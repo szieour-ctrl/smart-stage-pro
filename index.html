@@ -1,0 +1,1765 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Smart Stage AI™ — SZREG Virtual Staging</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet" />
+<style>
+:root{--ink:#1a1714;--cream:#f7f4ef;--warm:#e8e0d4;--gold:#b8975a;--gold-light:#d4b87a;--muted:#7a6f63;--danger:#c0392b;--success:#2d6a4f;--border:#ddd5c8;--sky:#3a7ca5;--shadow:0 2px 20px rgba(26,23,20,0.08);}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);min-height:100vh;font-size:15px;line-height:1.6;}
+.header{background:var(--ink);padding:18px 32px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;box-shadow:0 2px 12px rgba(0,0,0,0.3);}
+.header-brand{font-family:'Cormorant Garamond',serif;color:var(--gold);font-size:1.5rem;font-weight:300;letter-spacing:0.08em;}
+.header-brand span{color:#fff;font-style:italic;}
+.header-badge{background:var(--gold);color:var(--ink);font-size:0.65rem;font-weight:500;letter-spacing:0.12em;text-transform:uppercase;padding:3px 10px;border-radius:2px;}
+.compliance-bar{background:var(--ink);color:var(--gold);font-size:0.7rem;letter-spacing:0.12em;text-transform:uppercase;text-align:center;padding:6px;}
+.app{max-width:980px;margin:0 auto;padding:32px 20px 80px;}
+.panel{background:#fff;border:1px solid var(--border);border-radius:4px;padding:28px 32px;margin-bottom:24px;box-shadow:var(--shadow);}
+.panel-title{font-family:'Cormorant Garamond',serif;font-size:1.3rem;font-weight:400;color:var(--ink);margin-bottom:6px;}
+.panel-sub{font-size:0.82rem;color:var(--muted);margin-bottom:20px;}
+.upload-zone{border:2px dashed var(--border);border-radius:4px;padding:36px 20px;text-align:center;cursor:pointer;transition:all 0.2s;background:var(--cream);position:relative;}
+.upload-zone:hover,.upload-zone.drag-over{border-color:var(--gold);background:#faf7f2;}
+.upload-zone input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;}
+.upload-icon{font-size:1.8rem;margin-bottom:8px;opacity:0.5;}
+.upload-zone-text{font-family:'Cormorant Garamond',serif;font-size:1.1rem;color:var(--muted);margin-bottom:3px;}
+.upload-zone-hint{font-size:0.75rem;color:var(--muted);}
+.thumb-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;margin-top:16px;}
+.thumb-item{position:relative;border-radius:3px;overflow:hidden;border:2px solid transparent;aspect-ratio:4/3;background:var(--warm);}
+.thumb-item img{width:100%;height:100%;object-fit:cover;display:block;}
+.thumb-item .thumb-label{position:absolute;bottom:0;left:0;right:0;background:rgba(26,23,20,0.78);color:#fff;font-size:0.58rem;padding:3px 6px;letter-spacing:0.05em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.thumb-item .thumb-remove{position:absolute;top:4px;right:4px;background:rgba(192,57,43,0.9);color:#fff;border:none;border-radius:50%;width:20px;height:20px;font-size:13px;cursor:pointer;display:none;align-items:center;justify-content:center;}
+.thumb-item:hover .thumb-remove{display:flex;}
+.thumb-item.is-floorplan{border-color:var(--gold);}
+.thumb-item.is-floorplan .thumb-label{background:rgba(184,151,90,0.92);color:var(--ink);font-weight:600;}
+.fp-tag-btn{position:absolute;top:4px;left:4px;background:rgba(26,23,20,0.72);color:#fff;border:none;border-radius:2px;font-size:0.55rem;padding:2px 5px;cursor:pointer;letter-spacing:0.06em;text-transform:uppercase;}
+.thumb-item.is-floorplan .fp-tag-btn{background:rgba(184,151,90,0.92);color:var(--ink);}
+.progress-bar{height:3px;background:var(--warm);border-radius:2px;margin-bottom:20px;overflow:hidden;}
+.progress-fill{height:100%;background:linear-gradient(90deg,var(--gold),var(--gold-light));transition:width 0.4s ease;}
+.intake-step-badge{display:inline-block;background:var(--gold);color:var(--ink);font-size:0.65rem;font-weight:500;letter-spacing:0.1em;text-transform:uppercase;padding:2px 8px;border-radius:2px;margin-bottom:12px;}
+.intake-question{font-family:'Cormorant Garamond',serif;font-size:1.2rem;font-weight:400;color:var(--ink);margin-bottom:16px;line-height:1.4;}
+.option-list{display:flex;flex-direction:column;gap:8px;}
+.option-btn{display:flex;align-items:flex-start;gap:12px;background:var(--cream);border:1px solid var(--border);border-radius:4px;padding:12px 16px;cursor:pointer;text-align:left;transition:all 0.15s;font-family:'DM Sans',sans-serif;font-size:0.9rem;color:var(--ink);width:100%;}
+.option-btn:hover{border-color:var(--gold);background:#faf7f2;}
+.option-btn.selected{border-color:var(--gold);background:#faf7f2;box-shadow:inset 3px 0 0 var(--gold);}
+.option-letter{font-family:'Cormorant Garamond',serif;font-size:1rem;font-weight:600;color:var(--gold);min-width:18px;padding-top:1px;}
+.option-label{font-weight:500;}
+.option-desc{font-size:0.78rem;color:var(--muted);margin-top:2px;line-height:1.4;}
+.intake-nav{display:flex;gap:10px;margin-top:20px;}
+.room-map-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;}
+@media(max-width:640px){.room-map-grid{grid-template-columns:1fr;}}
+.room-map-list{display:flex;flex-direction:column;gap:8px;}
+.room-map-item{background:var(--cream);border:1px solid var(--border);border-radius:3px;padding:10px 14px;}
+.room-map-name{font-weight:500;font-size:0.9rem;}
+.room-map-adj{font-size:0.72rem;color:var(--muted);margin-top:2px;}
+.photo-assign-list,.no-fp-label-list{display:flex;flex-direction:column;gap:8px;}
+.photo-assign-row{display:flex;align-items:center;gap:10px;background:var(--cream);border:1px solid var(--border);border-radius:3px;padding:8px 12px;}
+.photo-assign-thumb{width:52px;height:40px;object-fit:cover;border-radius:2px;flex-shrink:0;cursor:pointer;transition:opacity 0.15s;}
+.photo-assign-thumb:hover{opacity:0.8;}
+.photo-assign-name{font-size:0.78rem;color:var(--muted);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.photo-assign-select{font-size:0.8rem;padding:4px 8px;border:1px solid var(--border);border-radius:3px;background:#fff;color:var(--ink);cursor:pointer;flex-shrink:0;}
+.summary-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-top:8px;}
+.summary-chip{background:var(--cream);border:1px solid var(--border);border-radius:3px;padding:8px 12px;}
+.summary-chip-label{font-size:0.65rem;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);}
+.summary-chip-val{font-size:0.88rem;font-weight:500;color:var(--ink);margin-top:2px;}
+.room-queue{display:flex;flex-direction:column;gap:14px;}
+.room-card{border:1px solid var(--border);border-radius:4px;overflow:hidden;background:#fff;}
+.room-card.is-anchor{border-color:var(--gold);}
+.room-card.is-exterior{border-color:var(--sky);}
+.room-card.is-reference{border-color:#bbb;opacity:0.75;}
+.room-card-header{display:flex;align-items:center;gap:10px;padding:12px 16px;background:var(--cream);border-bottom:1px solid var(--border);flex-wrap:wrap;}
+.room-card-thumb{width:60px;height:45px;object-fit:cover;border-radius:2px;border:1px solid var(--border);flex-shrink:0;cursor:pointer;transition:transform 0.15s,box-shadow 0.15s;}
+.room-card-thumb:hover{transform:scale(1.04);box-shadow:0 2px 10px rgba(0,0,0,0.18);}
+.room-card-info{flex:1;min-width:0;}
+.room-card-name{font-weight:500;font-size:0.9rem;}
+.room-card-adj{font-size:0.72rem;color:var(--muted);margin-top:1px;}
+.room-card-status{font-size:0.72rem;margin-top:2px;}
+.room-card-status.pending{color:var(--muted);}
+.room-card-status.processing{color:var(--gold);}
+.room-card-status.done{color:var(--success);}
+.room-card-status.error{color:var(--danger);}
+.shot-focus-badge{font-size:0.68rem;color:var(--sky);margin-top:2px;font-style:italic;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:340px;}
+.anchor-badge{background:var(--gold);color:var(--ink);font-size:0.58rem;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;padding:2px 7px;border-radius:2px;}
+.ext-badge{background:var(--sky);color:#fff;font-size:0.58rem;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;padding:2px 7px;border-radius:2px;}
+.ref-badge{background:#888;color:#fff;font-size:0.58rem;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;padding:2px 7px;border-radius:2px;}
+.room-card-actions{display:flex;gap:6px;flex-wrap:wrap;}
+.mode-toggle{display:flex;gap:0;border:1px solid var(--border);border-radius:3px;overflow:hidden;flex-shrink:0;}
+.mode-toggle-btn{padding:5px 12px;font-size:0.72rem;font-weight:500;letter-spacing:0.06em;text-transform:uppercase;border:none;cursor:pointer;background:#fff;color:var(--muted);transition:all 0.15s;}
+.mode-toggle-btn.active-int{background:var(--ink);color:#fff;}
+.mode-toggle-btn.active-ext{background:var(--sky);color:#fff;}
+.ext-panel{padding:16px;background:#f4f8fc;border-top:1px solid #cce0f0;}
+.ext-panel-title{font-size:0.75rem;text-transform:uppercase;letter-spacing:0.1em;color:var(--sky);font-weight:600;margin-bottom:12px;}
+.ext-options{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;margin-bottom:14px;}
+.ext-option{display:flex;align-items:flex-start;gap:10px;background:#fff;border:1px solid #cce0f0;border-radius:4px;padding:10px 12px;cursor:pointer;transition:all 0.15s;}
+.ext-option:hover{border-color:var(--sky);}
+.ext-option.selected{border-color:var(--sky);background:#edf5fb;box-shadow:inset 3px 0 0 var(--sky);}
+.ext-option input[type=checkbox]{margin-top:2px;accent-color:var(--sky);flex-shrink:0;}
+.ext-option-label{font-weight:500;font-size:0.85rem;}
+.ext-option-desc{font-size:0.74rem;color:var(--muted);margin-top:2px;line-height:1.35;}
+.ext-enhancement-item{background:#fff;border:1px solid #cce0f0;border-radius:3px;overflow:hidden;margin-top:10px;}
+.ext-enhancement-header{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:#edf5fb;border-bottom:1px solid #cce0f0;flex-wrap:wrap;gap:6px;}
+.ext-enhancement-name{font-size:0.8rem;font-weight:500;color:var(--sky);}
+.result-viewer{padding:16px;}
+.result-pair{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;}
+@media(max-width:580px){.result-pair{grid-template-columns:1fr;}}
+.result-img-wrap{position:relative;}
+.result-img-wrap img{width:100%;border-radius:3px;border:1px solid var(--border);display:block;cursor:pointer;}
+.result-img-badge{position:absolute;top:8px;left:8px;background:rgba(26,23,20,0.82);color:#fff;font-size:0.62rem;letter-spacing:0.1em;text-transform:uppercase;padding:3px 8px;border-radius:2px;}
+.result-img-badge.staged{background:rgba(184,151,90,0.92);color:var(--ink);}
+.result-img-badge.ext-enhanced{background:rgba(58,124,165,0.92);color:#fff;}
+.result-img-badge.final-badge{background:rgba(45,106,79,0.92);color:#fff;}
+.iterate-panel{background:var(--cream);border-top:1px solid var(--border);padding:14px 16px;display:flex;gap:8px;align-items:flex-end;}
+.iterate-input{flex:1;border:1px solid var(--border);border-radius:3px;padding:8px 12px;font-family:'DM Sans',sans-serif;font-size:0.85rem;color:var(--ink);background:#fff;resize:none;min-height:38px;}
+.iterate-input:focus{outline:none;border-color:var(--gold);}
+.iterate-hint{font-size:0.72rem;color:var(--muted);margin-top:4px;}
+.final-panel{background:#f4faf7;border-top:1px solid #b8ddd0;padding:14px 16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.final-panel-label{font-size:0.75rem;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:var(--success);flex-shrink:0;}
+.quality-select{font-size:0.85rem;padding:6px 10px;border:1px solid #b8ddd0;border-radius:3px;background:#fff;color:var(--ink);cursor:pointer;}
+.final-progress{font-size:0.8rem;color:var(--success);display:flex;align-items:center;gap:8px;}
+/* Lightbox */
+#lightbox{position:fixed;inset:0;background:rgba(10,8,6,0.92);z-index:9000;display:flex;align-items:center;justify-content:center;padding:20px;}
+#lightbox.hidden{display:none!important;}
+.lightbox-inner{background:#fff;border-radius:6px;overflow:hidden;max-width:860px;width:100%;max-height:92vh;display:flex;flex-direction:column;}
+.lightbox-img-wrap{flex-shrink:0;display:flex;align-items:center;justify-content:center;background:#111;max-height:52vh;overflow:hidden;}
+.lightbox-img-wrap img{max-width:100%;max-height:52vh;object-fit:contain;display:block;}
+.lightbox-body{padding:18px 24px;overflow-y:auto;}
+.lightbox-title{font-family:'Cormorant Garamond',serif;font-size:1.1rem;font-weight:400;margin-bottom:5px;}
+.lightbox-sub{font-size:0.78rem;color:var(--muted);margin-bottom:12px;line-height:1.5;}
+.lightbox-input{width:100%;border:1px solid var(--border);border-radius:3px;padding:10px 14px;font-family:'DM Sans',sans-serif;font-size:0.9rem;color:var(--ink);background:var(--cream);resize:none;}
+.lightbox-input:focus{outline:none;border-color:var(--gold);}
+.lightbox-examples{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;}
+.lightbox-example{background:var(--warm);border:1px solid var(--border);border-radius:12px;font-size:0.72rem;padding:3px 10px;cursor:pointer;color:var(--muted);transition:all 0.15s;}
+.lightbox-example:hover{border-color:var(--gold);color:var(--ink);}
+.lightbox-footer{display:flex;gap:8px;justify-content:flex-end;padding:12px 24px;border-top:1px solid var(--border);background:var(--cream);flex-shrink:0;}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:9px 18px;border-radius:3px;font-family:'DM Sans',sans-serif;font-size:0.82rem;font-weight:500;letter-spacing:0.04em;cursor:pointer;border:none;transition:all 0.15s;text-transform:uppercase;}
+.btn-primary{background:var(--gold);color:var(--ink);}
+.btn-primary:hover{background:var(--gold-light);}
+.btn-primary:disabled{background:var(--border);color:var(--muted);cursor:not-allowed;}
+.btn-sky{background:var(--sky);color:#fff;}
+.btn-sky:hover{background:#2d6a8f;}
+.btn-sky:disabled{background:var(--border);color:var(--muted);cursor:not-allowed;}
+.btn-success{background:var(--success);color:#fff;}
+.btn-success:hover{background:#235a40;}
+.btn-success:disabled{background:var(--border);color:var(--muted);cursor:not-allowed;}
+.btn-outline{background:transparent;color:var(--ink);border:1px solid var(--border);}
+.btn-outline:hover{border-color:var(--gold);color:var(--gold);}
+.btn-outline:disabled{opacity:0.5;cursor:not-allowed;}
+.btn-ghost{background:transparent;color:var(--muted);padding:8px 12px;font-size:0.75rem;}
+.btn-ghost:hover{color:var(--ink);}
+.btn-sm{padding:7px 13px;font-size:0.75rem;}
+.mls-disclosure-note{background:#fff8e7;border:1px solid #f0d080;border-radius:3px;padding:10px 14px;font-size:0.78rem;color:#7a6000;margin-top:12px;display:flex;gap:8px;align-items:flex-start;}
+.spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--warm);border-top-color:var(--gold);border-radius:50%;animation:spin 0.7s linear infinite;}
+.spinner-sky{border-color:#cce0f0;border-top-color:var(--sky);}
+.spinner-green{border-color:#b8ddd0;border-top-color:var(--success);}
+@keyframes spin{to{transform:rotate(360deg);}}
+.hidden{display:none!important;}
+#toast{position:fixed;bottom:24px;right:24px;background:var(--ink);color:#fff;padding:12px 20px;border-radius:4px;font-size:0.82rem;opacity:0;pointer-events:none;transition:opacity 0.3s;z-index:9999;max-width:340px;}
+#toast.show{opacity:1;}
+#toast.error{background:var(--danger);}
+#toast.success{background:var(--success);}
+#sbs-canvas{display:none;}
+/* ── Open Plan Strategy Toggle ── */
+.op-strategy-wrap{display:flex;align-items:center;gap:8px;margin-bottom:12px;padding:10px 14px;background:var(--cream);border:1px solid var(--border);border-radius:3px;}
+.op-strategy-label{font-size:0.72rem;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);font-weight:600;white-space:nowrap;}
+.op-strategy-btn{font-size:0.72rem;padding:4px 10px;border-radius:2px;border:1px solid var(--border);background:#fff;color:var(--ink);cursor:pointer;letter-spacing:0.04em;transition:all 0.15s;}
+.op-strategy-btn.active{background:var(--gold);color:var(--ink);border-color:var(--gold);font-weight:600;}
+.op-strategy-desc{font-size:0.68rem;color:var(--muted);margin-left:4px;}
+/* ── Prompt Preview Modal ── */
+#prompt-modal{position:fixed;inset:0;background:rgba(10,8,6,0.92);z-index:9100;display:flex;align-items:center;justify-content:center;padding:20px;}
+#prompt-modal.hidden{display:none!important;}
+.pm-inner{background:#fff;border-radius:6px;overflow:hidden;max-width:780px;width:100%;max-height:92vh;display:flex;flex-direction:column;}
+.pm-header{background:var(--ink);padding:16px 24px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;}
+.pm-title{font-family:'Cormorant Garamond',serif;color:var(--gold);font-size:1.15rem;font-weight:300;letter-spacing:0.06em;}
+.pm-badge{background:var(--gold);color:var(--ink);font-size:0.6rem;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;padding:2px 8px;border-radius:2px;}
+.pm-body{padding:20px 24px;overflow-y:auto;flex:1;}
+.pm-room-label{font-size:0.72rem;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);margin-bottom:6px;}
+.pm-room-name{font-family:'Cormorant Garamond',serif;font-size:1.1rem;color:var(--ink);margin-bottom:16px;}
+.pm-section-label{font-size:0.68rem;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);font-weight:600;margin-bottom:6px;margin-top:14px;}
+.pm-meta{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px;}
+.pm-meta-chip{background:var(--cream);border:1px solid var(--border);border-radius:2px;font-size:0.72rem;padding:3px 9px;color:var(--ink);}
+.pm-prompt-wrap{position:relative;}
+.pm-prompt{width:100%;min-height:220px;border:1px solid var(--border);border-radius:3px;padding:12px 14px;font-family:'DM Sans',sans-serif;font-size:0.82rem;color:var(--ink);background:var(--cream);resize:vertical;line-height:1.6;}
+.pm-prompt:focus{outline:none;border-color:var(--gold);}
+.pm-prompt-hint{font-size:0.72rem;color:var(--muted);margin-top:6px;line-height:1.5;}
+.pm-warning{background:#fff8e7;border:1px solid #f0d080;border-radius:3px;padding:10px 14px;font-size:0.76rem;color:#7a6000;margin-top:12px;line-height:1.5;}
+.pm-footer{display:flex;gap:8px;justify-content:space-between;align-items:center;padding:14px 24px;border-top:1px solid var(--border);background:var(--cream);flex-shrink:0;}
+.pm-footer-left{font-size:0.72rem;color:var(--muted);}
+.pm-footer-right{display:flex;gap:8px;}
+.section-label{font-size:0.72rem;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);margin-bottom:10px;font-weight:500;}
+.fp-analyzing{display:flex;align-items:center;gap:10px;padding:14px 0;color:var(--muted);font-size:0.85rem;}
+.tier-label{font-size:0.62rem;text-transform:uppercase;letter-spacing:0.1em;font-weight:600;padding:2px 6px;border-radius:2px;}
+.tier-draft{background:#e8e0d4;color:#7a6f63;}
+.tier-final{background:rgba(45,106,79,0.15);color:var(--success);}
+</style>
+</head>
+<body>
+<div class="compliance-bar">MLS Compliance Mode Active — Original Image Always Displayed First</div>
+<header class="header">
+  <div class="header-brand">Smart Stage <span>AI™</span></div>
+  <div class="header-badge">SZREG Listing Tools</div>
+</header>
+<canvas id="sbs-canvas"></canvas>
+
+<!-- PROMPT PREVIEW MODAL -->
+<div id="prompt-modal" class="hidden">
+  <div class="pm-inner">
+    <div class="pm-header">
+      <div class="pm-title">Claude Vision — Staging Prompt Review</div>
+      <div class="pm-badge">Review Before Decor8</div>
+    </div>
+    <div class="pm-body">
+      <div class="pm-room-label">Room</div>
+      <div class="pm-room-name" id="pm-room-name">—</div>
+      <div class="pm-section-label">Session Parameters Sent to Claude</div>
+      <div class="pm-meta" id="pm-meta"></div>
+      <div class="pm-section-label">Claude Vision's Staging Prompt → Will Be Sent to Decor8</div>
+      <div class="pm-prompt-wrap">
+        <textarea class="pm-prompt" id="pm-prompt" rows="10" spellcheck="false"></textarea>
+      </div>
+      <div class="pm-prompt-hint">This is the exact text Claude Vision generated from reading your photo. Edit directly if you see placement errors — your edits go to Decor8, not Claude's version. Every word here influences what Decor8 places and where.</div>
+      <div class="pm-warning" id="pm-open-plan-warning" style="display:none;">⚠ <strong>Open Plan detected.</strong> Claude Vision read this as a multi-zone space. Watch for zone crowding — if the prompt places dining furniture AND living furniture in the same area, delete the placement instructions and keep only style/material descriptions. Decor8's native openplan logic handles zone separation better than text instructions.</div>
+      <div class="pm-section-label" style="margin-top:18px;">Decor8 API JSON — Exact Payload Being Sent</div>
+      <pre id="pm-api-payload" style="background:#1a1a1a;color:#e8e8e8;padding:14px;border-radius:3px;font-size:0.74rem;line-height:1.6;overflow-x:auto;white-space:pre-wrap;word-break:break-word;margin:0;"></pre>
+      <div style="font-size:0.68rem;color:var(--muted);margin-top:6px;">These are the exact fields Decor8 receives. <strong>input_image_url</strong> is assigned at upload. If prompt is present, design_style and color_scheme are not sent.</div>
+    </div>
+    <div class="pm-footer">
+      <div class="pm-footer-left" id="pm-cost-note">Approving sends to Decor8 · ~$0.20 · ~45 seconds</div>
+      <div class="pm-footer-right">
+        <button class="btn btn-ghost" onclick="cancelPromptModal()">✕ Cancel — Don't Stage</button>
+        <button class="btn btn-outline" onclick="clearPromptAndStage()" title="Send to Decor8 with NO custom prompt — use Decor8 native intelligence only">Stage Without Prompt</button>
+        <button class="btn btn-primary" onclick="approvePromptAndStage()">Approve → Stage It</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- LIGHTBOX -->
+<div id="lightbox" class="hidden">
+  <div class="lightbox-inner">
+    <div class="lightbox-img-wrap"><img id="lightbox-img" src="" alt="" /></div>
+    <div class="lightbox-body">
+      <div class="lightbox-title" id="lightbox-title">Shot Focus Instructions</div>
+      <div class="lightbox-sub">Tell the AI what to emphasize in this photo. Critical for open-concept shots showing multiple spaces — without this the AI tries to fill every visible room equally.</div>
+      <textarea class="lightbox-input" id="lightbox-input" rows="3" placeholder='e.g. "Focus on the Great Room seating area — the kitchen in the background is secondary and should not be over-furnished"'></textarea>
+      <div class="lightbox-examples" id="lightbox-examples"></div>
+    </div>
+    <div class="lightbox-footer">
+      <button class="btn btn-ghost" onclick="closeLightbox()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveShotFocus()">Save Shot Focus →</button>
+    </div>
+  </div>
+</div>
+
+<div class="app">
+  <div id="step-upload" class="panel">
+    <div class="panel-title">Upload Listing Photos</div>
+    <div class="panel-sub">Upload all listing photos. Tag your floor plan using the "Set as Floor Plan" button on any thumbnail, or select "Floor Plan" in the room dropdown. Click any photo thumbnail to set Shot Focus instructions.</div>
+    <div class="upload-zone" id="upload-zone">
+      <input type="file" id="file-input" accept="image/*" multiple />
+      <div class="upload-icon">📁</div>
+      <div class="upload-zone-text">Drop listing photos here or click to browse</div>
+      <div class="upload-zone-hint">JPEG, PNG, WEBP · Tag floor plan · Exterior photos auto-detected · Click thumbnail to set Shot Focus</div>
+    </div>
+    <div id="thumb-grid" class="thumb-grid"></div>
+    <div id="upload-actions" class="hidden" style="margin-top:20px;display:flex;gap:10px;align-items:center;">
+      <button class="btn btn-primary" onclick="startIntake()">Begin Session Setup →</button>
+      <span id="upload-count-label" style="font-size:0.8rem;color:var(--muted);"></span>
+    </div>
+  </div>
+
+  <div id="step-intake" class="panel hidden">
+    <div class="progress-bar"><div class="progress-fill" id="intake-progress" style="width:0%"></div></div>
+    <div id="intake-body"></div>
+    <div class="intake-nav" id="intake-nav"></div>
+  </div>
+
+  <div id="step-mapping" class="panel hidden">
+    <div class="panel-title">Room Assignment</div>
+    <div id="mapping-body"></div>
+    <div style="margin-top:20px;">
+      <button class="btn btn-primary" onclick="confirmMapping()">Confirm Room Map → Begin Staging</button>
+    </div>
+  </div>
+
+  <div id="step-staging" class="hidden">
+    <div class="panel">
+      <div class="panel-title">Session Design DNA</div>
+      <div class="summary-grid" id="summary-grid"></div>
+      <div class="mls-disclosure-note">⚖️ <span><strong>MetroList Rule 11.6.1 Active:</strong> Every staged/enhanced image includes disclosure. Publish original immediately before altered version in Matrix.</span></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">Room Staging Queue</div>
+      <div class="panel-sub">Click any photo thumbnail to set Shot Focus. Draft stages are low quality — iterate freely. Generate Final for MLS-ready downloads.</div>
+      <div class="room-queue" id="room-queue"></div>
+      <div style="margin-top:16px;">
+        <button class="btn btn-outline btn-sm" onclick="showStep('step-upload');resetSession();">+ New Session</button>
+      </div>
+    </div>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script>
+// ══════════════════════════════════════════
+// CONSTANTS
+// ══════════════════════════════════════════
+// ── Room Options — Display label maps directly to Decor8 room_type ─────────────
+// Format: "Display Name || decor8_room_type"
+// What you select = what gets sent to Decor8. No hidden translation.
+const ROOM_OPTIONS = [
+  "── REFERENCE ────────────────── || __fp__",
+  "Floor Plan / Reference Only || __fp__",
+
+  "── OPEN PLAN (Multi-Zone) ────── || __fp__",
+  "Open Plan: Kitchen + Dining + Great Room || openplan",
+  "Open Plan: Kitchen + Dining || openplan",
+  "Open Plan: Kitchen + Great Room || openplan",
+  "Open Plan: Dining + Great Room || openplan",
+  "Open Plan: Kitchen + Living Room || openplan",
+
+  "── MAIN LIVING ─────────────────── || __fp__",
+  "Great Room / Living Room || livingroom",
+  "Family Room || familyroom",
+  "Dining Room || diningroom",
+  "Kitchen || kitchen",
+  "Entry / Foyer || foyer",
+  "Home Bar || homebar",
+  "Reading Nook || readingnook",
+  "Sun Room || sunroom",
+  "Basement || basement",
+  "Loft || familyroom",
+  "Flex Room || familyroom",
+
+  "── BEDROOM / BATH ──────────────── || __fp__",
+  "Primary Suite / Bedroom || bedroom",
+  "Bedroom 2 || bedroom",
+  "Bedroom 3 || bedroom",
+  "Bedroom 4 || bedroom",
+  "Kids Room || kidsroom",
+  "Primary Bath / Bathroom || bathroom",
+  "Powder Room || powderroom",
+  "Walk-In Closet || walkincloset",
+
+  "── OFFICE / STUDY ──────────────── || __fp__",
+  "Office || office",
+  "Study Room || study_room",
+
+  "── UTILITY ─────────────────────── || __fp__",
+  "Laundry Room || laundryroom",
+  "Mud Room || mudroom",
+  "Garage || garage",
+  "Gym || gym",
+  "Toy Room || toyroom",
+  "Balcony || balcony",
+
+  "── EXTERIOR ────────────────────── || __fp__",
+  "Covered Patio || back_patio",
+  "Backyard / Back Porch || back_porch",
+  "Exterior Front / Front Porch || front_porch",
+  "Pool Area || back_patio",
+  "Side Yard || back_porch",
+];
+
+// ── Parse room option value → {label, decor8Type, isFloorplan, isExterior} ───
+function parseRoomOption(val) {
+  if (!val || val.startsWith('──')) return null; // divider rows
+  const parts = val.split(' || ');
+  const label = parts[0].trim();
+  const decor8Type = parts[1]?.trim() || 'livingroom';
+  if (decor8Type === '__fp__') return { label, decor8Type: 'floorplan', isFloorplan: true, isExterior: false, isOpenPlan: false };
+  const EXTERIOR_TYPES = ['back_patio', 'back_porch', 'front_porch'];
+  const isExterior = EXTERIOR_TYPES.includes(decor8Type);
+  const isOpenPlan = decor8Type === 'openplan';
+  return { label, decor8Type, isFloorplan: false, isExterior, isOpenPlan };
+}
+
+// ── Open plan zone descriptions for Claude prompt ─────────────────────────────
+function getOpenPlanZones(label) {
+  if (label.includes('Kitchen + Dining + Great Room')) return 'Three zones: (1) Kitchen zone — island with sink/appliances, bar seating on FAR side from camera; (2) Dining zone — rectangular table under chandelier/pendant fixture, 6-8 chairs; (3) Great Room/Living zone — sofa facing fireplace, accent chair, coffee table, area rug';
+  if (label.includes('Kitchen + Dining') && !label.includes('Great Room')) return 'Two zones: (1) Kitchen zone — island with sink/appliances, bar seating on FAR side from camera; (2) Dining zone — rectangular table under chandelier/pendant fixture, 6-8 chairs. No living/great room zone.';
+  if (label.includes('Kitchen + Great Room')) return 'Two zones: (1) Kitchen zone — island with appliances, bar seating on far side from camera; (2) Great Room zone — sofa facing fireplace or feature wall, accent chair, coffee table, area rug';
+  if (label.includes('Dining + Great Room')) return 'Two zones: (1) Dining zone — rectangular table under chandelier, 6 chairs; (2) Great Room zone — sofa facing fireplace, accent chair, coffee table, area rug';
+  if (label.includes('Kitchen + Living Room')) return 'Two zones: (1) Kitchen zone — island with appliances, bar seating on far side; (2) Living zone — sofa arrangement facing focal wall, coffee table, area rug';
+  return null;
+}
+// ── Decor8 API mappings ───────────────────────────────────────────────────────
+const DECOR8_ROOM_TYPE = {
+  "Entry": "foyer", "Foyer": "foyer",
+  "Great Room": "openplan", "Living Room": "livingroom", "Family Room": "familyroom",
+  "Kitchen": "kitchen", "Dining Room": "diningroom",
+  "Primary Suite": "bedroom", "Bedroom 2": "bedroom", "Bedroom 3": "bedroom", "Bedroom 4": "bedroom",
+  "Primary Bath": "bathroom", "Powder Room": "powderroom",
+  "Office": "office", "Study": "office", "Loft": "familyroom", "Flex Room": "familyroom",
+  "Laundry": "laundryroom", "Garage": "garage",
+  "Covered Patio": "back_patio", "Backyard": "back_porch",
+  "Exterior Front": "front_porch", "Pool Area": "back_patio", "Side Yard": "back_porch",
+  "Other": "livingroom",
+};
+
+// If Kitchen visible with Great Room/Dining → openplan
+// Rooms that share the open plan DNA (same physical space)
+const OPENPLAN_CONNECTED_TYPES = ["openplan","livingroom","diningroom","kitchen","familyroom"];
+
+// Rooms that get Style DNA only (separate physical spaces)
+const STYLE_DNA_ONLY_TYPES = ["bedroom","bathroom","powderroom","office","study_room",
+  "laundryroom","mudroom","garage","gym","toyroom","kidsroom","walkincloset",
+  "sunroom","readingnook","basement","balcony","foyer",
+  "back_patio","back_porch","front_porch"];
+
+const OPENPLAN_ROOMS = ["Great Room","Kitchen","Dining Room","Living Room","Family Room"];
+
+const DECOR8_DESIGN_STYLE = {
+  "Organic Modern": "organicmodern",
+  "RH Luxury": "luxemodern",
+  "Contemporary": "contemporary",
+  "Japandi": "japandi",
+  "Transitional": "transitional",
+  "Coastal California": "coastal",
+};
+
+const DECOR8_COLOR_SCHEME = {
+  "Warm Neutrals": "COLOR_SCHEME_9",
+  "Bright Airy": "COLOR_SCHEME_0",
+  "Earth Tones": "COLOR_SCHEME_1",
+  "Soft Luxury": "COLOR_SCHEME_12",
+  "Moody Executive": "COLOR_SCHEME_13",
+  "Organic Natural": "COLOR_SCHEME_8",
+};
+
+// Returns 'full' (open plan connected), 'style' (separate room), or 'none' (exterior/reference)
+function getDNATier(room) {
+  if (!room || room.isReference) return 'none';
+  if (room.isExterior) return 'none';
+  const dt = room.decor8Type;
+  if (!dt || dt === 'floorplan') return 'none';
+  if (OPENPLAN_CONNECTED_TYPES.includes(dt)) return 'full';
+  if (STYLE_DNA_ONLY_TYPES.includes(dt)) return 'style';
+  return 'style'; // default to style for anything else
+}
+
+function getDecor8RoomType(roomName, adjacentRooms, decor8Type) {
+  // Trust the explicit dropdown selection first — user knows what's in the frame
+  // Only use openplan when the dropdown was explicitly set to an Open Plan label
+  if (decor8Type) return decor8Type;
+  return DECOR8_ROOM_TYPE[roomName] || "livingroom";
+}
+
+const EXTERIOR_KEYWORDS = ["exterior","backyard","patio","front yard","side yard","pool","garden","outdoor","landscape","driveway","covered patio"];
+
+const EXT_ENHANCEMENTS = [
+  {id:"outdoor-living",label:"Outdoor Living Staging",icon:"🪑",desc:"Patio furniture, dining set, fire pit, planters.",mlsTag:"Virtually Staged — Outdoor Furnishings"},
+  {id:"landscape",label:"Landscape Enhancement",icon:"🌿",desc:"Fresh lawn, trimmed hedges, seasonal flowers, mulch.",mlsTag:"Digitally Enhanced — Landscaping"},
+  {id:"golden-hour",label:"Golden Hour",icon:"🌅",desc:"Warm sunset lighting, long soft shadows.",mlsTag:"Digitally Enhanced — Golden Hour Lighting"},
+  {id:"twilight",label:"Twilight",icon:"🌙",desc:"Blue-hour sky, warm window glow, curb appeal.",mlsTag:"Digitally Enhanced — Twilight"},
+];
+
+// ── Room-type staging rules (Problem 4 fix) ──────────────────────────────────
+const ROOM_STAGING_RULES = {
+  "Primary Bath": `BATHROOM STAGING RULES — STRICTLY ENFORCE:
+- Do NOT place rugs under or around freestanding tubs
+- Do NOT hang art, mirrors, or decor over windows or on window walls
+- Do NOT add towel bars, hooks, or hardware to structural or tiled walls
+- Do NOT place plants on toilet tanks, toilet seats, or inside showers
+- DO add: folded towels on towel bar if one exists, small tray on tub surround or vanity, candle on vanity, simple plant on floor beside vanity only
+- Keep staging minimal — bathrooms should feel clean and spa-like, not cluttered`,
+  "Primary Suite": `BEDROOM STAGING RULES:
+- Bed must be centered on the primary wall — never floating or angled unless room forces it
+- Do NOT place furniture directly in front of windows or block window light
+- Nightstands required on both sides of bed if space allows
+- Do NOT add rugs that extend under the bed and create unrealistic proportions
+- Artwork above headboard must fit the wall width — no oversized art`,
+  "Kitchen": `KITCHEN STAGING RULES:
+- Do NOT add appliances that don't exist (coffee makers, stand mixers) on countertops unless space clearly exists
+- Bar stools at island must match the island height realistically
+- Do NOT hang pot racks or pendants that don't exist in the original photo
+- Keep countertops clean — minimal styling items only`,
+  "Great Room": `GREAT ROOM STAGING RULES:
+- Sofa must face the fireplace or focal wall — never face a blank wall
+- Do NOT block the fireplace hearth with furniture
+- Coffee table must be proportional to the sofa — no oversized or undersized tables
+- Area rug must extend under the front legs of all seating minimum`,
+  "Office": `OFFICE STAGING RULES:
+- Desk must face a wall or window — never floating in the center
+- Do NOT add built-in shelves that don't exist in the photo
+- Keep staging professional — no gaming chairs or casual furniture`,
+};
+
+const SHOT_FOCUS_HINTS = {
+  "Great Room":["Focus on the Great Room seating area — kitchen in background is secondary","Emphasize the fireplace wall as the focal point — do not over-furnish visible adjacent spaces","The open space should feel expansive — avoid crowding any visible connecting rooms"],
+  "Kitchen":["Focus on the kitchen island — living area behind is secondary and should remain lightly staged","Emphasize counter space and pendant lighting over the island","Stage bar stools at island — keep great room furniture minimal if visible"],
+  "Dining Room":["This is the Dining Room — do not over-furnish the living area visible behind","Focus on dining table and chandelier above it","Keep staging centered on dining space — adjoining rooms are background only"],
+  "Family Room":["Focus on the family room — do not fill the kitchen or entry visible behind","Emphasize comfortable seating facing the TV wall","Keep it warm and livable — this is the everyday gathering space"],
+  "Living Room":["Focus on the living room seating — kitchen visible behind is secondary","Emphasize the fireplace as the room anchor","Stage a conversational seating arrangement around the focal wall"],
+  "Primary Suite":["This is a bedroom — bed wall is the hero element","Emphasize the suite feel — nightstands, soft lighting, luxury textiles","Keep bathroom door area clean — do not stage the bath visible behind"],
+  "Primary Bath":["Focus on the freestanding tub or primary vanity","Keep staging minimal and spa-like — less is more in bathrooms","Do NOT stage the shower interior or place decor on toilet"],
+  "Covered Patio":["Focus on the covered patio — backyard behind is secondary","Stage outdoor seating under the covered area only","Emphasize the indoor-outdoor connection"],
+  "Backyard":["Focus on the main yard space — keep staging realistic","Stage outdoor dining or lounge in the primary open area","Keep it realistic — Sacramento suburban backyard aesthetic"],
+  "Exterior Front":["This is the front exterior — preserve exact architecture","Focus on curb appeal — driveway and entry are key","Do not alter roofline, windows, or structural elements"],
+};
+const DEFAULT_HINTS = ["Specify which room is the main focus","Describe what the buyer should notice first","Note any background spaces that should remain understaged"];
+
+// ══════════════════════════════════════════
+// SESSION
+// ══════════════════════════════════════════
+const SESSION = {
+  originals:[],floorplanRoomMap:null,photoRoomMap:{},
+  intake:{},rooms:[],anchorRoomId:null,
+  stagingDNA: null,        // Extracted from staged Open Plan image
+  anchorImageUrl: null,    // Decor8 URL of the staged Open Plan image — source for DNA two-image reads
+  openPlanRoomId: null,    // Room ID of the Open Plan — must be staged first
+  openPlanStrategy: 'guided', // 'native' | 'guided' | 'full'
+};
+let _lbRoomId = null;
+
+// ══════════════════════════════════════════
+// INTAKE
+// ══════════════════════════════════════════
+const INTAKE_STEPS = [
+  {key:'buyer',question:'Who is the most likely buyer for this property?',options:[
+    {letter:'A',label:'Gen Z First-Time Buyer',desc:'Trend-forward minimalist, Japandi, clean aesthetic.'},
+    {letter:'B',label:'Young Professional',desc:'Sophisticated modern, functional luxury.'},
+    {letter:'C',label:'Millennial Family',desc:'Organic modern, bright airy, family functionality.'},
+    {letter:'D',label:'Gen X Executive',desc:'Warm contemporary luxury, masculine sophistication.'},
+    {letter:'E',label:'Luxury Move-Up Buyer',desc:'High-end editorial, RH-inspired finishes.'},
+    {letter:'F',label:'Boomer Downsizer',desc:'Transitional warm luxury, resort comfort.'},
+    {letter:'G',label:'Active Adult 55+',desc:'Resort-style, open pathways, warm luxury.'},
+    {letter:'H',label:'Investor',desc:'Neutral broad-appeal staging, maximum marketability.'},
+  ]},
+  {key:'feeling',question:'What feeling should the home create?',options:[
+    {letter:'A',label:'Warm & Inviting',desc:'Layered textures, soft tones, fireplace-ready comfort.'},
+    {letter:'B',label:'Calm Luxury',desc:'Serene neutrals, quiet sophistication, spa-like stillness.'},
+    {letter:'C',label:'Modern Sophistication',desc:'Clean lines, bold contrast, refined restraint.'},
+    {letter:'D',label:'Resort-Style Living',desc:'Vacation-inspired ease, outdoor connection.'},
+    {letter:'E',label:'Bright & Airy',desc:'Light-flooded, fresh whites, open and expansive.'},
+    {letter:'F',label:'Editorial Luxury',desc:'Magazine-quality staging, curated and aspirational.'},
+  ]},
+  {key:'style',question:'Choose the overall design style.',options:[
+    {letter:'A',label:'Organic Modern',desc:'Warm contemporary with natural woods, layered neutrals.'},
+    {letter:'B',label:'RH Luxury',desc:'High-end styling with oversized furnishings, rich textures.'},
+    {letter:'C',label:'Contemporary',desc:'Clean modern lines, minimal clutter, refined simplicity.'},
+    {letter:'D',label:'Japandi',desc:'Minimalist Scandinavian + Japanese design, calm spaces.'},
+    {letter:'E',label:'Transitional',desc:'Balanced traditional warmth and modern simplicity.'},
+    {letter:'F',label:'Coastal California',desc:'Light airy interiors, soft neutrals, indoor-outdoor living.'},
+  ]},
+  {key:'intensity',question:'How elevated should the staging feel?',options:[
+    {letter:'A',label:'Light MLS Staging',desc:'Minimal furniture, maximum realism.'},
+    {letter:'B',label:'Luxury Market Ready',desc:'Upscale and believable — recommended default.'},
+    {letter:'C',label:'Editorial Luxury',desc:'Magazine-quality — best for luxury listings.'},
+    {letter:'D',label:'Builder Model Home',desc:'Fully furnished lifestyle showcase.'},
+  ]},
+  {key:'palette',question:'Choose the overall color direction.',options:[
+    {letter:'A',label:'Warm Neutrals',desc:'Oat, ivory, mushroom, warm taupe, walnut.'},
+    {letter:'B',label:'Bright Airy',desc:'Crisp whites, light wood, fresh and expansive.'},
+    {letter:'C',label:'Earth Tones',desc:'Terracotta, sage, clay, linen — grounded and organic.'},
+    {letter:'D',label:'Soft Luxury',desc:'Blush, champagne, warm grey.'},
+    {letter:'E',label:'Moody Executive',desc:'Charcoal, espresso, cognac leather, dark walnut.'},
+    {letter:'F',label:'Organic Natural',desc:'Linen, natural oak, matte black accents, stone.'},
+  ]},
+  {key:'mls',question:'Will these images be used for MLS or public marketing?',options:[
+    {letter:'A',label:'Yes — MLS & Public Marketing',desc:'MLS Safe Mode activated. All compliance rules enforced.'},
+    {letter:'B',label:'No — Internal / Seller Preview',desc:'Standard staging. Disclosure labels still recommended.'},
+  ]},
+];
+let currentIntakeStep=0;
+
+// ══════════════════════════════════════════
+// UPLOAD
+// ══════════════════════════════════════════
+const fileInput=document.getElementById('file-input');
+const uploadZone=document.getElementById('upload-zone');
+uploadZone.addEventListener('dragover',e=>{e.preventDefault();uploadZone.classList.add('drag-over');});
+uploadZone.addEventListener('dragleave',()=>uploadZone.classList.remove('drag-over'));
+uploadZone.addEventListener('drop',e=>{e.preventDefault();uploadZone.classList.remove('drag-over');handleFiles([...e.dataTransfer.files]);});
+fileInput.addEventListener('change',()=>handleFiles([...fileInput.files]));
+function handleFiles(files){
+  const imgs=files.filter(f=>f.type.startsWith('image/'));
+  if(!imgs.length){showToast('No image files found.','error');return;}
+  imgs.forEach(file=>{
+    const reader=new FileReader();
+    reader.onload=e=>{
+      const dataUrl=e.target.result,base64=dataUrl.split(',')[1];
+      const id='orig_'+Date.now()+'_'+Math.random().toString(36).slice(2,6);
+      SESSION.originals.push({id,name:file.name,base64,mimeType:file.type,dataUrl,isFloorplan:false});
+      renderThumb(SESSION.originals[SESSION.originals.length-1]);
+      updateUploadUI();
+    };
+    reader.readAsDataURL(file);
+  });
+}
+function renderThumb(orig){
+  const grid=document.getElementById('thumb-grid');
+  const item=document.createElement('div');
+  item.className='thumb-item'+(orig.isFloorplan?' is-floorplan':'');
+  item.dataset.id=orig.id;
+  item.innerHTML=`<img src="${orig.dataUrl}" alt="${orig.name}" />
+    <div class="thumb-label">${orig.isFloorplan?'📐 Floor Plan':orig.name}</div>
+    <button class="fp-tag-btn" onclick="toggleFloorplan('${orig.id}',event)">${orig.isFloorplan?'✓ Floor Plan':'Set as Floor Plan'}</button>
+    <button class="thumb-remove" onclick="removeOriginal('${orig.id}',event)">×</button>`;
+  grid.appendChild(item);
+}
+function toggleFloorplan(id,e){
+  e.stopPropagation();
+  SESSION.originals.forEach(o=>o.isFloorplan=false);
+  const orig=SESSION.originals.find(o=>o.id===id);
+  if(orig)orig.isFloorplan=true;
+  const grid=document.getElementById('thumb-grid');grid.innerHTML='';
+  SESSION.originals.forEach(o=>renderThumb(o));
+  showToast('Floor plan tagged.','success');
+}
+function removeOriginal(id,e){
+  e.stopPropagation();
+  SESSION.originals=SESSION.originals.filter(o=>o.id!==id);
+  document.querySelector(`.thumb-item[data-id="${id}"]`)?.remove();
+  updateUploadUI();
+}
+function updateUploadUI(){
+  const n=SESSION.originals.length;
+  const actions=document.getElementById('upload-actions'),label=document.getElementById('upload-count-label');
+  if(n>0){actions.classList.remove('hidden');actions.style.display='flex';label.textContent=`${n} photo${n!==1?'s':''} loaded`;}
+  else actions.classList.add('hidden');
+}
+
+// ══════════════════════════════════════════
+// INTAKE
+// ══════════════════════════════════════════
+function startIntake(){
+  if(!SESSION.originals.length){showToast('Upload at least one photo.','error');return;}
+  showStep('step-intake');currentIntakeStep=0;renderIntakeStep();
+}
+function renderIntakeStep(){
+  const step=INTAKE_STEPS[currentIntakeStep];
+  const pct=Math.round((currentIntakeStep/INTAKE_STEPS.length)*100);
+  document.getElementById('intake-progress').style.width=pct+'%';
+  const sel=SESSION.intake[step.key];
+  document.getElementById('intake-body').innerHTML=`
+    <div class="intake-step-badge">Step ${currentIntakeStep+1} of ${INTAKE_STEPS.length}</div>
+    <div class="intake-question">${step.question}</div>
+    <div class="option-list">
+      ${step.options.map(opt=>`
+        <button class="option-btn ${sel===opt.letter?'selected':''}" onclick="selectIntakeOption('${step.key}','${opt.letter}','${esc(opt.label)}')">
+          <div class="option-letter">${opt.letter}.</div>
+          <div class="option-content"><div class="option-label">${opt.label}</div>${opt.desc?`<div class="option-desc">${opt.desc}</div>`:''}</div>
+        </button>`).join('')}
+    </div>`;
+  document.getElementById('intake-nav').innerHTML=`
+    ${currentIntakeStep>0?`<button class="btn btn-outline btn-sm" onclick="intakeBack()">← Back</button>`:''}
+    <button class="btn btn-primary btn-sm" onclick="intakeNext()" ${sel?'':'disabled'}>
+      ${currentIntakeStep<INTAKE_STEPS.length-1?'Next →':'Continue to Room Mapping →'}
+    </button>`;
+}
+function selectIntakeOption(key,letter,label){SESSION.intake[key]=letter;SESSION.intake[key+'_label']=label;renderIntakeStep();}
+function intakeNext(){
+  if(!SESSION.intake[INTAKE_STEPS[currentIntakeStep].key]){showToast('Please select an option.','error');return;}
+  if(currentIntakeStep<INTAKE_STEPS.length-1){currentIntakeStep++;renderIntakeStep();}
+  else finishIntake();
+}
+function intakeBack(){if(currentIntakeStep>0){currentIntakeStep--;renderIntakeStep();}}
+async function finishIntake(){
+  const fp=SESSION.originals.find(o=>o.isFloorplan);
+  showStep('step-mapping');
+  if(fp){showMappingAnalyzing();await analyzeFloorplan(fp);}
+  else showMappingManual();
+}
+
+// ══════════════════════════════════════════
+// ROOM MAPPING
+// ══════════════════════════════════════════
+function showMappingAnalyzing(){document.getElementById('mapping-body').innerHTML=`<div class="fp-analyzing"><span class="spinner"></span> Analyzing floor plan — identifying rooms and adjacencies...</div>`;}
+async function analyzeFloorplan(fp){
+  try{
+    const res=await fetch('/.netlify/functions/stage-image-start',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({action:'analyze-floorplan',imageBase64:fp.base64,mimeType:fp.mimeType})});
+    const data=await res.json();
+    if(!res.ok||!data.rooms)throw new Error(data.error||'No room data');
+    SESSION.floorplanRoomMap=data;showMappingWithFloorplan(data.rooms);
+  }catch(err){showToast('Floor plan analysis failed — switching to manual labeling.','error');showMappingManual();}
+}
+function showMappingWithFloorplan(rooms){
+  const photos=SESSION.originals.filter(o=>!o.isFloorplan);
+  const roomOpts=rooms.map(r=>`<option value="${r.id}">${r.name}${r.floor?' (Fl.'+r.floor+')':''}</option>`).join('');
+  document.getElementById('mapping-body').innerHTML=`
+    <div class="panel-sub" style="margin-bottom:16px;">AI identified <strong>${rooms.length} rooms</strong>. Assign each photo. Click any thumbnail to set Shot Focus for open-concept shots.</div>
+    <div class="room-map-grid">
+      <div><div class="section-label">Floor Plan Rooms</div><div class="room-map-list">
+        ${rooms.map(r=>`<div class="room-map-item"><div class="room-map-name">${r.name}${r.floor?' · Floor '+r.floor:''}</div>${r.adjacentTo?.length?`<div class="room-map-adj">Adjacent: ${r.adjacentTo.map(aid=>rooms.find(x=>x.id===aid)?.name||aid).join(', ')}</div>`:''}</div>`).join('')}
+      </div></div>
+      <div><div class="section-label">Assign Photos to Rooms</div><div class="photo-assign-list">
+        ${photos.map(p=>`<div class="photo-assign-row">
+          <img class="photo-assign-thumb" src="${p.dataUrl}" onclick="openLightboxMapping('${p.id}')" title="Click to set Shot Focus" />
+          <span class="photo-assign-name">${p.name}</span>
+          <select class="photo-assign-select" onchange="updatePhotoRoom('${p.id}',this.value)">
+            <option value="">— Select room —</option>${roomOpts}
+          </select>
+        </div>`).join('')}
+      </div></div>
+    </div>`;
+}
+function updatePhotoRoom(photoId,roomId){
+  if(!roomId){delete SESSION.photoRoomMap[photoId];return;}
+  const room=SESSION.floorplanRoomMap?.rooms?.find(r=>r.id===roomId);
+  if(!room)return;
+  const adjNames=(room.adjacentTo||[]).map(aid=>SESSION.floorplanRoomMap.rooms.find(r=>r.id===aid)?.name).filter(Boolean);
+  const isExt=EXTERIOR_KEYWORDS.some(k=>room.name.toLowerCase().includes(k));
+  SESSION.photoRoomMap[photoId]={...SESSION.photoRoomMap[photoId]||{},roomId:room.id,roomName:room.name,adjacentNames:adjNames,isExterior:isExt};
+}
+function showMappingManual(){
+  const photos=SESSION.originals.filter(o=>!o.isFloorplan);
+  const roomOpts=ROOM_OPTIONS.map(r=>{
+    const isDivider = r.startsWith('──');
+    const val = isDivider ? '' : r;
+    return `<option value="${val}" ${isDivider?'disabled style="color:#999;font-size:0.75rem;"':''}>${r.split(' || ')[0]}</option>`;
+  }).join('');
+  document.getElementById('mapping-body').innerHTML=`
+    <div class="panel-sub" style="margin-bottom:16px;">Label each photo. "Floor Plan / Reference Only" marks a photo as reference — it won't be staged. Click thumbnails to set Shot Focus.</div>
+    <div class="no-fp-label-list">
+      ${photos.map(p=>`<div class="photo-assign-row">
+        <img class="photo-assign-thumb" src="${p.dataUrl}" onclick="openLightboxMapping('${p.id}')" title="Click to set Shot Focus" />
+        <span class="photo-assign-name">${p.name}</span>
+        <select class="photo-assign-select" onchange="updatePhotoRoomManual('${p.id}',this.value)">
+          <option value="">— Label this room —</option>${roomOpts}
+        </select>
+      </div>`).join('')}
+    </div>`;
+}
+function updatePhotoRoomManual(photoId,val){
+  if(!val){delete SESSION.photoRoomMap[photoId];return;}
+  const parsed = parseRoomOption(val);
+  if(!parsed) return; // divider row — ignore
+  if(parsed.isFloorplan){
+    const orig=SESSION.originals.find(o=>o.id===photoId);
+    if(orig)orig.isFloorplan=true;
+    SESSION.photoRoomMap[photoId]={roomId:'floorplan',roomName:'Floor Plan',adjacentNames:[],isExterior:false,isReference:true,decor8Type:'floorplan'};
+    return;
+  }
+  SESSION.photoRoomMap[photoId]={
+    ...SESSION.photoRoomMap[photoId]||{},
+    roomId: parsed.decor8Type,
+    roomName: parsed.label,
+    decor8Type: parsed.decor8Type,
+    adjacentNames:[],
+    isExterior: parsed.isExterior,
+    isOpenPlan: parsed.isOpenPlan,
+    isReference:false
+  };
+}
+function confirmMapping(){buildSummary();buildRoomQueue();showStep('step-staging');}
+
+// ══════════════════════════════════════════
+// LIGHTBOX
+// ══════════════════════════════════════════
+function openLightbox(roomId){
+  const room=SESSION.rooms.find(r=>r.id===roomId);
+  const orig=SESSION.originals.find(o=>o.id===room?.originalId);
+  if(!room||!orig)return;
+  _lbRoomId=roomId;
+  document.getElementById('lightbox-img').src=orig.dataUrl;
+  document.getElementById('lightbox-title').textContent='Shot Focus — '+room.roomName;
+  document.getElementById('lightbox-input').value=room.shotFocus||'';
+  const hints=SHOT_FOCUS_HINTS[room.roomName]||DEFAULT_HINTS;
+  document.getElementById('lightbox-examples').innerHTML=hints.map(h=>`<div class="lightbox-example" onclick="setLightboxExample(this)">${h}</div>`).join('');
+  document.getElementById('lightbox').classList.remove('hidden');
+}
+function openLightboxMapping(photoId){
+  const orig=SESSION.originals.find(o=>o.id===photoId);
+  if(!orig)return;
+  _lbRoomId='__mapping__:'+photoId;
+  const roomName=SESSION.photoRoomMap[photoId]?.roomName||orig.name;
+  document.getElementById('lightbox-img').src=orig.dataUrl;
+  document.getElementById('lightbox-title').textContent='Shot Focus — '+roomName;
+  document.getElementById('lightbox-input').value=SESSION.photoRoomMap[photoId]?.shotFocus||'';
+  const hints=SHOT_FOCUS_HINTS[roomName]||DEFAULT_HINTS;
+  document.getElementById('lightbox-examples').innerHTML=hints.map(h=>`<div class="lightbox-example" onclick="setLightboxExample(this)">${h}</div>`).join('');
+  document.getElementById('lightbox').classList.remove('hidden');
+}
+function setLightboxExample(el){document.getElementById('lightbox-input').value=el.textContent;}
+function closeLightbox(){document.getElementById('lightbox').classList.add('hidden');_lbRoomId=null;}
+function saveShotFocus(){
+  const val=document.getElementById('lightbox-input').value.trim();
+  if(_lbRoomId?.startsWith('__mapping__:')){
+    const photoId=_lbRoomId.split(':')[1];
+    if(!SESSION.photoRoomMap[photoId])SESSION.photoRoomMap[photoId]={};
+    SESSION.photoRoomMap[photoId].shotFocus=val;
+  } else {
+    const room=SESSION.rooms.find(r=>r.id===_lbRoomId);
+    if(room){room.shotFocus=val;renderRoomQueue();}
+  }
+  showToast('Shot Focus saved.','success');
+  closeLightbox();
+}
+document.getElementById('lightbox').addEventListener('click',e=>{if(e.target===document.getElementById('lightbox'))closeLightbox();});
+
+// ══════════════════════════════════════════
+// SUMMARY
+// ══════════════════════════════════════════
+function buildSummary(){
+  const KEYS=[{key:'buyer_label',label:'Buyer Profile'},{key:'feeling_label',label:'Desired Feeling'},{key:'style_label',label:'Design Style'},{key:'intensity_label',label:'Staging Level'},{key:'palette_label',label:'Color Direction'},{key:'mls_label',label:'MLS Compliance'}];
+  document.getElementById('summary-grid').innerHTML=KEYS.map(s=>`<div class="summary-chip"><div class="summary-chip-label">${s.label}</div><div class="summary-chip-val">${SESSION.intake[s.key]||'—'}</div></div>`).join('');
+}
+
+// ══════════════════════════════════════════
+// ROOM QUEUE
+// ══════════════════════════════════════════
+function buildRoomQueue(){
+  const photos=SESSION.originals.filter(o=>!o.isFloorplan);
+  SESSION.rooms=photos.map(orig=>{
+    const m=SESSION.photoRoomMap[orig.id];
+    const isOpenPlan=m?.isOpenPlan||false;
+    return {id:'room_'+orig.id,originalId:orig.id,roomName:m?.roomName||orig.name,decor8Type:m?.decor8Type||null,isOpenPlan,adjacentRooms:m?.adjacentNames||[],isExterior:m?.isExterior||false,isReference:m?.isReference||false,shotFocus:m?.shotFocus||'',status:'pending',stagedBase64:null,finalBase64:null,finalStatus:null,iterationNote:'',approvedDNA:null,extSelections:{},spatialAnalysis:null,spatialStatus:null,dnaStatus:null};
+  });
+  // Track Open Plan room ID for enforcement
+  const openPlanRoom = SESSION.rooms.find(r => r.isOpenPlan);
+  SESSION.openPlanRoomId = openPlanRoom?.id || null;
+  renderRoomQueue();
+}
+
+function isOpenPlanStaged() {
+  if (!SESSION.openPlanRoomId) return true; // No open plan in session — allow all
+  const opRoom = SESSION.rooms.find(r => r.id === SESSION.openPlanRoomId);
+  return opRoom?.status === 'done';
+}
+function toggleRoomMode(roomId,makeExt){
+  const room=SESSION.rooms.find(r=>r.id===roomId);
+  if(!room)return;
+  room.isExterior=makeExt;room.status='pending';room.stagedBase64=null;room.finalBase64=null;room.finalStatus=null;room.extSelections={};
+  renderRoomQueue();
+}
+function toggleExtSelection(roomId,enhId){
+  const room=SESSION.rooms.find(r=>r.id===roomId);
+  if(!room)return;
+  if(room.extSelections[enhId])delete room.extSelections[enhId];
+  else room.extSelections[enhId]={status:'pending',base64:null,finalBase64:null,finalStatus:null};
+  renderRoomQueue();
+}
+
+function renderRoomQueue(){
+  document.getElementById('room-queue').innerHTML=SESSION.rooms.map(room=>{
+    const orig=SESSION.originals.find(o=>o.id===room.originalId);
+    if(!orig)return '';
+    const isAnchor=SESSION.anchorRoomId===room.id;
+
+    if(room.isReference)return `<div class="room-card is-reference" id="card-${room.id}">
+      <div class="room-card-header"><img class="room-card-thumb" src="${orig.dataUrl}" />
+      <div class="room-card-info"><div class="room-card-name">${room.roomName} <span class="ref-badge">Reference Only</span></div>
+      <div class="room-card-status pending">Not staged — spatial reference only</div></div></div></div>`;
+
+    const modeToggle=`<div class="mode-toggle">
+      <button class="mode-toggle-btn ${!room.isExterior?'active-int':''}" onclick="toggleRoomMode('${room.id}',false)">Interior</button>
+      <button class="mode-toggle-btn ${room.isExterior?'active-ext':''}" onclick="toggleRoomMode('${room.id}',true)">Exterior</button>
+    </div>`;
+    const sfBadge=room.shotFocus?`<div class="shot-focus-badge">🎯 ${room.shotFocus.slice(0,80)}${room.shotFocus.length>80?'…':''}</div>`:''
+    const spatialBadge=(()=>{
+      if(room.spatialStatus==='analyzing')return `<div style="font-size:0.68rem;color:#888;margin-top:2px;display:flex;align-items:center;gap:4px;"><span class="spinner" style="width:10px;height:10px;border-width:1.5px;"></span> Analyzing room geometry...</div>`;
+      if(room.spatialAnalysis?.focalPoint)return `<div style="font-size:0.68rem;color:#2d6a4f;margin-top:2px;">🏠 Spatial: ${room.spatialAnalysis.focalPoint}${room.spatialAnalysis.islandSides&&room.spatialAnalysis.islandSides!=='N/A'?' · '+room.spatialAnalysis.islandSides:''}</div>`;
+      return '';
+    })();
+
+    // ── EXTERIOR ──
+    if(room.isExterior){
+      const selIds=Object.keys(room.extSelections);
+      const anyProc=selIds.some(id=>room.extSelections[id]?.status==='processing');
+      const runBtn=anyProc?`<button class="btn btn-sky btn-sm" disabled><span class="spinner spinner-sky"></span> Running</button>`
+        :`<button class="btn btn-sky btn-sm" onclick="runExtEnhancements('${room.id}')" ${selIds.length?'':'disabled'}>Run Selected</button>`;
+      const opts=EXT_ENHANCEMENTS.map(enh=>{const sel=!!room.extSelections[enh.id];return `<div class="ext-option ${sel?'selected':''}" onclick="toggleExtSelection('${room.id}','${enh.id}')">
+        <input type="checkbox" ${sel?'checked':''} onclick="event.stopPropagation();toggleExtSelection('${room.id}','${enh.id}')" />
+        <div><div class="ext-option-label">${enh.icon} ${enh.label}</div><div class="ext-option-desc">${enh.desc}</div></div></div>`;}).join('');
+      const enhResults=EXT_ENHANCEMENTS.filter(enh=>room.extSelections[enh.id]).map(enh=>{
+        const es=room.extSelections[enh.id];
+        if(es.status==='done'&&es.base64)return `<div class="ext-enhancement-item">
+          <div class="ext-enhancement-header"><span class="ext-enhancement-name">${enh.icon} ${enh.label}</span>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+            <span class="tier-label tier-draft">Draft</span>
+            <button class="btn btn-outline btn-sm" onclick="downloadOriginal('${room.id}')">↓ Original</button>
+            <button class="btn btn-outline btn-sm" onclick="downloadB64('data:image/jpeg;base64,'+getExtB64('${room.id}','${enh.id}','draft'),'EXT_${enh.id}_Draft_'+bName('${orig.name}')+'.jpg')">↓ Draft</button>
+            <button class="btn btn-outline btn-sm" onclick="downloadSideBySide('${room.id}','${enh.id}','draft')">↓ Side-by-Side</button>
+          </div></div>
+          <div class="result-viewer" style="padding:12px;"><div class="result-pair">
+            <div class="result-img-wrap"><img src="${orig.dataUrl}" onclick="openLightbox('${room.id}')" /><div class="result-img-badge">Original</div></div>
+            <div class="result-img-wrap"><img src="data:image/jpeg;base64,${es.base64}" /><div class="result-img-badge ext-enhanced">${enh.mlsTag}</div></div>
+          </div></div>
+          ${renderFinalPanel(room.id,enh.id)}</div>`;
+        if(es.status==='processing')return `<div class="ext-enhancement-item"><div class="ext-enhancement-header"><span class="ext-enhancement-name">${enh.icon} ${enh.label}</span><span style="font-size:0.75rem;color:var(--sky);display:flex;align-items:center;gap:6px;"><span class="spinner spinner-sky"></span> Generating draft...</span></div></div>`;
+        return '';
+      }).join('');
+      return `<div class="room-card is-exterior" id="card-${room.id}">
+        <div class="room-card-header"><img class="room-card-thumb" src="${orig.dataUrl}" onclick="openLightbox('${room.id}')" title="Click to set Shot Focus" />
+        <div class="room-card-info"><div class="room-card-name">${room.roomName} <span class="ext-badge">Exterior</span></div>${sfBadge}
+        <div class="room-card-status" style="color:var(--sky);">Select enhancements · Click photo to set Shot Focus</div></div>
+        <div class="room-card-actions">${runBtn}${modeToggle}</div></div>
+        <div class="ext-panel"><div class="ext-panel-title">Choose Exterior Enhancements — Multiple Allowed</div>
+        <div class="ext-options">${opts}</div>${enhResults}</div></div>`;
+    }
+
+    // ── INTERIOR ──
+    const statusLabel={
+      pending:'Ready to stage — click photo to set Shot Focus',
+      processing: room.promptStatus || 'Staging in progress...',
+      done:'✓ Staged',
+      error:'⚠ Error — retry available'
+    }[room.status];
+    const dnaTierBadge=(()=>{
+      const tier=getDNATier(room);
+      if(room.isOpenPlan) return '';
+      if(tier==='full'&&SESSION.stagingDNA) return `<span style="font-size:0.6rem;background:#e8f4f0;color:var(--success);border:1px solid #b8ddd0;padding:1px 6px;border-radius:2px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;">Full DNA</span>`;
+      if(tier==='style'&&SESSION.stagingDNA) return `<span style="font-size:0.6rem;background:#f4f8fc;color:var(--sky);border:1px solid #cce0f0;padding:1px 6px;border-radius:2px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;">Style DNA</span>`;
+      return '';
+    })();
+    const actions=(()=>{
+      if(room.status==='pending'||room.status==='error'){
+        const dnaTier = getDNATier(room);
+        const blocked = dnaTier === 'full' && !room.isOpenPlan && !isOpenPlanStaged();
+        if(blocked) return `
+          <div style="font-size:0.75rem;color:var(--muted);padding:4px 0;max-width:220px;line-height:1.4;">
+            🔒 Stage Open Plan first — this room shares its furniture DNA
+          </div>`;
+        return `<button class="btn btn-primary btn-sm" onclick="stageRoom('${room.id}')">Stage This Room</button>`;
+      }
+      if(room.status==='processing')return `<button class="btn btn-outline btn-sm" disabled><span class="spinner"></span> Generating</button>`;
+      if(room.status==='done')return `
+        <button class="btn btn-outline btn-sm" onclick="downloadOriginal('${room.id}')">↓ Original</button>
+        <button class="btn btn-outline btn-sm" onclick="downloadB64('data:image/jpeg;base64,'+getRoomB64('${room.id}','draft'),'DRAFT_'+bName(getOrigName('${room.id}'))+'.jpg')">↓ Draft</button>
+        <button class="btn btn-outline btn-sm" onclick="downloadSideBySide('${room.id}',null,'draft')">↓ Side-by-Side</button>
+        ${!isAnchor?`<button class="btn btn-ghost btn-sm" onclick="resetRoom('${room.id}')">Re-Stage</button>`:''}
+        <button class="btn btn-ghost btn-sm" onclick="showDecor8Payload('${room.id}')" title="Show exact JSON sent to Decor8 API">{ } API Payload</button>`;
+      return '';
+    })();
+    // Open Plan Strategy Toggle (always visible for open plan rooms)
+    const strategyToggle = room.isOpenPlan ? `<div class="op-strategy-wrap">
+      <span class="op-strategy-label">Open Plan Strategy:</span>
+      <button class="op-strategy-btn ${SESSION.openPlanStrategy==='native'?'active':''}" onclick="setOpenPlanStrategy('native')">A · Native Decor8</button>
+      <button class="op-strategy-btn ${SESSION.openPlanStrategy==='guided'?'active':''}" onclick="setOpenPlanStrategy('guided')">B · Guided Zoning</button>
+      <button class="op-strategy-btn ${SESSION.openPlanStrategy==='full'?'active':''}" onclick="setOpenPlanStrategy('full')">C · Full Placement</button>
+      <span class="op-strategy-desc">${SESSION.openPlanStrategy==='native'?'Decor8 picks everything':SESSION.openPlanStrategy==='guided'?'Rug anchors + style guidance':'Detailed placement + style'}</span>
+    </div>` : '';
+
+    // DNA status display for open plan
+    const dnaPanel = room.isOpenPlan ? (()=>{
+      if(room.dnaStatus==='extracting') return `<div style="background:#f4faf7;border-top:1px solid #b8ddd0;padding:10px 16px;display:flex;align-items:center;gap:8px;"><span class="spinner spinner-green"></span><span style="font-size:0.8rem;color:var(--success);">Claude Vision reading staged image — extracting Design DNA for all rooms...</span></div>`;
+      if(room.dnaStatus==='done'&&SESSION.stagingDNA) return `<div style="background:#f4faf7;border-top:1px solid #b8ddd0;padding:12px 16px;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><span style="background:var(--success);color:#fff;font-size:0.62rem;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;padding:2px 8px;border-radius:2px;">✓ Design DNA Locked</span><span style="font-size:0.75rem;color:var(--success);">${SESSION.stagingDNA.overallStyle}</span></div>
+        <div style="font-size:0.75rem;color:var(--muted);line-height:1.6;">
+          <strong>Sofa:</strong> ${SESSION.stagingDNA.sofa||'—'} &nbsp;·&nbsp;
+          <strong>Dining:</strong> ${SESSION.stagingDNA.diningTable||'—'} &nbsp;·&nbsp;
+          <strong>Wood:</strong> ${SESSION.stagingDNA.woodTones||'—'} &nbsp;·&nbsp;
+          <strong>Metals:</strong> ${SESSION.stagingDNA.metalFinishes||'—'}<br>
+          <strong>Palette:</strong> ${Array.isArray(SESSION.stagingDNA.colorPalette)?SESSION.stagingDNA.colorPalette.join(', '):(SESSION.stagingDNA.colorPalette||'—')}
+        </div>
+        <div style="font-size:0.7rem;color:#888;margin-top:6px;">All other rooms will match this staging automatically.</div>
+      </div>`;
+      if(room.dnaStatus==='failed') return `<div style="background:#fff8e7;border-top:1px solid #f0d080;padding:10px 16px;font-size:0.75rem;color:#7a6000;">⚠ DNA extraction failed — other rooms will use style defaults. You can re-stage this room to retry.</div>`;
+      return '';
+    })() : '';
+
+    const resultHtml=room.status==='done'?`<div class="result-viewer">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><span class="tier-label tier-draft">Staged — Decor8</span><span style="font-size:0.72rem;color:var(--muted);">Iterate with revision instructions below. Generate Final for highest resolution MLS download.</span></div>
+      <div class="result-pair">
+        <div class="result-img-wrap"><img src="${orig.dataUrl}" onclick="openLightbox('${room.id}')" title="Click to update Shot Focus" /><div class="result-img-badge">Original</div></div>
+        <div class="result-img-wrap"><img src="data:image/jpeg;base64,${room.stagedBase64}" /><div class="result-img-badge staged">Virtually Staged · Draft</div></div>
+      </div>
+      <div class="mls-disclosure-note" style="font-size:0.73rem;">⚖️ <strong>MLS Upload: Original first → Staged second.</strong> Label "Virtually Staged" in Matrix.</div>
+    </div>`:'';
+    const iterHtml=room.status==='done'?`<div class="iterate-panel">
+      <div style="flex:1;">
+        <textarea class="iterate-input" id="iter-${room.id}" placeholder='Revision — e.g. "warmer lighting, less furniture, match great room sofa"' rows="2"></textarea>
+        <div class="iterate-hint">Specify only what to change — everything else stays the same.</div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="iterateRoom('${room.id}')">Re-Stage Draft</button>
+    </div>`:'';
+    const finalHtml=room.status==='done'?renderFinalPanel(room.id,null):'';
+    // Replicate result panel — button now in header actions, this shows result/progress only
+    const repBtn=(()=>{
+      if(!room.replicateStatus) return ''; // button is in header actions now
+      if(room.replicateStatus==='processing')
+        return `<div style="background:#f0f4ff;border-top:1px solid #c8d4f0;padding:10px 16px;display:flex;align-items:center;gap:8px;">
+          <span class="spinner" style="border-top-color:#4a5fa5;border-color:#c8d4f0;"></span>
+          <span style="font-size:0.8rem;color:#4a5fa5;">Step 1: Claude Vision analyzing photo for precise mask... Step 2: Replicate SDXL inpainting locked regions...</span>
+        </div>`;
+      if(room.replicateStatus==='done'&&room.replicateBase64)
+        return `<div style="padding:16px;background:#f0f4ff;border-top:1px solid #c8d4f0;">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+            <span style="background:#4a5fa5;color:#fff;font-size:0.62rem;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;padding:2px 8px;border-radius:2px;">Replicate SDXL</span>
+            <span style="font-size:0.72rem;color:var(--muted);">${room.replicateMaskInfo||"Compare with gpt-image-1 draft above — which engine gives better results?"}</span>
+          </div>
+          <div class="result-pair">
+            <div class="result-img-wrap"><img src="${orig.dataUrl}" /><div class="result-img-badge">Original</div></div>
+            <div class="result-img-wrap"><img src="data:image/jpeg;base64,${room.replicateBase64}" /><div class="result-img-badge" style="background:rgba(74,95,165,0.9);color:#fff;">Replicate SDXL</div></div>
+          </div>
+          <div style="margin-top:8px;display:flex;gap:8px;">
+            <button class="btn btn-outline btn-sm" onclick="downloadB64('data:image/jpeg;base64,'+SESSION.rooms.find(r=>r.id==='${room.id}').replicateBase64,'REPLICATE_${room.roomName.replace(/\s+/g,'')}_'+bName(getOrigName('${room.id}'))+'.jpg')">↓ Replicate Result</button>
+            <button class="btn btn-ghost btn-sm" onclick="SESSION.rooms.find(r=>r.id==='${room.id}').replicateStatus=null;renderRoomQueue();">Run Again</button>
+          </div>
+        </div>`;
+      if(room.replicateStatus==='error')
+        return `<div style="background:#f0f4ff;border-top:1px solid #c8d4f0;padding:10px 16px;display:flex;align-items:center;gap:10px;">
+          <span style="font-size:0.72rem;color:var(--danger);">⚠ Replicate error</span>
+          <button class="btn btn-sm" style="background:#4a5fa5;color:#fff;" onclick="SESSION.rooms.find(r=>r.id==='${room.id}').replicateStatus=null;renderRoomQueue();">Retry</button>
+        </div>`;
+      return '';
+    })();
+    return `<div class="room-card ${isAnchor?'is-anchor':''}" id="card-${room.id}">
+      <div class="room-card-header"><img class="room-card-thumb" src="${orig.dataUrl}" onclick="openLightbox('${room.id}')" title="Click to set Shot Focus" />
+      <div class="room-card-info"><div class="room-card-name">${room.roomName} ${isAnchor?'<span class="anchor-badge">Design Anchor</span>':''}</div>
+      ${room.adjacentRooms.length?`<div class="room-card-adj">Adjacent: ${room.adjacentRooms.join(', ')}</div>`:''}${sfBadge}${spatialBadge}
+      <div class="room-card-status ${room.status}">${statusLabel}</div></div>
+      <div class="room-card-actions">${actions}${modeToggle}</div></div>
+      ${strategyToggle}${resultHtml}${dnaPanel}${iterHtml}${finalHtml}</div>`;
+  }).join('');
+}
+
+function renderFinalPanel(roomId,enhId){
+  const room=SESSION.rooms.find(r=>r.id===roomId);
+  if(!room)return '';
+  const enh=enhId?EXT_ENHANCEMENTS.find(e=>e.id===enhId):null;
+  const fs=enhId?room.extSelections[enhId]?.finalStatus:room.finalStatus;
+  const fb64=enhId?room.extSelections[enhId]?.finalBase64:room.finalBase64;
+  const draftReady=enhId?room.extSelections[enhId]?.base64:room.stagedBase64;
+  if(!draftReady)return '';
+  if(fs==='generating')return `<div class="final-panel"><span class="final-panel-label">Generating Final...</span><span class="final-progress"><span class="spinner spinner-green"></span> Processing at selected quality — this may take 30–60 seconds...</span></div>`;
+  if(fs==='done'&&fb64){
+    const tag=enh?enh.label.replace(/\s+/g,''):'VirtuallyStaged';
+    const orig=SESSION.originals.find(o=>o.id===room.originalId);
+    return `<div class="result-viewer" style="padding:12px 16px;">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><span class="tier-label tier-final">Final — MLS Quality</span></div>
+      <div class="result-pair">
+        <div class="result-img-wrap"><img src="${orig.dataUrl}" /><div class="result-img-badge">Original</div></div>
+        <div class="result-img-wrap"><img src="data:image/jpeg;base64,${fb64}" /><div class="result-img-badge final-badge">Final · ${enh?enh.mlsTag:'Virtually Staged'}</div></div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+        <button class="btn btn-success btn-sm" onclick="downloadB64('data:image/jpeg;base64,'+getFinalB64('${roomId}','${enhId||''}'),'FINAL_${tag}_'+bName(getOrigName('${roomId}'))+'.jpg')">↓ Final</button>
+        <button class="btn btn-outline btn-sm" onclick="downloadSideBySide('${roomId}','${enhId||null}','final')">↓ Final Side-by-Side</button>
+        <button class="btn btn-ghost btn-sm" onclick="resetFinal('${roomId}','${enhId||''}')">Re-Generate</button>
+      </div>
+    </div>`;
+  }
+  const selId=`qsel-${roomId}-${enhId||'int'}`;
+  return `<div class="final-panel">
+    <span class="final-panel-label">Generate Final</span>
+    <select class="quality-select" id="${selId}">
+      <option value="medium">Medium Quality (~$0.04)</option>
+      <option value="high">High Quality (~$0.17)</option>
+    </select>
+    <button class="btn btn-success btn-sm" onclick="generateFinal('${roomId}','${enhId||''}')">Generate Final →</button>
+  </div>`;
+}
+
+// ══════════════════════════════════════════
+// PROMPT BUILDERS
+// ══════════════════════════════════════════
+function getRoomTypeRules(roomName){
+  return ROOM_STAGING_RULES[roomName]||'';
+}
+
+// ── Global staging props standards ──────────────────────────────────────────
+const PROPS_RULES = `STAGING PROPS STANDARDS — APPLY TO ALL ROOMS:
+COUNTERTOPS & SURFACES: Minimal styling only — maximum one tray OR one bowl per counter section, one vase or single stem, one small plant maximum per surface. Do NOT add multiple accessories, fruit bowls, appliance collections, or cluttered styling to any counter or surface.
+WALL ART: Maximum ONE piece of art per wall. Art must be properly sized — width should be 50-75% of the wall or furniture piece below it. Do NOT add art over windows, on structural columns, or on walls too narrow to support it properly.
+AREA RUGS: Area rugs only — no runners, no layered rugs, no hall runners. Rugs must be sized correctly — in living areas front legs of all seating must sit on the rug. Do NOT add rugs in kitchens, bathrooms, or laundry rooms.
+PLANTS: Maximum one plant per room — floor plant OR table plant, not both. No fake-looking oversized plants.
+GENERAL: Less is more. Every item must earn its place. When in doubt, leave it out.`;
+
+// FIX #3: Reflection rule injected into every prompt
+const REFLECTION_RULE = `REFLECTION & LIGHTING ACCURACY — STRICTLY ENFORCE:
+- All mirrors, glass, windows, appliances, and polished surfaces must show ONLY what is physically visible from the camera angle in this exact photo
+- Do NOT invent reflections of objects, furniture, or spaces not present in this scene
+- Do NOT show reflections of rooms or angles that cannot be seen from this camera position
+- Window glass must show what is actually outside or simply appear as bright natural light — no invented exterior views
+- Mirrors must reflect only what would genuinely be visible to the camera — if uncertain, keep mirrors minimal or show soft light reflection only`;
+
+// FIX #2: Preservation block for iterations
+function buildPreservationBlock(room,iterNote){
+  if(!iterNote?.trim())return '';
+  return `PRESERVE FROM PREVIOUS STAGING — CHANGE ONLY WHAT IS LISTED BELOW:
+Keep identical: all furniture pieces not mentioned, all colors and materials not mentioned, all décor not mentioned, all lighting setup, all spatial relationships.
+CHANGE ONLY: ${iterNote.trim()}
+Do not add, remove, or modify anything else. This is a targeted revision, not a complete re-stage.`;
+}
+
+function buildInteriorPrompt(room,iterNote,quality){
+  const i=SESSION.intake;
+  let continuity='';
+  if(SESSION.anchorRoomId&&SESSION.anchorRoomId!==room.id){
+    const anchor=SESSION.rooms.find(r=>r.id===SESSION.anchorRoomId);
+    if(anchor?.approvedDNA){
+      const isAdj=room.adjacentRooms.includes(anchor.roomName);
+      continuity=`\nDESIGN CONTINUITY: This room is in the same home as the staged ${anchor.roomName}. Match: ${anchor.approvedDNA}\n${isAdj?'DIRECTLY ADJACENT — visible sightlines must show matching furniture language and palette.':'Maintain consistent style, woods, metals, textiles throughout.'}`;
+    }
+  }
+  const shotFocus=room.shotFocus?`\nSHOT FOCUS — CRITICAL: ${room.shotFocus}\nStage ONLY the primary space described. Do not over-furnish background or adjacent visible spaces.`:'';
+  // Spatial analysis block — precise placement from Claude Vision
+  const spatialBlock=(()=>{
+    const s=room.spatialAnalysis;
+    if(!s)return '';
+    const lines=[];
+    if(s.cameraFacing)lines.push('Camera position: '+s.cameraFacing);
+    if(s.focalPoint)lines.push('Room focal point: '+s.focalPoint);
+    if(s.islandSides&&s.islandSides!=='N/A'&&s.islandSides!=='n/a')lines.push('Island orientation: '+s.islandSides);
+    if(s.openFloorAreas)lines.push('Empty floor areas: '+s.openFloorAreas);
+    if(s.furniturePlacement?.length)lines.push('PRECISE PLACEMENT REQUIRED:\n'+s.furniturePlacement.map(p=>'  - '+p).join('\n'));
+    if(s.avoidAreas?.length)lines.push('DO NOT PLACE FURNITURE: '+s.avoidAreas.join(', '));
+    if(s.lightDirection)lines.push('Light source: '+s.lightDirection);
+    if(s.spatialNotes)lines.push('Spatial context: '+s.spatialNotes);
+    return lines.length?'\nSPATIAL ANALYSIS — FOLLOW EXACTLY:\n'+lines.join('\n'):'';
+  })();
+  const roomRules=getRoomTypeRules(room.roomName);
+  const preserveBlock=buildPreservationBlock(room,iterNote);
+  const mlsRule=i.mls==='A'?'MLS SAFE MODE: Preserve all architectural elements exactly as photographed. No structural alterations.':'Maintain photorealistic staging quality.';
+  const qualNote=quality==='high'?'Maximum photorealistic quality — luxury editorial, MLS-grade.':quality==='medium'?'High quality photorealistic MLS output.':'Draft quality — focus on correct placement and style direction.';
+  // Spatial block first — highest priority
+  return `Professional real estate virtual interior staging.
+ROOM: ${room.roomName}${room.adjacentRooms.length?`\nCONNECTS TO: ${room.adjacentRooms.join(', ')}`:''}
+${spatialBlock?'FURNITURE PLACEMENT — FOLLOW EXACTLY:\n'+spatialBlock+'\n':''}
+${shotFocus?shotFocus+'\n':''}
+PRESERVE ABSOLUTELY — NO EXCEPTIONS:
+- Kitchen island/peninsula: countertop shape, base geometry, ALL surfaces must remain GEOMETRICALLY IDENTICAL to original — do not round, warp, melt, or reshape any edge, corner, or surface
+- All cabinetry, countertops, appliances, windows, doors, flooring, ceiling height, architectural details, camera perspective must remain IDENTICAL
+- Do NOT add, move, or alter any permanent fixture or structural element
+STAGING: Buyer: ${i.buyer_label} · Feeling: ${i.feeling_label} · Style: ${i.style_label} · Intensity: ${i.intensity_label} · Color: ${i.palette_label}
+Add furniture, rugs, art, plants, décor appropriate to room type only. Realistic scale. Restrained upscale realism.
+${REFLECTION_RULE}
+${PROPS_RULES}
+${roomRules?roomRules+'\n':''}
+${continuity}
+${preserveBlock?preserveBlock+'\n':''}
+${mlsRule} ${qualNote}
+Embed "VIRTUALLY STAGED" text in lower portion.`.trim();
+}
+
+function buildExteriorPrompt(room,enh,quality){
+  const i=SESSION.intake;
+  const mlsRule=i.mls==='A'?'MLS SAFE MODE: Preserve ALL architectural elements exactly — roofline, structure, driveway, windows, hardscape. No fabrication.':'Maintain photorealistic quality.';
+  const shotFocus=room.shotFocus?`\nSHOT FOCUS: ${room.shotFocus}`:'';
+  const qualNote=quality==='high'?'Maximum photorealistic quality.':quality==='medium'?'High quality MLS output.':'Draft quality.';
+  const base=`${shotFocus}\n${REFLECTION_RULE}\n${mlsRule} ${qualNote}\nEmbed "${enh.mlsTag}" text in lower portion.`;
+  const prompts={
+    'outdoor-living':`Professional real estate virtual exterior staging. Add outdoor living furniture to this exterior photo.
+PRESERVE EXACTLY: all architecture, structure, hardscape, fencing, existing landscaping, roofline, camera perspective.
+ADD: outdoor furniture for ${i.buyer_label} buyer — patio dining set, lounge seating, side tables, planters. Style: ${i.style_label}. Color: ${i.palette_label}. Realistic scale on existing hardscape only — do not float furniture.${base}`,
+    'landscape':`Professional real estate exterior landscape enhancement.
+PRESERVE EXACTLY: all architecture, structure, hardscape, fencing, driveway, roofline, camera perspective.
+ENHANCE: lawn to lush green, trim hedges, seasonal flowers, fresh mulch, clean walkways. Realistic only — no fantasy landscaping.${base}`,
+    'golden-hour':`Professional real estate Golden Hour lighting conversion.
+PRESERVE EXACTLY: all architecture, roofline, structure, driveway, windows, landscaping layout, camera perspective. Do NOT add or remove any element.
+LIGHTING ONLY: Warm golden hour sunset — low-angle amber light, long soft shadows, subtle warm facade glow, cinematic sky. Avoid oversaturated orange or fake HDR.${base}`,
+    'twilight':`Professional real estate Twilight conversion.
+PRESERVE EXACTLY: all architecture, roofline, structure, driveway, windows, landscaping, camera perspective. Do NOT add or remove any element.
+LIGHTING ONLY: Blue-hour sky, warm interior window glow, subtle path lighting, luxury curb appeal. Realistic exposure — no neon, no fantasy colors.${base}`,
+  };
+  return prompts[enh.id]||'Professional real estate exterior photo enhancement.';
+}
+
+// ══════════════════════════════════════════
+// API CALL — auto-retry up to 3x on timeout
+// ══════════════════════════════════════════
+async function callStageAPIOnce(imageBase64,mimeType,prompt,quality){
+  const controller=new AbortController();
+  // 24-second abort — just under Netlify's 26s cap so we get a clean error
+  const timer=setTimeout(()=>controller.abort(),24000);
+  try{
+    const res=await fetch('/.netlify/functions/stage-image-start',{
+      method:'POST',headers:{'Content-Type':'application/json'},signal:controller.signal,
+      body:JSON.stringify({imageBase64,mimeType,stagingPrompt:prompt,quality:quality||'low'})
+    });
+    clearTimeout(timer);
+    if(!res.ok){
+      const txt=await res.text();
+      if(txt.trim().startsWith('<'))throw new Error('TIMEOUT');
+      let d;try{d=JSON.parse(txt);}catch(e){throw new Error('TIMEOUT');}
+      if(d.retryable)throw new Error('TIMEOUT'); // OpenAI overloaded — retry
+      throw new Error(d.error||'API error');
+    }
+    const data=await res.json();
+    if(data.error)throw new Error(data.error);
+    if(!data.stagedBase64)throw new Error('TIMEOUT'); // empty response = timeout
+    return data.stagedBase64;
+  }catch(err){
+    clearTimeout(timer);
+    if(err.name==='AbortError'||err.message==='TIMEOUT')throw new Error('TIMEOUT');
+    throw err;
+  }
+}
+async function callStageAPI(imageBase64,mimeType,prompt,quality,attempt=1){
+  try{
+    return await callStageAPIOnce(imageBase64,mimeType,prompt,quality);
+  }catch(err){
+    if(err.message==='TIMEOUT'&&attempt<=4){
+      const delay=attempt*2000; // increasing backoff: 2s, 4s, 6s, 8s
+      showToast('OpenAI timeout — retrying ('+attempt+'/4)...');
+      await new Promise(r=>setTimeout(r,delay));
+      return callStageAPI(imageBase64,mimeType,prompt,quality,attempt+1);
+    }
+    if(err.message==='TIMEOUT')throw new Error('OpenAI is taking too long right now. Please wait 30 seconds and try again — this is an OpenAI server issue, not your photo.');
+    throw err;
+  }
+}
+
+
+// ── Replicate SDXL Inpainting engine ─────────────────────────────────────────
+async function callReplicateAPI(imageBase64,mimeType,prompt){
+  const controller=new AbortController();
+  const timer=setTimeout(()=>controller.abort(),120000);
+  try{
+    const res=await fetch('/.netlify/functions/stage-replicate',{
+      method:'POST',headers:{'Content-Type':'application/json'},signal:controller.signal,
+      body:JSON.stringify({imageBase64,mimeType,stagingPrompt:prompt})
+    });
+    clearTimeout(timer);
+    if(!res.ok){
+      const txt=await res.text();
+      if(txt.trim().startsWith('<')){throw new Error('Replicate request timed out.');}
+      let data;try{data=JSON.parse(txt);}catch(e){throw new Error('Replicate error: '+txt.slice(0,100));}
+      throw new Error(data.error||'Replicate API error');
+    }
+    const data=await res.json();
+    if(data.error)throw new Error(data.error);
+    if(!data.stagedBase64)throw new Error('No image returned from Replicate');
+    return data; // return full response including maskRegions, roomDescription, stagingNote
+  }catch(err){
+    clearTimeout(timer);
+    if(err.name==='AbortError')throw new Error('Replicate request timed out.');
+    throw err;
+  }
+}
+async function stageRoomReplicate(roomId){
+  const room=SESSION.rooms.find(r=>r.id===roomId);
+  const orig=SESSION.originals.find(o=>o.id===room.originalId);
+  if(!room||!orig)return;
+  room.replicateStatus='processing';room.replicateBase64=null;
+  renderRoomQueue();
+  try{
+    const i=SESSION.intake;
+    const sf=room.shotFocus?'Focus: '+room.shotFocus+'. ':'';
+    const rules=ROOM_STAGING_RULES[room.roomName]||'';
+    const prompt=(sf+'Professional real estate virtual staging, '+room.roomName+'. '+i.style_label+' style. '+i.palette_label+' color palette. '+i.buyer_label+' buyer. Add realistic furniture, rugs, art, plants. Preserve all architecture, windows, cabinetry, appliances, flooring exactly. Photorealistic MLS marketing photography.'+(rules?'\n'+rules:'')).trim();
+    // Pass roomName so Claude Vision knows what room it's analyzing
+    const controller=new AbortController();
+    const timer=setTimeout(()=>controller.abort(),120000);
+    const res=await fetch('/.netlify/functions/stage-replicate',{
+      method:'POST',headers:{'Content-Type':'application/json'},signal:controller.signal,
+      body:JSON.stringify({imageBase64:orig.base64,mimeType:orig.mimeType,stagingPrompt:prompt,roomName:room.roomName})
+    });
+    clearTimeout(timer);
+    if(!res.ok){const txt=await res.text();throw new Error(txt.startsWith('<')?'Replicate timed out':(JSON.parse(txt).error||'Replicate error'));}
+    const data=await res.json();
+    if(data.error)throw new Error(data.error);
+    if(!data.stagedBase64)throw new Error('No image returned from Replicate');
+    room.replicateBase64=data.stagedBase64;
+    room.replicateStatus='done';
+    // Store mask analysis info for display
+    if(data.roomDescription||data.maskRegions){
+      room.replicateMaskInfo=(data.roomDescription||'')+(data.stagingNote?' · '+data.stagingNote:'')+(data.maskRegions?' ('+data.maskRegions+' fill region'+(data.maskRegions!==1?'s':'')+')':'');
+    }
+    await resizeToMatch(room,orig,null,'replicateBase64',data.stagedBase64);
+    showToast('✓ Replicate SDXL complete — compare below.','success');
+    renderRoomQueue();
+  }catch(err){room.replicateStatus='error';renderRoomQueue();showToast('Replicate error: '+err.message,'error');}
+}
+
+// ══════════════════════════════════════════
+// STAGE ROOM
+// ══════════════════════════════════════════
+// ── Extract Design DNA from staged Open Plan image ───────────────────────────
+async function extractStagingDNA(stagedBase64, mimeType) {
+  try {
+    const res = await fetch('/.netlify/functions/extract-staging-dna', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stagedBase64, mimeType: mimeType || 'image/jpeg' })
+    });
+    if (!res.ok) { console.warn('DNA extraction failed:', res.status); return null; }
+    const data = await res.json();
+    return data.dna || null;
+  } catch(e) { console.warn('DNA extraction error:', e.message); return null; }
+}
+
+// ── Decor8 staging engine ─────────────────────────────────────────────────────
+async function stageRoom(roomId, iterNote) {
+  const room = SESSION.rooms.find(r => r.id === roomId);
+  const orig = SESSION.originals.find(o => o.id === room.originalId);
+  if (!room || !orig) return;
+
+  const i = SESSION.intake;
+  const isIteration = !!(iterNote && room.stagedBase64);
+
+  // Source image: for iterations use staged image, for fresh use original
+  const sourceBase64 = isIteration ? room.stagedBase64 : orig.base64;
+  const sourceMime = isIteration ? 'image/jpeg' : orig.mimeType;
+
+  room.status = 'processing';
+  room.promptStatus = 'Generating staging prompt with Claude Vision...';
+  renderRoomQueue();
+
+  try {
+    // Step 1: Claude Vision generates hyper-detailed staging prompt
+    const promptRes = await fetch('/.netlify/functions/generate-staging-prompt', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        imageBase64: sourceBase64,
+        mimeType: sourceMime,
+        roomName: room.roomName,
+        roomType: getDecor8RoomType(room.roomName, room.adjacentRooms, room.decor8Type),
+        designStyle: DECOR8_DESIGN_STYLE[i.style_label] || 'transitional',
+        colorPalette: i.palette_label,
+        buyerProfile: i.buyer_label,
+        desiredFeeling: i.feeling_label,
+        stagingIntensity: i.intensity_label,
+        mlsMode: i.mls === 'A',
+        iterationNote: iterNote || null,
+        priorStagingDescription: isIteration ? room.approvedDNA : null,
+        shotFocus: room.shotFocus || null,
+        adjacentRooms: room.adjacentRooms,
+        dnaTier: getDNATier(room),
+        anchorDNA: (() => {
+          const tier = getDNATier(room);
+          if (!SESSION.stagingDNA) return null;
+          if (tier === 'full') return SESSION.stagingDNA.continuityPrompt || null;
+          if (tier === 'style') return `Match the overall style of this home: ${SESSION.stagingDNA.overallStyle}. Use the same wood tones (${SESSION.stagingDNA.woodTones || 'light oak'}), metal finishes (${SESSION.stagingDNA.metalFinishes || 'brushed nickel'}), and color palette (${Array.isArray(SESSION.stagingDNA.colorPalette)?SESSION.stagingDNA.colorPalette.join(', '):(SESSION.stagingDNA.colorPalette||'warm neutrals')}). Staging density: ${SESSION.stagingDNA.stagingDensity || 'moderate'}. Do NOT use the same furniture pieces — use appropriate furniture for this specific room type.`;
+          return null;
+        })(),
+        stagingDNA: getDNATier(room) === 'full' ? SESSION.stagingDNA : null,
+        openPlanZones: room.isOpenPlan ? (room.adjacentRooms.length ? room.adjacentRooms.join(' + ') : room.roomName) : null,
+        openPlanStrategy: room.isOpenPlan ? (SESSION.openPlanStrategy || 'guided') : null,
+        anchorImageUrl: (!room.isOpenPlan && SESSION.anchorImageUrl && isOpenPlanDerivedRoom(room.roomName)) ? SESSION.anchorImageUrl : null,
+        derivedZone: (!room.isOpenPlan && SESSION.anchorImageUrl) ? getOpenPlanDerivedZone(room.roomName) : null,
+      })
+    });
+
+    if (!promptRes.ok) {
+      const d = await promptRes.json();
+      throw new Error('Prompt generation failed: ' + (d.error || 'unknown'));
+    }
+    const { prompt } = await promptRes.json();
+    room.lastPrompt = prompt;
+
+    // ── PROMPT PREVIEW MODAL — pause here, wait for user approval ────────────
+    const approvedPrompt = await showPromptModal(room, prompt);
+    if (approvedPrompt === null) {
+      // User cancelled — reset room to pending, no Decor8 credit burned
+      room.status = 'pending';
+      room.promptStatus = null;
+      renderRoomQueue();
+      showToast('Staging cancelled — no Decor8 credit used.', '');
+      return;
+    }
+    const finalPrompt = approvedPrompt; // may be edited text or '' for no-prompt mode
+
+    // Step 2: Call Decor8 — auto-retry up to 3x on timeout
+    room.promptStatus = 'Staging with Decor8 — takes ~45 seconds...';
+    renderRoomQueue();
+
+    let decor8Data = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 80000);
+        const decor8Res = await fetch('/.netlify/functions/stage-decor8', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal,
+          body: JSON.stringify({
+            imageBase64: sourceBase64,
+            mimeType: sourceMime,
+            roomType: getDecor8RoomType(room.roomName, room.adjacentRooms, room.decor8Type),
+            designStyle: DECOR8_DESIGN_STYLE[i.style_label] || 'transitional',
+            colorScheme: DECOR8_COLOR_SCHEME[i.palette_label] || 'COLOR_SCHEME_9',
+            customPrompt: finalPrompt || undefined,
+          })
+        });
+        clearTimeout(timer);
+        if (!decor8Res.ok) {
+          const d = await decor8Res.json().catch(() => ({}));
+          if (attempt < 3) { room.promptStatus = `Retrying Decor8 (attempt ${attempt+1}/3)...`; renderRoomQueue(); continue; }
+          throw new Error('Decor8 staging failed: ' + (d.error || decor8Res.status));
+        }
+        decor8Data = await decor8Res.json();
+        if (!decor8Data.stagedBase64) {
+          if (attempt < 3) { room.promptStatus = `Retrying (attempt ${attempt+1}/3)...`; renderRoomQueue(); continue; }
+          throw new Error('No staged image returned');
+        }
+        break;
+      } catch(err) {
+        if (err.name === 'AbortError' && attempt < 3) {
+          room.promptStatus = `Decor8 timeout — retrying (${attempt+1}/3)...`;
+          renderRoomQueue();
+          continue;
+        }
+        throw err;
+      }
+    }
+    if (!decor8Data?.stagedBase64) throw new Error('Decor8 staging failed after 3 attempts');
+
+    room.stagedBase64 = decor8Data.stagedBase64;
+    room.lastDecor8Payload = decor8Data.decor8Payload || null; // store for debug display
+    room.status = 'done';
+    room.promptStatus = null;
+    room.approvedDNA = `${i.style_label} style, ${i.palette_label} palette, ${i.intensity_label} staging, ${i.buyer_label} buyer target, ${i.feeling_label} mood.`;
+
+    if (!SESSION.anchorRoomId) {
+      SESSION.anchorRoomId = room.id;
+    }
+
+    // If this is the Open Plan — extract Design DNA from the staged result
+    if (room.isOpenPlan && !SESSION.stagingDNA) {
+      room.dnaStatus = 'extracting';
+      renderRoomQueue();
+      showToast(`✓ ${room.roomName} staged — extracting Design DNA...`, 'success');
+      const dna = await extractStagingDNA(decor8Data.stagedBase64, 'image/jpeg');
+      if (dna) {
+        SESSION.stagingDNA = dna;
+        SESSION.anchorImageUrl = decor8Data.decor8ImageUrl || null;
+        room.dnaStatus = 'done';
+        showToast(`✓ Design DNA locked — ${dna.overallStyle}`, 'success');
+      } else {
+        room.dnaStatus = 'failed';
+        showToast(`✓ ${room.roomName} staged. DNA extraction failed — rooms will use style defaults.`, 'success');
+      }
+    } else {
+      showToast(`✓ ${room.roomName} staged with Design DNA continuity.`, 'success');
+    }
+
+    await resizeToMatch(room, orig, null, 'stagedBase64', decor8Data.stagedBase64);
+    renderRoomQueue();
+
+  } catch (err) {
+    room.status = 'error';
+    room.promptStatus = null;
+    renderRoomQueue();
+    showToast('Staging error: ' + err.message, 'error');
+  }
+}
+
+function iterateRoom(roomId) {
+  const note = document.getElementById('iter-' + roomId)?.value?.trim() || '';
+  if (!note) { showToast('Enter revision instructions first.', 'error'); return; }
+  const room = SESSION.rooms.find(r => r.id === roomId);
+  if (room) {
+    // Keep stagedBase64 as the SOURCE for the iteration — do not clear it
+    room.status = 'pending';
+    room.finalBase64 = null;
+    room.finalStatus = null;
+    stageRoom(roomId, note);
+  }
+}
+function resetRoom(roomId){
+  const room=SESSION.rooms.find(r=>r.id===roomId);
+  if(room){room.status='pending';room.stagedBase64=null;room.finalBase64=null;room.finalStatus=null;room.approvedDNA=null;if(SESSION.anchorRoomId===roomId)SESSION.anchorRoomId=null;renderRoomQueue();}
+}
+
+// ══════════════════════════════════════════
+// GENERATE FINAL
+// ══════════════════════════════════════════
+async function generateFinal(roomId,enhId){
+  const room=SESSION.rooms.find(r=>r.id===roomId);
+  const orig=SESSION.originals.find(o=>o.id===room.originalId);
+  if(!room||!orig)return;
+  const enh=enhId?EXT_ENHANCEMENTS.find(e=>e.id===enhId):null;
+  const selId='qsel-'+roomId+'-'+(enhId||'int');
+  const quality=document.getElementById(selId)?.value||'medium';
+  const prompt=enh?buildExteriorPrompt(room,enh,quality):buildInteriorPrompt(room,'',quality);
+  if(enhId){room.extSelections[enhId].finalStatus='generating';}else{room.finalStatus='generating';}
+  renderRoomQueue();
+  try{
+    const b64=await callStageAPI(orig.base64,orig.mimeType,prompt,quality);
+    await resizeToMatch(room,orig,enhId,'__final__',b64);
+    showToast(`✓ Final generated at ${quality} quality.`,'success');
+    renderRoomQueue();
+  }catch(err){
+    if(enhId)room.extSelections[enhId].finalStatus=null;else room.finalStatus=null;
+    renderRoomQueue();showToast('Final error: '+err.message,'error');
+  }
+}
+function resetFinal(roomId,enhId){
+  const room=SESSION.rooms.find(r=>r.id===roomId);
+  if(!room)return;
+  if(enhId){room.extSelections[enhId].finalStatus=null;room.extSelections[enhId].finalBase64=null;}
+  else{room.finalStatus=null;room.finalBase64=null;}
+  renderRoomQueue();
+}
+
+// ══════════════════════════════════════════
+// EXTERIOR ENHANCEMENTS
+// ══════════════════════════════════════════
+async function runExtEnhancements(roomId){
+  const room=SESSION.rooms.find(r=>r.id===roomId);
+  const orig=SESSION.originals.find(o=>o.id===room.originalId);
+  if(!room||!orig)return;
+  const toRun=EXT_ENHANCEMENTS.filter(enh=>room.extSelections[enh.id]&&room.extSelections[enh.id].status==='pending');
+  if(!toRun.length){showToast('Select at least one enhancement.','error');return;}
+  toRun.forEach(enh=>room.extSelections[enh.id].status='processing');
+  renderRoomQueue();
+  for(const enh of toRun){
+    try{
+      const b64=await callStageAPI(orig.base64,orig.mimeType,buildExteriorPrompt(room,enh,'low'),'low');
+      room.extSelections[enh.id].base64=b64;room.extSelections[enh.id].status='done';
+      await resizeToMatch(room,orig,enh.id,'__extdraft__',b64);
+      showToast(`✓ ${enh.label} draft complete.`,'success');
+    }catch(err){room.extSelections[enh.id].status='pending';showToast(`${enh.label}: ${err.message}`,'error');}
+    renderRoomQueue();
+  }
+}
+
+// ══════════════════════════════════════════
+// RESIZE
+// ══════════════════════════════════════════
+function resizeToMatch(room,orig,enhId,storeKey,incomingB64){
+  return new Promise(resolve=>{
+    const b64=incomingB64;
+    if(!b64){resolve();return;}
+    const oI=new Image(),sI=new Image();let loaded=0;
+    const onLoad=()=>{
+      loaded++;if(loaded<2)return;
+      const oW=oI.naturalWidth,oH=oI.naturalHeight;
+      const sW=sI.naturalWidth,sH=sI.naturalHeight;
+      const canvas=document.createElement('canvas');
+      canvas.width=oW;canvas.height=oH;
+      const ctx=canvas.getContext('2d');
+      // Strategy: scale the staged image to fill the original dimensions
+      // Use cover-fit: scale so staged image covers the canvas, crop excess
+      const scaleX=oW/sW, scaleY=oH/sH;
+      const scale=Math.max(scaleX,scaleY); // cover
+      const scaledW=Math.round(sW*scale);
+      const scaledH=Math.round(sH*scale);
+      const offsetX=Math.round((oW-scaledW)/2);
+      const offsetY=Math.round((oH-scaledH)/2);
+      ctx.drawImage(sI,offsetX,offsetY,scaledW,scaledH);
+      const newB64=canvas.toDataURL('image/jpeg',0.93).split(',')[1];
+      if(storeKey==='__final__'){if(enhId){room.extSelections[enhId].finalBase64=newB64;room.extSelections[enhId].finalStatus='done';}else{room.finalBase64=newB64;room.finalStatus='done';}}
+      else if(storeKey==='__extdraft__'){if(enhId)room.extSelections[enhId].base64=newB64;}
+      else{room[storeKey]=newB64;}
+      resolve();
+    };
+    oI.onload=sI.onload=onLoad;
+    oI.src=orig.dataUrl;
+    // Handle both JPEG and PNG output from different engines
+    const mime=b64.charAt(0)==='/' ? 'image/jpeg' : b64.charAt(0)==='i' ? 'image/png' : 'image/jpeg';
+    sI.src=`data:${mime};base64,`+b64;
+  });
+}
+
+// ══════════════════════════════════════════
+// DOWNLOADS
+// ══════════════════════════════════════════
+function getOrigName(roomId){const room=SESSION.rooms.find(r=>r.id===roomId);const orig=SESSION.originals.find(o=>o.id===room?.originalId);return orig?.name||'photo';}
+function getRoomB64(roomId,tier){const room=SESSION.rooms.find(r=>r.id===roomId);return tier==='final'?room?.finalBase64:room?.stagedBase64;}
+function getExtB64(roomId,enhId,tier){const room=SESSION.rooms.find(r=>r.id===roomId);return tier==='final'?room?.extSelections[enhId]?.finalBase64:room?.extSelections[enhId]?.base64;}
+function getFinalB64(roomId,enhId){return enhId?getExtB64(roomId,enhId,'final'):getRoomB64(roomId,'final');}
+function bName(n){return(n||'photo').replace(/\.[^.]+$/,'');}
+function downloadOriginal(roomId){const room=SESSION.rooms.find(r=>r.id===roomId);const orig=SESSION.originals.find(o=>o.id===room?.originalId);if(orig)triggerDownload(orig.dataUrl,'ORIGINAL_'+bName(orig.name)+'.jpg');}
+function downloadB64(dataUrl,filename){if(dataUrl&&!dataUrl.endsWith('undefined')&&!dataUrl.endsWith('null'))triggerDownload(dataUrl,filename);}
+function downloadSideBySide(roomId,enhId,tier){
+  const room=SESSION.rooms.find(r=>r.id===roomId);
+  const orig=SESSION.originals.find(o=>o.id===room?.originalId);
+  const b64=enhId?getExtB64(roomId,enhId,tier):getRoomB64(roomId,tier);
+  const enh=enhId?EXT_ENHANCEMENTS.find(e=>e.id===enhId):null;
+  const label=enh?enh.mlsTag:tier==='final'?'VIRTUALLY STAGED — FINAL':'VIRTUALLY STAGED · DRAFT';
+  if(!b64||!orig)return;
+  const canvas=document.getElementById('sbs-canvas'),ctx=canvas.getContext('2d');
+  const oI=new Image(),sI=new Image();let loaded=0;
+  const go=()=>{
+    loaded++;if(loaded<2)return;
+    const iW=oI.naturalWidth,iH=oI.naturalHeight,scale=900/iH,sW=Math.round(iW*scale),pad=14,ftH=62;
+    canvas.width=sW*2+pad*3;canvas.height=900+ftH+pad;
+    ctx.fillStyle='#1a1714';ctx.fillRect(0,0,canvas.width,canvas.height);
+    ctx.drawImage(oI,pad,pad,sW,900);ctx.drawImage(sI,sW+pad*2,pad,sW,900);
+    ctx.fillStyle='rgba(26,23,20,0.82)';ctx.fillRect(pad,pad,130,26);
+    ctx.fillStyle='#fff';ctx.font='500 12px sans-serif';ctx.fillText('ORIGINAL',pad+10,pad+18);
+    const badgeBg=enh?'rgba(58,124,165,0.92)':tier==='final'?'rgba(45,106,79,0.92)':'rgba(184,151,90,0.92)';
+    ctx.fillStyle=badgeBg;ctx.fillRect(sW+pad*2,pad,Math.min(label.length*7+20,sW-10),26);
+    ctx.fillStyle=enh||tier==='final'?'#fff':'#1a1714';ctx.font='500 11px sans-serif';ctx.fillText(label,sW+pad*2+10,pad+18);
+    ctx.fillStyle='#b8975a';ctx.font='400 11px sans-serif';ctx.fillText('Smart Stage AI™  |  SZREG  |  '+room.roomName+'  |  '+orig.name,pad,900+pad+18);
+    ctx.fillStyle='#7a6f63';ctx.font='400 10px sans-serif';ctx.fillText('Virtually staged/digitally enhanced for illustrative purposes. Original available upon request. MetroList Rule 11.6.1 compliant.',pad,900+pad+36);
+    const sfx=(enh?enh.label.replace(/\s+/g,''):'VirtuallyStaged')+'_'+(tier==='final'?'FINAL':'Draft');
+    triggerDownload(canvas.toDataURL('image/jpeg',0.93),'SBS_'+sfx+'_'+bName(orig.name)+'.jpg');
+  };
+  oI.onload=sI.onload=go;oI.src=orig.dataUrl;sI.src='data:image/jpeg;base64,'+b64;
+}
+function triggerDownload(dataUrl,filename){const a=document.createElement('a');a.href=dataUrl;a.download=filename;a.click();}
+
+// ══════════════════════════════════════════
+// DECOR8 API PAYLOAD DEBUGGER
+// ══════════════════════════════════════════
+let _debugPayloadText = ''; // stored for copy button
+
+function showDecor8Payload(roomId) {
+  const room = SESSION.rooms.find(r => r.id === roomId);
+  if (!room) return;
+  const payload = room.lastDecor8Payload;
+  const prompt = room.lastPrompt;
+
+  // Build display strings safely — no inline JSON in onclick
+  const payloadText = payload ? JSON.stringify(payload, null, 2) : null;
+  _debugPayloadText = payloadText || '';
+
+  const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+  const payloadHtml = payloadText
+    ? `<div style="color:#666;margin-bottom:4px;font-size:0.7rem;">Fields sent to Decor8 /generate_designs_for_room:</div>
+       <pre style="color:#e8e8e8;margin:0;white-space:pre-wrap;word-break:break-word;">${esc(payloadText)}</pre>`
+    : `<div style="color:#aaa;">Payload not captured — re-stage this room to see the payload.</div>`;
+
+  const promptHtml = prompt
+    ? `<div style="font-weight:700;margin-top:20px;margin-bottom:6px;font-size:0.82rem;color:#ccc;border-top:1px solid #333;padding-top:16px;">Claude Vision Prompt (sent as "prompt" field above)</div>
+       <pre style="color:#d4d4d4;margin:0;white-space:pre-wrap;word-break:break-word;font-size:0.74rem;">${esc(prompt)}</pre>`
+    : '';
+
+  const lb = document.getElementById('lightbox');
+  lb.innerHTML = `
+    <div style="background:#fff;max-width:900px;width:100%;max-height:90vh;display:flex;flex-direction:column;border-radius:6px;overflow:hidden;">
+      <div style="background:var(--ink);padding:16px 24px;display:flex;justify-content:space-between;align-items:center;flex-shrink:0;">
+        <div style="font-family:'Cormorant Garamond',serif;font-size:1.1rem;color:var(--gold);">Decor8 API Debug — ${room.roomName}</div>
+        <button onclick="closeLightbox()" style="background:none;border:none;font-size:1.2rem;cursor:pointer;color:#888;">✕</button>
+      </div>
+      <div style="overflow-y:auto;flex:1;padding:20px 24px;background:#1a1a1a;">
+        ${payloadHtml}
+        ${promptHtml}
+      </div>
+      <div style="padding:12px 24px;border-top:1px solid #eee;display:flex;gap:8px;background:#fff;flex-shrink:0;">
+        <button class="btn btn-outline btn-sm" onclick="copyDebugPayload()">Copy JSON</button>
+        <button class="btn btn-ghost btn-sm" onclick="closeLightbox()">Close</button>
+      </div>
+    </div>`;
+  lb.classList.remove('hidden');
+}
+
+function copyDebugPayload() {
+  if (!_debugPayloadText) { showToast('No payload to copy', ''); return; }
+  navigator.clipboard.writeText(_debugPayloadText)
+    .then(() => showToast('Payload copied to clipboard', 'success'))
+    .catch(() => showToast('Copy failed — try selecting text manually', ''));
+}
+
+// ══════════════════════════════════════════
+// OPEN PLAN DERIVED ROOM ROUTING
+// ══════════════════════════════════════════
+// Rooms that inherit Living Zone DNA from the staged Open Plan anchor image
+const LIVING_ZONE_ROOMS  = ['Living Room','Great Room','Family Room','Living/Great Room'];
+const DINING_ZONE_ROOMS  = ['Dining Room','Dining'];
+const KITCHEN_DNA_ROOMS  = ['Kitchen','Kitchen-Dining'];
+
+function isOpenPlanDerivedRoom(roomName) {
+  return [...LIVING_ZONE_ROOMS, ...DINING_ZONE_ROOMS, ...KITCHEN_DNA_ROOMS]
+    .some(r => roomName?.toLowerCase().includes(r.toLowerCase()));
+}
+
+function getOpenPlanDerivedZone(roomName) {
+  if (LIVING_ZONE_ROOMS.some(r => roomName?.toLowerCase().includes(r.toLowerCase()))) return 'living';
+  if (DINING_ZONE_ROOMS.some(r => roomName?.toLowerCase().includes(r.toLowerCase()))) return 'dining';
+  if (KITCHEN_DNA_ROOMS.some(r => roomName?.toLowerCase().includes(r.toLowerCase()))) return 'kitchen';
+  return null;
+}
+
+// ══════════════════════════════════════════
+// OPEN PLAN STRATEGY
+// ══════════════════════════════════════════
+function setOpenPlanStrategy(strategy) {
+  SESSION.openPlanStrategy = strategy;
+  renderRoomQueue();
+  showToast(`Open Plan strategy: ${strategy === 'native' ? 'A · Native Decor8' : strategy === 'guided' ? 'B · Guided Zoning' : 'C · Full Placement'}`, 'success');
+}
+
+// ══════════════════════════════════════════
+// PROMPT PREVIEW MODAL
+// ══════════════════════════════════════════
+let _promptModalResolve = null;
+
+function showPromptModal(room, prompt) {
+  return new Promise((resolve) => {
+    _promptModalResolve = resolve;
+    const i = SESSION.intake;
+
+    // Room name + meta chips
+    document.getElementById('pm-room-name').textContent = room.roomName;
+    const meta = [
+      { label: 'Style', val: i.style_label },
+      { label: 'Palette', val: i.palette_label },
+      { label: 'Buyer', val: i.buyer_label },
+      { label: 'Feeling', val: i.feeling_label },
+      { label: 'Intensity', val: i.intensity_label },
+      { label: 'Decor8 Room Type', val: getDecor8RoomType(room.roomName, room.adjacentRooms, room.decor8Type) },
+      { label: 'DNA Tier', val: getDNATier(room) === 'none' ? '—' : getDNATier(room) },
+    ];
+    document.getElementById('pm-meta').innerHTML = meta
+      .map(m => `<div class="pm-meta-chip"><strong>${m.label}:</strong> ${m.val || '—'}</div>`)
+      .join('');
+
+    // Prompt textarea
+    document.getElementById('pm-prompt').value = prompt;
+
+    // Open Plan warning
+    const warn = document.getElementById('pm-open-plan-warning');
+    warn.style.display = room.isOpenPlan ? 'block' : 'none';
+
+    // Cost note — show DNA context if applicable
+    const tier = getDNATier(room);
+    const dnaNote = tier === 'full' ? ' · Full DNA injected' : tier === 'style' ? ' · Style DNA injected' : '';
+    document.getElementById('pm-cost-note').textContent =
+      `Approving sends to Decor8 · ~$0.20 · ~45 sec${dnaNote}`;
+
+    // Build and display the exact Decor8 API payload
+    const roomType = getDecor8RoomType(room.roomName, room.adjacentRooms, room.decor8Type);
+    const hasPrompt = !!(prompt && prompt.length > 0);
+    const previewPayload = hasPrompt
+      ? {
+          input_image_url: "[assigned at ImgBB upload]",
+          room_type: roomType,
+          prompt: "[see prompt above]",
+          num_images: 1,
+          scale_factor: 2,
+        }
+      : {
+          input_image_url: "[assigned at ImgBB upload]",
+          room_type: roomType,
+          design_style: DECOR8_DESIGN_STYLE[i.style_label] || 'organicmodern',
+          num_images: 1,
+          scale_factor: 2,
+          color_scheme: DECOR8_COLOR_SCHEME[i.palette_label] || 'COLOR_SCHEME_9',
+        };
+    document.getElementById('pm-api-payload').textContent = JSON.stringify(previewPayload, null, 2);
+
+    document.getElementById('prompt-modal').classList.remove('hidden');
+  });
+}
+
+function approvePromptAndStage() {
+  const edited = document.getElementById('pm-prompt').value.trim();
+  document.getElementById('prompt-modal').classList.add('hidden');
+  if (_promptModalResolve) { _promptModalResolve(edited || ''); _promptModalResolve = null; }
+}
+
+function clearPromptAndStage() {
+  // Update payload preview to show enum mode (no prompt)
+  const payloadEl = document.getElementById('pm-api-payload');
+  if (payloadEl) {
+    try {
+      const current = JSON.parse(payloadEl.textContent);
+      const enumPayload = {
+        input_image_url: "[assigned at ImgBB upload]",
+        room_type: current.room_type,
+        design_style: current.design_style || 'organicmodern',
+        num_images: 1,
+        scale_factor: 2,
+        color_scheme: current.color_scheme || 'COLOR_SCHEME_9',
+      };
+      payloadEl.textContent = JSON.stringify(enumPayload, null, 2);
+    } catch(e) {}
+  }
+  document.getElementById('prompt-modal').classList.add('hidden');
+  if (_promptModalResolve) { _promptModalResolve(''); _promptModalResolve = null; }
+  showToast('Staging with no custom prompt — Decor8 native intelligence only.', '');
+}
+
+function cancelPromptModal() {
+  document.getElementById('prompt-modal').classList.add('hidden');
+  if (_promptModalResolve) { _promptModalResolve(null); _promptModalResolve = null; }
+}
+
+// ══════════════════════════════════════════
+// UTILS
+// ══════════════════════════════════════════
+function showStep(id){['step-upload','step-intake','step-mapping','step-staging'].forEach(s=>document.getElementById(s)?.classList.add('hidden'));document.getElementById(id)?.classList.remove('hidden');}
+function resetSession(){SESSION.originals=[];SESSION.intake={};SESSION.rooms=[];SESSION.floorplanRoomMap=null;SESSION.photoRoomMap={};SESSION.anchorRoomId=null;SESSION.anchorImageUrl=null;document.getElementById('thumb-grid').innerHTML='';document.getElementById('upload-actions').classList.add('hidden');fileInput.value='';}
+function showToast(msg,type=''){const t=document.getElementById('toast');t.textContent=msg;t.className='show '+(type||'');setTimeout(()=>{t.className='';},4000);}
+function esc(s){return(s||'').replace(/'/g,"&#39;").replace(/"/g,"&quot;");}
+showStep('step-upload');
+</script>
+</body>
+</html>

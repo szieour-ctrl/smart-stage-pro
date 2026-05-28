@@ -1,0 +1,55 @@
+[build]
+  functions = "netlify/functions"
+  publish = "."
+
+[functions]
+  node_bundler = "esbuild"
+
+[functions."stage-image"]
+  timeout = 26
+
+[functions."stage-image-start"]
+  timeout = 26
+
+[functions."stage-replicate"]
+  timeout = 26
+
+[functions."analyze-room"]
+  timeout = 10
+
+[functions."generate-staging-prompt"]
+  timeout = 20
+
+[functions."stage-decor8"]
+  timeout = 26
+
+[functions."stage-openai"]
+  timeout = 10
+
+[functions."stage-openai-background"]
+  timeout = 900
+
+[functions."check-openai"]
+  timeout = 10
+
+[functions."extract-staging-dna"]
+  timeout = 15
+
+[functions."serve-image"]
+  timeout = 10
+
+
+[functions."stage-decor8-background"]
+  timeout = 26
+
+[functions."check-decor8"]
+  timeout = 10
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+
+[context.production.environment]
+  NODE_VERSION = "18"

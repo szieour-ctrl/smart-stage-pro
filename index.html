@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Smart Stage AI™ — SZREG Virtual Staging</title>
+<title>Smart Stage PRO™ — SZREG Virtual Staging</title>
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet" />
 <style>
 :root{--ink:#1a1714;--cream:#f7f4ef;--warm:#e8e0d4;--gold:#b8975a;--gold-light:#d4b87a;--muted:#7a6f63;--danger:#c0392b;--success:#2d6a4f;--border:#ddd5c8;--sky:#3a7ca5;--shadow:0 2px 20px rgba(26,23,20,0.08);}
@@ -87,6 +87,11 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
 .mode-toggle-btn{padding:5px 12px;font-size:0.72rem;font-weight:500;letter-spacing:0.06em;text-transform:uppercase;border:none;cursor:pointer;background:#fff;color:var(--muted);transition:all 0.15s;}
 .mode-toggle-btn.active-int{background:var(--ink);color:#fff;}
 .mode-toggle-btn.active-ext{background:var(--sky);color:#fff;}
+.mode-toggle-btn.active-dcl{background:#7c5c3e;color:#fff;}
+.mode-toggle-btn.active-cns{background:#4a6741;color:#fff;}
+.dcl-result-badge{font-size:0.65rem;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;padding:2px 8px;border-radius:2px;}
+.dcl-badge{background:#7c5c3e;color:#fff;}
+.cns-badge{background:#4a6741;color:#fff;}
 .ext-panel{padding:16px;background:#f4f8fc;border-top:1px solid #cce0f0;}
 .ext-panel-title{font-size:0.75rem;text-transform:uppercase;letter-spacing:0.1em;color:var(--sky);font-weight:600;margin-bottom:12px;}
 .ext-options{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;margin-bottom:14px;}
@@ -507,7 +512,7 @@ const SESSION = {
   stagingDNA: null,        // Extracted from staged Open Plan image
   anchorImageUrl: null,    // Decor8 URL of the staged Open Plan image — source for DNA two-image reads
   openPlanRoomId: null,    // Room ID of the Open Plan — must be staged first
-  openPlanStrategy: 'guided', // 'native' | 'guided' | 'full'
+  openPlanStrategy: 'full', // PRO default — full placement always
 };
 let _lbRoomId = null;
 
@@ -804,7 +809,7 @@ function buildRoomQueue(){
   SESSION.rooms=photos.map(orig=>{
     const m=SESSION.photoRoomMap[orig.id];
     const isOpenPlan=m?.isOpenPlan||false;
-    return {id:'room_'+orig.id,originalId:orig.id,roomName:m?.roomName||orig.name,decor8Type:m?.decor8Type||null,isOpenPlan,adjacentRooms:m?.adjacentNames||[],isExterior:m?.isExterior||false,isReference:m?.isReference||false,shotFocus:m?.shotFocus||'',status:'pending',stagedBase64:null,finalBase64:null,finalStatus:null,iterationNote:'',approvedDNA:null,extSelections:{},spatialAnalysis:null,spatialStatus:null,dnaStatus:null};
+    return {id:'room_'+orig.id,originalId:orig.id,roomName:m?.roomName||orig.name,decor8Type:m?.decor8Type||null,isOpenPlan,adjacentRooms:m?.adjacentNames||[],isExterior:m?.isExterior||false,isReference:m?.isReference||false,shotFocus:m?.shotFocus||'',status:'pending',stagedBase64:null,finalBase64:null,finalStatus:null,iterationNote:'',approvedDNA:null,extSelections:{},spatialAnalysis:null,spatialStatus:null,dnaStatus:null,roomMode:'stage',declutteredBase64:null};
   });
   // Track Open Plan room ID for enforcement
   const openPlanRoom = SESSION.rooms.find(r => r.isOpenPlan);
@@ -817,10 +822,12 @@ function isOpenPlanStaged() {
   const opRoom = SESSION.rooms.find(r => r.id === SESSION.openPlanRoomId);
   return opRoom?.status === 'done';
 }
-function toggleRoomMode(roomId,makeExt){
+function toggleRoomMode(roomId,mode){
   const room=SESSION.rooms.find(r=>r.id===roomId);
   if(!room)return;
-  room.isExterior=makeExt;room.status='pending';room.stagedBase64=null;room.finalBase64=null;room.finalStatus=null;room.extSelections={};
+  room.roomMode=mode;
+  room.isExterior=(mode==='exterior');
+  room.status='pending';room.stagedBase64=null;room.finalBase64=null;room.finalStatus=null;room.extSelections={};room.declutteredBase64=null;
   renderRoomQueue();
 }
 function toggleExtSelection(roomId,enhId){
@@ -842,9 +849,12 @@ function renderRoomQueue(){
       <div class="room-card-info"><div class="room-card-name">${room.roomName} <span class="ref-badge">Reference Only</span></div>
       <div class="room-card-status pending">Not staged — spatial reference only</div></div></div></div>`;
 
+    const mode=room.roomMode||'stage';
     const modeToggle=`<div class="mode-toggle">
-      <button class="mode-toggle-btn ${!room.isExterior?'active-int':''}" onclick="toggleRoomMode('${room.id}',false)">Interior</button>
-      <button class="mode-toggle-btn ${room.isExterior?'active-ext':''}" onclick="toggleRoomMode('${room.id}',true)">Exterior</button>
+      <button class="mode-toggle-btn ${mode==='stage'?'active-int':''}" onclick="toggleRoomMode('${room.id}','stage')" title="Vacant home — stage empty room">Stage Vacant</button>
+      <button class="mode-toggle-btn ${mode==='declutter'?'active-dcl':''}" onclick="toggleRoomMode('${room.id}','declutter')" title="Remove clutter only — no staging">Declutter Only</button>
+      <button class="mode-toggle-btn ${mode==='cns'?'active-cns':''}" onclick="toggleRoomMode('${room.id}','cns')" title="Remove furniture then restage — occupied listings">Clean + Stage</button>
+      <button class="mode-toggle-btn ${mode==='exterior'?'active-ext':''}" onclick="toggleRoomMode('${room.id}','exterior')" title="Exterior enhancements">Exterior</button>
     </div>`;
     const sfBadge=room.shotFocus?`<div class="shot-focus-badge">🎯 ${room.shotFocus.slice(0,80)}${room.shotFocus.length>80?'…':''}</div>`:''
     const spatialBadge=(()=>{
@@ -889,7 +899,81 @@ function renderRoomQueue(){
         <div class="ext-options">${opts}</div>${enhResults}</div></div>`;
     }
 
-    // ── INTERIOR ──
+    // ── DECLUTTER ONLY ──
+    if(mode==='declutter'){
+      const isProcessing=room.status==='processing';
+      const isDone=room.status==='done';
+      const actionBtn=isProcessing
+        ?`<button class="btn btn-sm" style="background:#7c5c3e;color:#fff;" disabled><span class="spinner"></span> Removing Objects</button>`
+        :isDone
+          ?`<button class="btn btn-ghost btn-sm" onclick="resetRoom('${room.id}')">Re-Run</button>`
+          :`<button class="btn btn-sm" style="background:#7c5c3e;color:#fff;" onclick="runDeclutterOnly('${room.id}')">🧹 Declutter This Room</button>`;
+      const downloads=isDone&&room.declutteredBase64?`
+        <button class="btn btn-outline btn-sm" onclick="downloadOriginal('${room.id}')">↓ Original</button>
+        <button class="btn btn-outline btn-sm" onclick="downloadB64('data:image/jpeg;base64,${room.declutteredBase64||''}','CLEAN_'+bName(getOrigName('${room.id}'))+'.jpg')">↓ Cleaned</button>
+        <button class="btn btn-outline btn-sm" onclick="downloadSideBySide('${room.id}',null,'declutter')">↓ Side-by-Side</button>`:'';
+      const resultHtml=isDone&&room.declutteredBase64?`<div class="result-viewer">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><span class="dcl-result-badge dcl-badge">Objects Removed</span><span style="font-size:0.72rem;color:var(--muted);">Furniture and clutter removed — architectural elements preserved.</span></div>
+        <div class="result-pair">
+          <div class="result-img-wrap"><img src="${orig.dataUrl}" /><div class="result-img-badge">Original</div></div>
+          <div class="result-img-wrap"><img src="data:image/jpeg;base64,${room.declutteredBase64}" /><div class="result-img-badge" style="background:#7c5c3e;color:#fff;">Decluttered</div></div>
+        </div></div>`:'';
+      return `<div class="room-card" id="card-${room.id}" style="border-left:3px solid #7c5c3e;">
+        <div class="room-card-header">
+          <img class="room-card-thumb" src="${orig.dataUrl}" onclick="openLightbox('${room.id}')" />
+          <div class="room-card-info">
+            <div class="room-card-name">${room.roomName} <span style="font-size:0.65rem;background:#f4ede6;color:#7c5c3e;border:1px solid #d4b99a;padding:1px 6px;border-radius:2px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;">Declutter Only</span></div>
+            ${sfBadge}
+            <div class="room-card-status" style="color:#7c5c3e;">${isProcessing?(room.promptStatus||'Removing objects...'):'Remove clutter · 1 API call · ~$0.20'}</div>
+          </div>
+          <div class="room-card-actions">${actionBtn}${downloads}${modeToggle}</div>
+        </div>
+        ${resultHtml}
+      </div>`;
+    }
+
+    // ── CLEAN + STAGE ──
+    if(mode==='cns'){
+      const isProcessing=room.status==='processing';
+      const isDone=room.status==='done';
+      const actionBtn=isProcessing
+        ?`<button class="btn btn-sm" style="background:#4a6741;color:#fff;" disabled><span class="spinner"></span> ${room.promptStatus||'Processing...'}</button>`
+        :isDone
+          ?`<button class="btn btn-ghost btn-sm" onclick="resetRoom('${room.id}')">Re-Stage</button>`
+          :`<button class="btn btn-sm" style="background:#4a6741;color:#fff;" onclick="runCleanAndStage('${room.id}')">🧹 Clean + Stage</button>`;
+      const downloads=isDone&&room.stagedBase64?`
+        <button class="btn btn-outline btn-sm" onclick="downloadOriginal('${room.id}')">↓ Original</button>
+        <button class="btn btn-outline btn-sm" onclick="downloadB64('data:image/jpeg;base64,'+getRoomB64('${room.id}','draft'),'DRAFT_'+bName(getOrigName('${room.id}'))+'.jpg')">↓ Draft</button>
+        <button class="btn btn-outline btn-sm" onclick="downloadSideBySide('${room.id}',null,'cns')">↓ Side-by-Side</button>
+        <button class="btn btn-ghost btn-sm" onclick="showDecor8Payload('${room.id}')">{ } API Payload</button>`:'';
+      const resultHtml=isDone&&room.stagedBase64?`<div class="result-viewer">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><span class="dcl-result-badge cns-badge">Cleaned + Staged</span><span style="font-size:0.72rem;color:var(--muted);">Objects removed · Restaged with Decor8 · Iterate below.</span></div>
+        <div class="result-pair">
+          <div class="result-img-wrap"><img src="${orig.dataUrl}" /><div class="result-img-badge">Original</div></div>
+          <div class="result-img-wrap"><img src="data:image/jpeg;base64,${room.stagedBase64}" /><div class="result-img-badge staged">Cleaned + Staged · Draft</div></div>
+        </div>
+        <div class="mls-disclosure-note" style="font-size:0.73rem;">⚖️ <strong>MLS Upload: Original first → Staged second.</strong> Label "Virtually Staged" in Matrix.</div>
+      </div>`:'';
+      const iterHtml=isDone&&room.stagedBase64?`<div class="iterate-panel">
+        <textarea class="iterate-input" id="iter-${room.id}" placeholder='Revision — e.g. "warmer tones, lighter rug"'>${room.iterationNote||''}</textarea>
+        <button class="btn btn-primary btn-sm" onclick="reStageRoom('${room.id}')">Re-Stage Draft</button>
+      </div>`:'';
+      const finalHtml=isDone&&room.stagedBase64?renderFinalPanel(room.id,null):'';
+      return `<div class="room-card" id="card-${room.id}" style="border-left:3px solid #4a6741;">
+        <div class="room-card-header">
+          <img class="room-card-thumb" src="${orig.dataUrl}" onclick="openLightbox('${room.id}')" />
+          <div class="room-card-info">
+            <div class="room-card-name">${room.roomName} <span style="font-size:0.65rem;background:#edf4ec;color:#4a6741;border:1px solid #b0ccab;padding:1px 6px;border-radius:2px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;">Clean + Stage</span></div>
+            ${sfBadge}
+            <div class="room-card-status" style="color:#4a6741;">${isProcessing?(room.promptStatus||'Processing...'):'Remove clutter then restage · 2 API calls · ~$0.40'}</div>
+          </div>
+          <div class="room-card-actions">${actionBtn}${downloads}${modeToggle}</div>
+        </div>
+        ${resultHtml}${iterHtml}${finalHtml}
+      </div>`;
+    }
+
+    // ── STAGE VACANT / INTERIOR ──
     const statusLabel={
       pending:'Ready to stage — click photo to set Shot Focus',
       processing: room.promptStatus || 'Staging in progress...',
@@ -925,10 +1009,8 @@ function renderRoomQueue(){
     // Open Plan Strategy Toggle (always visible for open plan rooms)
     const strategyToggle = room.isOpenPlan ? `<div class="op-strategy-wrap">
       <span class="op-strategy-label">Open Plan Strategy:</span>
-      <button class="op-strategy-btn ${SESSION.openPlanStrategy==='native'?'active':''}" onclick="setOpenPlanStrategy('native')">A · Native Decor8</button>
-      <button class="op-strategy-btn ${SESSION.openPlanStrategy==='guided'?'active':''}" onclick="setOpenPlanStrategy('guided')">B · Guided Zoning</button>
-      <button class="op-strategy-btn ${SESSION.openPlanStrategy==='full'?'active':''}" onclick="setOpenPlanStrategy('full')">C · Full Placement</button>
-      <span class="op-strategy-desc">${SESSION.openPlanStrategy==='native'?'Decor8 picks everything':SESSION.openPlanStrategy==='guided'?'Rug anchors + style guidance':'Detailed placement + style'}</span>
+      <button class="op-strategy-btn ${SESSION.openPlanStrategy==='full'?'active':''}" onclick="setOpenPlanStrategy('full')">Full Placement</button>
+      <span class="op-strategy-desc">Detailed placement + style</span>
     </div>` : '';
 
     // DNA status display for open plan
@@ -1517,6 +1599,138 @@ function resetFinal(roomId,enhId){
 }
 
 // ══════════════════════════════════════════
+// PRO PIPELINES — DECLUTTER ONLY + CLEAN + STAGE
+// ══════════════════════════════════════════
+
+// Shared: call Decor8 remove objects endpoint
+async function callRemoveObjects(imageBase64, mimeType) {
+  const res = await fetch('/.netlify/functions/remove-objects', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ imageBase64, mimeType })
+  });
+  if (!res.ok) {
+    const d = await res.json().catch(() => ({}));
+    throw new Error('Remove objects failed: ' + (d.error || res.status));
+  }
+  const data = await res.json();
+  if (!data.removedBase64) throw new Error('No cleaned image returned');
+  return data.removedBase64;
+}
+
+// DECLUTTER ONLY — 1 API call, no staging
+async function runDeclutterOnly(roomId) {
+  const room = SESSION.rooms.find(r => r.id === roomId);
+  const orig = SESSION.originals.find(o => o.id === room?.originalId);
+  if (!room || !orig) return;
+  room.status = 'processing';
+  room.promptStatus = 'Removing objects with Decor8...';
+  renderRoomQueue();
+  try {
+    room.declutteredBase64 = await callRemoveObjects(orig.base64, orig.mimeType);
+    room.status = 'done';
+    room.promptStatus = null;
+    showToast('✓ Room decluttered — objects removed.', 'success');
+    renderRoomQueue();
+  } catch(err) {
+    room.status = 'error';
+    room.promptStatus = null;
+    renderRoomQueue();
+    showToast('Declutter error: ' + err.message, 'error');
+  }
+}
+
+// CLEAN + STAGE — 2 API calls: remove objects then stage
+async function runCleanAndStage(roomId) {
+  const room = SESSION.rooms.find(r => r.id === roomId);
+  const orig = SESSION.originals.find(o => o.id === room?.originalId);
+  if (!room || !orig) return;
+  const i = SESSION.intake || {};
+  room.status = 'processing';
+  room.promptStatus = 'Step 1 of 3 — Removing objects...';
+  renderRoomQueue();
+  try {
+    // Step 1: Remove objects
+    const cleanedBase64 = await callRemoveObjects(orig.base64, orig.mimeType);
+    room.declutteredBase64 = cleanedBase64;
+
+    // Step 2: Generate prompt from cleaned room
+    room.promptStatus = 'Step 2 of 3 — Reading cleaned room...';
+    renderRoomQueue();
+    const promptRes = await fetch('/.netlify/functions/generate-staging-prompt', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        imageBase64: cleanedBase64,
+        mimeType: orig.mimeType,
+        roomName: room.roomName,
+        adjacentRooms: room.adjacentRooms || [],
+        designStyle: i.style_label || 'Transitional',
+        colorPalette: i.palette_label || 'Soft Luxury',
+        openPlanStrategy: SESSION.openPlanStrategy || 'full',
+        stagingDNA: SESSION.stagingDNA || null,
+        anchorImageUrl: SESSION.anchorImageUrl || null,
+        derivedZone: null,
+      })
+    });
+    if (!promptRes.ok) throw new Error('Prompt generation failed: ' + promptRes.status);
+    const promptData = await promptRes.json();
+    const finalPrompt = promptData.prompt || '';
+
+    // Step 3: Stage cleaned room with Decor8
+    room.promptStatus = 'Step 3 of 3 — Staging with Decor8...';
+    renderRoomQueue();
+    let stagedData = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 80000);
+        const stageRes = await fetch('/.netlify/functions/stage-decor8', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal,
+          body: JSON.stringify({
+            imageBase64: cleanedBase64,
+            mimeType: orig.mimeType,
+            roomType: getDecor8RoomType(room.roomName, room.adjacentRooms, room.decor8Type),
+            designStyle: DECOR8_DESIGN_STYLE[i.style_label] || 'transitional',
+            colorScheme: DECOR8_COLOR_SCHEME[i.palette_label] || 'COLOR_SCHEME_9',
+            customPrompt: finalPrompt || undefined,
+          })
+        });
+        clearTimeout(timer);
+        if (!stageRes.ok) {
+          const d = await stageRes.json().catch(() => ({}));
+          if (attempt < 3) { room.promptStatus = `Retrying Decor8 (${attempt+1}/3)...`; renderRoomQueue(); continue; }
+          throw new Error('Staging failed: ' + (d.error || stageRes.status));
+        }
+        stagedData = await stageRes.json();
+        if (!stagedData.stagedBase64) {
+          if (attempt < 3) continue;
+          throw new Error('No staged image returned');
+        }
+        break;
+      } catch(err) {
+        if (err.name === 'AbortError' && attempt < 3) { room.promptStatus = `Decor8 timeout — retrying (${attempt+1}/3)...`; renderRoomQueue(); continue; }
+        throw err;
+      }
+    }
+    if (!stagedData?.stagedBase64) throw new Error('Staging failed after 3 attempts');
+    room.stagedBase64 = stagedData.stagedBase64;
+    room.lastDecor8Payload = stagedData.decor8Payload || null;
+    room.status = 'done';
+    room.promptStatus = null;
+    showToast('✓ Cleaned and staged.', 'success');
+    renderRoomQueue();
+  } catch(err) {
+    room.status = 'error';
+    room.promptStatus = null;
+    renderRoomQueue();
+    showToast('Clean + Stage error: ' + err.message, 'error');
+  }
+}
+
+// ══════════════════════════════════════════
 // EXTERIOR ENHANCEMENTS
 // ══════════════════════════════════════════
 async function runExtEnhancements(roomId){
@@ -1580,7 +1794,7 @@ function resizeToMatch(room,orig,enhId,storeKey,incomingB64){
 // DOWNLOADS
 // ══════════════════════════════════════════
 function getOrigName(roomId){const room=SESSION.rooms.find(r=>r.id===roomId);const orig=SESSION.originals.find(o=>o.id===room?.originalId);return orig?.name||'photo';}
-function getRoomB64(roomId,tier){const room=SESSION.rooms.find(r=>r.id===roomId);return tier==='final'?room?.finalBase64:room?.stagedBase64;}
+function getRoomB64(roomId,tier){const room=SESSION.rooms.find(r=>r.id===roomId);if(tier==='decluttered')return room?.declutteredBase64;return tier==='final'?room?.finalBase64:room?.stagedBase64;}
 function getExtB64(roomId,enhId,tier){const room=SESSION.rooms.find(r=>r.id===roomId);return tier==='final'?room?.extSelections[enhId]?.finalBase64:room?.extSelections[enhId]?.base64;}
 function getFinalB64(roomId,enhId){return enhId?getExtB64(roomId,enhId,'final'):getRoomB64(roomId,'final');}
 function bName(n){return(n||'photo').replace(/\.[^.]+$/,'');}
@@ -1589,9 +1803,16 @@ function downloadB64(dataUrl,filename){if(dataUrl&&!dataUrl.endsWith('undefined'
 function downloadSideBySide(roomId,enhId,tier){
   const room=SESSION.rooms.find(r=>r.id===roomId);
   const orig=SESSION.originals.find(o=>o.id===room?.originalId);
-  const b64=enhId?getExtB64(roomId,enhId,tier):getRoomB64(roomId,tier);
+  const b64=enhId?getExtB64(roomId,enhId,tier):
+    tier==='declutter'?room?.declutteredBase64:
+    tier==='cns'?room?.stagedBase64:
+    getRoomB64(roomId,tier);
   const enh=enhId?EXT_ENHANCEMENTS.find(e=>e.id===enhId):null;
-  const label=enh?enh.mlsTag:tier==='final'?'VIRTUALLY STAGED — FINAL':'VIRTUALLY STAGED · DRAFT';
+  const label=enh?enh.mlsTag:
+    tier==='final'?'VIRTUALLY STAGED — FINAL':
+    tier==='declutter'?'DECLUTTERED — OBJECTS REMOVED':
+    tier==='cns'?'CLEANED + STAGED · DRAFT':
+    'VIRTUALLY STAGED · DRAFT';
   if(!b64||!orig)return;
   const canvas=document.getElementById('sbs-canvas'),ctx=canvas.getContext('2d');
   const oI=new Image(),sI=new Image();let loaded=0;
@@ -1603,12 +1824,16 @@ function downloadSideBySide(roomId,enhId,tier){
     ctx.drawImage(oI,pad,pad,sW,900);ctx.drawImage(sI,sW+pad*2,pad,sW,900);
     ctx.fillStyle='rgba(26,23,20,0.82)';ctx.fillRect(pad,pad,130,26);
     ctx.fillStyle='#fff';ctx.font='500 12px sans-serif';ctx.fillText('ORIGINAL',pad+10,pad+18);
-    const badgeBg=enh?'rgba(58,124,165,0.92)':tier==='final'?'rgba(45,106,79,0.92)':'rgba(184,151,90,0.92)';
+    const badgeBg=enh?'rgba(58,124,165,0.92)':
+      tier==='final'?'rgba(45,106,79,0.92)':
+      tier==='declutter'?'rgba(124,92,62,0.92)':
+      tier==='cns'?'rgba(74,103,65,0.92)':
+      'rgba(184,151,90,0.92)';
     ctx.fillStyle=badgeBg;ctx.fillRect(sW+pad*2,pad,Math.min(label.length*7+20,sW-10),26);
-    ctx.fillStyle=enh||tier==='final'?'#fff':'#1a1714';ctx.font='500 11px sans-serif';ctx.fillText(label,sW+pad*2+10,pad+18);
-    ctx.fillStyle='#b8975a';ctx.font='400 11px sans-serif';ctx.fillText('Smart Stage AI™  |  SZREG  |  '+room.roomName+'  |  '+orig.name,pad,900+pad+18);
+    ctx.fillStyle='#fff';ctx.font='500 11px sans-serif';ctx.fillText(label,sW+pad*2+10,pad+18);
+    ctx.fillStyle='#b8975a';ctx.font='400 11px sans-serif';ctx.fillText('Smart Stage PRO™  |  SZREG  |  '+room.roomName+'  |  '+orig.name,pad,900+pad+18);
     ctx.fillStyle='#7a6f63';ctx.font='400 10px sans-serif';ctx.fillText('Virtually staged/digitally enhanced for illustrative purposes. Original available upon request. MetroList Rule 11.6.1 compliant.',pad,900+pad+36);
-    const sfx=(enh?enh.label.replace(/\s+/g,''):'VirtuallyStaged')+'_'+(tier==='final'?'FINAL':'Draft');
+    const sfx=tier==='declutter'?'Decluttered':tier==='cns'?'CleanedStaged':enh?enh.label.replace(/\s+/g,''):'VirtuallyStaged';
     triggerDownload(canvas.toDataURL('image/jpeg',0.93),'SBS_'+sfx+'_'+bName(orig.name)+'.jpg');
   };
   oI.onload=sI.onload=go;oI.src=orig.dataUrl;sI.src='data:image/jpeg;base64,'+b64;

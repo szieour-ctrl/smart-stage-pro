@@ -1,4 +1,4 @@
-// test-remove-objects.js — Netlify Function
+// remove-objects.js — Netlify Function
 // Tests Decor8 /remove_objects_from_room endpoint
 // Input:  imageBase64, mimeType
 // Output: removedBase64 — empty room result

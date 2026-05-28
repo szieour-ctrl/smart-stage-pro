@@ -45,6 +45,12 @@
 [functions."check-decor8"]
   timeout = 10
 
+[functions."test-remove-objects"]
+  timeout = 26
+
+[functions."upscale-image"]
+  timeout = 26
+
 [[headers]]
   for = "/*"
   [headers.values]

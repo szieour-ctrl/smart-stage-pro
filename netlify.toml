@@ -48,6 +48,9 @@
 [functions."test-remove-objects"]
   timeout = 26
 
+[functions."remove-objects"]
+  timeout = 26
+
 [functions."upscale-image"]
   timeout = 26
 

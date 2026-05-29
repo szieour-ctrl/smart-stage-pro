@@ -228,7 +228,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
       <div style="font-size:0.68rem;color:var(--muted);margin-top:6px;">These are the exact fields Decor8 receives. <strong>input_image_url</strong> is assigned at upload. If prompt is present, design_style and color_scheme are not sent.</div>
     </div>
     <div class="pm-footer">
-      <div class="pm-footer-left" id="pm-cost-note">Approving sends to Decor8 · ~$0.20 · ~45 seconds</div>
+      <div class="pm-footer-left" id="pm-cost-note">Approving sends to Decor8 · 1 Credit · ~45 seconds</div>
       <div class="pm-footer-right">
         <button class="btn btn-ghost" onclick="cancelPromptModal()">✕ Cancel — Don't Stage</button>
         <button class="btn btn-outline" onclick="clearPromptAndStage()" title="Send to Decor8 with NO custom prompt — use Decor8 native intelligence only">Stage Without Prompt</button>
@@ -924,7 +924,7 @@ function renderRoomQueue(){
           <div class="room-card-info">
             <div class="room-card-name">${room.roomName} <span style="font-size:0.65rem;background:#f4ede6;color:#7c5c3e;border:1px solid #d4b99a;padding:1px 6px;border-radius:2px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;">Declutter Only</span></div>
             ${sfBadge}
-            <div class="room-card-status" style="color:#7c5c3e;">${isProcessing?(room.promptStatus||'Removing objects...'):'Remove clutter · 1 API call · ~$0.20'}</div>
+            <div class="room-card-status" style="color:#7c5c3e;">${isProcessing?(room.promptStatus||'Removing objects...'):'Remove clutter · 1 Credit'}</div>
           </div>
           <div class="room-card-actions">${actionBtn}${downloads}${modeToggle}</div>
         </div>
@@ -965,7 +965,7 @@ function renderRoomQueue(){
           <div class="room-card-info">
             <div class="room-card-name">${room.roomName} <span style="font-size:0.65rem;background:#edf4ec;color:#4a6741;border:1px solid #b0ccab;padding:1px 6px;border-radius:2px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;">Clean + Stage</span></div>
             ${sfBadge}
-            <div class="room-card-status" style="color:#4a6741;">${isProcessing?(room.promptStatus||'Processing...'):'Remove clutter then restage · 2 API calls · ~$0.40'}</div>
+            <div class="room-card-status" style="color:#4a6741;">${isProcessing?(room.promptStatus||'Processing...'):'Remove clutter then restage · 2 Credits'}</div>
           </div>
           <div class="room-card-actions">${actionBtn}${downloads}${modeToggle}</div>
         </div>
@@ -1116,9 +1116,9 @@ function renderFinalPanel(roomId,enhId){
   return `<div class="final-panel">
     <span class="final-panel-label">Generate Final</span>
     <select class="quality-select" id="${selId}">
-      <option value="4">Print Quality 4x (~$0.20)</option>
-      <option value="6">Large Format 6x (~$0.40)</option>
-      <option value="8">Maximum 8x (~$0.60)</option>
+      <option value="4">Print Quality 4x (1 Credit — $1.00)</option>
+      <option value="6">Large Format 6x (2 Credits — $2.00)</option>
+      <option value="8">Maximum 8x (3 Credits — $3.00)</option>
     </select>
     <button class="btn btn-success btn-sm" onclick="generateFinal('${roomId}','${enhId||''}')">Generate Final →</button>
   </div>`;
@@ -1553,30 +1553,46 @@ async function generateFinal(roomId,enhId){
   renderRoomQueue();
 
   try{
-    const res=await fetch('/.netlify/functions/upscale-image',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({
-        imageBase64: draftBase64,
-        mimeType: 'image/jpeg',
-        scaleFactor,
-      })
-    });
-
-    if(!res.ok){
-      const d=await res.json().catch(()=>({}));
-      throw new Error('Upscale failed: '+(d.error||res.status));
+    let upscaleData = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 80000);
+        const res=await fetch('/.netlify/functions/upscale-image',{
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          signal: controller.signal,
+          body:JSON.stringify({
+            imageBase64: draftBase64,
+            mimeType: 'image/jpeg',
+            scaleFactor,
+          })
+        });
+        clearTimeout(timer);
+        if(!res.ok){
+          const d=await res.json().catch(()=>({}));
+          if (attempt < 3) continue;
+          throw new Error('Upscale failed: '+(d.error||res.status));
+        }
+        upscaleData = await res.json();
+        if(!upscaleData.upscaledBase64){
+          if (attempt < 3) continue;
+          throw new Error('No upscaled image returned');
+        }
+        break;
+      } catch(err) {
+        if (err.name === 'AbortError' && attempt < 3) continue;
+        throw err;
+      }
     }
-
-    const data=await res.json();
-    if(!data.upscaledBase64) throw new Error('No upscaled image returned');
+    if (!upscaleData?.upscaledBase64) throw new Error('Upscale failed after 3 attempts');
 
     // Store final — no resize/crop needed, upscale preserves composition
     if(enhId){
-      room.extSelections[enhId].finalBase64=data.upscaledBase64;
+      room.extSelections[enhId].finalBase64=upscaleData.upscaledBase64;
       room.extSelections[enhId].finalStatus='done';
     } else {
-      room.finalBase64=data.upscaledBase64;
+      room.finalBase64=upscaleData.upscaledBase64;
       room.finalStatus='done';
     }
 
@@ -1602,20 +1618,36 @@ function resetFinal(roomId,enhId){
 // PRO PIPELINES — DECLUTTER ONLY + CLEAN + STAGE
 // ══════════════════════════════════════════
 
-// Shared: call Decor8 remove objects endpoint
+// Shared: call Decor8 remove objects endpoint with retry
 async function callRemoveObjects(imageBase64, mimeType) {
-  const res = await fetch('/.netlify/functions/remove-objects', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ imageBase64, mimeType })
-  });
-  if (!res.ok) {
-    const d = await res.json().catch(() => ({}));
-    throw new Error('Remove objects failed: ' + (d.error || res.status));
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 80000);
+      const res = await fetch('/.netlify/functions/remove-objects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+        body: JSON.stringify({ imageBase64, mimeType })
+      });
+      clearTimeout(timer);
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        if (attempt < 3) continue;
+        throw new Error('Remove objects failed: ' + (d.error || res.status));
+      }
+      const data = await res.json();
+      if (!data.removedBase64) {
+        if (attempt < 3) continue;
+        throw new Error('No cleaned image returned');
+      }
+      return data.removedBase64;
+    } catch(err) {
+      if (err.name === 'AbortError' && attempt < 3) continue;
+      throw err;
+    }
   }
-  const data = await res.json();
-  if (!data.removedBase64) throw new Error('No cleaned image returned');
-  return data.removedBase64;
+  throw new Error('Remove objects failed after 3 attempts');
 }
 
 // DECLUTTER ONLY — 1 API call, no staging
@@ -1958,7 +1990,7 @@ function showPromptModal(room, prompt) {
     const tier = getDNATier(room);
     const dnaNote = tier === 'full' ? ' · Full DNA injected' : tier === 'style' ? ' · Style DNA injected' : '';
     document.getElementById('pm-cost-note').textContent =
-      `Approving sends to OpenAI gpt-image-1 · ~$0.04–0.08 · ~60 sec${dnaNote}`;
+      `Approving sends to Decor8 · 1 Credit · ~45 sec${dnaNote}`;
 
     // Build and display the exact Decor8 API payload
     const roomType = getDecor8RoomType(room.roomName, room.adjacentRooms, room.decor8Type);

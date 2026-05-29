@@ -213,6 +213,10 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
       <div class="pm-badge">Review Before Decor8</div>
     </div>
     <div class="pm-body">
+      <div id="pm-photo-wrap" style="display:none;margin-bottom:16px;border-radius:4px;overflow:hidden;max-height:220px;">
+        <img id="pm-photo" style="width:100%;height:220px;object-fit:cover;display:block;" />
+        <div style="font-size:0.68rem;color:#b8975a;background:#1a1714;padding:4px 10px;text-align:center;letter-spacing:0.06em;text-transform:uppercase;" id="pm-photo-label">Photo Being Sent to Decor8</div>
+      </div>
       <div class="pm-room-label">Room</div>
       <div class="pm-room-name" id="pm-room-name">—</div>
       <div class="pm-section-label">Session Parameters Sent to Claude</div>
@@ -940,7 +944,9 @@ function renderRoomQueue(){
         ?`<button class="btn btn-sm" style="background:#4a6741;color:#fff;" disabled><span class="spinner"></span> ${room.promptStatus||'Processing...'}</button>`
         :isDone
           ?`<button class="btn btn-ghost btn-sm" onclick="resetRoom('${room.id}')">Re-Stage</button>`
-          :`<button class="btn btn-sm" style="background:#4a6741;color:#fff;" onclick="runCleanAndStage('${room.id}')">🧹 Clean + Stage</button>`;
+          :room.declutteredBase64
+            ?`<button class="btn btn-sm" style="background:#4a6741;color:#fff;" onclick="runCleanAndStageFromCleaned('${room.id}')">▶ Resume — Generate Prompt</button>`
+            :`<button class="btn btn-sm" style="background:#4a6741;color:#fff;" onclick="runCleanAndStage('${room.id}')">🧹 Clean + Stage</button>`;
       const downloads=isDone&&room.stagedBase64?`
         <button class="btn btn-outline btn-sm" onclick="downloadOriginal('${room.id}')">↓ Original</button>
         <button class="btn btn-outline btn-sm" onclick="downloadB64('data:image/jpeg;base64,'+getRoomB64('${room.id}','draft'),'DRAFT_'+bName(getOrigName('${room.id}'))+'.jpg')">↓ Draft</button>
@@ -1672,6 +1678,107 @@ async function runDeclutterOnly(roomId) {
   }
 }
 
+// Resume Clean+Stage from existing cleaned image — skips remove step (saves 1 credit)
+async function runCleanAndStageFromCleaned(roomId) {
+  const room = SESSION.rooms.find(r => r.id === roomId);
+  const orig = SESSION.originals.find(o => o.id === room?.originalId);
+  if (!room || !orig || !room.declutteredBase64) return;
+  const i = SESSION.intake || {};
+  room.status = 'processing';
+  room.promptStatus = 'Reading cleaned room...';
+  renderRoomQueue();
+  try {
+    const cleanedBase64 = room.declutteredBase64;
+
+    // Generate prompt from cleaned room
+    const promptRes = await fetch('/.netlify/functions/generate-staging-prompt', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        imageBase64: cleanedBase64,
+        mimeType: orig.mimeType,
+        roomName: room.roomName,
+        adjacentRooms: room.adjacentRooms || [],
+        designStyle: i.style_label || 'Transitional',
+        colorPalette: i.palette_label || 'Soft Luxury',
+        openPlanStrategy: SESSION.openPlanStrategy || 'full',
+        stagingDNA: SESSION.stagingDNA || null,
+        anchorImageUrl: SESSION.anchorImageUrl || null,
+        derivedZone: null,
+      })
+    });
+    if (!promptRes.ok) throw new Error('Prompt generation failed: ' + promptRes.status);
+    const promptData = await promptRes.json();
+    const generatedPrompt = promptData.prompt || '';
+
+    // Show modal with cleaned photo
+    room.promptStatus = 'Review prompt before staging...';
+    renderRoomQueue();
+    const approvedPrompt = await showPromptModal(
+      room,
+      generatedPrompt,
+      cleanedBase64,
+      '✓ Cleaned Room — this is what Decor8 will stage'
+    );
+
+    if (approvedPrompt === null) {
+      room.status = 'pending';
+      room.promptStatus = null;
+      showToast('Staging cancelled — cleaned room preserved.', '');
+      renderRoomQueue();
+      return;
+    }
+
+    // Stage
+    room.promptStatus = 'Staging with Decor8...';
+    renderRoomQueue();
+    let stagedData = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 80000);
+        const stageRes = await fetch('/.netlify/functions/stage-decor8', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal,
+          body: JSON.stringify({
+            imageBase64: cleanedBase64,
+            mimeType: orig.mimeType,
+            roomType: getDecor8RoomType(room.roomName, room.adjacentRooms, room.decor8Type),
+            designStyle: DECOR8_DESIGN_STYLE[i.style_label] || 'transitional',
+            colorScheme: DECOR8_COLOR_SCHEME[i.palette_label] || 'COLOR_SCHEME_9',
+            customPrompt: approvedPrompt || undefined,
+          })
+        });
+        clearTimeout(timer);
+        if (!stageRes.ok) {
+          const d = await stageRes.json().catch(() => ({}));
+          if (attempt < 3) continue;
+          throw new Error('Staging failed: ' + (d.error || stageRes.status));
+        }
+        stagedData = await stageRes.json();
+        if (!stagedData.stagedBase64) { if (attempt < 3) continue; throw new Error('No staged image returned'); }
+        break;
+      } catch(err) {
+        if (err.name === 'AbortError' && attempt < 3) continue;
+        throw err;
+      }
+    }
+    if (!stagedData?.stagedBase64) throw new Error('Staging failed after 3 attempts');
+    room.stagedBase64 = stagedData.stagedBase64;
+    room.lastDecor8Payload = stagedData.decor8Payload || null;
+    room.status = 'done';
+    room.promptStatus = null;
+    showToast('✓ Cleaned and staged.', 'success');
+    renderRoomQueue();
+  } catch(err) {
+    room.status = 'error';
+    room.promptStatus = null;
+    renderRoomQueue();
+    showToast('Staging error: ' + err.message, 'error');
+  }
+}
+
 // CLEAN + STAGE — 2 API calls: remove objects then stage
 async function runCleanAndStage(roomId) {
   const room = SESSION.rooms.find(r => r.id === roomId);
@@ -1707,7 +1814,29 @@ async function runCleanAndStage(roomId) {
     });
     if (!promptRes.ok) throw new Error('Prompt generation failed: ' + promptRes.status);
     const promptData = await promptRes.json();
-    const finalPrompt = promptData.prompt || '';
+    const generatedPrompt = promptData.prompt || '';
+
+    // PAUSE — show prompt modal with cleaned room photo for human review
+    room.promptStatus = 'Review prompt before staging...';
+    renderRoomQueue();
+    const approvedPrompt = await showPromptModal(
+      room,
+      generatedPrompt,
+      cleanedBase64,
+      '✓ Cleaned Room — this is what Decor8 will stage'
+    );
+
+    // User cancelled — keep cleaned image, reset staging state
+    if (approvedPrompt === null) {
+      room.status = 'pending';
+      room.promptStatus = null;
+      // declutteredBase64 preserved — don't re-run remove
+      showToast('Staging cancelled — cleaned room preserved. Edit prompt and re-run when ready.', '');
+      renderRoomQueue();
+      return;
+    }
+
+    const finalPrompt = approvedPrompt;
 
     // Step 3: Stage cleaned room with Decor8
     room.promptStatus = 'Step 3 of 3 — Staging with Decor8...';
@@ -1959,10 +2088,23 @@ function setOpenPlanStrategy(strategy) {
 // ══════════════════════════════════════════
 let _promptModalResolve = null;
 
-function showPromptModal(room, prompt) {
+function showPromptModal(room, prompt, previewBase64, previewLabel) {
   return new Promise((resolve) => {
     _promptModalResolve = resolve;
     const i = SESSION.intake;
+
+    // Photo preview — show cleaned room for Clean+Stage, hide for Stage Vacant
+    const photoWrap = document.getElementById('pm-photo-wrap');
+    const photoEl = document.getElementById('pm-photo');
+    const photoLabelEl = document.getElementById('pm-photo-label');
+    if (previewBase64) {
+      photoEl.src = 'data:image/jpeg;base64,' + previewBase64;
+      photoLabelEl.textContent = previewLabel || 'Photo Being Sent to Decor8';
+      photoWrap.style.display = 'block';
+    } else {
+      photoWrap.style.display = 'none';
+      photoEl.src = '';
+    }
 
     // Room name + meta chips
     document.getElementById('pm-room-name').textContent = room.roomName;
@@ -1986,11 +2128,13 @@ function showPromptModal(room, prompt) {
     const warn = document.getElementById('pm-open-plan-warning');
     warn.style.display = room.isOpenPlan ? 'block' : 'none';
 
-    // Cost note — show DNA context if applicable
+    // Cost note — show DNA context + Clean+Stage context if applicable
     const tier = getDNATier(room);
     const dnaNote = tier === 'full' ? ' · Full DNA injected' : tier === 'style' ? ' · Style DNA injected' : '';
+    const cnsNote = room.roomMode === 'cns' ? ' · Remove already complete (1 Credit used)' : '';
+    const creditNote = room.roomMode === 'cns' ? '2 Credits total' : '1 Credit';
     document.getElementById('pm-cost-note').textContent =
-      `Approving sends to Decor8 · 1 Credit · ~45 sec${dnaNote}`;
+      `Approving sends to Decor8 · ${creditNote} · ~45 sec${dnaNote}${cnsNote}`;
 
     // Build and display the exact Decor8 API payload
     const roomType = getDecor8RoomType(room.roomName, room.adjacentRooms, room.decor8Type);
@@ -2048,6 +2192,7 @@ function clearPromptAndStage() {
 function cancelPromptModal() {
   document.getElementById('prompt-modal').classList.add('hidden');
   if (_promptModalResolve) { _promptModalResolve(null); _promptModalResolve = null; }
+  // Note: runCleanAndStage handles the cancel — preserves declutteredBase64
 }
 
 // ══════════════════════════════════════════

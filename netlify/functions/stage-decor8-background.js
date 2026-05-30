@@ -25,7 +25,7 @@ async function uploadToImgBB(imageBase64, mimeType, apiKey) {
   const imageBuffer = Buffer.from(imageBase64, "base64");
   const boundary = "----ImgBBBoundary" + Math.random().toString(36).slice(2);
   const ext = (mimeType || "image/jpeg").includes("png") ? "png" : "jpg";
-  const partHeader = Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="image"; filename="room.${ext}"\r\nContent-Type: ${mimeType || "image/jpeg"}\r\n\r\n`, "utf8");
+  const partHeader = Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="image"; filename="room_${Date.now()}_${Math.random().toString(36).slice(2,6)}.${ext}"\r\nContent-Type: ${mimeType || "image/jpeg"}\r\n\r\n`, "utf8");
   const partFooter = Buffer.from(`\r\n--${boundary}--\r\n`, "utf8");
   const body = Buffer.concat([partHeader, imageBuffer, partFooter]);
 

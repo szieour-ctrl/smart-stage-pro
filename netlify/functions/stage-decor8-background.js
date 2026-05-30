@@ -1,8 +1,10 @@
-// Netlify Background Function — runs up to 15 minutes
-// Triggered by stage-decor8.js, stores result in Netlify Blobs
-// Client polls check-decor8.js for result
+// stage-decor8-background.js — Netlify Background Function
+// Name ends in -background so Netlify treats it as async (up to 15 min, no timeout)
+// Uses @netlify/blobs for result storage — auth handled automatically by Netlify context
+// Client polls check-decor8?jobId=xxx every 3 seconds
 
 const https = require("https");
+const { getStore } = require("@netlify/blobs");
 
 function httpsRequest(options, body) {
   return new Promise((resolve, reject) => {
@@ -25,7 +27,10 @@ async function uploadToImgBB(imageBase64, mimeType, apiKey) {
   const imageBuffer = Buffer.from(imageBase64, "base64");
   const boundary = "----ImgBBBoundary" + Math.random().toString(36).slice(2);
   const ext = (mimeType || "image/jpeg").includes("png") ? "png" : "jpg";
-  const partHeader = Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="image"; filename="room_${Date.now()}_${Math.random().toString(36).slice(2,6)}.${ext}"\r\nContent-Type: ${mimeType || "image/jpeg"}\r\n\r\n`, "utf8");
+  const partHeader = Buffer.from(
+    `--${boundary}\r\nContent-Disposition: form-data; name="image"; filename="room_${Date.now()}_${Math.random().toString(36).slice(2,6)}.${ext}"\r\nContent-Type: ${mimeType || "image/jpeg"}\r\n\r\n`,
+    "utf8"
+  );
   const partFooter = Buffer.from(`\r\n--${boundary}--\r\n`, "utf8");
   const body = Buffer.concat([partHeader, imageBuffer, partFooter]);
 
@@ -33,36 +38,49 @@ async function uploadToImgBB(imageBase64, mimeType, apiKey) {
     hostname: "api.imgbb.com",
     path: `/1/upload?key=${apiKey}&expiration=3600`,
     method: "POST",
-    headers: { "Content-Type": `multipart/form-data; boundary=${boundary}`, "Content-Length": body.length }
+    headers: {
+      "Content-Type": `multipart/form-data; boundary=${boundary}`,
+      "Content-Length": body.length,
+    }
   }, body);
 
   if (result.status !== 200) throw new Error(`ImgBB failed: ${result.status}`);
   const url = result.body?.data?.url;
-  if (!url) throw new Error("No URL from ImgBB");
+  if (!url) throw new Error("No URL from ImgBB: " + JSON.stringify(result.body).slice(0, 100));
   return url;
 }
 
 async function callDecor8(imageUrl, roomType, designStyle, colorScheme, customPrompt, apiKey) {
   const payload = JSON.stringify({
     input_image_url: imageUrl,
-    room_type: roomType || "openplan",
-    design_style: designStyle || "transitional",
+    room_type: roomType || "livingroom",
     num_images: 1,
     scale_factor: 2,
-    color_scheme: colorScheme || "COLOR_SCHEME_9",
-    ...(customPrompt ? { prompt: customPrompt } : {}),
+    ...(customPrompt
+      ? { prompt: customPrompt }
+      : {
+          design_style: designStyle || "transitional",
+          color_scheme: colorScheme || "COLOR_SCHEME_9",
+        }
+    ),
   });
+
+  console.log("Decor8 payload mode:", customPrompt ? "PROMPT" : "ENUM", "chars:", customPrompt ? customPrompt.length : 0);
 
   const result = await httpsRequest({
     hostname: "api.decor8.ai",
     path: "/generate_designs_for_room",
     method: "POST",
-    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) }
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+      "Content-Length": Buffer.byteLength(payload),
+    }
   }, payload);
 
-  if (result.status !== 200) throw new Error(`Decor8 error: ${result.status} ${JSON.stringify(result.body).slice(0,200)}`);
+  if (result.status !== 200) throw new Error(`Decor8 error: ${result.status} ${JSON.stringify(result.body).slice(0, 200)}`);
   const images = result.body?.info?.images;
-  if (!images?.length) throw new Error("No images from Decor8");
+  if (!images?.length) throw new Error("No images from Decor8: " + JSON.stringify(result.body).slice(0, 200));
   return images[0];
 }
 
@@ -82,54 +100,52 @@ async function fetchAsBase64(url, hops = 0) {
   });
 }
 
-async function storeResult(jobId, data, token, siteId) {
-  const body = Buffer.from(JSON.stringify(data));
-  await new Promise((resolve, reject) => {
-    const req = https.request({
-      hostname: "api.netlify.com",
-      path: `/api/v1/sites/${siteId}/blobs/${encodeURIComponent("job-" + jobId)}`,
-      method: "PUT",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", "Content-Length": body.length }
-    }, (res) => { res.resume(); res.on("end", resolve); });
-    req.on("error", reject);
-    req.write(body);
-    req.end();
-  });
-}
-
-exports.handler = async (event) => {
-  const token = process.env.NETLIFY_ACCESS_TOKEN;
-  const siteId = process.env.NETLIFY_SITE_ID;
+exports.handler = async (event, context) => {
   const decor8Key = process.env.DECOR8_API_KEY;
-  const imgbbKey = process.env.IMGBB_API_KEY;
+  const imgbbKey  = process.env.IMGBB_API_KEY;
+
+  // @netlify/blobs uses context automatically — no token/siteId needed
+  const store = getStore({ name: "staging-jobs", consistency: "strong" });
 
   let jobId;
   try {
-    const { jobId: jId, imageBase64, mimeType, roomType, designStyle, colorScheme, customPrompt } = JSON.parse(event.body);
+    const {
+      jobId: jId, imageBase64, mimeType,
+      roomType, designStyle, colorScheme, customPrompt
+    } = JSON.parse(event.body);
     jobId = jId;
 
-    console.log(`Background job ${jobId} starting...`);
+    console.log(`Background job ${jobId} starting — room: ${roomType}`);
 
     // Upload to ImgBB
     const imageUrl = await uploadToImgBB(imageBase64, mimeType, imgbbKey);
     console.log(`Job ${jobId}: ImgBB URL obtained`);
 
-    // Call Decor8
+    // Call Decor8 — no timeout risk, background function runs up to 15 min
     const imageResult = await callDecor8(imageUrl, roomType, designStyle, colorScheme, customPrompt, decor8Key);
-    console.log(`Job ${jobId}: Decor8 complete`);
+    console.log(`Job ${jobId}: Decor8 complete, fetching result...`);
 
-    // Fetch result
+    // Fetch result as base64
     const stagedBase64 = await fetchAsBase64(imageResult.url);
-    console.log(`Job ${jobId}: Result fetched ${Math.round(stagedBase64.length/1024)}KB`);
+    console.log(`Job ${jobId}: Result fetched — ${Math.round(stagedBase64.length / 1024)}KB`);
 
-    // Store success result in Blobs
-    await storeResult(jobId, { status: "done", stagedBase64, width: imageResult.width, height: imageResult.height }, token, siteId);
-    console.log(`Job ${jobId}: Result stored`);
+    // Store result in Netlify Blobs — auto-authenticated via context
+    await store.set(jobId, JSON.stringify({
+      status: "done",
+      stagedBase64,
+      width: imageResult.width,
+      height: imageResult.height,
+    }));
+    console.log(`Job ${jobId}: Stored in Blobs — complete`);
 
   } catch (err) {
-    console.error(`Job ${jobId} error:`, err.message);
-    if (jobId && token && siteId) {
-      try { await storeResult(jobId, { status: "error", error: err.message }, token, siteId); } catch(e) {}
+    console.error(`Job ${jobId || "unknown"} error:`, err.message);
+    if (jobId) {
+      try {
+        await store.set(jobId, JSON.stringify({ status: "error", error: err.message }));
+      } catch (storeErr) {
+        console.error("Failed to store error result:", storeErr.message);
+      }
     }
   }
 };

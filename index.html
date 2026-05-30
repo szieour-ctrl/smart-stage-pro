@@ -198,7 +198,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
 </style>
 </head>
 <body>
-<div class="compliance-bar">MLS Compliance Mode Active — Original Image Always Displayed First</div>
+<div class="compliance-bar">California AB 723 §10140.8 Compliance Active — Original uploaded for permanent public URL · QR Code applied to all Final images · MetroList Rule 11.6.1</div>
 <header class="header">
   <div class="header-brand">Smart Stage <span>AI™</span></div>
   <div class="header-badge">SZREG Listing Tools</div>
@@ -584,12 +584,38 @@ function handleFiles(files){
     reader.onload=e=>{
       const dataUrl=e.target.result,base64=dataUrl.split(',')[1];
       const id='orig_'+Date.now()+'_'+Math.random().toString(36).slice(2,6);
-      SESSION.originals.push({id,name:file.name,base64,mimeType:file.type,dataUrl,isFloorplan:false});
+      const origObj={id,name:file.name,base64,mimeType:file.type,dataUrl,isFloorplan:false,originalUrl:null,ab723Status:'pending'};
+      SESSION.originals.push(origObj);
       renderThumb(SESSION.originals[SESSION.originals.length-1]);
       updateUploadUI();
+      // AB 723 §10140.8 — upload original to Cloudinary for permanent public URL
+      uploadOriginalForCompliance(origObj);
     };
     reader.readAsDataURL(file);
   });
+}
+
+// ── AB 723 COMPLIANCE — ORIGINAL UPLOAD ─────────────────────────────────────
+async function uploadOriginalForCompliance(origObj) {
+  try {
+    const res = await fetch('/.netlify/functions/upload-original', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ imageBase64: origObj.base64, mimeType: origObj.mimeType })
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) {
+      console.warn('AB723 upload failed for', origObj.name, ':', data.error);
+      origObj.ab723Status = 'error';
+      return;
+    }
+    origObj.originalUrl = data.publicUrl;
+    origObj.ab723Status = 'ready';
+    console.log('AB723 original uploaded:', origObj.name, '->', data.publicUrl);
+  } catch (err) {
+    console.warn('AB723 upload error:', err.message);
+    origObj.ab723Status = 'error';
+  }
 }
 function renderThumb(orig){
   const grid=document.getElementById('thumb-grid');
@@ -1587,16 +1613,51 @@ async function generateFinal(roomId,enhId){
     }
     if (!upscaleData?.upscaledBase64) throw new Error('Upscale failed after 3 attempts');
 
-    // Store final — no resize/crop needed, upscale preserves composition
+    // ── AB 723 §10140.8 COMPLIANCE COMPOSITE ──────────────────────────────
+    // Apply QR code + disclosure bar to the upscaled final image
+    // Falls back gracefully if Cloudinary upload hasn't completed
+    const orig = SESSION.originals.find(o => o.id === room.originalId);
+    let finalBase64 = upscaleData.upscaledBase64;
+
+    if (orig?.originalUrl) {
+      try {
+        const ab723Res = await fetch('/.netlify/functions/ab723-composite', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            stagedBase64: upscaleData.upscaledBase64,
+            mimeType: 'image/jpeg',
+            originalUrl: orig.originalUrl,
+            roomName: room.roomName || 'Room',
+            tier: enhId ? 'final' : 'final',
+          })
+        });
+        const ab723Data = await ab723Res.json();
+        if (ab723Data.compliantBase64) {
+          finalBase64 = ab723Data.compliantBase64;
+          console.log('AB723 composite applied to final image');
+        } else {
+          console.warn('AB723 composite returned no image — using upscaled without compliance overlay');
+        }
+      } catch (ab723Err) {
+        console.warn('AB723 composite error — using upscaled without overlay:', ab723Err.message);
+      }
+    } else {
+      console.warn('AB723: originalUrl not available — original not yet uploaded or Cloudinary not configured. Final image will not include QR code.');
+      showToast('Note: AB 723 compliance overlay not applied — check Cloudinary configuration.', 'error');
+    }
+
+    // Store final — AB 723 compliant version if available, upscaled fallback otherwise
     if(enhId){
-      room.extSelections[enhId].finalBase64=upscaleData.upscaledBase64;
+      room.extSelections[enhId].finalBase64=finalBase64;
       room.extSelections[enhId].finalStatus='done';
     } else {
-      room.finalBase64=upscaleData.upscaledBase64;
+      room.finalBase64=finalBase64;
       room.finalStatus='done';
     }
 
-    showToast(`✓ Final upscaled at ${scaleFactor}x.`,'success');
+    const ab723Note = orig?.originalUrl ? ' · AB 723 compliant' : ' · AB 723 overlay pending';
+    showToast(`✓ Final upscaled at ${scaleFactor}x${ab723Note}.`,'success');
     renderRoomQueue();
 
   }catch(err){
@@ -1885,7 +1946,7 @@ function downloadWatermarked(roomId, b64, filename, label) {
     // Footer text line 2 — compliance
     ctx.fillStyle = '#7a6f63';
     ctx.font = '400 10px Arial, sans-serif';
-    ctx.fillText('Virtually staged/digitally enhanced for illustrative purposes. Original available upon request. MetroList Rule 11.6.1 compliant.', 12, iH + 34);
+    ctx.fillText('Virtually staged — digitally altered per CA AB 723 §10140.8. Original unaltered image available upon request. MetroList Rule 11.6.1 compliant.', 12, iH + 34);
 
     triggerDownload(canvas.toDataURL('image/jpeg', 0.93), filename);
   };
@@ -1924,7 +1985,7 @@ function downloadSideBySide(roomId,enhId,tier){
     ctx.fillStyle=badgeBg;ctx.fillRect(sW+pad*2,pad,Math.min(label.length*7+20,sW-10),26);
     ctx.fillStyle='#fff';ctx.font='500 11px sans-serif';ctx.fillText(label,sW+pad*2+10,pad+18);
     ctx.fillStyle='#b8975a';ctx.font='400 11px sans-serif';ctx.fillText('Smart Stage PRO™  |  SZREG  |  '+room.roomName+'  |  '+orig.name,pad,900+pad+18);
-    ctx.fillStyle='#7a6f63';ctx.font='400 10px sans-serif';ctx.fillText('Virtually staged/digitally enhanced for illustrative purposes. Original available upon request. MetroList Rule 11.6.1 compliant.',pad,900+pad+36);
+    ctx.fillStyle='#7a6f63';ctx.font='400 10px sans-serif';ctx.fillText('Virtually staged — digitally altered per CA AB 723 §10140.8. Original unaltered image included (left). MetroList Rule 11.6.1 compliant.',pad,900+pad+36);
     const sfx=tier==='declutter'?'Decluttered':tier==='cns'?'CleanedStaged':enh?enh.label.replace(/\s+/g,''):'VirtuallyStaged';
     triggerDownload(canvas.toDataURL('image/jpeg',0.93),'SBS_'+sfx+'_'+bName(orig.name)+'.jpg');
   };

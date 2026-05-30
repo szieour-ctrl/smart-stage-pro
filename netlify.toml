@@ -54,6 +54,12 @@
 [functions."upscale-image"]
   timeout = 26
 
+[functions."upload-original"]
+  timeout = 20
+
+[functions."ab723-composite"]
+  timeout = 26
+
 [[headers]]
   for = "/*"
   [headers.values]

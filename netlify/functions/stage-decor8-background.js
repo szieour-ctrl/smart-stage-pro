@@ -104,8 +104,14 @@ exports.handler = async (event, context) => {
   const decor8Key = process.env.DECOR8_API_KEY;
   const imgbbKey  = process.env.IMGBB_API_KEY;
 
-  // @netlify/blobs uses context automatically — no token/siteId needed
-  const store = getStore({ name: "staging-jobs", consistency: "strong" });
+  // Background functions require explicit credentials for @netlify/blobs
+  const netlifyToken = process.env.NETLIFY_ACCESS_TOKEN;
+  const netlifyId    = process.env.NETLIFY_SITE_ID;
+  if (!netlifyToken || !netlifyId) {
+    console.error("NETLIFY_ACCESS_TOKEN or NETLIFY_SITE_ID not set — cannot store results");
+    return;
+  }
+  const store = getStore({ name: "staging-jobs", siteID: netlifyId, token: netlifyToken });
 
   let jobId;
   try {

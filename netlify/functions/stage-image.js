@@ -78,7 +78,7 @@ function buildMultipart(boundary, imageBuffer, imageMime, prompt, quality) {
 
   const textBuf = Buffer.from(parts.join("\r\n") + "\r\n", "utf8");
   const fileHdr = Buffer.from(
-    `--${boundary}\r\nContent-Disposition: form-data; name="image"; filename="room.jpg"\r\nContent-Type: ${imageMime}\r\n\r\n`,
+    `--${boundary}\r\nContent-Disposition: form-data; name="image"; filename="room_${Date.now()}_${Math.random().toString(36).slice(2,6)}.jpg"\r\nContent-Type: ${imageMime}\r\n\r\n`,
     "utf8"
   );
   const closing = Buffer.from(`\r\n--${boundary}--\r\n`, "utf8");

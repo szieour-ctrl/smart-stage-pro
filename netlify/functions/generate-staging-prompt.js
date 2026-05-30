@@ -506,7 +506,7 @@ ANALYZE THE PHOTO AND IDENTIFY:
 3. Island/peninsula orientation — which side faces camera vs away
 4. All empty floor zones where furniture can go
 5. All permanent fixtures that must be preserved exactly
-6. Visible adjacent spaces that need appropriate (not overstaged) treatment
+6. Architectural openings (pass-throughs, archways, doorways) — note their location and width only. These are boundaries, not staging zones. The wall and floor area ADJACENT to an opening belongs to the primary room and must be staged at full density.
 7. Natural light direction and quality
 
 GENERATE A STAGING PROMPT that specifies:
@@ -517,7 +517,8 @@ GENERATE A STAGING PROMPT that specifies:
 - Art placement with size guidance
 - Props (minimal — follow props standards)
 - What to preserve exactly
-- What adjacent visible spaces should look like (understaged background)
+- Architectural openings: treat pass-throughs, archways, and doorways as WALL SEGMENTS only. Do NOT write instructions that restrict furniture placement near openings. The floor area beside or in front of any opening is part of the primary room — stage it at full density appropriate to the room's square footage. A floor lamp, accent chair, console table, or plant beside an opening is correct and encouraged.
+- Room scale calibration: distribute furniture across the FULL floor area visible in the photo. A large room requires proportionally large furniture and multiple furniture groupings. Never cluster all pieces in one zone and leave remaining floor area empty.
 
 Return ONLY the staging prompt text — no explanation, no JSON, no preamble.`;
     }

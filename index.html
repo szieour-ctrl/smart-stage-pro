@@ -209,7 +209,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
 <div id="prompt-modal" class="hidden">
   <div class="pm-inner">
     <div class="pm-header">
-      <div class="pm-title">Claude Vision — Staging Prompt Review</div>
+      <div class="pm-title">⏸ Claude Vision — Review Before Staging</div>
       <div class="pm-badge">Review Before Decor8</div>
     </div>
     <div class="pm-body">
@@ -221,7 +221,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
       <div class="pm-prompt-wrap">
         <textarea class="pm-prompt" id="pm-prompt" rows="10" spellcheck="false"></textarea>
       </div>
-      <div class="pm-prompt-hint">This is the exact text Claude Vision generated from reading your photo. Edit directly if you see placement errors — your edits go to Decor8, not Claude's version. Every word here influences what Decor8 places and where.</div>
+      <div class="pm-prompt-hint">✏️ <strong>Edit this prompt directly before staging.</strong> Claude Vision generated this by reading your photo. You can add instructions, remove placement details, or change any element. Your edited version goes to Decor8 — not Claude's original. Every word influences what gets placed and where. Use the <strong>Clear Prompt</strong> button to let Decor8 stage using its own intelligence with no text guidance.</div>
       <div class="pm-warning" id="pm-open-plan-warning" style="display:none;">⚠ <strong>Open Plan detected.</strong> Claude Vision read this as a multi-zone space. Watch for zone crowding — if the prompt places dining furniture AND living furniture in the same area, delete the placement instructions and keep only style/material descriptions. Decor8's native openplan logic handles zone separation better than text instructions.</div>
       <div class="pm-section-label" style="margin-top:18px;">Decor8 API JSON — Exact Payload Being Sent</div>
       <pre id="pm-api-payload" style="background:#1a1a1a;color:#e8e8e8;padding:14px;border-radius:3px;font-size:0.74rem;line-height:1.6;overflow-x:auto;white-space:pre-wrap;word-break:break-word;margin:0;"></pre>
@@ -1002,6 +1002,7 @@ function renderRoomQueue(){
     // ── STAGE VACANT / INTERIOR ──
     const statusLabel={
       pending:'Ready to stage — click photo to set Shot Focus',
+      'prompt-review': room.promptStatus || '⏸ Review Claude Vision prompt before staging',
       processing: room.promptStatus || 'Staging in progress...',
       done:'✓ Staged',
       error:'⚠ Error — retry available'
@@ -1023,6 +1024,7 @@ function renderRoomQueue(){
           </div>`;
         return `<button class="btn btn-primary btn-sm" onclick="stageRoom('${room.id}')">Stage This Room</button>`;
       }
+      if(room.status==='prompt-review')return `<button class="btn btn-primary btn-sm" onclick="document.getElementById('prompt-modal').classList.remove('hidden');setTimeout(()=>{document.getElementById('pm-prompt').focus();},60);">✏️ Review Prompt →</button>`;
       if(room.status==='processing')return `<button class="btn btn-outline btn-sm" disabled><span class="spinner"></span> Generating</button>`;
       if(room.status==='done')return `
         <button class="btn btn-outline btn-sm" onclick="downloadOriginal('${room.id}')">↓ Original</button>
@@ -1440,7 +1442,17 @@ async function stageRoom(roomId, iterNote) {
     room.lastPrompt = prompt;
 
     // ── PROMPT PREVIEW MODAL — pause here, wait for user approval ────────────
+    // Change status to 'prompt-review' so the card shows a clear waiting state
+    room.status = 'prompt-review';
+    room.promptStatus = '✏️ Review Claude Vision prompt before staging...';
+    renderRoomQueue();
     const approvedPrompt = await showPromptModal(room, prompt);
+    // Restore processing status once approved
+    if (approvedPrompt !== null) {
+      room.status = 'processing';
+      room.promptStatus = 'Staging with Decor8 — takes ~45 seconds...';
+      renderRoomQueue();
+    }
     if (approvedPrompt === null) {
       // User cancelled — reset room to pending, no Decor8 credit burned
       room.status = 'pending';
@@ -2146,6 +2158,13 @@ function showPromptModal(room, prompt) {
     document.getElementById('pm-api-payload').textContent = JSON.stringify(previewPayload, null, 2);
 
     document.getElementById('prompt-modal').classList.remove('hidden');
+    // Scroll the modal into view and focus the textarea so the user knows it is waiting
+    setTimeout(() => {
+      const modal = document.getElementById('prompt-modal');
+      if (modal) modal.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      const ta = document.getElementById('pm-prompt');
+      if (ta) { ta.focus(); ta.setSelectionRange(0, 0); }
+    }, 80);
   });
 }
 

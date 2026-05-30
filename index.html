@@ -1133,7 +1133,7 @@ function renderFinalPanel(roomId,enhId){
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
         <button class="btn btn-success btn-sm" onclick="downloadWatermarked('${roomId}','data:image/jpeg;base64,'+getFinalB64('${roomId}','${enhId||''}'),'FINAL_${tag}_'+bName(getOrigName('${roomId}'))+'.jpg','VIRTUALLY STAGED — FINAL')">↓ Final</button>
-        <button class="btn btn-outline btn-sm" onclick="downloadSideBySide('${roomId}','${enhId||null}','final')">↓ Final Side-by-Side</button>
+        <button class="btn btn-outline btn-sm" onclick="downloadSideBySide('${roomId}','${enhId||''}','final')">↓ Final Side-by-Side</button>
         <button class="btn btn-ghost btn-sm" onclick="resetFinal('${roomId}','${enhId||''}')">Re-Generate</button>
       </div>
     </div>`;
@@ -1971,10 +1971,18 @@ function downloadSideBySide(roomId,enhId,tier){
   const oI=new Image(),sI=new Image();let loaded=0;
   const go=()=>{
     loaded++;if(loaded<2)return;
-    const iW=oI.naturalWidth,iH=oI.naturalHeight,scale=900/iH,sW=Math.round(iW*scale),pad=14,ftH=62;
-    canvas.width=sW*2+pad*3;canvas.height=900+ftH+pad;
+    // For 'final' tier the staged image already contains the AB 723 footer (72px).
+    // Scale both panels to the staged image's natural height so the footer is not cropped.
+    // For all other tiers use the fixed 900px height as before.
+    const iW=oI.naturalWidth,iH=oI.naturalHeight;
+    const stagedH=sI.naturalHeight,stagedW=sI.naturalWidth;
+    const targetH=tier==='final'?stagedH:900;
+    const scale=targetH/iH,sW=Math.round(iW*scale),pad=14;
+    // Final tier: staged side already has footer — no extra footer bar needed
+    const ftH=tier==='final'?0:62;
+    canvas.width=sW*2+pad*3;canvas.height=targetH+ftH+pad;
     ctx.fillStyle='#1a1714';ctx.fillRect(0,0,canvas.width,canvas.height);
-    ctx.drawImage(oI,pad,pad,sW,900);ctx.drawImage(sI,sW+pad*2,pad,sW,900);
+    ctx.drawImage(oI,pad,pad,sW,targetH);ctx.drawImage(sI,sW+pad*2,pad,sW,stagedH);
     ctx.fillStyle='rgba(26,23,20,0.82)';ctx.fillRect(pad,pad,130,26);
     ctx.fillStyle='#fff';ctx.font='500 12px sans-serif';ctx.fillText('ORIGINAL',pad+10,pad+18);
     const badgeBg=enh?'rgba(58,124,165,0.92)':
@@ -1984,10 +1992,13 @@ function downloadSideBySide(roomId,enhId,tier){
       'rgba(184,151,90,0.92)';
     ctx.fillStyle=badgeBg;ctx.fillRect(sW+pad*2,pad,Math.min(label.length*7+20,sW-10),26);
     ctx.fillStyle='#fff';ctx.font='500 11px sans-serif';ctx.fillText(label,sW+pad*2+10,pad+18);
-    ctx.fillStyle='#b8975a';ctx.font='400 11px sans-serif';ctx.fillText('Smart Stage PRO™  |  SZREG  |  '+room.roomName+'  |  '+orig.name,pad,900+pad+18);
-    ctx.fillStyle='#7a6f63';ctx.font='400 10px sans-serif';ctx.fillText('Virtually staged — digitally altered per CA AB 723 §10140.8. Original unaltered image included (left). MetroList Rule 11.6.1 compliant.',pad,900+pad+36);
+    if(tier!=='final'){
+      ctx.fillStyle='#b8975a';ctx.font='400 11px sans-serif';ctx.fillText('Smart Stage PRO™  |  SZREG  |  '+room.roomName+'  |  '+orig.name,pad,targetH+pad+18);
+      ctx.fillStyle='#7a6f63';ctx.font='400 10px sans-serif';ctx.fillText('Virtually staged — digitally altered per CA AB 723 §10140.8. Original unaltered image included (left). MetroList Rule 11.6.1 compliant.',pad,targetH+pad+36);
+    }
     const sfx=tier==='declutter'?'Decluttered':tier==='cns'?'CleanedStaged':enh?enh.label.replace(/\s+/g,''):'VirtuallyStaged';
-    triggerDownload(canvas.toDataURL('image/jpeg',0.93),'SBS_'+sfx+'_'+bName(orig.name)+'.jpg');
+    const filename=tier==='final'?'FINAL_SBS_'+sfx+'_'+bName(orig.name)+'.jpg':'SBS_'+sfx+'_'+bName(orig.name)+'.jpg';
+    triggerDownload(canvas.toDataURL('image/jpeg',0.93),filename);
   };
   oI.onload=sI.onload=go;oI.src=orig.dataUrl;sI.src='data:image/jpeg;base64,'+b64;
 }

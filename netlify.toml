@@ -2,6 +2,9 @@
   functions = "netlify/functions"
   publish = "."
 
+[blobs]
+  # Netlify Blobs — used for background staging job result storage
+
 [functions]
   node_bundler = "esbuild"
 
@@ -21,7 +24,7 @@
   timeout = 20
 
 [functions."stage-decor8"]
-  timeout = 26
+  timeout = 90
 
 [functions."stage-openai"]
   timeout = 10
@@ -40,25 +43,25 @@
 
 
 [functions."stage-decor8-background"]
-  timeout = 26
+  timeout = 90
 
 [functions."check-decor8"]
-  timeout = 10
+  timeout = 15
 
 [functions."test-remove-objects"]
   timeout = 26
 
 [functions."remove-objects"]
-  timeout = 26
+  timeout = 90
 
 [functions."upscale-image"]
-  timeout = 26
+  timeout = 60
 
 [functions."upload-original"]
   timeout = 20
 
 [functions."ab723-composite"]
-  timeout = 26
+  timeout = 45
 
 [[headers]]
   for = "/*"

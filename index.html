@@ -256,7 +256,43 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
 </div>
 
 <div class="app">
-  <div id="step-upload" class="panel">
+  <!-- ── STEP: PROPERTY SEARCH ── -->
+  <div id="step-property" class="panel">
+    <div class="panel-title">Property Search</div>
+    <div class="panel-sub">Search for the listing address to create or open a compliance project. This generates your AB 723 compliance page and QR code.</div>
+
+    <div style="max-width:560px;margin:0 auto;">
+      <!-- Search input -->
+      <div style="position:relative;margin-bottom:8px;">
+        <input type="text" id="addr-input" placeholder="Start typing address — e.g. 123 Main St, Roseville..."
+          autocomplete="off" spellcheck="false"
+          style="width:100%;padding:14px 16px;border:1px solid var(--border);border-radius:6px;font-size:14px;font-family:inherit;background:var(--surface);color:var(--ink);"
+          oninput="onAddressInput(this.value)"
+          onkeydown="onAddressKeydown(event)">
+        <div id="addr-spinner" style="display:none;position:absolute;right:14px;top:50%;transform:translateY(-50%);"><span class="spinner"></span></div>
+      </div>
+
+      <!-- Autocomplete dropdown -->
+      <div id="addr-dropdown" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,0.12);overflow:hidden;margin-bottom:16px;"></div>
+
+      <!-- Project status card -->
+      <div id="project-card" style="display:none;border:1px solid var(--border);border-radius:6px;padding:20px;background:var(--surface);margin-bottom:20px;">
+        <div id="project-card-content"></div>
+      </div>
+
+      <!-- Action buttons -->
+      <div id="property-actions" style="display:none;display:flex;gap:10px;">
+        <button class="btn btn-primary" id="property-continue-btn" onclick="continueToUpload()" style="display:none;">Continue to Photo Upload →</button>
+        <button class="btn btn-outline btn-sm" onclick="resetPropertySearch()">Clear Search</button>
+      </div>
+
+      <p style="margin-top:24px;font-size:11px;color:var(--muted);text-align:center;">
+        Address search powered by Google Maps · Each address creates a permanent AB 723 compliance page
+      </p>
+    </div>
+  </div>
+
+  <div id="step-upload" class="panel hidden">
     <div class="panel-title">Upload Listing Photos</div>
     <div class="panel-sub">Upload all listing photos. Tag your floor plan using the "Set as Floor Plan" button on any thumbnail, or select "Floor Plan" in the room dropdown. Click any photo thumbnail to set Shot Focus instructions.</div>
     <div class="upload-zone" id="upload-zone">
@@ -297,7 +333,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
       <div class="panel-sub">Click any photo thumbnail to set Shot Focus. Draft stages are low quality — iterate freely. Generate Final for MLS-ready downloads.</div>
       <div class="room-queue" id="room-queue"></div>
       <div style="margin-top:16px;">
-        <button class="btn btn-outline btn-sm" onclick="showStep('step-upload');resetSession();">+ New Session</button>
+        <button class="btn btn-outline btn-sm" onclick="showStep('step-property');resetSession();">+ New Session</button>
       </div>
     </div>
   </div>
@@ -509,12 +545,271 @@ const DEFAULT_HINTS = ["Specify which room is the main focus","Describe what the
 const SESSION = {
   originals:[],floorplanRoomMap:null,photoRoomMap:{},
   intake:{},rooms:[],anchorRoomId:null,
-  stagingDNA: null,        // Extracted from staged Open Plan image
-  anchorImageUrl: null,    // Decor8 URL of the staged Open Plan image — source for DNA two-image reads
-  openPlanRoomId: null,    // Room ID of the Open Plan — must be staged first
-  openPlanStrategy: 'full', // PRO default — full placement always
+  stagingDNA: null,
+  anchorImageUrl: null,
+  openPlanRoomId: null,
+  openPlanStrategy: 'full',
+  // Project / compliance fields
+  projectId: null,
+  projectAddress: null,
+  complianceUrl: null,
+  projectStatus: null,   // 'existing' | 'new' | null
 };
 let _lbRoomId = null;
+
+// ══════════════════════════════════════════
+// PROPERTY SEARCH + PROJECT MANAGEMENT
+// ══════════════════════════════════════════
+
+let _addrDebounce = null;
+let _addrSessionToken = null;
+let _addrSelectedIndex = -1;
+let _addrPredictions = [];
+
+function generateSessionToken() {
+  return 'st_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2);
+}
+
+function onAddressInput(value) {
+  clearTimeout(_addrDebounce);
+  document.getElementById('project-card').style.display = 'none';
+  document.getElementById('property-actions').style.display = 'none';
+  document.getElementById('property-continue-btn').style.display = 'none';
+
+  if (value.length < 3) {
+    document.getElementById('addr-dropdown').style.display = 'none';
+    _addrPredictions = [];
+    return;
+  }
+
+  _addrDebounce = setTimeout(() => fetchAddressPredictions(value), 300);
+}
+
+async function fetchAddressPredictions(input) {
+  if (!_addrSessionToken) _addrSessionToken = generateSessionToken();
+  document.getElementById('addr-spinner').style.display = 'block';
+  try {
+    const res = await fetch('/.netlify/functions/property-search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ input, sessionToken: _addrSessionToken }),
+    });
+    const data = await res.json();
+    _addrPredictions = data.predictions || [];
+    renderAddressDropdown(_addrPredictions);
+  } catch (err) {
+    console.warn('Address search error:', err.message);
+  } finally {
+    document.getElementById('addr-spinner').style.display = 'none';
+  }
+}
+
+function renderAddressDropdown(predictions) {
+  const dd = document.getElementById('addr-dropdown');
+  if (!predictions.length) { dd.style.display = 'none'; return; }
+
+  dd.innerHTML = predictions.map((p, i) => `
+    <div class="addr-option" data-index="${i}" onclick="selectAddress(${i})"
+      style="padding:12px 16px;cursor:pointer;border-bottom:1px solid var(--border);font-size:13px;display:flex;flex-direction:column;gap:2px;">
+      <span style="color:var(--ink);font-weight:500;">${escHtml(p.mainText)}</span>
+      <span style="color:var(--muted);font-size:11px;">${escHtml(p.secondaryText)}</span>
+    </div>
+  `).join('');
+
+  // Hover styles
+  dd.querySelectorAll('.addr-option').forEach(el => {
+    el.addEventListener('mouseenter', () => el.style.background = 'var(--bg)');
+    el.addEventListener('mouseleave', () => el.style.background = '');
+  });
+
+  dd.style.display = 'block';
+  _addrSelectedIndex = -1;
+}
+
+function onAddressKeydown(e) {
+  const dd = document.getElementById('addr-dropdown');
+  if (!_addrPredictions.length) return;
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    _addrSelectedIndex = Math.min(_addrSelectedIndex + 1, _addrPredictions.length - 1);
+    highlightDropdownOption();
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    _addrSelectedIndex = Math.max(_addrSelectedIndex - 1, 0);
+    highlightDropdownOption();
+  } else if (e.key === 'Enter' && _addrSelectedIndex >= 0) {
+    e.preventDefault();
+    selectAddress(_addrSelectedIndex);
+  } else if (e.key === 'Escape') {
+    dd.style.display = 'none';
+  }
+}
+
+function highlightDropdownOption() {
+  document.querySelectorAll('.addr-option').forEach((el, i) => {
+    el.style.background = i === _addrSelectedIndex ? 'var(--bg)' : '';
+  });
+}
+
+async function selectAddress(index) {
+  const prediction = _addrPredictions[index];
+  if (!prediction) return;
+
+  const address = prediction.description;
+  document.getElementById('addr-input').value = address;
+  document.getElementById('addr-dropdown').style.display = 'none';
+  _addrSessionToken = null; // Reset session token after selection
+
+  // Look up existing project
+  await lookupOrCreateProject(address);
+}
+
+async function lookupOrCreateProject(address) {
+  const card = document.getElementById('project-card');
+  const cardContent = document.getElementById('project-card-content');
+  const actions = document.getElementById('property-actions');
+
+  card.style.display = 'block';
+  cardContent.innerHTML = '<div style="color:var(--muted);font-size:13px;">Checking for existing project...</div>';
+  actions.style.display = 'none';
+
+  try {
+    const res = await fetch('/.netlify/functions/project-manage?action=lookup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ address }),
+    });
+    const data = await res.json();
+
+    if (data.exists) {
+      // Project found
+      SESSION.projectId = data.projectId;
+      SESSION.projectAddress = address;
+      SESSION.complianceUrl = data.complianceUrl;
+      SESSION.projectStatus = 'existing';
+
+      cardContent.innerHTML = `
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+          <span style="font-size:20px;">✅</span>
+          <div>
+            <div style="font-weight:500;font-size:14px;color:var(--ink);">Existing Project Found</div>
+            <div style="font-size:12px;color:var(--muted);">${escHtml(address)}</div>
+          </div>
+        </div>
+        <div style="background:var(--bg);border-radius:4px;padding:12px;font-size:12px;line-height:1.9;">
+          <div>📁 <strong>${data.imageCount || 0}</strong> staged image set${data.imageCount !== 1 ? 's' : ''} in project</div>
+          <div>🔗 QR Code Active · Compliance Page Active</div>
+          <div>📅 Created ${data.createdAt ? new Date(data.createdAt).toLocaleDateString() : 'Unknown'}</div>
+          <div style="margin-top:8px;">
+            <a href="${data.complianceUrl}" target="_blank" style="color:var(--gold);font-size:11px;">View Compliance Page →</a>
+          </div>
+        </div>`;
+    } else {
+      // No existing project — offer to create
+      cardContent.innerHTML = `
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+          <span style="font-size:20px;">🆕</span>
+          <div>
+            <div style="font-weight:500;font-size:14px;color:var(--ink);">No Existing Project Found</div>
+            <div style="font-size:12px;color:var(--muted);">${escHtml(address)}</div>
+          </div>
+        </div>
+        <div style="background:var(--bg);border-radius:4px;padding:12px;font-size:12px;color:var(--muted);line-height:1.7;">
+          A new compliance project will be created with:<br>
+          • Permanent compliance page URL<br>
+          • AB 723 QR code for all staged images<br>
+          • 3-year record retention per DRE requirements
+        </div>`;
+
+      // Create project immediately on selection
+      await createNewProject(address);
+      return;
+    }
+
+    // Show continue button
+    document.getElementById('property-continue-btn').style.display = 'inline-block';
+    actions.style.display = 'flex';
+
+  } catch (err) {
+    cardContent.innerHTML = `<div style="color:#c0392b;font-size:13px;">⚠ Search error: ${escHtml(err.message)} — you may continue without a project.</div>`;
+    document.getElementById('property-continue-btn').style.display = 'inline-block';
+    actions.style.display = 'flex';
+  }
+}
+
+async function createNewProject(address) {
+  const cardContent = document.getElementById('project-card-content');
+  const actions = document.getElementById('property-actions');
+
+  try {
+    const res = await fetch('/.netlify/functions/project-manage?action=create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        address,
+        siteUrl: window.location.origin,
+        agentInfo: {}, // Uses env vars on server side
+      }),
+    });
+    const data = await res.json();
+
+    SESSION.projectId = data.projectId;
+    SESSION.projectAddress = address;
+    SESSION.complianceUrl = data.complianceUrl;
+    SESSION.projectStatus = 'new';
+
+    cardContent.innerHTML = `
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+        <span style="font-size:20px;">✅</span>
+        <div>
+          <div style="font-weight:500;font-size:14px;color:var(--ink);">New Project Created</div>
+          <div style="font-size:12px;color:var(--muted);">${escHtml(address)}</div>
+        </div>
+      </div>
+      <div style="background:var(--bg);border-radius:4px;padding:12px;font-size:12px;line-height:1.9;">
+        <div>🆔 Project ID: <strong>${data.projectId}</strong></div>
+        <div>🔗 Compliance URL generated</div>
+        <div>📋 QR code will be applied to all Final images</div>
+        <div style="margin-top:8px;">
+          <a href="${data.complianceUrl}" target="_blank" style="color:var(--gold);font-size:11px;">View Compliance Page →</a>
+        </div>
+      </div>`;
+
+    document.getElementById('property-continue-btn').style.display = 'inline-block';
+    actions.style.display = 'flex';
+
+  } catch (err) {
+    cardContent.innerHTML = `<div style="color:#c0392b;font-size:13px;">⚠ Could not create project: ${escHtml(err.message)} — you may continue without a project.</div>`;
+    document.getElementById('property-continue-btn').style.display = 'inline-block';
+    actions.style.display = 'flex';
+  }
+}
+
+function continueToUpload() {
+  showStep('step-upload');
+  // Update compliance bar with project info
+  if (SESSION.projectAddress) {
+    const bar = document.getElementById('compliance-bar-text');
+    if (bar) bar.textContent = `AB 723 Compliant · Project: ${SESSION.projectAddress} · QR codes active on all Finals`;
+  }
+}
+
+function resetPropertySearch() {
+  document.getElementById('addr-input').value = '';
+  document.getElementById('addr-dropdown').style.display = 'none';
+  document.getElementById('project-card').style.display = 'none';
+  document.getElementById('property-actions').style.display = 'none';
+  SESSION.projectId = null;
+  SESSION.projectAddress = null;
+  SESSION.complianceUrl = null;
+  SESSION.projectStatus = null;
+  _addrPredictions = [];
+  _addrSessionToken = null;
+}
+
+function escHtml(str) {
+  return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
 
 // ══════════════════════════════════════════
 // INTAKE
@@ -1582,6 +1877,50 @@ async function stageDecor8Background(payload, onStatus) {
   throw new Error('Decor8 staging timed out after 3 minutes — please retry');
 }
 
+// ── PROJECT IMAGE ATTACHMENT ─────────────────────────────────────────────────
+async function attachFinalToProject(finalBase64, room, orig, enhId) {
+  if (!SESSION.projectId) return;
+
+  try {
+    // Upload staged final to Cloudinary
+    const uploadRes = await fetch('/.netlify/functions/upload-staged', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        imageBase64: finalBase64,
+        mimeType: 'image/jpeg',
+        projectId: SESSION.projectId,
+        roomName: room.roomName || 'Room',
+        tier: enhId ? 'final-enhanced' : 'final',
+      })
+    });
+    const uploadData = await uploadRes.json();
+    if (!uploadData.publicUrl) throw new Error('No staged URL from Cloudinary');
+
+    // Attach to project in Blobs
+    await fetch('/.netlify/functions/project-manage?action=add-image', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        projectId: SESSION.projectId,
+        imageData: {
+          roomName: room.roomName || 'Room',
+          tier: enhId ? 'final-enhanced' : 'final',
+          originalUrl: orig?.originalUrl || null,
+          stagedUrl: uploadData.publicUrl,
+          fileName: orig?.name || '',
+        }
+      })
+    });
+
+    console.log('Image attached to project:', SESSION.projectId, 'room:', room.roomName);
+    showToast(`✓ Added to compliance project: ${SESSION.projectAddress || SESSION.projectId}`, 'success');
+
+  } catch (err) {
+    console.warn('attachFinalToProject error:', err.message);
+  }
+}
+
 function iterateRoom(roomId) {
   const note = document.getElementById('iter-' + roomId)?.value?.trim() || '';
   if (!note) { showToast('Enter revision instructions first.', 'error'); return; }
@@ -1674,8 +2013,9 @@ async function generateFinal(roomId,enhId){
             stagedBase64: upscaleData.upscaledBase64,
             mimeType: 'image/jpeg',
             originalUrl: orig.originalUrl,
+            complianceUrl: SESSION.complianceUrl || null,
             roomName: room.roomName || 'Room',
-            tier: enhId ? 'final' : 'final',
+            tier: 'final',
           })
         });
         const ab723Data = await ab723Res.json();
@@ -1705,6 +2045,14 @@ async function generateFinal(roomId,enhId){
     const ab723Note = orig?.originalUrl ? ' · AB 723 compliant' : ' · AB 723 overlay pending';
     showToast(`✓ Final upscaled at ${scaleFactor}x${ab723Note}.`,'success');
     renderRoomQueue();
+
+    // ── UPLOAD STAGED FINAL TO CLOUDINARY + ATTACH TO PROJECT ────────────────
+    // Fires in background — does not block UI
+    if (SESSION.projectId) {
+      attachFinalToProject(finalBase64, room, orig, enhId).catch(err => {
+        console.warn('Project attachment failed (non-blocking):', err.message);
+      });
+    }
 
   }catch(err){
     if(enhId)room.extSelections[enhId].finalStatus=null;
@@ -2238,7 +2586,7 @@ function cancelPromptModal() {
 // ══════════════════════════════════════════
 // UTILS
 // ══════════════════════════════════════════
-function showStep(id){['step-upload','step-intake','step-mapping','step-staging'].forEach(s=>document.getElementById(s)?.classList.add('hidden'));document.getElementById(id)?.classList.remove('hidden');}
+function showStep(id){['step-property','step-upload','step-intake','step-mapping','step-staging'].forEach(s=>document.getElementById(s)?.classList.add('hidden'));document.getElementById(id)?.classList.remove('hidden');}
 function resetSession(){SESSION.originals=[];SESSION.intake={};SESSION.rooms=[];SESSION.floorplanRoomMap=null;SESSION.photoRoomMap={};SESSION.anchorRoomId=null;SESSION.anchorImageUrl=null;document.getElementById('thumb-grid').innerHTML='';document.getElementById('upload-actions').classList.add('hidden');fileInput.value='';}
 function showToast(msg,type=''){const t=document.getElementById('toast');t.textContent=msg;t.className='show '+(type||'');setTimeout(()=>{t.className='';},4000);}
 function esc(s){return(s||'').replace(/'/g,"&#39;").replace(/"/g,"&quot;");}

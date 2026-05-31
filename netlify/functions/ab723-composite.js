@@ -53,7 +53,7 @@ async function generateQRBuffer(url, size) {
 // sharp doesn't have a native text renderer — we build SVG text overlays
 // and composite them onto the image
 
-function buildFooterSVG(width, footerH, roomName, originalUrl, tier) {
+function buildFooterSVG(width, footerH, roomName, originalUrl, tier, complianceUrl) {
   const tierLabel =
     tier === "final"    ? "VIRTUALLY STAGED — FINAL" :
     tier === "declutter"? "DECLUTTERED — OBJECTS REMOVED" :
@@ -117,12 +117,12 @@ function buildBadgeSVG(width, imageH, tier) {
     tier === "cns"       ? "rgba(74,103,65,0.92)" :
     "rgba(184,151,90,0.92)";
 
-  const badgeW = Math.min(label.length * 7 + 24, 380);
+  const badgeW = Math.min(label.length * 9 + 28, 480);
 
   return `<svg width="${width}" height="${imageH}" xmlns="http://www.w3.org/2000/svg">
     <!-- Top-left staged badge -->
-    <rect x="12" y="12" width="${badgeW}" height="26" rx="2" fill="${bgColor}"/>
-    <text x="22" y="29" font-family="Arial, sans-serif" font-size="11" font-weight="500" fill="#ffffff">
+    <rect x="12" y="12" width="${badgeW}" height="32" rx="2" fill="${bgColor}"/>
+    <text x="22" y="31" font-family="Arial, sans-serif" font-size="15" font-weight="500" fill="#ffffff">
       ${escSVG(label)}
     </text>
   </svg>`;
@@ -143,7 +143,7 @@ async function buildCompliantImage(stagedBase64, originalUrl, roomName, tier, co
   const qrBuffer = await generateQRBuffer(qrTarget, QR_SIZE);
 
   // 2. Build footer SVG
-  const footerSvg = buildFooterSVG(W, FOOTER_H, roomName, originalUrl, tier);
+  const footerSvg = buildFooterSVG(W, FOOTER_H, roomName, originalUrl, tier, complianceUrl);
   const footerBuffer = Buffer.from(footerSvg);
 
   // 3. Build badge SVG (overlaid on staged image)

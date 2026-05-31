@@ -27,11 +27,10 @@
   timeout = 90
 
 [functions."stage-openai"]
-  timeout = 10
+  timeout = 30
 
 [functions."stage-openai-background"]
   timeout = 900
-
 [functions."check-openai"]
   timeout = 10
 

@@ -12,7 +12,7 @@
   timeout = 26
 
 [functions."stage-image-start"]
-  timeout = 26
+  timeout = 90
 
 [functions."stage-replicate"]
   timeout = 26
@@ -52,7 +52,7 @@
   timeout = 26
 
 [functions."remove-objects"]
-  timeout = 90
+  timeout = 120
 
 [functions."upscale-image"]
   timeout = 60

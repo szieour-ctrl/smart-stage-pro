@@ -1817,26 +1817,28 @@ async function stageRoom(roomId, iterNote) {
     }
     const finalPrompt = approvedPrompt; // may be edited text or '' for no-prompt mode
 
-    // Step 2: Call Decor8 via Background Function — bypasses 26s Netlify timeout
-    // Fire-and-poll pattern: background job runs up to 15 min, client polls every 3s
-    room.promptStatus = 'Staging with Decor8 — takes ~45 seconds...';
+    // Step 2: Call OpenAI via stage-image-start
+    room.promptStatus = 'Staging with AI — takes ~60 seconds...';
     renderRoomQueue();
 
-    const decor8Data = await stageDecor8Background({
-      imageBase64: sourceBase64,
-      mimeType: sourceMime,
-      roomType: getDecor8RoomType(room.roomName, room.adjacentRooms, room.decor8Type),
-      designStyle: DECOR8_DESIGN_STYLE[i.style_label] || 'transitional',
-      colorScheme: DECOR8_COLOR_SCHEME[i.palette_label] || 'COLOR_SCHEME_9',
-      customPrompt: finalPrompt || undefined,
-    }, (statusMsg) => {
-      room.promptStatus = statusMsg;
-      renderRoomQueue();
+    const openaiRes = await fetch('/.netlify/functions/stage-image-start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        imageBase64: sourceBase64,
+        mimeType: sourceMime,
+        stagingPrompt: finalPrompt,
+        quality: 'high',
+      }),
     });
-    if (!decor8Data?.stagedBase64) throw new Error('Decor8 staging failed — no image returned');
+    if (!openaiRes.ok) {
+      const errData = await openaiRes.json().catch(() => ({}));
+      throw new Error('Staging failed: ' + (errData.error || openaiRes.status));
+    }
+    const openaiData = await openaiRes.json();
+    if (!openaiData?.stagedBase64) throw new Error('OpenAI staging failed — no image returned');
 
-    room.stagedBase64 = decor8Data.stagedBase64;
-    room.lastDecor8Payload = decor8Data.decor8Payload || null; // store for debug display
+    room.stagedBase64 = openaiData.stagedBase64;
     room.status = 'done';
     room.promptStatus = null;
     room.approvedDNA = `${i.style_label} style, ${i.palette_label} palette, ${i.intensity_label} staging, ${i.buyer_label} buyer target, ${i.feeling_label} mood.`;
@@ -2158,12 +2160,12 @@ function resetFinal(roomId,enhId){
 // PRO PIPELINES — DECLUTTER ONLY + CLEAN + STAGE
 // ══════════════════════════════════════════
 
-// Shared: call Decor8 remove objects endpoint with retry
+// Shared: call remove-objects endpoint with retry (Claude Vision + GPT Image 2)
 async function callRemoveObjects(imageBase64, mimeType) {
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 80000);
+      const timer = setTimeout(() => controller.abort(), 120000);
       const res = await fetch('/.netlify/functions/remove-objects', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2196,7 +2198,7 @@ async function runDeclutterOnly(roomId) {
   const orig = SESSION.originals.find(o => o.id === room?.originalId);
   if (!room || !orig) return;
   room.status = 'processing';
-  room.promptStatus = 'Removing objects with Decor8...';
+  room.promptStatus = 'Analyzing room — removing objects...';
   renderRoomQueue();
   try {
     room.declutteredBase64 = await callRemoveObjects(orig.base64, orig.mimeType);
@@ -2249,31 +2251,29 @@ async function runCleanAndStage(roomId) {
     const promptData = await promptRes.json();
     const finalPrompt = promptData.prompt || '';
 
-    // Step 3: Stage cleaned room with Decor8
-    room.promptStatus = 'Step 3 of 3 — Staging with Decor8...';
+    // Step 3: Stage cleaned room with OpenAI
+    room.promptStatus = 'Step 3 of 3 — Staging with AI...';
     renderRoomQueue();
     let stagedData = null;
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
         const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 80000);
-        const stageRes = await fetch('/.netlify/functions/stage-decor8', {
+        const timer = setTimeout(() => controller.abort(), 120000);
+        const stageRes = await fetch('/.netlify/functions/stage-image-start', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           signal: controller.signal,
           body: JSON.stringify({
             imageBase64: cleanedBase64,
             mimeType: orig.mimeType,
-            roomType: getDecor8RoomType(room.roomName, room.adjacentRooms, room.decor8Type),
-            designStyle: DECOR8_DESIGN_STYLE[i.style_label] || 'transitional',
-            colorScheme: DECOR8_COLOR_SCHEME[i.palette_label] || 'COLOR_SCHEME_9',
-            customPrompt: finalPrompt || undefined,
+            stagingPrompt: finalPrompt,
+            quality: 'high',
           })
         });
         clearTimeout(timer);
         if (!stageRes.ok) {
           const d = await stageRes.json().catch(() => ({}));
-          if (attempt < 3) { room.promptStatus = `Retrying Decor8 (${attempt+1}/3)...`; renderRoomQueue(); continue; }
+          if (attempt < 3) { room.promptStatus = `Retrying (${attempt+1}/3)...`; renderRoomQueue(); continue; }
           throw new Error('Staging failed: ' + (d.error || stageRes.status));
         }
         stagedData = await stageRes.json();

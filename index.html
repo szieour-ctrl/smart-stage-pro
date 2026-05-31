@@ -200,7 +200,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
 <body>
 <div class="compliance-bar">California AB 723 §10140.8 Compliance Active — Original uploaded for permanent public URL · QR Code applied to all Final images · MetroList Rule 11.6.1</div>
 <header class="header">
-  <div class="header-brand">Smart Stage <span>AI™</span></div>
+  <div class="header-brand">Smart Stage <span>PRO™</span></div>
   <div class="header-badge">SZREG Listing Tools</div>
 </header>
 <canvas id="sbs-canvas"></canvas>
@@ -599,6 +599,7 @@ async function fetchAddressPredictions(input) {
       body: JSON.stringify({ input, sessionToken: _addrSessionToken }),
     });
     const data = await res.json();
+    if (data.error) console.error('Property search error:', data.error);
     _addrPredictions = data.predictions || [];
     renderAddressDropdown(_addrPredictions);
   } catch (err) {
@@ -2647,7 +2648,7 @@ function resetSession(){
 }
 function showToast(msg,type=''){const t=document.getElementById('toast');t.textContent=msg;t.className='show '+(type||'');setTimeout(()=>{t.className='';},4000);}
 function esc(s){return(s||'').replace(/'/g,"&#39;").replace(/"/g,"&quot;");}
-showStep('step-upload');
+showStep('step-property');
 </script>
 </body>
 </html>

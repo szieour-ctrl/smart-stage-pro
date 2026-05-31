@@ -63,6 +63,34 @@
 [functions."ab723-composite"]
   timeout = 45
 
+
+[functions."property-search"]
+  timeout = 10
+
+[functions."project-manage"]
+  timeout = 15
+
+[functions."upload-staged"]
+  timeout = 30
+
+[functions."compliance-page"]
+  timeout = 15
+
+[functions."download-compliance-zip"]
+  timeout = 60
+
+[[redirects]]
+  from = "/compliance/:projectId"
+  to = "/.netlify/functions/compliance-page"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/compliance"
+  to = "/.netlify/functions/compliance-page"
+  status = 200
+  force = true
+
 [[headers]]
   for = "/*"
   [headers.values]

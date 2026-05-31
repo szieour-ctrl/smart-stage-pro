@@ -333,7 +333,11 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
       <div class="panel-sub">Click any photo thumbnail to set Shot Focus. Draft stages are low quality — iterate freely. Generate Final for MLS-ready downloads.</div>
       <div class="room-queue" id="room-queue"></div>
       <div style="margin-top:16px;">
-        <button class="btn btn-outline btn-sm" onclick="showStep('step-property');resetSession();">+ New Session</button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+          <button class="btn btn-outline btn-sm" onclick="startNewSession()">+ New Session</button>
+          <button class="btn btn-outline btn-sm" onclick="continueProject()" id="continue-project-btn" style="display:none;">+ Add More Rooms</button>
+          <span id="current-project-label" style="font-size:11px;color:var(--muted);display:none;"></span>
+        </div>
       </div>
     </div>
   </div>
@@ -700,8 +704,9 @@ async function lookupOrCreateProject(address) {
           <div>📁 <strong>${data.imageCount || 0}</strong> staged image set${data.imageCount !== 1 ? 's' : ''} in project</div>
           <div>🔗 QR Code Active · Compliance Page Active</div>
           <div>📅 Created ${data.createdAt ? new Date(data.createdAt).toLocaleDateString() : 'Unknown'}</div>
-          <div style="margin-top:8px;">
+          <div style="margin-top:8px;display:flex;gap:16px;align-items:center;flex-wrap:wrap;">
             <a href="${data.complianceUrl}" target="_blank" style="color:var(--gold);font-size:11px;">View Compliance Page →</a>
+            <a href="/.netlify/functions/generate-qr?complianceUrl=${encodeURIComponent(data.complianceUrl)}&address=${encodeURIComponent(address)}&projectId=${data.projectId}" download style="color:var(--muted);font-size:11px;">↓ Download Marketing QR</a>
           </div>
         </div>`;
     } else {
@@ -770,8 +775,9 @@ async function createNewProject(address) {
         <div>🆔 Project ID: <strong>${data.projectId}</strong></div>
         <div>🔗 Compliance URL generated</div>
         <div>📋 QR code will be applied to all Final images</div>
-        <div style="margin-top:8px;">
+        <div style="margin-top:8px;display:flex;gap:16px;align-items:center;flex-wrap:wrap;">
           <a href="${data.complianceUrl}" target="_blank" style="color:var(--gold);font-size:11px;">View Compliance Page →</a>
+          <a href="/.netlify/functions/generate-qr?complianceUrl=${encodeURIComponent(data.complianceUrl)}&address=${encodeURIComponent(address)}&projectId=${data.projectId}" download style="color:var(--muted);font-size:11px;">↓ Download Marketing QR</a>
         </div>
       </div>`;
 
@@ -791,6 +797,58 @@ function continueToUpload() {
   if (SESSION.projectAddress) {
     const bar = document.getElementById('compliance-bar-text');
     if (bar) bar.textContent = `AB 723 Compliant · Project: ${SESSION.projectAddress} · QR codes active on all Finals`;
+  }
+  updateSessionButtons();
+}
+
+// ── SESSION MANAGEMENT ───────────────────────────────────────────────────────
+
+function startNewSession() {
+  // Warn if current session has staged images not yet in a project
+  const unattached = SESSION.rooms.filter(r => r.finalBase64 && !SESSION.projectId);
+  if (unattached.length > 0) {
+    if (!confirm('Starting a new session will clear all current staging work. Any unattached Finals will be lost. Continue?')) return;
+  }
+  resetSession();
+  showStep('step-property');
+}
+
+function continueProject() {
+  // Add more rooms to the current project without resetting staging queue
+  // Just go back to upload step — project context is preserved
+  if (!SESSION.projectId) {
+    showToast('No active project — please search for a property first.', 'error');
+    showStep('step-property');
+    return;
+  }
+  // Clear only originals and rooms, keep project context
+  SESSION.originals = [];
+  SESSION.rooms = [];
+  SESSION.floorplanRoomMap = null;
+  SESSION.photoRoomMap = {};
+  SESSION.anchorRoomId = null;
+  SESSION.anchorImageUrl = null;
+  SESSION.stagingDNA = null;
+  SESSION.openPlanRoomId = null;
+  document.getElementById('thumb-grid').innerHTML = '';
+  document.getElementById('upload-actions').classList.add('hidden');
+  fileInput.value = '';
+  showStep('step-upload');
+  showToast(`Continuing project: ${SESSION.projectAddress} — upload additional rooms`, 'success');
+}
+
+function updateSessionButtons() {
+  const continueBtn = document.getElementById('continue-project-btn');
+  const projectLabel = document.getElementById('current-project-label');
+  if (SESSION.projectId && continueBtn) {
+    continueBtn.style.display = 'inline-block';
+    if (projectLabel) {
+      projectLabel.style.display = 'inline';
+      projectLabel.textContent = `Active: ${SESSION.projectAddress || SESSION.projectId}`;
+    }
+  } else {
+    if (continueBtn) continueBtn.style.display = 'none';
+    if (projectLabel) projectLabel.style.display = 'none';
   }
 }
 
@@ -896,7 +954,7 @@ async function uploadOriginalForCompliance(origObj) {
     const res = await fetch('/.netlify/functions/upload-original', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ imageBase64: origObj.base64, mimeType: origObj.mimeType })
+      body: JSON.stringify({ imageBase64: origObj.base64, mimeType: origObj.mimeType, listingId: SESSION.projectId || null })
     });
     const data = await res.json();
     if (!res.ok || data.error) {
@@ -1431,6 +1489,7 @@ function renderFinalPanel(roomId,enhId){
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
         <button class="btn btn-success btn-sm" onclick="downloadWatermarked('${roomId}','data:image/jpeg;base64,'+getFinalB64('${roomId}','${enhId||''}'),'FINAL_${tag}_'+bName(getOrigName('${roomId}'))+'.jpg','VIRTUALLY STAGED — FINAL')">↓ Final</button>
         <button class="btn btn-outline btn-sm" onclick="downloadSideBySide('${roomId}','${enhId||''}','final')">↓ Final Side-by-Side</button>
+        ${SESSION.complianceUrl ? `<button class="btn btn-outline btn-sm" onclick="downloadMarketingQR()">↓ Marketing QR</button>` : ''}
         <button class="btn btn-ghost btn-sm" onclick="resetFinal('${roomId}','${enhId||''}')">Re-Generate</button>
       </div>
     </div>`;
@@ -1921,6 +1980,27 @@ async function attachFinalToProject(finalBase64, room, orig, enhId) {
   }
 }
 
+// ── MARKETING QR DOWNLOAD ────────────────────────────────────────────────────
+function downloadMarketingQR() {
+  if (!SESSION.complianceUrl) {
+    showToast('No active project — search for a property first to generate a QR code.', 'error');
+    return;
+  }
+  const params = new URLSearchParams({
+    complianceUrl: SESSION.complianceUrl,
+    address: SESSION.projectAddress || '',
+    projectId: SESSION.projectId || '',
+  });
+  // Trigger download via anchor click
+  const a = document.createElement('a');
+  a.href = `/.netlify/functions/generate-qr?${params}`;
+  a.download = `SmartStage_QR_${(SESSION.projectAddress || 'property').replace(/[^a-z0-9]/gi,'_').slice(0,40)}.png`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  showToast('↓ Downloading marketing QR code...', 'success');
+}
+
 function iterateRoom(roomId) {
   const note = document.getElementById('iter-' + roomId)?.value?.trim() || '';
   if (!note) { showToast('Enter revision instructions first.', 'error'); return; }
@@ -1997,6 +2077,11 @@ async function generateFinal(roomId,enhId){
       }
     }
     if (!upscaleData?.upscaledBase64) throw new Error('Upscale failed after 3 attempts');
+
+    // ── PROJECT GUARD — warn if no project selected ──────────────────────
+    if (!SESSION.projectId) {
+      showToast('⚠ No property project active — Finals will not attach to a compliance page. Search for a property first.', 'error');
+    }
 
     // ── AB 723 §10140.8 COMPLIANCE COMPOSITE ──────────────────────────────
     // Apply QR code + disclosure bar to the upscaled final image
@@ -2587,7 +2672,27 @@ function cancelPromptModal() {
 // UTILS
 // ══════════════════════════════════════════
 function showStep(id){['step-property','step-upload','step-intake','step-mapping','step-staging'].forEach(s=>document.getElementById(s)?.classList.add('hidden'));document.getElementById(id)?.classList.remove('hidden');}
-function resetSession(){SESSION.originals=[];SESSION.intake={};SESSION.rooms=[];SESSION.floorplanRoomMap=null;SESSION.photoRoomMap={};SESSION.anchorRoomId=null;SESSION.anchorImageUrl=null;document.getElementById('thumb-grid').innerHTML='';document.getElementById('upload-actions').classList.add('hidden');fileInput.value='';}
+function resetSession(){
+  SESSION.originals=[];
+  SESSION.intake={};
+  SESSION.rooms=[];
+  SESSION.floorplanRoomMap=null;
+  SESSION.photoRoomMap={};
+  SESSION.anchorRoomId=null;
+  SESSION.anchorImageUrl=null;
+  SESSION.stagingDNA=null;
+  SESSION.openPlanRoomId=null;
+  // Clear project — force property search on next session
+  SESSION.projectId=null;
+  SESSION.projectAddress=null;
+  SESSION.complianceUrl=null;
+  SESSION.projectStatus=null;
+  document.getElementById('thumb-grid').innerHTML='';
+  document.getElementById('upload-actions').classList.add('hidden');
+  fileInput.value='';
+  // Reset property search UI
+  resetPropertySearch();
+}
 function showToast(msg,type=''){const t=document.getElementById('toast');t.textContent=msg;t.className='show '+(type||'');setTimeout(()=>{t.className='';},4000);}
 function esc(s){return(s||'').replace(/'/g,"&#39;").replace(/"/g,"&quot;");}
 showStep('step-upload');

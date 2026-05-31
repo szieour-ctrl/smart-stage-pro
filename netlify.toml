@@ -99,3 +99,6 @@
 
 [context.production.environment]
   NODE_VERSION = "18"
+
+[functions."generate-qr"]
+  timeout = 20

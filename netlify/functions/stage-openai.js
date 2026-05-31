@@ -36,9 +36,9 @@ exports.handler = async (event) => {
   };
 
   try {
-    const { imageBase64, mimeType, customPrompt } = JSON.parse(event.body);
-    if (!imageBase64)  return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing imageBase64" }) };
-    if (!customPrompt) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing customPrompt" }) };
+    const { imageBase64, mimeType, stagingPrompt } = JSON.parse(event.body);
+    if (!imageBase64)   return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing imageBase64" }) };
+    if (!stagingPrompt) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing stagingPrompt" }) };
 
     const token  = process.env.NETLIFY_ACCESS_TOKEN;
     const siteId = process.env.NETLIFY_SITE_ID;
@@ -48,7 +48,7 @@ exports.handler = async (event) => {
     const jobId = "oai-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8);
 
     // Fire background function — don't await result
-    await triggerBackground({ jobId, imageBase64, mimeType, customPrompt }, token, siteId);
+    await triggerBackground({ jobId, imageBase64, mimeType, stagingPrompt }, token, siteId);
 
     // Return jobId immediately — client polls check-decor8 for result
     return {

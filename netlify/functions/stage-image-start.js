@@ -50,15 +50,15 @@ Return: {"rooms": [{"id":"...","name":"...","floor":1,"adjacentTo":["..."]}]}` }
 // ── Build multipart for OpenAI ─────────────────────────────────────────────────
 function buildMultipart(boundary, imageBuffer, imageMime, prompt, quality) {
   const parts = [];
-  parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\ngpt-image-1`);
+  parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\ngpt-image-2`);
   parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="prompt"\r\n\r\n${prompt}`);
   parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="n"\r\n\r\n1`);
   parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="size"\r\n\r\n1024x1024`);
-  parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="quality"\r\n\r\n${quality || "low"}`);
+  parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="quality"\r\n\r\n${quality || "high"}`);
   parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="output_format"\r\n\r\npng`);
   const textBuf = Buffer.from(parts.join("\r\n") + "\r\n", "utf8");
   const fileHdr = Buffer.from(
-    `--${boundary}\r\nContent-Disposition: form-data; name="image"; filename="room.jpg"\r\nContent-Type: ${imageMime}\r\n\r\n`, "utf8"
+    `--${boundary}\r\nContent-Disposition: form-data; name="image[]"; filename="room.jpg"\r\nContent-Type: ${imageMime}\r\n\r\n`, "utf8"
   );
   return Buffer.concat([textBuf, fileHdr, imageBuffer, Buffer.from(`\r\n--${boundary}--\r\n`, "utf8")]);
 }
@@ -101,9 +101,9 @@ exports.handler = async (event) => {
     const imageBuffer = Buffer.from(imageBase64, "base64");
     const imageMime = mimeType || "image/jpeg";
     const boundary = "----FormBoundary" + Math.random().toString(36).slice(2);
-    const formData = buildMultipart(boundary, imageBuffer, imageMime, stagingPrompt, quality || "low");
+    const formData = buildMultipart(boundary, imageBuffer, imageMime, stagingPrompt, quality || "high");
 
-    console.log(`Staging: quality=${quality||'low'} imageSize=${Math.round(imageBuffer.length/1024)}KB`);
+    console.log(`Staging: quality=${quality||'high'} imageSize=${Math.round(imageBuffer.length/1024)}KB`);
 
     const result = await httpsRequest({
       hostname: "api.openai.com",

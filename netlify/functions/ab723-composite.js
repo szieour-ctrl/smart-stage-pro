@@ -26,8 +26,8 @@ const sharp  = require("sharp");
 const QRCode = require("qrcode");
 
 // ── LAYOUT CONSTANTS ─────────────────────────────────────────────────────────
-const FOOTER_H   = 72;   // px — disclosure bar height
-const QR_SIZE    = 64;   // px — QR code dimensions (64x64 is scannable on screen)
+const FOOTER_H   = 96;   // px — disclosure bar height
+const QR_SIZE    = 120;   // px — QR code dimensions (64x64 is scannable on screen)
 const QR_MARGIN  = 10;   // px — QR code right/bottom margin inside footer
 const FONT_COLOR_GOLD  = { r: 184, g: 151, b: 90,  alpha: 1 };
 const FONT_COLOR_MUTED = { r: 122, g: 111, b: 99,  alpha: 1 };
@@ -61,10 +61,11 @@ function buildFooterSVG(width, footerH, roomName, originalUrl, tier) {
     "VIRTUALLY STAGED";
 
   // Truncate URL for display — show hostname + path prefix only
-  let shortUrl = originalUrl;
+  const displayUrl = complianceUrl || originalUrl;
+  let shortUrl = displayUrl;
   try {
-    const u = new URL(originalUrl);
-    shortUrl = u.hostname + u.pathname.slice(0, 40) + (u.pathname.length > 40 ? "…" : "");
+    const u = new URL(displayUrl);
+    shortUrl = u.hostname + u.pathname.slice(0, 50) + (u.pathname.length > 50 ? "…" : "");
   } catch(e) {}
 
   return `<svg width="${width}" height="${footerH}" xmlns="http://www.w3.org/2000/svg">
@@ -83,7 +84,7 @@ function buildFooterSVG(width, footerH, roomName, originalUrl, tier) {
 
     <!-- Line 3: URL + QR instruction -->
     <text x="12" y="56" font-family="Arial, sans-serif" font-size="9.5" font-weight="400" fill="#9a8f83">
-      Original unaltered image: ${escSVG(shortUrl.slice(0, 80))}  |  Scan QR code →
+      AB 723 Compliance: ${escSVG(shortUrl)}  |  Scan QR for originals + all staged images →
     </text>
 
     <!-- Compliance badge -->
@@ -128,7 +129,9 @@ function buildBadgeSVG(width, imageH, tier) {
 }
 
 // ── MAIN COMPOSITE ───────────────────────────────────────────────────────────
-async function buildCompliantImage(stagedBase64, originalUrl, roomName, tier) {
+async function buildCompliantImage(stagedBase64, originalUrl, roomName, tier, complianceUrl) {
+  // Use complianceUrl (compliance page) if available, otherwise fall back to originalUrl (Cloudinary)
+  const qrTarget = complianceUrl || originalUrl;
   const imageBuffer = Buffer.from(stagedBase64, "base64");
 
   // Get image dimensions
@@ -137,7 +140,7 @@ async function buildCompliantImage(stagedBase64, originalUrl, roomName, tier) {
   const H = meta.height;
 
   // 1. Generate QR code PNG
-  const qrBuffer = await generateQRBuffer(originalUrl, QR_SIZE);
+  const qrBuffer = await generateQRBuffer(qrTarget, QR_SIZE);
 
   // 2. Build footer SVG
   const footerSvg = buildFooterSVG(W, FOOTER_H, roomName, originalUrl, tier);
@@ -199,6 +202,7 @@ exports.handler = async (event) => {
       stagedBase64,
       mimeType,
       originalUrl,
+      complianceUrl,
       roomName,
       tier,
     } = JSON.parse(event.body || "{}");
@@ -218,7 +222,8 @@ exports.handler = async (event) => {
       stagedBase64,
       originalUrl,
       roomName || "Room",
-      tier || "draft"
+      tier || "draft",
+      complianceUrl || null
     );
 
     console.log(`AB723 composite complete: ${Math.round(compliantBase64.length / 1024)}KB`);

@@ -11,6 +11,7 @@
   "license": "ISC",
   "dependencies": {
     "@netlify/blobs": "^10.7.9",
+    "archiver": "^8.0.0",
     "cloudinary": "^2.10.0",
     "qrcode": "^1.5.4",
     "sharp": "^0.34.5"

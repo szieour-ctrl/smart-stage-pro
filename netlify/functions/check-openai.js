@@ -34,7 +34,25 @@ async function getResult(jobId, token, siteId) {
       res.on("end", () => {
         const raw = Buffer.concat(chunks).toString("utf8");
         console.log(`Direct response size: ${raw.length} preview: ${raw.slice(0,100)}`);
-        try { resolve(JSON.parse(raw)); }
+        try {
+          const parsed = JSON.parse(raw);
+          // Netlify Blobs returns {"url":"https://s3..."} — follow it to get actual data
+          if (parsed?.url && parsed.url.includes("s3") && !parsed.status) {
+            console.log(`S3 indirect URL, fetching: ${parsed.url.slice(0,80)}`);
+            https.request(new URL(parsed.url), (res2) => {
+              const chunks2 = [];
+              res2.on("data", c => chunks2.push(c));
+              res2.on("end", () => {
+                const raw2 = Buffer.concat(chunks2).toString("utf8");
+                console.log(`S3 fetch: ${res2.statusCode} size: ${raw2.length}`);
+                try { resolve(JSON.parse(raw2)); }
+                catch(e) { console.error("S3 parse error:", e.message); resolve(null); }
+              });
+            }).on("error", reject).end();
+            return;
+          }
+          resolve(parsed);
+        }
         catch(e) { resolve(null); }
       });
     });

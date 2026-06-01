@@ -1414,7 +1414,7 @@ function renderRoomQueue(){
     })() : '';
 
     const resultHtml=room.status==='done'?`<div class="result-viewer">
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><span class="tier-label tier-draft">Staged — Decor8</span><span style="font-size:0.72rem;color:var(--muted);">Iterate with revision instructions below. Generate Final for highest resolution MLS download.</span></div>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><span class="tier-label tier-draft">Staged — Draft</span><span style="font-size:0.72rem;color:var(--muted);">Iterate with revision instructions below. Generate Final for highest resolution MLS download.</span></div>
       <div class="result-pair">
         <div class="result-img-wrap"><img src="${orig.dataUrl}" onclick="openLightbox('${room.id}')" title="Click to update Shot Focus" /><div class="result-img-badge">Original</div></div>
         <div class="result-img-wrap"><img src="data:image/jpeg;base64,${room.stagedBase64}" /><div class="result-img-badge staged">Virtually Staged · Draft</div></div>
@@ -1818,10 +1818,10 @@ async function stageRoom(roomId, iterNote) {
     const finalPrompt = approvedPrompt; // may be edited text or '' for no-prompt mode
 
     // Step 2: Call GPT Image 2 via background fire-and-poll
-    room.promptStatus = 'Staging with AI — takes ~60–90 seconds...';
+    room.promptStatus = 'Generating draft — takes ~15 seconds...';
     renderRoomQueue();
 
-    const stagedBase64 = await callStageAPI(sourceBase64, sourceMime, finalPrompt, 'high');
+    const stagedBase64 = await callStageAPI(sourceBase64, sourceMime, finalPrompt, 'low');
     if (!stagedBase64) throw new Error('OpenAI staging failed — no image returned');
 
     room.stagedBase64 = stagedBase64;
@@ -1833,27 +1833,29 @@ async function stageRoom(roomId, iterNote) {
       SESSION.anchorRoomId = room.id;
     }
 
-    // If this is the Open Plan — extract Design DNA from the staged result
+    // Show image immediately — DNA extraction runs in background without blocking
+    await resizeToMatch(room, orig, null, 'stagedBase64', stagedBase64);
+    renderRoomQueue();
+    showToast(`✓ ${room.roomName} staged successfully.`, 'success');
+
+    // If this is the Open Plan — extract Design DNA async (non-blocking)
     if (room.isOpenPlan && !SESSION.stagingDNA) {
       room.dnaStatus = 'extracting';
       renderRoomQueue();
-      showToast(`✓ ${room.roomName} staged — extracting Design DNA...`, 'success');
-      const dna = await extractStagingDNA(decor8Data.stagedBase64, 'image/jpeg');
-      if (dna) {
-        SESSION.stagingDNA = dna;
-        SESSION.anchorImageUrl = decor8Data.decor8ImageUrl || null;
-        room.dnaStatus = 'done';
-        showToast(`✓ Design DNA locked — ${dna.overallStyle}`, 'success');
-      } else {
+      extractStagingDNA(stagedBase64, 'image/jpeg').then(dna => {
+        if (dna) {
+          SESSION.stagingDNA = dna;
+          room.dnaStatus = 'done';
+          showToast(`✓ Design DNA locked — ${dna.overallStyle}`, 'success');
+        } else {
+          room.dnaStatus = 'failed';
+        }
+        renderRoomQueue();
+      }).catch(() => {
         room.dnaStatus = 'failed';
-        showToast(`✓ ${room.roomName} staged. DNA extraction failed — rooms will use style defaults.`, 'success');
-      }
-    } else {
-      showToast(`✓ ${room.roomName} staged with Design DNA continuity.`, 'success');
+        renderRoomQueue();
+      });
     }
-
-    await resizeToMatch(room, orig, null, 'stagedBase64', decor8Data.stagedBase64);
-    renderRoomQueue();
 
   } catch (err) {
     room.status = 'error';
@@ -2238,9 +2240,9 @@ async function runCleanAndStage(roomId) {
     const finalPrompt = promptData.prompt || '';
 
     // Step 3: Stage cleaned room with OpenAI background fire-and-poll
-    room.promptStatus = 'Step 3 of 3 — Staging with AI...';
+    room.promptStatus = 'Step 3 of 3 — Generating draft...';
     renderRoomQueue();
-    const cleanedStagedBase64 = await callStageAPI(cleanedBase64, orig.mimeType, finalPrompt, 'high');
+    const cleanedStagedBase64 = await callStageAPI(cleanedBase64, orig.mimeType, finalPrompt, 'low');
     if (!cleanedStagedBase64) throw new Error('No staged image returned');
     room.stagedBase64 = cleanedStagedBase64;
     room.status = 'done';

@@ -1,17 +1,39 @@
-// group-spatial-read.js — Dispatcher (synchronous)
-// Validates input, generates jobId, triggers background function, returns jobId immediately.
-// Client polls check-spatial-read.js every 3 seconds for result.
-// Background function does the actual Haiku call + prompt assembly.
+// group-spatial-read.js — Dispatcher
+// Compresses images, generates jobId, triggers background, returns jobId immediately.
+// Mirrors stage-openai.js pattern exactly — fire-and-forget to background function.
 
 const https = require("https");
+const sharp = require("sharp");
 
-function triggerBackground(payload, siteUrl) {
-  // Fire-and-forget — do NOT await response body, just confirm connection made.
-  // group-spatial-read-background runs with timeout=900 as a long-running function.
-  // Dispatcher returns jobId immediately; client polls check-spatial-read.
+// Compress each image — same logic as stage-openai.js
+// Keeps total payload under Netlify 6MB limit across multiple images
+async function compressImage(imageBase64, mimeType) {
+  const buffer = Buffer.from(imageBase64, "base64");
+  const meta = await sharp(buffer).metadata();
+  const sizeKB = Math.round(buffer.length / 1024);
+  const maxDim = Math.max(meta.width || 0, meta.height || 0);
+
+  // For group reads: compress more aggressively — target 800px max, 600KB per image
+  // Haiku only needs to read spatial layout, not pixel-level detail
+  if (maxDim <= 800 && sizeKB <= 600) {
+    return { base64: imageBase64, mimeType };
+  }
+
+  const compressed = await sharp(buffer)
+    .resize(800, 800, { fit: "inside", withoutEnlargement: true })
+    .jpeg({ quality: 82 })
+    .toBuffer();
+
+  const compressedKB = Math.round(compressed.length / 1024);
+  console.log(`Image compressed for spatial read: ${meta.width}x${meta.height} ${sizeKB}KB → 800px ${compressedKB}KB`);
+  return { base64: compressed.toString("base64"), mimeType: "image/jpeg" };
+}
+
+async function triggerBackground(payload, siteUrl) {
   const body = Buffer.from(JSON.stringify(payload));
+  console.log(`Triggering group-spatial-read-background: payload ${Math.round(body.length / 1024)}KB`);
   const url = new URL(`${siteUrl}/.netlify/functions/group-spatial-read-background`);
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const req = https.request({
       hostname: url.hostname,
       path: url.pathname,
@@ -21,14 +43,10 @@ function triggerBackground(payload, siteUrl) {
         "Content-Length": body.length,
       }
     }, (res) => {
-      // Drain response so connection closes cleanly, resolve immediately
       res.resume();
-      resolve(res.statusCode);
+      res.on("end", () => resolve(res.statusCode));
     });
-    req.on("error", (err) => {
-      console.warn("Background trigger connection error (non-fatal):", err.message);
-      resolve(200); // treat as fired — background may still run
-    });
+    req.on("error", reject);
     req.write(body);
     req.end();
   });
@@ -56,23 +74,32 @@ exports.handler = async (event) => {
     const siteUrl = process.env.URL || process.env.DEPLOY_URL;
     if (!siteUrl) return { statusCode: 500, headers, body: JSON.stringify({ error: "Site URL not configured" }) };
 
+    // Compress all images before dispatch — keeps payload under 6MB
+    console.log(`Compressing ${images.length} images for spatial read...`);
+    const compressedImages = await Promise.all(
+      images.map(async (img) => {
+        const { base64, mimeType } = await compressImage(img.base64, img.mimeType || "image/jpeg");
+        return { ...img, base64, mimeType };
+      })
+    );
+
+    const totalKB = Math.round(compressedImages.reduce((sum, img) => sum + img.base64.length * 0.75 / 1024, 0));
+    console.log(`Total compressed payload: ~${totalKB}KB for ${images.length} images`);
+
     const jobId = "gsr-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8);
 
-    console.log(`Group spatial read dispatch: jobId=${jobId} images=${images.length} type=${groupType}`);
-
     const triggerStatus = await triggerBackground({
-      jobId, images, groupType, designStyle, colorPalette
+      jobId, images: compressedImages, groupType, designStyle, colorPalette
     }, siteUrl);
 
-    if (triggerStatus !== 202 && triggerStatus !== 200) {
+    console.log(`Job ${jobId}: background trigger status = ${triggerStatus}`);
+
+    if (triggerStatus !== 202) {
+      console.error(`Job ${jobId}: background trigger FAILED with status ${triggerStatus}`);
       return { statusCode: 500, headers, body: JSON.stringify({ error: `Background trigger failed: ${triggerStatus}` }) };
     }
 
-    return {
-      statusCode: 200,
-      headers,
-      body: JSON.stringify({ jobId })
-    };
+    return { statusCode: 200, headers, body: JSON.stringify({ jobId }) };
 
   } catch (err) {
     console.error("group-spatial-read dispatch error:", err.message);

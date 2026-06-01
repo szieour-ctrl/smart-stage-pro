@@ -1636,7 +1636,7 @@ async function callStageAPI(imageBase64, mimeType, prompt, quality) {
   // Step 2: Poll check-openai every 3 seconds — max 4 minutes (80 polls)
   const maxPolls = 80;
   for (let poll = 0; poll < maxPolls; poll++) {
-    await new Promise(r => setTimeout(r, 3000));
+    await new Promise(r => setTimeout(r, 1500));
     const elapsed = Math.round(((poll + 1) * 3));
     try {
       const checkRes = await fetch(`/.netlify/functions/check-openai?jobId=${encodeURIComponent(jobId)}`);

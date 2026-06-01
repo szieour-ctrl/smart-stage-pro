@@ -28,8 +28,19 @@ function addressHash(address) {
   return crypto.createHash("md5").update(normalized).digest("hex").slice(0, 16);
 }
 
-function generateProjectId() {
-  return "proj_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 7);
+function generateProjectId(address) {
+  // Format: szreg_[streetaddr]_[MMDDYY]
+  const now = new Date();
+  const mm = String(now.getMonth() + 1).padStart(2, "0");
+  const dd = String(now.getDate()).padStart(2, "0");
+  const yy = String(now.getFullYear()).slice(2);
+  const dateStr = mm + dd + yy;
+  const addrSlug = (address || "")
+    .toLowerCase()
+    .replace(/,.*$/, "")           // remove city/state
+    .replace(/[^a-z0-9]+/g, "")   // remove spaces and special chars
+    .slice(0, 20);
+  return "szreg_" + addrSlug + "_" + dateStr;
 }
 
 function complianceUrl(projectId, siteUrl) {
@@ -76,7 +87,7 @@ async function createProject(address, agentInfo, siteUrl, env) {
     return { created: false, existing: true, projectId: proj.projectId, complianceUrl: proj.complianceUrl };
   }
 
-  const projectId = generateProjectId();
+  const projectId = generateProjectId(address);
   const cUrl = complianceUrl(projectId, siteUrl);
 
   const project = {

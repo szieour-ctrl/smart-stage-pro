@@ -26,9 +26,9 @@ const sharp  = require("sharp");
 const QRCode = require("qrcode");
 
 // ── LAYOUT CONSTANTS ─────────────────────────────────────────────────────────
-const FOOTER_H   = 96;   // px — disclosure bar height
-const QR_SIZE    = 120;   // px — QR code dimensions (64x64 is scannable on screen)
-const QR_MARGIN  = 10;   // px — QR code right/bottom margin inside footer
+const FOOTER_H   = 72;    // px — slimmer disclosure bar (text only, no QR)
+const QR_SIZE    = 200;   // px — larger QR overlaid directly on image corner
+const QR_MARGIN  = 20;    // px — QR margin from image edge
 const FONT_COLOR_GOLD  = { r: 184, g: 151, b: 90,  alpha: 1 };
 const FONT_COLOR_MUTED = { r: 122, g: 111, b: 99,  alpha: 1 };
 const FOOTER_BG        = { r: 26,  g: 23,  b: 20,  alpha: 1 };
@@ -36,7 +36,9 @@ const FOOTER_BG        = { r: 26,  g: 23,  b: 20,  alpha: 1 };
 // ── QR CODE GENERATION ───────────────────────────────────────────────────────
 async function generateQRBuffer(url, size) {
   // Returns a PNG buffer of the QR code at specified size
-  const qrPng = await QRCode.toBuffer(url, {
+  // Clean the URL to ensure reliable encoding
+  const cleanUrl = String(url || "").trim().replace(/\s+/g, "");
+  const qrPng = await QRCode.toBuffer(cleanUrl, {
     type: "png",
     width: size,
     margin: 1,
@@ -44,7 +46,7 @@ async function generateQRBuffer(url, size) {
       dark: "#FFFFFF",   // white modules on dark background — inverted for dark footer
       light: "#1a1714",  // matches footer background color
     },
-    errorCorrectionLevel: "M",
+    errorCorrectionLevel: "H",  // 30% error recovery — most reliable for printed/screen QR
   });
   return qrPng;
 }
@@ -73,24 +75,18 @@ function buildFooterSVG(width, footerH, roomName, originalUrl, tier, complianceU
     <rect width="${width}" height="${footerH}" fill="#1a1714"/>
 
     <!-- Line 1: Brand + tier + room -->
-    <text x="12" y="22" font-family="Arial, sans-serif" font-size="11" font-weight="400" fill="#b8975a">
-      Smart Stage AI™  |  SZREG  |  ${escSVG(tierLabel)}  |  ${escSVG(roomName)}
+    <text x="16" y="22" font-family="Arial, sans-serif" font-size="13" font-weight="500" fill="#b8975a">
+      Smart Stage PRO™  |  SZREG  |  ${escSVG(tierLabel)}  |  ${escSVG(roomName)}
     </text>
 
     <!-- Line 2: AB 723 disclosure statement -->
-    <text x="12" y="40" font-family="Arial, sans-serif" font-size="9.5" font-weight="400" fill="#9a8f83">
-      Virtually staged image — digitally altered per California AB 723 §10140.8.
+    <text x="16" y="42" font-family="Arial, sans-serif" font-size="11" font-weight="400" fill="#9a8f83">
+      Virtually staged image — digitally altered per California AB 723 §10140.8. Scan QR code for original + all staged images.
     </text>
 
-    <!-- Line 3: URL + QR instruction -->
-    <text x="12" y="56" font-family="Arial, sans-serif" font-size="9.5" font-weight="400" fill="#9a8f83">
-      AB 723 Compliance: ${escSVG(shortUrl)}  |  Scan QR for originals + all staged images →
-    </text>
-
-    <!-- Compliance badge -->
-    <rect x="${width - 195}" y="6" width="120" height="16" rx="2" fill="#2d6a4f"/>
-    <text x="${width - 188}" y="18" font-family="Arial, sans-serif" font-size="8.5" font-weight="500" fill="#ffffff" letter-spacing="0.08em">
-      CA AB 723 COMPLIANT
+    <!-- Line 3: URL -->
+    <text x="16" y="60" font-family="Arial, sans-serif" font-size="10" font-weight="400" fill="#7a6f66">
+      AB 723 Compliance: ${escSVG(shortUrl)}
     </text>
   </svg>`;
 }
@@ -117,12 +113,12 @@ function buildBadgeSVG(width, imageH, tier) {
     tier === "cns"       ? "rgba(74,103,65,0.92)" :
     "rgba(184,151,90,0.92)";
 
-  const badgeW = Math.min(label.length * 9 + 28, 480);
+  const badgeW = Math.min(label.length * 10 + 40, 600);
 
   return `<svg width="${width}" height="${imageH}" xmlns="http://www.w3.org/2000/svg">
-    <!-- Top-left staged badge -->
-    <rect x="12" y="12" width="${badgeW}" height="32" rx="2" fill="${bgColor}"/>
-    <text x="22" y="31" font-family="Arial, sans-serif" font-size="15" font-weight="500" fill="#ffffff">
+    <!-- Top-left staged badge - larger and more prominent -->
+    <rect x="16" y="16" width="${badgeW}" height="44" rx="4" fill="${bgColor}"/>
+    <text x="24" y="45" font-family="Arial, sans-serif" font-size="22" font-weight="600" fill="#ffffff" letter-spacing="0.05em">
       ${escSVG(label)}
     </text>
   </svg>`;
@@ -159,6 +155,10 @@ async function buildCompliantImage(stagedBase64, originalUrl, roomName, tier, co
 
   const totalH = H + FOOTER_H;
 
+  // QR overlaid on bottom-right corner of staged image with dark background pad
+  const qrTop  = H - QR_SIZE - QR_MARGIN;
+  const qrLeft = W - QR_SIZE - QR_MARGIN;
+
   const result = await sharp({
     create: {
       width: W,
@@ -170,16 +170,12 @@ async function buildCompliantImage(stagedBase64, originalUrl, roomName, tier, co
   .composite([
     // Place staged image at top
     { input: imageBuffer,  top: 0, left: 0 },
-    // Badge overlay on staged image
+    // Badge overlay top-left of image
     { input: badgeBuffer,  top: 0, left: 0 },
+    // QR code overlaid bottom-right of image (on top of staged image)
+    { input: qrBuffer, top: qrTop, left: qrLeft },
     // Footer SVG at bottom
     { input: footerBuffer, top: H, left: 0 },
-    // QR code in bottom-right of footer
-    {
-      input: qrBuffer,
-      top:  H + Math.floor((FOOTER_H - QR_SIZE) / 2),
-      left: W - QR_SIZE - QR_MARGIN,
-    },
   ])
   .jpeg({ quality: 93, progressive: true })
   .toBuffer();

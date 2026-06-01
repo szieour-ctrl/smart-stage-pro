@@ -85,7 +85,7 @@ IMPORTANT: spatialDNA is for internal orchestration only — it will never be se
 Design DNA fields (overallStyle through continuityPrompt) are injected into staging prompts for other rooms.`;
 
     const payload = JSON.stringify({
-      model: "claude-opus-4-5",
+      model: "claude-haiku-4-5",
       max_tokens: 1200,
       system: systemPrompt,
       messages: [{

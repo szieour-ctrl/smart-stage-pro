@@ -12,11 +12,13 @@ function buildOpenAIMultipart(imageBuffer, imageMime, prompt, quality) {
   parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\ngpt-image-2`);
   parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="prompt"\r\n\r\n${prompt}`);
   parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="n"\r\n\r\n1`);
-  parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="size"\r\n\r\n1024x1024`);
+  // 1536x1024 — landscape output matches listing photo aspect ratio (3:2)
+  // Prevents the square-crop mismatch that made staged rooms appear taller than original
+  parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="size"\r\n\r\n1536x1024`);
   parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="quality"\r\n\r\n${quality || "low"}`);
   const textBuf = Buffer.from(parts.join("\r\n") + "\r\n", "utf8");
   const fileHdr = Buffer.from(
-    `--${boundary}\r\nContent-Disposition: form-data; name="image[]"; filename="room.jpg"\r\nContent-Type: ${imageMime}\r\n\r\n`,
+    `--${boundary}\r\nContent-Disposition: form-data; name="image[]"; filename="room.png"\r\nContent-Type: ${imageMime}\r\n\r\n`,
     "utf8"
   );
   const closing = Buffer.from(`\r\n--${boundary}--\r\n`, "utf8");
@@ -27,7 +29,7 @@ async function callOpenAI(imageBase64, mimeType, prompt, apiKey, quality) {
   // OpenAI edits endpoint requires PNG — convert regardless of input format
   const rawBuffer = Buffer.from(imageBase64, "base64");
   const imageBuffer = await sharp(rawBuffer).png().toBuffer();
-  console.log(`OpenAI: prompt ${prompt.length} chars, image ${Math.round(rawBuffer.length/1024)}KB → PNG ${Math.round(imageBuffer.length/1024)}KB quality=${quality||"low"}`);
+  console.log(`OpenAI: prompt ${prompt.length} chars, image ${Math.round(rawBuffer.length/1024)}KB → PNG ${Math.round(imageBuffer.length/1024)}KB quality=${quality||"low"} size=1536x1024`);
   const { body, boundary } = buildOpenAIMultipart(imageBuffer, "image/png", prompt, quality);
   return new Promise((resolve, reject) => {
     const req = https.request({

@@ -139,7 +139,7 @@ Return ONLY valid JSON — no markdown, no preamble.
 
   const payload = JSON.stringify({
     model: "claude-haiku-4-5",
-    max_tokens: 2000,
+    max_tokens: 4000,
     messages: [{
       role: "user",
       content: [
@@ -171,8 +171,30 @@ Return ONLY valid JSON — no markdown, no preamble.
   try {
     return JSON.parse(clean);
   } catch(e) {
-    console.error("Spatial pre-read JSON parse failed:", clean.slice(0, 400));
-    throw new Error("Spatial pre-read returned invalid JSON");
+    // Attempt to repair truncated JSON — close any open arrays/objects
+    console.warn("Spatial pre-read JSON truncated — attempting repair. Length:", clean.length);
+    try {
+      let repaired = clean;
+      // Remove trailing partial key-value or comma
+      repaired = repaired.replace(/,\s*$/, '').replace(/"[^"]*$/, '').replace(/:\s*$/, '');
+      // Count unclosed braces and brackets
+      let braces = 0, brackets = 0;
+      for (const ch of repaired) {
+        if (ch === '{') braces++;
+        else if (ch === '}') braces--;
+        else if (ch === '[') brackets++;
+        else if (ch === ']') brackets--;
+      }
+      // Close in reverse order
+      while (brackets > 0) { repaired += ']'; brackets--; }
+      while (braces > 0) { repaired += '}'; braces--; }
+      const parsed = JSON.parse(repaired);
+      console.warn("Spatial pre-read JSON repaired successfully");
+      return parsed;
+    } catch(e2) {
+      console.error("Spatial pre-read JSON parse failed after repair attempt:", clean.slice(0, 400));
+      throw new Error("Spatial pre-read returned invalid JSON — try reducing image count or check max_tokens");
+    }
   }
 }
 

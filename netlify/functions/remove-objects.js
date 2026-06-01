@@ -149,13 +149,13 @@ exports.handler = async (event) => {
   };
 
   try {
-    const { imageBase64, mimeType } = JSON.parse(event.body);
+    const { imageBase64: rawBase64, mimeType: rawMime } = JSON.parse(event.body);
     if (!imageBase64) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing imageBase64" }) };
 
     // Compress if large
     const { base64: readyBase64, mimeType: readyMime } = await prepareImage(imageBase64, mimeType);
-    imageBase64 = readyBase64;
-    mimeType = readyMime;
+    const imageBase64 = readyBase64;
+    const mimeType = readyMime;
 
     const claudeKey = process.env.ANTHROPIC_API_KEY;
     const openaiKey = process.env.OPENAI_API_KEY;

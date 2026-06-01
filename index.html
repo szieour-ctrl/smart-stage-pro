@@ -1724,13 +1724,18 @@ async function stageRoomReplicate(roomId){
 // ── Extract Design DNA from staged Open Plan image ───────────────────────────
 async function extractStagingDNA(stagedBase64, mimeType) {
   try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 25000); // 25s max
     const res = await fetch('/.netlify/functions/extract-staging-dna', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
       body: JSON.stringify({ stagedBase64, mimeType: mimeType || 'image/jpeg' })
     });
+    clearTimeout(timer);
     if (!res.ok) { console.warn('DNA extraction failed:', res.status); return null; }
     const data = await res.json();
+    if (data.error) { console.warn('DNA extraction error:', data.error); return null; }
     return data.dna || null;
   } catch(e) { console.warn('DNA extraction error:', e.message); return null; }
 }

@@ -17,6 +17,17 @@ function httpsRequest(options, body) {
   });
 }
 
+// ── MIME TYPE DETECTOR — prevents Claude image/jpeg vs image/png mismatch ───────
+function detectMime(base64) {
+  try {
+    const buf = Buffer.from(base64.slice(0, 16), 'base64');
+    if (buf[0] === 0x89 && buf[1] === 0x50) return 'image/png';
+    if (buf[0] === 0xFF && buf[1] === 0xD8) return 'image/jpeg';
+    if (buf[0] === 0x52 && buf[1] === 0x49) return 'image/webp';
+  } catch(e) {}
+  return 'image/jpeg';
+}
+
 // ── STYLE LABEL MAP ──────────────────────────────────────────────────────────
 const STYLE_LABELS = {
   'organicmodern':'Organic Modern','transitional':'Transitional','contemporary':'Contemporary',
@@ -391,7 +402,7 @@ exports.handler = async (event) => {
       // Strategies B and C: Claude scans photo for PRESERVE list + fixture names only
       // Zone anchors, rug shapes, zone order are ALL hardcoded in buildOpenPlanPrompt
       console.log("Open plan: scanning photo for PRESERVE list + fixtures, strategy:", openPlanStrategy || 'guided');
-      const metadata = await extractOpenPlanMetadata({ imageBase64, mimeType, claudeKey });
+      const metadata = await extractOpenPlanMetadata({ imageBase64, mimeType: detectMime(imageBase64), claudeKey });
 
       const prompt = buildOpenPlanPrompt({
         preserveList:     metadata.preserveList || '',
@@ -420,7 +431,7 @@ exports.handler = async (event) => {
       const prompt = await buildDNADerivedPrompt({
         anchorImageUrl,
         vacantImageBase64: imageBase64,
-        mimeType,
+        mimeType: detectMime(imageBase64),
         derivedZone,
         roomName,
         designStyle,

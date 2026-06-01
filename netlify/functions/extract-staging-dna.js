@@ -27,8 +27,19 @@ exports.handler = async (event) => {
   };
 
   try {
-    const { stagedBase64, mimeType } = JSON.parse(event.body);
+    const { stagedBase64, mimeType: rawMimeType } = JSON.parse(event.body);
     if (!stagedBase64) return { statusCode: 400, headers, body: JSON.stringify({ error: "stagedBase64 required" }) };
+    // Detect actual image type from base64 magic bytes — prevents Claude mime mismatch error
+    function detectMime(b64) {
+      try {
+        const buf = Buffer.from(b64.slice(0, 16), 'base64');
+        if (buf[0] === 0x89 && buf[1] === 0x50) return 'image/png';
+        if (buf[0] === 0xFF && buf[1] === 0xD8) return 'image/jpeg';
+        if (buf[0] === 0x52 && buf[1] === 0x49) return 'image/webp';
+      } catch(e) {}
+      return rawMimeType || 'image/jpeg';
+    }
+    const mimeType = detectMime(stagedBase64);
 
     const claudeKey = process.env.ANTHROPIC_API_KEY;
     if (!claudeKey) return { statusCode: 500, headers, body: JSON.stringify({ error: "ANTHROPIC_API_KEY not configured" }) };

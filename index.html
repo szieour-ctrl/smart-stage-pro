@@ -167,6 +167,20 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
 .op-strategy-wrap{display:flex;align-items:center;gap:8px;margin-bottom:12px;padding:10px 14px;background:var(--cream);border:1px solid var(--border);border-radius:3px;}
 .op-strategy-label{font-size:0.72rem;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);font-weight:600;white-space:nowrap;}
 .op-strategy-btn{font-size:0.72rem;padding:4px 10px;border-radius:2px;border:1px solid var(--border);background:#fff;color:var(--ink);cursor:pointer;letter-spacing:0.04em;transition:all 0.15s;}
+.group-thumb-row{display:flex;flex-wrap:wrap;gap:10px;margin-top:8px;}
+.group-thumb-item{position:relative;width:90px;cursor:pointer;border-radius:3px;overflow:hidden;border:2px solid transparent;transition:border-color 0.15s;}
+.group-thumb-item.selected{border-color:var(--gold);}
+.group-thumb-item img{width:90px;height:68px;object-fit:cover;display:block;}
+.group-thumb-label{font-size:0.65rem;color:var(--muted);padding:3px 4px;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;background:#faf9f7;}
+.group-thumb-check{position:absolute;top:4px;right:4px;width:18px;height:18px;background:var(--gold);border-radius:50%;display:none;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:var(--ink);}
+.group-thumb-item.selected .group-thumb-check{display:flex;}
+.group-prompt-card{background:#faf9f7;border:1px solid var(--border);border-radius:4px;padding:12px 14px;margin-bottom:10px;}
+.group-prompt-label{font-size:0.72rem;font-weight:600;color:var(--gold);margin-bottom:6px;letter-spacing:0.04em;}
+.group-prompt-ta{width:100%;min-height:140px;border:1px solid var(--border);border-radius:3px;padding:10px 12px;font-family:'DM Sans',sans-serif;font-size:0.78rem;color:var(--ink);background:#fff;resize:vertical;line-height:1.6;box-sizing:border-box;}
+.group-prompt-ta:focus{outline:none;border-color:var(--gold);}
+.group-conflict-note{font-size:0.72rem;color:#7a6000;background:#fff8e7;border:1px solid #f0d080;border-radius:3px;padding:6px 10px;margin-bottom:8px;}
+.group-stage-btn{font-size:0.75rem;padding:5px 12px;background:var(--gold);border:none;border-radius:3px;color:var(--ink);font-weight:600;cursor:pointer;margin-top:6px;}
+.group-stage-btn:hover{opacity:0.88;}
 .op-strategy-btn.active{background:var(--gold);color:var(--ink);border-color:var(--gold);font-weight:600;}
 .op-strategy-desc{font-size:0.68rem;color:var(--muted);margin-left:4px;}
 /* ── Prompt Preview Modal ── */
@@ -210,28 +224,28 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
   <div class="pm-inner">
     <div class="pm-header">
       <div class="pm-title">⏸ Claude Vision — Review Before Staging</div>
-      <div class="pm-badge">Review Before Decor8</div>
+      <div class="pm-badge">Review Before Staging</div>
     </div>
     <div class="pm-body">
       <div class="pm-room-label">Room</div>
       <div class="pm-room-name" id="pm-room-name">—</div>
       <div class="pm-section-label">Session Parameters Sent to Claude</div>
       <div class="pm-meta" id="pm-meta"></div>
-      <div class="pm-section-label">Claude Vision's Staging Prompt → Will Be Sent to Decor8</div>
+      <div class="pm-section-label">Staging Prompt → Will Be Sent to GPT Image 2</div>
       <div class="pm-prompt-wrap">
         <textarea class="pm-prompt" id="pm-prompt" rows="10" spellcheck="false"></textarea>
       </div>
-      <div class="pm-prompt-hint">✏️ <strong>Edit this prompt directly before staging.</strong> Claude Vision generated this by reading your photo. You can add instructions, remove placement details, or change any element. Your edited version goes to Decor8 — not Claude's original. Every word influences what gets placed and where. Use the <strong>Clear Prompt</strong> button to let Decor8 stage using its own intelligence with no text guidance.</div>
+      <div class="pm-prompt-hint">✏️ <strong>Edit this prompt directly before staging.</strong> Claude Vision generated this by reading your photo — for group sessions, the master spatial plan shaped this prompt. You can add instructions, remove placement details, or change any element. What you see here is exactly what goes to GPT Image 2. Every word influences what gets placed and where. Use the <strong>Clear Prompt</strong> button to stage with no text guidance.</div>
       <div class="pm-warning" id="pm-open-plan-warning" style="display:none;">⚠ <strong>Open Plan detected.</strong> Claude Vision read this as a multi-zone space. Watch for zone crowding — if the prompt places dining furniture AND living furniture in the same area, delete the placement instructions and keep only style/material descriptions. Decor8's native openplan logic handles zone separation better than text instructions.</div>
       <div class="pm-section-label" style="margin-top:18px;">Decor8 API JSON — Exact Payload Being Sent</div>
       <pre id="pm-api-payload" style="background:#1a1a1a;color:#e8e8e8;padding:14px;border-radius:3px;font-size:0.74rem;line-height:1.6;overflow-x:auto;white-space:pre-wrap;word-break:break-word;margin:0;"></pre>
       <div style="font-size:0.68rem;color:var(--muted);margin-top:6px;">These are the exact fields Decor8 receives. <strong>input_image_url</strong> is assigned at upload. If prompt is present, design_style and color_scheme are not sent.</div>
     </div>
     <div class="pm-footer">
-      <div class="pm-footer-left" id="pm-cost-note">Approving sends to Decor8 · 1 Credit · ~45 seconds</div>
+      <div class="pm-footer-left" id="pm-cost-note">Approving sends to GPT Image 2 · 1 Credit · ~15 seconds</div>
       <div class="pm-footer-right">
         <button class="btn btn-ghost" onclick="cancelPromptModal()">✕ Cancel — Don't Stage</button>
-        <button class="btn btn-outline" onclick="clearPromptAndStage()" title="Send to Decor8 with NO custom prompt — use Decor8 native intelligence only">Stage Without Prompt</button>
+        <button class="btn btn-outline" onclick="clearPromptAndStage()" title="Send to GPT Image 2 with NO custom prompt">Stage Without Prompt</button>
         <button class="btn btn-primary" onclick="approvePromptAndStage()">Approve → Stage It</button>
       </div>
     </div>
@@ -328,6 +342,22 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
       <div class="summary-grid" id="summary-grid"></div>
       <div class="mls-disclosure-note">⚖️ <span><strong>MetroList Rule 11.6.1 Active:</strong> Every staged/enhanced image includes disclosure. Publish original immediately before altered version in Matrix.</span></div>
     </div>
+    <div class="panel" id="group-session-panel">
+      <div class="panel-title">Multi-Angle Group Staging <span style="font-size:0.72rem;font-weight:400;color:var(--muted);margin-left:8px;">Optional — for Open Plan or Bedroom multi-angle sets</span></div>
+      <div class="panel-sub" id="group-session-sub">Select 2–5 photos that show the <strong>same space from different angles</strong>. Claude reads all angles simultaneously to build one Master Staging Plan — then writes individual prompts for each image using visible landmarks as anchors.</div>
+      <div id="group-select-area" style="margin-top:12px;"></div>
+      <div id="group-actions" style="margin-top:12px;display:none;gap:8px;flex-wrap:wrap;align-items:center;">
+        <select id="group-type-select" onchange="SESSION.groupType=this.value" style="font-size:0.75rem;padding:4px 8px;border:1px solid var(--border);border-radius:3px;background:#fff;">
+          <option value="openplan">Open Plan (Kitchen/Dining/Living)</option>
+          <option value="bedroom">Bedroom (multi-angle)</option>
+        </select>
+        <button class="btn btn-primary btn-sm" id="group-generate-btn" onclick="runGroupSpatialRead()">&#x1F50D; Generate Group Staging Plan</button>
+        <button class="btn btn-outline btn-sm" onclick="clearGroupSession()">Clear Group</button>
+        <span id="group-status" style="font-size:0.75rem;color:var(--muted);"></span>
+      </div>
+      <div id="group-results-area" style="margin-top:12px;display:none;"></div>
+    </div>
+
     <div class="panel">
       <div class="panel-title">Room Staging Queue</div>
       <div class="panel-sub">Click any photo thumbnail to set Shot Focus. Draft stages are low quality — iterate freely. Generate Final for MLS-ready downloads.</div>
@@ -553,6 +583,12 @@ const SESSION = {
   anchorImageUrl: null,
   openPlanRoomId: null,
   openPlanStrategy: 'full',
+  // Multi-angle group session
+  groupMode: false,           // true when user has activated group session
+  groupImages: [],            // [{ roomId, imageIndex, label, base64, mimeType }]
+  groupSpatialPlan: null,     // master spatial JSON from group-spatial-read
+  groupPrompts: [],           // [{ imageIndex, imageLabel, promptText }] — editable
+  groupType: 'openplan',      // 'openplan' | 'bedroom'
   // Project / compliance fields
   projectId: null,
   projectAddress: null,
@@ -831,6 +867,11 @@ function continueProject() {
   SESSION.anchorImageUrl = null;
   SESSION.stagingDNA = null;
   SESSION.openPlanRoomId = null;
+  SESSION.groupMode = false;
+  SESSION.groupImages = [];
+  SESSION.groupSpatialPlan = null;
+  SESSION.groupPrompts = [];
+  SESSION.groupType = 'openplan';
   document.getElementById('thumb-grid').innerHTML = '';
   document.getElementById('upload-actions').classList.add('hidden');
   fileInput.value = '';
@@ -1195,6 +1236,7 @@ function buildRoomQueue(){
   const openPlanRoom = SESSION.rooms.find(r => r.isOpenPlan);
   SESSION.openPlanRoomId = openPlanRoom?.id || null;
   renderRoomQueue();
+  renderGroupSelectArea();
 }
 
 function isOpenPlanStaged() {
@@ -1722,15 +1764,28 @@ async function stageRoomReplicate(roomId){
 // STAGE ROOM
 // ══════════════════════════════════════════
 // ── Extract Design DNA from staged Open Plan image ───────────────────────────
+async function detectMimeType(base64) {
+  // Detect actual image type from base64 magic bytes to prevent Claude mime mismatch error
+  try {
+    const header = atob(base64.slice(0, 16));
+    const bytes = header.split('').map(c => c.charCodeAt(0));
+    if (bytes[0] === 0x89 && bytes[1] === 0x50) return 'image/png';
+    if (bytes[0] === 0xFF && bytes[1] === 0xD8) return 'image/jpeg';
+    if (bytes[0] === 0x52 && bytes[1] === 0x49) return 'image/webp';
+  } catch(e) {}
+  return 'image/jpeg';
+}
+
 async function extractStagingDNA(stagedBase64, mimeType) {
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 25000); // 25s max
+    const detectedMime = await detectMimeType(stagedBase64);
     const res = await fetch('/.netlify/functions/extract-staging-dna', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       signal: controller.signal,
-      body: JSON.stringify({ stagedBase64, mimeType: mimeType || 'image/jpeg' })
+      body: JSON.stringify({ stagedBase64, mimeType: detectedMime })
     });
     clearTimeout(timer);
     if (!res.ok) { console.warn('DNA extraction failed:', res.status); return null; }
@@ -2524,6 +2579,230 @@ function setOpenPlanStrategy(strategy) {
   renderRoomQueue();
   showToast(`Open Plan strategy: ${strategy === 'native' ? 'A · Native Decor8' : strategy === 'guided' ? 'B · Guided Zoning' : 'C · Full Placement'}`, 'success');
 }
+
+// ══════════════════════════════════════════
+// GROUP SESSION — MULTI-ANGLE SPATIAL READ
+// ══════════════════════════════════════════
+
+function renderGroupSelectArea() {
+  const area = document.getElementById('group-select-area');
+  const actions = document.getElementById('group-actions');
+  if (!area) return;
+
+  const photos = SESSION.originals.filter(o => !o.isFloorplan);
+  if (!photos.length) { area.innerHTML = '<div style="font-size:0.75rem;color:var(--muted);">Upload photos first, then return here to group them.</div>'; return; }
+
+  const selectedIds = new Set(SESSION.groupImages.map(g => g.originalId));
+
+  let html = '<div style="font-size:0.75rem;color:var(--muted);margin-bottom:8px;">Click photos to add to group (2–5 images):</div>';
+  html += '<div class="group-thumb-row">';
+  photos.forEach(orig => {
+    const sel = selectedIds.has(orig.id);
+    const idx = SESSION.groupImages.findIndex(g => g.originalId === orig.id);
+    const badge = sel ? (idx + 1) : '';
+    html += `<div class="group-thumb-item ${sel ? 'selected' : ''}" onclick="toggleGroupImage('${orig.id}')" title="${escHtml(orig.name)}">
+      <img src="${orig.dataUrl}" />
+      <div class="group-thumb-label">${escHtml(orig.name.length > 14 ? orig.name.slice(0,13)+'…' : orig.name)}</div>
+      <div class="group-thumb-check">${badge}</div>
+    </div>`;
+  });
+  html += '</div>';
+
+  area.innerHTML = html;
+  if (actions) actions.style.display = SESSION.groupImages.length >= 2 ? 'flex' : 'none';
+}
+
+function toggleGroupImage(origId) {
+  const orig = SESSION.originals.find(o => o.id === origId);
+  if (!orig) return;
+  const idx = SESSION.groupImages.findIndex(g => g.originalId === origId);
+  if (idx >= 0) {
+    SESSION.groupImages.splice(idx, 1);
+  } else {
+    if (SESSION.groupImages.length >= 5) { showToast('Maximum 5 images per group.', 'error'); return; }
+    const room = SESSION.rooms.find(r => r.originalId === origId);
+    SESSION.groupImages.push({
+      originalId: origId,
+      roomId: room?.id || null,
+      label: room?.roomName || orig.name,
+      base64: orig.base64,
+      mimeType: orig.mimeType,
+      fileName: orig.name,
+    });
+  }
+  renderGroupSelectArea();
+}
+
+function clearGroupSession() {
+  SESSION.groupImages = [];
+  SESSION.groupSpatialPlan = null;
+  SESSION.groupPrompts = [];
+  SESSION.groupMode = false;
+  renderGroupSelectArea();
+  const resultsArea = document.getElementById('group-results-area');
+  if (resultsArea) { resultsArea.style.display = 'none'; resultsArea.innerHTML = ''; }
+  const statusEl = document.getElementById('group-status');
+  if (statusEl) statusEl.textContent = '';
+  showToast('Group session cleared.', '');
+}
+
+async function runGroupSpatialRead() {
+  if (SESSION.groupImages.length < 2) { showToast('Select at least 2 images for group read.', 'error'); return; }
+
+  const btn = document.getElementById('group-generate-btn');
+  const statusEl = document.getElementById('group-status');
+  if (btn) btn.disabled = true;
+  if (statusEl) statusEl.textContent = 'Reading ' + SESSION.groupImages.length + ' angles with Claude Vision...';
+
+  try {
+    const i = SESSION.intake;
+    const res = await fetch('/.netlify/functions/group-spatial-read', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        images: SESSION.groupImages.map(g => ({
+          base64: g.base64,
+          mimeType: g.mimeType,
+          label: g.label,
+          fileName: g.fileName,
+        })),
+        groupType: SESSION.groupType || 'openplan',
+        designStyle: i.style_label || 'Organic Modern',
+        colorPalette: i.palette_label || 'Warm Neutrals',
+      })
+    });
+
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || 'Group spatial read failed');
+
+    SESSION.groupSpatialPlan = data.spatialPlan;
+    SESSION.groupPrompts = data.perImagePrompts;
+    SESSION.groupMode = true;
+
+    if (statusEl) statusEl.textContent = `✓ ${data.anglesRead} angles read · ${data.conflictsResolved} conflicts resolved`;
+
+    renderGroupResults(data);
+    showToast(`✓ Group staging plan built — ${data.anglesRead} prompts ready for review.`, 'success');
+
+  } catch (err) {
+    if (statusEl) statusEl.textContent = 'Error: ' + err.message;
+    showToast('Group read failed: ' + err.message, 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+function renderGroupResults(data) {
+  const resultsArea = document.getElementById('group-results-area');
+  if (!resultsArea) return;
+
+  const conflicts = data.spatialPlan?.conflictsDetected || [];
+  let html = '';
+
+  if (conflicts.length) {
+    html += '<div class="group-conflict-note">⚡ <strong>' + conflicts.length + ' cross-angle conflict' + (conflicts.length > 1 ? 's' : '') + ' resolved:</strong> ';
+    html += conflicts.map(c => c.element + ' — ' + c.resolution).join(' · ');
+    html += '</div>';
+  }
+
+  html += '<div style="font-size:0.75rem;color:var(--muted);margin-bottom:10px;">Review and edit each prompt below. These are the exact instructions going to GPT Image 2 — every word matters. When ready, click Stage to fire each image.</div>';
+
+  data.perImagePrompts.forEach((p, i) => {
+    const gImg = SESSION.groupImages[i];
+    const roomId = gImg?.roomId || '';
+    html += `<div class="group-prompt-card">
+      <div class="group-prompt-label">${escHtml(p.imageLabel)}</div>
+      <textarea class="group-prompt-ta" id="group-prompt-ta-${i}" rows="7">${escHtml(p.promptText)}</textarea>
+      ${roomId ? `<button class="group-stage-btn" onclick="stageGroupImage(${i}, '${roomId}')">Stage This Image →</button>` : '<div style="font-size:0.72rem;color:var(--muted);margin-top:6px;">Room not matched — stage manually from queue below.</div>'}
+    </div>`;
+  });
+
+  html += `<div style="display:flex;gap:8px;margin-top:4px;">
+    <button class="btn btn-primary btn-sm" onclick="stageAllGroupImages()">Stage All ${data.perImagePrompts.length} Images →</button>
+  </div>`;
+
+  resultsArea.innerHTML = html;
+  resultsArea.style.display = 'block';
+}
+
+async function stageGroupImage(promptIndex, roomId) {
+  const ta = document.getElementById('group-prompt-ta-' + promptIndex);
+  const promptText = ta ? ta.value.trim() : (SESSION.groupPrompts[promptIndex]?.promptText || '');
+  if (!promptText) { showToast('Prompt is empty.', 'error'); return; }
+  if (!roomId) { showToast('No room matched for this image.', 'error'); return; }
+
+  const room = SESSION.rooms.find(r => r.id === roomId);
+  const orig = room ? SESSION.originals.find(o => o.id === room.originalId) : null;
+  if (!room || !orig) { showToast('Room not found.', 'error'); return; }
+
+  // Store the group-derived prompt on the room so it bypasses generate-staging-prompt
+  room.groupPromptOverride = promptText;
+  await stageRoomWithPrompt(roomId, promptText);
+}
+
+async function stageAllGroupImages() {
+  const unmatched = SESSION.groupImages.filter(g => !g.roomId);
+  if (unmatched.length) {
+    showToast(unmatched.length + ' image(s) not matched to rooms — stage those manually from queue.', 'error');
+  }
+  for (let i = 0; i < SESSION.groupImages.length; i++) {
+    const gImg = SESSION.groupImages[i];
+    if (!gImg.roomId) continue;
+    const ta = document.getElementById('group-prompt-ta-' + i);
+    const promptText = ta ? ta.value.trim() : (SESSION.groupPrompts[i]?.promptText || '');
+    if (promptText) {
+      await stageRoomWithPrompt(gImg.roomId, promptText);
+      await new Promise(r => setTimeout(r, 800)); // brief gap between fires
+    }
+  }
+}
+
+// Stages a room using a pre-approved prompt — skips generate-staging-prompt entirely
+async function stageRoomWithPrompt(roomId, promptText) {
+  const room = SESSION.rooms.find(r => r.id === roomId);
+  const orig = SESSION.originals.find(o => o.id === room?.originalId);
+  if (!room || !orig) return;
+
+  room.status = 'processing';
+  room.promptStatus = 'Staging with GPT Image 2...';
+  renderRoomQueue();
+
+  try {
+    const stagedBase64 = await callStageAPI(orig.base64, orig.mimeType, promptText, 'low');
+    if (!stagedBase64) throw new Error('No image returned');
+
+    room.stagedBase64 = stagedBase64;
+    room.status = 'done';
+    room.promptStatus = null;
+    room.approvedDNA = SESSION.intake.style_label + ' style, ' + SESSION.intake.palette_label + ' palette.';
+    room.lastPrompt = promptText;
+
+    if (!SESSION.anchorRoomId) SESSION.anchorRoomId = room.id;
+
+    await resizeToMatch(room, orig, null, 'stagedBase64', stagedBase64);
+    renderRoomQueue();
+    showToast('✓ ' + room.roomName + ' staged.', 'success');
+
+    // DNA extraction if open plan
+    if (room.isOpenPlan && !SESSION.stagingDNA) {
+      room.dnaStatus = 'extracting';
+      renderRoomQueue();
+      extractStagingDNA(stagedBase64, 'image/jpeg').then(dna => {
+        if (dna) { SESSION.stagingDNA = dna; room.dnaStatus = 'done'; showToast('✓ Design DNA locked — ' + dna.overallStyle, 'success'); }
+        else room.dnaStatus = 'failed';
+        renderRoomQueue();
+      }).catch(() => { room.dnaStatus = 'failed'; renderRoomQueue(); });
+    }
+
+  } catch (err) {
+    room.status = 'error';
+    room.promptStatus = null;
+    renderRoomQueue();
+    showToast('Staging error: ' + err.message, 'error');
+  }
+}
+
+
 
 // ══════════════════════════════════════════
 // PROMPT PREVIEW MODAL

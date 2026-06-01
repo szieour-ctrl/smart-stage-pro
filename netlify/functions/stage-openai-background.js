@@ -1,9 +1,9 @@
 // stage-openai-background.js — Netlify Background Function
-// Called by stage-openai.js dispatcher — runs up to 15 minutes (no timeout issue)
-// Calls GPT Image 2, stores result in Netlify Blobs
+// Calls GPT Image 2, stores result in Netlify Blobs via SDK
 // Client polls check-openai.js every 3 seconds for result
 
 const https = require("https");
+const { getStore } = require("@netlify/blobs");
 
 function buildOpenAIMultipart(imageBuffer, imageMime, prompt) {
   const boundary = "----OAIBoundary" + Math.random().toString(36).slice(2);
@@ -53,36 +53,15 @@ async function callOpenAI(imageBase64, mimeType, prompt, apiKey) {
   });
 }
 
-// Store result in Netlify Blobs via REST API
-async function storeResult(jobId, data, token, siteId) {
-  const body = Buffer.from(JSON.stringify(data));
-  await new Promise((resolve, reject) => {
-    const req = https.request({
-      hostname: "api.netlify.com",
-      path: `/api/v1/sites/${siteId}/blobs/${encodeURIComponent("job-" + jobId)}`,
-      method: "PUT",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-        "Content-Length": body.length,
-      }
-    }, (res) => { res.resume(); res.on("end", resolve); });
-    req.on("error", reject);
-    req.write(body);
-    req.end();
-  });
-}
-
 exports.handler = async (event) => {
-  const token     = process.env.NETLIFY_ACCESS_TOKEN;
-  const siteId    = process.env.NETLIFY_SITE_ID;
   const openAIKey = process.env.OPENAI_API_KEY;
-
   let jobId;
   try {
     const { jobId: jId, imageBase64, mimeType, stagingPrompt } = JSON.parse(event.body);
     jobId = jId;
     console.log(`Job ${jobId} starting...`);
+
+    const store = getStore("staging-jobs");
 
     // Call GPT Image 2
     const result = await callOpenAI(imageBase64, mimeType, stagingPrompt, openAIKey);
@@ -90,14 +69,15 @@ exports.handler = async (event) => {
     if (!stagedBase64) throw new Error("No image data in OpenAI response");
     console.log(`Job ${jobId}: complete ${Math.round(stagedBase64.length/1024)}KB`);
 
-    // Store result in Blobs
-    await storeResult(jobId, { status: "done", stagedBase64 }, token, siteId);
+    // Store result via SDK — no presigned URL expiry issues
+    await store.setJSON(jobId, { status: "done", stagedBase64 });
     console.log(`Job ${jobId}: stored in Blobs`);
 
   } catch (err) {
     console.error(`Job ${jobId} error:`, err.message);
-    if (jobId && token && siteId) {
-      try { await storeResult(jobId, { status: "error", error: err.message }, token, siteId); } catch(e) {}
-    }
+    try {
+      const store = getStore("staging-jobs");
+      await store.setJSON(jobId, { status: "error", error: err.message });
+    } catch(e) {}
   }
 };

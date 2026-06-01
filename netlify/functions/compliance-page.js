@@ -26,7 +26,7 @@ function formatDate(isoString) {
 }
 
 function renderPage(project, projectId) {
-  const agentName     = project.agentName     || process.env.AGENT_NAME     || "Smart Stage AI™";
+  const agentName     = project.agentName     || process.env.AGENT_NAME     || "Smart Stage PRO™";
   const agentBrokerage= project.agentBrokerage|| process.env.AGENT_BROKERAGE|| "";
   const agentDRE      = project.agentDRE      || process.env.AGENT_DRE      || "";
   const agentLogoUrl  = project.agentLogoUrl  || process.env.AGENT_LOGO_URL || "";
@@ -156,7 +156,7 @@ function renderPage(project, projectId) {
     for the property listed below, in compliance with California Business and Professions Code §10140.8
     (Assembly Bill 723, effective October 10, 2025). All staged images have been digitally altered by
     adding virtual furniture and décor for illustrative purposes only. The property is sold as shown
-    in the original photographs. This page is maintained by Smart Stage PRO™ powered by Smart Stage AI™.
+    in the original photographs. This page is maintained by Smart Stage PRO™ powered by SZREG.
   </p>
 </div>
 
@@ -206,7 +206,7 @@ function renderPage(project, projectId) {
   </div>
   <hr class="legal-divider">
   <div class="legal-bottom">
-    Smart Stage PRO™ is powered by Smart Stage AI™ · Compliance page generated automatically ·
+    Smart Stage PRO™ is powered by SZREG · Compliance page generated automatically ·
     Page URL: <a href="javascript:void(0)" onclick="navigator.clipboard.writeText(window.location.href)">${process.env.URL || "https://smart-stage-pro.netlify.app"}/compliance/${projectId}</a> ·
     For questions about this disclosure contact ${agentName}${agentDRE ? " (DRE #" + agentDRE + ")" : ""}.
   </div>
@@ -227,7 +227,7 @@ h2{color:#1a1714;margin-bottom:12px;}p{color:#7a6f63;font-size:14px;line-height:
 <div class="box">
   <h2>Compliance Page Not Found</h2>
   <p>The project <strong>${projectId}</strong> could not be located. This page may have expired or the project ID may be incorrect.</p>
-  <p style="margin-top:16px;font-size:12px;color:#b0a090;">Smart Stage PRO™ · Smart Stage AI™</p>
+  <p style="margin-top:16px;font-size:12px;color:#b0a090;">Smart Stage PRO™ · SZREG</p>
 </div>
 </body></html>`;
 }

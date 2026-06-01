@@ -2653,7 +2653,6 @@ async function runGroupSpatialRead() {
   const statusEl = document.getElementById('group-status');
   if (btn) btn.disabled = true;
 
-  // Status messages cycle while polling
   const statusMessages = [
     'Reading ' + SESSION.groupImages.length + ' angles with Claude Vision...',
     'Detecting cross-angle conflicts...',
@@ -2670,9 +2669,7 @@ async function runGroupSpatialRead() {
 
   try {
     const i = SESSION.intake;
-
-    // Step 1: Dispatch — returns jobId immediately
-    const dispatchRes = await fetch('/.netlify/functions/group-spatial-read', {
+    const res = await fetch('/.netlify/functions/group-spatial-read', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -2688,40 +2685,14 @@ async function runGroupSpatialRead() {
       })
     });
 
-    const dispatch = await dispatchRes.json();
-    if (!dispatchRes.ok || dispatch.error) throw new Error(dispatch.error || 'Dispatch failed');
-    const jobId = dispatch.jobId;
-
-    // Step 2: Poll check-spatial-read every 3 seconds until done or error
-    let data = null;
-    let attempts = 0;
-    const maxAttempts = 40; // 40 × 3s = 2 minutes max
-
-    while (attempts < maxAttempts) {
-      await new Promise(r => setTimeout(r, 3000));
-      attempts++;
-
-      const pollRes = await fetch(`/.netlify/functions/check-spatial-read?jobId=${jobId}`);
-      const pollData = await pollRes.json();
-
-      if (pollData.status === 'done') {
-        data = pollData;
-        break;
-      }
-      if (pollData.status === 'error') {
-        throw new Error(pollData.error || 'Spatial read failed in background');
-      }
-      // status === 'pending' or 'processing' — keep polling
-    }
-
-    if (!data) throw new Error('Spatial read timed out — try with fewer images');
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || 'Group spatial read failed');
 
     SESSION.groupSpatialPlan = data.spatialPlan;
     SESSION.groupPrompts = data.perImagePrompts;
     SESSION.groupMode = true;
 
     if (statusEl) statusEl.textContent = `✓ ${data.anglesRead} angles read · ${data.conflictsResolved} conflicts resolved`;
-
     renderGroupResults(data);
     showToast(`✓ Group staging plan built — ${data.anglesRead} prompts ready for review.`, 'success');
 

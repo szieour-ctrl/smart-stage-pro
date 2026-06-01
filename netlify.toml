@@ -39,7 +39,7 @@
   timeout = 10
 
 [functions."group-spatial-read"]
-  timeout = 30
+  timeout = 900
 [functions."check-openai"]
   timeout = 10
 

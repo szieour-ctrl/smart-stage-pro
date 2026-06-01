@@ -5,15 +5,15 @@
 
 const https = require("https");
 
-async function triggerBackground(payload, token, siteId) {
+async function triggerBackground(payload, siteUrl) {
   const body = Buffer.from(JSON.stringify(payload));
+  const url = new URL(`${siteUrl}/.netlify/functions/stage-openai-background`);
   return new Promise((resolve, reject) => {
     const req = https.request({
-      hostname: "api.netlify.com",
-      path: `/api/v1/sites/${siteId}/functions/stage-openai-background`,
+      hostname: url.hostname,
+      path: url.pathname,
       method: "POST",
       headers: {
-        Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
         "Content-Length": body.length,
       }
@@ -40,15 +40,14 @@ exports.handler = async (event) => {
     if (!imageBase64)   return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing imageBase64" }) };
     if (!stagingPrompt) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing stagingPrompt" }) };
 
-    const token  = process.env.NETLIFY_ACCESS_TOKEN;
-    const siteId = process.env.NETLIFY_SITE_ID;
-    if (!token || !siteId) return { statusCode: 500, headers, body: JSON.stringify({ error: "Netlify env not configured" }) };
+    const siteUrl = process.env.URL || process.env.DEPLOY_URL;
+    if (!siteUrl) return { statusCode: 500, headers, body: JSON.stringify({ error: "Site URL not configured" }) };
 
     // Generate unique jobId
     const jobId = "oai-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8);
 
     // Fire background function — log status so we can confirm it triggered
-    const triggerStatus = await triggerBackground({ jobId, imageBase64, mimeType, stagingPrompt }, token, siteId);
+    const triggerStatus = await triggerBackground({ jobId, imageBase64, mimeType, stagingPrompt }, siteUrl);
     console.log(`Job ${jobId}: background trigger status = ${triggerStatus}`);
 
     if (triggerStatus !== 202) {

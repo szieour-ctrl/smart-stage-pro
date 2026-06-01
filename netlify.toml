@@ -31,6 +31,15 @@
 
 [functions."stage-openai-background"]
   timeout = 900
+
+[functions."group-spatial-read-background"]
+  timeout = 900
+
+[functions."check-spatial-read"]
+  timeout = 10
+
+[functions."group-spatial-read"]
+  timeout = 30
 [functions."check-openai"]
   timeout = 10
 

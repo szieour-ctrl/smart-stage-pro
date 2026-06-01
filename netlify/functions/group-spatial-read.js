@@ -1,33 +1,9 @@
 // group-spatial-read.js — Dispatcher
-// Compresses images, generates jobId, triggers background, returns jobId immediately.
-// Mirrors stage-openai.js pattern exactly — fire-and-forget to background function.
+// Validates input, generates jobId, triggers background, returns jobId immediately.
+// NO sharp dependency — images passed through as-is to background function.
+// Background function handles all processing with no timeout risk.
 
 const https = require("https");
-const sharp = require("sharp");
-
-// Compress each image — same logic as stage-openai.js
-// Keeps total payload under Netlify 6MB limit across multiple images
-async function compressImage(imageBase64, mimeType) {
-  const buffer = Buffer.from(imageBase64, "base64");
-  const meta = await sharp(buffer).metadata();
-  const sizeKB = Math.round(buffer.length / 1024);
-  const maxDim = Math.max(meta.width || 0, meta.height || 0);
-
-  // For group reads: compress more aggressively — target 800px max, 600KB per image
-  // Haiku only needs to read spatial layout, not pixel-level detail
-  if (maxDim <= 800 && sizeKB <= 600) {
-    return { base64: imageBase64, mimeType };
-  }
-
-  const compressed = await sharp(buffer)
-    .resize(800, 800, { fit: "inside", withoutEnlargement: true })
-    .jpeg({ quality: 82 })
-    .toBuffer();
-
-  const compressedKB = Math.round(compressed.length / 1024);
-  console.log(`Image compressed for spatial read: ${meta.width}x${meta.height} ${sizeKB}KB → 800px ${compressedKB}KB`);
-  return { base64: compressed.toString("base64"), mimeType: "image/jpeg" };
-}
 
 async function triggerBackground(payload, siteUrl) {
   const body = Buffer.from(JSON.stringify(payload));
@@ -74,22 +50,11 @@ exports.handler = async (event) => {
     const siteUrl = process.env.URL || process.env.DEPLOY_URL;
     if (!siteUrl) return { statusCode: 500, headers, body: JSON.stringify({ error: "Site URL not configured" }) };
 
-    // Compress all images before dispatch — keeps payload under 6MB
-    console.log(`Compressing ${images.length} images for spatial read...`);
-    const compressedImages = await Promise.all(
-      images.map(async (img) => {
-        const { base64, mimeType } = await compressImage(img.base64, img.mimeType || "image/jpeg");
-        return { ...img, base64, mimeType };
-      })
-    );
-
-    const totalKB = Math.round(compressedImages.reduce((sum, img) => sum + img.base64.length * 0.75 / 1024, 0));
-    console.log(`Total compressed payload: ~${totalKB}KB for ${images.length} images`);
-
     const jobId = "gsr-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8);
+    console.log(`Group spatial read dispatch: jobId=${jobId} images=${images.length} type=${groupType}`);
 
     const triggerStatus = await triggerBackground({
-      jobId, images: compressedImages, groupType, designStyle, colorPalette
+      jobId, images, groupType, designStyle, colorPalette
     }, siteUrl);
 
     console.log(`Job ${jobId}: background trigger status = ${triggerStatus}`);

@@ -4,7 +4,29 @@
 // No timeout risk — background functions run up to 15 minutes.
 
 const https = require("https");
+const sharp = require("sharp");
 const { getStore } = require("@netlify/blobs");
+
+// Compress images for Haiku — 800px max is sufficient for spatial reading
+// Keeps total Anthropic API payload manageable across multiple images
+async function compressForRead(imageBase64) {
+  try {
+    const buffer = Buffer.from(imageBase64, "base64");
+    const meta = await sharp(buffer).metadata();
+    const maxDim = Math.max(meta.width || 0, meta.height || 0);
+    const sizeKB = Math.round(buffer.length / 1024);
+    if (maxDim <= 800 && sizeKB <= 600) return imageBase64;
+    const compressed = await sharp(buffer)
+      .resize(800, 800, { fit: "inside", withoutEnlargement: true })
+      .jpeg({ quality: 82 })
+      .toBuffer();
+    console.log(`Compressed for spatial read: ${maxDim}px ${sizeKB}KB → ${Math.round(compressed.length/1024)}KB`);
+    return compressed.toString("base64");
+  } catch(e) {
+    console.warn("Compression failed, using original:", e.message);
+    return imageBase64;
+  }
+}
 
 function httpsRequest(options, body) {
   return new Promise((resolve, reject) => {
@@ -379,8 +401,18 @@ exports.handler = async (event) => {
     await store.setJSON(jobId, { status: "processing", startedAt: Date.now() });
     console.log(`Job ${jobId}: heartbeat written`);
 
+    // Compress images for Haiku — spatial reading only needs 800px
+    const readyImages = await Promise.all(
+      images.map(async (img) => ({
+        ...img,
+        base64: await compressForRead(img.base64),
+        mimeType: "image/jpeg"
+      }))
+    );
+    console.log(`Job ${jobId}: images compressed, running spatial pre-read...`);
+
     // Phase 1: Haiku reads all images
-    const spatialPlan = await runSpatialPreRead({ images, groupType: groupType || 'openplan', claudeKey });
+    const spatialPlan = await runSpatialPreRead({ images: readyImages, groupType: groupType || 'openplan', claudeKey });
     console.log(`Job ${jobId}: spatial plan built — ${spatialPlan.conflictsDetected?.length || 0} conflicts, ${spatialPlan.perImageAnchors?.length || 0} anchor sets`);
 
     // Phase 2: Assemble plain text prompt per image

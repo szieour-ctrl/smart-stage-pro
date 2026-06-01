@@ -47,8 +47,14 @@ exports.handler = async (event) => {
     // Generate unique jobId
     const jobId = "oai-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8);
 
-    // Fire background function — don't await result
-    await triggerBackground({ jobId, imageBase64, mimeType, stagingPrompt }, token, siteId);
+    // Fire background function — log status so we can confirm it triggered
+    const triggerStatus = await triggerBackground({ jobId, imageBase64, mimeType, stagingPrompt }, token, siteId);
+    console.log(`Job ${jobId}: background trigger status = ${triggerStatus}`);
+
+    if (triggerStatus !== 202) {
+      console.error(`Job ${jobId}: background trigger FAILED with status ${triggerStatus}`);
+      return { statusCode: 500, headers, body: JSON.stringify({ error: `Background function trigger failed: ${triggerStatus}` }) };
+    }
 
     // Return jobId immediately — client polls check-decor8 for result
     return {

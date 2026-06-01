@@ -55,13 +55,15 @@ async function callOpenAI(imageBase64, mimeType, prompt, apiKey) {
 
 exports.handler = async (event) => {
   const openAIKey = process.env.OPENAI_API_KEY;
+  const siteID    = process.env.NETLIFY_SITE_ID;
+  const token     = process.env.NETLIFY_ACCESS_TOKEN;
   let jobId;
   try {
     const { jobId: jId, imageBase64, mimeType, stagingPrompt } = JSON.parse(event.body);
     jobId = jId;
     console.log(`Job ${jobId} starting...`);
 
-    const store = getStore("staging-jobs");
+    const store = getStore({ name: "staging-jobs", siteID, token });
 
     // Call GPT Image 2
     const result = await callOpenAI(imageBase64, mimeType, stagingPrompt, openAIKey);
@@ -76,7 +78,7 @@ exports.handler = async (event) => {
   } catch (err) {
     console.error(`Job ${jobId} error:`, err.message);
     try {
-      const store = getStore("staging-jobs");
+      const store = getStore({ name: "staging-jobs", siteID, token });
       await store.setJSON(jobId, { status: "error", error: err.message });
     } catch(e) {}
   }

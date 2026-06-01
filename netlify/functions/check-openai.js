@@ -1,5 +1,5 @@
 // check-openai.js — Polling endpoint for OpenAI background jobs
-// Uses @netlify/blobs SDK — avoids presigned S3 URL expiry issues
+// Uses @netlify/blobs SDK with explicit siteID + token
 // Returns: {status: "pending"} | {status: "done", stagedBase64} | {status: "error", error}
 
 const { getStore } = require("@netlify/blobs");
@@ -10,14 +10,18 @@ exports.handler = async (event) => {
   const jobId = event.queryStringParameters?.jobId;
   if (!jobId) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing jobId" }) };
 
+  const siteID = process.env.NETLIFY_SITE_ID;
+  const token  = process.env.NETLIFY_ACCESS_TOKEN;
+  if (!siteID || !token) return { statusCode: 500, headers, body: JSON.stringify({ error: "Storage not configured" }) };
+
   console.log(`check-openai: jobId=${jobId}`);
 
   try {
-    const store = getStore("staging-jobs");
+    const store = getStore({ name: "staging-jobs", siteID, token });
     const result = await store.get(jobId, { type: "json" });
 
     if (!result) {
-      console.log(`Job ${jobId}: pending (not in store yet)`);
+      console.log(`Job ${jobId}: pending`);
       return { statusCode: 200, headers, body: JSON.stringify({ status: "pending" }) };
     }
 
@@ -26,7 +30,6 @@ exports.handler = async (event) => {
 
   } catch (err) {
     console.error("check-openai error:", err.message);
-    // Blob not found = still pending
     if (err.message?.includes("404") || err.message?.includes("not found")) {
       return { statusCode: 200, headers, body: JSON.stringify({ status: "pending" }) };
     }

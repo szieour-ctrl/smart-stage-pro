@@ -107,33 +107,33 @@ Return ONLY valid JSON — no markdown, no preamble, no trailing text.
 
   "zoneAnchorLocks": {
     "diningZone": {
-      "present": true or false,
-      "ceilingAnchor": "Full description of chandelier — e.g. '5-arm brushed nickel chandelier with clear glass cone shades' — or null if no dining zone",
-      "ceilingAnchorInstruction": "Place [rug shape and material] area rug centered directly under the [chandelier description]. Place [table description] centered on rug. Place [N] [chair description] chairs around the table. — or null",
+      "present": true,
+      "ceilingAnchor": "chandelier description",
+      "ceilingAnchorInstruction": "Place rug under chandelier. Place table on rug. Place chairs.",
       "backWallAnchor": null,
       "frontWallAnchor": null
     },
     "kitchenZone": {
-      "present": true or false,
-      "ceilingAnchor": "Full description of pendant lights over island — or null",
-      "ceilingAnchorInstruction": "Place [N] [stool description] bar stools on the dining-zone-facing side of the island only, directly below the pendant lights. — or null",
-      "islandNote": "FLOATING KITCHEN ISLAND CABINET — do not remove, relocate, resize, or alter. — or null"
+      "present": true,
+      "ceilingAnchor": "pendant description over island",
+      "ceilingAnchorInstruction": "Place N stools on dining-zone-facing side below pendants.",
+      "islandNote": "FLOATING KITCHEN ISLAND CABINET — do not remove, relocate, resize, or alter."
     },
     "livingZone": {
-      "present": true or false,
-      "ceilingAnchor": "Full description of ceiling fan — or null",
-      "ceilingAnchorInstruction": "Place [rug description] area rug centered directly under the [ceiling fan description].",
-      "backWallAnchor": "Description of the wall the sofa back goes against — e.g. 'pass-through wall on the left', 'rear structural wall', 'wall with pass-through opening above it'. This is the wall visible in the image that defines the depth of the living zone.",
-      "backWallAnchorInstruction": "Place [sofa description] sofa with its back against the [back wall description], centered on the rug, facing the fireplace.",
-      "frontWallAnchor": "Description of the fireplace wall — e.g. 'white painted fireplace surround centered on back wall'",
-      "frontWallAnchorInstruction": "All living zone seating faces the [fireplace description] on the [front wall description]."
+      "present": true,
+      "ceilingAnchor": "ceiling fan description",
+      "ceilingAnchorInstruction": "Place rug centered under ceiling fan.",
+      "backWallAnchor": "wall the sofa back goes against — pass-through wall, rear wall, etc.",
+      "backWallAnchorInstruction": "Place sofa back against [back wall], centered on rug, facing fireplace.",
+      "frontWallAnchor": "fireplace wall description",
+      "frontWallAnchorInstruction": "All seating faces [fireplace] on [front wall]."
     },
     "bedroomZone": {
       "present": ${isBedroom ? 'true' : 'false'},
-      "backWallAnchor": "${isBedroom ? 'Solid wall with no doors or windows — confirmed clear across angles — headboard wall' : 'null'}",
-      "backWallAnchorInstruction": "${isBedroom ? 'Place bed with headboard against the [back wall description]. Center bed on the wall.' : 'null'}",
-      "leftClearance": "${isBedroom ? 'Description of left wall element requiring clearance — door, closet, window — or null' : 'null'}",
-      "rightClearance": "${isBedroom ? 'Description of right wall element requiring clearance — door, closet, window — or null' : 'null'}"
+      "backWallAnchor": ${isBedroom ? '"solid wall confirmed clear — headboard wall"' : 'null'},
+      "backWallAnchorInstruction": ${isBedroom ? '"Place bed headboard against [back wall], centered."' : 'null'},
+      "leftClearance": ${isBedroom ? '"[door/closet/window on left] — or null"' : 'null'},
+      "rightClearance": ${isBedroom ? '"[door/closet/window on right] — or null"' : 'null'}
     }
   },
 
@@ -146,26 +146,26 @@ Return ONLY valid JSON — no markdown, no preamble, no trailing text.
   ],
 
   "masterFurniturePlan": {
-    "style": "One phrase design style",
+    "style": "one phrase",
     "livingZone": {
-      "sofa": "fabric, color, profile description",
-      "accentChairs": "count, style, fabric — placed where sofa would traditionally be, angled toward fireplace",
-      "coffeeTable": "material, shape",
-      "rug": "large, shape, material",
-      "console": "dark wood console or credenza, right wall under windows — or null if no window wall",
-      "plant": "one large plant, type, pot, placement right of fireplace — or null",
-      "art": "one landscape art piece centered above fireplace surround, 50-60% surround width — or null",
-      "floorLamp": "arc floor lamp behind left accent chair — or null"
+      "sofa": "fabric+color+profile",
+      "accentChairs": "count+style+fabric",
+      "coffeeTable": "material+shape",
+      "rug": "shape+material",
+      "console": "description+placement — or null",
+      "plant": "type+pot+placement — or null",
+      "art": "description — or null",
+      "floorLamp": "description — or null"
     },
     "diningZone": {
-      "table": "material, shape, size",
-      "chairs": "count, style, fabric",
-      "rug": "large round jute or natural fiber",
-      "centerpiece": "one tall vase with stems or greenery"
+      "table": "material+shape+size",
+      "chairs": "count+style+fabric",
+      "rug": "shape+material",
+      "centerpiece": "description"
     },
     "kitchenZone": {
-      "stools": "count, style, frame finish",
-      "props": "one small bowl of fruit on island countertop only — all other surfaces clean"
+      "stools": "count+style+frame",
+      "props": "one item only"
     }
   },
 
@@ -173,29 +173,27 @@ Return ONLY valid JSON — no markdown, no preamble, no trailing text.
     ${images.map((img, i) => `{
       "imageIndex": ${i},
       "imageLabel": "${img.label || img.fileName || ('Angle ' + (i + 1))}",
-      "cameraPosition": "Brief description of where camera is positioned and what direction it faces",
-      "visibleZones": ["zones clearly visible in this image — kitchen, dining, living, bedroom"],
-      "primaryAnchor": "The single most prominent visible ceiling fixture or architectural feature that orients this image",
+      "cameraPosition": "one sentence — camera position and facing direction",
+      "visibleZones": ["kitchen","dining","living"],
+      "primaryAnchor": "most prominent visible ceiling fixture or architectural element",
       "furnitureBoundaryAnchors": {
-        "livingRugCenter": "Center rug under [specific ceiling fan description visible in this image] — or null if living zone not visible",
-        "livingRugDepth": "Rug spans from approximately 18 inches in front of [fireplace hearth description] back to approximately 18 inches in front of [back wall description] — or null",
-        "livingLeftBoundary": "Left furniture boundary: [specific visible wall, column, or element] — or null",
-        "livingRightBoundary": "Right furniture boundary: [specific visible wall or window] — or null",
-        "livingSofaNote": "Sofa back against [back wall description], centered on rug, facing [fireplace description] — or null",
-        "livingZoneScale": "normal — or 'background scale: this zone is in the far rear of the frame, scale furniture smaller than foreground zones' if living zone is in the deep background",
-        "diningRugCenter": "Center dining rug under [chandelier description] — or null if dining not visible",
-        "diningBoundary": "Dining rug does not extend past [specific landmark] on kitchen side or [specific landmark] on living side — or null",
-        "islandStoolSide": "Stools on [dining-zone-facing / far] side of island only — or null if kitchen not visible"
+        "livingRugCenter": "Center rug under [fan name] — or null",
+        "livingRugDepth": "Rug from 18in in front of [hearth] to 18in in front of [back wall] — or null",
+        "livingLeftBoundary": "[visible element] — or null",
+        "livingRightBoundary": "[visible element] — or null",
+        "livingSofaNote": "Sofa back against [back wall], facing [fireplace] — or null",
+        "livingZoneScale": "normal — or background scale if living zone is in deep background of frame",
+        "diningRugCenter": "Center under [chandelier name] — or null",
+        "diningBoundary": "Rug edge stops at [landmark] — or null",
+        "islandStoolSide": "Stools on dining-zone-facing side only — or null"
       },
       "positiveStagingInstructions": {
-        "diningZone": "Full positive staging sequence for dining zone visible in this image, using anchor fixture as starting point. Format: 'DINING ZONE: Place [rug] centered under [chandelier]. Place [table] centered on rug. Place [N chairs]. Place [centerpiece].' — or null if dining not visible in this image",
-        "kitchenZone": "Full positive staging sequence for kitchen zone. Format: 'KITCHEN ZONE: Place [N stools] on the dining-zone-facing side of the island below the [pendant description]. Place [props] on island. Keep all surfaces clean.' — or null if kitchen not visible",
-        "livingZone": "Full positive staging sequence for living zone. ALWAYS starts with rug under fan, then sofa against back wall, then chairs angled toward fireplace, then coffee table, then accessories. Format: 'LIVING ZONE: Place [rug] centered under [ceiling fan]. Rug spans from 18 inches in front of [hearth] to 18 inches in front of [back wall]. Place [sofa] with back against [back wall description], centered on rug, facing [fireplace]. Place [N accent chairs] on rug angled inward toward fireplace. Place [coffee table] centered on rug between sofa and fireplace. Place [console] against [wall]. Place [plant]. Place [art] above fireplace. Place [floor lamp].' — or null if living not visible",
-        "bedroomZone": "Full positive staging sequence for bedroom if present — or null"
+        "diningZone": "DINING ZONE: Place [rug] under [chandelier]. Place [table] on rug. Place [N chairs]. Place [centerpiece]. — or null",
+        "kitchenZone": "KITCHEN ZONE: Place [N stools] on dining-zone-facing side below [pendants]. Place [props]. Keep surfaces clean. — or null",
+        "livingZone": "LIVING ZONE: Place [rug] under [fan]. Rug from 18in of [hearth] to 18in of [back wall]. Place [sofa] back against [back wall] facing [fireplace]. Place [N chairs] angled toward fireplace. Place [coffee table]. Place [console]. Place [plant]. Place [art] above fireplace. Place [lamp]. — or null",
+        "bedroomZone": "BEDROOM: Place [bed] headboard against [back wall]. Place [nightstands]. Place [dresser]. — or null"
       },
-      "imageSpecificProhibitions": [
-        "DO NOT [specific prohibition derived from what IS visible in this image and confirmed by cross-angle read — e.g. DO NOT convert the two fixed grid windows into a patio door, DO NOT extend furniture past the end of the pass-through wall, DO NOT place bar stools on the camera-facing side of the island]"
-      ]
+      "imageSpecificProhibitions": ["DO NOT [specific visible-landmark-based prohibition]"]
     }`).join(',\n    ')}
   ],
 
@@ -209,7 +207,7 @@ Return ONLY valid JSON — no markdown, no preamble, no trailing text.
 
   const payload = JSON.stringify({
     model: "claude-haiku-4-5",
-    max_tokens: 4000,
+    max_tokens: 6000,
     messages: [{
       role: "user",
       content: [

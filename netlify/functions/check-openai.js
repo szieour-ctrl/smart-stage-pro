@@ -10,7 +10,7 @@ exports.handler = async (event) => {
   const jobId = event.queryStringParameters?.jobId;
   if (!jobId) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing jobId" }) };
 
-  const siteID = process.env.NETLIFY_SITE_ID;
+  const siteID = process.env.SZREG_SITE_ID || process.env.NETLIFY_SITE_ID;
   const token  = process.env.NETLIFY_ACCESS_TOKEN;
   if (!siteID || !token) return { statusCode: 500, headers, body: JSON.stringify({ error: "Storage not configured" }) };
 
@@ -21,7 +21,13 @@ exports.handler = async (event) => {
     const result = await store.get(jobId, { type: "json" });
 
     if (!result) {
-      console.log(`Job ${jobId}: pending`);
+      console.log(`Job ${jobId}: pending (not in store yet)`);
+      return { statusCode: 200, headers, body: JSON.stringify({ status: "pending" }) };
+    }
+
+    if (result.status === "processing") {
+      const elapsed = result.startedAt ? Math.round((Date.now() - result.startedAt) / 1000) : "?";
+      console.log(`Job ${jobId}: processing — ${elapsed}s elapsed since start`);
       return { statusCode: 200, headers, body: JSON.stringify({ status: "pending" }) };
     }
 

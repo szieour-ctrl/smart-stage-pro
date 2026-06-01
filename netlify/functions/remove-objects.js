@@ -5,6 +5,21 @@
 // Removes: all furniture, decor, personal items, rugs, lamps, art, plants, appliances on counters
 
 const https = require("https");
+const sharp = require("sharp");
+
+async function prepareImage(imageBase64, mimeType) {
+  const buffer = Buffer.from(imageBase64, "base64");
+  const meta = await sharp(buffer).metadata();
+  const sizeKB = Math.round(buffer.length / 1024);
+  const maxDim = Math.max(meta.width || 0, meta.height || 0);
+  if (maxDim <= 1536 && sizeKB <= 1500) return { base64: imageBase64, mimeType };
+  const compressed = await sharp(buffer)
+    .resize(1536, 1536, { fit: "inside", withoutEnlargement: true })
+    .jpeg({ quality: 88 })
+    .toBuffer();
+  console.log(`remove-objects compressed: ${meta.width}x${meta.height} ${sizeKB}KB → ${Math.round(compressed.length/1024)}KB`);
+  return { base64: compressed.toString("base64"), mimeType: "image/jpeg" };
+}
 
 // ── HTTPS helper ──────────────────────────────────────────────────────────────
 function httpsRequest(options, body) {
@@ -136,6 +151,11 @@ exports.handler = async (event) => {
   try {
     const { imageBase64, mimeType } = JSON.parse(event.body);
     if (!imageBase64) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing imageBase64" }) };
+
+    // Compress if large
+    const { base64: readyBase64, mimeType: readyMime } = await prepareImage(imageBase64, mimeType);
+    imageBase64 = readyBase64;
+    mimeType = readyMime;
 
     const claudeKey = process.env.ANTHROPIC_API_KEY;
     const openaiKey = process.env.OPENAI_API_KEY;

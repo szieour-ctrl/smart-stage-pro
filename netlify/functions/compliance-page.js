@@ -13,7 +13,7 @@ const { getStore } = require("@netlify/blobs");
 function getProjectStore() {
   return getStore({
     name: "smart-stage-projects",
-    siteID: process.env.NETLIFY_SITE_ID,
+    siteID: process.env.SZREG_SITE_ID || process.env.NETLIFY_SITE_ID,
     token: process.env.NETLIFY_ACCESS_TOKEN,
   });
 }

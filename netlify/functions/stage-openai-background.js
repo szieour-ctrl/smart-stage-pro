@@ -3,16 +3,17 @@
 // Client polls check-openai.js every 3 seconds for result
 
 const https = require("https");
+const sharp = require("sharp");
 const { getStore } = require("@netlify/blobs");
 
-function buildOpenAIMultipart(imageBuffer, imageMime, prompt) {
+function buildOpenAIMultipart(imageBuffer, imageMime, prompt, quality) {
   const boundary = "----OAIBoundary" + Math.random().toString(36).slice(2);
   const parts = [];
   parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\ngpt-image-2`);
   parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="prompt"\r\n\r\n${prompt}`);
   parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="n"\r\n\r\n1`);
   parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="size"\r\n\r\n1024x1024`);
-  parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="quality"\r\n\r\nhigh`);
+  parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="quality"\r\n\r\n${quality || "low"}`);
   const textBuf = Buffer.from(parts.join("\r\n") + "\r\n", "utf8");
   const fileHdr = Buffer.from(
     `--${boundary}\r\nContent-Disposition: form-data; name="image[]"; filename="room.jpg"\r\nContent-Type: ${imageMime}\r\n\r\n`,
@@ -22,10 +23,12 @@ function buildOpenAIMultipart(imageBuffer, imageMime, prompt) {
   return { body: Buffer.concat([textBuf, fileHdr, imageBuffer, closing]), boundary };
 }
 
-async function callOpenAI(imageBase64, mimeType, prompt, apiKey) {
-  const imageBuffer = Buffer.from(imageBase64, "base64");
-  const { body, boundary } = buildOpenAIMultipart(imageBuffer, mimeType || "image/jpeg", prompt);
-  console.log(`OpenAI: prompt ${prompt.length} chars, image ${Math.round(imageBuffer.length/1024)}KB`);
+async function callOpenAI(imageBase64, mimeType, prompt, apiKey, quality) {
+  // OpenAI edits endpoint requires PNG — convert regardless of input format
+  const rawBuffer = Buffer.from(imageBase64, "base64");
+  const imageBuffer = await sharp(rawBuffer).png().toBuffer();
+  console.log(`OpenAI: prompt ${prompt.length} chars, image ${Math.round(rawBuffer.length/1024)}KB → PNG ${Math.round(imageBuffer.length/1024)}KB quality=${quality||"low"}`);
+  const { body, boundary } = buildOpenAIMultipart(imageBuffer, "image/png", prompt, quality);
   return new Promise((resolve, reject) => {
     const req = https.request({
       hostname: "api.openai.com",
@@ -55,18 +58,22 @@ async function callOpenAI(imageBase64, mimeType, prompt, apiKey) {
 
 exports.handler = async (event) => {
   const openAIKey = process.env.OPENAI_API_KEY;
-  const siteID    = process.env.NETLIFY_SITE_ID;
+  const siteID    = process.env.SZREG_SITE_ID || process.env.NETLIFY_SITE_ID;
   const token     = process.env.NETLIFY_ACCESS_TOKEN;
   let jobId;
   try {
-    const { jobId: jId, imageBase64, mimeType, stagingPrompt } = JSON.parse(event.body);
+    const { jobId: jId, imageBase64, mimeType, stagingPrompt, quality } = JSON.parse(event.body);
     jobId = jId;
     console.log(`Job ${jobId} starting...`);
 
     const store = getStore({ name: "staging-jobs", siteID, token });
 
+    // Write heartbeat immediately — confirms background function is running
+    await store.setJSON(jobId, { status: "processing", startedAt: Date.now() });
+    console.log(`Job ${jobId}: heartbeat written`);
+
     // Call GPT Image 2
-    const result = await callOpenAI(imageBase64, mimeType, stagingPrompt, openAIKey);
+    const result = await callOpenAI(imageBase64, mimeType, stagingPrompt, openAIKey, quality);
     const stagedBase64 = result?.data?.[0]?.b64_json;
     if (!stagedBase64) throw new Error("No image data in OpenAI response");
     console.log(`Job ${jobId}: complete ${Math.round(stagedBase64.length/1024)}KB`);

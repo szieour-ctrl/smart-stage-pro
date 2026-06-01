@@ -122,7 +122,7 @@ ${hasDining ? `Dining Zone:
 Place a large oval area rug centered directly beneath ${diningAnchor}. Place a modern dining table with 6 chairs centered on the rug defining the dining zone. Keep clear circulation between the dining area and ${islandDesc || 'adjacent spaces'}.` : ''}
 
 ${hasLiving ? `Living Zone:
-Place a large rectangular area rug in front of the feature wall centered beneath ${livingAnchor2}. ${sofaLine}` : ''}
+Place a large rectangular area rug centered beneath ${livingAnchor2} with the rug anchored to the fireplace as the primary focal wall. ${sofaLine} Place two sculptural accent chairs flanking the fireplace, angled inward toward the conversation area, approximately 3 feet from the fireplace on each side. Place a coffee table centered on the rug between the sofa and fireplace. If a pass-through or architectural opening is visible on any wall, treat it as a wall segment only — stage the floor area adjacent to the opening at full density with a floor lamp, console table, or accent chair. Do not leave the area beside any architectural opening empty.` : ''}
 
 ${stoolAnchor ? `Kitchen Island:
 ${stoolAnchor}` : (hasKitchen || hasIsland) ? `Kitchen Island:

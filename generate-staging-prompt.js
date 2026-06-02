@@ -69,9 +69,12 @@ function buildOpenPlanPrompt({ preserveList, chandelier, ceilingFan, designStyle
   const labelLower = (openPlanZones || '').toLowerCase();
   const zones = visibleZones || [];
 
-  const hasKitchen = zones.includes('kitchen') || labelLower.includes('kitchen');
-  const hasDining  = zones.includes('dining')  || true; // dining always present in open plan
-  const hasLiving  = zones.includes('living')  || labelLower.includes('great room') || labelLower.includes('living');
+  // visibleZones from Haiku is the authority — only stage zones confirmed visible in this image
+  // Fall back to label ONLY if Haiku returned no zones at all (empty array)
+  const hasKitchen = zones.length > 0 ? zones.includes('kitchen') : labelLower.includes('kitchen');
+  const hasDining  = zones.length > 0 ? zones.includes('dining')  : true;
+  const hasLiving  = zones.length > 0 ? zones.includes('living')  : (labelLower.includes('great room') || labelLower.includes('living'));
+  const hasFlexRoom = zones.includes('flex_room') || zones.includes('flex') || labelLower.includes('flex');
   const hasIsland  = zones.includes('kitchen') || labelLower.includes('kitchen');
 
   // Resolve style and palette
@@ -134,6 +137,9 @@ Place a large oval area rug centered directly beneath ${diningAnchor}. Place a m
 
 ${hasLiving ? `Living Zone:
 Place a large rectangular area rug centered beneath ${livingAnchor2} with the rug anchored to the fireplace as the primary focal wall. ${sofaLine} Place two sculptural accent chairs flanking the fireplace, angled inward toward the conversation area, approximately 3 feet from the fireplace on each side. Place a coffee table centered on the rug between the sofa and fireplace. If a pass-through or architectural opening is visible on any wall, treat it as a wall segment only — stage the floor area adjacent to the opening at full density with a floor lamp, console table, or accent chair. Do not leave the area beside any architectural opening empty.` : ''}
+
+${hasFlexRoom ? `Flex Room (Multi-purpose Zone):
+Place a secondary seating arrangement, game table, home office nook, or accent furniture in this transitional zone. Use this space to accommodate family gathering, casual dining overflow, reading nook, or activity center. Coordinate furniture style and colors with kitchen and living zones. Stage at full floor density proportional to the zone's square footage.` : ''}
 
 ${stoolAnchor ? `Kitchen Island:
 ${stoolAnchor}` : (hasKitchen || hasIsland) ? `Kitchen Island:
@@ -518,7 +524,8 @@ ANALYZE THE PHOTO AND IDENTIFY:
 4. All empty floor zones where furniture can go
 5. All permanent fixtures that must be preserved exactly
 6. Architectural openings (pass-throughs, archways, doorways) — note their location and width only. These are boundaries, not staging zones. The wall and floor area ADJACENT to an opening belongs to the primary room and must be staged at full density.
-7. Natural light direction and quality
+7. Flex room zones: Look for open areas defined by structural columns, partial/low half-walls (not full ceiling-to-floor), or secondary pendant lighting fixtures. These bridge-zones between kitchen and living room are multi-purpose and must be identified and staged. Markers: visible column in open floor + low wall with visual cutout + secondary pendant fixture = FLEX ROOM zone.
+8. Natural light direction and quality
 
 GENERATE A STAGING PROMPT that specifies:
 - Exact furniture pieces and their precise placement locations
@@ -528,6 +535,7 @@ GENERATE A STAGING PROMPT that specifies:
 - Art placement with size guidance
 - Props (minimal — follow props standards)
 - What to preserve exactly
+- Flex room staging (if present): Specify furniture type appropriate to the zone (secondary seating, game table, reading nook, home office, activity center) and its placement relative to the island and fireplace. Flex rooms are multi-purpose zones that bridge kitchen and living — they MUST be fully staged.
 - Architectural openings: treat pass-throughs, archways, and doorways as WALL SEGMENTS only. Do NOT write instructions that restrict furniture placement near openings. The floor area beside or in front of any opening is part of the primary room — stage it at full density appropriate to the room's square footage. A floor lamp, accent chair, console table, or plant beside an opening is correct and encouraged.
 - Room scale calibration: distribute furniture across the FULL floor area visible in the photo. A large room requires proportionally large furniture and multiple furniture groupings. Never cluster all pieces in one zone and leave remaining floor area empty.
 

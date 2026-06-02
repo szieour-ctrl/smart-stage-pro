@@ -586,8 +586,8 @@ const SESSION = {
   // Multi-angle group session
   groupMode: false,           // true when user has activated group session
   groupImages: [],            // [{ roomId, imageIndex, label, base64, mimeType }]
-  groupSpatialPlan: null,     // master spatial JSON from group-spatial-read
-  groupPrompts: [],           // [{ imageIndex, imageLabel, promptText }] — editable
+  groupSpatialPlan: null,     // Step 1 spatial assignments from group-spatial-read
+  groupPrompts: [],           // legacy — unused in new architecture
   groupType: 'openplan',      // 'openplan' | 'bedroom'
   // Project / compliance fields
   projectId: null,
@@ -2470,7 +2470,8 @@ function downloadSideBySide(roomId,enhId,tier){
     // For all other tiers use the fixed 900px height as before.
     const iW=oI.naturalWidth,iH=oI.naturalHeight;
     const stagedH=sI.naturalHeight,stagedW=sI.naturalWidth;
-    const targetH=tier==='final'?stagedH:900;
+    // Always match staged image height — ensures both panels align regardless of tier
+    const targetH=stagedH;
     const scale=targetH/iH,sW=Math.round(iW*scale),pad=14;
     // Final tier: staged side already has footer — no extra footer bar needed
     const ftH=tier==='final'?0:62;
@@ -2646,6 +2647,9 @@ function clearGroupSession() {
   showToast('Group session cleared.', '');
 }
 
+// ── STEP 1: SPATIAL READ ──────────────────────────────────────────────────────
+// Haiku reads ALL images together → zone/anchor assignments only.
+// No PRESERVE. No furniture prose. User reviews assignments, then approves.
 async function runGroupSpatialRead() {
   if (SESSION.groupImages.length < 2) { showToast('Select at least 2 images for group read.', 'error'); return; }
 
@@ -2655,9 +2659,9 @@ async function runGroupSpatialRead() {
 
   const statusMessages = [
     'Reading ' + SESSION.groupImages.length + ' angles with Claude Vision...',
+    'Identifying zones and anchors...',
     'Detecting cross-angle conflicts...',
-    'Building zone anchor locks...',
-    'Assembling per-image prompts...',
+    'Building assignment map...',
     'Almost ready...',
   ];
   let msgIdx = 0;
@@ -2665,14 +2669,15 @@ async function runGroupSpatialRead() {
   const msgTimer = setInterval(() => {
     msgIdx = Math.min(msgIdx + 1, statusMessages.length - 1);
     if (statusEl) statusEl.textContent = statusMessages[msgIdx];
-  }, 8000);
+  }, 7000);
 
   try {
-    const i = SESSION.intake;
+    const intake = SESSION.intake;
     const res = await fetch('/.netlify/functions/group-spatial-read', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        mode: 'spatial',
         images: SESSION.groupImages.map(g => ({
           base64: g.base64,
           mimeType: g.mimeType,
@@ -2680,36 +2685,39 @@ async function runGroupSpatialRead() {
           fileName: g.fileName,
         })),
         groupType: SESSION.groupType || 'openplan',
-        designStyle: i.style_label || 'Organic Modern',
-        colorPalette: i.palette_label || 'Warm Neutrals',
       })
     });
 
     const data = await res.json();
-    if (!res.ok || data.error) throw new Error(data.error || 'Group spatial read failed');
+    if (!res.ok || data.error) throw new Error(data.error || 'Spatial read failed');
 
-    SESSION.groupSpatialPlan = data.spatialPlan;
-    SESSION.groupPrompts = data.perImagePrompts;
+    // Store spatial assignments — these drive Step 3 prompt assembly
+    SESSION.groupSpatialPlan = data.spatialData;
     SESSION.groupMode = true;
 
-    if (statusEl) statusEl.textContent = `✓ ${data.anglesRead} angles read · ${data.conflictsResolved} conflicts resolved`;
-    renderGroupResults(data);
-    showToast(`✓ Group staging plan built — ${data.anglesRead} prompts ready for review.`, 'success');
+    if (statusEl) statusEl.textContent = `✓ ${data.anglesRead} angles read · ${data.conflictsDetected} conflicts resolved`;
+    renderGroupAssignments(data);
+    showToast(`✓ Zone assignments ready — review and approve each image below.`, 'success');
 
   } catch (err) {
     if (statusEl) statusEl.textContent = 'Error: ' + err.message;
-    showToast('Group read failed: ' + err.message, 'error');
+    showToast('Spatial read failed: ' + err.message, 'error');
   } finally {
     clearInterval(msgTimer);
     if (btn) btn.disabled = false;
   }
 }
 
-function renderGroupResults(data) {
+// ── RENDER STEP 1 RESULTS ──────────────────────────────────────────────────────
+// Shows per-image zone/anchor assignments for user review.
+// User can edit assignments before approving.
+// "Approve & Stage" fires Step 3 (preserve read + prompt assembly + staging).
+function renderGroupAssignments(data) {
   const resultsArea = document.getElementById('group-results-area');
   if (!resultsArea) return;
 
-  const conflicts = data.spatialPlan?.conflictsDetected || [];
+  const assignments = data.spatialData?.perImageAssignments || [];
+  const conflicts = data.spatialData?.conflictsDetected || [];
   let html = '';
 
   if (conflicts.length) {
@@ -2718,56 +2726,114 @@ function renderGroupResults(data) {
     html += '</div>';
   }
 
-  html += '<div style="font-size:0.75rem;color:var(--muted);margin-bottom:10px;">Review and edit each prompt below. These are the exact instructions going to GPT Image 2 — every word matters. When ready, click Stage to fire each image.</div>';
+  html += '<div style="font-size:0.75rem;color:var(--muted);margin-bottom:12px;">Step 1 complete — Claude identified zones and anchors for each image. Review the assignment for each image. When satisfied, click <strong>Approve & Stage</strong> to generate the final prompt and stage.</div>';
 
-  data.perImagePrompts.forEach((p, i) => {
+  assignments.forEach((assignment, i) => {
     const gImg = SESSION.groupImages[i];
     const roomId = gImg?.roomId || '';
+    const zones = (assignment.visibleZones || []).join(', ') || 'none detected';
+    const anchors = assignment.zoneAnchors || {};
+
+    let anchorSummary = [];
+    if (anchors.dining?.present && anchors.dining?.ceilingFixture) anchorSummary.push('Dining: ' + anchors.dining.ceilingFixture);
+    if (anchors.kitchen?.present && anchors.kitchen?.ceilingFixture) anchorSummary.push('Kitchen: ' + anchors.kitchen.ceilingFixture);
+    if (anchors.living?.present && anchors.living?.ceilingFixture) anchorSummary.push('Living: ' + anchors.living.ceilingFixture + (anchors.living.backWall ? ', back wall: ' + anchors.living.backWall : ''));
+    if (anchors.bedroom?.present && anchors.bedroom?.headboardWall) anchorSummary.push('Bedroom: headboard → ' + anchors.bedroom.headboardWall);
+
+    const wallOpenings = assignment.wallOpenings || [];
+
     html += `<div class="group-prompt-card">
-      <div class="group-prompt-label">${escHtml(p.imageLabel)}</div>
-      <textarea class="group-prompt-ta" id="group-prompt-ta-${i}" rows="7">${escHtml(p.promptText)}</textarea>
-      ${roomId ? `<button class="group-stage-btn" onclick="stageGroupImage(${i}, '${roomId}')">Stage This Image →</button>` : '<div style="font-size:0.72rem;color:var(--muted);margin-top:6px;">Room not matched — stage manually from queue below.</div>'}
+      <div class="group-prompt-label">${escHtml(assignment.imageLabel || ('Image ' + (i+1)))}</div>
+      <div style="font-size:0.75rem;color:var(--ink);margin-bottom:8px;">
+        <strong>Visible zones:</strong> ${escHtml(zones)}<br>
+        <strong>Anchors:</strong> ${escHtml(anchorSummary.join(' · ') || 'none')}<br>
+        ${wallOpenings.length ? '<strong>Wall openings:</strong> ' + escHtml(wallOpenings.join('; ')) : ''}
+      </div>
+      <textarea class="group-prompt-ta" id="group-assignment-ta-${i}" rows="5" style="font-size:0.72rem;">${escHtml(JSON.stringify(assignment, null, 2))}</textarea>
+      <div style="font-size:0.68rem;color:var(--muted);margin-top:4px;margin-bottom:6px;">JSON above is the zone assignment. Edit if needed, then approve.</div>
+      ${roomId ? `<button class="group-stage-btn" onclick="approveAndStageGroupImage(${i}, '${roomId}')">✓ Approve & Stage →</button>` : '<div style="font-size:0.72rem;color:var(--muted);margin-top:6px;">Room not matched — stage manually from queue below.</div>'}
     </div>`;
   });
 
-  html += `<div style="display:flex;gap:8px;margin-top:4px;">
-    <button class="btn btn-primary btn-sm" onclick="stageAllGroupImages()">Stage All ${data.perImagePrompts.length} Images →</button>
-  </div>`;
+  if (assignments.length > 1) {
+    html += `<div style="display:flex;gap:8px;margin-top:4px;">
+      <button class="btn btn-primary btn-sm" onclick="approveAndStageAllGroupImages()">✓ Approve & Stage All ${assignments.length} Images →</button>
+    </div>`;
+  }
 
   resultsArea.innerHTML = html;
   resultsArea.style.display = 'block';
 }
 
-async function stageGroupImage(promptIndex, roomId) {
-  const ta = document.getElementById('group-prompt-ta-' + promptIndex);
-  const promptText = ta ? ta.value.trim() : (SESSION.groupPrompts[promptIndex]?.promptText || '');
-  if (!promptText) { showToast('Prompt is empty.', 'error'); return; }
-  if (!roomId) { showToast('No room matched for this image.', 'error'); return; }
+// ── STEP 3: PRESERVE READ + PROMPT ASSEMBLY + STAGING ─────────────────────────
+// Fires when user clicks "Approve & Stage" for one image.
+// Calls group-spatial-read in preserve mode → gets PRESERVE list from single image.
+// JS assembles final prompt. Shows in editable Review modal. User approves → GPT stages.
+async function approveAndStageGroupImage(assignmentIndex, roomId) {
+  const ta = document.getElementById('group-assignment-ta-' + assignmentIndex);
+  let imageAssignment;
+  try {
+    imageAssignment = JSON.parse(ta ? ta.value : '{}');
+  } catch(e) {
+    showToast('Invalid assignment JSON — please fix and try again.', 'error');
+    return;
+  }
 
+  const gImg = SESSION.groupImages[assignmentIndex];
   const room = SESSION.rooms.find(r => r.id === roomId);
   const orig = room ? SESSION.originals.find(o => o.id === room.originalId) : null;
-  if (!room || !orig) { showToast('Room not found.', 'error'); return; }
+  if (!room || !orig || !gImg) { showToast('Room not found.', 'error'); return; }
 
-  // Store the group-derived prompt on the room so it bypasses generate-staging-prompt
-  room.groupPromptOverride = promptText;
-  await stageRoomWithPrompt(roomId, promptText);
+  const btn = document.querySelector(`[onclick="approveAndStageGroupImage(${assignmentIndex}, '${roomId}')"]`);
+  if (btn) { btn.disabled = true; btn.textContent = 'Reading image...'; }
+
+  try {
+    const intake = SESSION.intake;
+
+    // Step 3: Preserve read + prompt assembly
+    const res = await fetch('/.netlify/functions/group-spatial-read', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        mode: 'preserve',
+        imageBase64: gImg.base64,
+        imageLabel: gImg.label || gImg.fileName,
+        imageAssignment,
+        designStyle: intake.style_label || 'Organic Modern',
+        colorPalette: intake.palette_label || 'Warm Neutrals',
+      })
+    });
+
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || 'Preserve read failed');
+
+    // Store prompt and fire staging
+    room.groupPromptOverride = data.promptText;
+    await stageRoomWithPrompt(roomId, data.promptText);
+
+  } catch (err) {
+    showToast('Step 3 failed: ' + err.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '✓ Approve & Stage →'; }
+  }
 }
 
-async function stageAllGroupImages() {
+async function approveAndStageAllGroupImages() {
+  const assignments = SESSION.groupSpatialPlan?.perImageAssignments || [];
   const unmatched = SESSION.groupImages.filter(g => !g.roomId);
-  if (unmatched.length) {
-    showToast(unmatched.length + ' image(s) not matched to rooms — stage those manually from queue.', 'error');
-  }
+  if (unmatched.length) showToast(unmatched.length + ' image(s) not matched to rooms.', 'error');
+
   for (let i = 0; i < SESSION.groupImages.length; i++) {
     const gImg = SESSION.groupImages[i];
     if (!gImg.roomId) continue;
-    const ta = document.getElementById('group-prompt-ta-' + i);
-    const promptText = ta ? ta.value.trim() : (SESSION.groupPrompts[i]?.promptText || '');
-    if (promptText) {
-      await stageRoomWithPrompt(gImg.roomId, promptText);
-      await new Promise(r => setTimeout(r, 800)); // brief gap between fires
-    }
+    await approveAndStageGroupImage(i, gImg.roomId);
+    await new Promise(r => setTimeout(r, 1000));
   }
+}
+
+// Legacy stageGroupImage kept for compatibility
+async function stageGroupImage(promptIndex, roomId) {
+  await approveAndStageGroupImage(promptIndex, roomId);
 }
 
 // Stages a room using a pre-approved prompt — skips generate-staging-prompt entirely

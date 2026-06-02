@@ -150,10 +150,10 @@ exports.handler = async (event) => {
 
   try {
     const { imageBase64: rawBase64, mimeType: rawMime } = JSON.parse(event.body);
-    if (!imageBase64) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing imageBase64" }) };
+    if (!rawBase64) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing imageBase64" }) };
 
     // Compress if large
-    const { base64: readyBase64, mimeType: readyMime } = await prepareImage(imageBase64, mimeType);
+    const { base64: readyBase64, mimeType: readyMime } = await prepareImage(rawBase64, rawMime);
     const imageBase64 = readyBase64;
     const mimeType = readyMime;
 

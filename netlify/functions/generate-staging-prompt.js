@@ -168,7 +168,7 @@ Scan this photo carefully and return:
     messages: [{
       role: "user",
       content: [
-        { type: "image", source: { type: "base64", media_type: mimeType || "image/jpeg", data: imageBase64 } },
+        { type: "image", source: { type: "base64", media_type: detectMime(imageBase64), data: imageBase64 } },
         { type: "text", text: prompt }
       ]
     }]
@@ -332,7 +332,7 @@ Return ONLY the final prompt text — no explanation, no preamble.`;
       role: "user",
       content: [
         { type: "image", source: { type: "url", url: anchorImageUrl } },
-        { type: "image", source: { type: "base64", media_type: mimeType || "image/jpeg", data: vacantImageBase64 } },
+        { type: "image", source: { type: "base64", media_type: detectMime(vacantImageBase64), data: vacantImageBase64 } },
         { type: "text", text: userPrompt }
       ]
     }]
@@ -541,7 +541,7 @@ Return ONLY the staging prompt text — no explanation, no JSON, no preamble.`;
       messages: [{
         role: "user",
         content: imageBase64 ? [
-          { type: "image", source: { type: "base64", media_type: mimeType || "image/jpeg", data: imageBase64 } },
+          { type: "image", source: { type: "base64", media_type: detectMime(imageBase64), data: imageBase64 } },
           { type: "text", text: userPrompt }
         ] : [{ type: "text", text: userPrompt }]
       }]

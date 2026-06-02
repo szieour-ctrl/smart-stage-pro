@@ -56,6 +56,9 @@
 [functions."check-decor8"]
   timeout = 15
 
+[functions."test-remove-objects"]
+  timeout = 26
+
 [functions."remove-objects"]
   timeout = 900
 

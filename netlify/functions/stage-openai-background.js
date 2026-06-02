@@ -6,15 +6,15 @@ const https = require("https");
 const sharp = require("sharp");
 const { getStore } = require("@netlify/blobs");
 
-function buildOpenAIMultipart(imageBuffer, imageMime, prompt, quality) {
+function buildOpenAIMultipart(imageBuffer, imageMime, prompt, quality, size) {
   const boundary = "----OAIBoundary" + Math.random().toString(36).slice(2);
+  const outputSize = size || "1536x1024";
   const parts = [];
   parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\ngpt-image-2`);
   parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="prompt"\r\n\r\n${prompt}`);
   parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="n"\r\n\r\n1`);
-  // 1536x1024 — landscape output matches listing photo aspect ratio (3:2)
-  // Prevents the square-crop mismatch that made staged rooms appear taller than original
-  parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="size"\r\n\r\n1536x1024`);
+  // Size auto-detected from input: landscape photos → 1536x1024, square inputs → 1024x1024
+  parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="size"\r\n\r\n${outputSize}`);
   parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="quality"\r\n\r\n${quality || "low"}`);
   const textBuf = Buffer.from(parts.join("\r\n") + "\r\n", "utf8");
   const fileHdr = Buffer.from(
@@ -29,8 +29,19 @@ async function callOpenAI(imageBase64, mimeType, prompt, apiKey, quality) {
   // OpenAI edits endpoint requires PNG — convert regardless of input format
   const rawBuffer = Buffer.from(imageBase64, "base64");
   const imageBuffer = await sharp(rawBuffer).png().toBuffer();
-  console.log(`OpenAI: prompt ${prompt.length} chars, image ${Math.round(rawBuffer.length/1024)}KB → PNG ${Math.round(imageBuffer.length/1024)}KB quality=${quality||"low"} size=1536x1024`);
-  const { body, boundary } = buildOpenAIMultipart(imageBuffer, "image/png", prompt, quality);
+  // Detect aspect ratio to set correct output size
+  // Square input (remove-objects) → 1024x1024
+  // Landscape input (listing photos) → 1536x1024
+  // Portrait input → 1024x1536
+  const meta = await sharp(rawBuffer).metadata();
+  const w = meta.width || 1024;
+  const h = meta.height || 1024;
+  let outputSize;
+  if (Math.abs(w - h) < 100) outputSize = "1024x1024";
+  else if (w > h) outputSize = "1536x1024";
+  else outputSize = "1024x1536";
+  console.log(`OpenAI: prompt ${prompt.length} chars, image ${Math.round(rawBuffer.length/1024)}KB → PNG ${Math.round(imageBuffer.length/1024)}KB quality=${quality||"low"} size=${outputSize} input=${w}x${h}`);
+  const { body, boundary } = buildOpenAIMultipart(imageBuffer, "image/png", prompt, quality, outputSize);
   return new Promise((resolve, reject) => {
     const req = https.request({
       hostname: "api.openai.com",

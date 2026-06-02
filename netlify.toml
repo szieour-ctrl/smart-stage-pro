@@ -38,6 +38,9 @@
 [functions."check-spatial-read"]
   timeout = 10
 
+[functions."remove-objects"]
+  timeout = 900
+
 [functions."group-spatial-read"]
   timeout = 900
 [functions."check-openai"]

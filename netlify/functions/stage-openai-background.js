@@ -30,12 +30,17 @@ async function callOpenAI(imageBase64, mimeType, prompt, apiKey, quality) {
   const rawBuffer = Buffer.from(imageBase64, "base64");
   const imageBuffer = await sharp(rawBuffer).png().toBuffer();
   // Detect aspect ratio to set correct output size
-  // Square input (remove-objects output) → 1024x1024
+  // Square input (remove-objects) → 1024x1024
   // Landscape input (listing photos) → 1536x1024
+  // Portrait input → 1024x1536
   const meta = await sharp(rawBuffer).metadata();
-  const isSquare = meta.width && meta.height && Math.abs(meta.width - meta.height) < 100;
-  const outputSize = isSquare ? "1024x1024" : "1536x1024";
-  console.log(`OpenAI: prompt ${prompt.length} chars, image ${Math.round(rawBuffer.length/1024)}KB → PNG ${Math.round(imageBuffer.length/1024)}KB quality=${quality||"low"} size=${outputSize} input=${meta.width}x${meta.height}`);
+  const w = meta.width || 1024;
+  const h = meta.height || 1024;
+  let outputSize;
+  if (Math.abs(w - h) < 100) outputSize = "1024x1024";
+  else if (w > h) outputSize = "1536x1024";
+  else outputSize = "1024x1536";
+  console.log(`OpenAI: prompt ${prompt.length} chars, image ${Math.round(rawBuffer.length/1024)}KB → PNG ${Math.round(imageBuffer.length/1024)}KB quality=${quality||"low"} size=${outputSize} input=${w}x${h}`);
   const { body, boundary } = buildOpenAIMultipart(imageBuffer, "image/png", prompt, quality, outputSize);
   return new Promise((resolve, reject) => {
     const req = https.request({
@@ -72,7 +77,11 @@ exports.handler = async (event) => {
   try {
     const { jobId: jId, imageBase64, mimeType, stagingPrompt, quality } = JSON.parse(event.body);
     jobId = jId;
-    console.log(`Job ${jobId} starting...`);
+    console.log(`Job ${jobId} starting... siteID=${siteID ? "SET" : "MISSING"} token=${token ? "SET" : "MISSING"}`);
+
+    if (!siteID) throw new Error("NETLIFY_SITE_ID not configured");
+    if (!token)  throw new Error("NETLIFY_ACCESS_TOKEN not configured");
+    if (!openAIKey) throw new Error("OPENAI_API_KEY not configured");
 
     const store = getStore({ name: "staging-jobs", siteID, token });
 

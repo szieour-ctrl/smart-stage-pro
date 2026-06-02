@@ -44,10 +44,18 @@ async function triggerBackground(payload, siteUrl) {
         "Content-Length": body.length,
       }
     }, (res) => {
-      res.resume();
-      res.on("end", () => resolve(res.statusCode));
+      const chunks = [];
+      res.on("data", c => chunks.push(c));
+      res.on("end", () => {
+        const responseBody = Buffer.concat(chunks).toString("utf8").slice(0, 500);
+        console.log(`Background response: status=${res.statusCode} body=${responseBody}`);
+        resolve(res.statusCode);
+      });
     });
-    req.on("error", reject);
+    req.on("error", (err) => {
+      console.error(`Background trigger network error: ${err.message}`);
+      reject(err);
+    });
     req.write(body);
     req.end();
   });

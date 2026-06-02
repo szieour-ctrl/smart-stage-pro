@@ -1,11 +1,16 @@
-// group-spatial-read.js — Single long-running function
-// Runs Haiku spatial pre-read + prompt assembly inline.
-// timeout = 900 in netlify.toml — no background function needed.
-// Client waits for response (same pattern as generate-staging-prompt).
+// group-spatial-read.js — Dispatcher + Preserve Mode
+//
+// MODE: spatial — Dispatches to background function, returns jobId immediately.
+//   Client polls check-spatial-read.js every 3 seconds.
+//   Background handles the slow Haiku multi-image read (~30s).
+//
+// MODE: preserve — Runs inline (fast, ~2-3s single image).
+//   Reads one image for PRESERVE list.
+//   Assembles final GPT prompt from zone assignments + PRESERVE + session DNA.
+//   Returns promptText ready for GPT Image 2.
 
 const https = require("https");
 const sharp = require("sharp");
-const { getStore } = require("@netlify/blobs");
 
 function httpsRequest(options, body) {
   return new Promise((resolve, reject) => {
@@ -68,96 +73,51 @@ async function compressForRead(imageBase64) {
       .resize(800, 800, { fit: "inside", withoutEnlargement: true })
       .jpeg({ quality: 82 })
       .toBuffer();
-    console.log(`Compressed: ${maxDim}px ${sizeKB}KB -> ${Math.round(compressed.length/1024)}KB`);
     return compressed.toString("base64");
-  } catch(e) {
-    console.warn("Compression failed, using original:", e.message);
-    return imageBase64;
-  }
+  } catch(e) { return imageBase64; }
 }
 
-async function runSpatialPreRead({ images, groupType, claudeKey }) {
-  const isBedroom = groupType === 'bedroom';
-
-  const imageBlocks = images.map((img, i) => ([
-    { type: "image", source: { type: "base64", media_type: detectMime(img.base64), data: img.base64 } },
-    { type: "text", text: `IMAGE ${i + 1} — ${img.label || img.fileName || ('Angle ' + (i + 1))}` }
-  ])).flat();
-
-  const perImageSchema = images.map((img, i) => {
-    const label = img.label || img.fileName || ('Angle ' + (i + 1));
-    return [
-      '{',
-      '  "imageIndex": ' + i + ',',
-      '  "imageLabel": "' + label + '",',
-      '  "cameraPosition": "one sentence",',
-      '  "visibleZones": ["kitchen","dining","living"],',
-      '  "primaryAnchor": "most prominent ceiling fixture or architectural element",',
-      '  "furnitureBoundaryAnchors": {',
-      '    "livingRugCenter": "Center rug under [fan] or null",',
-      '    "livingRugDepth": "Rug from 18in of [hearth] to 18in of [back wall] or null",',
-      '    "livingLeftBoundary": "[visible element] or null",',
-      '    "livingRightBoundary": "[visible element] or null",',
-      '    "livingSofaNote": "Sofa back against [back wall] facing [fireplace] or null",',
-      '    "livingZoneScale": "normal or background scale",',
-      '    "diningRugCenter": "Center under [chandelier] or null",',
-      '    "diningBoundary": "Rug edge stops at [landmark] or null",',
-      '    "islandStoolSide": "Stools on dining-zone-facing side only or null"',
-      '  },',
-      '  "positiveStagingInstructions": {',
-      '    "diningZone": "DINING ZONE: Place [rug] under [chandelier]. Place [table]. Place [chairs]. Place [centerpiece]. or null",',
-      '    "kitchenZone": "KITCHEN ZONE: Place [N stools] below [pendants] on dining side. Place [props]. or null",',
-      '    "livingZone": "LIVING ZONE: Place [rug] under [fan]. Rug from 18in of [hearth] to 18in of [back wall]. Place [sofa] back against [back wall] facing [fireplace]. Place [chairs]. Place [coffee table]. Place [console]. Place [plant]. Place [art]. Place [lamp]. or null",',
-      '    "bedroomZone": "BEDROOM: Place [bed] headboard against [back wall]. Place [nightstands]. or null"',
-      '  },',
-      '  "imageSpecificProhibitions": ["DO NOT [landmark-based prohibition]"]',
-      '}'
-    ].join('\n');
-  }).join(',\n');
-
-  const rules = [
-    'CRITICAL RULES:',
-    '1. Every ceiling fixture MUST have zone assignment in PRESERVE and zoneAnchorLocks.',
-    '2. Every instruction MUST reference a visible landmark.',
-    '3. PRESERVE only what is photographed — no pools, decks, or invented features.',
-    '4. positiveStagingInstructions required for EVERY visible zone in EVERY image.',
-    '5. Prohibitions come LAST.',
-    '6. Chandelier over floor = DINING ZONE. Pendants over island = KITCHEN ZONE. Ceiling fan = LIVING ZONE.',
-    '7. Sofa back goes against back wall facing fireplace. Never floats.',
-  ].join('\n');
-
-  const schema = [
+async function runPreserveRead({ imageBase64, imageLabel, claudeKey }) {
+  const prompt = [
+    'You are reading a real estate listing photo to generate a PRESERVE list for MLS virtual staging.',
+    'Describe every permanent architectural element visible in this photograph only.',
+    'Do not infer or describe anything outside the frame.',
+    '',
+    'RULES:',
+    '1. Every ceiling fixture: type, arm/bulb count, finish, shade style.',
+    '2. All cabinetry: color, door style, hardware finish.',
+    '3. All countertops: material and color.',
+    '4. All flooring: material, color.',
+    '5. All windows: pane pattern, frame color.',
+    '6. All doors: type, color.',
+    '7. Fireplace: surround color, profile, hearth, firebox.',
+    '8. Island: base color, countertop, visible appliances.',
+    '9. Backsplash: material, pattern, color.',
+    '10. All visible appliances.',
+    '11. Wall openings: "partition wall with rectangular opening [location] — separate room beyond, do not stage".',
+    '12. End with: DO NOT alter any permanent architectural element.',
+    '13. Do NOT include anything not visible in this photograph.',
+    '',
+    'Return ONLY valid JSON — no markdown, no preamble.',
+    '',
     '{',
-    '  "groupType": "' + groupType + '",',
-    '  "anglesRead": ' + images.length + ',',
-    '  "masterPreserve": "All permanent elements with zone assignments for fixtures. End: DO NOT alter any permanent architectural element.",',
-    '  "zoneAnchorLocks": {',
-    '    "diningZone": { "present": true, "ceilingAnchor": "chandelier desc", "ceilingAnchorInstruction": "Place rug under chandelier. Place table. Place chairs.", "backWallAnchor": null, "frontWallAnchor": null },',
-    '    "kitchenZone": { "present": true, "ceilingAnchor": "pendant desc", "ceilingAnchorInstruction": "Place N stools on dining-side below pendants.", "islandNote": "FLOATING KITCHEN ISLAND — do not alter." },',
-    '    "livingZone": { "present": true, "ceilingAnchor": "fan desc", "ceilingAnchorInstruction": "Place rug under fan.", "backWallAnchor": "wall sofa back goes against", "backWallAnchorInstruction": "Place sofa back against [wall] facing fireplace.", "frontWallAnchor": "fireplace wall", "frontWallAnchorInstruction": "All seating faces fireplace." },',
-    '    "bedroomZone": { "present": ' + (isBedroom ? 'true' : 'false') + ', "backWallAnchor": ' + (isBedroom ? '"headboard wall"' : 'null') + ', "backWallAnchorInstruction": ' + (isBedroom ? '"Place bed headboard against [wall]."' : 'null') + ' }',
-    '  },',
-    '  "conflictsDetected": [{ "element": "name", "conflict": "what was ambiguous", "resolution": "correct interpretation" }],',
-    '  "masterFurniturePlan": {',
-    '    "style": "one phrase",',
-    '    "livingZone": { "sofa": "desc", "accentChairs": "desc", "coffeeTable": "desc", "rug": "desc", "console": "desc or null", "plant": "desc or null", "art": "desc or null", "floorLamp": "desc or null" },',
-    '    "diningZone": { "table": "desc", "chairs": "desc", "rug": "desc", "centerpiece": "desc" },',
-    '    "kitchenZone": { "stools": "desc", "props": "one item" }',
-    '  },',
-    '  "perImageAnchors": [' + perImageSchema + '],',
-    '  "globalProhibitions": ["DO NOT add walls between zones.", "DO NOT alter room geometry.", "DO NOT add exterior features not photographed."]',
+    '  "imageLabel": "' + (imageLabel || 'image') + '",',
+    '  "preserveList": "comma-separated list of every permanent element visible, ending with: DO NOT alter any permanent architectural element.",',
+    '  "wallOpenings": ["each wall opening: type and location"],',
+    '  "adjacentRoomsVisible": ["each room visible through an opening — do not stage from this image"]',
     '}'
   ].join('\n');
 
-  const promptText = 'You are analyzing ' + images.length + ' photos of the same ' +
-    (isBedroom ? 'bedroom' : 'open plan living space') + ' from different camera angles.\n' +
-    'All images show the same physical space. Build a unified spatial inventory for MLS virtual staging.\n\n' +
-    rules + '\n\nReturn ONLY valid JSON — no markdown, no preamble.\n\n' + schema;
-
   const payload = JSON.stringify({
     model: "claude-haiku-4-5",
-    max_tokens: 6000,
-    messages: [{ role: "user", content: [...imageBlocks, { type: "text", text: promptText }] }]
+    max_tokens: 1500,
+    messages: [{
+      role: "user",
+      content: [
+        { type: "image", source: { type: "base64", media_type: detectMime(imageBase64), data: imageBase64 } },
+        { type: "text", text: prompt }
+      ]
+    }]
   });
 
   const result = await httpsRequest({
@@ -172,152 +132,192 @@ async function runSpatialPreRead({ images, groupType, claudeKey }) {
     }
   }, payload);
 
-  if (result.status !== 200) throw new Error("Haiku failed: " + (result.body?.error?.message || result.status));
-
+  if (result.status !== 200) throw new Error("Preserve read failed: " + (result.body?.error?.message || result.status));
   const text = result.body?.content?.[0]?.text?.trim() || "{}";
   const clean = text.replace(/```json|```/g, "").trim();
-  try {
-    return JSON.parse(clean);
-  } catch(e) {
-    console.warn("JSON truncated — attempting repair. Length:", clean.length);
-    try {
-      let r = clean.replace(/,\s*$/, '').replace(/"[^"]*$/, '').replace(/:\s*$/, '');
-      let braces = 0, brackets = 0;
-      for (const ch of r) { if (ch==='{') braces++; else if (ch==='}') braces--; else if (ch==='[') brackets++; else if (ch===']') brackets--; }
-      while (brackets > 0) { r += ']'; brackets--; }
-      while (braces > 0) { r += '}'; braces--; }
-      return JSON.parse(r);
-    } catch(e2) {
-      throw new Error("Spatial pre-read returned invalid JSON");
-    }
-  }
+  try { return JSON.parse(clean); }
+  catch(e) { throw new Error("Preserve read returned invalid JSON"); }
 }
 
-function assemblePlainTextPrompt({ spatialPlan, imageIndex, designStyle, colorPalette }) {
+function assemblePrompt({ imageAssignment, preserveData, designStyle, colorPalette }) {
   const rawStyle = designStyle || 'Organic Modern';
   const style = STYLE_LABELS[rawStyle?.toLowerCase().replace(/[^a-z]/g, '')] || rawStyle;
   const palette = colorPalette || 'Warm Neutrals';
-  const paletteTones = PALETTE_TONES[palette] || `${palette} tones`;
+  const paletteTones = PALETTE_TONES[palette] || (palette + ' tones');
 
-  const locks = spatialPlan.zoneAnchorLocks || {};
-  const imgAnchor = spatialPlan.perImageAnchors?.[imageIndex] || {};
-  const bounds = imgAnchor.furnitureBoundaryAnchors || {};
-  const positive = imgAnchor.positiveStagingInstructions || {};
-  const visibleZones = imgAnchor.visibleZones || [];
-  const prohibitions = [...(imgAnchor.imageSpecificProhibitions || []), ...(spatialPlan.globalProhibitions || [])];
+  const zones = imageAssignment.visibleZones || [];
+  const anchors = imageAssignment.zoneAnchors || {};
+  const boundaries = imageAssignment.boundaryAnchors || {};
+  const wallOpenings = imageAssignment.wallOpenings || [];
+  const preserveList = preserveData?.preserveList || '';
+  const adjacentRooms = preserveData?.adjacentRoomsVisible || [];
 
-  const hasLiving  = visibleZones.includes('living');
-  const hasDining  = visibleZones.includes('dining');
-  const hasKitchen = visibleZones.includes('kitchen');
-  const hasBedroom = visibleZones.includes('bedroom');
+  const hasLiving  = zones.includes('living');
+  const hasDining  = zones.includes('dining');
+  const hasKitchen = zones.includes('kitchen');
+  const hasBedroom = zones.includes('bedroom');
 
-  let p = `PRESERVE EXACTLY: ${spatialPlan.masterPreserve}\n\n`;
-  p += `Stage with furniture and decor only. Do not alter any permanent architectural element. `;
-  p += `Stage in ${style} design style using a ${palette} palette with ${paletteTones} throughout.\n\n`;
+  let p = '';
 
-  const anchorLines = [];
-  if (hasDining && locks.diningZone?.ceilingAnchor) {
-    anchorLines.push(`DINING ZONE ANCHOR LOCK — ${locks.diningZone.ceilingAnchor}: This is the Dining Zone anchor. Dining rug and table center directly under this fixture. NOT a kitchen fixture.`);
+  p += 'PRESERVE EXACTLY: ' + preserveList + '\n\n';
+  p += 'Stage with furniture and decor only. Do not alter any permanent architectural element. ';
+  p += 'Stage in ' + style + ' design style using a ' + palette + ' palette with ' + paletteTones + ' throughout.\n\n';
+
+  const anchorBlocks = [];
+  if (hasDining && anchors.dining?.present && anchors.dining?.ceilingFixture) {
+    anchorBlocks.push('DINING ZONE ANCHOR LOCK — ' + anchors.dining.ceilingFixture + ': This fixture is the permanent anchor for the Dining Zone. Dining rug and table center directly under this fixture. This is NOT a kitchen fixture.');
   }
-  if (hasKitchen && locks.kitchenZone?.ceilingAnchor) {
-    anchorLines.push(`KITCHEN ZONE ANCHOR LOCK — ${locks.kitchenZone.ceilingAnchor}: Kitchen Zone anchor over island. ${locks.kitchenZone.islandNote || 'DO NOT alter the floating kitchen island.'}`);
+  if (hasKitchen && anchors.kitchen?.present && anchors.kitchen?.ceilingFixture) {
+    anchorBlocks.push('KITCHEN ZONE ANCHOR LOCK — ' + anchors.kitchen.ceilingFixture + ': Kitchen Zone anchor over island. ' + (anchors.kitchen.islandDescription ? 'FLOATING KITCHEN ISLAND CABINET: ' + anchors.kitchen.islandDescription + ' — do not remove, relocate, resize, or alter.' : 'DO NOT alter the floating kitchen island cabinet.'));
   }
-  if (hasLiving && locks.livingZone?.present) {
-    const lz = locks.livingZone;
+  if (hasLiving && anchors.living?.present) {
+    const lv = anchors.living;
     let ll = 'LIVING ZONE ANCHOR LOCKS:\n';
-    if (lz.ceilingAnchor) ll += `  Ceiling: ${lz.ceilingAnchor} — rug centers under this.\n`;
-    if (lz.frontWallAnchor) ll += `  Front wall: ${lz.frontWallAnchor} — all seating faces this.\n`;
-    if (lz.backWallAnchor) ll += `  Back wall: ${lz.backWallAnchor} — sofa back against this wall.\n`;
-    anchorLines.push(ll.trim());
+    if (lv.ceilingFixture) ll += '  Ceiling: ' + lv.ceilingFixture + ' — rug centers directly under this fixture.\n';
+    if (lv.frontWall)      ll += '  Front wall: ' + lv.frontWall + ' — all seating faces this wall.\n';
+    if (lv.backWall)       ll += '  Back wall: ' + lv.backWall + ' — sofa back goes against this wall facing the fireplace.\n';
+    anchorBlocks.push(ll.trim());
   }
-  if (hasBedroom && locks.bedroomZone?.present) {
-    const bz = locks.bedroomZone;
-    let bl = 'BEDROOM ZONE ANCHOR LOCKS:\n';
-    if (bz.backWallAnchor) bl += `  Headboard wall: ${bz.backWallAnchor}.\n`;
-    anchorLines.push(bl.trim());
+  if (hasBedroom && anchors.bedroom?.present && anchors.bedroom?.headboardWall) {
+    anchorBlocks.push('BEDROOM ZONE ANCHOR LOCKS:\n  Headboard wall: ' + anchors.bedroom.headboardWall + ' — place bed headboard against this wall centered.');
   }
-  if (anchorLines.length) p += anchorLines.join('\n\n') + '\n\n';
+  if (anchorBlocks.length) p += anchorBlocks.join('\n\n') + '\n\n';
 
   const boundaryLines = [];
   if (hasLiving) {
-    if (bounds.livingRugCenter) boundaryLines.push(bounds.livingRugCenter + '.');
-    if (bounds.livingRugDepth)  boundaryLines.push(bounds.livingRugDepth + '.');
-    if (bounds.livingSofaNote)  boundaryLines.push(bounds.livingSofaNote + '.');
-    if (bounds.livingLeftBoundary)  boundaryLines.push(bounds.livingLeftBoundary + '.');
-    if (bounds.livingRightBoundary) boundaryLines.push(bounds.livingRightBoundary + '.');
-    if (bounds.livingZoneScale && bounds.livingZoneScale !== 'normal') boundaryLines.push(bounds.livingZoneScale + '.');
+    if (boundaries.livingFront) boundaryLines.push(boundaries.livingFront + '.');
+    if (boundaries.livingBack)  boundaryLines.push(boundaries.livingBack + '.');
+    if (boundaries.livingLeft)  boundaryLines.push('Left boundary: ' + boundaries.livingLeft + '.');
+    if (boundaries.livingRight) boundaryLines.push('Right boundary: ' + boundaries.livingRight + '.');
+    if (anchors.living?.zoneScale === 'background') boundaryLines.push('Living zone is in far background — scale as background depth, do not extend toward camera.');
   }
   if (hasDining) {
-    if (bounds.diningRugCenter) boundaryLines.push(bounds.diningRugCenter + '.');
-    if (bounds.diningBoundary)  boundaryLines.push(bounds.diningBoundary + '.');
+    if (boundaries.diningLeft)  boundaryLines.push('Dining left boundary: ' + boundaries.diningLeft + '.');
+    if (boundaries.diningRight) boundaryLines.push('Dining right boundary: ' + boundaries.diningRight + '.');
   }
-  if (hasKitchen && bounds.islandStoolSide) boundaryLines.push(bounds.islandStoolSide + '.');
-  if (boundaryLines.length) p += `FURNITURE BOUNDARY ANCHORS:\n${boundaryLines.join(' ')}\n\n`;
+  if (boundaryLines.length) p += 'FURNITURE BOUNDARY ANCHORS:\n' + boundaryLines.join(' ') + '\n\n';
 
-  const positiveBlocks = [];
-  if (hasDining  && positive.diningZone  && positive.diningZone  !== 'null') positiveBlocks.push(positive.diningZone);
-  if (hasKitchen && positive.kitchenZone && positive.kitchenZone !== 'null') positiveBlocks.push(positive.kitchenZone);
-  if (hasLiving  && positive.livingZone  && positive.livingZone  !== 'null') positiveBlocks.push(positive.livingZone);
-  if (hasBedroom && positive.bedroomZone && positive.bedroomZone !== 'null') positiveBlocks.push(positive.bedroomZone);
-  if (positiveBlocks.length) p += `POSITIVE STAGING INSTRUCTIONS:\n${positiveBlocks.join('\n\n')}\n\n`;
+  const stagingBlocks = [];
+  if (hasDining && anchors.dining?.present && anchors.dining?.ceilingFixture) {
+    stagingBlocks.push('DINING ZONE: Place a round area rug centered directly under the ' + anchors.dining.ceilingFixture + '. Place a round dining table centered on the rug. Place 6 upholstered dining chairs around the table. Place one tall vase with stems on the table center.');
+  }
+  if (hasKitchen && anchors.kitchen?.present && anchors.kitchen?.ceilingFixture) {
+    stagingBlocks.push('KITCHEN ZONE: Place 3 counter stools on the dining-zone-facing side of the island only, directly below the ' + anchors.kitchen.ceilingFixture + '. Place one small bowl of fruit on the island countertop. Keep all other surfaces clean.');
+  }
+  if (hasLiving && anchors.living?.present) {
+    const lv = anchors.living;
+    const fan   = lv.ceilingFixture || 'ceiling fan';
+    const front = lv.frontWall      || 'fireplace';
+    const back  = lv.backWall       || 'back wall';
+    const leftB = boundaries.livingLeft ? ', not extending past ' + boundaries.livingLeft : '';
+    stagingBlocks.push('LIVING ZONE: Place a large area rug centered directly under the ' + fan + ', extending from 18 inches in front of the ' + front + ' back to 18 inches in front of the ' + back + leftB + '. Place a light linen sofa with its back against the ' + back + ', centered on the rug, facing the fireplace. Place two upholstered accent chairs on the rug angled inward toward the fireplace. Place a round coffee table centered on the rug between the sofa and the fireplace. Place a dark wood console against the right wall. Place one large plant right of the fireplace. Place one landscape art piece centered above the fireplace surround. Place one arc floor lamp behind the left accent chair.');
+  }
+  if (hasBedroom && anchors.bedroom?.present) {
+    stagingBlocks.push('BEDROOM ZONE: Place bed with headboard against the ' + (anchors.bedroom.headboardWall || 'back wall') + '. Place matching nightstands flanking the bed. Place a dresser on the opposite wall. Place a bench at the foot of the bed.');
+  }
+  if (stagingBlocks.length) p += 'POSITIVE STAGING INSTRUCTIONS:\n\n' + stagingBlocks.join('\n\n') + '\n\n';
 
-  if (prohibitions.length) p += prohibitions.filter(Boolean).join('\n') + '\n\n';
+  const prohibitions = [];
+  if (wallOpenings.length) {
+    prohibitions.push('DO NOT stage furniture inside or through wall openings — ' + wallOpenings.join('; ') + '.');
+    prohibitions.push('DO NOT add ceiling fixtures, pendants, cabinetry, or counters through or near wall openings.');
+    prohibitions.push('PRESERVE the room visible through each wall opening exactly as photographed — do not brighten, alter, or obscure.');
+  }
+  if (adjacentRooms.length) prohibitions.push('DO NOT stage rooms visible through wall openings: ' + adjacentRooms.join('; ') + '.');
+  if (hasKitchen) {
+    prohibitions.push('DO NOT place bar stools on the camera-facing side of the island.');
+    prohibitions.push('DO NOT remove, relocate, resize, or alter the floating kitchen island cabinet.');
+  }
+  if (!hasKitchen) prohibitions.push('DO NOT add kitchen cabinetry, island, or kitchen fixtures — kitchen is not visible in this photograph.');
+  if (!hasDining)  prohibitions.push('DO NOT add a dining table, dining chairs, or dining chandelier — dining zone is not visible in this photograph.');
+  prohibitions.push('DO NOT add ceiling fixtures or chandeliers not visible in this photograph.');
+  prohibitions.push('DO NOT add walls, enclosures, or any architectural element not photographed.');
+  prohibitions.push('DO NOT add exterior features not visible in this photograph.');
+  p += prohibitions.join('\n') + '\n\n';
 
-  p += `Use ${style} furniture with clean lines, refined materials, and metallic accents. `;
-  p += `Maintain realistic furniture scale proportional to the room. Do not scale furniture up to fill the frame. `;
-  p += `Preserve all architectural features, room dimensions, and camera perspective exactly as photographed. `;
-  p += `This image is for MLS listing per California AB 723 §10140.6. Room proportions must be preserved exactly.`;
+  p += 'Use ' + style + ' furniture with clean architectural lines, refined materials, and metallic accents. ';
+  p += 'Maintain realistic furniture scale proportional to the room. Do not scale furniture up to fill the frame. ';
+  p += 'Preserve all architectural features, room dimensions, and camera perspective exactly as photographed. ';
+  p += 'This image is for MLS listing per California AB 723 §10140.6. Room proportions must be preserved exactly. ';
+  p += 'Virtual staging adds furniture and decor only — any alteration to architecture or spatial geometry is prohibited.';
 
   return p.trim();
 }
 
+async function triggerBackground(payload, siteUrl) {
+  const body = Buffer.from(JSON.stringify(payload));
+  console.log('Triggering group-spatial-read-background: payload ' + Math.round(body.length / 1024) + 'KB');
+  const url = new URL(siteUrl + '/.netlify/functions/group-spatial-read-background');
+  return new Promise((resolve, reject) => {
+    const req = https.request({
+      hostname: url.hostname,
+      path: url.pathname,
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Content-Length": body.length }
+    }, (res) => {
+      const chunks = [];
+      res.on("data", c => chunks.push(c));
+      res.on("end", () => {
+        console.log('Background response: status=' + res.statusCode + ' body=' + Buffer.concat(chunks).toString("utf8").slice(0, 200));
+        resolve(res.statusCode);
+      });
+    });
+    req.on("error", reject);
+    req.write(body);
+    req.end();
+  });
+}
+
 exports.handler = async (event) => {
   if (event.httpMethod !== "POST") return { statusCode: 405, body: "Method Not Allowed" };
-
-  const headers = {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Headers": "Content-Type",
-    "Content-Type": "application/json",
-  };
+  const headers = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "Content-Type", "Content-Type": "application/json" };
 
   try {
-    const { images, groupType, designStyle, colorPalette } = JSON.parse(event.body);
-
-    if (!images || images.length < 2) return { statusCode: 400, headers, body: JSON.stringify({ error: "At least 2 images required" }) };
-    if (images.length > 5)           return { statusCode: 400, headers, body: JSON.stringify({ error: "Maximum 5 images" }) };
-
+    const body = JSON.parse(event.body);
     const claudeKey = process.env.ANTHROPIC_API_KEY;
     if (!claudeKey) return { statusCode: 500, headers, body: JSON.stringify({ error: "ANTHROPIC_API_KEY not configured" }) };
 
-    console.log(`Group spatial read: ${images.length} images, type=${groupType}`);
+    // MODE: spatial — fire background, return jobId
+    if (body.mode === 'spatial' || (!body.mode && body.images && !body.imageBase64)) {
+      const { images, groupType } = body;
+      if (!images || images.length < 1) return { statusCode: 400, headers, body: JSON.stringify({ error: "At least 1 image required" }) };
+      if (images.length > 5)            return { statusCode: 400, headers, body: JSON.stringify({ error: "Maximum 5 images" }) };
 
-    // Compress images
-    const readyImages = await Promise.all(images.map(async (img) => ({
-      ...img, base64: await compressForRead(img.base64), mimeType: "image/jpeg"
-    })));
+      const siteUrl = process.env.URL || process.env.DEPLOY_URL;
+      if (!siteUrl) return { statusCode: 500, headers, body: JSON.stringify({ error: "Site URL not configured" }) };
 
-    // Run Haiku spatial pre-read
-    const spatialPlan = await runSpatialPreRead({ images: readyImages, groupType: groupType || 'openplan', claudeKey });
-    console.log(`Spatial plan: ${spatialPlan.conflictsDetected?.length || 0} conflicts, ${spatialPlan.perImageAnchors?.length || 0} anchor sets`);
+      const readyImages = await Promise.all(images.map(async (img) => ({
+        ...img, base64: await compressForRead(img.base64), mimeType: "image/jpeg"
+      })));
 
-    // Assemble per-image prompts
-    const perImagePrompts = images.map((img, i) => ({
-      imageIndex: i,
-      imageLabel: img.label || img.fileName || `Angle ${i + 1}`,
-      promptText: assemblePlainTextPrompt({ spatialPlan, imageIndex: i, designStyle, colorPalette }),
-      anchors: spatialPlan.perImageAnchors?.[i] || {},
-    }));
+      const jobId = "gsr-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8);
+      console.log('Group spatial read dispatch: jobId=' + jobId + ' images=' + images.length);
 
-    return {
-      statusCode: 200,
-      headers,
-      body: JSON.stringify({
-        spatialPlan,
-        perImagePrompts,
-        conflictsResolved: spatialPlan.conflictsDetected?.length || 0,
-        anglesRead: images.length,
-      })
-    };
+      const triggerStatus = await triggerBackground({ jobId, mode: 'spatial', images: readyImages, groupType }, siteUrl);
+      console.log('Job ' + jobId + ': background trigger status = ' + triggerStatus);
+
+      if (triggerStatus !== 202) {
+        return { statusCode: 500, headers, body: JSON.stringify({ error: 'Background trigger failed: ' + triggerStatus }) };
+      }
+      return { statusCode: 200, headers, body: JSON.stringify({ jobId }) };
+    }
+
+    // MODE: preserve — inline, fast (~2-3s)
+    if (body.mode === 'preserve') {
+      const { imageBase64, imageLabel, imageAssignment, designStyle, colorPalette } = body;
+      if (!imageBase64)     return { statusCode: 400, headers, body: JSON.stringify({ error: "imageBase64 required" }) };
+      if (!imageAssignment) return { statusCode: 400, headers, body: JSON.stringify({ error: "imageAssignment required" }) };
+
+      console.log('Preserve read: ' + imageLabel);
+      const compressedBase64 = await compressForRead(imageBase64);
+      const preserveData = await runPreserveRead({ imageBase64: compressedBase64, imageLabel, claudeKey });
+      const promptText = assemblePrompt({ imageAssignment, preserveData, designStyle, colorPalette });
+
+      console.log('Preserve + assembly complete: ' + promptText.length + ' chars');
+      return { statusCode: 200, headers, body: JSON.stringify({ mode: 'preserve', preserveData, promptText }) };
+    }
+
+    return { statusCode: 400, headers, body: JSON.stringify({ error: "Invalid mode — use spatial or preserve" }) };
 
   } catch (err) {
     console.error("group-spatial-read error:", err.message);

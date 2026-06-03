@@ -164,8 +164,14 @@ function assemblePrompt({ imageAssignment, preserveData, designStyle, colorPalet
   p += 'Stage in ' + style + ' design style using a ' + palette + ' palette with ' + paletteTones + ' throughout.\n\n';
 
   const anchorBlocks = [];
-  if (hasDining && anchors.dining?.present && anchors.dining?.ceilingFixture) {
-    anchorBlocks.push('DINING ZONE ANCHOR LOCK — ' + anchors.dining.ceilingFixture + ': This fixture is the permanent anchor for the Dining Zone. Dining rug and table center directly under this fixture. This is NOT a kitchen fixture.');
+  if (hasDining && anchors.dining?.present) {
+    if (anchors.dining.ceilingFixture) {
+      anchorBlocks.push('DINING ZONE ANCHOR LOCK — ' + anchors.dining.ceilingFixture + ': This fixture is the permanent anchor for the Dining Zone. Dining rug and table center directly under this fixture. This is NOT a kitchen fixture.');
+    } else {
+      const leftB  = boundaries.diningLeft  ? boundaries.diningLeft  : 'kitchen island';
+      const rightB = boundaries.diningRight ? boundaries.diningRight : 'living zone';
+      anchorBlocks.push('DINING ZONE: No chandelier visible in this image. Center dining table and rug in the open floor area between ' + leftB + ' and ' + rightB + '.');
+    }
   }
   if (hasKitchen && anchors.kitchen?.present && anchors.kitchen?.ceilingFixture) {
     anchorBlocks.push('KITCHEN ZONE ANCHOR LOCK — ' + anchors.kitchen.ceilingFixture + ': Kitchen Zone anchor over island. ' + (anchors.kitchen.islandDescription ? 'FLOATING KITCHEN ISLAND CABINET: ' + anchors.kitchen.islandDescription + ' — do not remove, relocate, resize, or alter.' : 'DO NOT alter the floating kitchen island cabinet.'));
@@ -198,8 +204,16 @@ function assemblePrompt({ imageAssignment, preserveData, designStyle, colorPalet
   if (boundaryLines.length) p += 'FURNITURE BOUNDARY ANCHORS:\n' + boundaryLines.join(' ') + '\n\n';
 
   const stagingBlocks = [];
-  if (hasDining && anchors.dining?.present && anchors.dining?.ceilingFixture) {
-    stagingBlocks.push('DINING ZONE: Place a round area rug centered directly under the ' + anchors.dining.ceilingFixture + '. Place a round dining table centered on the rug. Place 6 upholstered dining chairs around the table. Place one tall vase with stems on the table center.');
+  if (hasDining && anchors.dining?.present) {
+    if (anchors.dining.ceilingFixture) {
+      // Confirmed chandelier anchor
+      stagingBlocks.push('DINING ZONE: Place a round area rug centered directly under the ' + anchors.dining.ceilingFixture + '. Place a round dining table centered on the rug. Place 6 upholstered dining chairs around the table. Place one tall vase with stems on the table center.');
+    } else {
+      // No confirmed chandelier — center in open floor between boundaries
+      const leftB  = boundaries.diningLeft  ? ' to the right of the ' + boundaries.diningLeft  : '';
+      const rightB = boundaries.diningRight ? ' and to the left of the ' + boundaries.diningRight : '';
+      stagingBlocks.push('DINING ZONE: Place a round area rug centered in the open floor area' + leftB + rightB + '. Place a round dining table centered on the rug. Place 6 upholstered dining chairs around the table. Place one tall vase with stems on the table center.');
+    }
   }
   if (hasKitchen && anchors.kitchen?.present && anchors.kitchen?.ceilingFixture) {
     stagingBlocks.push('KITCHEN ZONE: Place 3 counter stools on the dining-zone-facing side of the island only, directly below the ' + anchors.kitchen.ceilingFixture + '. Place one small bowl of fruit on the island countertop. Keep all other surfaces clean.');

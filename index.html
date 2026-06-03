@@ -2815,6 +2815,7 @@ async function approveAndStageGroupImage(assignmentIndex, roomId) {
         imageBase64: gImg.base64,
         imageLabel: gImg.label || gImg.fileName,
         imageAssignment,
+        groupSpatialPlan: SESSION.groupSpatialPlan || null,
         designStyle: intake.style_label || 'Organic Modern',
         colorPalette: intake.palette_label || 'Warm Neutrals',
       })
@@ -3033,4 +3034,3 @@ showStep('step-property');
 </script>
 </body>
 </html>
-

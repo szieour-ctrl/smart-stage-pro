@@ -94,7 +94,7 @@ async function runPreserveRead({ imageBase64, imageLabel, claudeKey }) {
     '8. Island: base color, countertop, visible appliances.',
     '9. Backsplash: material, pattern, color.',
     '10. All visible appliances.',
-    '11. Wall openings: "partition wall with rectangular opening [location] — separate room beyond, do not stage".',
+    '11. Wall openings: describe exactly what is visible — e.g. "partition wall with rectangular opening upper left", "sliding glass door right wall", "archway to hallway".',
     '12. End with: DO NOT alter any permanent architectural element.',
     '13. Do NOT include anything not visible in this photograph.',
     '',
@@ -235,7 +235,7 @@ function assemblePrompt({ imageAssignment, preserveData, designStyle, colorPalet
   if (wallOpenings.length) {
     prohibitions.push('DO NOT stage furniture inside or through wall openings — ' + wallOpenings.join('; ') + '.');
     prohibitions.push('DO NOT add ceiling fixtures, pendants, cabinetry, or counters through or near wall openings.');
-    prohibitions.push('PRESERVE the room visible through each wall opening exactly as photographed — do not brighten, alter, or obscure.');
+    prohibitions.push('DO NOT add architectural elements, furniture, or objects inside the room visible through any wall opening.');
   }
   if (adjacentRooms.length) prohibitions.push('DO NOT stage rooms visible through wall openings: ' + adjacentRooms.join('; ') + '.');
   if (hasKitchen) {

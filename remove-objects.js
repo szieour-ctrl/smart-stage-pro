@@ -95,7 +95,7 @@ function buildRemoveMultipart(imageBuffer, imageMime, prompt) {
   parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="quality"\r\n\r\nlow`);
   const textBuf = Buffer.from(parts.join("\r\n") + "\r\n", "utf8");
   const fileHdr = Buffer.from(
-    `--${boundary}\r\nContent-Disposition: form-data; name="image[]"; filename="room.jpg"\r\nContent-Type: ${imageMime}\r\n\r\n`,
+    `--${boundary}\r\nContent-Disposition: form-data; name="image[]"; filename="room.png"\r\nContent-Type: ${imageMime}\r\n\r\n`,
     "utf8"
   );
   const closing = Buffer.from(`\r\n--${boundary}--\r\n`, "utf8");
@@ -114,8 +114,10 @@ async function removeWithGPT(imageBase64, mimeType, roomAnalysis, openaiKey) {
     `Where furniture was, show only the clean floor, wall, or ceiling behind it. ` +
     `Do NOT add any new furniture, staging, or objects. Result must be a completely empty room ready for virtual staging.`;
 
-  const imageBuffer = Buffer.from(imageBase64, "base64");
-  const { body, boundary } = buildRemoveMultipart(imageBuffer, mimeType || "image/jpeg", prompt);
+  // OpenAI edits endpoint requires PNG — convert regardless of input format
+  const rawBuffer = Buffer.from(imageBase64, "base64");
+  const imageBuffer = await sharp(rawBuffer).png().toBuffer();
+  const { body, boundary } = buildRemoveMultipart(imageBuffer, "image/png", prompt);
 
   console.log(`Remove prompt: ${prompt.length} chars, image: ${Math.round(imageBuffer.length / 1024)}KB`);
 

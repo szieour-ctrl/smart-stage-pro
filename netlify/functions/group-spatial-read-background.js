@@ -90,9 +90,9 @@ async function runSpatialRead({ images, groupType, claudeKey }) {
       '  "visibleZones": ["list ONLY zones with stageable floor area visible in THIS image: kitchen, dining, living, bedroom"],',
       '  "cameraPosition": "one sentence",',
       '  "zoneAnchors": {',
-      '    "dining": { "present": true/false, "ceilingFixture": "chandelier desc or null", "instruction": "Center rug and table under [fixture] or null" },',
-      '    "kitchen": { "present": true/false, "ceilingFixture": "pendant desc or null", "islandDescription": "island desc or null", "stoolSide": "dining-zone-facing or null", "instruction": "Place N stools below [pendants] or null" },',
-      '    "living": { "present": true/false, "ceilingFixture": "fan desc or null", "frontWall": "fireplace desc or null", "backWall": "PRIORITY ORDER: (1) if a partition wall with an opening/cutout is visible anywhere in the frame, that wall IS the back wall — use it. (2) if no partition wall, use the solid interior wall opposite the fireplace. (3) NEVER use an exterior wall, window wall, or glass door wall as the back wall.", "zoneScale": "foreground or background", "instruction": "Place rug under [fan]. Sofa against [backWall] facing [fireplace] or null" },',
+      '    "dining": { "present": true/false, "ceilingFixture": "LCD classification: e.g. 5-arm brushed nickel chandelier with clear glass shades — or null if not visible in this image", "fixtureType": "chandelier or pendant or null", "spatialContext": "open floor adjacent to kitchen (dining/nook) or walled room with entrance (flex/formal) or null", "instruction": "Center rug and table under [fixture] or null" },',
+      '    "kitchen": { "present": true/false, "ceilingFixture": "LCD classification: e.g. 2 individual pendant lights with brushed nickel finish and clear glass shades hanging over island — or null", "islandDescription": "island desc or null", "islandBarOverhang": true/false, "stoolSide": "dining-zone-facing or null", "instruction": "Place N stools below [pendants] or null" },',
+      '    "living": { "present": true/false, "ceilingFixture": "LCD classification: e.g. brushed nickel ceiling fan with 4 black blades and light kit — or null", "frontWall": "fireplace desc or null", "backWall": "PRIORITY ORDER: (1) if a partition wall with an opening/cutout is visible anywhere in the frame, that wall IS the back wall — use it. (2) if no partition wall, use the solid interior wall opposite the fireplace. (3) NEVER use an exterior wall, window wall, or glass door wall as the back wall.", "zoneScale": "foreground or background", "instruction": "Place rug under [fan]. Sofa against [backWall] facing [fireplace] or null" },',
       '    "bedroom": { "present": ' + (isBedroom ? 'true' : 'false') + ', "headboardWall": "desc or null", "instruction": "Place bed headboard against [wall] or null" }',
       '  },',
       '  "wallOpenings": ["each wall opening visible: type, location, what is beyond — do not assign zone anchors to rooms beyond openings"],',
@@ -116,11 +116,24 @@ async function runSpatialRead({ images, groupType, claudeKey }) {
     'RULES:',
     '1. visibleZones: list ONLY zones with stageable floor area in THIS image. If kitchen not visible — omit kitchen.',
     '2. Fixtures visible through wall openings belong to the room beyond — do not assign them here.',
-    '3. FIXTURE ZONE RULES — read carefully:',
-    '   DINING anchor: any chandelier or multi-pendant fixture hanging over OPEN FLOOR with no surface below it.',
-    '   KITCHEN anchor: pendant lights hanging directly over an island countertop surface.',
-    '   If a multi-pendant fixture hangs over open floor with no island below — it is DINING, not kitchen.',
-    '   Ceiling fan = LIVING anchor. Always.',
+    '3. LIGHTING CLASSIFICATION DICTIONARY (LCD) — classify every hanging fixture using this logic:',
+    '   Step A: COUNT the arms/lights on each fixture accurately. A single fixture with 5 arms is ONE chandelier, not "two pendants."',
+    '   Step B: CHECK what is directly below the fixture:',
+    '     - Island countertop below → PENDANT LIGHT → KITCHEN anchor.',
+    '     - Bathroom vanity below → PENDANT LIGHT → BATHROOM anchor.',
+    '     - Open floor (no surface below) → go to Step C.',
+    '   Step C: CLASSIFY the fixture type hanging over open floor:',
+    '     - Multi-arm fixture with branching arms/lights on one canopy = CHANDELIER.',
+    '     - Individual fixtures each on their own cord/chain = PENDANT LIGHTS.',
+    '   Step D: DETERMINE the zone for CHANDELIERS based on spatial context:',
+    '     - Chandelier over open floor adjacent to kitchen (no walls enclosing it) = DINING/NOOK zone anchor (informal dining).',
+    '     - Chandelier inside a walled room with a defined entrance/doorway = FLEX ROOM zone anchor (formal dining).',
+    '   Step E: OTHER ceiling fixtures:',
+    '     - Recessed/can lights = zone-neutral, not an anchor. Include in PRESERVE only.',
+    '     - Ceiling fan (with or without light kit) = LIVING zone anchor. Always.',
+    '     - Flush-mount globe/dome = FLEX ROOM, BEDROOM, or LAUNDRY anchor (context-dependent).',
+    '   CRITICAL: Describe the fixture as it actually appears. Do not invent fixtures not visible in the frame.',
+    '   CRITICAL: If a fixture is not visible in THIS image, set ceilingFixture to null for that zone.',
     '4. List every wall opening in wallOpenings[] — do not stage rooms visible through openings.',
     '5. Return ONLY valid JSON — no markdown, no preamble.',
     '',
@@ -268,13 +281,14 @@ function assemblePrompt({ imageAssignment, preserveData, designStyle, colorPalet
       'DINING ZONE ANCHOR LOCK — ' + anchors.dining.ceilingFixture + ': ' +
       'This fixture is the permanent anchor for the Dining Zone. ' +
       'Dining rug and table center directly under this fixture. ' +
-      'This is NOT a kitchen fixture and does NOT hang over the island.'
+      'This is NOT a kitchen fixture and does NOT hang over the island. ' +
+      'DO NOT replace, alter, remove, restyle, or substitute this fixture. It must remain exactly as photographed — same arm count, same finish, same shades, same position.'
     );
   }
   if (hasKitchen && anchors.kitchen?.present && anchors.kitchen?.ceilingFixture) {
     anchorBlocks.push(
       'KITCHEN ZONE ANCHOR LOCK — ' + anchors.kitchen.ceilingFixture + ': ' +
-      'Kitchen Zone anchor over island. ' +
+      'Kitchen Zone anchor over island. DO NOT replace, alter, or substitute these fixtures. ' +
       (anchors.kitchen.islandDescription
         ? 'FLOATING KITCHEN ISLAND CABINET: ' + anchors.kitchen.islandDescription + ' — do not remove, relocate, resize, or alter.'
         : 'DO NOT alter the floating kitchen island cabinet.')
@@ -283,7 +297,7 @@ function assemblePrompt({ imageAssignment, preserveData, designStyle, colorPalet
   if (hasLiving && anchors.living?.present) {
     const lv = anchors.living;
     let ll = 'LIVING ZONE ANCHOR LOCKS:\n';
-    if (lv.ceilingFixture) ll += '  Ceiling: ' + lv.ceilingFixture + ' — rug centers directly under this fixture.\n';
+    if (lv.ceilingFixture) ll += '  Ceiling: ' + lv.ceilingFixture + ' — rug centers directly under this fixture. DO NOT replace, alter, or substitute this fixture.\n';
     if (lv.frontWall)      ll += '  Front wall: ' + lv.frontWall + ' — all seating faces this wall.\n';
     if (lv.backWall)       ll += '  Back wall: ' + lv.backWall + ' — sofa back goes against this wall facing the fireplace.\n';
     anchorBlocks.push(ll.trim());
@@ -321,11 +335,18 @@ function assemblePrompt({ imageAssignment, preserveData, designStyle, colorPalet
     );
   }
   if (hasKitchen && anchors.kitchen?.present && anchors.kitchen?.ceilingFixture) {
-    stagingBlocks.push(
-      'KITCHEN ZONE: Place 3 counter stools on the dining-zone-facing side of the island only, ' +
-      'directly below the ' + anchors.kitchen.ceilingFixture + '. ' +
-      'Place one small bowl of fruit on the island countertop. Keep all other surfaces clean.'
-    );
+    if (anchors.kitchen.islandBarOverhang) {
+      stagingBlocks.push(
+        'KITCHEN ZONE: Place 3 counter stools on the dining-zone-facing side of the island only, ' +
+        'directly below the ' + anchors.kitchen.ceilingFixture + '. ' +
+        'Place one small bowl of fruit on the island countertop. Keep all other surfaces clean.'
+      );
+    } else {
+      stagingBlocks.push(
+        'KITCHEN ZONE: No bar overhang — DO NOT add stools. ' +
+        'Place one small bowl of fruit on the island countertop. Keep all other surfaces clean.'
+      );
+    }
   }
   if (hasLiving && anchors.living?.present) {
     const lv = anchors.living;
@@ -369,6 +390,7 @@ function assemblePrompt({ imageAssignment, preserveData, designStyle, colorPalet
   }
   if (!hasKitchen) prohibitions.push('DO NOT add kitchen cabinetry, island, or kitchen fixtures — kitchen is not visible in this photograph.');
   if (!hasDining)  prohibitions.push('DO NOT add a dining table, dining chairs, or dining chandelier — dining zone is not visible in this photograph.');
+  prohibitions.push('DO NOT replace, alter, restyle, or substitute any existing ceiling fixture — chandeliers, pendants, fans, and recessed lights must remain exactly as photographed.');
   prohibitions.push('DO NOT add ceiling fixtures or chandeliers not visible in this photograph.');
   prohibitions.push('DO NOT add walls, enclosures, or any architectural element not photographed.');
   prohibitions.push('DO NOT add exterior features not visible in this photograph.');

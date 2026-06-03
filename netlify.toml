@@ -62,9 +62,6 @@
 [functions."remove-objects"]
   timeout = 30
 
-[functions."remove-objects-background"]
-  timeout = 900
-
 [functions."upscale-image"]
   timeout = 60
 

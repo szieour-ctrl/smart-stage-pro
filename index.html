@@ -2233,8 +2233,8 @@ async function callRemoveObjects(imageBase64, mimeType) {
       if (!checkRes.ok) continue;
       const result = await checkRes.json();
       if (result.status === 'done') {
-        if (!result.removedBase64) throw new Error('No cleaned image in completed job');
-        return result.removedBase64;
+        if (!result.stagedBase64) throw new Error('No cleaned image in completed job');
+        return result.stagedBase64;
       }
       if (result.status === 'error') throw new Error('Remove objects error: ' + (result.error || 'unknown'));
       // status === 'pending' — keep polling

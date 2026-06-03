@@ -92,7 +92,7 @@ async function runSpatialRead({ images, groupType, claudeKey }) {
       '  "zoneAnchors": {',
       '    "dining": { "present": true/false, "ceilingFixture": "chandelier desc or null", "instruction": "Center rug and table under [fixture] or null" },',
       '    "kitchen": { "present": true/false, "ceilingFixture": "pendant desc or null", "islandDescription": "island desc or null", "stoolSide": "dining-zone-facing or null", "instruction": "Place N stools below [pendants] or null" },',
-      '    "living": { "present": true/false, "ceilingFixture": "fan desc or null", "frontWall": "fireplace desc or null", "backWall": "wall the sofa back goes against — if a partition wall with opening is visible, that IS the back wall. Never use a window wall. Wall opposite fireplace if no partition visible.", "zoneScale": "foreground or background", "instruction": "Place rug under [fan]. Sofa against [backWall] facing [fireplace] or null" },',
+      '    "living": { "present": true/false, "ceilingFixture": "fan desc or null", "frontWall": "fireplace desc or null", "backWall": "PRIORITY ORDER: (1) if a partition wall with an opening/cutout is visible anywhere in the frame, that wall IS the back wall — use it. (2) if no partition wall, use the solid interior wall opposite the fireplace. (3) NEVER use an exterior wall, window wall, or glass door wall as the back wall.", "zoneScale": "foreground or background", "instruction": "Place rug under [fan]. Sofa against [backWall] facing [fireplace] or null" },',
       '    "bedroom": { "present": ' + (isBedroom ? 'true' : 'false') + ', "headboardWall": "desc or null", "instruction": "Place bed headboard against [wall] or null" }',
       '  },',
       '  "wallOpenings": ["each wall opening visible: type, location, what is beyond — do not assign zone anchors to rooms beyond openings"],',
@@ -331,7 +331,9 @@ function assemblePrompt({ imageAssignment, preserveData, designStyle, colorPalet
     const lv = anchors.living;
     const fan   = lv.ceilingFixture || 'ceiling fan';
     const front = lv.frontWall      || 'fireplace';
-    const back  = lv.backWall       || 'back wall';
+    const backRaw = lv.backWall || 'back wall';
+    const badBack = /glass|window|exterior|sliding|door|patio/i.test(backRaw);
+    const back = badBack ? 'partition wall or interior wall opposite the fireplace' : backRaw;
     const leftB = boundaries.livingLeft ? ', not extending past ' + boundaries.livingLeft : '';
     stagingBlocks.push(
       'LIVING ZONE: Place a large area rug centered directly under the ' + fan + ', ' +

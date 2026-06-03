@@ -2210,34 +2210,40 @@ function resetFinal(roomId,enhId){
 
 // Shared: call remove-objects endpoint with retry (Claude Vision + GPT Image 2)
 async function callRemoveObjects(imageBase64, mimeType) {
-  for (let attempt = 1; attempt <= 3; attempt++) {
+  // Step 1: Fire background job — returns jobId immediately
+  const startRes = await fetch('/.netlify/functions/remove-objects', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ imageBase64, mimeType })
+  });
+  if (!startRes.ok) {
+    const d = await startRes.json().catch(() => ({}));
+    throw new Error('Remove objects failed to start: ' + (d.error || startRes.status));
+  }
+  const { jobId } = await startRes.json();
+  if (!jobId) throw new Error('No jobId returned from remove-objects dispatcher');
+  console.log('Remove job fired:', jobId);
+
+  // Step 2: Poll check-openai every 3 seconds — max 4 minutes (80 polls)
+  const maxPolls = 80;
+  for (let poll = 0; poll < maxPolls; poll++) {
+    await new Promise(r => setTimeout(r, 3000));
     try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 120000);
-      const res = await fetch('/.netlify/functions/remove-objects', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        signal: controller.signal,
-        body: JSON.stringify({ imageBase64, mimeType })
-      });
-      clearTimeout(timer);
-      if (!res.ok) {
-        const d = await res.json().catch(() => ({}));
-        if (attempt < 3) continue;
-        throw new Error('Remove objects failed: ' + (d.error || res.status));
+      const checkRes = await fetch(`/.netlify/functions/check-openai?jobId=${encodeURIComponent(jobId)}`);
+      if (!checkRes.ok) continue;
+      const result = await checkRes.json();
+      if (result.status === 'done') {
+        if (!result.removedBase64) throw new Error('No cleaned image in completed job');
+        return result.removedBase64;
       }
-      const data = await res.json();
-      if (!data.removedBase64) {
-        if (attempt < 3) continue;
-        throw new Error('No cleaned image returned');
-      }
-      return data.removedBase64;
+      if (result.status === 'error') throw new Error('Remove objects error: ' + (result.error || 'unknown'));
+      // status === 'pending' — keep polling
     } catch(err) {
-      if (err.name === 'AbortError' && attempt < 3) continue;
-      throw err;
+      if (err.message.startsWith('Remove objects error:')) throw err;
+      // network blip — keep polling
     }
   }
-  throw new Error('Remove objects failed after 3 attempts');
+  throw new Error('Remove objects timed out after 4 minutes — please try again.');
 }
 
 // DECLUTTER ONLY — 1 API call, no staging

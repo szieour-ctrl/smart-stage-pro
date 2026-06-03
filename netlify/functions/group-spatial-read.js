@@ -139,16 +139,39 @@ async function runPreserveRead({ imageBase64, imageLabel, claudeKey }) {
   catch(e) { throw new Error("Preserve read returned invalid JSON"); }
 }
 
-function assemblePrompt({ imageAssignment, preserveData, designStyle, colorPalette }) {
+function assemblePrompt({ imageAssignment, preserveData, designStyle, colorPalette, groupSpatialPlan }) {
   const rawStyle = designStyle || 'Organic Modern';
   const style = STYLE_LABELS[rawStyle?.toLowerCase().replace(/[^a-z]/g, '')] || rawStyle;
   const palette = colorPalette || 'Warm Neutrals';
   const paletteTones = PALETTE_TONES[palette] || (palette + ' tones');
 
-  const zones = imageAssignment.visibleZones || [];
-  const anchors = imageAssignment.zoneAnchors || {};
+  const zones = [...(imageAssignment.visibleZones || [])];
+  const anchors = JSON.parse(JSON.stringify(imageAssignment.zoneAnchors || {}));
   const boundaries = imageAssignment.boundaryAnchors || {};
   const wallOpenings = imageAssignment.wallOpenings || [];
+
+  // MULTI-ANGLE MERGE: pull confirmed zone anchors from other images in the group
+  // If a zone was confirmed in any other angle, apply it here even if not visible in this frame
+  if (groupSpatialPlan?.perImageAssignments) {
+    for (const otherImage of groupSpatialPlan.perImageAssignments) {
+      if (otherImage === imageAssignment) continue;
+
+      // Merge confirmed dining anchor
+      if (!anchors.dining?.present && otherImage.zoneAnchors?.dining?.present && otherImage.zoneAnchors?.dining?.ceilingFixture) {
+        anchors.dining = { ...otherImage.zoneAnchors.dining, confirmedFromOtherAngle: true };
+        if (!zones.includes('dining')) zones.push('dining');
+        // Use boundary anchors from this image if available, else from confirming image
+        if (!boundaries.diningLeft  && otherImage.boundaryAnchors?.diningLeft)  boundaries.diningLeft  = otherImage.boundaryAnchors.diningLeft;
+        if (!boundaries.diningRight && otherImage.boundaryAnchors?.diningRight) boundaries.diningRight = otherImage.boundaryAnchors.diningRight;
+      }
+
+      // Merge confirmed living anchor (ceiling fan) if missing
+      if (!anchors.living?.ceilingFixture && otherImage.zoneAnchors?.living?.ceilingFixture) {
+        anchors.living = anchors.living || {};
+        anchors.living.ceilingFixture = otherImage.zoneAnchors.living.ceilingFixture;
+      }
+    }
+  }
   const preserveList = preserveData?.preserveList || '';
   const adjacentRooms = preserveData?.adjacentRoomsVisible || [];
 
@@ -222,7 +245,10 @@ function assemblePrompt({ imageAssignment, preserveData, designStyle, colorPalet
     const lv = anchors.living;
     const fan   = lv.ceilingFixture || 'ceiling fan';
     const front = lv.frontWall      || 'fireplace';
-    const back  = lv.backWall       || 'back wall';
+    // Safety check — never allow glass door, window, or exterior wall as sofa back wall
+    const backRaw = lv.backWall || 'back wall';
+    const badBack = /glass|window|exterior|sliding|door|patio/i.test(backRaw);
+    const back = badBack ? 'partition wall or interior wall opposite the fireplace' : backRaw;
     const leftB = boundaries.livingLeft ? ', not extending past ' + boundaries.livingLeft : '';
     stagingBlocks.push('LIVING ZONE: Place a large area rug centered directly under the ' + fan + ', extending from 18 inches in front of the ' + front + ' back to 18 inches in front of the ' + back + leftB + '. Place a light linen sofa with its back against the ' + back + ', centered on the rug, facing the fireplace. Place two upholstered accent chairs on the rug angled inward toward the fireplace. Place a round coffee table centered on the rug between the sofa and the fireplace. Place a dark wood console against the right wall. Place one large plant right of the fireplace. Place one landscape art piece centered above the fireplace surround. Place one arc floor lamp behind the left accent chair.');
   }
@@ -325,7 +351,7 @@ exports.handler = async (event) => {
       console.log('Preserve read: ' + imageLabel);
       const compressedBase64 = await compressForRead(imageBase64);
       const preserveData = await runPreserveRead({ imageBase64: compressedBase64, imageLabel, claudeKey });
-      const promptText = assemblePrompt({ imageAssignment, preserveData, designStyle, colorPalette });
+      const promptText = assemblePrompt({ imageAssignment, preserveData, designStyle, colorPalette, groupSpatialPlan: body.groupSpatialPlan || null });
 
       console.log('Preserve + assembly complete: ' + promptText.length + ' chars');
       return { statusCode: 200, headers, body: JSON.stringify({ mode: 'preserve', preserveData, promptText }) };

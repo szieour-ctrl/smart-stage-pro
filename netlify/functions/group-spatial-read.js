@@ -189,7 +189,7 @@ function assemblePrompt({ imageAssignment, preserveData, designStyle, colorPalet
   const anchorBlocks = [];
   if (hasDining && anchors.dining?.present) {
     if (anchors.dining.ceilingFixture) {
-      anchorBlocks.push('DINING ZONE ANCHOR LOCK — ' + anchors.dining.ceilingFixture + ': This fixture is the permanent anchor for the Dining Zone. Dining rug and table center directly under this fixture. This is NOT a kitchen fixture.');
+      anchorBlocks.push('DINING ZONE ANCHOR LOCK — ' + anchors.dining.ceilingFixture + ': This fixture is the permanent anchor for the Dining Zone. Dining rug and table center directly under this fixture. This is NOT a kitchen fixture. DO NOT replace, alter, remove, restyle, or substitute this fixture. It must remain exactly as photographed — same arm count, same finish, same shades, same position.');
     } else {
       const leftB  = boundaries.diningLeft  ? boundaries.diningLeft  : 'kitchen island';
       const rightB = boundaries.diningRight ? boundaries.diningRight : 'living zone';
@@ -197,12 +197,12 @@ function assemblePrompt({ imageAssignment, preserveData, designStyle, colorPalet
     }
   }
   if (hasKitchen && anchors.kitchen?.present && anchors.kitchen?.ceilingFixture) {
-    anchorBlocks.push('KITCHEN ZONE ANCHOR LOCK — ' + anchors.kitchen.ceilingFixture + ': Kitchen Zone anchor over island. ' + (anchors.kitchen.islandDescription ? 'FLOATING KITCHEN ISLAND CABINET: ' + anchors.kitchen.islandDescription + ' — do not remove, relocate, resize, or alter.' : 'DO NOT alter the floating kitchen island cabinet.'));
+    anchorBlocks.push('KITCHEN ZONE ANCHOR LOCK — ' + anchors.kitchen.ceilingFixture + ': Kitchen Zone anchor over island. DO NOT replace, alter, or substitute these fixtures. ' + (anchors.kitchen.islandDescription ? 'FLOATING KITCHEN ISLAND CABINET: ' + anchors.kitchen.islandDescription + ' — do not remove, relocate, resize, or alter.' : 'DO NOT alter the floating kitchen island cabinet.'));
   }
   if (hasLiving && anchors.living?.present) {
     const lv = anchors.living;
     let ll = 'LIVING ZONE ANCHOR LOCKS:\n';
-    if (lv.ceilingFixture) ll += '  Ceiling: ' + lv.ceilingFixture + ' — rug centers directly under this fixture.\n';
+    if (lv.ceilingFixture) ll += '  Ceiling: ' + lv.ceilingFixture + ' — rug centers directly under this fixture. DO NOT replace, alter, or substitute this fixture.\n';
     if (lv.frontWall)      ll += '  Front wall: ' + lv.frontWall + ' — all seating faces this wall.\n';
     if (lv.backWall)       ll += '  Back wall: ' + lv.backWall + ' — sofa back goes against this wall facing the fireplace.\n';
     anchorBlocks.push(ll.trim());
@@ -239,7 +239,11 @@ function assemblePrompt({ imageAssignment, preserveData, designStyle, colorPalet
     }
   }
   if (hasKitchen && anchors.kitchen?.present && anchors.kitchen?.ceilingFixture) {
-    stagingBlocks.push('KITCHEN ZONE: Place 3 counter stools on the dining-zone-facing side of the island only, directly below the ' + anchors.kitchen.ceilingFixture + '. Place one small bowl of fruit on the island countertop. Keep all other surfaces clean.');
+    if (anchors.kitchen.islandBarOverhang) {
+      stagingBlocks.push('KITCHEN ZONE: Place 3 counter stools on the dining-zone-facing side of the island only, directly below the ' + anchors.kitchen.ceilingFixture + '. Place one small bowl of fruit on the island countertop. Keep all other surfaces clean.');
+    } else {
+      stagingBlocks.push('KITCHEN ZONE: No bar overhang — DO NOT add stools. Place one small bowl of fruit on the island countertop. Keep all other surfaces clean.');
+    }
   }
   if (hasLiving && anchors.living?.present) {
     const lv = anchors.living;
@@ -270,6 +274,7 @@ function assemblePrompt({ imageAssignment, preserveData, designStyle, colorPalet
   }
   if (!hasKitchen) prohibitions.push('DO NOT add kitchen cabinetry, island, or kitchen fixtures — kitchen is not visible in this photograph.');
   if (!hasDining)  prohibitions.push('DO NOT add a dining table, dining chairs, or dining chandelier — dining zone is not visible in this photograph.');
+  prohibitions.push('DO NOT replace, alter, restyle, or substitute any existing ceiling fixture — chandeliers, pendants, fans, and recessed lights must remain exactly as photographed.');
   prohibitions.push('DO NOT add ceiling fixtures or chandeliers not visible in this photograph.');
   prohibitions.push('DO NOT add walls, enclosures, or any architectural element not photographed.');
   prohibitions.push('DO NOT add exterior features not visible in this photograph.');

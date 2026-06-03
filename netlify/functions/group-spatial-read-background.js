@@ -92,7 +92,7 @@ async function runSpatialRead({ images, groupType, claudeKey }) {
       '  "zoneAnchors": {',
       '    "dining": { "present": true/false, "ceilingFixture": "chandelier desc or null", "instruction": "Center rug and table under [fixture] or null" },',
       '    "kitchen": { "present": true/false, "ceilingFixture": "pendant desc or null", "islandDescription": "island desc or null", "stoolSide": "dining-zone-facing or null", "instruction": "Place N stools below [pendants] or null" },',
-      '    "living": { "present": true/false, "ceilingFixture": "fan desc or null", "frontWall": "fireplace desc or null", "backWall": "wall sofa goes against or null", "zoneScale": "foreground or background", "instruction": "Place rug under [fan]. Sofa against [backWall] facing [fireplace] or null" },',
+      '    "living": { "present": true/false, "ceilingFixture": "fan desc or null", "frontWall": "fireplace desc or null", "backWall": "wall the sofa back goes against — if a partition wall with opening is visible, that IS the back wall. Never use a window wall. Wall opposite fireplace if no partition visible.", "zoneScale": "foreground or background", "instruction": "Place rug under [fan]. Sofa against [backWall] facing [fireplace] or null" },',
       '    "bedroom": { "present": ' + (isBedroom ? 'true' : 'false') + ', "headboardWall": "desc or null", "instruction": "Place bed headboard against [wall] or null" }',
       '  },',
       '  "wallOpenings": ["each wall opening visible: type, location, what is beyond — do not assign zone anchors to rooms beyond openings"],',
@@ -116,7 +116,11 @@ async function runSpatialRead({ images, groupType, claudeKey }) {
     'RULES:',
     '1. visibleZones: list ONLY zones with stageable floor area in THIS image. If kitchen not visible — omit kitchen.',
     '2. Fixtures visible through wall openings belong to the room beyond — do not assign them here.',
-    '3. Chandelier over open floor = DINING anchor. Pendants over island = KITCHEN anchor. Ceiling fan = LIVING anchor.',
+    '3. FIXTURE ZONE RULES — read carefully:',
+    '   DINING anchor: any chandelier or multi-pendant fixture hanging over OPEN FLOOR with no surface below it.',
+    '   KITCHEN anchor: pendant lights hanging directly over an island countertop surface.',
+    '   If a multi-pendant fixture hangs over open floor with no island below — it is DINING, not kitchen.',
+    '   Ceiling fan = LIVING anchor. Always.',
     '4. List every wall opening in wallOpenings[] — do not stage rooms visible through openings.',
     '5. Return ONLY valid JSON — no markdown, no preamble.',
     '',
@@ -419,4 +423,3 @@ exports.handler = async (event) => {
     } catch(e) {}
   }
 };
-

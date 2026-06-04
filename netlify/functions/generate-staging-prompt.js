@@ -69,9 +69,11 @@ function buildOpenPlanPrompt({ preserveList, chandelier, ceilingFan, designStyle
   const labelLower = (openPlanZones || '').toLowerCase();
   const zones = visibleZones || [];
 
-  const hasKitchen = zones.includes('kitchen') || labelLower.includes('kitchen');
-  const hasDining  = zones.includes('dining')  || true; // dining always present in open plan
-  const hasLiving  = zones.includes('living')  || labelLower.includes('great room') || labelLower.includes('living');
+  // visibleZones from Haiku is the authority — only stage zones confirmed visible in this image
+  // Fall back to label ONLY if Haiku returned no zones at all (empty array)
+  const hasKitchen = zones.length > 0 ? zones.includes('kitchen') : labelLower.includes('kitchen');
+  const hasDining  = zones.length > 0 ? zones.includes('dining')  : true;
+  const hasLiving  = zones.length > 0 ? zones.includes('living')  : (labelLower.includes('great room') || labelLower.includes('living'));
   const hasFlexRoom = zones.includes('flex_room') || zones.includes('flex') || labelLower.includes('flex');
   const hasIsland  = zones.includes('kitchen') || labelLower.includes('kitchen');
 
@@ -386,6 +388,7 @@ exports.handler = async (event) => {
       anchorDNA, stagingDNA, dnaTier,
       openPlanStrategy,
       anchorImageUrl, derivedZone,
+      zoneList, openPlanZoneDescription,
     } = JSON.parse(event.body);
 
     const claudeKey = process.env.ANTHROPIC_API_KEY;
@@ -495,10 +498,15 @@ Generate a revised staging prompt that:
 Return ONLY the prompt text — no explanation, no JSON, no markdown.`;
 
     } else {
-      // Single room fresh staging
+      // Single room fresh staging — constrained by zoneList from user label
+      const zoneConstraint = (zoneList && zoneList.length > 0)
+        ? `\n\nZONE CONSTRAINT — CRITICAL:\nThe user labeled this photo as: ${roomName}\nYou may ONLY stage furniture in these zones: ${zoneList.join(', ')}.\nAll other visible open floor space, adjacent rooms visible through openings, and areas outside these zones MUST be preserved EXACTLY as photographed — empty floor stays empty, walls stay intact, no furniture placed outside the labeled zones.\nDO NOT reframe, crop, shift, or alter the camera perspective. Image boundaries must remain exactly as the original photograph.\nDO NOT remove, open, widen, or alter any partition wall, half-wall, or architectural divider. Wall openings must remain exactly as photographed — same dimensions, same glass panes, same trim.`
+        : '';
+
       userPrompt = `Analyze this vacant real estate listing photo and generate a virtual staging prompt for an MLS listing.
 
 MANDATORY: Your prompt MUST open with PRESERVE EXACTLY. Scan the photo and list every permanent element — cabinetry (exact color and style), countertop material, flooring, wall color, all installed fixtures, tile, appliances, mirrors, windows, trim, fireplace, island geometry. Every item in PRESERVE EXACTLY tells the staging engine it cannot touch that element.
+${zoneConstraint}
 
 SESSION PARAMETERS:
 - Room: ${roomName} (Decor8 room type: ${roomType})
@@ -519,23 +527,23 @@ ANALYZE THE PHOTO AND IDENTIFY:
 1. Camera position and direction
 2. Room focal point (fireplace, view, feature wall)
 3. Island/peninsula orientation — which side faces camera vs away
-4. All empty floor zones where furniture can go
+4. All empty floor zones within the LABELED ZONES ONLY where furniture can go
 5. All permanent fixtures that must be preserved exactly
-6. Architectural openings (pass-throughs, archways, doorways) — note their location and width only. These are boundaries, not staging zones. The wall and floor area ADJACENT to an opening belongs to the primary room and must be staged at full density.
-7. Flex room zones: Look for open areas defined by structural columns, partial/low half-walls (not full ceiling-to-floor), or secondary pendant lighting fixtures. These bridge-zones between kitchen and living room are multi-purpose and must be identified and staged. Markers: visible column in open floor + low wall with visual cutout + secondary pendant fixture = FLEX ROOM zone.
+6. Architectural openings (pass-throughs, archways, doorways) — these are preservation boundaries, NOT staging zones. DO NOT stage furniture through, inside, or beyond any opening. The wall structure around each opening must be preserved exactly.
+7. All partition walls, half-walls, and architectural dividers — these MUST be preserved exactly as photographed. DO NOT remove, open, widen, or convert any wall opening into a walk-through.
 8. Natural light direction and quality
 
 GENERATE A STAGING PROMPT that specifies:
-- Exact furniture pieces and their precise placement locations
+- Exact furniture pieces and their precise placement locations WITHIN THE LABELED ZONES ONLY
 - Which side of islands/peninsulas bar seating goes (always far side from camera)
 - Sofa orientation relative to focal point
 - Area rug sizing and position
 - Art placement with size guidance
 - Props (minimal — follow props standards)
 - What to preserve exactly
-- Flex room staging (if present): Specify furniture type appropriate to the zone (secondary seating, game table, reading nook, home office, activity center) and its placement relative to the island and fireplace. Flex rooms are multi-purpose zones that bridge kitchen and living — they MUST be fully staged.
-- Architectural openings: treat pass-throughs, archways, and doorways as WALL SEGMENTS only. Do NOT write instructions that restrict furniture placement near openings. The floor area beside or in front of any opening is part of the primary room — stage it at full density appropriate to the room's square footage. A floor lamp, accent chair, console table, or plant beside an opening is correct and encouraged.
-- Room scale calibration: distribute furniture across the FULL floor area visible in the photo. A large room requires proportionally large furniture and multiple furniture groupings. Never cluster all pieces in one zone and leave remaining floor area empty.
+- DO NOT stage any zone not in the label. Open floor space outside the labeled zones must remain empty.
+- DO NOT alter camera angle, field of view, or image crop. The image boundaries and perspective must remain exactly as the original photograph.
+- DO NOT remove, open, widen, or alter any partition wall, half-wall, or architectural divider. Wall openings must remain exactly as photographed — same dimensions, same glass panes, same trim.
 
 Return ONLY the staging prompt text — no explanation, no JSON, no preamble.`;
     }

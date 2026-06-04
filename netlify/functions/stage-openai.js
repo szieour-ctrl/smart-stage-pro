@@ -82,15 +82,25 @@ exports.handler = async (event) => {
 
     const jobId = "oai-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8);
 
-    const triggerStatus = await triggerBackground({
-      jobId, imageBase64: readyBase64, mimeType: readyMime, stagingPrompt, quality: quality || "low"
-    }, siteUrl);
+    // Retry up to 3 times — Netlify background functions intermittently return 500
+    let triggerStatus;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      triggerStatus = await triggerBackground({
+        jobId, imageBase64: readyBase64, mimeType: readyMime, stagingPrompt, quality: quality || "low"
+      }, siteUrl);
 
-    console.log(`Job ${jobId}: background trigger status = ${triggerStatus}`);
+      console.log(`Job ${jobId}: attempt ${attempt} background trigger status = ${triggerStatus}`);
+
+      if (triggerStatus === 202) break;
+      if (attempt < 3) {
+        console.log(`Job ${jobId}: retrying in 2 seconds...`);
+        await new Promise(r => setTimeout(r, 2000));
+      }
+    }
 
     if (triggerStatus !== 202) {
-      console.error(`Job ${jobId}: background trigger FAILED with status ${triggerStatus}`);
-      return { statusCode: 500, headers, body: JSON.stringify({ error: `Background function trigger failed: ${triggerStatus}` }) };
+      console.error(`Job ${jobId}: background trigger FAILED after 3 attempts, last status ${triggerStatus}`);
+      return { statusCode: 500, headers, body: JSON.stringify({ error: `Background function trigger failed after 3 attempts: ${triggerStatus}` }) };
     }
 
     return { statusCode: 200, headers, body: JSON.stringify({ jobId }) };

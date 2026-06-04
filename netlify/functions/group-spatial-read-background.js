@@ -87,7 +87,7 @@ async function runSpatialRead({ images, groupType, claudeKey }) {
       '{',
       '  "imageIndex": ' + i + ',',
       '  "imageLabel": "' + label + '",',
-      '  "visibleZones": ["list ONLY zones with stageable floor area visible in THIS image: kitchen, dining, living, bedroom"],',
+      '  "visibleZones": ["list ONLY zones with stageable floor area visible in THIS image: kitchen, dining, living, flex, bedroom"],',
       '  "cameraPosition": "one sentence",',
       '  "zoneAnchors": {',
       '    "dining": { "present": true/false, "ceilingFixture": "LCD classification: e.g. 5-arm brushed nickel chandelier with clear glass shades — or null if not visible in this image", "fixtureType": "chandelier or pendant or null", "spatialContext": "open floor adjacent to kitchen (dining/nook) or walled room with entrance (flex/formal) or null", "instruction": "Center rug and table under [fixture] or null" },',
@@ -126,8 +126,9 @@ async function runSpatialRead({ images, groupType, claudeKey }) {
     '     - Multi-arm fixture with branching arms/lights on one canopy = CHANDELIER.',
     '     - Individual fixtures each on their own cord/chain = PENDANT LIGHTS.',
     '   Step D: DETERMINE the zone for CHANDELIERS based on spatial context:',
-    '     - Chandelier over open floor adjacent to kitchen (no walls enclosing it) = DINING/NOOK zone anchor (informal dining).',
-    '     - Chandelier inside a walled room with a defined entrance/doorway = FLEX ROOM zone anchor (formal dining).',
+    '     - Chandelier hanging over OPEN FLOOR SPACE adjacent to kitchen with NO enclosing walls between it and the main living area = DINING/NOOK zone anchor. The defining feature is OPEN SPACE — no walls, partitions, or columns enclosing the area under the fixture.',
+    '     - Chandelier hanging INSIDE A ROOM that has walls, partitions, or columns forming an enclosed or semi-enclosed space with an archway, doorway, or pass-through opening = FLEX ROOM zone anchor. The defining feature is WALLS AROUND IT — if you can trace walls enclosing the fixture, it is in a Flex Room, NOT a dining zone.',
+    '     - A fixture visible THROUGH a wall opening is in the ADJACENT room, not in this room. Do not assign it as an anchor for this room.',
     '   Step E: OTHER ceiling fixtures:',
     '     - Recessed/can lights = zone-neutral, not an anchor. Include in PRESERVE only.',
     '     - Ceiling fan (with or without light kit) = LIVING zone anchor. Always.',
@@ -266,6 +267,7 @@ function assemblePrompt({ imageAssignment, preserveData, designStyle, colorPalet
   const hasDining  = zones.includes('dining');
   const hasKitchen = zones.includes('kitchen');
   const hasBedroom = zones.includes('bedroom');
+  const hasFlex    = zones.includes('flex');
 
   let p = '';
 
@@ -390,6 +392,9 @@ function assemblePrompt({ imageAssignment, preserveData, designStyle, colorPalet
   }
   if (!hasKitchen) prohibitions.push('DO NOT add kitchen cabinetry, island, or kitchen fixtures — kitchen is not visible in this photograph.');
   if (!hasDining)  prohibitions.push('DO NOT add a dining table, dining chairs, or dining chandelier — dining zone is not visible in this photograph.');
+  if (!hasFlex && wallOpenings.some(w => /flex|arch|enclosed|semi-enclosed|walled room/i.test(w))) {
+    prohibitions.push('A Flex Room is visible through a wall opening — DO NOT stage furniture inside the Flex Room. DO NOT assign any fixture inside the Flex Room as a dining anchor. Any chandelier inside an enclosed or semi-enclosed space with walls is a Flex Room fixture, not a dining/nook anchor.');
+  }
   if (hasDining && anchors.dining?.present && !anchors.dining?.ceilingFixture) {
     prohibitions.push('DINING ZONE: Open floor area is visible but the dining anchor fixture (chandelier) is NOT in this frame. DO NOT stage the dining area in this image. DO NOT add any chandelier, pendant, dining table, or dining chairs. This zone will be staged from a different angle where the chandelier is visible.');
   }

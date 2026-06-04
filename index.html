@@ -2224,6 +2224,10 @@ async function callRemoveObjects(imageBase64, mimeType) {
   if (!removalPrompt) throw new Error('No removal prompt returned from analysis');
   console.log('Remove objects: prompt ready, firing staging...');
 
+  // Brief pause — Netlify intermittently 500s when background triggers fire
+  // immediately after another function completes
+  await new Promise(r => setTimeout(r, 2000));
+
   // Step 2: Fire stage-openai via callStageAPI (already working pipeline)
   const cleanedBase64 = await callStageAPI(imageBase64, mimeType, removalPrompt, 'low');
   return cleanedBase64;

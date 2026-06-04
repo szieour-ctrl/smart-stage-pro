@@ -390,6 +390,9 @@ function assemblePrompt({ imageAssignment, preserveData, designStyle, colorPalet
   }
   if (!hasKitchen) prohibitions.push('DO NOT add kitchen cabinetry, island, or kitchen fixtures — kitchen is not visible in this photograph.');
   if (!hasDining)  prohibitions.push('DO NOT add a dining table, dining chairs, or dining chandelier — dining zone is not visible in this photograph.');
+  if (hasDining && anchors.dining?.present && !anchors.dining?.ceilingFixture) {
+    prohibitions.push('DINING ZONE: Open floor area is visible but the dining anchor fixture (chandelier) is NOT in this frame. DO NOT stage the dining area in this image. DO NOT add any chandelier, pendant, dining table, or dining chairs. This zone will be staged from a different angle where the chandelier is visible.');
+  }
   prohibitions.push('DO NOT replace, alter, restyle, or substitute any existing ceiling fixture — chandeliers, pendants, fans, and recessed lights must remain exactly as photographed.');
   prohibitions.push('DO NOT add ceiling fixtures or chandeliers not visible in this photograph.');
   prohibitions.push('DO NOT add walls, enclosures, or any architectural element not photographed.');

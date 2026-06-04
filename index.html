@@ -349,6 +349,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
       <div id="group-actions" style="margin-top:12px;display:none;gap:8px;flex-wrap:wrap;align-items:center;">
         <select id="group-type-select" onchange="SESSION.groupType=this.value" style="font-size:0.75rem;padding:4px 8px;border:1px solid var(--border);border-radius:3px;background:#fff;">
           <option value="openplan">Open Plan (Kitchen/Dining/Living)</option>
+          <option value="openplan-flex">Open Plan (Kitchen/Dining/Living/Flex)</option>
           <option value="bedroom">Bedroom (multi-angle)</option>
         </select>
         <button class="btn btn-primary btn-sm" id="group-generate-btn" onclick="runGroupSpatialRead()">&#x1F50D; Generate Group Staging Plan</button>
@@ -386,11 +387,14 @@ const ROOM_OPTIONS = [
   "Floor Plan / Reference Only || __fp__",
 
   "── OPEN PLAN (Multi-Zone) ────── || __fp__",
+  "Open Plan: Kitchen + Dining/Nook + Living + Flex Room || openplan",
+  "Open Plan: Kitchen + Dining/Nook + Living Room || openplan",
   "Open Plan: Kitchen + Dining + Great Room || openplan",
   "Open Plan: Kitchen + Dining || openplan",
   "Open Plan: Kitchen + Great Room || openplan",
   "Open Plan: Dining + Great Room || openplan",
   "Open Plan: Kitchen + Living Room || openplan",
+  "Open Plan: Flex Room + Great Room || openplan",
 
   "── MAIN LIVING ─────────────────── || __fp__",
   "Great Room / Living Room || livingroom",
@@ -441,20 +445,36 @@ function parseRoomOption(val) {
   const parts = val.split(' || ');
   const label = parts[0].trim();
   const decor8Type = parts[1]?.trim() || 'livingroom';
-  if (decor8Type === '__fp__') return { label, decor8Type: 'floorplan', isFloorplan: true, isExterior: false, isOpenPlan: false };
+  if (decor8Type === '__fp__') return { label, decor8Type: 'floorplan', isFloorplan: true, isExterior: false, isOpenPlan: false, zoneList: [] };
   const EXTERIOR_TYPES = ['back_patio', 'back_porch', 'front_porch'];
   const isExterior = EXTERIOR_TYPES.includes(decor8Type);
   const isOpenPlan = decor8Type === 'openplan';
-  return { label, decor8Type, isFloorplan: false, isExterior, isOpenPlan };
+  // Extract zoneList from Open Plan labels
+  const zoneList = isOpenPlan ? parseZoneListFromLabel(label) : [label.toLowerCase().replace(/[^a-z ]/g,'').trim()];
+  return { label, decor8Type, isFloorplan: false, isExterior, isOpenPlan, zoneList };
+}
+
+// Map open plan label text → structured zone array for Haiku prompt
+function parseZoneListFromLabel(label) {
+  const zones = [];
+  const l = label.toLowerCase();
+  if (l.includes('kitchen')) zones.push('kitchen');
+  if (l.includes('dining') || l.includes('nook')) zones.push('dining');
+  if (l.includes('living') || l.includes('great room')) zones.push('living');
+  if (l.includes('flex')) zones.push('flex');
+  return zones;
 }
 
 // ── Open plan zone descriptions for Claude prompt ─────────────────────────────
 function getOpenPlanZones(label) {
-  if (label.includes('Kitchen + Dining + Great Room')) return 'Three zones: (1) Kitchen zone — island with sink/appliances, bar seating on FAR side from camera; (2) Dining zone — rectangular table under chandelier/pendant fixture, 6-8 chairs; (3) Great Room/Living zone — sofa facing fireplace, accent chair, coffee table, area rug';
-  if (label.includes('Kitchen + Dining') && !label.includes('Great Room')) return 'Two zones: (1) Kitchen zone — island with sink/appliances, bar seating on FAR side from camera; (2) Dining zone — rectangular table under chandelier/pendant fixture, 6-8 chairs. No living/great room zone.';
+  if (label.includes('Kitchen + Dining/Nook + Living + Flex')) return 'Four zones: (1) Kitchen zone — island with sink/appliances, bar seating on FAR side from camera; (2) Dining/Nook zone — table under chandelier/pendant fixture hanging over OPEN FLOOR SPACE (no enclosing walls), chairs; (3) Living zone — sofa facing fireplace or feature wall, accent chair, coffee table, area rug; (4) Flex Room zone — semi-enclosed space with walls and an archway/opening, any fixture INSIDE this enclosed space is a Flex Room fixture, NOT a dining anchor';
+  if (label.includes('Kitchen + Dining/Nook + Living Room')) return 'Three zones: (1) Kitchen zone — island with sink/appliances, bar seating on FAR side from camera; (2) Dining/Nook zone — table under chandelier/pendant fixture hanging over OPEN FLOOR SPACE (no enclosing walls), chairs; (3) Living zone — sofa facing fireplace or feature wall, accent chair, coffee table, area rug';
+  if (label.includes('Kitchen + Dining + Great Room')) return 'Three zones: (1) Kitchen zone — island with sink/appliances, bar seating on FAR side from camera; (2) Dining zone — rectangular table under chandelier/pendant fixture hanging over OPEN FLOOR SPACE (no enclosing walls), 6-8 chairs; (3) Great Room/Living zone — sofa facing fireplace, accent chair, coffee table, area rug';
+  if (label.includes('Kitchen + Dining') && !label.includes('Great Room') && !label.includes('Living')) return 'Two zones: (1) Kitchen zone — island with sink/appliances, bar seating on FAR side from camera; (2) Dining zone — rectangular table under chandelier/pendant fixture hanging over OPEN FLOOR SPACE (no enclosing walls), 6-8 chairs. No living/great room zone.';
   if (label.includes('Kitchen + Great Room')) return 'Two zones: (1) Kitchen zone — island with appliances, bar seating on far side from camera; (2) Great Room zone — sofa facing fireplace or feature wall, accent chair, coffee table, area rug';
-  if (label.includes('Dining + Great Room')) return 'Two zones: (1) Dining zone — rectangular table under chandelier, 6 chairs; (2) Great Room zone — sofa facing fireplace, accent chair, coffee table, area rug';
+  if (label.includes('Dining + Great Room')) return 'Two zones: (1) Dining zone — rectangular table under chandelier hanging over OPEN FLOOR SPACE (no enclosing walls), 6 chairs; (2) Great Room zone — sofa facing fireplace, accent chair, coffee table, area rug';
   if (label.includes('Kitchen + Living Room')) return 'Two zones: (1) Kitchen zone — island with appliances, bar seating on far side; (2) Living zone — sofa arrangement facing focal wall, coffee table, area rug';
+  if (label.includes('Flex Room + Great Room')) return 'Two zones: (1) Flex Room zone — semi-enclosed space with walls and an archway/opening, furniture inside the enclosed space only; (2) Great Room zone — sofa facing fireplace or feature wall, accent chair, coffee table, area rug';
   return null;
 }
 // ── Decor8 API mappings ───────────────────────────────────────────────────────
@@ -1165,7 +1185,8 @@ function updatePhotoRoomManual(photoId,val){
     adjacentNames:[],
     isExterior: parsed.isExterior,
     isOpenPlan: parsed.isOpenPlan,
-    isReference:false
+    isReference:false,
+    zoneList: parsed.zoneList || []
   };
 }
 function confirmMapping(){buildSummary();buildRoomQueue();showStep('step-staging');}
@@ -1230,7 +1251,7 @@ function buildRoomQueue(){
   SESSION.rooms=photos.map(orig=>{
     const m=SESSION.photoRoomMap[orig.id];
     const isOpenPlan=m?.isOpenPlan||false;
-    return {id:'room_'+orig.id,originalId:orig.id,roomName:m?.roomName||orig.name,decor8Type:m?.decor8Type||null,isOpenPlan,adjacentRooms:m?.adjacentNames||[],isExterior:m?.isExterior||false,isReference:m?.isReference||false,shotFocus:m?.shotFocus||'',status:'pending',stagedBase64:null,finalBase64:null,finalStatus:null,iterationNote:'',approvedDNA:null,extSelections:{},spatialAnalysis:null,spatialStatus:null,dnaStatus:null,roomMode:'stage',declutteredBase64:null};
+    return {id:'room_'+orig.id,originalId:orig.id,roomName:m?.roomName||orig.name,decor8Type:m?.decor8Type||null,isOpenPlan,adjacentRooms:m?.adjacentNames||[],zoneList:m?.zoneList||[],isExterior:m?.isExterior||false,isReference:m?.isReference||false,shotFocus:m?.shotFocus||'',status:'pending',stagedBase64:null,finalBase64:null,finalStatus:null,iterationNote:'',approvedDNA:null,extSelections:{},spatialAnalysis:null,spatialStatus:null,dnaStatus:null,roomMode:'stage',declutteredBase64:null};
   });
   // Track Open Plan room ID for enforcement
   const openPlanRoom = SESSION.rooms.find(r => r.isOpenPlan);
@@ -1864,6 +1885,8 @@ async function stageRoom(roomId) {
         priorStagingDescription: null,
         shotFocus: room.shotFocus || null,
         adjacentRooms: room.adjacentRooms,
+        zoneList: room.zoneList || [],
+        openPlanZoneDescription: room.isOpenPlan ? getOpenPlanZones(room.roomName) : null,
         dnaTier: getDNATier(room),
         anchorDNA: (() => {
           const tier = getDNATier(room);

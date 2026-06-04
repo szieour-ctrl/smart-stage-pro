@@ -2210,40 +2210,23 @@ function resetFinal(roomId,enhId){
 
 // Shared: call remove-objects endpoint with retry (Claude Vision + GPT Image 2)
 async function callRemoveObjects(imageBase64, mimeType) {
-  // Step 1: Fire background job — returns jobId immediately
-  const startRes = await fetch('/.netlify/functions/remove-objects', {
+  // Step 1: Claude Vision — get removal prompt (~3-4s)
+  const analyzeRes = await fetch('/.netlify/functions/remove-objects', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ imageBase64, mimeType })
   });
-  if (!startRes.ok) {
-    const d = await startRes.json().catch(() => ({}));
-    throw new Error('Remove objects failed to start: ' + (d.error || startRes.status));
+  if (!analyzeRes.ok) {
+    const d = await analyzeRes.json().catch(() => ({}));
+    throw new Error('Room analysis failed: ' + (d.error || analyzeRes.status));
   }
-  const { jobId } = await startRes.json();
-  if (!jobId) throw new Error('No jobId returned from remove-objects dispatcher');
-  console.log('Remove job fired:', jobId);
+  const { removalPrompt } = await analyzeRes.json();
+  if (!removalPrompt) throw new Error('No removal prompt returned from analysis');
+  console.log('Remove objects: prompt ready, firing staging...');
 
-  // Step 2: Poll check-openai every 3 seconds — max 4 minutes (80 polls)
-  const maxPolls = 80;
-  for (let poll = 0; poll < maxPolls; poll++) {
-    await new Promise(r => setTimeout(r, 3000));
-    try {
-      const checkRes = await fetch(`/.netlify/functions/check-openai?jobId=${encodeURIComponent(jobId)}`);
-      if (!checkRes.ok) continue;
-      const result = await checkRes.json();
-      if (result.status === 'done') {
-        if (!result.stagedBase64) throw new Error('No cleaned image in completed job');
-        return result.stagedBase64;
-      }
-      if (result.status === 'error') throw new Error('Remove objects error: ' + (result.error || 'unknown'));
-      // status === 'pending' — keep polling
-    } catch(err) {
-      if (err.message.startsWith('Remove objects error:')) throw err;
-      // network blip — keep polling
-    }
-  }
-  throw new Error('Remove objects timed out after 4 minutes — please try again.');
+  // Step 2: Fire stage-openai via callStageAPI (already working pipeline)
+  const cleanedBase64 = await callStageAPI(imageBase64, mimeType, removalPrompt, 'low');
+  return cleanedBase64;
 }
 
 // DECLUTTER ONLY — 1 API call, no staging

@@ -2210,25 +2210,15 @@ function resetFinal(roomId,enhId){
 
 // Shared: call remove-objects endpoint with retry (Claude Vision + GPT Image 2)
 async function callRemoveObjects(imageBase64, mimeType) {
-  // Step 1: Claude Vision — get removal prompt (~3-4s)
-  const analyzeRes = await fetch('/.netlify/functions/remove-objects', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ imageBase64, mimeType })
-  });
-  if (!analyzeRes.ok) {
-    const d = await analyzeRes.json().catch(() => ({}));
-    throw new Error('Room analysis failed: ' + (d.error || analyzeRes.status));
-  }
-  const { removalPrompt } = await analyzeRes.json();
-  if (!removalPrompt) throw new Error('No removal prompt returned from analysis');
-  console.log('Remove objects: prompt ready, firing staging...');
+  // Generic removal prompt — no Claude Vision step, no prior function call
+  // Goes through exact same path as regular staging: callStageAPI → stage-openai → background
+  const removalPrompt = 'Remove ALL furniture, rugs, decor, personal items, lamps, art, plants, and movable objects from this room. ' +
+    'PRESERVE EXACTLY as-is: all walls, floors, ceilings, windows, doors, built-in cabinets, countertops, ' +
+    'fireplace, light fixtures, ceiling fans, crown molding, baseboards, and all permanent architectural elements. ' +
+    'Where furniture was, show only the clean floor, wall, or ceiling behind it. ' +
+    'Do NOT add any new furniture, staging, or objects. Result must be a completely empty room ready for virtual staging.';
 
-  // Brief pause — Netlify intermittently 500s when background triggers fire
-  // immediately after another function completes
-  await new Promise(r => setTimeout(r, 2000));
-
-  // Step 2: Fire stage-openai via callStageAPI (already working pipeline)
+  console.log('Remove objects: firing staging with generic removal prompt...');
   const cleanedBase64 = await callStageAPI(imageBase64, mimeType, removalPrompt, 'low');
   return cleanedBase64;
 }

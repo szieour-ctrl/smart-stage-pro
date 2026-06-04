@@ -1661,11 +1661,44 @@ LIGHTING ONLY: Blue-hour sky, warm interior window glow, subtle path lighting, l
 // Dispatches to stage-openai (returns jobId instantly) then polls check-openai
 // No timeout issues — background function runs up to 15 minutes
 async function callStageAPI(imageBase64, mimeType, prompt, quality) {
+  // Client-side compression — protects against oversized DSLR exterior photos
+  // Netlify function payload limit is ~6MB; base64 inflates ~33%, so cap source at ~3.5MB
+  let readyBase64 = imageBase64;
+  let readyMime = mimeType;
+  const rawSizeKB = Math.round((imageBase64.length * 3) / 4 / 1024);
+  if (rawSizeKB > 1500) {
+    try {
+      const img = new Image();
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = reject;
+        img.src = `data:${mimeType};base64,${imageBase64}`;
+      });
+      const maxDim = 1536;
+      let w = img.naturalWidth, h = img.naturalHeight;
+      if (Math.max(w, h) > maxDim) {
+        const scale = maxDim / Math.max(w, h);
+        w = Math.round(w * scale);
+        h = Math.round(h * scale);
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.88);
+      readyBase64 = dataUrl.split(',')[1];
+      readyMime = 'image/jpeg';
+      const compressedKB = Math.round((readyBase64.length * 3) / 4 / 1024);
+      console.log(`Client compress: ${rawSizeKB}KB → ${compressedKB}KB (${img.naturalWidth}x${img.naturalHeight} → ${w}x${h})`);
+    } catch(e) {
+      console.warn('Client compression failed, sending original:', e.message);
+    }
+  }
+
   // Step 1: Fire background job — returns jobId immediately
   const startRes = await fetch('/.netlify/functions/stage-openai', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ imageBase64, mimeType, stagingPrompt: prompt })
+    body: JSON.stringify({ imageBase64: readyBase64, mimeType: readyMime, stagingPrompt: prompt, quality: quality || 'low' })
   });
   if (!startRes.ok) {
     const d = await startRes.json().catch(() => ({}));
@@ -1673,7 +1706,7 @@ async function callStageAPI(imageBase64, mimeType, prompt, quality) {
   }
   const { jobId } = await startRes.json();
   if (!jobId) throw new Error('No jobId returned from staging dispatcher');
-  console.log('Staging job fired:', jobId);
+  console.log('Staging job fired:', jobId, `(${Math.round((readyBase64.length * 3) / 4 / 1024)}KB)`);
 
   // Step 2: Poll check-openai every 3 seconds — max 4 minutes (80 polls)
   const maxPolls = 80;
@@ -1796,17 +1829,16 @@ async function extractStagingDNA(stagedBase64, mimeType) {
 }
 
 // ── Decor8 staging engine ─────────────────────────────────────────────────────
-async function stageRoom(roomId, iterNote) {
+async function stageRoom(roomId) {
   const room = SESSION.rooms.find(r => r.id === roomId);
   const orig = SESSION.originals.find(o => o.id === room.originalId);
   if (!room || !orig) return;
 
   const i = SESSION.intake;
-  const isIteration = !!(iterNote && room.stagedBase64);
 
-  // Source image: for iterations use staged image, for fresh use original
-  const sourceBase64 = isIteration ? room.stagedBase64 : orig.base64;
-  const sourceMime = isIteration ? 'image/jpeg' : orig.mimeType;
+  // stageRoom is now ONLY for fresh staging — iterations use iterateRoom/reStageRoom
+  const sourceBase64 = orig.base64;
+  const sourceMime = orig.mimeType;
 
   room.status = 'processing';
   room.promptStatus = 'Generating staging prompt with Claude Vision...';
@@ -1828,8 +1860,8 @@ async function stageRoom(roomId, iterNote) {
         desiredFeeling: i.feeling_label,
         stagingIntensity: i.intensity_label,
         mlsMode: i.mls === 'A',
-        iterationNote: iterNote || null,
-        priorStagingDescription: isIteration ? room.approvedDNA : null,
+        iterationNote: null,
+        priorStagingDescription: null,
         shotFocus: room.shotFocus || null,
         adjacentRooms: room.adjacentRooms,
         dnaTier: getDNATier(room),
@@ -2051,16 +2083,116 @@ function downloadMarketingQR() {
   showToast('↓ Downloading marketing QR code...', 'success');
 }
 
-function iterateRoom(roomId) {
+async function iterateRoom(roomId) {
   const note = document.getElementById('iter-' + roomId)?.value?.trim() || '';
   if (!note) { showToast('Enter revision instructions first.', 'error'); return; }
   const room = SESSION.rooms.find(r => r.id === roomId);
-  if (room) {
-    // Keep stagedBase64 as the SOURCE for the iteration — do not clear it
-    room.status = 'pending';
-    room.finalBase64 = null;
-    room.finalStatus = null;
-    stageRoom(roomId, note);
+  if (!room) return;
+  if (!room.lastPrompt) { showToast('No prior prompt found — stage this room first.', 'error'); return; }
+  const orig = SESSION.originals.find(o => o.id === room.originalId);
+  if (!orig) return;
+
+  // Surgical iteration: original approved prompt + revision appended
+  // Skips Claude Vision entirely — no fresh read, no dart throws
+  const revisionPrompt = room.lastPrompt + '\n\nREVISION — Apply these changes to the staging above. Everything not mentioned stays exactly the same:\n' + note;
+
+  room.status = 'processing';
+  room.promptStatus = 'Re-staging with revision...';
+  room.finalBase64 = null;
+  room.finalStatus = null;
+  renderRoomQueue();
+
+  try {
+    // Show prompt review so user can verify the combined prompt
+    room.lastPrompt = revisionPrompt;
+    room.status = 'prompt-review';
+    room.promptStatus = '✏️ Review revised prompt before staging...';
+    renderRoomQueue();
+    const approvedPrompt = await showPromptModal(room, revisionPrompt);
+    if (approvedPrompt === null) {
+      room.status = 'done'; // Return to done state, not pending
+      room.promptStatus = null;
+      renderRoomQueue();
+      showToast('Re-stage cancelled.', '');
+      return;
+    }
+
+    room.status = 'processing';
+    room.promptStatus = 'Generating revised draft — takes ~15 seconds...';
+    renderRoomQueue();
+
+    // Send ORIGINAL photo + revised prompt to GPT — never GPT output
+    const stagedBase64 = await callStageAPI(orig.base64, orig.mimeType, approvedPrompt, 'low');
+    if (!stagedBase64) throw new Error('OpenAI staging failed — no image returned');
+
+    room.stagedBase64 = stagedBase64;
+    room.lastPrompt = approvedPrompt;
+    room.status = 'done';
+    room.promptStatus = null;
+    await resizeToMatch(room, orig, null, 'stagedBase64', stagedBase64);
+    renderRoomQueue();
+    showToast(`✓ ${room.roomName} re-staged successfully.`, 'success');
+  } catch (err) {
+    room.status = 'error';
+    room.promptStatus = null;
+    renderRoomQueue();
+    showToast('Re-stage error: ' + err.message, 'error');
+  }
+}
+async function reStageRoom(roomId) {
+  const note = document.getElementById('iter-' + roomId)?.value?.trim() || '';
+  if (!note) { showToast('Enter revision instructions first.', 'error'); return; }
+  const room = SESSION.rooms.find(r => r.id === roomId);
+  if (!room) return;
+  if (!room.lastPrompt) { showToast('No prior prompt found — run Clean + Stage first.', 'error'); return; }
+  if (!room.declutteredBase64) { showToast('No cleaned image found — run Clean + Stage first.', 'error'); return; }
+
+  // Surgical iteration: original approved prompt + revision appended
+  // Uses decluttered photo (not original occupied photo) as image source
+  const revisionPrompt = room.lastPrompt + '\n\nREVISION — Apply these changes to the staging above. Everything not mentioned stays exactly the same:\n' + note;
+
+  room.status = 'processing';
+  room.promptStatus = 'Re-staging with revision...';
+  room.stagedBase64 = null;
+  room.finalBase64 = null;
+  room.finalStatus = null;
+  renderRoomQueue();
+
+  try {
+    room.lastPrompt = revisionPrompt;
+    room.status = 'prompt-review';
+    room.promptStatus = '✏️ Review revised prompt before staging...';
+    renderRoomQueue();
+    const approvedPrompt = await showPromptModal(room, revisionPrompt);
+    if (approvedPrompt === null) {
+      room.status = 'done';
+      room.promptStatus = null;
+      renderRoomQueue();
+      showToast('Re-stage cancelled.', '');
+      return;
+    }
+
+    room.status = 'processing';
+    room.promptStatus = 'Generating revised draft — takes ~15 seconds...';
+    renderRoomQueue();
+
+    // Send DECLUTTERED photo + revised prompt to GPT
+    const stagedBase64 = await callStageAPI(room.declutteredBase64, 'image/jpeg', approvedPrompt, 'low');
+    if (!stagedBase64) throw new Error('OpenAI staging failed — no image returned');
+
+    room.stagedBase64 = stagedBase64;
+    room.lastPrompt = approvedPrompt;
+    room.status = 'done';
+    room.promptStatus = null;
+    const orig = SESSION.originals.find(o => o.id === room.originalId);
+    await resizeToMatch(room, orig, null, 'stagedBase64', stagedBase64);
+    renderRoomQueue();
+    showToast(`✓ ${room.roomName} re-staged successfully.`, 'success');
+  } catch (err) {
+    room.status = 'error';
+    room.promptStatus = null;
+    renderRoomQueue();
+    showToast('Re-stage error: ' + err.message, 'error');
   }
 }
 function resetRoom(roomId){

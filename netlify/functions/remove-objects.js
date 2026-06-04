@@ -97,7 +97,8 @@ async function triggerStaging(payload, siteUrl) {
       const chunks = [];
       res.on("data", c => chunks.push(c));
       res.on("end", () => {
-        console.log(`remove-objects: background response status=${res.statusCode}`);
+        const responseBody = Buffer.concat(chunks).toString("utf8").slice(0, 500);
+        console.log(`remove-objects: background response status=${res.statusCode} body=${responseBody}`);
         resolve(res.statusCode);
       });
     });

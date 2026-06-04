@@ -31,7 +31,7 @@ exports.handler = async (event) => {
       return { statusCode: 200, headers, body: JSON.stringify({ status: "pending" }) };
     }
 
-    console.log(`Job ${jobId}: status=${result.status} stagedBase64=${result.stagedBase64?.length || 0}`);
+    console.log(`Job ${jobId}: status=${result.status} stagedBase64=${result.stagedBase64?.length || 0}${result.error ? ' error=' + result.error : ''}`);
     return { statusCode: 200, headers, body: JSON.stringify(result) };
 
   } catch (err) {

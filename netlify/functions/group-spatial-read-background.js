@@ -44,11 +44,6 @@ const STYLE_LABELS = {
   'grandmillennial':'Grand Millennial','wabi_sabi':'Wabi Sabi',
 };
 
-const PALETTE_TONES = {
-  'Warm Neutrals':    'warm cream, taupe, and honey tones',
-  'Bright Airy':      'soft white, pale sage, and warm wood tones',
-};
-
 // ✅ AB 723 COMPLIANCE HEADER — Prepended to every prompt
 const AB723_HEADER = `You are an MLS virtual staging assistant operating under California AB 723 §10140.6.
 
@@ -61,6 +56,10 @@ AB 723 COMPLIANCE: Virtual staging adds furniture only. Any alteration to perman
 ═══════════════════════════════════════════════════════════════════════════════
 
 `;
+
+const PALETTE_TONES = {
+  'Warm Neutrals':    'warm cream, taupe, and honey tones',
+  'Bright Airy':      'soft white, pale sage, and warm wood tones',
   'Soft Luxury':      'blue, gray, and champagne tones',
   'Cool Gray':        'cool gray, slate, and white tones',
   'Earth Tones':      'terracotta, rust, and warm brown tones',

@@ -47,14 +47,6 @@ const STYLE_LABELS = {
 const PALETTE_TONES = {
   'Warm Neutrals':    'warm cream, taupe, and honey tones',
   'Bright Airy':      'soft white, pale sage, and warm wood tones',
-  'Soft Luxury':      'blue, gray, and champagne tones',
-  'Cool Gray':        'cool gray, slate, and white tones',
-  'Earth Tones':      'terracotta, rust, and warm brown tones',
-  'Bold Contrast':    'black, white, and bold accent tones',
-  'Coastal Blue':     'ocean blue, sandy neutral, and white tones',
-  'Sage Green':       'sage green, warm white, and natural wood tones',
-  'Jewel Tones':      'emerald, sapphire, and warm gold tones',
-  'Desert Modern':    'sand, clay, and muted terracotta tones',
 };
 
 // ✅ AB 723 COMPLIANCE HEADER — Prepended to every prompt
@@ -69,6 +61,15 @@ AB 723 COMPLIANCE: Virtual staging adds furniture only. Any alteration to perman
 ═══════════════════════════════════════════════════════════════════════════════
 
 `;
+  'Soft Luxury':      'blue, gray, and champagne tones',
+  'Cool Gray':        'cool gray, slate, and white tones',
+  'Earth Tones':      'terracotta, rust, and warm brown tones',
+  'Bold Contrast':    'black, white, and bold accent tones',
+  'Coastal Blue':     'ocean blue, sandy neutral, and white tones',
+  'Sage Green':       'sage green, warm white, and natural wood tones',
+  'Jewel Tones':      'emerald, sapphire, and warm gold tones',
+  'Desert Modern':    'sand, clay, and muted terracotta tones',
+};
 
 async function compressForRead(imageBase64) {
   try {
@@ -131,29 +132,41 @@ async function runSpatialRead({ images, groupType, claudeKey }) {
     '2. Fixtures visible through wall openings belong to the room beyond — do not assign them here.',
     '3. LIGHTING CLASSIFICATION DICTIONARY (LCD) — classify every hanging fixture using this logic:',
     '   Step A: COUNT the arms/lights on each fixture accurately. A single fixture with 5 arms is ONE chandelier, not "two pendants."',
-    '   Step B: DESCRIBE the finish + style: "brushed nickel", "oil-rubbed bronze", "brass", "chrome", "satin", etc.',
-    '   Step C: DESCRIBE the shades/globes: "clear glass cylinder shades", "seeded glass dome shades", "no shades (bare bulbs)", etc.',
-    '   Step D: OUTPUT example: "5-arm brushed nickel chandelier with clear glass cylinder shades" or "2 individual pendant lights with brushed nickel finish and dome shades."',
-    '4. Each image gets its own zone assignment — do NOT combine across images.',
-    '5. Wall openings are architectural boundaries — do not assign zones beyond them to this image.',
-    '6. visibleZones MUST be an array. Format: ["kitchen"] or ["kitchen", "dining"] or ["living", "flex"] — omit zones without stageable floor area.',
-    'Return ONLY valid JSON — no markdown, no explanation, no preamble. JSON must be parseable by JSON.parse() with no cleanup required.',
-    ''
+    '   Step B: CHECK what is directly below the fixture:',
+    '     - Island countertop below → PENDANT LIGHT → KITCHEN anchor.',
+    '     - Bathroom vanity below → PENDANT LIGHT → BATHROOM anchor.',
+    '     - Open floor (no surface below) → go to Step C.',
+    '   Step C: CLASSIFY the fixture type hanging over open floor:',
+    '     - Multi-arm fixture with branching arms/lights on one canopy = CHANDELIER.',
+    '     - Individual fixtures each on their own cord/chain = PENDANT LIGHTS.',
+    '   Step D: DETERMINE the zone for CHANDELIERS based on spatial context:',
+    '     - Chandelier hanging over OPEN FLOOR SPACE adjacent to kitchen with NO enclosing walls between it and the main living area = DINING/NOOK zone anchor. The defining feature is OPEN SPACE — no walls, partitions, or columns enclosing the area under the fixture.',
+    '     - Chandelier hanging INSIDE A ROOM that has walls, partitions, or columns forming an enclosed or semi-enclosed space with an archway, doorway, or pass-through opening = FLEX ROOM zone anchor. The defining feature is WALLS AROUND IT — if you can trace walls enclosing the fixture, it is in a Flex Room, NOT a dining zone.',
+    '     - A fixture visible THROUGH a wall opening is in the ADJACENT room, not in this room. Do not assign it as an anchor for this room.',
+    '   Step E: OTHER ceiling fixtures:',
+    '     - Recessed/can lights = zone-neutral, not an anchor. Include in PRESERVE only.',
+    '     - Ceiling fan (with or without light kit) = LIVING zone anchor. Always.',
+    '     - Flush-mount globe/dome = FLEX ROOM, BEDROOM, or LAUNDRY anchor (context-dependent).',
+    '   CRITICAL: Describe the fixture as it actually appears. Do not invent fixtures not visible in the frame.',
+    '   CRITICAL: If a fixture is not visible in THIS image, set ceilingFixture to null for that zone.',
+    '4. List every wall opening in wallOpenings[] — do not stage rooms visible through openings.',
+    '5. Return ONLY valid JSON — no markdown, no preamble.',
+    '',
+    '{',
+    '  "groupType": "' + groupType + '",',
+    '  "anglesRead": ' + images.length + ',',
+    '  "conflictsDetected": [{ "element": "name", "conflict": "what was ambiguous", "resolution": "correct answer" }],',
+    '  "perImageAssignments": [' + perImageSchema + ']',
+    '}'
   ].join('\n');
 
   const payload = JSON.stringify({
     model: "claude-haiku-4-5",
-    max_tokens: 2000,
-    system: prompt,
-    messages: [{
-      role: "user",
-      content: [
-        { type: "text", text: perImageSchema }
-      ].concat(imageBlocks)
-    }]
+    max_tokens: 6000,
+    messages: [{ role: "user", content: [...imageBlocks, { type: "text", text: prompt }] }]
   });
 
-  const claudeResult = await httpsRequest({
+  const result = await httpsRequest({
     hostname: "api.anthropic.com",
     path: "/v1/messages",
     method: "POST",
@@ -165,30 +178,89 @@ async function runSpatialRead({ images, groupType, claudeKey }) {
     }
   }, payload);
 
-  if (claudeResult.status !== 200) {
-    throw new Error("Spatial read failed: " + JSON.stringify(claudeResult.body).slice(0, 300));
-  }
+  if (result.status !== 200) throw new Error("Haiku spatial read failed: " + (result.body?.error?.message || result.status));
 
-  const responseText = claudeResult.body?.content?.[0]?.text?.trim();
-  if (!responseText) throw new Error("No response from spatial read");
-
-  let parsed;
+  const text = result.body?.content?.[0]?.text?.trim() || "{}";
+  const clean = text.replace(/```json|```/g, "").trim();
   try {
-    const cleaned = responseText.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/i, "").trim();
-    parsed = JSON.parse(cleaned);
+    return JSON.parse(clean);
   } catch(e) {
-    console.error("Spatial read parse error:", responseText.slice(0, 200));
-    throw new Error("Invalid spatial read JSON");
-  }
-
-  const assignments = parsed.perImageAssignments || [];
-
-  return {
-    spatialData: {
-      perImageAssignments: assignments,
-      conflictsDetected: parsed.conflictsDetected || []
+    // Repair truncated JSON
+    try {
+      let r = clean.replace(/,\s*$/, '').replace(/"[^"]*$/, '').replace(/:\s*$/, '');
+      let braces = 0, brackets = 0;
+      for (const ch of r) { if (ch==='{') braces++; else if (ch==='}') braces--; else if (ch==='[') brackets++; else if (ch===']') brackets--; }
+      while (brackets > 0) { r += ']'; brackets--; }
+      while (braces > 0) { r += '}'; braces--; }
+      return JSON.parse(r);
+    } catch(e2) {
+      throw new Error("Spatial read returned invalid JSON");
     }
-  };
+  }
+}
+
+// ── MODE 2: PRESERVE READ ────────────────────────────────────────────────────
+async function runPreserveRead({ imageBase64, imageLabel, claudeKey }) {
+  const prompt = [
+    'You are reading a real estate listing photo to generate a PRESERVE list for MLS virtual staging.',
+    'Describe every permanent architectural element visible in this photograph only.',
+    'Do not infer or describe anything outside the frame.',
+    '',
+    'RULES:',
+    '1. Every ceiling fixture: type, arm/bulb count, finish, shade style.',
+    '2. All cabinetry: color, door style, hardware finish.',
+    '3. All countertops: material and color.',
+    '4. All flooring: material, color.',
+    '5. All windows: pane pattern, frame color.',
+    '6. All doors: type, color.',
+    '7. Fireplace: surround color, profile, hearth, firebox.',
+    '8. Island: base color, countertop, visible appliances.',
+    '9. Backsplash: material, pattern, color.',
+    '10. All visible appliances.',
+    '11. Wall openings: "partition wall with rectangular opening [location] — separate room beyond, do not stage".',
+    '12. End with: DO NOT alter any permanent architectural element.',
+    '13. Do NOT include anything not visible in this photograph.',
+    '',
+    'Return ONLY valid JSON — no markdown, no preamble.',
+    '',
+    '{',
+    '  "imageLabel": "' + (imageLabel || 'image') + '",',
+    '  "preserveList": "comma-separated list of every permanent element visible, ending with: DO NOT alter any permanent architectural element.",',
+    '  "wallOpenings": ["each wall opening: type and location"],',
+    '  "adjacentRoomsVisible": ["each room visible through an opening — do not stage from this image"]',
+    '}'
+  ].join('\n');
+
+  const payload = JSON.stringify({
+    model: "claude-haiku-4-5",
+    max_tokens: 1500,
+    messages: [{
+      role: "user",
+      content: [
+        { type: "image", source: { type: "base64", media_type: detectMime(imageBase64), data: imageBase64 } },
+        { type: "text", text: prompt }
+      ]
+    }]
+  });
+
+  const result = await httpsRequest({
+    hostname: "api.anthropic.com",
+    path: "/v1/messages",
+    method: "POST",
+    headers: {
+      "x-api-key": claudeKey,
+      "anthropic-version": "2023-06-01",
+      "content-type": "application/json",
+      "content-length": Buffer.byteLength(payload)
+    }
+  }, payload);
+
+  if (result.status !== 200) throw new Error("Haiku preserve read failed: " + (result.body?.error?.message || result.status));
+
+  const text = result.body?.content?.[0]?.text?.trim() || "{}";
+  const clean = text.replace(/```json|```/g, "").trim();
+  try { return JSON.parse(clean); }
+  catch(e) { throw new Error("Preserve read returned invalid JSON"); }
 }
 
 // ── PROMPT ASSEMBLER ─────────────────────────────────────────────────────────
@@ -211,7 +283,6 @@ function assemblePrompt({ imageAssignment, preserveData, designStyle, colorPalet
   const hasBedroom = zones.includes('bedroom');
   const hasFlex    = zones.includes('flex');
 
-  // ✅ LOCATION 1: Prepend AB 723 header at start of assemblePrompt
   let p = AB723_HEADER;
 
   // 1. PRESERVE
@@ -344,7 +415,6 @@ function assemblePrompt({ imageAssignment, preserveData, designStyle, colorPalet
   prohibitions.push('DO NOT replace, alter, restyle, or substitute any existing ceiling fixture — chandeliers, pendants, fans, and recessed lights must remain exactly as photographed.');
   prohibitions.push('DO NOT add ceiling fixtures or chandeliers not visible in this photograph.');
   prohibitions.push('DO NOT add walls, enclosures, or any architectural element not photographed.');
-  prohibitions.push('DO NOT remove, open, widen, or convert any partition wall, half-wall, or architectural divider into a walk-through. The wall structure, opening dimensions, glass panes, and trim around every wall opening must remain exactly as photographed. Partition walls are permanent architecture, not staging surfaces.');
   prohibitions.push('DO NOT add exterior features not visible in this photograph.');
   p += prohibitions.join('\n') + '\n\n';
 
@@ -363,56 +433,39 @@ module.exports.runPreserveRead = runPreserveRead;
 module.exports.assemblePrompt  = assemblePrompt;
 module.exports.compressForRead = compressForRead;
 
+// ── BACKGROUND HANDLER ────────────────────────────────────────────────────────
 exports.handler = async (event) => {
-  if (event.httpMethod !== "POST") return { statusCode: 405, body: "Method Not Allowed" };
-
-  const headers = {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Headers": "Content-Type",
-    "Content-Type": "application/json",
-  };
+  const claudeKey = process.env.ANTHROPIC_API_KEY;
+  const siteID    = process.env.SZREG_SITE_ID || process.env.NETLIFY_SITE_ID;
+  const token     = process.env.NETLIFY_ACCESS_TOKEN;
+  let jobId;
 
   try {
-    const { jobId, images, groupType, designStyle, colorPalette, claudeKey, siteID, token } = JSON.parse(event.body);
+    const { jobId: jId, mode, images, groupType } = JSON.parse(event.body);
+    jobId = jId;
+    console.log('Group spatial read background: jobId=' + jobId + ' images=' + images.length + ' type=' + groupType);
 
-    if (!images || !images.length) return { statusCode: 400, headers, body: JSON.stringify({ error: "images array required" }) };
-    if (!claudeKey) return { statusCode: 400, headers, body: JSON.stringify({ error: "claudeKey required" }) };
-    if (!siteID || !token) return { statusCode: 500, headers, body: JSON.stringify({ error: "NETLIFY_SITE_ID or NETLIFY_ACCESS_TOKEN not configured" }) };
+    const store = getStore({ name: "staging-jobs", siteID, token });
+    await store.setJSON(jobId, { status: "processing", startedAt: Date.now() });
+    console.log('Job ' + jobId + ': heartbeat written');
 
-    const store = getStore({ name: "spatial-reads", siteID, token });
+    const spatialData = await runSpatialRead({ images, groupType: groupType || 'openplan', claudeKey });
+    console.log('Job ' + jobId + ': spatial read complete — ' + (spatialData.conflictsDetected?.length || 0) + ' conflicts, ' + (spatialData.perImageAssignments?.length || 0) + ' images');
 
-    // Heartbeat
-    if (jobId) await store.setJSON(jobId, { status: "processing", startedAt: Date.now() });
-
-    // Compress images
-    const compressedImages = await Promise.all(
-      images.map(async img => ({
-        ...img,
-        base64: await compressForRead(img.base64)
-      }))
-    );
-
-    // Run spatial read
-    const result = await runSpatialRead({ images: compressedImages, groupType, claudeKey });
-
-    // Process assignments — assemble prompts
-    const processed = result.spatialData.perImageAssignments.map((assignment, i) => {
-      const preserveData = { preserveList: assignment.preserveList || '' };
-      const prompt = assemblePrompt({ imageAssignment: assignment, preserveData, designStyle, colorPalette });
-      return { ...assignment, stagingPrompt: prompt };
+    await store.setJSON(jobId, {
+      status: "done",
+      spatialData,
+      anglesRead: images.length,
+      conflictsDetected: spatialData.conflictsDetected?.length || 0,
     });
 
-    // Store result
-    if (jobId) await store.setJSON(jobId, { status: "done", spatialData: { perImageAssignments: processed, conflictsDetected: result.spatialData.conflictsDetected } });
+    console.log('Job ' + jobId + ': stored in Blobs');
 
-    console.log("Spatial read complete:", images.length, "images,", result.spatialData.conflictsDetected.length, "conflicts");
   } catch (err) {
-    console.error("group-spatial-read-background error:", err.message);
-    if (jobId) {
-      try {
-        const store = getStore({ name: "spatial-reads", siteID, token });
-        await store.setJSON(jobId, { status: "error", error: err.message });
-      } catch(e) {}
-    }
+    console.error('Job ' + (jobId || 'unknown') + ' error:', err.message);
+    try {
+      const store = getStore({ name: "staging-jobs", siteID, token });
+      await store.setJSON(jobId, { status: "error", error: err.message });
+    } catch(e) {}
   }
 };

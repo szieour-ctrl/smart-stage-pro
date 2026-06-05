@@ -401,6 +401,7 @@ function assemblePrompt({ imageAssignment, preserveData, designStyle, colorPalet
   prohibitions.push('DO NOT replace, alter, restyle, or substitute any existing ceiling fixture — chandeliers, pendants, fans, and recessed lights must remain exactly as photographed.');
   prohibitions.push('DO NOT add ceiling fixtures or chandeliers not visible in this photograph.');
   prohibitions.push('DO NOT add walls, enclosures, or any architectural element not photographed.');
+  prohibitions.push('DO NOT remove, open, widen, or convert any partition wall, half-wall, or architectural divider into a walk-through. The wall structure, opening dimensions, glass panes, and trim around every wall opening must remain exactly as photographed. Partition walls are permanent architecture, not staging surfaces.');
   prohibitions.push('DO NOT add exterior features not visible in this photograph.');
   p += prohibitions.join('\n') + '\n\n';
 

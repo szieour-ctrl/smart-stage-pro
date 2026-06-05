@@ -6,6 +6,19 @@ const https = require("https");
 const sharp = require("sharp");
 const { getStore } = require("@netlify/blobs");
 
+// ✅ AB 723 COMPLIANCE HEADER — Prepended to every prompt sent to GPT
+const AB723_HEADER = `You are an MLS virtual staging assistant operating under California AB 723 §10140.6.
+
+PRIMARY ROLE: Stage furniture and decor ONLY.
+
+IMMUTABLE LOCK: Never alter, move, remove, replace, or touch: structural walls | ceilings | kitchen/bathroom cabinets | countertops | lighting fixtures. These must be preserved exactly as photographed.
+
+AB 723 COMPLIANCE: Virtual staging adds furniture only. Any alteration to permanent architecture makes the listing non-compliant and subject to MLS removal.
+
+═══════════════════════════════════════════════════════════════════════════════
+
+`;
+
 function buildOpenAIMultipart(imageBuffer, imageMime, prompt, quality, size) {
   const boundary = "----OAIBoundary" + Math.random().toString(36).slice(2);
   const outputSize = size || "1536x1024";
@@ -41,7 +54,11 @@ async function callOpenAI(imageBase64, mimeType, prompt, apiKey, quality) {
   else if (w > h) outputSize = "1536x1024";
   else outputSize = "1024x1536";
   console.log(`OpenAI: prompt ${prompt.length} chars, image ${Math.round(rawBuffer.length/1024)}KB → PNG ${Math.round(imageBuffer.length/1024)}KB quality=${quality||"low"} size=${outputSize} input=${w}x${h}`);
-  const { body, boundary } = buildOpenAIMultipart(imageBuffer, "image/png", prompt, quality, outputSize);
+  
+  // ✅ LOCATION 4: Wrap prompt with AB 723 header
+  const wrappedPrompt = AB723_HEADER + prompt;
+  
+  const { body, boundary } = buildOpenAIMultipart(imageBuffer, "image/png", wrappedPrompt, quality, outputSize);
   return new Promise((resolve, reject) => {
     const req = https.request({
       hostname: "api.openai.com",
@@ -89,7 +106,7 @@ exports.handler = async (event) => {
     await store.setJSON(jobId, { status: "processing", startedAt: Date.now() });
     console.log(`Job ${jobId}: heartbeat written`);
 
-    // Call GPT Image 2
+    // Call GPT Image 2 with wrapped prompt
     const result = await callOpenAI(imageBase64, mimeType, stagingPrompt, openAIKey, quality);
     const stagedBase64 = result?.data?.[0]?.b64_json;
     if (!stagedBase64) throw new Error("No image data in OpenAI response");

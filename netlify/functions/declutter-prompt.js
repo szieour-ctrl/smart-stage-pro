@@ -164,10 +164,11 @@ exports.handler = async (event) => {
   };
 
   try {
-    const { imageBase64, mimeType, claudeKey } = JSON.parse(event.body);
+    const { imageBase64, mimeType } = JSON.parse(event.body);
+    const claudeKey = process.env.ANTHROPIC_API_KEY;
 
     if (!imageBase64) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing imageBase64" }) };
-    if (!claudeKey) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing claudeKey" }) };
+    if (!claudeKey) return { statusCode: 500, headers, body: JSON.stringify({ error: "ANTHROPIC_API_KEY not configured" }) };
 
     // Analyze room via Haiku
     const roomData = await analyzeRoomForDeclutter({ imageBase64, claudeKey });

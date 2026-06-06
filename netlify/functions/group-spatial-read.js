@@ -62,6 +62,17 @@ const PALETTE_TONES = {
   'Desert Modern':    'sand, clay, and muted terracotta tones',
 };
 
+// ✅ AB 723 COMPLIANCE HEADER — Prepended to every prompt
+const AB723_HEADER = `PRIMARY ROLE: Stage furniture and decor ONLY.
+
+IMMUTABLE LOCK: Never alter, move, remove, replace, or touch: structural walls | ceilings | kitchen/bathroom cabinets | countertops | lighting fixtures. These must be preserved exactly as photographed.
+
+AB 723 COMPLIANCE: Virtual staging adds furniture only. Any alteration to permanent architecture makes the listing non-compliant and subject to MLS removal.
+
+═══════════════════════════════════════════════════════════════════════════════
+
+`;
+
 async function compressForRead(imageBase64) {
   try {
     const buffer = Buffer.from(imageBase64, "base64");
@@ -139,7 +150,7 @@ async function runPreserveRead({ imageBase64, imageLabel, claudeKey }) {
   catch(e) { throw new Error("Preserve read returned invalid JSON"); }
 }
 
-function assemblePrompt({ imageAssignment, preserveData, designStyle, colorPalette, groupSpatialPlan }) {
+function assemblePrompt({ imageAssignment, preserveData, designStyle, colorPalette, groupSpatialPlan, imageLabel }) {
   const rawStyle = designStyle || 'Organic Modern';
   const style = STYLE_LABELS[rawStyle?.toLowerCase().replace(/[^a-z]/g, '')] || rawStyle;
   const palette = colorPalette || 'Warm Neutrals';
@@ -150,9 +161,34 @@ function assemblePrompt({ imageAssignment, preserveData, designStyle, colorPalet
   const boundaries = imageAssignment.boundaryAnchors || {};
   const wallOpenings = imageAssignment.wallOpenings || [];
 
+  // ✅ ZONE FILTER — If user labeled this as a single room, ONLY stage that zone
+  // "Living Room" → living only. "Kitchen" → kitchen only.
+  // "Open Plan: Kitchen + Dining + Living" → keep all zones (no filter)
+  let isSingleRoomLabel = false;
+  if (imageLabel) {
+    const label = imageLabel.toLowerCase();
+    const isOpenPlan = label.includes('open plan') || (label.includes('+') && (label.includes('kitchen') || label.includes('dining') || label.includes('living')));
+    
+    if (!isOpenPlan) {
+      isSingleRoomLabel = true;
+      let allowedZone = null;
+      if (label.includes('living') || label.includes('great room') || label.includes('family room')) allowedZone = 'living';
+      else if (label.includes('kitchen'))  allowedZone = 'kitchen';
+      else if (label.includes('dining'))   allowedZone = 'dining';
+      else if (label.includes('bedroom'))  allowedZone = 'bedroom';
+      
+      if (allowedZone) {
+        // Remove all zones except the labeled one
+        while (zones.length) zones.pop();
+        zones.push(allowedZone);
+        console.log('ZONE FILTER: imageLabel="' + imageLabel + '" → staging ONLY: ' + allowedZone);
+      }
+    }
+  }
+
   // MULTI-ANGLE MERGE: pull confirmed zone anchors from other images in the group
-  // If a zone was confirmed in any other angle, apply it here even if not visible in this frame
-  if (groupSpatialPlan?.perImageAssignments) {
+  // ✅ SKIP merge for single-room labels — prevents phantom zone injection
+  if (!isSingleRoomLabel && groupSpatialPlan?.perImageAssignments) {
     for (const otherImage of groupSpatialPlan.perImageAssignments) {
       if (otherImage === imageAssignment) continue;
 
@@ -180,11 +216,19 @@ function assemblePrompt({ imageAssignment, preserveData, designStyle, colorPalet
   const hasKitchen = zones.includes('kitchen');
   const hasBedroom = zones.includes('bedroom');
 
-  let p = '';
+  let p = AB723_HEADER;
 
   p += 'PRESERVE EXACTLY: ' + preserveList + '\n\n';
   p += 'Stage with furniture and decor only. Do not alter any permanent architectural element. ';
   p += 'Stage in ' + style + ' design style using a ' + palette + ' palette with ' + paletteTones + ' throughout.\n\n';
+
+  // ✅ EXPLICIT ZONE SCOPE — tells GPT exactly which zones to stage
+  p += 'STAGING ZONE SCOPE — Stage ONLY these zones visible in THIS image: ' + zones.map(z => z.toUpperCase()).join(', ') + '.\n';
+  if (!zones.includes('kitchen')) p += 'Kitchen is NOT visible — DO NOT add kitchen furniture, stools, or island accessories.\n';
+  if (!zones.includes('dining'))  p += 'Dining zone is NOT visible — DO NOT add a dining table, dining chairs, or dining rug.\n';
+  if (!zones.includes('living'))  p += 'Living zone is NOT visible — DO NOT add sofas, accent chairs, coffee tables, or living room furniture.\n';
+  if (!zones.includes('bedroom')) p += 'Bedroom is NOT visible — DO NOT add beds, nightstands, or bedroom furniture.\n';
+  p += '\n';
 
   const anchorBlocks = [];
   if (hasDining && anchors.dining?.present) {
@@ -359,7 +403,7 @@ exports.handler = async (event) => {
       console.log('Preserve read: ' + imageLabel);
       const compressedBase64 = await compressForRead(imageBase64);
       const preserveData = await runPreserveRead({ imageBase64: compressedBase64, imageLabel, claudeKey });
-      const promptText = assemblePrompt({ imageAssignment, preserveData, designStyle, colorPalette, groupSpatialPlan: body.groupSpatialPlan || null });
+      const promptText = assemblePrompt({ imageAssignment, preserveData, designStyle, colorPalette, groupSpatialPlan: body.groupSpatialPlan || null, imageLabel });
 
       console.log('Preserve + assembly complete: ' + promptText.length + ' chars');
       return { statusCode: 200, headers, body: JSON.stringify({ mode: 'preserve', preserveData, promptText }) };

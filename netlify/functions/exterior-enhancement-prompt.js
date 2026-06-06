@@ -257,16 +257,16 @@ exports.handler = async (event) => {
     const { 
       imageBase64, 
       mimeType, 
-      claudeKey,
       openAIKey,
       mode,  // "build-prompt" or "execute"
       skyType,  // "day", "dusk", "night"
       yardType,  // "front|back|side"
       landscapeStyle  // "Mediterranean", "Modern", "Cottage", etc.
     } = JSON.parse(event.body);
+    const claudeKey = process.env.ANTHROPIC_API_KEY;
 
     if (!imageBase64) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing imageBase64" }) };
-    if (!claudeKey) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing claudeKey" }) };
+    if (!claudeKey) return { statusCode: 500, headers, body: JSON.stringify({ error: "ANTHROPIC_API_KEY not configured" }) };
 
     const siteUrl = process.env.URL || process.env.DEPLOY_URL;
     if (!siteUrl) return { statusCode: 500, headers, body: JSON.stringify({ error: "Site URL not configured" }) };

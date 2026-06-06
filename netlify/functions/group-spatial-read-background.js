@@ -289,6 +289,15 @@ function assemblePrompt({ imageAssignment, preserveData, designStyle, colorPalet
   p += 'Stage with furniture and decor only. Do not alter any permanent architectural element. ';
   p += 'Stage in ' + style + ' design style using a ' + palette + ' palette with ' + paletteTones + ' throughout.\n\n';
 
+  // 1b. EXPLICIT ZONE SCOPE — prevents GPT from hallucinating zones not in this image
+  const activeZones = zones.filter(z => z !== 'flex');
+  p += 'STAGING ZONE SCOPE — Stage ONLY these zones visible in THIS image: ' + activeZones.join(', ').toUpperCase() + '.\n';
+  if (!hasKitchen) p += 'Kitchen is NOT visible in this image — DO NOT add kitchen furniture, stools, or island accessories.\n';
+  if (!hasDining)  p += 'Dining zone is NOT visible in this image — DO NOT add a dining table, dining chairs, or dining rug.\n';
+  if (!hasLiving)  p += 'Living zone is NOT visible in this image — DO NOT add sofas, accent chairs, coffee tables, or living room furniture.\n';
+  if (!hasBedroom) p += 'Bedroom is NOT visible in this image — DO NOT add beds, nightstands, or bedroom furniture.\n';
+  p += '\n';
+
   // 2. ZONE ANCHOR LOCKS
   const anchorBlocks = [];
   if (hasDining && anchors.dining?.present && anchors.dining?.ceilingFixture) {

@@ -1435,11 +1435,8 @@ function renderRoomQueue(){
       if(room.status==='pending'||room.status==='error'){
         const dnaTier = getDNATier(room);
         const blocked = dnaTier === 'full' && !room.isOpenPlan && !isOpenPlanStaged();
-        if(blocked) return `
-          <div style="font-size:0.75rem;color:var(--muted);padding:4px 0;max-width:220px;line-height:1.4;">
-            🔒 Stage Open Plan first — this room shares its furniture DNA
-          </div>`;
-        return `<button class="btn btn-primary btn-sm" onclick="stageRoom('${room.id}')">Stage This Room</button>`;
+        const dnaWarning = blocked ? `<div style="font-size:0.68rem;color:#b8860b;padding:2px 0;max-width:240px;line-height:1.4;">⚠ Open Plan not yet staged — DNA consistency not available</div>` : '';
+        return `${dnaWarning}<button class="btn btn-primary btn-sm" onclick="stageRoom('${room.id}')">Stage This Room</button>`;
       }
       if(room.status==='prompt-review')return `<button class="btn btn-primary btn-sm" onclick="document.getElementById('prompt-modal').classList.remove('hidden');setTimeout(()=>{document.getElementById('pm-prompt').focus();},60);">✏️ Review Prompt →</button>`;
       if(room.status==='processing')return `<button class="btn btn-outline btn-sm" disabled><span class="spinner"></span> Generating</button>`;
@@ -1866,40 +1863,16 @@ async function stageRoom(roomId) {
   renderRoomQueue();
 
   try {
-    // Step 1: Claude Vision generates hyper-detailed staging prompt
-    const promptRes = await fetch('/.netlify/functions/generate-staging-prompt', {
+    // Step 1: Haiku reads THIS image only — builds single-room prompt with AB 723 compliance
+    const promptRes = await fetch('/.netlify/functions/stage-vacant-prompt', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         imageBase64: sourceBase64,
         mimeType: sourceMime,
-        roomName: room.roomName,
-        roomType: getDecor8RoomType(room.roomName, room.adjacentRooms, room.decor8Type),
-        designStyle: DECOR8_DESIGN_STYLE[i.style_label] || 'transitional',
-        colorPalette: i.palette_label,
-        buyerProfile: i.buyer_label,
-        desiredFeeling: i.feeling_label,
-        stagingIntensity: i.intensity_label,
-        mlsMode: i.mls === 'A',
-        iterationNote: null,
-        priorStagingDescription: null,
-        shotFocus: room.shotFocus || null,
-        adjacentRooms: room.adjacentRooms,
-        zoneList: room.zoneList || [],
-        openPlanZoneDescription: room.isOpenPlan ? getOpenPlanZones(room.roomName) : null,
-        dnaTier: getDNATier(room),
-        anchorDNA: (() => {
-          const tier = getDNATier(room);
-          if (!SESSION.stagingDNA) return null;
-          if (tier === 'full') return SESSION.stagingDNA.continuityPrompt || null;
-          if (tier === 'style') return `Match the overall style of this home: ${SESSION.stagingDNA.overallStyle}. Use the same wood tones (${SESSION.stagingDNA.woodTones || 'light oak'}), metal finishes (${SESSION.stagingDNA.metalFinishes || 'brushed nickel'}), and color palette (${Array.isArray(SESSION.stagingDNA.colorPalette)?SESSION.stagingDNA.colorPalette.join(', '):(SESSION.stagingDNA.colorPalette||'warm neutrals')}). Staging density: ${SESSION.stagingDNA.stagingDensity || 'moderate'}. Do NOT use the same furniture pieces — use appropriate furniture for this specific room type.`;
-          return null;
-        })(),
-        stagingDNA: getDNATier(room) === 'full' ? SESSION.stagingDNA : null,
-        openPlanZones: room.isOpenPlan ? (room.adjacentRooms.length ? room.adjacentRooms.join(' + ') : room.roomName) : null,
-        openPlanStrategy: room.isOpenPlan ? (SESSION.openPlanStrategy || 'guided') : null,
-        anchorImageUrl: (!room.isOpenPlan && SESSION.anchorImageUrl && isOpenPlanDerivedRoom(room.roomName)) ? SESSION.anchorImageUrl : null,
-        derivedZone: (!room.isOpenPlan && SESSION.anchorImageUrl) ? getOpenPlanDerivedZone(room.roomName) : null,
+        roomType: room.roomName || getDecor8RoomType(room.roomName, room.adjacentRooms, room.decor8Type),
+        designStyle: i.style_label || 'Organic Modern',
+        colorPalette: i.palette_label || 'Warm Neutrals',
       })
     });
 
@@ -1907,7 +1880,8 @@ async function stageRoom(roomId) {
       const d = await promptRes.json();
       throw new Error('Prompt generation failed: ' + (d.error || 'unknown'));
     }
-    const { prompt } = await promptRes.json();
+    const promptData = await promptRes.json();
+    const prompt = promptData.stagingPrompt;
     room.lastPrompt = prompt;
 
     // ── PROMPT PREVIEW MODAL — pause here, wait for user approval ────────────
@@ -1919,15 +1893,15 @@ async function stageRoom(roomId) {
     // Restore processing status once approved
     if (approvedPrompt !== null) {
       room.status = 'processing';
-      room.promptStatus = 'Staging with Decor8 — takes ~45 seconds...';
+      room.promptStatus = 'Staging with GPT Image 2 — takes ~15 seconds...';
       renderRoomQueue();
     }
     if (approvedPrompt === null) {
-      // User cancelled — reset room to pending, no Decor8 credit burned
+      // User cancelled — reset room to pending, no credit burned
       room.status = 'pending';
       room.promptStatus = null;
       renderRoomQueue();
-      showToast('Staging cancelled — no Decor8 credit used.', '');
+      showToast('Staging cancelled — no credit used.', '');
       return;
     }
     const finalPrompt = approvedPrompt; // may be edited text or '' for no-prompt mode
@@ -2378,16 +2352,48 @@ async function callRemoveObjects(imageBase64, mimeType) {
   return cleanedBase64;
 }
 
-// DECLUTTER ONLY — 1 API call, no staging
+// DECLUTTER ONLY — Haiku reads room, builds AB 723 compliant removal prompt, modal preview
 async function runDeclutterOnly(roomId) {
   const room = SESSION.rooms.find(r => r.id === roomId);
   const orig = SESSION.originals.find(o => o.id === room?.originalId);
   if (!room || !orig) return;
   room.status = 'processing';
-  room.promptStatus = 'Analyzing room — removing objects...';
+  room.promptStatus = 'Reading room for decluttering...';
   renderRoomQueue();
   try {
-    room.declutteredBase64 = await callRemoveObjects(orig.base64, orig.mimeType);
+    // Step 1: Haiku reads room — identifies what to remove vs preserve
+    const promptRes = await fetch('/.netlify/functions/declutter-prompt', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        imageBase64: orig.base64,
+        mimeType: orig.mimeType,
+      })
+    });
+    if (!promptRes.ok) {
+      const d = await promptRes.json();
+      throw new Error('Declutter prompt failed: ' + (d.error || 'unknown'));
+    }
+    const { declutterPrompt } = await promptRes.json();
+
+    // Step 2: Show modal for user review
+    room.status = 'prompt-review';
+    room.promptStatus = '✏️ Review declutter prompt before removing objects...';
+    renderRoomQueue();
+    const approvedPrompt = await showPromptModal(room, declutterPrompt);
+    if (approvedPrompt === null) {
+      room.status = 'pending'; room.promptStatus = null; renderRoomQueue();
+      showToast('Declutter cancelled — no credit used.', '');
+      return;
+    }
+
+    // Step 3: Execute declutter with approved/edited prompt
+    room.status = 'processing';
+    room.promptStatus = 'Removing objects — takes ~15 seconds...';
+    renderRoomQueue();
+    room.declutteredBase64 = await callStageAPI(orig.base64, orig.mimeType, approvedPrompt, 'low');
+    if (!room.declutteredBase64) throw new Error('Declutter failed — no image returned');
+    room.stagedBase64 = room.declutteredBase64;
     room.status = 'done';
     room.promptStatus = null;
     showToast('✓ Room decluttered — objects removed.', 'success');
@@ -2400,47 +2406,80 @@ async function runDeclutterOnly(roomId) {
   }
 }
 
-// CLEAN + STAGE — 2 API calls: remove objects then stage
+// CLEAN + STAGE — Step 1: Declutter with modal, Step 2: Stage vacant with modal
 async function runCleanAndStage(roomId) {
   const room = SESSION.rooms.find(r => r.id === roomId);
   const orig = SESSION.originals.find(o => o.id === room?.originalId);
   if (!room || !orig) return;
   const i = SESSION.intake || {};
   room.status = 'processing';
-  room.promptStatus = 'Step 1 of 3 — Removing objects...';
+  room.promptStatus = 'Step 1 of 3 — Reading room for decluttering...';
   renderRoomQueue();
   try {
-    // Step 1: Remove objects
-    const cleanedBase64 = await callRemoveObjects(orig.base64, orig.mimeType);
+    // Step 1A: Haiku reads room for decluttering
+    const declutterRes = await fetch('/.netlify/functions/declutter-prompt', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        imageBase64: orig.base64,
+        mimeType: orig.mimeType,
+      })
+    });
+    if (!declutterRes.ok) throw new Error('Declutter prompt failed: ' + declutterRes.status);
+    const { declutterPrompt } = await declutterRes.json();
+
+    // Step 1B: Show declutter modal
+    room.status = 'prompt-review';
+    room.promptStatus = '✏️ Review declutter prompt (Step 1 of 2)...';
+    renderRoomQueue();
+    const approvedDeclutter = await showPromptModal(room, declutterPrompt);
+    if (approvedDeclutter === null) {
+      room.status = 'pending'; room.promptStatus = null; renderRoomQueue();
+      showToast('Clean + Stage cancelled.', '');
+      return;
+    }
+
+    // Step 1C: Execute declutter
+    room.status = 'processing';
+    room.promptStatus = 'Step 1 of 3 — Removing objects...';
+    renderRoomQueue();
+    const cleanedBase64 = await callStageAPI(orig.base64, orig.mimeType, approvedDeclutter, 'low');
+    if (!cleanedBase64) throw new Error('Declutter failed — no image returned');
     room.declutteredBase64 = cleanedBase64;
 
-    // Step 2: Generate prompt from cleaned room
-    room.promptStatus = 'Step 2 of 3 — Reading cleaned room...';
+    // Step 2A: Haiku reads cleaned room for staging
+    room.promptStatus = 'Step 2 of 3 — Reading cleaned room for staging...';
     renderRoomQueue();
-    const promptRes = await fetch('/.netlify/functions/generate-staging-prompt', {
+    const stageRes = await fetch('/.netlify/functions/stage-vacant-prompt', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         imageBase64: cleanedBase64,
         mimeType: orig.mimeType,
-        roomName: room.roomName,
-        adjacentRooms: room.adjacentRooms || [],
-        designStyle: i.style_label || 'Transitional',
-        colorPalette: i.palette_label || 'Soft Luxury',
-        openPlanStrategy: SESSION.openPlanStrategy || 'full',
-        stagingDNA: SESSION.stagingDNA || null,
-        anchorImageUrl: SESSION.anchorImageUrl || null,
-        derivedZone: null,
+        roomType: room.roomName,
+        designStyle: i.style_label || 'Organic Modern',
+        colorPalette: i.palette_label || 'Warm Neutrals',
       })
     });
-    if (!promptRes.ok) throw new Error('Prompt generation failed: ' + promptRes.status);
-    const promptData = await promptRes.json();
-    const finalPrompt = promptData.prompt || '';
+    if (!stageRes.ok) throw new Error('Stage prompt failed: ' + stageRes.status);
+    const { stagingPrompt } = await stageRes.json();
 
-    // Step 3: Stage cleaned room with OpenAI background fire-and-poll
-    room.promptStatus = 'Step 3 of 3 — Generating draft...';
+    // Step 2B: Show staging modal
+    room.status = 'prompt-review';
+    room.promptStatus = '✏️ Review staging prompt (Step 2 of 2)...';
     renderRoomQueue();
-    const cleanedStagedBase64 = await callStageAPI(cleanedBase64, orig.mimeType, finalPrompt, 'low');
+    const approvedStage = await showPromptModal(room, stagingPrompt);
+    if (approvedStage === null) {
+      room.status = 'pending'; room.promptStatus = null; renderRoomQueue();
+      showToast('Clean + Stage cancelled at staging step.', '');
+      return;
+    }
+
+    // Step 3: Stage cleaned room with approved prompt
+    room.status = 'processing';
+    room.promptStatus = 'Step 3 of 3 — Generating staged draft...';
+    renderRoomQueue();
+    const cleanedStagedBase64 = await callStageAPI(cleanedBase64, orig.mimeType, approvedStage, 'low');
     if (!cleanedStagedBase64) throw new Error('No staged image returned');
     room.stagedBase64 = cleanedStagedBase64;
     room.status = 'done';
@@ -2967,16 +3006,16 @@ async function approveAndStageGroupImage(assignmentIndex, roomId) {
     // Store prompt + SHOW MODAL for user review before staging
     room.groupPromptOverride = data.promptText;
     
-    // ✅ NEW: Show modal with prompt
+    // Show modal with prompt for user review/editing
     const editedPrompt = await showPromptModal(room, data.promptText);
     
-    // ✅ User clicked Cancel
+    // User clicked Cancel
     if (editedPrompt === null) {
       showToast('Staging cancelled', 'warning');
       return;
     }
     
-    // ✅ User approved (or edited), send edited prompt to GPT
+    // User approved (or edited), send edited prompt to GPT
     await stageRoomWithPrompt(roomId, editedPrompt);
 
   } catch (err) {

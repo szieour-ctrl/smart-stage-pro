@@ -100,14 +100,14 @@ exports.handler = async (event) => {
       roomType, 
       designStyle, 
       colorPalette, 
-      claudeKey,
       openAIKey,
       mode  // "build-prompt" or "execute"
     } = JSON.parse(event.body);
+    const claudeKey = process.env.ANTHROPIC_API_KEY;
 
     if (!imageBase64) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing imageBase64" }) };
     if (!roomType) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing roomType" }) };
-    if (!claudeKey) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing claudeKey" }) };
+    if (!claudeKey) return { statusCode: 500, headers, body: JSON.stringify({ error: "ANTHROPIC_API_KEY not configured" }) };
 
     const siteUrl = process.env.URL || process.env.DEPLOY_URL;
     if (!siteUrl) return { statusCode: 500, headers, body: JSON.stringify({ error: "Site URL not configured" }) };

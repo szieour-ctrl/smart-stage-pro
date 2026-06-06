@@ -2964,9 +2964,20 @@ async function approveAndStageGroupImage(assignmentIndex, roomId) {
     const data = await res.json();
     if (!res.ok || data.error) throw new Error(data.error || 'Preserve read failed');
 
-    // Store prompt and fire staging
+    // Store prompt + SHOW MODAL for user review before staging
     room.groupPromptOverride = data.promptText;
-    await stageRoomWithPrompt(roomId, data.promptText);
+    
+    // ✅ NEW: Show modal with prompt
+    const editedPrompt = await showPromptModal(room, data.promptText);
+    
+    // ✅ User clicked Cancel
+    if (editedPrompt === null) {
+      showToast('Staging cancelled', 'warning');
+      return;
+    }
+    
+    // ✅ User approved (or edited), send edited prompt to GPT
+    await stageRoomWithPrompt(roomId, editedPrompt);
 
   } catch (err) {
     showToast('Step 3 failed: ' + err.message, 'error');

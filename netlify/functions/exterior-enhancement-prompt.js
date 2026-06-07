@@ -7,7 +7,36 @@
 // Frontend then calls stage-openai.js with the returned prompt.
 // DO NOT modify stage-openai.js or stage-openai-background.js.
 
-const Anthropic = require("@anthropic-ai/sdk");
+const https = require("https");
+
+// Native HTTPS helper — matches the pattern used by all other functions in this project
+function callClaudeHaiku(apiKey, payload) {
+  return new Promise((resolve, reject) => {
+    const data = JSON.stringify(payload);
+    const options = {
+      hostname: "api.anthropic.com",
+      path: "/v1/messages",
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "Content-Length": Buffer.byteLength(data)
+      }
+    };
+    const req = https.request(options, (res) => {
+      let body = "";
+      res.on("data", (chunk) => { body += chunk; });
+      res.on("end", () => {
+        try { resolve(JSON.parse(body)); }
+        catch (e) { reject(new Error("Anthropic response parse error: " + body.slice(0, 200))); }
+      });
+    });
+    req.on("error", reject);
+    req.write(data);
+    req.end();
+  });
+}
 
 // ─────────────────────────────────────────────
 // AB 723 HEADER — ALWAYS FIRST. NEVER REMOVE.
@@ -304,12 +333,10 @@ exports.handler = async function (event, context) {
     };
   }
 
-  // ── Step 1: Haiku Spatial Read ──────────────────────────────
+  // ── Step 1: Haiku Spatial Read (native HTTPS — no SDK dependency) ──────────
   let spatialRead = {};
   try {
-    const anthropic = new Anthropic({ apiKey: claudeKey });
-
-    const spatialResponse = await anthropic.messages.create({
+    const haikusResponse = await callClaudeHaiku(claudeKey, {
       model: "claude-haiku-4-5-20251001",
       max_tokens: 1024,
       messages: [
@@ -333,7 +360,7 @@ exports.handler = async function (event, context) {
       ]
     });
 
-    const rawText = (spatialResponse.content[0]?.text || "").trim();
+    const rawText = (haikusResponse.content?.[0]?.text || "").trim();
 
     // Strip any accidental markdown fences before parsing
     const jsonMatch = rawText.match(/\{[\s\S]*\}/);

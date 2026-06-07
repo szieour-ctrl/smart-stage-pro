@@ -54,10 +54,17 @@ REMOVE (movable objects only):
 - Decor (art, plants, throw pillows, lamps, rugs, etc.)
 - Wall-mounted mirrors (decorative, not medicine cabinet)
 - Wall art, framed photos, picture frames
+- Freestanding shelving, ladder shelves, bookcases, etageres (unless permanently built into wall)
 - Wall-mounted shelving units (not built-in)
 - Personal items (books, photos, decorations, collectibles)
 - Curtains, drapes, window treatments (shutters/blinds stay)
+- TVs and electronics (wall brackets stay)
 - Any movable object not listed in PRESERVE
+
+CRITICAL INPAINTING RULE FOR MIRRORS AND WALL ART:
+When removing a mirror or art from a wall, fill that area with MATCHING WALL PAINT AND TEXTURE.
+Do NOT create a doorway, window, opening, niche, or alcove where a mirror or art was removed.
+The result must be a flat, continuous wall surface matching the surrounding wall color and finish.
 
 PRESERVE (permanent architecture - IMMUTABLE):
 - Structural walls, ceilings, flooring
@@ -140,16 +147,18 @@ function buildDeclutterPrompt({ roomData }) {
   });
 
   p += `\nINPAINTING RULES:\n`;
-  p += `1. Remove all furniture and decor\n`;
-  p += `2. Fill empty areas with matching floor, wall, and ceiling surfaces\n`;
-  p += `3. Keep all architectural elements in exact original positions\n`;
-  p += `4. Preserve all fixtures, appliances, and built-ins\n`;
-  p += `5. Do NOT alter wall colors, ceiling finish, or flooring\n`;
-  p += `6. Do NOT remove or modify windows, doors, or frames\n`;
-  p += `7. Do NOT alter kitchen cabinets, countertops, or appliances\n`;
-  p += `8. Do NOT modify bathroom fixtures\n`;
-  p += `9. Maintain realistic perspective and proportions\n`;
-  p += `10. Result must be a completely empty room ready for staging\n\n`;
+  p += `1. Remove ALL furniture, decor, freestanding shelves, mirrors, and art\n`;
+  p += `2. Fill empty areas with MATCHING floor, wall, and ceiling surfaces\n`;
+  p += `3. Where a mirror or art was removed, fill with FLAT WALL matching surrounding paint color — NEVER create a doorway, window, opening, niche, or alcove\n`;
+  p += `4. Where shelving was removed, fill with matching wall surface\n`;
+  p += `5. Keep all architectural elements in exact original positions\n`;
+  p += `6. Preserve all fixtures, appliances, and built-ins\n`;
+  p += `7. Do NOT alter wall colors, ceiling finish, or flooring\n`;
+  p += `8. Do NOT remove or modify windows, doors, or frames\n`;
+  p += `9. Do NOT create new doorways, openings, or architectural features\n`;
+  p += `10. Do NOT alter kitchen cabinets, countertops, or appliances\n`;
+  p += `11. Maintain realistic perspective and proportions\n`;
+  p += `12. Result must be a completely empty room with bare walls ready for staging\n\n`;
 
   p += `COMPLIANCE:\n`;
   p += `This room will be prepared per California AB 723 §10140.6 for virtual staging.\n`;

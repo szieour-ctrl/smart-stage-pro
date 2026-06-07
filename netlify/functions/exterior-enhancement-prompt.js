@@ -1,373 +1,369 @@
-// exterior-enhancement-prompt.js — Exterior Enhancements
-// Sky replacement (day/dusk/night) + Landscaping generation
-// Preserves house structure per AB 723
-// AB 723 compliant throughout
+// exterior-enhancement-prompt.js
+// Smart Stage PRO™ | Exterior Enhancement Module — Full Rebuild
+// June 7, 2026 | SZ Real Estate Group | DRE #01397303
+//
+// ROLE: Prompt BUILDER only. Haiku reads exterior → assembleExteriorPrompt() → returns { prompt, spatialRead }.
+// Frontend compresses image BEFORE calling this function (1024px max via canvas).
+// Frontend then calls stage-openai.js with the returned prompt.
+// DO NOT modify stage-openai.js or stage-openai-background.js.
 
-const https = require("https");
-const sharp = require("sharp");
+const Anthropic = require("@anthropic-ai/sdk");
 
-function httpsRequest(options, body) {
-  return new Promise((resolve, reject) => {
-    const req = https.request(options, (res) => {
-      const chunks = [];
-      res.on("data", (c) => chunks.push(c));
-      res.on("end", () => {
-        const raw = Buffer.concat(chunks).toString("utf8");
-        try { resolve({ status: res.statusCode, body: JSON.parse(raw) }); }
-        catch (e) { resolve({ status: res.statusCode, body: { raw } }); }
-      });
-    });
-    req.on("error", reject);
-    if (body) req.write(body);
-    req.end();
-  });
-}
+// ─────────────────────────────────────────────
+// AB 723 HEADER — ALWAYS FIRST. NEVER REMOVE.
+// California Civil Code §10140.6
+// ─────────────────────────────────────────────
+const AB723_HEADER = `PRIMARY ROLE: You are a professional real estate exterior photo enhancement AI.
+IMMUTABLE LOCK: You must NEVER remove, alter, add, or reposition any permanent architectural structure. This includes the roofline, exterior walls, windows, doors, garage doors, chimneys, hardscape (existing driveway, existing walkway, existing patio or deck surface), permanent fencing, retaining walls, or any other structural or built element.
+AB 723 COMPLIANCE (California Civil Code §10140.6): This image will be disclosed as virtually enhanced per CA AB 723 §10140.6. All enhancements must be realistic and achievable for this actual property. Do not create impossible or non-existent features. Do not alter the structure of the home in any way.`;
 
-function detectMime(base64) {
-  try {
-    const buf = Buffer.from(base64.slice(0, 16), 'base64');
-    if (buf[0] === 0x89 && buf[1] === 0x50) return 'image/png';
-    if (buf[0] === 0xFF && buf[1] === 0xD8) return 'image/jpeg';
-    if (buf[0] === 0x52 && buf[1] === 0x49) return 'image/webp';
-  } catch(e) {}
-  return 'image/jpeg';
-}
+// ─────────────────────────────────────────────
+// LIGHTING OPTIONS
+// ─────────────────────────────────────────────
+const LIGHTING_PROMPTS = {
+  "golden-hour":
+    `LIGHTING — Golden Hour: Replace the current sky and lighting with golden hour conditions. Apply warm, raking sunlight from a low angle on the horizon (30–35 degrees above). Cast long, soft shadows from trees and architectural features across the lawn and driveway. The sky transitions from warm amber and peach near the horizon to a clear light blue overhead. Color temperature of the scene: 3200K–4000K (warm and inviting). Any visible windows may show a soft, warm incandescent interior glow. The facade takes on a golden wash that flatters the architecture.`,
 
-async function prepareImage(imageBase64, mimeType) {
-  const buffer = Buffer.from(imageBase64, "base64");
-  const meta = await sharp(buffer).metadata();
-  const sizeKB = Math.round(buffer.length / 1024);
-  const maxDim = Math.max(meta.width || 0, meta.height || 0);
+  "sunset-glow":
+    `LIGHTING — Sunset Glow: Apply a soft, natural sunset ambiance. The sky transitions from warm coral and soft peach near the horizon to a muted dusty blue overhead. Lighting is diffused and soft-directional with minimal harsh shadows — this is a relaxed, cinematic evening feel, not dramatic. The facade receives a gentle warm wash (4000K–4500K). No heavy saturation. Interior windows show a subtle warm glow. The overall mood is peaceful and welcoming.`,
 
-  if (maxDim <= 1536 && sizeKB <= 1500) {
-    console.log(`Image OK: ${meta.width}x${meta.height} ${sizeKB}KB`);
-    return { base64: imageBase64, mimeType };
-  }
+  "twilight":
+    `LIGHTING — Twilight (MLS Favorite): Transform the image to professional MLS twilight conditions. The sky is a rich deep cobalt blue at the top, fading to violet and indigo near the horizon — the classic blue-hour look. CRITICAL: ALL visible interior windows must be ON with a warm amber glow (2700K–3000K simulated incandescent/LED interior lights). The exterior is lit by cool blue ambient light balanced against the warm window glow. Where plausible for the architecture, add subtle landscape path lighting or uplighting on trees and the facade. This is the maximum curb appeal look used by professional real estate photographers.`,
 
-  const compressed = await sharp(buffer)
-    .resize(1536, 1536, { fit: "inside", withoutEnlargement: true })
-    .jpeg({ quality: 88 })
-    .toBuffer();
+  "luxury-twilight":
+    `LIGHTING — Luxury Twilight: Apply a dramatic, premium twilight treatment. The sky is deep navy to midnight blue with exceptional gradient depth and richness. CRITICAL: ALL visible interior windows are ON with the warmest possible amber glow. Dramatic uplighting illuminates architectural features and specimen trees from below with warm amber fixtures. Where a driveway or walkway exists, add subtle path lighting pools. The result is a strong contrast between the deep blue sky and the warmly lit home — a magazine cover quality exterior shot. This treatment is reserved for premium and luxury marketing.`
+};
 
-  const compressedKB = Math.round(compressed.length / 1024);
-  console.log(`Image compressed: ${meta.width}x${meta.height} ${sizeKB}KB → 1536px max ${compressedKB}KB`);
-  return { base64: compressed.toString("base64"), mimeType: "image/jpeg" };
-}
+// ─────────────────────────────────────────────
+// LANDSCAPE ENHANCEMENT OPTIONS
+// ─────────────────────────────────────────────
+const LANDSCAPE_PROMPTS = {
+  "basic-refresh":
+    `LANDSCAPE ENHANCEMENT — Basic Refresh: Replace any dry, brown, patchy, or sparse grass with a uniformly healthy, vibrant green lawn. Add fresh dark brown or black mulch to any visible planting beds. Trim all shrubs to a clean, well-maintained appearance with defined edges. Remove any dead plants, weeds, or debris. Do NOT add new plants, change the layout, or introduce new landscape features — only refresh and improve what already exists.`,
 
-function triggerBackground(payload, siteUrl) {
-  const body = Buffer.from(JSON.stringify(payload));
-  console.log(`Triggering stage-openai-background: payload ${Math.round(body.length / 1024)}KB`);
-  const url = new URL(`${siteUrl}/.netlify/functions/stage-openai-background`);
-  
-  return new Promise((resolve, reject) => {
-    const req = https.request({
-      hostname: url.hostname,
-      path: url.pathname,
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Content-Length": body.length,
-      }
-    }, (res) => {
-      const chunks = [];
-      res.on("data", (c) => chunks.push(c));
-      res.on("end", () => {
-        const responseBody = Buffer.concat(chunks).toString("utf8").slice(0, 500);
-        console.log(`stage-openai-background response: status=${res.statusCode}`);
-        resolve(res.statusCode);
-      });
-    });
-    req.on("error", reject);
-    req.write(body);
-    req.end();
-  });
-}
+  "professional-design":
+    `LANDSCAPE ENHANCEMENT — Professional Landscape Design: Upgrade the existing landscape to a professionally installed look. Define all planting beds with clean steel or natural stone edging. Introduce ornamental grasses and low-maintenance rounded shrubs in natural layered groupings. Frame the front walkway with tiered plantings: low ground cover at the front edge, mid-height flowering shrubs behind. Apply fresh dark brown mulch throughout all beds. Ensure the lawn is healthy, neatly edged along all hardscape lines. The overall effect should feel intentional and architecturally planned — as if a landscape designer installed it.`,
 
-// ✅ AB 723 COMPLIANCE HEADER — Every prompt starts with this
-const AB723_HEADER = `PRIMARY ROLE: Enhance exterior only. Preserve house structure exactly.
+  "california-water-wise":
+    `LANDSCAPE ENHANCEMENT — California Water-Wise: Replace any lawn with a California-appropriate water-wise landscape in warm, natural earth tones. Use decomposed granite (DG) in tan/buff as the primary ground surface. Add carefully arranged boulders and decorative rock groupings. Plant drought-tolerant California native species: lavender, ornamental sage, agave, blue fescue, manzanita, California poppies, and succulents in clustered groupings with clear negative space between. Create DG pathways with clean steel edging from driveway to entry. The color palette is warm earth tones — no tropical plants, no high-water-use species. This is the premium Sacramento Valley water-wise aesthetic appropriate for the California market.`,
 
-IMMUTABLE LOCK: Never alter, move, remove, replace, or touch: house structure | roof | walls | windows | doors | trim | siding | foundation | hardscape. These must be preserved exactly as photographed.
+  "luxury-resort":
+    `LANDSCAPE ENHANCEMENT — Luxury Resort Landscape: Install a full luxury resort-grade landscape treatment. Plant mature specimen trees (24–36" box size equivalent) as architectural focal points flanking the entry or driveway. Layer mid-height ornamental flowering shrubs, architectural grasses, and tropical accent plants. Carpet the ground layer with lush annual color, creeping ground covers, and perennials. Where uplighting is plausible, add warm amber fixture glow at tree bases and accent plants. Use precision metal edging, custom stone or decomposed granite pathways, and statement container plantings at the entry. The result must read as a luxury estate landscape — layered, immaculate, and impressive.`,
 
-AB 723 COMPLIANCE: Exterior enhancements add/improve landscaping and sky only. Any alteration to house structure makes the result non-compliant and subject to MLS removal.
+  "seasonal-color":
+    `LANDSCAPE ENHANCEMENT — Seasonal Color Enhancement: Add vibrant seasonal blooms appropriate to the current season. Install full flower beds along the front foundation with a curated color palette. Create a strong focal point at the entry with a large container planting arrangement or ornamental flowering tree. Line the front walkway with seasonal annuals or flowering perennials in complementary tones. Ensure the lawn is a healthy, saturated green. The overall effect should be welcoming and emotionally appealing — a home that feels move-in-ready and joyful.`
+};
 
-═══════════════════════════════════════════════════════════════════════════════
+// ─────────────────────────────────────────────
+// OUTDOOR LIVING STAGING OPTIONS
+// null = do not add any outdoor living staging
+// ─────────────────────────────────────────────
+const OUTDOOR_LIVING_PROMPTS = {
+  "none": null,
 
-`;
+  "patio-seating":
+    `OUTDOOR LIVING STAGING — Patio Seating: IF a patio, deck, covered patio, or suitable hardscape area is clearly visible in the photo, add a casual seating arrangement: 2–4 weather-resistant chairs (wicker, powder-coated aluminum, or teak finish) with a small round coffee table or side table. Add 1–2 medium potted plants or planters. Keep the arrangement open and airy — do not overcrowd the space. Furniture should complement the home's architectural style. IF no patio or deck is visible, skip this instruction entirely.`,
 
-// ✅ HAIKU READS EXTERIOR — Identifies house structure to preserve
-async function analyzeExterior({ imageBase64, claudeKey }) {
-  const prompt = `You are analyzing an exterior photo for MLS enhancement (sky replacement + landscaping).
+  "outdoor-dining":
+    `OUTDOOR LIVING STAGING — Outdoor Dining: IF a patio, deck, covered patio, or suitable hardscape area is clearly visible in the photo, add an outdoor dining set: a rectangular or round dining table that seats 4–6, with matching side chairs. Add a simple centerpiece appropriate to the setting (a lantern, low succulent arrangement, or grouped candles). Furniture material and style should match the home's architecture (modern metal for contemporary, teak or wicker for traditional or craftsman). IF no patio or deck is visible, skip this instruction entirely.`,
 
-TASK: Identify what must be PRESERVED (house structure) and what can be ENHANCED (sky, landscaping).
+  "conversation-lounge":
+    `OUTDOOR LIVING STAGING — Conversation Lounge: IF a patio, deck, covered patio, or suitable hardscape area is clearly visible in the photo, create an outdoor conversation lounge. Include a 3-piece outdoor sectional or L-shaped sofa with 1–2 coordinating lounge chairs facing a linear gas fire table or a low square coffee table as the centerpiece. Add outdoor throw pillows in neutral tones (ivory, taupe, soft gray). This arrangement signals premium outdoor entertaining capability. IF no patio or deck is visible, skip this instruction entirely.`,
 
-PRESERVE (house structure - IMMUTABLE):
-- House exterior walls, siding, color, texture
-- Roof shape, color, material
-- Windows (frames, glass, shutters)
-- Doors (frames, entry doors)
-- Trim, eaves, gutters
-- Foundation, porch, deck, patio
-- Driveway, walkways
-- Existing vegetation structure (large trees, shrubs)
+  "california-entertainer":
+    `OUTDOOR LIVING STAGING — California Entertainer: IF a patio, deck, covered patio, or yard area is clearly visible in the photo, create a full California entertainer setup. Define two zones: (1) a dining zone with a table and 4–6 chairs on one side, and (2) a lounge zone with 2–3 accent chairs and side tables on the other. Add 2–3 large ceramic or concrete statement planters with lush plants. Suggest warm bistro string lights overhead if a covered structure supports them (subtle, not overwhelming). This layout communicates the full California indoor-outdoor lifestyle. IF no suitable outdoor area is visible, skip this instruction entirely.`,
 
-ENHANCE (can be modified/added):
-- Sky (overcast, dull, or clear - can be replaced with day/dusk/night)
-- Landscaping (add plants, flowers, gardens, hardscape improvements)
-- Yard maintenance appearance
+  "luxury-resort-living":
+    `OUTDOOR LIVING STAGING — Luxury Resort Outdoor Living: IF a patio, deck, covered patio, or yard area is clearly visible in the photo, stage with luxury resort-grade outdoor furniture. Add a designer-grade sectional or chaise lounge set with premium cushions in a crisp neutral palette (white, cream, or warm linen). Include a fire table or architectural fire bowl as the focal point. Add an outdoor area rug under the seating to define the zone. Place 2–3 architectural planters with sculptural specimen plants (agave, olive tree, or boxwood sphere). The result must read as a 5-star resort terrace — refined, expensive, and aspirational. IF no suitable outdoor area is visible, skip this instruction entirely.`
+};
 
-Return ONLY valid JSON:
+// ─────────────────────────────────────────────
+// ENHANCEMENT INTENSITY
+// ─────────────────────────────────────────────
+const INTENSITY_PROMPTS = {
+  "mls-light":
+    `ENHANCEMENT INTENSITY — MLS Light (10–15% improvement): Apply conservative enhancements only. The photo should look like perfect natural conditions on a beautiful day — not a transformation. Greener grass, brighter sky, minor cleanup of imperfections. Buyers must immediately recognize this as the actual property with minimal effort to imagine it. Nothing should look artificial or over-processed.`,
+
+  "market-ready":
+    `ENHANCEMENT INTENSITY — Market Ready (25–35% improvement): Apply moderate, noticeable enhancements. The home should look well-maintained and genuinely move-in-ready. Healthy landscape, improved lighting, clean and polished surfaces. The improvement is clearly visible compared to the original but remains fully realistic. A buyer should feel this is what the property looks like at its best with normal upkeep.`,
+
+  "premium-marketing":
+    `ENHANCEMENT INTENSITY — Premium Marketing (50–60% improvement): Apply significant enhancements for a professional marketing photo result. This is the best version of what this property could realistically look like with quality maintenance and landscaping investment. All elements are polished and photogenic. The result should be suitable for print marketing materials, high-end MLS photos, and featured listing placement.`,
+
+  "luxury-presentation":
+    `ENHANCEMENT INTENSITY — Luxury Presentation (70–80% improvement): Apply maximum enhancements for aspirational, aspirationally accurate marketing. Showcase the property at its absolute pinnacle — immaculate in every detail. Exceptional landscaping, perfect lighting, staging that elevates the emotional and financial perception of the property. The image is for luxury listing presentations, print brochures, and premium digital marketing. All enhancements must remain architecturally accurate to this specific home.`
+};
+
+// ─────────────────────────────────────────────
+// PROPERTY TIER — HIDDEN INTERNAL CALIBRATION VARIABLE
+// Guides the AI's calibration of enhancement style to match
+// the property's price point. Not labeled in the output.
+// ─────────────────────────────────────────────
+const PROPERTY_TIER_CONTEXT = {
+  "entry":
+    `INTERNAL CALIBRATION — Entry Tier ($300K–$600K): Keep all enhancements neighborhood-appropriate and achievable. No exotic or tropical plants. No luxury designer furniture. Landscape improvements should look like a well-cared-for, pride-of-ownership home in a standard Sacramento Valley neighborhood. Do not over-stage or create unrealistic expectations for the price point.`,
+
+  "move-up":
+    `INTERNAL CALIBRATION — Move-Up Tier ($600K–$1.2M): Apply moderately premium enhancements. Quality materials, well-designed landscape, attractive outdoor living staging. Enhancements should feel aspirational and achievable for an upper-middle-market buyer. The home should feel like a step up — tasteful, well-invested, and worth the price.`,
+
+  "luxury":
+    `INTERNAL CALIBRATION — Luxury Tier ($1.2M+): Apply full premium treatment with no restraint. Designer materials, resort-style landscaping, high-end furniture, and maximum visual polish. Every enhancement should signal exclusivity, quality, and luxury. This home competes with resort-level properties. Nothing is too refined.`
+};
+
+// ─────────────────────────────────────────────
+// MLS COMPLIANCE FOOTER — ALWAYS LAST. NEVER REMOVE.
+// ─────────────────────────────────────────────
+const MLS_COMPLIANCE_FOOTER = `MLS COMPLIANCE — ABSOLUTE RULES (these override all other instructions):
+1. NEVER alter, remove, reposition, or modify any permanent structure: walls, roof, foundation, existing driveway surface, existing hardscape, permanent fencing, utility boxes, or any structural element.
+2. NEVER add or remove windows or doors.
+3. NEVER change the exterior paint or siding color of the home unless explicitly instructed.
+4. NEVER add a swimming pool, spa, or water feature unless one is clearly present in the original photo.
+5. NEVER add a second story, room addition, or structural extension that does not exist in the original photo.
+6. All added items must be REMOVABLE: plants, mulch, furniture, decor, lighting effects — not structural.
+7. The final image must be completely believable as a real photograph of this actual property taken under ideal conditions.
+8. MAINTAIN original image dimensions, field of view, and camera perspective. NO cropping. NO zoom changes. NO perspective distortion. NO horizon shift.`;
+
+// ─────────────────────────────────────────────
+// HAIKU SPATIAL READ PROMPT
+// ─────────────────────────────────────────────
+const HAIKU_EXTERIOR_READ_PROMPT = `You are analyzing a real estate exterior photo to guide virtual enhancement. Return ONLY valid JSON with no preamble, no explanation, no markdown fences.
 
 {
-  "exteriorType": "front|back|side|aerial",
-  "preserveList": "Comprehensive list of house structure elements visible and their colors/textures. DO NOT alter any of these.",
-  "skyCondition": "current sky description (overcast, clear, dull, etc.)",
-  "skyRecommendation": "day|dusk|night",
-  "landscapingStatus": "description of current landscaping",
-  "landscapingEnhancementOpportunities": [
-    "opportunity 1",
-    "opportunity 2"
-  ],
-  "enhancementStrategy": "Brief summary of how to enhance"
-}`;
-
-  const payload = JSON.stringify({
-    model: "claude-haiku-4-5",
-    max_tokens: 1200,
-    messages: [{
-      role: "user",
-      content: [
-        { type: "image", source: { type: "base64", media_type: detectMime(imageBase64), data: imageBase64 } },
-        { type: "text", text: prompt }
-      ]
-    }]
-  });
-
-  const result = await httpsRequest({
-    hostname: "api.anthropic.com",
-    path: "/v1/messages",
-    method: "POST",
-    headers: {
-      "x-api-key": claudeKey,
-      "anthropic-version": "2023-06-01",
-      "content-type": "application/json",
-      "content-length": Buffer.byteLength(payload)
-    }
-  }, payload);
-
-  if (result.status !== 200) throw new Error("Haiku exterior analysis failed: " + (result.body?.error?.message || result.status));
-
-  const text = result.body?.content?.[0]?.text?.trim() || "{}";
-  const clean = text.replace(/```json|```/g, "").trim();
-  try { return JSON.parse(clean); }
-  catch(e) { throw new Error("Exterior analysis JSON parse failed"); }
+  "architecturalStyle": "ranch|mediterranean|craftsman|contemporary|traditional|colonial|farmhouse|spanish|other",
+  "stories": 1,
+  "garageType": "attached-1car|attached-2car|attached-3car|detached|none|not-visible",
+  "garageDoor": "facing-street|side-entry|not-visible",
+  "driveway": "concrete|asphalt|pavers|gravel|dirt|none|not-visible",
+  "frontWalkway": true,
+  "existingLandscapeLevel": "none|minimal|moderate|mature",
+  "grassPresent": true,
+  "grassCondition": "healthy|fair|dry|dead|none",
+  "treeMaturity": "none|young|moderate|mature",
+  "outdoorLivingVisible": "patio|deck|covered-patio|none",
+  "existingOutdoorFurniture": false,
+  "fencing": "none|wood|vinyl|iron|block-wall|partial",
+  "poolVisible": false,
+  "existingLandscapeLighting": "none|minimal|moderate",
+  "timeOfDayInPhoto": "day|golden-hour|dusk|night",
+  "skyCondition": "clear|partly-cloudy|overcast|not-visible",
+  "dominantExteriorFinish": "describe briefly: e.g. beige stucco, white wood siding, brick, grey fiber cement",
+  "roofMaterial": "tile|shingle|flat|metal|not-visible",
+  "visibleSpecialFeatures": []
 }
 
-// ✅ BUILD SKY REPLACEMENT PROMPT
-function buildSkyReplacementPrompt({ exteriorData, skyType }) {
-  let p = AB723_HEADER;
+Populate visibleSpecialFeatures with any of: RV access, circular driveway, solar panels, basketball hoop, flagpole, decorative shutters, columns, covered entry, water feature, sport court, ADU, gate.
+Return ONLY the JSON object.`;
 
-  p += `TASK: Replace sky in exterior photo\n\n`;
+// ─────────────────────────────────────────────
+// PROMPT ASSEMBLER
+// Assembly order per spec:
+// 1. AB 723 Header
+// 2. Spatial Context (from Haiku read)
+// 3. Landscape Enhancement Block
+// 4. Outdoor Living Block
+// 5. Lighting Block
+// 6. Intensity Block
+// 7. Property Tier (hidden internal calibration)
+// 8. MLS Compliance Footer
+// ─────────────────────────────────────────────
+function assembleExteriorPrompt({ spatialRead, lighting, landscape, outdoorLiving, intensity, propertyTier }) {
+  const parts = [];
 
-  p += `PRESERVE EXACTLY (do not alter):\n${exteriorData.preserveList}\n\n`;
+  // 1. AB 723 Header — ALWAYS FIRST
+  parts.push(AB723_HEADER);
 
-  p += `SKY REPLACEMENT:\n`;
-  p += `Current sky: ${exteriorData.skyCondition}\n`;
-  p += `Replace with: ${skyType} sky\n\n`;
+  // 2. Spatial Context Block (inform GPT what it's looking at)
+  if (spatialRead && Object.keys(spatialRead).length > 0) {
+    const contextLines = [];
 
-  if (skyType === 'day') {
-    p += `DAY SKY: Clear blue sky, bright sunny conditions, soft shadows on house\n`;
-    p += `Adjust house shadows and lighting to match bright daylight\n`;
-    p += `Keep colors warm and inviting\n`;
-  } else if (skyType === 'dusk') {
-    p += `DUSK SKY: Golden hour lighting, warm orange/pink tones, soft shadows\n`;
-    p += `Adjust house lighting and shadows to warm golden tones\n`;
-    p += `Create romantic, appealing curb appeal\n`;
-  } else if (skyType === 'night') {
-    p += `NIGHT SKY: Dark evening sky with stars or moon, house exterior lit with landscape lighting\n`;
-    p += `Add subtle exterior lighting to highlight house features\n`;
-    p += `Maintain inviting appearance while showcasing nighttime curb appeal\n`;
+    if (spatialRead.architecturalStyle)
+      contextLines.push(`Architecture: ${spatialRead.architecturalStyle}`);
+    if (spatialRead.stories)
+      contextLines.push(`Stories: ${spatialRead.stories}`);
+    if (spatialRead.dominantExteriorFinish)
+      contextLines.push(`Exterior finish: ${spatialRead.dominantExteriorFinish}`);
+    if (spatialRead.roofMaterial && spatialRead.roofMaterial !== "not-visible")
+      contextLines.push(`Roof: ${spatialRead.roofMaterial}`);
+    if (spatialRead.garageType && spatialRead.garageType !== "not-visible")
+      contextLines.push(`Garage: ${spatialRead.garageType}${spatialRead.garageDoor && spatialRead.garageDoor !== "not-visible" ? ` (${spatialRead.garageDoor})` : ""}`);
+    if (spatialRead.driveway && spatialRead.driveway !== "not-visible")
+      contextLines.push(`Driveway: ${spatialRead.driveway}`);
+    if (spatialRead.frontWalkway)
+      contextLines.push(`Front walkway: present`);
+    if (spatialRead.outdoorLivingVisible && spatialRead.outdoorLivingVisible !== "none")
+      contextLines.push(`Outdoor living area: ${spatialRead.outdoorLivingVisible}`);
+    if (spatialRead.existingOutdoorFurniture)
+      contextLines.push(`Existing outdoor furniture: yes — REMOVE before restaging`);
+    if (spatialRead.fencing && spatialRead.fencing !== "none")
+      contextLines.push(`Fencing: ${spatialRead.fencing}`);
+    if (spatialRead.poolVisible)
+      contextLines.push(`Pool: VISIBLE — preserve pool, only enhance surrounding landscape`);
+    if (spatialRead.grassPresent && spatialRead.grassCondition)
+      contextLines.push(`Grass: present, condition = ${spatialRead.grassCondition}`);
+    if (spatialRead.treeMaturity && spatialRead.treeMaturity !== "none")
+      contextLines.push(`Tree maturity: ${spatialRead.treeMaturity}`);
+    if (spatialRead.timeOfDayInPhoto)
+      contextLines.push(`Original photo time of day: ${spatialRead.timeOfDayInPhoto}`);
+    if (spatialRead.visibleSpecialFeatures && spatialRead.visibleSpecialFeatures.length > 0)
+      contextLines.push(`Special features: ${spatialRead.visibleSpecialFeatures.join(", ")}`);
+
+    if (contextLines.length > 0) {
+      parts.push(
+        `STAGING ZONE SCOPE — PROPERTY ANALYSIS:\n${contextLines.map(l => `  • ${l}`).join("\n")}\nApply all enhancements consistently with the above architectural reality. Do not contradict or ignore any of these observed features.`
+      );
+    }
   }
 
-  p += `\nIMPORTANT:\n`;
-  p += `— Preserve house structure exactly (walls, roof, windows, doors, trim)\n`;
-  p += `— Preserve house color and siding texture\n`;
-  p += `— Adjust shadows and lighting to match new sky condition\n`;
-  p += `— Do NOT alter or move house elements\n`;
-  p += `— Do NOT alter trees, large shrubs, or existing landscaping\n`;
-  p += `— Result must show beautiful curb appeal with new sky\n\n`;
+  // 3. Landscape Enhancement Block
+  const landscapePrompt = LANDSCAPE_PROMPTS[landscape];
+  if (landscapePrompt) {
+    parts.push(landscapePrompt);
+  }
 
-  p += `COMPLIANCE:\n`;
-  p += `This enhancement per California AB 723 §10140.6.\n`;
-  p += `House structure and architectural elements preserved exactly.\n`;
-  p += `Sky replacement only — no structural alterations.`;
+  // 4. Outdoor Living Block
+  const outdoorPrompt = OUTDOOR_LIVING_PROMPTS[outdoorLiving];
+  if (outdoorPrompt) {
+    parts.push(outdoorPrompt);
+  }
 
-  return p.trim();
+  // 5. Lighting Block
+  const lightingPrompt = LIGHTING_PROMPTS[lighting];
+  if (lightingPrompt) {
+    parts.push(lightingPrompt);
+  }
+
+  // 6. Intensity Block
+  const intensityPrompt = INTENSITY_PROMPTS[intensity];
+  if (intensityPrompt) {
+    parts.push(intensityPrompt);
+  }
+
+  // 7. Property Tier — Hidden internal calibration
+  const tierContext = PROPERTY_TIER_CONTEXT[propertyTier];
+  if (tierContext) {
+    parts.push(tierContext);
+  }
+
+  // 8. MLS Compliance Footer — ALWAYS LAST
+  parts.push(MLS_COMPLIANCE_FOOTER);
+
+  return parts.join("\n\n");
 }
 
-// ✅ BUILD LANDSCAPING ENHANCEMENT PROMPT
-function buildLandscapingPrompt({ exteriorData, landscapeStyle, yardType }) {
-  let p = AB723_HEADER;
+// ─────────────────────────────────────────────
+// NETLIFY HANDLER
+// ─────────────────────────────────────────────
+exports.handler = async function (event, context) {
+  if (event.httpMethod !== "POST") {
+    return {
+      statusCode: 405,
+      body: JSON.stringify({ error: "Method Not Allowed" })
+    };
+  }
 
-  p += `TASK: Enhance landscaping in ${yardType} photo\n\n`;
-
-  p += `PRESERVE EXACTLY (do not alter):\n${exteriorData.preserveList}\n\n`;
-
-  p += `LANDSCAPING ENHANCEMENT:\n`;
-  p += `Current landscaping: ${exteriorData.landscapingStatus}\n`;
-  p += `Style: ${landscapeStyle}\n`;
-  p += `Yard type: ${yardType}\n\n`;
-
-  p += `Enhancement opportunities:\n`;
-  exteriorData.landscapingEnhancementOpportunities.forEach(opp => {
-    p += `— ${opp}\n`;
-  });
-
-  p += `\nENHANCEMENT APPROACH:\n`;
-  p += `Add plants, flowers, shrubs, trees, and hardscape improvements in ${landscapeStyle} style\n`;
-  p += `Focus on curb appeal and property value enhancement\n`;
-  p += `Keep improvements proportional to yard and house\n\n`;
-
-  p += `IMPORTANT:\n`;
-  p += `— Preserve house structure exactly (walls, roof, windows, doors, trim, foundation)\n`;
-  p += `— Preserve house color and siding texture\n`;
-  p += `— Preserve large existing trees and major landscaping features\n`;
-  p += `— Do NOT alter or move house elements\n`;
-  p += `— Do NOT alter roof, siding, windows, or doors\n`;
-  p += `— Add landscaping enhancements while maintaining realistic proportions\n`;
-  p += `— Result must show attractive, well-maintained yard\n\n`;
-
-  p += `COMPLIANCE:\n`;
-  p += `This enhancement per California AB 723 §10140.6.\n`;
-  p += `House structure and architectural elements preserved exactly.\n`;
-  p += `Landscaping enhancement only — no structural alterations.`;
-
-  return p.trim();
-}
-
-exports.handler = async (event) => {
-  if (event.httpMethod !== "POST") return { statusCode: 405, body: "Method Not Allowed" };
-  
-  const headers = {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Headers": "Content-Type",
-    "Content-Type": "application/json",
-  };
-
+  let body;
   try {
-    const { 
-      imageBase64, 
-      mimeType, 
-      openAIKey,
-      mode,  // "build-prompt" or "execute"
-      skyType,  // "day", "dusk", "night"
-      yardType,  // "front|back|side"
-      landscapeStyle  // "Mediterranean", "Modern", "Cottage", etc.
-    } = JSON.parse(event.body);
-    const claudeKey = process.env.ANTHROPIC_API_KEY;
-
-    if (!imageBase64) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing imageBase64" }) };
-    if (!claudeKey) return { statusCode: 500, headers, body: JSON.stringify({ error: "ANTHROPIC_API_KEY not configured" }) };
-
-    const siteUrl = process.env.URL || process.env.DEPLOY_URL;
-    if (!siteUrl) return { statusCode: 500, headers, body: JSON.stringify({ error: "Site URL not configured" }) };
-
-    // Compress image if needed
-    const { base64: readyBase64, mimeType: readyMime } = await prepareImage(imageBase64, mimeType);
-
-    // ═══════════════════════════════════════════════════════════════════════════════
-    // MODE 1: BUILD PROMPT FOR USER REVIEW
-    // ═══════════════════════════════════════════════════════════════════════════════
-    if (mode === "build-prompt") {
-      // Analyze exterior
-      const exteriorData = await analyzeExterior({ imageBase64: readyBase64, claudeKey });
-
-      // Build prompts for both enhancements
-      const skyPrompt = buildSkyReplacementPrompt({ exteriorData, skyType: skyType || exteriorData.skyRecommendation });
-      const landscapePrompt = buildLandscapingPrompt({ exteriorData, landscapeStyle: landscapeStyle || "Modern", yardType: yardType || "Front Yard" });
-
-      return {
-        statusCode: 200,
-        headers,
-        body: JSON.stringify({
-          success: true,
-          mode: "exterior-enhancements",
-          exteriorData,
-          options: {
-            skyTypes: ["day", "dusk", "night"],
-            yardTypes: ["Front Yard", "Backyard", "Side Yard"],
-            landscapeStyles: ["Mediterranean", "Modern", "Cottage", "Japanese Zen", "Tropical", "Minimalist", "English Cottage", "Xeriscape"]
-          },
-          prompts: {
-            skyReplacement: skyPrompt,
-            landscaping: landscapePrompt
-          },
-          message: "Exterior enhancement options ready. Review prompts and choose: Sky Replacement, Landscaping, or Both."
-        })
-      };
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════════════
-    // MODE 2: EXECUTE SKY REPLACEMENT
-    // ═══════════════════════════════════════════════════════════════════════════════
-    if (mode === "sky-replacement") {
-      if (!openAIKey) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing openAIKey" }) };
-
-      const exteriorData = await analyzeExterior({ imageBase64: readyBase64, claudeKey });
-      const skyPrompt = buildSkyReplacementPrompt({ exteriorData, skyType: skyType || "day" });
-      const jobId = "sky-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8);
-
-      await triggerBackground({
-        jobId,
-        imageBase64: readyBase64,
-        mimeType: readyMime,
-        stagingPrompt: skyPrompt,
-        quality: "low"
-      }, siteUrl);
-
-      return {
-        statusCode: 202,
-        headers,
-        body: JSON.stringify({
-          success: true,
-          jobId,
-          message: `Sky replacement (${skyType || 'day'})... Please wait`
-        })
-      };
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════════════
-    // MODE 3: EXECUTE LANDSCAPING
-    // ═══════════════════════════════════════════════════════════════════════════════
-    if (mode === "landscaping") {
-      if (!openAIKey) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing openAIKey" }) };
-
-      const exteriorData = await analyzeExterior({ imageBase64: readyBase64, claudeKey });
-      const landscapePrompt = buildLandscapingPrompt({ exteriorData, landscapeStyle: landscapeStyle || "Modern", yardType: yardType || "Front Yard" });
-      const jobId = "landscape-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8);
-
-      await triggerBackground({
-        jobId,
-        imageBase64: readyBase64,
-        mimeType: readyMime,
-        stagingPrompt: landscapePrompt,
-        quality: "low"
-      }, siteUrl);
-
-      return {
-        statusCode: 202,
-        headers,
-        body: JSON.stringify({
-          success: true,
-          jobId,
-          message: `Landscaping enhancement (${landscapeStyle || 'Modern'})... Please wait`
-        })
-      };
-    }
-
-    return { statusCode: 400, headers, body: JSON.stringify({ error: "Invalid mode. Use: build-prompt, sky-replacement, or landscaping" }) };
-
-  } catch (err) {
-    console.error("exterior-enhancement error:", err.message);
-    return { statusCode: 500, headers, body: JSON.stringify({ error: err.message }) };
+    body = JSON.parse(event.body);
+  } catch (e) {
+    return {
+      statusCode: 400,
+      body: JSON.stringify({ error: "Invalid JSON body" })
+    };
   }
+
+  const {
+    imageBase64,
+    imageMimeType = "image/jpeg",
+    lighting = "twilight",
+    landscape = "basic-refresh",
+    outdoorLiving = "none",
+    intensity = "market-ready",
+    propertyTier = "move-up"
+  } = body;
+
+  if (!imageBase64) {
+    return {
+      statusCode: 400,
+      body: JSON.stringify({ error: "imageBase64 is required" })
+    };
+  }
+
+  // Validate options — default to safe fallbacks if unrecognized values arrive
+  const validLighting = LIGHTING_PROMPTS[lighting] ? lighting : "twilight";
+  const validLandscape = LANDSCAPE_PROMPTS[landscape] ? landscape : "basic-refresh";
+  const validOutdoor = OUTDOOR_LIVING_PROMPTS.hasOwnProperty(outdoorLiving) ? outdoorLiving : "none";
+  const validIntensity = INTENSITY_PROMPTS[intensity] ? intensity : "market-ready";
+  const validTier = PROPERTY_TIER_CONTEXT[propertyTier] ? propertyTier : "move-up";
+
+  // API key — server-side only. NEVER send from frontend.
+  const claudeKey = process.env.ANTHROPIC_API_KEY;
+  if (!claudeKey) {
+    return {
+      statusCode: 500,
+      body: JSON.stringify({ error: "Server configuration error: ANTHROPIC_API_KEY not set" })
+    };
+  }
+
+  // ── Step 1: Haiku Spatial Read ──────────────────────────────
+  let spatialRead = {};
+  try {
+    const anthropic = new Anthropic({ apiKey: claudeKey });
+
+    const spatialResponse = await anthropic.messages.create({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 1024,
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "image",
+              source: {
+                type: "base64",
+                media_type: imageMimeType,
+                data: imageBase64
+              }
+            },
+            {
+              type: "text",
+              text: HAIKU_EXTERIOR_READ_PROMPT
+            }
+          ]
+        }
+      ]
+    });
+
+    const rawText = (spatialResponse.content[0]?.text || "").trim();
+
+    // Strip any accidental markdown fences before parsing
+    const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      spatialRead = JSON.parse(jsonMatch[0]);
+    }
+  } catch (err) {
+    // Spatial read failure is non-fatal. Log and continue with empty spatial context.
+    console.error("Haiku exterior spatial read error:", err.message || err);
+    spatialRead = {};
+  }
+
+  // ── Step 2: Assemble the full prompt ─────────────────────────
+  const prompt = assembleExteriorPrompt({
+    spatialRead,
+    lighting: validLighting,
+    landscape: validLandscape,
+    outdoorLiving: validOutdoor,
+    intensity: validIntensity,
+    propertyTier: validTier
+  });
+
+  // ── Return prompt + spatial read to frontend ─────────────────
+  // Frontend calls stage-openai.js with { imageBase64, stagingPrompt: prompt }
+  return {
+    statusCode: 200,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      prompt,
+      spatialRead
+    })
+  };
 };

@@ -56,10 +56,10 @@ REMOVE (movable objects only):
 - Wall art, framed photos, picture frames
 - TVs, TV wall mount brackets, and all electronics
 - Large rectangular wall-mounted objects (whether mirror, TV, or art — remove all)
-- Freestanding shelving, ladder shelves, bookcases, etageres (unless permanently built into wall)
+- Freestanding shelving — remove the ENTIRE unit (frame + shelves + contents). This includes: ladder shelves, A-frame shelves, leaning shelves, bookcases standing on the floor, etageres, display racks, and any shelf unit that stands on its own or leans against a wall. If it can be picked up and carried out of the room, it is furniture — REMOVE IT COMPLETELY.
+- Wall-mounted floating shelves (unless recessed into wall cavity)
 - Personal items (books, photos, decorations, collectibles)
 - Curtains, drapes, window treatments (shutters/blinds stay)
-- Wall-mounted shelving units (not built-in)
 - Any movable object not listed in PRESERVE
 
 CRITICAL INPAINTING RULE FOR MIRRORS, TVs, AND WALL ART:
@@ -76,7 +76,7 @@ PRESERVE (permanent architecture - IMMUTABLE):
 - Kitchen cabinetry, countertops, backsplash, appliances (stove, oven, microwave, refrigerator, dishwasher, hood)
 - Bathroom fixtures (vanity, toilet, shower, tub, medicine cabinet mirrors)
 - Fireplace surround, hearth, insert
-- Built-in shelving, bookcases (permanently attached to wall)
+- Built-in shelving ONLY if permanently constructed into the wall (recessed, nailed to studs, part of wall construction). A shelf leaning against a wall is NOT built-in.
 - Ceiling fans, chandeliers, light fixtures (in situ)
 - Architectural elements (columns, beams, trim, crown molding)
 
@@ -160,7 +160,8 @@ function buildDeclutterPrompt({ roomData }) {
   p += `9. Do NOT create new doorways, openings, or architectural features\n`;
   p += `10. Do NOT alter kitchen cabinets, countertops, or appliances\n`;
   p += `11. Maintain realistic perspective and proportions\n`;
-  p += `12. Result must be a completely empty room with bare walls ready for staging\n\n`;
+  p += `12. Maintain the EXACT same camera angle, field of view, and framing as the original — do NOT crop, zoom, or reframe\n`;
+  p += `13. Result must be a completely empty room with bare walls ready for staging\n\n`;
 
   p += `COMPLIANCE:\n`;
   p += `This room will be prepared per California AB 723 §10140.6 for virtual staging.\n`;

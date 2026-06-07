@@ -52,19 +52,24 @@ TASK: Identify what must be REMOVED vs. what must be PRESERVED.
 REMOVE (movable objects only):
 - Furniture (sofas, chairs, tables, beds, dressers, etc.)
 - Decor (art, plants, throw pillows, lamps, rugs, etc.)
-- Personal items (books, photos, decorations)
+- Wall-mounted mirrors (decorative, not medicine cabinet)
+- Wall art, framed photos, picture frames
+- Wall-mounted shelving units (not built-in)
+- Personal items (books, photos, decorations, collectibles)
+- Curtains, drapes, window treatments (shutters/blinds stay)
 - Any movable object not listed in PRESERVE
 
 PRESERVE (permanent architecture - IMMUTABLE):
 - Structural walls, ceilings, flooring
-- Windows (frames, glass, shutters)
+- Windows (frames, glass, shutters, plantation blinds)
 - Doors (frames, hinges)
 - Kitchen cabinetry, countertops, backsplash, appliances (stove, oven, microwave, refrigerator, dishwasher, hood)
-- Bathroom fixtures (vanity, toilet, shower, tub)
+- Bathroom fixtures (vanity, toilet, shower, tub, medicine cabinet mirrors)
 - Fireplace surround, hearth, insert
-- Built-in shelving, bookcases
+- Built-in shelving, bookcases (permanently attached to wall)
 - Ceiling fans, chandeliers, light fixtures (in situ)
-- Architectural elements (columns, beams, trim)
+- Architectural elements (columns, beams, trim, crown molding)
+- Wall-mounted TV brackets (hardware only, remove TV)
 
 Return ONLY valid JSON — no markdown:
 

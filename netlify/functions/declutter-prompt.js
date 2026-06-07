@@ -54,16 +54,19 @@ REMOVE (movable objects only):
 - Decor (art, plants, throw pillows, lamps, rugs, etc.)
 - Wall-mounted mirrors (decorative, not medicine cabinet)
 - Wall art, framed photos, picture frames
+- TVs, TV wall mount brackets, and all electronics
+- Large rectangular wall-mounted objects (whether mirror, TV, or art — remove all)
 - Freestanding shelving, ladder shelves, bookcases, etageres (unless permanently built into wall)
-- Wall-mounted shelving units (not built-in)
 - Personal items (books, photos, decorations, collectibles)
 - Curtains, drapes, window treatments (shutters/blinds stay)
-- TVs and electronics (wall brackets stay)
+- Wall-mounted shelving units (not built-in)
 - Any movable object not listed in PRESERVE
 
-CRITICAL INPAINTING RULE FOR MIRRORS AND WALL ART:
-When removing a mirror or art from a wall, fill that area with MATCHING WALL PAINT AND TEXTURE.
-Do NOT create a doorway, window, opening, niche, or alcove where a mirror or art was removed.
+CRITICAL INPAINTING RULE FOR MIRRORS, TVs, AND WALL ART:
+When removing a mirror, TV, or art from a wall, fill that area with MATCHING WALL PAINT AND TEXTURE.
+Remove ALL mounting hardware (TV brackets, picture hangers, mirror clips) and fill with matching wall.
+Do NOT create a doorway, window, opening, niche, or alcove where any wall object was removed.
+Do NOT leave any mounting bracket, hardware, or outline visible.
 The result must be a flat, continuous wall surface matching the surrounding wall color and finish.
 
 PRESERVE (permanent architecture - IMMUTABLE):
@@ -76,7 +79,6 @@ PRESERVE (permanent architecture - IMMUTABLE):
 - Built-in shelving, bookcases (permanently attached to wall)
 - Ceiling fans, chandeliers, light fixtures (in situ)
 - Architectural elements (columns, beams, trim, crown molding)
-- Wall-mounted TV brackets (hardware only, remove TV)
 
 Return ONLY valid JSON — no markdown:
 

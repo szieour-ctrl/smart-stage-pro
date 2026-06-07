@@ -1914,6 +1914,8 @@ async function stageRoom(roomId) {
     if (!stagedBase64) throw new Error('OpenAI staging failed — no image returned');
 
     room.stagedBase64 = stagedBase64;
+    // Resize staged image to match original dimensions
+    await resizeToMatch(room, orig, null, 'stagedBase64', stagedBase64);
     room.status = 'done';
     room.promptStatus = null;
     room.approvedDNA = `${i.style_label} style, ${i.palette_label} palette, ${i.intensity_label} staging, ${i.buyer_label} buyer target, ${i.feeling_label} mood.`;
@@ -2393,7 +2395,10 @@ async function runDeclutterOnly(roomId) {
     renderRoomQueue();
     room.declutteredBase64 = await callStageAPI(orig.base64, orig.mimeType, approvedPrompt, 'low');
     if (!room.declutteredBase64) throw new Error('Declutter failed — no image returned');
+    // Resize decluttered image to match original dimensions
     room.stagedBase64 = room.declutteredBase64;
+    await resizeToMatch(room, orig, null, 'stagedBase64', room.declutteredBase64);
+    room.declutteredBase64 = room.stagedBase64; // keep both in sync
     room.status = 'done';
     room.promptStatus = null;
     showToast('✓ Room decluttered — objects removed.', 'success');
@@ -2510,6 +2515,8 @@ async function runCleanAndStage(roomId) {
     const cleanedStagedBase64 = await callStageAPI(compressedCleaned, 'image/jpeg', approvedStage, 'low');
     if (!cleanedStagedBase64) throw new Error('No staged image returned');
     room.stagedBase64 = cleanedStagedBase64;
+    // Resize staged image to match original dimensions
+    await resizeToMatch(room, orig, null, 'stagedBase64', cleanedStagedBase64);
     room.status = 'done';
     room.promptStatus = null;
     showToast('✓ Cleaned and staged.', 'success');

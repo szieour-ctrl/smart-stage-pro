@@ -93,7 +93,7 @@ exports.handler = async function(event) {
     spatialReadJson,  // Optional — Haiku spatial read JSON object
     originalBlobKey,  // Required — Netlify Blob key for the original photo
     stagedBlobKey,    // Required — Netlify Blob key for the staged output
-    creditsUsed = 25, // Default — override with actual credit cost if tracked
+    creditsUsed = 1, // 1 platform credit = 1 staged image
     // Exterior enhancement fields (optional)
     lighting, landscape, outdoorLiving, intensity, propertyTier
   } = body;

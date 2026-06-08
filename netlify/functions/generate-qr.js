@@ -92,7 +92,7 @@ function buildCanvasSVG(address, agentName, agentBrokerage) {
     <text x="${CANVAS_W / 2}" y="${CANVAS_H - 20}"
       font-family="Arial, sans-serif" font-size="10" font-weight="400"
       fill="#3a3028" text-anchor="middle" letter-spacing="0.06em">
-      SMART STAGE PRO™  ·  SMART STAGE AI™
+      SMART STAGE PRO™
     </text>
   </svg>`;
 }
@@ -126,7 +126,7 @@ exports.handler = async (event) => {
       body: JSON.stringify({ error: "Missing complianceUrl" })
     };
 
-    const agentName      = process.env.AGENT_NAME      || "Smart Stage AI™";
+    const agentName      = process.env.AGENT_NAME      || "Smart Stage PRO™";
     const agentBrokerage = process.env.AGENT_BROKERAGE || "";
 
     // Generate high-resolution QR code

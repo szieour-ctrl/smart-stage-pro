@@ -87,6 +87,23 @@
 [functions."download-compliance-zip"]
   timeout = 60
 
+# ── Domain redirects ─────────────────────────────────────
+# Redirect Netlify subdomain to custom domain (301 permanent)
+# Must be BEFORE path-based redirects so Netlify processes first
+[[redirects]]
+  from   = "https://smart-stage-pro.netlify.app/*"
+  to     = "https://smartstagepro.com/:splat"
+  status = 301
+  force  = true
+
+# Redirect www to apex
+[[redirects]]
+  from   = "https://www.smartstagepro.com/*"
+  to     = "https://smartstagepro.com/:splat"
+  status = 301
+  force  = true
+
+# ── Compliance page routing ──────────────────────────────
 [[redirects]]
   from = "/compliance/:projectId"
   to = "/.netlify/functions/compliance-page"
@@ -102,11 +119,39 @@
 [[headers]]
   for = "/*"
   [headers.values]
-    X-Frame-Options = "DENY"
-    X-Content-Type-Options = "nosniff"
+    X-Frame-Options            = "DENY"
+    X-Content-Type-Options     = "nosniff"
+    Referrer-Policy            = "strict-origin-when-cross-origin"
+    Strict-Transport-Security  = "max-age=31536000; includeSubDomains; preload"
+    Permissions-Policy         = "camera=(), microphone=(), geolocation=()"
 
 [context.production.environment]
   NODE_VERSION = "18"
 
 [functions."generate-qr"]
   timeout = 20
+
+# ── New functions added June 7, 2026 ─────────────────────
+[functions."exterior-enhancement-prompt"]
+  timeout = 30
+
+[functions."accept-terms"]
+  timeout = 15
+
+[functions."create-checkout-session"]
+  timeout = 20
+
+[functions."stripe-webhook"]
+  timeout = 20
+
+[functions."save-staged-image"]
+  timeout = 20
+
+[functions."get-compliance-data"]
+  timeout = 30
+
+[functions."update-ab723-disclosed"]
+  timeout = 15
+
+[functions."get-user-listings"]
+  timeout = 30

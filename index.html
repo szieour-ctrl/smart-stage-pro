@@ -3,16 +3,15 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Smart Stage PRO™ — SZREG Virtual Staging</title>
+<title>Smart Stage PRO™ — Virtual Staging Platform</title>
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet" />
 <style>
 :root{--ink:#1a1714;--cream:#f7f4ef;--warm:#e8e0d4;--gold:#b8975a;--gold-light:#d4b87a;--muted:#7a6f63;--danger:#c0392b;--success:#2d6a4f;--border:#ddd5c8;--sky:#3a7ca5;--shadow:0 2px 20px rgba(26,23,20,0.08);}
 *{box-sizing:border-box;margin:0;padding:0;}
 body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);min-height:100vh;font-size:15px;line-height:1.6;}
-.header{background:var(--ink);padding:18px 32px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;box-shadow:0 2px 12px rgba(0,0,0,0.3);}
-.header-brand{font-family:'Cormorant Garamond',serif;color:var(--gold);font-size:1.5rem;font-weight:300;letter-spacing:0.08em;}
-.header-brand span{color:#fff;font-style:italic;}
-.header-badge{background:var(--gold);color:var(--ink);font-size:0.65rem;font-weight:500;letter-spacing:0.12em;text-transform:uppercase;padding:3px 10px;border-radius:2px;}
+.header{background:var(--ink);padding:14px 28px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;box-shadow:0 2px 12px rgba(0,0,0,0.3);}
+.header-left{display:flex;align-items:center;}
+.header-right{display:flex;align-items:center;gap:12px;}
 .compliance-bar{background:var(--ink);color:var(--gold);font-size:0.7rem;letter-spacing:0.12em;text-transform:uppercase;text-align:center;padding:6px;}
 .app{max-width:980px;margin:0 auto;padding:32px 20px 80px;}
 .panel{background:#fff;border:1px solid var(--border);border-radius:4px;padding:28px 32px;margin-bottom:24px;box-shadow:var(--shadow);}
@@ -210,12 +209,19 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
 .tier-draft{background:#e8e0d4;color:#7a6f63;}
 .tier-final{background:rgba(45,106,79,0.15);color:var(--success);}
 </style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
-<div class="compliance-bar">California AB 723 §10140.8 Compliance Active — Original uploaded for permanent public URL · QR Code applied to all Final images · MetroList Rule 11.6.1</div>
+<div class="compliance-bar" id="compliance-bar-text">California AB 723 §10140.6 Compliance Active — Original uploaded for permanent public URL · QR Code applied to all Final images · MetroList Rule 11.6.1</div>
 <header class="header">
-  <div class="header-brand">Smart Stage <span>PRO™</span></div>
-  <div class="header-badge">SZREG Listing Tools</div>
+  <div class="header-left" style="display:flex;align-items:center;gap:14px;">
+    <img src="https://res.cloudinary.com/de18zsi7o/image/upload/v1780935171/Smart_Stage_PRO_Logo_zciwlo.png" alt="Smart Stage PRO™" style="height:44px;width:auto;display:block;" />
+  </div>
+  <div class="header-right" style="display:flex;align-items:center;gap:12px;">
+    <div id="header-credit-badge" class="hidden" style="background:rgba(184,151,90,0.18);border:1px solid var(--gold);border-radius:3px;padding:4px 12px;font-size:0.72rem;color:var(--gold);letter-spacing:0.06em;white-space:nowrap;"></div>
+    <div id="header-user-info" class="hidden" style="font-size:0.75rem;color:#c8bfb0;letter-spacing:0.04em;"></div>
+    <button id="header-signout-btn" class="hidden btn btn-ghost" style="font-size:0.72rem;padding:5px 12px;color:#c8bfb0;" onclick="signOut()">Sign Out</button>
+  </div>
 </header>
 <canvas id="sbs-canvas"></canvas>
 
@@ -223,29 +229,29 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
 <div id="prompt-modal" class="hidden">
   <div class="pm-inner">
     <div class="pm-header">
-      <div class="pm-title">⏸ Claude Vision — Review Before Staging</div>
+      <div class="pm-title">⏸ Smart Stage Engine — Review Before Staging</div>
       <div class="pm-badge">Review Before Staging</div>
     </div>
     <div class="pm-body">
       <div class="pm-room-label">Room</div>
       <div class="pm-room-name" id="pm-room-name">—</div>
-      <div class="pm-section-label">Session Parameters Sent to Claude</div>
+      <div class="pm-section-label">Session Parameters</div>
       <div class="pm-meta" id="pm-meta"></div>
-      <div class="pm-section-label">Staging Prompt → Will Be Sent to GPT Image 2</div>
+      <div class="pm-section-label">Staging Prompt — Edit Before Approving</div>
       <div class="pm-prompt-wrap">
         <textarea class="pm-prompt" id="pm-prompt" rows="10" spellcheck="false"></textarea>
       </div>
-      <div class="pm-prompt-hint">✏️ <strong>Edit this prompt directly before staging.</strong> Claude Vision generated this by reading your photo — for group sessions, the master spatial plan shaped this prompt. You can add instructions, remove placement details, or change any element. What you see here is exactly what goes to GPT Image 2. Every word influences what gets placed and where. Use the <strong>Clear Prompt</strong> button to stage with no text guidance.</div>
-      <div class="pm-warning" id="pm-open-plan-warning" style="display:none;">⚠ <strong>Open Plan detected.</strong> Claude Vision read this as a multi-zone space. Watch for zone crowding — if the prompt places dining furniture AND living furniture in the same area, delete the placement instructions and keep only style/material descriptions. Decor8's native openplan logic handles zone separation better than text instructions.</div>
-      <div class="pm-section-label" style="margin-top:18px;">Decor8 API JSON — Exact Payload Being Sent</div>
+      <div class="pm-prompt-hint">✏️ <strong>Edit this prompt directly before staging.</strong> The Smart Stage engine analyzed your photo and built this prompt. You can add instructions, remove placement details, or change any element. What you see here is exactly what drives the staging output. Every word influences what gets placed and where. Use the <strong>Stage Without Prompt</strong> button to stage with no text guidance.</div>
+      <div class="pm-warning" id="pm-open-plan-warning" style="display:none;">⚠ <strong>Open Plan detected.</strong> The Smart Stage engine read this as a multi-zone space. Watch for zone crowding — if the prompt places dining furniture AND living furniture in the same area, delete the placement instructions and keep only style/material descriptions. The engine's native open-plan logic handles zone separation better than text instructions.</div>
+      <div class="pm-section-label" style="margin-top:18px;">Staging Engine Payload</div>
       <pre id="pm-api-payload" style="background:#1a1a1a;color:#e8e8e8;padding:14px;border-radius:3px;font-size:0.74rem;line-height:1.6;overflow-x:auto;white-space:pre-wrap;word-break:break-word;margin:0;"></pre>
-      <div style="font-size:0.68rem;color:var(--muted);margin-top:6px;">These are the exact fields Decor8 receives. <strong>input_image_url</strong> is assigned at upload. If prompt is present, design_style and color_scheme are not sent.</div>
+      <div style="font-size:0.68rem;color:var(--muted);margin-top:6px;">Exact parameters sent to the staging engine. If a custom prompt is present, design_style and color_scheme are omitted.</div>
     </div>
     <div class="pm-footer">
-      <div class="pm-footer-left" id="pm-cost-note">Approving sends to GPT Image 2 · 1 Credit · ~15 seconds</div>
+      <div class="pm-footer-left" id="pm-cost-note">Approving uses 1 staged image · ~15 seconds</div>
       <div class="pm-footer-right">
         <button class="btn btn-ghost" onclick="cancelPromptModal()">✕ Cancel — Don't Stage</button>
-        <button class="btn btn-outline" onclick="clearPromptAndStage()" title="Send to GPT Image 2 with NO custom prompt">Stage Without Prompt</button>
+        <button class="btn btn-outline" onclick="clearPromptAndStage()" title="Stage with no custom prompt">Stage Without Prompt</button>
         <button class="btn btn-primary" onclick="approvePromptAndStage()">Approve → Stage It</button>
       </div>
     </div>
@@ -269,6 +275,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
   </div>
 </div>
 
+<div id="app-container" class="hidden">
 <div class="app">
   <!-- ── STEP: PROPERTY SEARCH ── -->
   <div id="step-property" class="panel">
@@ -344,7 +351,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
     </div>
     <div class="panel" id="group-session-panel">
       <div class="panel-title">Multi-Angle Group Staging <span style="font-size:0.72rem;font-weight:400;color:var(--muted);margin-left:8px;">Optional — for Open Plan or Bedroom multi-angle sets</span></div>
-      <div class="panel-sub" id="group-session-sub">Select 2–5 photos that show the <strong>same space from different angles</strong>. Claude reads all angles simultaneously to build one Master Staging Plan — then writes individual prompts for each image using visible landmarks as anchors.</div>
+      <div class="panel-sub" id="group-session-sub">Select 2–5 photos that show the <strong>same space from different angles</strong>. The Smart Stage engine reads all angles simultaneously to build one Master Staging Plan — then writes individual prompts for each image using visible landmarks as anchors.</div>
       <div id="group-select-area" style="margin-top:12px;"></div>
       <div id="group-actions" style="margin-top:12px;display:none;gap:8px;flex-wrap:wrap;align-items:center;">
         <select id="group-type-select" onchange="SESSION.groupType=this.value" style="font-size:0.75rem;padding:4px 8px;border:1px solid var(--border);border-radius:3px;background:#fff;">
@@ -373,6 +380,8 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
     </div>
   </div>
 </div>
+</div><!-- /app -->
+</div><!-- /app-container -->
 <div id="toast"></div>
 
 <script>
@@ -1390,7 +1399,7 @@ function renderRoomQueue(){
         <button class="btn btn-outline btn-sm" onclick="downloadSideBySide('${room.id}',null,'cns')">↓ Side-by-Side</button>
         <button class="btn btn-ghost btn-sm" onclick="showDecor8Payload('${room.id}')">{ } API Payload</button>`:'';
       const resultHtml=isDone&&room.stagedBase64?`<div class="result-viewer">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><span class="dcl-result-badge cns-badge">Cleaned + Staged</span><span style="font-size:0.72rem;color:var(--muted);">Objects removed · Restaged with Decor8 · Iterate below.</span></div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><span class="dcl-result-badge cns-badge">Cleaned + Staged</span><span style="font-size:0.72rem;color:var(--muted);">Objects removed · Restaged virtually · Iterate below.</span></div>
         <div class="result-pair">
           <div class="result-img-wrap"><img src="${orig.dataUrl}" /><div class="result-img-badge">Original</div></div>
           <div class="result-img-wrap"><img src="data:image/jpeg;base64,${room.stagedBase64}" /><div class="result-img-badge staged">Cleaned + Staged · Draft</div></div>
@@ -1419,7 +1428,7 @@ function renderRoomQueue(){
     // ── STAGE VACANT / INTERIOR ──
     const statusLabel={
       pending:'Ready to stage — click photo to set Shot Focus',
-      'prompt-review': room.promptStatus || '⏸ Review Claude Vision prompt before staging',
+      'prompt-review': room.promptStatus || '⏸ Review Smart Stage engine prompt before staging',
       processing: room.promptStatus || 'Staging in progress...',
       done:'✓ Staged',
       error:'⚠ Error — retry available'
@@ -1457,7 +1466,7 @@ function renderRoomQueue(){
 
     // DNA status display for open plan
     const dnaPanel = room.isOpenPlan ? (()=>{
-      if(room.dnaStatus==='extracting') return `<div style="background:#f4faf7;border-top:1px solid #b8ddd0;padding:10px 16px;display:flex;align-items:center;gap:8px;"><span class="spinner spinner-green"></span><span style="font-size:0.8rem;color:var(--success);">Claude Vision reading staged image — extracting Design DNA for all rooms...</span></div>`;
+      if(room.dnaStatus==='extracting') return `<div style="background:#f4faf7;border-top:1px solid #b8ddd0;padding:10px 16px;display:flex;align-items:center;gap:8px;"><span class="spinner spinner-green"></span><span style="font-size:0.8rem;color:var(--success);">Smart Stage engine reading staged image — extracting Design DNA for all rooms...</span></div>`;
       if(room.dnaStatus==='done'&&SESSION.stagingDNA) return `<div style="background:#f4faf7;border-top:1px solid #b8ddd0;padding:12px 16px;">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><span style="background:var(--success);color:#fff;font-size:0.62rem;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;padding:2px 8px;border-radius:2px;">✓ Design DNA Locked</span><span style="font-size:0.75rem;color:var(--success);">${SESSION.stagingDNA.overallStyle}</span></div>
         <div style="font-size:0.75rem;color:var(--muted);line-height:1.6;">
@@ -1495,7 +1504,7 @@ function renderRoomQueue(){
       if(room.replicateStatus==='processing')
         return `<div style="background:#f0f4ff;border-top:1px solid #c8d4f0;padding:10px 16px;display:flex;align-items:center;gap:8px;">
           <span class="spinner" style="border-top-color:#4a5fa5;border-color:#c8d4f0;"></span>
-          <span style="font-size:0.8rem;color:#4a5fa5;">Step 1: Claude Vision analyzing photo for precise mask... Step 2: Replicate SDXL inpainting locked regions...</span>
+          <span style="font-size:0.8rem;color:#4a5fa5;">Analyzing photo for precise mask... Running inpainting on locked regions...</span>
         </div>`;
       if(room.replicateStatus==='done'&&room.replicateBase64)
         return `<div style="padding:16px;background:#f0f4ff;border-top:1px solid #c8d4f0;">
@@ -1556,14 +1565,28 @@ function renderFinalPanel(roomId,enhId){
     </div>`;
   }
   const selId=`qsel-${roomId}-${enhId||'int'}`;
+  // Credit cost by selection
+  const creditMap = {'mls':1,'marketing':2,'print':3};
   return `<div class="final-panel">
     <span class="final-panel-label">Generate Final</span>
-    <select class="quality-select" id="${selId}">
-      <option value="4">Print Quality 4x (1 Credit — $1.00)</option>
-      <option value="6">Large Format 6x (2 Credits — $2.00)</option>
-      <option value="8">Maximum 8x (3 Credits — $3.00)</option>
-    </select>
-    <button class="btn btn-success btn-sm" onclick="generateFinal('${roomId}','${enhId||''}')">Generate Final →</button>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+      <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:0.78rem;padding:5px 10px;border:1px solid #b8ddd0;border-radius:3px;background:#fff;">
+        <input type="radio" name="${selId}" value="mls" checked style="accent-color:var(--success);" onchange="updateFinalLabel('${roomId}','${enhId||''}')">
+        <span><strong>MLS Ready</strong> <span style="color:var(--muted);font-size:0.72rem;">— Included</span></span>
+      </label>
+      <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:0.78rem;padding:5px 10px;border:1px solid #b8ddd0;border-radius:3px;background:#fff;">
+        <input type="radio" name="${selId}" value="marketing" style="accent-color:var(--success);" onchange="updateFinalLabel('${roomId}','${enhId||''}')">
+        <span><strong>Marketing Quality</strong> <span style="color:var(--muted);font-size:0.72rem;">+1 image</span></span>
+      </label>
+      <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:0.78rem;padding:5px 10px;border:1px solid #b8ddd0;border-radius:3px;background:#fff;">
+        <input type="radio" name="${selId}" value="print" style="accent-color:var(--success);" onchange="updateFinalLabel('${roomId}','${enhId||''}')">
+        <span><strong>Print Quality</strong> <span style="color:var(--muted);font-size:0.72rem;">+2 images</span></span>
+      </label>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap;">
+      <button class="btn btn-success btn-sm" id="gen-final-btn-${roomId}-${enhId||'int'}" onclick="generateFinal('${roomId}','${enhId||''}')">Generate Final — MLS Ready →</button>
+      <span id="gen-final-note-${roomId}-${enhId||'int'}" style="font-size:0.72rem;color:var(--muted);">Uses 1 staged image from your plan</span>
+    </div>
   </div>`;
 }
 
@@ -1859,7 +1882,7 @@ async function stageRoom(roomId) {
   const sourceMime = orig.mimeType;
 
   room.status = 'processing';
-  room.promptStatus = 'Generating staging prompt with Claude Vision...';
+  room.promptStatus = 'Smart Stage engine analyzing photo...';
   renderRoomQueue();
 
   try {
@@ -1887,13 +1910,13 @@ async function stageRoom(roomId) {
     // ── PROMPT PREVIEW MODAL — pause here, wait for user approval ────────────
     // Change status to 'prompt-review' so the card shows a clear waiting state
     room.status = 'prompt-review';
-    room.promptStatus = '✏️ Review Claude Vision prompt before staging...';
+    room.promptStatus = '✏️ Review Smart Stage engine prompt before staging...';
     renderRoomQueue();
     const approvedPrompt = await showPromptModal(room, prompt);
     // Restore processing status once approved
     if (approvedPrompt !== null) {
       room.status = 'processing';
-      room.promptStatus = 'Staging with GPT Image 2 — takes ~15 seconds...';
+      room.promptStatus = 'Staging in progress — takes ~15 seconds...';
       renderRoomQueue();
     }
     if (approvedPrompt === null) {
@@ -1911,7 +1934,7 @@ async function stageRoom(roomId) {
     renderRoomQueue();
 
     const stagedBase64 = await callStageAPI(sourceBase64, sourceMime, finalPrompt, 'low');
-    if (!stagedBase64) throw new Error('OpenAI staging failed — no image returned');
+    if (!stagedBase64) throw new Error('Staging engine failed — no image returned');
 
     room.stagedBase64 = stagedBase64;
     // Resize staged image to match original dimensions
@@ -1973,7 +1996,7 @@ async function stageDecor8Background(payload, onStatus) {
   if (!startRes.ok) {
     // Background function not available — fall back to synchronous call
     console.warn('Background function unavailable, falling back to synchronous stage-decor8');
-    onStatus && onStatus('Staging with Decor8 (direct)...');
+    onStatus && onStatus('Staging in progress...');
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 80000);
     const syncRes = await fetch('/.netlify/functions/stage-decor8', {
@@ -1983,7 +2006,7 @@ async function stageDecor8Background(payload, onStatus) {
       body: JSON.stringify(payload),
     });
     clearTimeout(timer);
-    if (!syncRes.ok) throw new Error('Decor8 staging failed: ' + syncRes.status);
+    if (!syncRes.ok) throw new Error('Staging engine error: ' + syncRes.status);
     return await syncRes.json();
   }
 
@@ -1997,7 +2020,7 @@ async function stageDecor8Background(payload, onStatus) {
     elapsed += pollInterval;
 
     const secs = Math.round(elapsed / 1000);
-    onStatus && onStatus(`Staging with Decor8 — ${secs}s elapsed...`);
+    onStatus && onStatus(`Staging in progress — ${secs}s...`);
 
     const checkRes = await fetch(`/.netlify/functions/check-decor8?jobId=${encodeURIComponent(jobId)}`);
     if (!checkRes.ok) continue; // network blip — keep polling
@@ -2014,7 +2037,7 @@ async function stageDecor8Background(payload, onStatus) {
     // status === 'pending' — keep polling
   }
 
-  throw new Error('Decor8 staging timed out after 3 minutes — please retry');
+  throw new Error('Staging timed out after 3 minutes — please retry');
 }
 
 // ── PROJECT IMAGE ATTACHMENT ─────────────────────────────────────────────────
@@ -2122,7 +2145,7 @@ async function iterateRoom(roomId) {
 
     // Send ORIGINAL photo + revised prompt to GPT — never GPT output
     const stagedBase64 = await callStageAPI(orig.base64, orig.mimeType, approvedPrompt, 'low');
-    if (!stagedBase64) throw new Error('OpenAI staging failed — no image returned');
+    if (!stagedBase64) throw new Error('Staging engine failed — no image returned');
 
     room.stagedBase64 = stagedBase64;
     room.lastPrompt = approvedPrompt;
@@ -2177,7 +2200,7 @@ async function reStageRoom(roomId) {
 
     // Send DECLUTTERED photo + revised prompt to GPT
     const stagedBase64 = await callStageAPI(room.declutteredBase64, 'image/jpeg', approvedPrompt, 'low');
-    if (!stagedBase64) throw new Error('OpenAI staging failed — no image returned');
+    if (!stagedBase64) throw new Error('Staging engine failed — no image returned');
 
     room.stagedBase64 = stagedBase64;
     room.lastPrompt = approvedPrompt;
@@ -2218,7 +2241,12 @@ async function generateFinal(roomId,enhId){
   }
 
   const selId='qsel-'+roomId+'-'+(enhId||'int');
-  const scaleFactor=parseInt(document.getElementById(selId)?.value)||4;
+  // Read selected radio button value
+  const selectedRadio = document.querySelector(`input[name="${selId}"]:checked`);
+  const qualityChoice = selectedRadio ? selectedRadio.value : 'mls';
+  // Map to scale factor: mls=4x, marketing=6x, print=8x
+  const scaleMap = { mls: 4, marketing: 6, print: 8 };
+  const scaleFactor = scaleMap[qualityChoice] || 4;
 
   if(enhId){room.extSelections[enhId].finalStatus='generating';}
   else{room.finalStatus='generating';}
@@ -2669,7 +2697,7 @@ function downloadWatermarked(roomId, b64, filename, label) {
     ctx.font = '400 11px Arial, sans-serif';
     const roomName = room?.roomName || '';
     const origName = orig?.name || '';
-    ctx.fillText(`Smart Stage AI™  |  SZREG  |  ${roomName}  |  ${origName}`, 12, iH + 17);
+    ctx.fillText(`Smart Stage PRO™  |  ${roomName}  |  ${origName}`, 12, iH + 17);
 
     // Footer text line 2 — compliance
     ctx.fillStyle = '#7a6f63';
@@ -2722,7 +2750,7 @@ function downloadSideBySide(roomId,enhId,tier){
     ctx.fillStyle=badgeBg;ctx.fillRect(sW+pad*2,pad,Math.min(label.length*7+20,sW-10),26);
     ctx.fillStyle='#fff';ctx.font='500 11px sans-serif';ctx.fillText(label,sW+pad*2+10,pad+18);
     if(tier!=='final'){
-      ctx.fillStyle='#b8975a';ctx.font='400 11px sans-serif';ctx.fillText('Smart Stage PRO™  |  SZREG  |  '+room.roomName+'  |  '+orig.name,pad,targetH+pad+18);
+      ctx.fillStyle='#b8975a';ctx.font='400 11px sans-serif';ctx.fillText('Smart Stage PRO™  |  '+room.roomName+'  |  '+orig.name,pad,targetH+pad+18);
       ctx.fillStyle='#7a6f63';ctx.font='400 10px sans-serif';ctx.fillText('Virtually staged — digitally altered per CA AB 723 §10140.8. Original unaltered image included (left). MetroList Rule 11.6.1 compliant.',pad,targetH+pad+36);
     }
     const sfx=tier==='declutter'?'Decluttered':tier==='cns'?'CleanedStaged':enh?enh.label.replace(/\s+/g,''):'VirtuallyStaged';
@@ -2751,12 +2779,12 @@ function showDecor8Payload(roomId) {
   const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
   const payloadHtml = payloadText
-    ? `<div style="color:#666;margin-bottom:4px;font-size:0.7rem;">Fields sent to Decor8 /generate_designs_for_room:</div>
+    ? `<div style="color:#666;margin-bottom:4px;font-size:0.7rem;">Staging engine parameters:</div>
        <pre style="color:#e8e8e8;margin:0;white-space:pre-wrap;word-break:break-word;">${esc(payloadText)}</pre>`
     : `<div style="color:#aaa;">Payload not captured — re-stage this room to see the payload.</div>`;
 
   const promptHtml = prompt
-    ? `<div style="font-weight:700;margin-top:20px;margin-bottom:6px;font-size:0.82rem;color:#ccc;border-top:1px solid #333;padding-top:16px;">Claude Vision Prompt (sent as "prompt" field above)</div>
+    ? `<div style="font-weight:700;margin-top:20px;margin-bottom:6px;font-size:0.82rem;color:#ccc;border-top:1px solid #333;padding-top:16px;">Custom Prompt (sent to staging engine)</div>
        <pre style="color:#d4d4d4;margin:0;white-space:pre-wrap;word-break:break-word;font-size:0.74rem;">${esc(prompt)}</pre>`
     : '';
 
@@ -2812,7 +2840,7 @@ function getOpenPlanDerivedZone(roomName) {
 function setOpenPlanStrategy(strategy) {
   SESSION.openPlanStrategy = strategy;
   renderRoomQueue();
-  showToast(`Open Plan strategy: ${strategy === 'native' ? 'A · Native Decor8' : strategy === 'guided' ? 'B · Guided Zoning' : 'C · Full Placement'}`, 'success');
+  showToast(`Open Plan strategy: ${strategy === 'native' ? 'A · Engine Native' : strategy === 'guided' ? 'B · Guided Zoning' : 'C · Full Placement'}`, 'success');
 }
 
 // ══════════════════════════════════════════
@@ -2893,7 +2921,7 @@ async function runGroupSpatialRead() {
   if (btn) btn.disabled = true;
 
   const statusMessages = [
-    'Reading ' + SESSION.groupImages.length + ' angles with Claude Vision...',
+    'Reading ' + SESSION.groupImages.length + ' angles with Smart Stage engine...',
     'Identifying zones and anchors...',
     'Detecting cross-angle conflicts...',
     'Building assignment map...',
@@ -3107,7 +3135,7 @@ async function stageRoomWithPrompt(roomId, promptText) {
   if (!room || !orig) return;
 
   room.status = 'processing';
-  room.promptStatus = 'Staging with GPT Image 2...';
+  room.promptStatus = 'Staging in progress...';
   renderRoomQueue();
 
   try {
@@ -3183,21 +3211,21 @@ function showPromptModal(room, prompt) {
     const tier = getDNATier(room);
     const dnaNote = tier === 'full' ? ' · Full DNA injected' : tier === 'style' ? ' · Style DNA injected' : '';
     document.getElementById('pm-cost-note').textContent =
-      `Approving sends to Decor8 · 1 Credit · ~45 sec${dnaNote}`;
+      `Approving uses 1 staged image · ~45 sec${dnaNote}`;
 
     // Build and display the exact Decor8 API payload
     const roomType = getDecor8RoomType(room.roomName, room.adjacentRooms, room.decor8Type);
     const hasPrompt = !!(prompt && prompt.length > 0);
     const previewPayload = hasPrompt
       ? {
-          input_image_url: "[assigned at ImgBB upload]",
+          input_image_url: "[assigned at image upload]",
           room_type: roomType,
           prompt: "[see prompt above]",
           num_images: 1,
           scale_factor: 2,
         }
       : {
-          input_image_url: "[assigned at ImgBB upload]",
+          input_image_url: "[assigned at image upload]",
           room_type: roomType,
           design_style: DECOR8_DESIGN_STYLE[i.style_label] || 'organicmodern',
           num_images: 1,
@@ -3230,7 +3258,7 @@ function clearPromptAndStage() {
     try {
       const current = JSON.parse(payloadEl.textContent);
       const enumPayload = {
-        input_image_url: "[assigned at ImgBB upload]",
+        input_image_url: "[assigned at image upload]",
         room_type: current.room_type,
         design_style: current.design_style || 'organicmodern',
         num_images: 1,
@@ -3242,7 +3270,7 @@ function clearPromptAndStage() {
   }
   document.getElementById('prompt-modal').classList.add('hidden');
   if (_promptModalResolve) { _promptModalResolve(''); _promptModalResolve = null; }
-  showToast('Staging with no custom prompt — Decor8 native intelligence only.', '');
+  showToast('Staging with no custom prompt — engine default style only.', '');
 }
 
 function cancelPromptModal() {
@@ -3277,7 +3305,463 @@ function resetSession(){
 }
 function showToast(msg,type=''){const t=document.getElementById('toast');t.textContent=msg;t.className='show '+(type||'');setTimeout(()=>{t.className='';},4000);}
 function esc(s){return(s||'').replace(/'/g,"&#39;").replace(/"/g,"&quot;");}
+
+// ── Generate Final label updater ─────────────────────────────────────────────
+function updateFinalLabel(roomId, enhId) {
+  const selId = 'qsel-' + roomId + '-' + (enhId || 'int');
+  const btnId = 'gen-final-btn-' + roomId + '-' + (enhId || 'int');
+  const noteId = 'gen-final-note-' + roomId + '-' + (enhId || 'int');
+  const selected = document.querySelector(`input[name="${selId}"]:checked`)?.value || 'mls';
+  const labels = { mls: 'MLS Ready', marketing: 'Marketing Quality', print: 'Print Quality' };
+  const costs = { mls: '1 staged image', marketing: '2 staged images', print: '3 staged images' };
+  const btn = document.getElementById(btnId);
+  const note = document.getElementById(noteId);
+  if (btn) btn.textContent = `Generate Final — ${labels[selected]} →`;
+  if (note) note.textContent = `Uses ${costs[selected]} from your plan`;
+}
+
+// ══════════════════════════════════════════
+// AUTH SYSTEM — Supabase
+// ══════════════════════════════════════════
+const SUPABASE_URL = 'https://swhawdqhkiifvbbgnolz.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRucGFlbnB3ZGhqbXNseW1na3NlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA4NjczNTIsImV4cCI6MjA5NjQ0MzM1Mn0.pEdH1YgINYjj8sAutsJJoO8x4VUxTCfIzVbjSu_yBTY';
+
+let _supabase = null;
+let _currentUser = null;
+let _userRecord = null;
+
+function getSupabase() {
+  if (!_supabase) {
+    _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  }
+  return _supabase;
+}
+
+// ── AUTH INIT — runs on page load ────────────────────────────────────────────
+async function initAuth() {
+  const sb = getSupabase();
+  const { data: { session } } = await sb.auth.getSession();
+  if (session?.user) {
+    _currentUser = session.user;
+    await handleAuthenticatedUser(session.user);
+  } else {
+    showAuthModal('login');
+  }
+
+  // Listen for auth state changes
+  sb.auth.onAuthStateChange(async (event, session) => {
+    if (event === 'SIGNED_IN' && session?.user) {
+      _currentUser = session.user;
+      await handleAuthenticatedUser(session.user);
+    } else if (event === 'SIGNED_OUT') {
+      _currentUser = null;
+      _userRecord = null;
+      hideAllAuthModals();
+      showAuthModal('login');
+      hideAppUI();
+    }
+  });
+}
+
+async function handleAuthenticatedUser(user) {
+  hideAllAuthModals();
+
+  // Load user record from Supabase
+  const sb = getSupabase();
+  const { data: userRec } = await sb.from('users').select('*').eq('id', user.id).single();
+  _userRecord = userRec;
+
+  // Check ToS acceptance
+  if (!userRec?.terms_accepted_at) {
+    showTosModal(user);
+    return;
+  }
+
+  // Check subscription status
+  const status = userRec?.subscription_status;
+  if (!status || status === 'inactive' || status === 'canceled') {
+    showPricingPage(user, userRec);
+    return;
+  }
+
+  // Active subscriber — show tool
+  await showMainApp(user, userRec);
+}
+
+// ── HEADER UPDATE ────────────────────────────────────────────────────────────
+async function updateHeaderForUser(user, userRec) {
+  const nameEl = document.getElementById('header-user-info');
+  const signOutBtn = document.getElementById('header-signout-btn');
+  const creditBadge = document.getElementById('header-credit-badge');
+
+  if (nameEl) {
+    nameEl.textContent = userRec?.full_name || user.email;
+    nameEl.classList.remove('hidden');
+  }
+  if (signOutBtn) signOutBtn.classList.remove('hidden');
+
+  // Load credit balance from Supabase
+  if (creditBadge && userRec) {
+    const sb = getSupabase();
+    const { data: ledger } = await sb
+      .from('credit_ledger')
+      .select('balance_after')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+      .limit(1);
+    const balance = ledger?.[0]?.balance_after ?? null;
+    if (balance !== null) {
+      creditBadge.textContent = `${balance} images remaining`;
+      creditBadge.classList.remove('hidden');
+    }
+  }
+}
+
+// ── SHOW MAIN APP ────────────────────────────────────────────────────────────
+async function showMainApp(user, userRec) {
+  hideAllAuthModals();
+  document.getElementById('app-container').classList.remove('hidden');
+  await updateHeaderForUser(user, userRec);
+  showStep('step-property');
+}
+
+function hideAppUI() {
+  document.getElementById('app-container').classList.add('hidden');
+}
+
+// ── SIGN OUT ─────────────────────────────────────────────────────────────────
+async function signOut() {
+  await getSupabase().auth.signOut();
+}
+
+// ══════════════════════════════════════════
+// AUTH MODAL
+// ══════════════════════════════════════════
+function showAuthModal(mode) {
+  let modal = document.getElementById('auth-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'auth-modal';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(10,8,6,0.96);z-index:9200;display:flex;align-items:center;justify-content:center;padding:20px;';
+    document.body.appendChild(modal);
+  }
+  modal.innerHTML = `
+    <div style="background:#fff;border-radius:6px;overflow:hidden;max-width:420px;width:100%;box-shadow:0 8px 40px rgba(0,0,0,0.4);">
+      <div style="background:var(--ink);padding:28px 32px;text-align:center;">
+        <img src="https://res.cloudinary.com/de18zsi7o/image/upload/v1780935171/Smart_Stage_PRO_Logo_zciwlo.png" alt="Smart Stage PRO™" style="height:72px;width:auto;margin:0 auto 12px;display:block;" />
+        <div style="font-size:0.72rem;color:#c8bfb0;letter-spacing:0.12em;text-transform:uppercase;">The Complete Virtual Staging Platform™</div>
+      </div>
+      <div style="padding:28px 32px;">
+        <div style="display:flex;gap:0;border:1px solid var(--border);border-radius:3px;overflow:hidden;margin-bottom:24px;">
+          <button id="auth-tab-login" onclick="switchAuthTab('login')" style="flex:1;padding:9px;font-size:0.8rem;font-weight:500;border:none;cursor:pointer;letter-spacing:0.04em;background:${mode==='login'?'var(--ink)':'#fff'};color:${mode==='login'?'var(--gold)':'var(--muted)'};">Sign In</button>
+          <button id="auth-tab-signup" onclick="switchAuthTab('signup')" style="flex:1;padding:9px;font-size:0.8rem;font-weight:500;border:none;cursor:pointer;letter-spacing:0.04em;background:${mode==='signup'?'var(--ink)':'#fff'};color:${mode==='signup'?'var(--gold)':'var(--muted)'};">Create Account</button>
+        </div>
+        <div id="auth-error" style="display:none;background:#fef0ef;border:1px solid #f5c6c3;border-radius:3px;padding:10px 14px;font-size:0.8rem;color:var(--danger);margin-bottom:16px;"></div>
+        <div id="auth-form-area">
+          ${mode === 'signup' ? `
+          <div style="margin-bottom:14px;">
+            <label style="font-size:0.75rem;font-weight:500;color:var(--muted);display:block;margin-bottom:5px;letter-spacing:0.04em;text-transform:uppercase;">Full Name</label>
+            <input id="auth-name" type="text" placeholder="Your full name" style="width:100%;padding:11px 14px;border:1px solid var(--border);border-radius:3px;font-size:0.9rem;font-family:inherit;color:var(--ink);" />
+          </div>` : ''}
+          <div style="margin-bottom:14px;">
+            <label style="font-size:0.75rem;font-weight:500;color:var(--muted);display:block;margin-bottom:5px;letter-spacing:0.04em;text-transform:uppercase;">Email</label>
+            <input id="auth-email" type="email" placeholder="you@yourbrokerage.com" style="width:100%;padding:11px 14px;border:1px solid var(--border);border-radius:3px;font-size:0.9rem;font-family:inherit;color:var(--ink);" />
+          </div>
+          <div style="margin-bottom:22px;">
+            <label style="font-size:0.75rem;font-weight:500;color:var(--muted);display:block;margin-bottom:5px;letter-spacing:0.04em;text-transform:uppercase;">Password</label>
+            <input id="auth-password" type="password" placeholder="${mode==='signup'?'At least 8 characters':'Your password'}" style="width:100%;padding:11px 14px;border:1px solid var(--border);border-radius:3px;font-size:0.9rem;font-family:inherit;color:var(--ink);" onkeydown="if(event.key==='Enter')submitAuth('${mode}')" />
+          </div>
+          <button onclick="submitAuth('${mode}')" id="auth-submit-btn" style="width:100%;padding:13px;background:var(--gold);color:var(--ink);border:none;border-radius:3px;font-size:0.85rem;font-weight:600;letter-spacing:0.06em;cursor:pointer;text-transform:uppercase;">
+            ${mode==='login'?'Sign In →':'Create Account →'}
+          </button>
+          ${mode==='login'?`<div style="text-align:center;margin-top:14px;"><button onclick="showForgotPassword()" style="background:none;border:none;font-size:0.78rem;color:var(--muted);cursor:pointer;text-decoration:underline;">Forgot password?</button></div>`:''}
+        </div>
+        <div style="text-align:center;margin-top:20px;padding-top:16px;border-top:1px solid var(--border);">
+          <div style="font-size:0.72rem;color:var(--muted);">California AB 723 §10140.6 compliant · Secure · 3-year retention</div>
+        </div>
+      </div>
+    </div>`;
+  modal.classList.remove('hidden');
+}
+
+function switchAuthTab(mode) {
+  showAuthModal(mode);
+}
+
+async function submitAuth(mode) {
+  const email = document.getElementById('auth-email')?.value?.trim();
+  const password = document.getElementById('auth-password')?.value;
+  const name = document.getElementById('auth-name')?.value?.trim();
+  const errEl = document.getElementById('auth-error');
+  const btn = document.getElementById('auth-submit-btn');
+
+  if (!email || !password) { showAuthError('Please enter your email and password.'); return; }
+  if (mode === 'signup' && !name) { showAuthError('Please enter your full name.'); return; }
+  if (mode === 'signup' && password.length < 8) { showAuthError('Password must be at least 8 characters.'); return; }
+
+  btn.textContent = mode === 'login' ? 'Signing in...' : 'Creating account...';
+  btn.disabled = true;
+
+  const sb = getSupabase();
+  try {
+    if (mode === 'login') {
+      const { error } = await sb.auth.signInWithPassword({ email, password });
+      if (error) throw error;
+    } else {
+      const { data, error } = await sb.auth.signUp({ email, password, options: { data: { full_name: name } } });
+      if (error) throw error;
+      if (data?.user && !data.session) {
+        // Email confirmation required
+        showAuthSuccess('Check your email to confirm your account, then sign in.');
+        return;
+      }
+    }
+  } catch (err) {
+    showAuthError(err.message || 'Authentication failed. Please try again.');
+    btn.textContent = mode === 'login' ? 'Sign In →' : 'Create Account →';
+    btn.disabled = false;
+  }
+}
+
+function showAuthError(msg) {
+  const el = document.getElementById('auth-error');
+  if (el) { el.textContent = msg; el.style.display = 'block'; }
+}
+
+function showAuthSuccess(msg) {
+  const area = document.getElementById('auth-form-area');
+  if (area) area.innerHTML = `<div style="text-align:center;padding:20px 0;">
+    <div style="font-size:2rem;margin-bottom:12px;">✅</div>
+    <div style="font-size:0.9rem;color:var(--ink);line-height:1.6;">${msg}</div>
+  </div>`;
+}
+
+async function showForgotPassword() {
+  const email = document.getElementById('auth-email')?.value?.trim();
+  if (!email) { showAuthError('Enter your email address first.'); return; }
+  const { error } = await getSupabase().auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
+  if (error) { showAuthError(error.message); return; }
+  showAuthSuccess('Password reset email sent. Check your inbox.');
+}
+
+function hideAllAuthModals() {
+  document.getElementById('auth-modal')?.remove();
+  document.getElementById('tos-modal')?.remove();
+}
+
+// ══════════════════════════════════════════
+// TERMS OF SERVICE MODAL
+// ══════════════════════════════════════════
+function showTosModal(user) {
+  let modal = document.getElementById('tos-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'tos-modal';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(10,8,6,0.96);z-index:9300;display:flex;align-items:center;justify-content:center;padding:20px;';
+    document.body.appendChild(modal);
+  }
+  modal.innerHTML = `
+    <div style="background:#fff;border-radius:6px;overflow:hidden;max-width:560px;width:100%;max-height:90vh;display:flex;flex-direction:column;">
+      <div style="background:var(--ink);padding:20px 28px;display:flex;align-items:center;gap:12px;flex-shrink:0;">
+        <img src="https://res.cloudinary.com/de18zsi7o/image/upload/v1780935171/Smart_Stage_PRO_Logo_zciwlo.png" alt="Smart Stage PRO™" style="height:38px;width:auto;" />
+        <div>
+          <div style="font-family:'Cormorant Garamond',serif;color:var(--gold);font-size:1.1rem;font-weight:300;">Terms of Service</div>
+          <div style="font-size:0.68rem;color:#c8bfb0;letter-spacing:0.08em;">Review and accept before using Smart Stage PRO™</div>
+        </div>
+      </div>
+      <div id="tos-scroll" style="overflow-y:auto;flex:1;padding:24px 28px;font-size:0.82rem;color:var(--ink);line-height:1.7;" onscroll="checkTosScroll()">
+        <p style="margin-bottom:14px;"><strong>Smart Stage PRO™ Terms of Service</strong><br>Effective date: June 2026</p>
+        <p style="margin-bottom:10px;"><strong>1. AB 723 Compliance</strong><br>All staged images generated through this platform include mandatory disclosure overlays and are stored with permanent compliance records per California AB 723 §10140.6. You agree to use all staged images in compliance with California real estate disclosure laws, MetroList Rule 11.6.1, and applicable MLS rules. Staged images must be clearly labeled as virtually staged in all MLS and public marketing materials.</p>
+        <p style="margin-bottom:10px;"><strong>2. Staged Image Credits</strong><br>Your subscription includes a monthly allocation of staged images. Credits do not roll over. Overage usage is billed at published rates. One platform credit equals one staged image generation.</p>
+        <p style="margin-bottom:10px;"><strong>3. Permitted Use</strong><br>Smart Stage PRO™ is licensed for use by licensed California real estate professionals for legitimate listing marketing purposes. You may not resell, redistribute, or sublicense access to this platform.</p>
+        <p style="margin-bottom:10px;"><strong>4. Image Ownership</strong><br>You retain ownership of all original listing photographs you upload. Staged images generated by the platform are licensed to you for real estate marketing use. The platform retains the right to store original and staged images for AB 723 compliance purposes for a minimum of three years.</p>
+        <p style="margin-bottom:10px;"><strong>5. Privacy & Data</strong><br>Property addresses, agent information, and staged images are stored securely and used solely to provide platform services and maintain AB 723 compliance records. We do not sell your data.</p>
+        <p style="margin-bottom:10px;"><strong>6. Subscription & Billing</strong><br>Subscriptions are billed monthly or annually. You may cancel at any time; access continues through the end of the paid period. Refunds are not provided for partial months.</p>
+        <p style="margin-bottom:10px;"><strong>7. Limitation of Liability</strong><br>Smart Stage PRO™ is provided as-is. We are not responsible for MLS violations, disclosure errors, or regulatory penalties arising from your use of staged images. You are solely responsible for compliance with all applicable real estate laws and MLS rules.</p>
+        <p style="margin-bottom:20px;"><strong>8. Changes to Terms</strong><br>We may update these terms with 30 days notice. Continued use constitutes acceptance.</p>
+        <p style="font-size:0.75rem;color:var(--muted);">Smart Stage PRO™ is a product of SZ Real Estate Group · DRE #01397303</p>
+      </div>
+      <div style="padding:16px 28px;border-top:1px solid var(--border);background:var(--cream);flex-shrink:0;">
+        <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;margin-bottom:14px;">
+          <input type="checkbox" id="tos-checkbox" style="margin-top:3px;accent-color:var(--gold);width:16px;height:16px;flex-shrink:0;" onchange="checkTosReady()" disabled />
+          <span style="font-size:0.8rem;color:var(--ink);line-height:1.5;">I have read and agree to the Smart Stage PRO™ Terms of Service, including the AB 723 compliance requirements.</span>
+        </label>
+        <div id="tos-scroll-note" style="font-size:0.72rem;color:var(--muted);margin-bottom:12px;">↓ Scroll to the bottom to enable acceptance</div>
+        <button id="tos-accept-btn" onclick="acceptTos()" disabled style="width:100%;padding:12px;background:var(--border);color:var(--muted);border:none;border-radius:3px;font-size:0.85rem;font-weight:600;letter-spacing:0.06em;cursor:not-allowed;text-transform:uppercase;">Accept & Continue →</button>
+      </div>
+    </div>`;
+}
+
+function checkTosScroll() {
+  const el = document.getElementById('tos-scroll');
+  const checkbox = document.getElementById('tos-checkbox');
+  const note = document.getElementById('tos-scroll-note');
+  if (!el || !checkbox) return;
+  const atBottom = el.scrollHeight - el.scrollTop <= el.clientHeight + 40;
+  if (atBottom) {
+    checkbox.disabled = false;
+    if (note) note.textContent = '☑ Check the box above to accept';
+  }
+}
+
+function checkTosReady() {
+  const checked = document.getElementById('tos-checkbox')?.checked;
+  const btn = document.getElementById('tos-accept-btn');
+  if (btn) {
+    btn.disabled = !checked;
+    btn.style.background = checked ? 'var(--gold)' : 'var(--border)';
+    btn.style.color = checked ? 'var(--ink)' : 'var(--muted)';
+    btn.style.cursor = checked ? 'pointer' : 'not-allowed';
+  }
+}
+
+async function acceptTos() {
+  const btn = document.getElementById('tos-accept-btn');
+  if (btn) { btn.textContent = 'Saving...'; btn.disabled = true; }
+  try {
+    const res = await fetch('/.netlify/functions/accept-terms', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: _currentUser?.id }),
+    });
+    if (!res.ok) throw new Error('Failed to record acceptance');
+    document.getElementById('tos-modal')?.remove();
+    // Re-check user state
+    await handleAuthenticatedUser(_currentUser);
+  } catch (err) {
+    if (btn) { btn.textContent = 'Accept & Continue →'; btn.disabled = false; checkTosReady(); }
+    showToast('Could not save acceptance: ' + err.message, 'error');
+  }
+}
+
+// ══════════════════════════════════════════
+// PRICING PAGE
+// ══════════════════════════════════════════
+function showPricingPage(user, userRec) {
+  hideAllAuthModals();
+  hideAppUI();
+
+  let page = document.getElementById('pricing-page');
+  if (!page) {
+    page = document.createElement('div');
+    page.id = 'pricing-page';
+    document.body.appendChild(page);
+  }
+  page.style.cssText = 'min-height:100vh;background:var(--cream);padding:0 0 80px;';
+
+  const urlParams = new URLSearchParams(window.location.search);
+  const checkoutSuccess = urlParams.get('checkout') === 'success';
+
+  page.innerHTML = `
+    ${checkoutSuccess ? `
+    <div style="background:#2d6a4f;color:#fff;text-align:center;padding:14px;font-size:0.85rem;letter-spacing:0.04em;">
+      ✅ Subscription activated — welcome to Smart Stage PRO™! Loading your account...
+    </div>` : ''}
+    <div style="max-width:860px;margin:0 auto;padding:48px 20px 0;">
+      <div style="text-align:center;margin-bottom:48px;">
+        <img src="https://res.cloudinary.com/de18zsi7o/image/upload/v1780935171/Smart_Stage_PRO_Logo_zciwlo.png" alt="Smart Stage PRO™" style="height:80px;width:auto;margin:0 auto 20px;display:block;" />
+        <h1 style="font-family:'Cormorant Garamond',serif;font-size:2rem;font-weight:300;color:var(--ink);margin-bottom:8px;">Choose Your Plan</h1>
+        <p style="font-size:0.9rem;color:var(--muted);">California AB 723 §10140.6 compliance built in · Cancel anytime</p>
+        ${userRec?.full_name ? `<p style="font-size:0.82rem;color:var(--muted);margin-top:6px;">Signed in as ${escHtml(userRec.full_name || user.email)} · <button onclick="signOut()" style="background:none;border:none;color:var(--gold);cursor:pointer;font-size:0.82rem;text-decoration:underline;">Sign out</button></p>` : ''}
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:20px;margin-bottom:40px;">
+
+        <!-- SOLO -->
+        <div style="background:#fff;border:1px solid var(--border);border-radius:6px;padding:28px 24px;box-shadow:var(--shadow);display:flex;flex-direction:column;">
+          <div style="font-family:'Cormorant Garamond',serif;font-size:1.4rem;font-weight:400;color:var(--ink);margin-bottom:4px;">Solo</div>
+          <div style="font-size:2rem;font-weight:300;color:var(--gold);margin-bottom:4px;">$49<span style="font-size:1rem;color:var(--muted)">/mo</span></div>
+          <div style="font-size:0.75rem;color:var(--muted);margin-bottom:20px;">or $490/yr — 2 months free</div>
+          <ul style="list-style:none;font-size:0.82rem;color:var(--ink);line-height:1.9;flex:1;margin-bottom:20px;">
+            <li>✓ &nbsp;50 staged images / month</li>
+            <li>✓ &nbsp;1 agent account</li>
+            <li>✓ &nbsp;All 5 staging modules</li>
+            <li>✓ &nbsp;AB 723 compliance pages</li>
+            <li>✓ &nbsp;QR codes on all Finals</li>
+            <li>✓ &nbsp;3-year record retention</li>
+            <li style="color:var(--muted);">○ &nbsp;Overage: $25 / 20 images</li>
+          </ul>
+          <button onclick="startCheckout('solo')" class="btn btn-primary" style="width:100%;justify-content:center;">Subscribe — Solo →</button>
+        </div>
+
+        <!-- TEAM -->
+        <div style="background:#fff;border:2px solid var(--gold);border-radius:6px;padding:28px 24px;box-shadow:0 4px 24px rgba(184,151,90,0.18);display:flex;flex-direction:column;position:relative;">
+          <div style="position:absolute;top:-12px;left:50%;transform:translateX(-50%);background:var(--gold);color:var(--ink);font-size:0.65rem;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;padding:3px 14px;border-radius:20px;">Most Popular</div>
+          <div style="font-family:'Cormorant Garamond',serif;font-size:1.4rem;font-weight:400;color:var(--ink);margin-bottom:4px;">Team</div>
+          <div style="font-size:2rem;font-weight:300;color:var(--gold);margin-bottom:4px;">$99<span style="font-size:1rem;color:var(--muted)">/mo</span></div>
+          <div style="font-size:0.75rem;color:var(--muted);margin-bottom:20px;">or $990/yr — 2 months free</div>
+          <ul style="list-style:none;font-size:0.82rem;color:var(--ink);line-height:1.9;flex:1;margin-bottom:20px;">
+            <li>✓ &nbsp;125 staged images / month</li>
+            <li>✓ &nbsp;Up to 5 agent sub-accounts</li>
+            <li>✓ &nbsp;Shared image pool</li>
+            <li>✓ &nbsp;Team AB 723 dashboard</li>
+            <li>✓ &nbsp;All Solo features</li>
+            <li style="color:var(--muted);">○ &nbsp;Overage: $45 / 50 images</li>
+          </ul>
+          <button onclick="startCheckout('team')" class="btn btn-primary" style="width:100%;justify-content:center;">Subscribe — Team →</button>
+        </div>
+
+        <!-- BROKERAGE -->
+        <div style="background:#fff;border:1px solid var(--border);border-radius:6px;padding:28px 24px;box-shadow:var(--shadow);display:flex;flex-direction:column;">
+          <div style="font-family:'Cormorant Garamond',serif;font-size:1.4rem;font-weight:400;color:var(--ink);margin-bottom:4px;">Brokerage</div>
+          <div style="font-size:2rem;font-weight:300;color:var(--gold);margin-bottom:4px;">$279<span style="font-size:1rem;color:var(--muted)">/mo</span></div>
+          <div style="font-size:0.75rem;color:var(--muted);margin-bottom:20px;">or $2,790/yr — 2 months free</div>
+          <ul style="list-style:none;font-size:0.82rem;color:var(--ink);line-height:1.9;flex:1;margin-bottom:20px;">
+            <li>✓ &nbsp;400 staged images / month</li>
+            <li>✓ &nbsp;Unlimited agents</li>
+            <li>✓ &nbsp;Brokerage compliance dashboard</li>
+            <li>✓ &nbsp;AB 723 CSV export</li>
+            <li>✓ &nbsp;All Team features</li>
+            <li style="color:var(--muted);">○ &nbsp;Overage: $75 / 100 images</li>
+          </ul>
+          <button onclick="startCheckout('brokerage')" class="btn btn-primary" style="width:100%;justify-content:center;">Subscribe — Brokerage →</button>
+        </div>
+
+      </div>
+
+      <div style="text-align:center;font-size:0.78rem;color:var(--muted);line-height:1.8;">
+        All plans include AB 723 compliance · Stripe secure billing · Cancel anytime<br>
+        Questions? Contact <a href="mailto:sam@szrealestategroup.com" style="color:var(--gold);">sam@szrealestategroup.com</a>
+      </div>
+    </div>`;
+
+  // If checkout=success, refresh subscription status after short delay
+  if (checkoutSuccess) {
+    setTimeout(async () => {
+      const sb = getSupabase();
+      const { data: updated } = await sb.from('users').select('*').eq('id', user.id).single();
+      if (updated?.subscription_status === 'active') {
+        page.remove();
+        await showMainApp(user, updated);
+        // Clean URL
+        window.history.replaceState({}, '', window.location.pathname);
+      }
+    }, 3000);
+  }
+}
+
+async function startCheckout(plan) {
+  if (!_currentUser) { showToast('Please sign in first.', 'error'); return; }
+  const btn = document.querySelector(`button[onclick="startCheckout('${plan}')"]`);
+  if (btn) { btn.textContent = 'Redirecting to checkout...'; btn.disabled = true; }
+  try {
+    const res = await fetch('/.netlify/functions/create-checkout-session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ plan, userId: _currentUser.id, email: _currentUser.email }),
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    if (data.url) window.location.href = data.url;
+  } catch (err) {
+    showToast('Checkout error: ' + err.message, 'error');
+    if (btn) { btn.textContent = `Subscribe — ${plan.charAt(0).toUpperCase()+plan.slice(1)} →`; btn.disabled = false; }
+  }
+}
+
+// ── INIT ─────────────────────────────────────────────────────────────────────
 showStep('step-property');
+initAuth();
 </script>
 </body>
 </html>

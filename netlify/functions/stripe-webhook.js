@@ -9,10 +9,12 @@ const crypto = require('crypto');
 
 // ── Credit allotments per plan ────────────────────────────
 // MUST match create-checkout-session.js
+// 1 platform credit = 1 staged image
+// Must match subscription allotments: Solo 50, Team 125, Brokerage 400
 const PLAN_CREDITS = {
-  solo:       100,
-  team:       300,
-  brokerage: 1000
+  solo:       50,
+  team:       125,
+  brokerage:  400
 };
 
 function getRoleFromPlan(plan) {

@@ -1,12 +1,6 @@
 // compliance-page.js — Netlify Function
 // Serves the permanent AB 723 §10140.8 compliance page for a property project
 // URL: /compliance/{projectId}
-// Shows: agent branding, property address, all original + staged image pairs,
-//        disclosure text, download ZIP link, date staged
-//
-// This page satisfies AB 723 §10140.8(a)(2) — internet website requirement:
-// "include the unaltered version of the images from which the digitally altered
-//  images were created in the posting"
 
 const { getStore } = require("@netlify/blobs");
 
@@ -80,12 +74,13 @@ function renderPage(project, projectId) {
     body { font-family: Arial, Helvetica, sans-serif; background: #f5f3f0; color: #1a1a1a; min-height: 100vh; }
 
     /* ── HEADER ── */
-    .site-header { background: #1a1714; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; }
-    .header-brand { display: flex; align-items: center; gap: 14px; }
-    .header-logo { height: 40px; width: auto; border-radius: 4px; }
-    .header-name { color: #b8975a; font-size: 14px; font-weight: 500; letter-spacing: 0.06em; }
-    .header-brokerage { color: #7a6f63; font-size: 11px; margin-top: 2px; letter-spacing: 0.04em; }
-    .header-badge { background: #2d6a4f; color: #fff; font-size: 10px; font-weight: 600; padding: 4px 10px; border-radius: 3px; letter-spacing: 0.08em; white-space: nowrap; }
+    .site-header { background: #1a1714; padding: 20px 28px; display: flex; align-items: center; justify-content: space-between; }
+    .header-brand { display: flex; align-items: center; gap: 18px; }
+    /* INCREASED logo height: was 40px, now 72px */
+    .header-logo { height: 72px; width: auto; display: block; }
+    .header-name { color: #b8975a; font-size: 15px; font-weight: 500; letter-spacing: 0.06em; }
+    .header-brokerage { color: #7a6f63; font-size: 12px; margin-top: 3px; letter-spacing: 0.04em; }
+    .header-badge { background: #2d6a4f; color: #fff; font-size: 10px; font-weight: 600; padding: 5px 12px; border-radius: 3px; letter-spacing: 0.08em; white-space: nowrap; }
 
     /* ── COMPLIANCE BANNER ── */
     .compliance-banner { background: #1B3A5C; color: #fff; padding: 14px 24px; }
@@ -139,7 +134,7 @@ function renderPage(project, projectId) {
 <!-- HEADER -->
 <header class="site-header">
   <div class="header-brand">
-    ${agentLogoUrl ? `<img src="${agentLogoUrl}" alt="${agentBrokerage} logo" class="header-logo">` : ""}
+    ${agentLogoUrl ? `<img src="${agentLogoUrl}" alt="Smart Stage PRO™" class="header-logo">` : ""}
     <div>
       <div class="header-name">${agentName}</div>
       ${agentBrokerage ? `<div class="header-brokerage">${agentBrokerage}${agentDRE ? " · DRE #" + agentDRE : ""}</div>` : ""}
@@ -150,10 +145,10 @@ function renderPage(project, projectId) {
 
 <!-- COMPLIANCE BANNER -->
 <div class="compliance-banner">
-  <h1>Virtual Staging Disclosure — California AB 723 §10140.8</h1>
+  <h1>Virtual Staging Disclosure — California AB 723 §10140.6</h1>
   <p>
     This page provides the original, unaltered photographs and their corresponding virtually staged versions
-    for the property listed below, in compliance with California Business and Professions Code §10140.8
+    for the property listed below, in compliance with California Business and Professions Code §10140.6
     (Assembly Bill 723, effective October 10, 2025). All staged images have been digitally altered by
     adding virtual furniture and décor for illustrative purposes only. The property is sold as shown
     in the original photographs. This page is maintained by Smart Stage PRO™.
@@ -233,7 +228,6 @@ h2{color:#1a1714;margin-bottom:12px;}p{color:#7a6f63;font-size:14px;line-height:
 }
 
 exports.handler = async (event) => {
-  // Extract projectId from path: /compliance/{projectId}
   const pathParts = (event.path || "").split("/").filter(Boolean);
   const projectId = pathParts[pathParts.length - 1];
 

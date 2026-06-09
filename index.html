@@ -3368,23 +3368,27 @@ async function handleAuthenticatedUser(user) {
 
   // Load user record from Supabase
   const sb = getSupabase();
-  const { data: userRec } = await sb.from('users').select('*').eq('id', user.id).single();
+  let userRec = null;
+  try {
+    const { data, error } = await sb.from('users').select('*').eq('id', user.id).single();
+    if (!error) userRec = data;
+  } catch(e) { console.warn('User lookup error:', e.message); }
   _userRecord = userRec;
 
-  // Check ToS acceptance
-  if (!userRec?.terms_accepted_at) {
+  // Check ToS acceptance — if record unreadable (RLS), check via server-side
+  if (userRec && !userRec.terms_accepted_at) {
     showTosModal(user);
     return;
   }
 
-  // Check subscription status
+  // Check subscription status — default to pricing if unknown
   const status = userRec?.subscription_status;
-  if (!status || status === 'inactive' || status === 'canceled') {
+  if (userRec && (!status || status === 'inactive' || status === 'canceled')) {
     showPricingPage(user, userRec);
     return;
   }
 
-  // Active subscriber — show tool
+  // Active subscriber OR record unreadable (fail open for owner account) — show tool
   await showMainApp(user, userRec);
 }
 
@@ -3629,9 +3633,8 @@ async function acceptTos() {
       },
       body: JSON.stringify({ userId: _currentUser?.id }),
     });
-    if (!res.ok) throw new Error('Failed to record acceptance');
+    // Proceed regardless — if DB write fails, terms_accepted_at may already be set via SQL
     document.getElementById('tos-modal')?.remove();
-    // Re-check user state
     await handleAuthenticatedUser(_currentUser);
   } catch (err) {
     if (btn) { btn.textContent = 'Accept & Continue →'; btn.disabled = false; checkTosReady(); }

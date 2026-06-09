@@ -3324,11 +3324,12 @@ function updateFinalLabel(roomId, enhId) {
 // AUTH SYSTEM — Supabase
 // ══════════════════════════════════════════
 const SUPABASE_URL = 'https://dnpaenpwdhjmslymgkse.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRucGFlbnB3ZGhqbXNseW1na3NlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA4NjczNTIsImV4cCI6MjA5NjQ0MzM1Mn0.pEdH1YgINYjj8sAutsJJoO8x4VUxTCfIzVbjSu_yBTY';
+const SUPABASE_ANON_KEY = 'sb_publishable_ssbzvKE4nj_7SnceFIBxgQ_DwmKw246';
 
 let _supabase = null;
 let _currentUser = null;
 let _userRecord = null;
+let _pendingCheckoutPlan = null;
 
 function getSupabase() {
   if (!_supabase) {
@@ -3348,11 +3349,14 @@ async function initAuth() {
     showAuthModal('login');
   }
 
-  // Listen for auth state changes
+  // Listen for auth state changes (OAuth/magic-link/token refresh)
+  // Password login is handled explicitly in submitAuth to avoid double-call
   sb.auth.onAuthStateChange(async (event, session) => {
     if (event === 'SIGNED_IN' && session?.user) {
-      _currentUser = session.user;
-      await handleAuthenticatedUser(session.user);
+      if (!_currentUser || _currentUser.id !== session.user.id) {
+        _currentUser = session.user;
+        await handleAuthenticatedUser(session.user);
+      }
     } else if (event === 'SIGNED_OUT') {
       _currentUser = null;
       _userRecord = null;
@@ -3375,20 +3379,34 @@ async function handleAuthenticatedUser(user) {
   } catch(e) { console.warn('User lookup error:', e.message); }
   _userRecord = userRec;
 
-  // Check ToS acceptance — if record unreadable (RLS), check via server-side
-  if (userRec && !userRec.terms_accepted_at) {
+  // If user record not readable, route to pricing (safe default — never grant free access)
+  if (!userRec) {
+    showPricingPage(user, null);
+    return;
+  }
+
+  // Check ToS acceptance
+  if (!userRec.terms_accepted_at) {
     showTosModal(user);
     return;
   }
 
-  // Check subscription status — default to pricing if unknown
-  const status = userRec?.subscription_status;
-  if (userRec && (!status || status === 'inactive' || status === 'canceled')) {
+  // Check subscription status — must be explicitly active
+  const status = userRec.subscription_status;
+  if (status !== 'active') {
+    // If user came from a pricing page subscribe click, go straight to checkout
+    if (_pendingCheckoutPlan) {
+      const plan = _pendingCheckoutPlan;
+      _pendingCheckoutPlan = null;
+      showPricingPage(user, userRec);
+      setTimeout(() => startCheckout(plan), 300);
+      return;
+    }
     showPricingPage(user, userRec);
     return;
   }
 
-  // Active subscriber OR record unreadable (fail open for owner account) — show tool
+  // Active subscriber — show tool
   await showMainApp(user, userRec);
 }
 
@@ -3509,8 +3527,14 @@ async function submitAuth(mode) {
   const sb = getSupabase();
   try {
     if (mode === 'login') {
-      const { error } = await sb.auth.signInWithPassword({ email, password });
+      const { data, error } = await sb.auth.signInWithPassword({ email, password });
       if (error) throw error;
+      // Explicitly handle authenticated user — don't rely solely on onAuthStateChange
+      // which may not fire if a session already exists or fires before modal teardown
+      if (data?.user) {
+        _currentUser = data.user;
+        await handleAuthenticatedUser(data.user);
+      }
     } else {
       const { data, error } = await sb.auth.signUp({ email, password, options: { data: { full_name: name } } });
       if (error) throw error;
@@ -3518,6 +3542,11 @@ async function submitAuth(mode) {
         // Email confirmation required
         showAuthSuccess('Check your email to confirm your account, then sign in.');
         return;
+      }
+      // Signup with immediate session (email confirm OFF) — proceed directly
+      if (data?.user && data.session) {
+        _currentUser = data.user;
+        await handleAuthenticatedUser(data.user);
       }
     }
   } catch (err) {
@@ -3749,18 +3778,25 @@ function showPricingPage(user, userRec) {
 }
 
 async function startCheckout(plan) {
-  if (!_currentUser) { showToast('Please sign in first.', 'error'); return; }
+  if (!_currentUser) {
+    _pendingCheckoutPlan = plan;
+    showAuthModal('signup');
+    return;
+  }
   const btn = document.querySelector(`button[onclick="startCheckout('${plan}')"]`);
   if (btn) { btn.textContent = 'Redirecting to checkout...'; btn.disabled = true; }
   try {
     const { data: { session: stripeSession } } = await getSupabase().auth.getSession();
     const jwt = stripeSession?.access_token;
+    if (!jwt) {
+      showToast('Session expired — please sign in again.', 'error');
+      showAuthModal('login');
+      if (btn) { btn.textContent = 'Subscribe — ' + plan.charAt(0).toUpperCase() + plan.slice(1) + ' →'; btn.disabled = false; }
+      return;
+    }
     const res = await fetch('/.netlify/functions/create-checkout-session', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(jwt ? { 'Authorization': 'Bearer ' + jwt } : {}),
-      },
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + jwt },
       body: JSON.stringify({ plan, userId: _currentUser.id, email: _currentUser.email }),
     });
     const data = await res.json();

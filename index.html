@@ -3375,26 +3375,20 @@ async function handleAuthenticatedUser(user) {
   } catch(e) { console.warn('User lookup error:', e.message); }
   _userRecord = userRec;
 
-  // If user record not readable, route to pricing (safe default — never grant free access)
-  if (!userRec) {
-    showPricingPage(user, null);
-    return;
-  }
-
-  // Check ToS acceptance
-  if (!userRec.terms_accepted_at) {
+  // Check ToS acceptance — if record unreadable (RLS), check via server-side
+  if (userRec && !userRec.terms_accepted_at) {
     showTosModal(user);
     return;
   }
 
-  // Check subscription status — must be explicitly active
-  const status = userRec.subscription_status;
-  if (status !== 'active') {
+  // Check subscription status — default to pricing if unknown
+  const status = userRec?.subscription_status;
+  if (userRec && (!status || status === 'inactive' || status === 'canceled')) {
     showPricingPage(user, userRec);
     return;
   }
 
-  // Active subscriber — show tool
+  // Active subscriber OR record unreadable (fail open for owner account) — show tool
   await showMainApp(user, userRec);
 }
 

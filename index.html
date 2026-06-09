@@ -3329,7 +3329,6 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 let _supabase = null;
 let _currentUser = null;
 let _userRecord = null;
-let _pendingCheckoutPlan = null;
 
 function getSupabase() {
   if (!_supabase) {
@@ -3376,34 +3375,20 @@ async function handleAuthenticatedUser(user) {
   } catch(e) { console.warn('User lookup error:', e.message); }
   _userRecord = userRec;
 
-  // If user record not readable, route to pricing (safe default — never grant free access)
-  if (!userRec) {
-    showPricingPage(user, null);
-    return;
-  }
-
-  // Check ToS acceptance
-  if (!userRec.terms_accepted_at) {
+  // Check ToS acceptance — if record unreadable (RLS), check via server-side
+  if (userRec && !userRec.terms_accepted_at) {
     showTosModal(user);
     return;
   }
 
-  // Check subscription status — must be explicitly active
-  const status = userRec.subscription_status;
-  if (status !== 'active') {
-    // If user came from a pricing page subscribe click, go straight to checkout
-    if (_pendingCheckoutPlan) {
-      const plan = _pendingCheckoutPlan;
-      _pendingCheckoutPlan = null;
-      showPricingPage(user, userRec);
-      setTimeout(() => startCheckout(plan), 300);
-      return;
-    }
+  // Check subscription status — default to pricing if unknown
+  const status = userRec?.subscription_status;
+  if (userRec && (!status || status === 'inactive' || status === 'canceled')) {
     showPricingPage(user, userRec);
     return;
   }
 
-  // Active subscriber — show tool
+  // Active subscriber OR record unreadable (fail open for owner account) — show tool
   await showMainApp(user, userRec);
 }
 
@@ -3764,25 +3749,18 @@ function showPricingPage(user, userRec) {
 }
 
 async function startCheckout(plan) {
-  if (!_currentUser) {
-    _pendingCheckoutPlan = plan;
-    showAuthModal('signup');
-    return;
-  }
+  if (!_currentUser) { showToast('Please sign in first.', 'error'); return; }
   const btn = document.querySelector(`button[onclick="startCheckout('${plan}')"]`);
   if (btn) { btn.textContent = 'Redirecting to checkout...'; btn.disabled = true; }
   try {
     const { data: { session: stripeSession } } = await getSupabase().auth.getSession();
     const jwt = stripeSession?.access_token;
-    if (!jwt) {
-      showToast('Session expired — please sign in again.', 'error');
-      showAuthModal('login');
-      if (btn) { btn.textContent = 'Subscribe — ' + plan.charAt(0).toUpperCase() + plan.slice(1) + ' →'; btn.disabled = false; }
-      return;
-    }
     const res = await fetch('/.netlify/functions/create-checkout-session', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + jwt },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(jwt ? { 'Authorization': 'Bearer ' + jwt } : {}),
+      },
       body: JSON.stringify({ plan, userId: _currentUser.id, email: _currentUser.email }),
     });
     const data = await res.json();

@@ -161,7 +161,6 @@ exports.handler = async function(event) {
     'metadata[terms_version]':                   userRecord?.terms_version || '1.0',
     'subscription_data[metadata][user_id]':      authUser.id,
     'subscription_data[metadata][plan]':         plan,
-    'consent_collection[terms_of_service]':      'required',
   };
 
   // Add existing Stripe customer ID if user already has one

@@ -1,12 +1,8 @@
 // accept-terms.js
 // Smart Stage PRO™  |  Terms of Service Acceptance Recorder
-// Called by frontend BEFORE create-checkout-session.js
-// Stores: user_id, timestamp, version, IP address in users table
-// Supabase service role key bypasses RLS — access is controlled by JWT verification
 
 const https = require('https');
 
-// ── Supabase helpers ─────────────────────────────────────
 function supabaseQuery(method, table, body, queryParams = '') {
   return new Promise((resolve, reject) => {
     const urlStr = `${process.env.SUPABASE_URL}/rest/v1/${table}${queryParams}`;
@@ -24,23 +20,24 @@ function supabaseQuery(method, table, body, queryParams = '') {
         ...(bodyStr ? { 'Content-Length': Buffer.byteLength(bodyStr) } : {})
       }
     };
+    console.log('supabaseQuery:', method, urlStr, 'key prefix:', process.env.SUPABASE_SERVICE_ROLE_KEY?.slice(0,20));
     const req = https.request(options, res => {
       let data = '';
       res.on('data', c => data += c);
       res.on('end', () => {
+        console.log('supabaseQuery response status:', res.statusCode, 'body:', data.slice(0, 200));
         try { resolve({ status: res.statusCode, data: JSON.parse(data || '[]') }); }
         catch { resolve({ status: res.statusCode, data }); }
       });
     });
-    req.on('error', reject);
+    req.on('error', (e) => { console.log('supabaseQuery error:', e.message); reject(e); });
     if (bodyStr) req.write(bodyStr);
     req.end();
   });
 }
 
-// Verify Supabase JWT and return user object, or null if invalid
 function verifyJWT(authHeader) {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     if (!authHeader || !authHeader.startsWith('Bearer ')) { resolve(null); return; }
     const jwt = authHeader.split(' ')[1];
     const url = new URL(`${process.env.SUPABASE_URL}/auth/v1/user`);
@@ -57,28 +54,33 @@ function verifyJWT(authHeader) {
       let data = '';
       res.on('data', c => data += c);
       res.on('end', () => {
+        console.log('verifyJWT status:', res.statusCode, 'body:', data.slice(0,100));
         try {
           const parsed = JSON.parse(data);
           resolve(res.statusCode === 200 && parsed.id ? parsed : null);
         } catch { resolve(null); }
       });
     });
-    req.on('error', reject);
+    req.on('error', (e) => { console.log('verifyJWT error:', e.message); resolve(null); });
     req.end();
   });
 }
 
-// ── Handler ──────────────────────────────────────────────
 exports.handler = async function(event) {
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: 'Method Not Allowed' };
   }
 
-  // Verify caller is authenticated
+  console.log('SUPABASE_URL:', process.env.SUPABASE_URL);
+  console.log('SERVICE_ROLE_KEY prefix:', process.env.SUPABASE_SERVICE_ROLE_KEY?.slice(0,20));
+
   const authUser = await verifyJWT(event.headers.authorization || event.headers.Authorization);
   if (!authUser) {
+    console.log('verifyJWT failed — returning 401');
     return { statusCode: 401, body: JSON.stringify({ error: 'Unauthorized' }) };
   }
+
+  console.log('Authenticated user:', authUser.id);
 
   let body;
   try { body = JSON.parse(event.body); }
@@ -87,13 +89,11 @@ exports.handler = async function(event) {
   const { termsVersion = '1.0' } = body;
   const userId = authUser.id;
 
-  // Capture IP for legal record (Netlify passes client IP in headers)
   const clientIp =
     event.headers['x-forwarded-for']?.split(',')[0]?.trim() ||
     event.headers['client-ip'] ||
     'unknown';
 
-  // Write acceptance to Supabase
   const result = await supabaseQuery(
     'PATCH',
     `users?id=eq.${userId}`,
@@ -104,8 +104,10 @@ exports.handler = async function(event) {
     }
   );
 
+  console.log('PATCH result:', result.status, JSON.stringify(result.data));
+
   if (result.status !== 200 && result.status !== 204) {
-    console.error('Supabase error recording ToS acceptance:', result);
+    console.error('Supabase PATCH failed:', result.status, result.data);
     return { statusCode: 500, body: JSON.stringify({ error: 'Failed to record acceptance' }) };
   }
 

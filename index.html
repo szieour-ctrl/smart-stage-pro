@@ -1631,35 +1631,33 @@ async function generateDeclutterFinal(roomId) {
   const room = SESSION.rooms.find(r => r.id === roomId);
   if (!room || !room.declutteredBase64) { showToast('No decluttered image found.', 'error'); return; }
 
-  // Set stagedBase64 to the decluttered image so generateFinal pipeline works unchanged
-  // Save original stagedBase64 to restore if needed
-  const originalStagedBase64 = room.stagedBase64;
-  room.stagedBase64 = room.declutteredBase64;
-
-  // Read quality selection
+  // Read quality from declutter selector
   const selId = `qsel-dcl-${roomId}`;
   const quality = document.querySelector(`input[name="${selId}"]:checked`)?.value || 'mls';
-  const scaleMap = { mls: 4, marketing: 6, print: 8 };
 
-  // Temporarily override the quality selector name so generateFinal reads correct value
-  const tempId = `qsel-${roomId}-int`;
-  document.querySelectorAll(`input[name="${selId}"]`).forEach(el => {
-    const clone = el.cloneNode(true);
-    clone.name = tempId;
-    el.parentNode.insertBefore(clone, el);
-    el.style.display = 'none';
-  });
+  // Map declutter quality selector name to what generateFinal expects
+  const intSelId = `qsel-${roomId}-int`;
+  // Temporarily set the interior quality radio to match declutter selection
+  const existingRadio = document.querySelector(`input[name="${intSelId}"][value="${quality}"]`);
+  if (existingRadio) existingRadio.checked = true;
+
+  // Swap declutteredBase64 into stagedBase64 so generateFinal uses it as source
+  const savedStaged = room.stagedBase64;
+  const savedFinalStatus = room.finalStatus;
+  const savedFinalBase64 = room.finalBase64;
+  room.stagedBase64 = room.declutteredBase64;
 
   try {
     await generateFinal(roomId, null);
-    // Mirror result to declutter-specific fields
+    // Copy result to declutter-specific fields
     room.declutterFinalBase64 = room.finalBase64;
     room.declutterFinalStatus = room.finalStatus;
   } finally {
-    // Restore original staged base64 and clean up temp inputs
-    room.stagedBase64 = originalStagedBase64;
-    document.querySelectorAll(`input[name="${tempId}"]`).forEach(el => el.remove());
-    document.querySelectorAll(`input[name="${selId}"]`).forEach(el => el.style.display = '');
+    // Restore original values
+    room.stagedBase64 = savedStaged;
+    room.finalStatus = savedFinalStatus;
+    room.finalBase64 = savedFinalBase64;
+    renderRoomQueue();
   }
 }
 

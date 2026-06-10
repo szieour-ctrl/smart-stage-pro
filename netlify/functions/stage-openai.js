@@ -14,20 +14,39 @@ async function prepareImage(imageBase64, mimeType) {
   const sizeKB = Math.round(buffer.length / 1024);
   const maxDim = Math.max(meta.width || 0, meta.height || 0);
 
-  // Only resize/compress if over threshold
-  if (maxDim <= 1536 && sizeKB <= 1500) {
-    console.log(`Image OK: ${meta.width}x${meta.height} ${sizeKB}KB — no compression needed`);
-    return { base64: imageBase64, mimeType };
+  console.log(`Image input: ${meta.width}x${meta.height} ${sizeKB}KB format=${meta.format} channels=${meta.channels} hasAlpha=${meta.hasAlpha} orientation=${meta.orientation||'none'}`);
+
+  // Always normalize through Sharp to:
+  // 1. Auto-rotate based on EXIF (fixes iPhone portrait photos)
+  // 2. Flatten alpha channel (PNG transparency breaks OpenAI edits endpoint)
+  // 3. Convert to JPEG for consistent handling
+  // 4. Resize if over threshold
+  const needsResize = maxDim > 1536 || sizeKB > 1500;
+  const hasAlpha = meta.hasAlpha || meta.channels === 4;
+  const hasRotation = meta.orientation && meta.orientation !== 1;
+  const isPNG = meta.format === 'png';
+
+  // Always normalize if: PNG, has alpha, has rotation, or needs resize
+  if (needsResize || hasAlpha || hasRotation || isPNG) {
+    let pipeline = sharp(buffer)
+      .rotate() // auto-rotate from EXIF
+      .flatten({ background: { r: 255, g: 255, b: 255 } }); // flatten alpha to white
+
+    if (needsResize) {
+      pipeline = pipeline.resize(1536, 1536, { fit: "inside", withoutEnlargement: true });
+    }
+
+    const normalized = await pipeline
+      .jpeg({ quality: 92, mozjpeg: false })
+      .toBuffer();
+
+    const normMeta = await sharp(normalized).metadata();
+    console.log(`Image normalized: ${normMeta.width}x${normMeta.height} ${Math.round(normalized.length/1024)}KB → JPEG`);
+    return { base64: normalized.toString("base64"), mimeType: "image/jpeg" };
   }
 
-  const compressed = await sharp(buffer)
-    .resize(1536, 1536, { fit: "inside", withoutEnlargement: true })
-    .jpeg({ quality: 88 })
-    .toBuffer();
-
-  const compressedKB = Math.round(compressed.length / 1024);
-  console.log(`Image compressed: ${meta.width}x${meta.height} ${sizeKB}KB → 1536px max ${compressedKB}KB`);
-  return { base64: compressed.toString("base64"), mimeType: "image/jpeg" };
+  console.log(`Image OK: ${meta.width}x${meta.height} ${sizeKB}KB — no normalization needed`);
+  return { base64: imageBase64, mimeType };
 }
 
 async function triggerBackground(payload, siteUrl) {
@@ -74,8 +93,10 @@ exports.handler = async (event) => {
     if (!imageBase64)   return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing imageBase64" }) };
     if (!stagingPrompt) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing stagingPrompt" }) };
 
-    const siteUrl = process.env.URL || process.env.DEPLOY_URL;
-    if (!siteUrl) return { statusCode: 500, headers, body: JSON.stringify({ error: "Site URL not configured" }) };
+    // Always use Netlify subdomain for function-to-function calls —
+    // custom domain redirects break background function 202 handshake
+    const siteUrl = process.env.NETLIFY_URL || "https://smart-stage-pro.netlify.app";
+    console.log(`Using trigger URL base: ${siteUrl}`);
 
     // Compress if large — protects against subscriber uploading 10MB photos
     const { base64: readyBase64, mimeType: readyMime } = await prepareImage(imageBase64, mimeType);

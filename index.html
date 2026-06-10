@@ -2710,106 +2710,57 @@ function downloadWatermarked(roomId, b64, filename, label) {
 
   img.src = b64.startsWith('data:') ? b64 : `data:image/jpeg;base64,${b64}`;
 }
-function downloadSideBySide(roomId,enhId,tier){
-  const room=SESSION.rooms.find(r=>r.id===roomId);
-  const orig=SESSION.originals.find(o=>o.id===room?.originalId);
-  const b64=enhId?getExtB64(roomId,enhId,tier):
-    tier==='declutter'?room?.declutteredBase64:
-    tier==='cns'?room?.stagedBase64:
-    getRoomB64(roomId,tier);
-  const enh=enhId?EXT_ENHANCEMENTS.find(e=>e.id===enhId):null;
-  const label=enh?enh.mlsTag:
-    tier==='final'?'VIRTUALLY STAGED — FINAL':
-    tier==='declutter'?'DECLUTTERED — OBJECTS REMOVED':
-    tier==='cns'?'CLEANED + STAGED · DRAFT':
-    'VIRTUALLY STAGED · DRAFT';
-  if(!b64||!orig)return;
-  const canvas=document.getElementById('sbs-canvas'),ctx=canvas.getContext('2d');
-  const oI=new Image(),sI=new Image();let loaded=0;
-  const go=()=>{
-    loaded++;if(loaded<2)return;
-    const oW=oI.naturalWidth, oH=oI.naturalHeight;
-    const sW_raw=sI.naturalWidth, sH_raw=sI.naturalHeight;
+async function downloadSideBySide(roomId, enhId, tier) {
+  const room = SESSION.rooms.find(r => r.id === roomId);
+  const orig = SESSION.originals.find(o => o.id === room?.originalId);
+  const b64  = enhId ? getExtB64(roomId, enhId, tier) :
+    tier === 'declutter' ? room?.declutteredBase64 :
+    tier === 'cns'       ? room?.stagedBase64 :
+    getRoomB64(roomId, tier);
+  const enh = enhId ? EXT_ENHANCEMENTS.find(e => e.id === enhId) : null;
 
-    // For final tier, staged image has 72px AB723 footer already baked in.
-    // The image content (excluding footer) is sH_raw - 72.
-    // We need both panels to show the same content height side by side.
-    const BAKED_FOOTER = tier==='final' ? 72 : 0;
-    const stagedContentH = sH_raw - BAKED_FOOTER;
+  if (!b64 || !orig) return;
 
-    // Scale original to match staged content height
-    const scale = stagedContentH / oH;
-    const panelW = Math.round(oW * scale); // both panels same width
-    const pad = 14;
-    const ftH = 100; // SBS footer bar height — tall enough for QR + text
+  // Get original as base64 from dataUrl
+  const origB64 = orig.dataUrl.includes(',') ? orig.dataUrl.split(',')[1] : orig.dataUrl;
 
-    // Total canvas: two panels (same width) + padding + shared footer
-    // For final: staged panel includes its own baked footer below content
-    const totalPanelH = tier==='final' ? sH_raw : stagedContentH;
-    canvas.width  = panelW * 2 + pad * 3;
-    canvas.height = totalPanelH + pad * 2 + ftH;
+  // For final tier the staged image has the AB723 footer baked in — send as-is
+  // For other tiers send the raw staged image
+  const stagedB64 = b64;
 
-    // Background
-    ctx.fillStyle='#1a1714';
-    ctx.fillRect(0,0,canvas.width,canvas.height);
+  const sfx = tier==='declutter' ? 'Decluttered' : tier==='cns' ? 'CleanedStaged' : enh ? enh.label.replace(/\s+/g,'') : 'VirtuallyStaged';
+  const filename = (tier==='final' ? 'FINAL_SBS_' : 'SBS_') + sfx + '_' + bName(orig.name) + '.jpg';
 
-    // Draw original panel — scaled to content height, no footer
-    ctx.drawImage(oI, pad, pad, panelW, stagedContentH);
+  // Show loading indicator on the button
+  const btn = event?.target;
+  const origText = btn?.textContent;
+  if (btn) { btn.textContent = 'Generating…'; btn.disabled = true; }
 
-    // Draw staged panel — includes baked footer for final tier
-    ctx.drawImage(sI, panelW+pad*2, pad, panelW, totalPanelH);
+  try {
+    const res = await fetch('/.netlify/functions/generate-sbs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        originalBase64: origB64,
+        stagedBase64:   stagedB64,
+        address:        SESSION.projectAddress || '',
+        roomName:       room.roomName || '',
+        tier,
+        complianceUrl:  SESSION.complianceUrl || ''
+      })
+    });
 
-    // ORIGINAL badge
-    ctx.fillStyle='rgba(26,23,20,0.85)';
-    ctx.fillRect(pad, pad, 140, 28);
-    ctx.fillStyle='#fff';
-    ctx.font='600 12px Arial,sans-serif';
-    ctx.fillText('ORIGINAL — UNALTERED', pad+10, pad+19);
+    if (!res.ok) throw new Error('SBS generation failed: ' + res.status);
+    const data = await res.json();
+    if (!data.sbsBase64) throw new Error('No SBS image returned');
 
-    // Staged badge
-    const badgeBg=enh?'rgba(58,124,165,0.92)':
-      tier==='final'?'rgba(45,106,79,0.92)':
-      tier==='declutter'?'rgba(124,92,62,0.92)':
-      tier==='cns'?'rgba(74,103,65,0.92)':
-      'rgba(184,151,90,0.92)';
-    const badgeW=Math.min(label.length*8+24, panelW-10);
-    ctx.fillStyle=badgeBg;
-    ctx.fillRect(panelW+pad*2, pad, badgeW, 28);
-    ctx.fillStyle='#fff';
-    ctx.font='600 12px Arial,sans-serif';
-    ctx.fillText(label, panelW+pad*2+10, pad+19);
-
-    // SBS footer bar — compliance text + QR placeholder text
-    const ftY = totalPanelH + pad * 2;
-    ctx.fillStyle='#1a1714';
-    ctx.fillRect(0, ftY, canvas.width, ftH);
-
-    // Footer line 1 — branding + room
-    ctx.fillStyle='#b8975a';
-    ctx.font='500 13px Arial,sans-serif';
-    ctx.fillText('Smart Stage PRO™  |  '+(room.roomName||'')+'  |  AB 723 §10140.8 Compliant', 16, ftY+22);
-
-    // Footer line 2 — compliance statement
-    ctx.fillStyle='#9a8f83';
-    ctx.font='400 11px Arial,sans-serif';
-    ctx.fillText('Virtually staged image — digitally altered for illustrative purposes only. Original unaltered image shown left. MetroList Rule 11.6.1.', 16, ftY+42);
-
-    // Footer line 3 — compliance URL
-    const compUrl = SESSION?.complianceUrl || 'smartstagepro.com/compliance/' + (SESSION?.projectId||'');
-    ctx.fillStyle='#7a6f66';
-    ctx.font='400 10px Arial,sans-serif';
-    ctx.fillText('Compliance page: '+compUrl, 16, ftY+60);
-
-    // Footer line 4 — scan instruction
-    ctx.fillStyle='#5a5048';
-    ctx.font='400 10px Arial,sans-serif';
-    ctx.fillText('Scan QR code on MLS Ready image to view compliance page and original photo.', 16, ftY+78);
-
-    const sfx=tier==='declutter'?'Decluttered':tier==='cns'?'CleanedStaged':enh?enh.label.replace(/\s+/g,''):'VirtuallyStaged';
-    const filename=tier==='final'?'FINAL_SBS_'+sfx+'_'+bName(orig.name)+'.jpg':'SBS_'+sfx+'_'+bName(orig.name)+'.jpg';
-    triggerDownload(canvas.toDataURL('image/jpeg',0.93),filename);
-  };
-  oI.onload=sI.onload=go;oI.src=orig.dataUrl;sI.src='data:image/jpeg;base64,'+b64;
+    triggerDownload('data:image/jpeg;base64,' + data.sbsBase64, filename);
+  } catch (err) {
+    console.error('downloadSideBySide error:', err.message);
+    alert('Side-by-side generation failed. Please try again.');
+  } finally {
+    if (btn) { btn.textContent = origText; btn.disabled = false; }
+  }
 }
 function triggerDownload(dataUrl,filename){const a=document.createElement('a');a.href=dataUrl;a.download=filename;a.click();}
 

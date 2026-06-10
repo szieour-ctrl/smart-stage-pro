@@ -1334,11 +1334,19 @@ function renderRoomQueue(){
             <button class="btn btn-outline btn-sm" onclick="downloadOriginal('${room.id}')">↓ Original</button>
             <button class="btn btn-outline btn-sm" onclick="downloadWatermarked('${room.id}','data:image/jpeg;base64,'+getExtB64('${room.id}','${enh.id}','draft'),'EXT_${enh.id}_Draft_'+bName('${orig.name}')+'.jpg','VIRTUALLY STAGED · DRAFT')">↓ Draft</button>
             <button class="btn btn-outline btn-sm" onclick="downloadSideBySide('${room.id}','${enh.id}','draft')">↓ Side-by-Side</button>
+            <button class="btn btn-ghost btn-sm" onclick="restageExtEnhancement('${room.id}','${enh.id}')">↺ Restage</button>
           </div></div>
           <div class="result-viewer" style="padding:12px;"><div class="result-pair">
             <div class="result-img-wrap"><img src="${orig.dataUrl}" onclick="openLightbox('${room.id}')" /><div class="result-img-badge">Original</div></div>
             <div class="result-img-wrap"><img src="data:image/jpeg;base64,${es.base64}" /><div class="result-img-badge ext-enhanced">${enh.mlsTag}</div></div>
           </div></div>
+          <div class="iterate-panel">
+            <div style="flex:1;">
+              <textarea class="iterate-input" id="iter-ext-${room.id}-${enh.id}" placeholder='Revision — e.g. "more dramatic lighting, add potted plants at entry"' rows="2"></textarea>
+              <div class="iterate-hint">Specify only what to change — everything else stays the same.</div>
+            </div>
+            <button class="btn btn-primary btn-sm" onclick="iterateExtEnhancement('${room.id}','${enh.id}')">Re-Stage</button>
+          </div>
           ${renderFinalPanel(room.id,enh.id)}</div>`;
         if(es.status==='processing')return `<div class="ext-enhancement-item"><div class="ext-enhancement-header"><span class="ext-enhancement-name">${enh.icon} ${enh.label}</span><span style="font-size:0.75rem;color:var(--sky);display:flex;align-items:center;gap:6px;"><span class="spinner spinner-sky"></span> Generating draft...</span></div></div>`;
         return '';
@@ -1371,6 +1379,14 @@ function renderRoomQueue(){
           <div class="result-img-wrap"><img src="${orig.dataUrl}" /><div class="result-img-badge">Original</div></div>
           <div class="result-img-wrap"><img src="data:image/jpeg;base64,${room.declutteredBase64}" /><div class="result-img-badge" style="background:#7c5c3e;color:#fff;">Decluttered</div></div>
         </div></div>`:'';
+      const declutterIterHtml = isDone && room.declutteredBase64 ? `<div class="iterate-panel">
+        <div style="flex:1;">
+          <textarea class="iterate-input" id="iter-dcl-${room.id}" placeholder='Revision — e.g. "brighter, remove the rug mark on floor"' rows="2"></textarea>
+          <div class="iterate-hint">Specify only what to change — everything else stays the same.</div>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="iterateDeclutter('${room.id}')">Re-Declutter</button>
+      </div>` : '';
+      const declutterFinalHtml = isDone && room.declutteredBase64 ? renderFinalPanelForDeclutter(room.id) : '';
       return `<div class="room-card" id="card-${room.id}" style="border-left:3px solid #7c5c3e;">
         <div class="room-card-header">
           <img class="room-card-thumb" src="${orig.dataUrl}" onclick="openLightbox('${room.id}')" />
@@ -1381,7 +1397,7 @@ function renderRoomQueue(){
           </div>
           <div class="room-card-actions">${actionBtn}${downloads}${modeToggle}</div>
         </div>
-        ${resultHtml}
+        ${resultHtml}${declutterIterHtml}${declutterFinalHtml}
       </div>`;
     }
 
@@ -1537,6 +1553,124 @@ function renderRoomQueue(){
       <div class="room-card-actions">${actions}${modeToggle}</div></div>
       ${strategyToggle}${resultHtml}${dnaPanel}${iterHtml}${finalHtml}</div>`;
   }).join('');
+}
+
+// ── DECLUTTER FINAL PANEL ────────────────────────────────────────────────────
+// Declutter uses declutteredBase64 as the source for Final generation
+// instead of stagedBase64 — wired separately to preserve the distinction
+function renderFinalPanelForDeclutter(roomId) {
+  const room = SESSION.rooms.find(r => r.id === roomId);
+  if (!room || !room.declutteredBase64) return '';
+  const fs = room.declutterFinalStatus;
+  const fb64 = room.declutterFinalBase64;
+
+  if (fs === 'generating') return `<div class="final-panel"><span class="final-panel-label">Generating Final...</span><span class="final-progress"><span class="spinner spinner-green"></span> Processing at selected quality — this may take 30–60 seconds...</span></div>`;
+
+  if (fs === 'done' && fb64) {
+    const orig = SESSION.originals.find(o => o.id === room.originalId);
+    return `<div class="result-viewer" style="padding:12px 16px;">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><span class="tier-label tier-final">Final — MLS Quality</span></div>
+      <div class="result-pair">
+        <div class="result-img-wrap"><img src="${orig.dataUrl}" /><div class="result-img-badge">Original</div></div>
+        <div class="result-img-wrap"><img src="data:image/jpeg;base64,${fb64}" /><div class="result-img-badge final-badge">Final · Decluttered</div></div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+        <button class="btn btn-success btn-sm" onclick="downloadWatermarked('${roomId}','data:image/jpeg;base64,${fb64}','FINAL_Decluttered_'+bName(getOrigName('${roomId}'))+'.jpg','DECLUTTERED — FINAL')">↓ Final</button>
+        <button class="btn btn-outline btn-sm" onclick="downloadSideBySide('${roomId}',null,'final')">↓ Final Side-by-Side</button>
+        ${SESSION.complianceUrl ? `<button class="btn btn-outline btn-sm" onclick="downloadMarketingQR()">↓ Marketing QR</button>` : ''}
+        <button class="btn btn-ghost btn-sm" onclick="resetDeclutterFinal('${roomId}')">Re-Generate</button>
+      </div>
+    </div>`;
+  }
+
+  const selId = `qsel-dcl-${roomId}`;
+  return `<div class="final-panel">
+    <span class="final-panel-label">Generate Final</span>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+      <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:0.78rem;padding:5px 10px;border:1px solid #b8ddd0;border-radius:3px;background:#fff;">
+        <input type="radio" name="${selId}" value="mls" checked style="accent-color:var(--success);" onchange="updateDeclutterFinalLabel('${roomId}')">
+        <span><strong>MLS Ready</strong> <span style="color:var(--muted);font-size:0.72rem;">— Included</span></span>
+      </label>
+      <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:0.78rem;padding:5px 10px;border:1px solid #b8ddd0;border-radius:3px;background:#fff;">
+        <input type="radio" name="${selId}" value="marketing" style="accent-color:var(--success);" onchange="updateDeclutterFinalLabel('${roomId}')">
+        <span><strong>Marketing Quality</strong> <span style="color:var(--muted);font-size:0.72rem;">+1 image</span></span>
+      </label>
+      <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:0.78rem;padding:5px 10px;border:1px solid #b8ddd0;border-radius:3px;background:#fff;">
+        <input type="radio" name="${selId}" value="print" style="accent-color:var(--success);" onchange="updateDeclutterFinalLabel('${roomId}')">
+        <span><strong>Print Quality</strong> <span style="color:var(--muted);font-size:0.72rem;">+2 images</span></span>
+      </label>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap;">
+      <button class="btn btn-success btn-sm" id="gen-final-btn-dcl-${roomId}" onclick="generateDeclutterFinal('${roomId}')">Generate Final — MLS Ready →</button>
+      <span id="gen-final-note-dcl-${roomId}" style="font-size:0.72rem;color:var(--muted);">Uses 1 staged image from your plan</span>
+    </div>
+  </div>`;
+}
+
+function resetDeclutterFinal(roomId) {
+  const room = SESSION.rooms.find(r => r.id === roomId);
+  if (!room) return;
+  room.declutterFinalStatus = null;
+  room.declutterFinalBase64 = null;
+  renderRooms();
+}
+
+function updateDeclutterFinalLabel(roomId) {
+  const selId = `qsel-dcl-${roomId}`;
+  const sel = document.querySelector(`input[name="${selId}"]:checked`)?.value || 'mls';
+  const creditMap = {mls:1, marketing:2, print:3};
+  const noteEl = document.getElementById(`gen-final-note-dcl-${roomId}`);
+  const btnEl = document.getElementById(`gen-final-btn-dcl-${roomId}`);
+  const labels = {mls:'Generate Final — MLS Ready →', marketing:'Generate Final — Marketing Quality →', print:'Generate Final — Print Quality →'};
+  if (noteEl) noteEl.textContent = `Uses ${creditMap[sel]} staged image${creditMap[sel]>1?'s':''} from your plan`;
+  if (btnEl) btnEl.textContent = labels[sel];
+}
+
+async function generateDeclutterFinal(roomId) {
+  const room = SESSION.rooms.find(r => r.id === roomId);
+  if (!room || !room.declutteredBase64) { showToast('No decluttered image found.', 'error'); return; }
+
+  const selId = `qsel-dcl-${roomId}`;
+  const quality = document.querySelector(`input[name="${selId}"]:checked`)?.value || 'mls';
+  const qualityMap = {mls:'low', marketing:'medium', print:'high'};
+
+  room.declutterFinalStatus = 'generating';
+  renderRooms();
+
+  try {
+    // Use declutteredBase64 as source — run through staging engine at higher quality
+    const orig = SESSION.originals.find(o => o.id === room.originalId);
+    const prompt = `Professional real estate photo. This is a decluttered room — all movable items have been removed. '
+      + 'PRESERVE EXACTLY: all walls, floors, ceilings, windows, doors, built-in fixtures, and all architectural elements. '
+      + 'Output a clean, bright, high-resolution version of this empty room ready for MLS publication.`;
+
+    const finalBase64 = await callStageAPI(room.declutteredBase64, 'image/jpeg', prompt, qualityMap[quality]);
+    room.declutterFinalBase64 = finalBase64;
+    room.declutterFinalStatus = 'done';
+
+    // Save to compliance page
+    if (SESSION.projectId) {
+      const orig2 = SESSION.originals.find(o => o.id === room.originalId);
+      saveToCompliancePage(roomId, null, 'declutter-final', finalBase64, orig2);
+    }
+  } catch (err) {
+    room.declutterFinalStatus = 'error';
+    showToast('Final generation failed: ' + err.message, 'error');
+  }
+  renderRooms();
+}
+
+// ── EXTERIOR RESTAGE PER ENHANCEMENT ─────────────────────────────────────────
+async function restageExtEnhancement(roomId, enhId) {
+  const room = SESSION.rooms.find(r => r.id === roomId);
+  if (!room) return;
+  // Reset just this enhancement's draft — keep others intact
+  if (room.extSelections[enhId]) {
+    room.extSelections[enhId] = { ...room.extSelections[enhId], status: 'pending', base64: null, finalBase64: null, finalStatus: null };
+  }
+  renderRooms();
+  // Re-run just this enhancement
+  await runSingleExtEnhancement(roomId, enhId);
 }
 
 function renderFinalPanel(roomId,enhId){
@@ -2600,6 +2734,135 @@ async function runExtEnhancements(roomId){
     }catch(err){room.extSelections[enh.id].status='pending';showToast(`${enh.label}: ${err.message}`,'error');}
     renderRoomQueue();
   }
+}
+
+// ── DECLUTTER ITERATE ────────────────────────────────────────────────────────
+async function iterateDeclutter(roomId) {
+  const room = SESSION.rooms.find(r => r.id === roomId);
+  if (!room || !room.declutteredBase64) return;
+  const note = document.getElementById('iter-dcl-' + roomId)?.value?.trim() || '';
+
+  room.status = 'processing';
+  room.promptStatus = 'Re-decluttering with revision...';
+  renderRoomQueue();
+
+  try {
+    const orig = SESSION.originals.find(o => o.id === room.originalId);
+    // Build revised prompt using the current decluttered image as source
+    const revisionSuffix = note ? ` Additional revision: ${note}` : '';
+    const promptRes = await fetch('/.netlify/functions/declutter-prompt', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ imageBase64: orig.base64, mimeType: orig.mimeType })
+    });
+    const promptData = await promptRes.json();
+    const basePrompt = promptData.removalPrompt || promptData.prompt || '';
+    const revisedPrompt = basePrompt + revisionSuffix;
+
+    // Use original image as source for re-declutter
+    const newBase64 = await callStageAPI(orig.base64, orig.mimeType, revisedPrompt, 'low');
+    room.declutteredBase64 = newBase64;
+    room.stagedBase64 = newBase64;
+    room.declutterFinalStatus = null;
+    room.declutterFinalBase64 = null;
+    room.status = 'done';
+    room.promptStatus = null;
+    showToast('✓ Re-decluttered.', 'success');
+  } catch (err) {
+    room.status = 'done'; // revert to done so user can try again
+    room.promptStatus = null;
+    showToast('Re-declutter failed: ' + err.message, 'error');
+  }
+  renderRoomQueue();
+}
+
+
+// ── EXTERIOR ITERATE PER ENHANCEMENT ─────────────────────────────────────────
+async function iterateExtEnhancement(roomId, enhId) {
+  const room = SESSION.rooms.find(r => r.id === roomId);
+  const orig = SESSION.originals.find(o => o.id === room?.originalId);
+  if (!room || !orig) return;
+  const enh = EXT_ENHANCEMENTS.find(e => e.id === enhId);
+  if (!enh) return;
+
+  const note = document.getElementById(`iter-ext-${roomId}-${enhId}`)?.value?.trim() || '';
+  room.extSelections[enhId] = { ...room.extSelections[enhId], status: 'processing', finalBase64: null, finalStatus: null };
+  renderRoomQueue();
+
+  const compressedB64 = await new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      const maxDim = 1024;
+      let w = img.width, h = img.height;
+      if (w > maxDim || h > maxDim) {
+        if (w > h) { h = Math.round(h * maxDim / w); w = maxDim; }
+        else { w = Math.round(w * maxDim / h); h = maxDim; }
+      }
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      resolve(canvas.toDataURL('image/jpeg', 0.85).split(',')[1]);
+    };
+    img.onerror = () => reject(new Error('Compression failed'));
+    img.src = orig.dataUrl || ('data:' + orig.mimeType + ';base64,' + orig.base64);
+  });
+
+  try {
+    const basePrompt = buildExteriorPrompt(room, enh, 'low');
+    const revisedPrompt = note ? basePrompt + ` Additional instruction: ${note}` : basePrompt;
+    const b64 = await callStageAPI(compressedB64, 'image/jpeg', revisedPrompt, 'low');
+    room.extSelections[enhId].base64 = b64;
+    room.extSelections[enhId].status = 'done';
+    await resizeToMatch(room, orig, enhId, '__extdraft__', b64);
+    showToast(`✓ ${enh.label} re-staged.`, 'success');
+  } catch (err) {
+    room.extSelections[enhId].status = 'done';
+    showToast(`${enh.label}: ${err.message}`, 'error');
+  }
+  renderRoomQueue();
+}
+
+async function runSingleExtEnhancement(roomId, enhId) {
+  const room = SESSION.rooms.find(r => r.id === roomId);
+  const orig = SESSION.originals.find(o => o.id === room?.originalId);
+  if (!room || !orig) return;
+
+  const enh = EXT_ENHANCEMENTS.find(e => e.id === enhId);
+  if (!enh) return;
+
+  room.extSelections[enhId] = { ...room.extSelections[enhId], status: 'processing' };
+  renderRoomQueue();
+
+  // Compress image
+  const compressedB64 = await new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      const maxDim = 1024;
+      let w = img.width, h = img.height;
+      if (w > maxDim || h > maxDim) {
+        if (w > h) { h = Math.round(h * maxDim / w); w = maxDim; }
+        else { w = Math.round(w * maxDim / h); h = maxDim; }
+      }
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      resolve(canvas.toDataURL('image/jpeg', 0.85).split(',')[1]);
+    };
+    img.onerror = () => reject(new Error('Image compression failed'));
+    img.src = orig.dataUrl || ('data:' + orig.mimeType + ';base64,' + orig.base64);
+  });
+
+  try {
+    const b64 = await callStageAPI(compressedB64, 'image/jpeg', buildExteriorPrompt(room, enh, 'low'), 'low');
+    room.extSelections[enhId].base64 = b64;
+    room.extSelections[enhId].status = 'done';
+    await resizeToMatch(room, orig, enhId, '__extdraft__', b64);
+    showToast(`✓ ${enh.label} restaged.`, 'success');
+  } catch (err) {
+    room.extSelections[enhId].status = 'pending';
+    showToast(`${enh.label}: ${err.message}`, 'error');
+  }
+  renderRoomQueue();
 }
 
 // ══════════════════════════════════════════

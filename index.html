@@ -777,25 +777,26 @@ async function lookupOrCreateProject(address) {
           </div>
         </div>`;
     } else {
-      // No existing project — offer to create
+      // No existing project — store address, create only when Generate Final fires
+      SESSION.projectAddress = address;
+      SESSION.projectId = null;
+      SESSION.complianceUrl = null;
+      SESSION.projectStatus = 'pending-create';
+
       cardContent.innerHTML = `
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
           <span style="font-size:20px;">🆕</span>
           <div>
-            <div style="font-weight:500;font-size:14px;color:var(--ink);">No Existing Project Found</div>
+            <div style="font-weight:500;font-size:14px;color:var(--ink);">New Listing</div>
             <div style="font-size:12px;color:var(--muted);">${escHtml(address)}</div>
           </div>
         </div>
         <div style="background:var(--bg);border-radius:4px;padding:12px;font-size:12px;color:var(--muted);line-height:1.7;">
-          A new compliance project will be created with:<br>
+          A compliance project will be created automatically when you Generate your first Final image.<br>
           • Permanent compliance page URL<br>
           • AB 723 QR code for all staged images<br>
           • 3-year record retention per DRE requirements
         </div>`;
-
-      // Create project immediately on selection
-      await createNewProject(address);
-      return;
     }
 
     // Show continue button
@@ -1630,34 +1631,36 @@ async function generateDeclutterFinal(roomId) {
   const room = SESSION.rooms.find(r => r.id === roomId);
   if (!room || !room.declutteredBase64) { showToast('No decluttered image found.', 'error'); return; }
 
+  // Set stagedBase64 to the decluttered image so generateFinal pipeline works unchanged
+  // Save original stagedBase64 to restore if needed
+  const originalStagedBase64 = room.stagedBase64;
+  room.stagedBase64 = room.declutteredBase64;
+
+  // Read quality selection
   const selId = `qsel-dcl-${roomId}`;
   const quality = document.querySelector(`input[name="${selId}"]:checked`)?.value || 'mls';
-  const qualityMap = {mls:'low', marketing:'medium', print:'high'};
+  const scaleMap = { mls: 4, marketing: 6, print: 8 };
 
-  room.declutterFinalStatus = 'generating';
-  renderRooms();
+  // Temporarily override the quality selector name so generateFinal reads correct value
+  const tempId = `qsel-${roomId}-int`;
+  document.querySelectorAll(`input[name="${selId}"]`).forEach(el => {
+    const clone = el.cloneNode(true);
+    clone.name = tempId;
+    el.parentNode.insertBefore(clone, el);
+    el.style.display = 'none';
+  });
 
   try {
-    // Use declutteredBase64 as source — run through staging engine at higher quality
-    const orig = SESSION.originals.find(o => o.id === room.originalId);
-    const prompt = `Professional real estate photo. This is a decluttered room — all movable items have been removed. '
-      + 'PRESERVE EXACTLY: all walls, floors, ceilings, windows, doors, built-in fixtures, and all architectural elements. '
-      + 'Output a clean, bright, high-resolution version of this empty room ready for MLS publication.`;
-
-    const finalBase64 = await callStageAPI(room.declutteredBase64, 'image/jpeg', prompt, qualityMap[quality]);
-    room.declutterFinalBase64 = finalBase64;
-    room.declutterFinalStatus = 'done';
-
-    // Save to compliance page
-    if (SESSION.projectId) {
-      const orig2 = SESSION.originals.find(o => o.id === room.originalId);
-      saveToCompliancePage(roomId, null, 'declutter-final', finalBase64, orig2);
-    }
-  } catch (err) {
-    room.declutterFinalStatus = 'error';
-    showToast('Final generation failed: ' + err.message, 'error');
+    await generateFinal(roomId, null);
+    // Mirror result to declutter-specific fields
+    room.declutterFinalBase64 = room.finalBase64;
+    room.declutterFinalStatus = room.finalStatus;
+  } finally {
+    // Restore original staged base64 and clean up temp inputs
+    room.stagedBase64 = originalStagedBase64;
+    document.querySelectorAll(`input[name="${tempId}"]`).forEach(el => el.remove());
+    document.querySelectorAll(`input[name="${selId}"]`).forEach(el => el.style.display = '');
   }
-  renderRooms();
 }
 
 // ── EXTERIOR RESTAGE PER ENHANCEMENT ─────────────────────────────────────────
@@ -2422,47 +2425,54 @@ async function generateFinal(roomId,enhId){
     }
     if (!upscaleData?.upscaledBase64) throw new Error('Upscale failed after 3 attempts');
 
-    // ── PROJECT GUARD — warn if no project selected ──────────────────────
+    // ── CREATE PROJECT IF NEEDED ─────────────────────────────────────────────
+    // Projects are created at Generate Final time, not at property search
+    if (!SESSION.projectId && SESSION.projectAddress && SESSION.projectStatus === 'pending-create') {
+      showToast('Creating compliance project...', '');
+      try {
+        await createNewProject(SESSION.projectAddress);
+        showToast('✓ Compliance project created.', 'success');
+      } catch (projErr) {
+        console.warn('Project creation failed (non-blocking):', projErr.message);
+      }
+    }
+
     if (!SESSION.projectId) {
       showToast('⚠ No property project active — Finals will not attach to a compliance page. Search for a property first.', 'error');
     }
 
-    // ── AB 723 §10140.8 COMPLIANCE COMPOSITE ──────────────────────────────
-    // Apply QR code + disclosure bar to the upscaled final image
-    // Falls back gracefully if Cloudinary upload hasn't completed
+    // ── AB 723 — clean image, no overlays (MLS rules) ───────────────────────
+    // Compliance is provided via: compliance page URL, Marketing QR, and Final SBS
+    // The Final image itself is clean — no badge, no QR overlay
     const orig = SESSION.originals.find(o => o.id === room.originalId);
     let finalBase64 = upscaleData.upscaledBase64;
 
-    if (orig?.originalUrl) {
+    // Upload original to Cloudinary if not already done (needed for compliance page)
+    if (orig && !orig.originalUrl && SESSION.projectId) {
       try {
-        const ab723Res = await fetch('/.netlify/functions/ab723-composite', {
+        const uploadRes = await fetch('/.netlify/functions/upload-original', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            stagedBase64: upscaleData.upscaledBase64,
-            mimeType: 'image/jpeg',
-            originalUrl: orig.originalUrl,
-            complianceUrl: SESSION.complianceUrl || null,
+            imageBase64: orig.base64,
+            mimeType: orig.mimeType,
+            projectId: SESSION.projectId,
             roomName: room.roomName || 'Room',
-            tier: 'final',
           })
         });
-        const ab723Data = await ab723Res.json();
-        if (ab723Data.compliantBase64) {
-          finalBase64 = ab723Data.compliantBase64;
-          console.log('AB723 composite applied to final image');
-        } else {
-          console.warn('AB723 composite returned no image — using upscaled without compliance overlay');
+        const uploadData = await uploadRes.json();
+        if (uploadData.publicUrl) {
+          orig.originalUrl = uploadData.publicUrl;
+          console.log('Original uploaded to Cloudinary:', orig.originalUrl);
         }
-      } catch (ab723Err) {
-        console.warn('AB723 composite error — using upscaled without overlay:', ab723Err.message);
+      } catch (uploadErr) {
+        console.warn('Original upload failed (non-blocking):', uploadErr.message);
       }
-    } else {
-      console.warn('AB723: originalUrl not available — original not yet uploaded or Cloudinary not configured. Final image will not include QR code.');
-      showToast('Note: AB 723 compliance overlay not applied — check Cloudinary configuration.', 'error');
     }
 
-    // Store final — AB 723 compliant version if available, upscaled fallback otherwise
+    console.log(`Generate Final: clean image ${Math.round(finalBase64.length/1024)}KB — no overlays per MLS rules`);
+
+    // Store final — clean image
     if(enhId){
       room.extSelections[enhId].finalBase64=finalBase64;
       room.extSelections[enhId].finalStatus='done';
@@ -2471,12 +2481,12 @@ async function generateFinal(roomId,enhId){
       room.finalStatus='done';
     }
 
-    const ab723Note = orig?.originalUrl ? ' · AB 723 compliant' : ' · AB 723 overlay pending';
-    showToast(`✓ Final upscaled at ${scaleFactor}x${ab723Note}.`,'success');
+    showToast(`✓ Final generated at ${scaleFactor}x · Clean image ready for MLS publication.`,'success');
     renderRoomQueue();
 
-    // ── UPLOAD STAGED FINAL TO CLOUDINARY + ATTACH TO PROJECT ────────────────
+    // ── UPLOAD STAGED FINAL TO CLOUDINARY + ATTACH TO COMPLIANCE PAGE ────────
     // Fires in background — does not block UI
+    // This is what populates the compliance page with original + staged pairs
     if (SESSION.projectId) {
       attachFinalToProject(finalBase64, room, orig, enhId).catch(err => {
         console.warn('Project attachment failed (non-blocking):', err.message);

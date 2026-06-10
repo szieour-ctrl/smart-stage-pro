@@ -124,7 +124,8 @@ exports.handler = async (event) => {
     }
 
     const listingsResult = await supabase("GET", "listings", null, listingsQuery);
-    const dbListings = listingsResult.data || [];
+    console.log('listings query status:', listingsResult.status, 'data type:', typeof listingsResult.data, 'isArray:', Array.isArray(listingsResult.data));
+    const dbListings = Array.isArray(listingsResult.data) ? listingsResult.data : [];
 
     // ── Enrich from Netlify Blobs (image counts + thumbnails) ─────────────
     const store = getProjectStore();

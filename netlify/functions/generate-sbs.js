@@ -159,10 +159,19 @@ async function buildSBS(originalBase64, stagedBase64, address, roomName, tier, c
   const stagedMeta = await sharp(stagedBuf).metadata();
 
   // Target panel height — use original height, scale staged to match
-  const PANEL_H = origMeta.height;
-  const PANEL_W = origMeta.width;
+  // Cap panel width at 900px so sidebar stays proportionally readable
+  // regardless of original image resolution
+  const MAX_PANEL_W = 900;
+  const scale = origMeta.width > MAX_PANEL_W ? MAX_PANEL_W / origMeta.width : 1;
+  const PANEL_W = Math.round(origMeta.width * scale);
+  const PANEL_H = Math.round(origMeta.height * scale);
 
-  // Resize staged to match original dimensions exactly
+  // Resize both panels to capped dimensions for consistent layout
+  const origResized = scale < 1
+    ? await sharp(origBuf).resize(PANEL_W, PANEL_H, { fit: "fill" }).jpeg({ quality: 92 }).toBuffer()
+    : origBuf;
+
+  // Resize staged to match panel dimensions exactly
   const stagedResized = await sharp(stagedBuf)
     .resize(PANEL_W, PANEL_H, { fit: "cover", position: "center" })
     .jpeg({ quality: 92 })
@@ -193,10 +202,10 @@ async function buildSBS(originalBase64, stagedBase64, address, roomName, tier, c
   // Label badges over images
   const origLabelBuf = Buffer.from(buildLabelSVG(PANEL_W, PANEL_H, "ORIGINAL", "#1a1714"));
   const stagedLabel  =
-    tier === "final"     ? "STAGED" :
+    tier === "final"     ? "VIRTUALLY STAGED" :
     tier === "declutter" ? "DECLUTTERED" :
     tier === "cns"       ? "CLEANED + STAGED" :
-    "STAGED";
+    "VIRTUALLY STAGED";
   const stagedLabelColor = "#2d6a4f"; // always green — clean, consistent with compliance page
   const stagedLabelBuf = Buffer.from(buildLabelSVG(PANEL_W, PANEL_H, stagedLabel, stagedLabelColor));
 
@@ -215,7 +224,7 @@ async function buildSBS(originalBase64, stagedBase64, address, roomName, tier, c
     // Address bar
     { input: addressBuf,     top: HEADER_H,                        left: 0 },
     // Original image
-    { input: origBuf,        top: panelY,                          left: origX },
+    { input: origResized,    top: panelY,                          left: origX },
     { input: origLabelBuf,   top: panelY,                          left: origX },
     // Staged image
     { input: stagedResized,  top: panelY,                          left: stagX },

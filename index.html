@@ -815,13 +815,16 @@ async function createNewProject(address) {
   const actions = document.getElementById('property-actions');
 
   try {
+    const session = await getSupabase().auth.getSession();
+    const userId = session?.data?.session?.user?.id || null;
     const res = await fetch('/.netlify/functions/project-manage?action=create', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         address,
         siteUrl: window.location.origin,
-        agentInfo: {}, // Uses env vars on server side
+        agentInfo: {},
+        userId,
       }),
     });
     const data = await res.json();
@@ -1576,8 +1579,8 @@ function renderFinalPanelForDeclutter(roomId) {
         <div class="result-img-wrap"><img src="data:image/jpeg;base64,${fb64}" /><div class="result-img-badge final-badge">Final · Decluttered</div></div>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
-        <button class="btn btn-success btn-sm" onclick="downloadWatermarked('${roomId}','data:image/jpeg;base64,${fb64}','FINAL_Decluttered_'+bName(getOrigName('${roomId}'))+'.jpg','DECLUTTERED — FINAL')">↓ Final</button>
-        <button class="btn btn-outline btn-sm" onclick="downloadSideBySide('${roomId}',null,'final')">↓ Final Side-by-Side</button>
+        <button class="btn btn-success btn-sm" onclick="downloadB64('data:image/jpeg;base64,${fb64}','FINAL_Decluttered_'+bName(getOrigName('${roomId}'))+'.jpg')">↓ Final</button>
+        <button class="btn btn-outline btn-sm" onclick="downloadDeclutterSBS('${roomId}')">↓ Final Side-by-Side</button>
         ${SESSION.complianceUrl ? `<button class="btn btn-outline btn-sm" onclick="downloadMarketingQR()">↓ Marketing QR</button>` : ''}
         <button class="btn btn-ghost btn-sm" onclick="resetDeclutterFinal('${roomId}')">Re-Generate</button>
       </div>
@@ -1693,7 +1696,7 @@ function renderFinalPanel(roomId,enhId){
         <div class="result-img-wrap"><img src="data:image/jpeg;base64,${fb64}" /><div class="result-img-badge final-badge">Final · ${enh?enh.mlsTag:'Virtually Staged'}</div></div>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
-        <button class="btn btn-success btn-sm" onclick="downloadWatermarked('${roomId}','data:image/jpeg;base64,'+getFinalB64('${roomId}','${enhId||''}'),'FINAL_${tag}_'+bName(getOrigName('${roomId}'))+'.jpg','VIRTUALLY STAGED — FINAL')">↓ Final</button>
+        <button class="btn btn-success btn-sm" onclick="downloadB64('data:image/jpeg;base64,'+getFinalB64('${roomId}','${enhId||''}'),'FINAL_${tag}_'+bName(getOrigName('${roomId}'))+'.jpg')">↓ Final</button>
         <button class="btn btn-outline btn-sm" onclick="downloadSideBySide('${roomId}','${enhId||''}','final')">↓ Final Side-by-Side</button>
         ${SESSION.complianceUrl ? `<button class="btn btn-outline btn-sm" onclick="downloadMarketingQR()">↓ Marketing QR</button>` : ''}
         <button class="btn btn-ghost btn-sm" onclick="resetFinal('${roomId}','${enhId||''}')">Re-Generate</button>
@@ -2744,7 +2747,43 @@ async function runExtEnhancements(roomId){
   }
 }
 
-// ── DECLUTTER ITERATE ────────────────────────────────────────────────────────
+// ── DECLUTTER SBS DOWNLOAD ───────────────────────────────────────────────────
+async function downloadDeclutterSBS(roomId) {
+  const room = SESSION.rooms.find(r => r.id === roomId);
+  const orig = SESSION.originals.find(o => o.id === room?.originalId);
+  if (!room?.declutteredBase64 || !orig) {
+    showToast('No decluttered image found.', 'error'); return;
+  }
+  const origB64 = orig.dataUrl?.includes(',') ? orig.dataUrl.split(',')[1] : orig.base64;
+  const filename = 'FINAL_SBS_Decluttered_' + bName(orig.name) + '.jpg';
+  const btn = event?.target;
+  const origText = btn?.textContent;
+  if (btn) { btn.textContent = 'Generating…'; btn.disabled = true; }
+  try {
+    const res = await fetch('/.netlify/functions/generate-sbs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        originalBase64: origB64,
+        stagedBase64:   room.declutteredBase64,
+        address:        SESSION.projectAddress || '',
+        roomName:       room.roomName || '',
+        tier:           'declutter',
+        complianceUrl:  SESSION.complianceUrl || ''
+      })
+    });
+    if (!res.ok) throw new Error('SBS generation failed: ' + res.status);
+    const data = await res.json();
+    if (!data.sbsBase64) throw new Error('No SBS image returned');
+    triggerDownload('data:image/jpeg;base64,' + data.sbsBase64, filename);
+  } catch (err) {
+    showToast('Side-by-Side generation failed: ' + err.message, 'error');
+  } finally {
+    if (btn) { btn.textContent = origText; btn.disabled = false; }
+  }
+}
+
+
 async function iterateDeclutter(roomId) {
   const room = SESSION.rooms.find(r => r.id === roomId);
   if (!room || !room.declutteredBase64) return;

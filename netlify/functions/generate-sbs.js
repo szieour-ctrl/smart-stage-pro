@@ -11,8 +11,8 @@ const https  = require("https");
 
 // ── LAYOUT ───────────────────────────────────────────────────────────────────
 const HEADER_H    = 72;   // dark header bar
-const SIDEBAR_W   = 220;  // right compliance sidebar
-const FOOTER_H    = 64;   // bottom disclosure footer
+const SIDEBAR_W   = 280;  // right compliance sidebar — wider for readable text
+const FOOTER_H    = 80;   // bottom disclosure footer — taller for compliance URL
 const PANEL_GAP   = 8;    // gap between original and staged panels
 const PAD         = 16;   // outer padding
 const BADGE_H     = 48;   // address bar height
@@ -74,35 +74,40 @@ function buildSidebarSVG(h, complianceUrl) {
     { icon:"✓", title:"AB 723 Compliant", sub:"California Civil Code §10140.6" },
     { icon:"🔒", title:"Transparent", sub:"Full disclosure of virtually staged images" },
     { icon:"👤", title:"Consumer Protection", sub:"Clear and upfront information" },
-    { icon:"📄", title:"View Full Disclosure", sub:"Visit compliance URL below" },
+    { icon:"📄", title:"View Full Disclosure", sub:"Scan QR or visit compliance URL" },
   ];
 
-  const itemH = 70;
-  const startY = 80;
+  const itemH = 80;
+  const startY = 72;
   const itemsSVG = items.map((item, i) => {
     const y = startY + i * itemH;
     return `
-    <circle cx="22" cy="${y+16}" r="14" fill="rgba(184,151,90,0.12)" stroke="rgba(184,151,90,0.3)" stroke-width="1"/>
-    <text x="22" y="${y+21}" font-family="Arial,sans-serif" font-size="12" fill="#b8975a" text-anchor="middle">${item.icon}</text>
-    <text x="44" y="${y+12}" font-family="Arial,sans-serif" font-size="11" font-weight="600" fill="#1a1714">${escSVG(item.title)}</text>
-    <text x="44" y="${y+26}" font-family="Arial,sans-serif" font-size="9.5" font-weight="400" fill="#7a6f63">${escSVG(item.sub.slice(0,28))}</text>
-    ${item.sub.length > 28 ? `<text x="44" y="${y+39}" font-family="Arial,sans-serif" font-size="9.5" fill="#7a6f63">${escSVG(item.sub.slice(28,56))}</text>` : ''}`;
+    <circle cx="24" cy="${y+18}" r="16" fill="rgba(184,151,90,0.12)" stroke="rgba(184,151,90,0.3)" stroke-width="1"/>
+    <text x="24" y="${y+24}" font-family="Arial,sans-serif" font-size="14" fill="#b8975a" text-anchor="middle">${item.icon}</text>
+    <text x="50" y="${y+14}" font-family="Arial,sans-serif" font-size="13" font-weight="700" fill="#1a1714">${escSVG(item.title)}</text>
+    <text x="50" y="${y+30}" font-family="Arial,sans-serif" font-size="11" font-weight="400" fill="#7a6f63">${escSVG(item.sub.slice(0,26))}</text>
+    ${item.sub.length > 26 ? `<text x="50" y="${y+44}" font-family="Arial,sans-serif" font-size="11" fill="#7a6f63">${escSVG(item.sub.slice(26))}</text>` : ''}`;
   }).join('');
 
   const urlShort = (complianceUrl||'').replace('https://','').slice(0,30);
 
-  const QR_SZ = 160;
-  const qrY = h - QR_SZ - 60; // QR position from bottom of sidebar
+  const QR_SZ = 180;
+  const qrY = h - QR_SZ - 80; // QR position from bottom of sidebar
+  const urlFull = (complianceUrl || '').replace('https://', '');
+  const urlLine1 = urlFull.slice(0, 32);
+  const urlLine2 = urlFull.slice(32, 64);
   return `<svg width="${SIDEBAR_W}" height="${h}" xmlns="http://www.w3.org/2000/svg">
     <rect width="${SIDEBAR_W}" height="${h}" fill="#f7f4ef"/>
     <rect x="0" y="0" width="2" height="${h}" fill="#e0d8ce"/>
-    <text x="${SIDEBAR_W/2}" y="36" font-family="Arial,sans-serif" font-size="10" font-weight="700" fill="#b8975a" text-anchor="middle" letter-spacing="0.1em">AB 723 COMPLIANCE</text>
-    <line x1="16" y1="48" x2="${SIDEBAR_W-16}" y2="48" stroke="#e0d8ce" stroke-width="1"/>
+    <text x="${SIDEBAR_W/2}" y="36" font-family="Arial,sans-serif" font-size="12" font-weight="700" fill="#b8975a" text-anchor="middle" letter-spacing="0.1em">AB 723 COMPLIANCE</text>
+    <line x1="12" y1="50" x2="${SIDEBAR_W-12}" y2="50" stroke="#e0d8ce" stroke-width="1"/>
     ${itemsSVG}
-    <line x1="16" y1="${qrY - 16}" x2="${SIDEBAR_W-16}" y2="${qrY - 16}" stroke="#e0d8ce" stroke-width="1"/>
-    <text x="${SIDEBAR_W/2}" y="${qrY - 4}" font-family="Arial,sans-serif" font-size="8" font-weight="700" fill="#b8975a" text-anchor="middle" letter-spacing="0.08em">SCAN FOR ORIGINAL PHOTO</text>
-    <rect x="${(SIDEBAR_W-QR_SZ)/2 - 4}" y="${qrY + 2}" width="${QR_SZ + 8}" height="${QR_SZ + 8}" rx="4" fill="#ffffff" stroke="#e0d8ce" stroke-width="1"/>
-    <text x="${SIDEBAR_W/2}" y="${h-10}" font-family="Arial,sans-serif" font-size="7.5" fill="#7a6f63" text-anchor="middle">${escSVG(urlShort)}</text>
+    <line x1="12" y1="${qrY - 18}" x2="${SIDEBAR_W-12}" y2="${qrY - 18}" stroke="#e0d8ce" stroke-width="1"/>
+    <text x="${SIDEBAR_W/2}" y="${qrY - 6}" font-family="Arial,sans-serif" font-size="10" font-weight="700" fill="#b8975a" text-anchor="middle" letter-spacing="0.06em">SCAN FOR ORIGINAL PHOTO</text>
+    <rect x="${(SIDEBAR_W-QR_SZ)/2 - 4}" y="${qrY}" width="${QR_SZ + 8}" height="${QR_SZ + 8}" rx="4" fill="#ffffff" stroke="#e0d8ce" stroke-width="1"/>
+    <text x="${SIDEBAR_W/2}" y="${qrY + QR_SZ + 24}" font-family="Arial,sans-serif" font-size="9" font-weight="600" fill="#b8975a" text-anchor="middle">COMPLIANCE PAGE:</text>
+    <text x="${SIDEBAR_W/2}" y="${qrY + QR_SZ + 38}" font-family="Arial,sans-serif" font-size="9" fill="#1a1714" text-anchor="middle">${escSVG(urlLine1)}</text>
+    ${urlLine2 ? `<text x="${SIDEBAR_W/2}" y="${qrY + QR_SZ + 52}" font-family="Arial,sans-serif" font-size="9" fill="#1a1714" text-anchor="middle">${escSVG(urlLine2)}</text>` : ''}
   </svg>`;
 }
 
@@ -125,12 +130,11 @@ function buildFooterSVG(totalW, complianceUrl) {
   return `<svg width="${totalW}" height="${FOOTER_H}" xmlns="http://www.w3.org/2000/svg">
     <rect width="${totalW}" height="${FOOTER_H}" fill="#f0ece4"/>
     <rect x="0" y="0" width="${totalW}" height="2" fill="#e0d8ce"/>
-    <text x="20" y="20" font-family="Arial,sans-serif" font-size="10" font-weight="700" fill="#1a1714" letter-spacing="0.04em">IMPORTANT DISCLOSURE:</text>
-    <text x="168" y="20" font-family="Arial,sans-serif" font-size="10" fill="#5a5048">These images include virtual staging. Furniture, décor, and enhancements are digitally added and are</text>
-    <text x="20" y="34" font-family="Arial,sans-serif" font-size="10" fill="#5a5048">not included in the sale of the property unless otherwise stated in the listing agreement.</text>
-    <text x="20" y="50" font-family="Arial,sans-serif" font-size="9" font-weight="700" fill="#b8975a">AB 723 Compliance Page:</text>
-    <text x="148" y="50" font-family="Arial,sans-serif" font-size="9" fill="#1a1714">${escSVG(urlDisplay)}</text>
-    <text x="${totalW - 20}" y="62" font-family="Arial,sans-serif" font-size="8" fill="#aaa098" text-anchor="end">Smart Stage PRO™  ·  California AB 723 §10140.6  ·  MetroList Rule 11.6.1</text>
+    <text x="20" y="22" font-family="Arial,sans-serif" font-size="11" font-weight="700" fill="#1a1714" letter-spacing="0.04em">IMPORTANT DISCLOSURE:</text>
+    <text x="190" y="22" font-family="Arial,sans-serif" font-size="11" fill="#5a5048">These images include virtual staging. Furniture, décor, and enhancements are digitally added and are not included in the sale of the property.</text>
+    <text x="20" y="40" font-family="Arial,sans-serif" font-size="11" fill="#5a5048">AB 723 Compliance disclosures, original unaltered photos, and staged image pairs are available at:</text>
+    <text x="20" y="58" font-family="Arial,sans-serif" font-size="12" font-weight="700" fill="#b8975a">${escSVG(urlDisplay)}</text>
+    <text x="${totalW - 20}" y="76" font-family="Arial,sans-serif" font-size="9" fill="#aaa098" text-anchor="end">Smart Stage PRO™  ·  California AB 723 §10140.6  ·  MetroList Rule 11.6.1  ·  smartstagepro.com</text>
   </svg>`;
 }
 

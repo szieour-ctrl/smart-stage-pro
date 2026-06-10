@@ -2728,32 +2728,83 @@ function downloadSideBySide(roomId,enhId,tier){
   const oI=new Image(),sI=new Image();let loaded=0;
   const go=()=>{
     loaded++;if(loaded<2)return;
-    // For 'final' tier the staged image already contains the AB 723 footer (72px).
-    // Scale both panels to the staged image's natural height so the footer is not cropped.
-    // For all other tiers use the fixed 900px height as before.
-    const iW=oI.naturalWidth,iH=oI.naturalHeight;
-    const stagedH=sI.naturalHeight,stagedW=sI.naturalWidth;
-    // Always match staged image height — ensures both panels align regardless of tier
-    const targetH=stagedH;
-    const scale=targetH/iH,sW=Math.round(iW*scale),pad=14;
-    // Final tier: staged side already has footer — no extra footer bar needed
-    const ftH=tier==='final'?0:62;
-    canvas.width=sW*2+pad*3;canvas.height=targetH+ftH+pad;
-    ctx.fillStyle='#1a1714';ctx.fillRect(0,0,canvas.width,canvas.height);
-    ctx.drawImage(oI,pad,pad,sW,targetH);ctx.drawImage(sI,sW+pad*2,pad,sW,stagedH);
-    ctx.fillStyle='rgba(26,23,20,0.82)';ctx.fillRect(pad,pad,130,26);
-    ctx.fillStyle='#fff';ctx.font='500 12px sans-serif';ctx.fillText('ORIGINAL',pad+10,pad+18);
+    const oW=oI.naturalWidth, oH=oI.naturalHeight;
+    const sW_raw=sI.naturalWidth, sH_raw=sI.naturalHeight;
+
+    // For final tier, staged image has 72px AB723 footer already baked in.
+    // The image content (excluding footer) is sH_raw - 72.
+    // We need both panels to show the same content height side by side.
+    const BAKED_FOOTER = tier==='final' ? 72 : 0;
+    const stagedContentH = sH_raw - BAKED_FOOTER;
+
+    // Scale original to match staged content height
+    const scale = stagedContentH / oH;
+    const panelW = Math.round(oW * scale); // both panels same width
+    const pad = 14;
+    const ftH = 100; // SBS footer bar height — tall enough for QR + text
+
+    // Total canvas: two panels (same width) + padding + shared footer
+    // For final: staged panel includes its own baked footer below content
+    const totalPanelH = tier==='final' ? sH_raw : stagedContentH;
+    canvas.width  = panelW * 2 + pad * 3;
+    canvas.height = totalPanelH + pad * 2 + ftH;
+
+    // Background
+    ctx.fillStyle='#1a1714';
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+
+    // Draw original panel — scaled to content height, no footer
+    ctx.drawImage(oI, pad, pad, panelW, stagedContentH);
+
+    // Draw staged panel — includes baked footer for final tier
+    ctx.drawImage(sI, panelW+pad*2, pad, panelW, totalPanelH);
+
+    // ORIGINAL badge
+    ctx.fillStyle='rgba(26,23,20,0.85)';
+    ctx.fillRect(pad, pad, 140, 28);
+    ctx.fillStyle='#fff';
+    ctx.font='600 12px Arial,sans-serif';
+    ctx.fillText('ORIGINAL — UNALTERED', pad+10, pad+19);
+
+    // Staged badge
     const badgeBg=enh?'rgba(58,124,165,0.92)':
       tier==='final'?'rgba(45,106,79,0.92)':
       tier==='declutter'?'rgba(124,92,62,0.92)':
       tier==='cns'?'rgba(74,103,65,0.92)':
       'rgba(184,151,90,0.92)';
-    ctx.fillStyle=badgeBg;ctx.fillRect(sW+pad*2,pad,Math.min(label.length*7+20,sW-10),26);
-    ctx.fillStyle='#fff';ctx.font='500 11px sans-serif';ctx.fillText(label,sW+pad*2+10,pad+18);
-    if(tier!=='final'){
-      ctx.fillStyle='#b8975a';ctx.font='400 11px sans-serif';ctx.fillText('Smart Stage PRO™  |  '+room.roomName+'  |  '+orig.name,pad,targetH+pad+18);
-      ctx.fillStyle='#7a6f63';ctx.font='400 10px sans-serif';ctx.fillText('Virtually staged — digitally altered per CA AB 723 §10140.8. Original unaltered image included (left). MetroList Rule 11.6.1 compliant.',pad,targetH+pad+36);
-    }
+    const badgeW=Math.min(label.length*8+24, panelW-10);
+    ctx.fillStyle=badgeBg;
+    ctx.fillRect(panelW+pad*2, pad, badgeW, 28);
+    ctx.fillStyle='#fff';
+    ctx.font='600 12px Arial,sans-serif';
+    ctx.fillText(label, panelW+pad*2+10, pad+19);
+
+    // SBS footer bar — compliance text + QR placeholder text
+    const ftY = totalPanelH + pad * 2;
+    ctx.fillStyle='#1a1714';
+    ctx.fillRect(0, ftY, canvas.width, ftH);
+
+    // Footer line 1 — branding + room
+    ctx.fillStyle='#b8975a';
+    ctx.font='500 13px Arial,sans-serif';
+    ctx.fillText('Smart Stage PRO™  |  '+(room.roomName||'')+'  |  AB 723 §10140.8 Compliant', 16, ftY+22);
+
+    // Footer line 2 — compliance statement
+    ctx.fillStyle='#9a8f83';
+    ctx.font='400 11px Arial,sans-serif';
+    ctx.fillText('Virtually staged image — digitally altered for illustrative purposes only. Original unaltered image shown left. MetroList Rule 11.6.1.', 16, ftY+42);
+
+    // Footer line 3 — compliance URL
+    const compUrl = SESSION?.complianceUrl || 'smartstagepro.com/compliance/' + (SESSION?.projectId||'');
+    ctx.fillStyle='#7a6f66';
+    ctx.font='400 10px Arial,sans-serif';
+    ctx.fillText('Compliance page: '+compUrl, 16, ftY+60);
+
+    // Footer line 4 — scan instruction
+    ctx.fillStyle='#5a5048';
+    ctx.font='400 10px Arial,sans-serif';
+    ctx.fillText('Scan QR code on MLS Ready image to view compliance page and original photo.', 16, ftY+78);
+
     const sfx=tier==='declutter'?'Decluttered':tier==='cns'?'CleanedStaged':enh?enh.label.replace(/\s+/g,''):'VirtuallyStaged';
     const filename=tier==='final'?'FINAL_SBS_'+sfx+'_'+bName(orig.name)+'.jpg':'SBS_'+sfx+'_'+bName(orig.name)+'.jpg';
     triggerDownload(canvas.toDataURL('image/jpeg',0.93),filename);
@@ -3423,6 +3474,8 @@ async function updateHeaderForUser(user, userRec) {
     nameEl.classList.remove('hidden');
   }
   if (signOutBtn) signOutBtn.classList.remove('hidden');
+  const listingsBtn = document.getElementById('header-listings-btn');
+  if (listingsBtn) listingsBtn.classList.remove('hidden');
 
   // Load credit balance from Supabase
   if (creditBadge && userRec) {
@@ -3451,6 +3504,11 @@ async function showMainApp(user, userRec) {
 
 function hideAppUI() {
   document.getElementById('app-container').classList.add('hidden');
+  const lb = document.getElementById('header-listings-btn');
+  if (lb) lb.classList.add('hidden');
+  document.getElementById('header-user-info')?.classList.add('hidden');
+  document.getElementById('header-signout-btn')?.classList.add('hidden');
+  document.getElementById('header-credit-badge')?.classList.add('hidden');
 }
 
 // ── SIGN OUT ─────────────────────────────────────────────────────────────────

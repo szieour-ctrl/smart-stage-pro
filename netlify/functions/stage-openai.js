@@ -16,28 +16,24 @@ async function prepareImage(imageBase64, mimeType) {
 
   console.log(`Image input: ${meta.width}x${meta.height} ${sizeKB}KB format=${meta.format} channels=${meta.channels} hasAlpha=${meta.hasAlpha} orientation=${meta.orientation||'none'}`);
 
-  // Always normalize through Sharp to:
-  // 1. Auto-rotate based on EXIF (fixes iPhone portrait photos)
-  // 2. Flatten alpha channel (PNG transparency breaks OpenAI edits endpoint)
-  // 3. Convert to JPEG for consistent handling
-  // 4. Resize if over threshold
-  const needsResize = maxDim > 1536 || sizeKB > 1500;
-  const hasAlpha = meta.hasAlpha || meta.channels === 4;
-  const hasRotation = meta.orientation && meta.orientation !== 1;
-  const isPNG = meta.format === 'png';
+  // Netlify function-to-function payload limit is ~300KB
+  // Target: max 1024px longest side, max 200KB — ensures payload stays under 280KB
+  const TARGET_MAX_DIM = 1024;
+  const TARGET_MAX_KB  = 200;
 
-  // Always normalize if: PNG, has alpha, has rotation, or needs resize
+  const needsResize = maxDim > TARGET_MAX_DIM || sizeKB > TARGET_MAX_KB;
+  const hasAlpha    = meta.hasAlpha || meta.channels === 4;
+  const hasRotation = meta.orientation && meta.orientation !== 1;
+  const isPNG       = meta.format === 'png';
+
   if (needsResize || hasAlpha || hasRotation || isPNG) {
     let pipeline = sharp(buffer)
-      .rotate() // auto-rotate from EXIF
-      .flatten({ background: { r: 255, g: 255, b: 255 } }); // flatten alpha to white
-
-    if (needsResize) {
-      pipeline = pipeline.resize(1536, 1536, { fit: "inside", withoutEnlargement: true });
-    }
+      .rotate()
+      .flatten({ background: { r: 255, g: 255, b: 255 } })
+      .resize(TARGET_MAX_DIM, TARGET_MAX_DIM, { fit: "inside", withoutEnlargement: true });
 
     const normalized = await pipeline
-      .jpeg({ quality: 92, mozjpeg: false })
+      .jpeg({ quality: 85, mozjpeg: false })
       .toBuffer();
 
     const normMeta = await sharp(normalized).metadata();

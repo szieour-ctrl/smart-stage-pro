@@ -120,14 +120,17 @@ function buildNoticeSVG(w) {
 }
 
 // ── FOOTER ───────────────────────────────────────────────────────────────────
-function buildFooterSVG(totalW) {
+function buildFooterSVG(totalW, complianceUrl) {
+  const urlDisplay = complianceUrl || "smartstagepro.com/compliance/[project-id]";
   return `<svg width="${totalW}" height="${FOOTER_H}" xmlns="http://www.w3.org/2000/svg">
     <rect width="${totalW}" height="${FOOTER_H}" fill="#f0ece4"/>
     <rect x="0" y="0" width="${totalW}" height="2" fill="#e0d8ce"/>
-    <text x="20" y="22" font-family="Arial,sans-serif" font-size="10" font-weight="700" fill="#1a1714" letter-spacing="0.04em">IMPORTANT DISCLOSURE:</text>
-    <text x="168" y="22" font-family="Arial,sans-serif" font-size="10" fill="#5a5048">These images include virtual staging. Furniture, décor, and enhancements are digitally added and are</text>
-    <text x="20" y="38" font-family="Arial,sans-serif" font-size="10" fill="#5a5048">not included in the sale of the property unless otherwise stated in the listing agreement.</text>
-    <text x="20" y="56" font-family="Arial,sans-serif" font-size="9" fill="#aaa098">Smart Stage PRO™  ·  California AB 723 §10140.6  ·  MetroList Rule 11.6.1  ·  smartstagepro.com</text>
+    <text x="20" y="20" font-family="Arial,sans-serif" font-size="10" font-weight="700" fill="#1a1714" letter-spacing="0.04em">IMPORTANT DISCLOSURE:</text>
+    <text x="168" y="20" font-family="Arial,sans-serif" font-size="10" fill="#5a5048">These images include virtual staging. Furniture, décor, and enhancements are digitally added and are</text>
+    <text x="20" y="34" font-family="Arial,sans-serif" font-size="10" fill="#5a5048">not included in the sale of the property unless otherwise stated in the listing agreement.</text>
+    <text x="20" y="50" font-family="Arial,sans-serif" font-size="9" font-weight="700" fill="#b8975a">AB 723 Compliance Page:</text>
+    <text x="148" y="50" font-family="Arial,sans-serif" font-size="9" fill="#1a1714">${escSVG(urlDisplay)}</text>
+    <text x="${totalW - 20}" y="62" font-family="Arial,sans-serif" font-size="8" fill="#aaa098" text-anchor="end">Smart Stage PRO™  ·  California AB 723 §10140.6  ·  MetroList Rule 11.6.1</text>
   </svg>`;
 }
 
@@ -181,20 +184,16 @@ async function buildSBS(originalBase64, stagedBase64, address, roomName, tier, c
   const addressBuf = Buffer.from(buildAddressSVG(totalW, address || "Property Address"));
   const sidebarBuf = Buffer.from(buildSidebarSVG(sidebarH, complianceUrl));
   const noticeBuf  = Buffer.from(buildNoticeSVG(imageAreaW + PAD * 2));
-  const footerBuf  = Buffer.from(buildFooterSVG(totalW));
+  const footerBuf  = Buffer.from(buildFooterSVG(totalW, complianceUrl));
 
   // Label badges over images
   const origLabelBuf = Buffer.from(buildLabelSVG(PANEL_W, PANEL_H, "ORIGINAL", "#1a1714"));
   const stagedLabel  =
-    tier === "final"     ? "VIRTUALLY STAGED — FINAL" :
+    tier === "final"     ? "STAGED" :
     tier === "declutter" ? "DECLUTTERED" :
     tier === "cns"       ? "CLEANED + STAGED" :
-    "VIRTUALLY STAGED";
-  const stagedLabelColor =
-    tier === "final"     ? "#2d6a4f" :
-    tier === "declutter" ? "#7c5c3e" :
-    tier === "cns"       ? "#4a6741" :
-    "#b8975a";
+    "STAGED";
+  const stagedLabelColor = "#2d6a4f"; // always green — clean, consistent with compliance page
   const stagedLabelBuf = Buffer.from(buildLabelSVG(PANEL_W, PANEL_H, stagedLabel, stagedLabelColor));
 
   // Image panel Y position

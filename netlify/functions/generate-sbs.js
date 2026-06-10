@@ -29,27 +29,28 @@ function formatDate() {
 // ── HEADER BAR ───────────────────────────────────────────────────────────────
 function buildHeaderSVG(totalW) {
   return `<svg width="${totalW}" height="${HEADER_H}" xmlns="http://www.w3.org/2000/svg">
-    <rect width="${totalW}" height="${HEADER_H}" fill="#1a1714"/>
+    <rect width="${totalW}" height="${HEADER_H}" fill="#ffffff"/>
+    <rect x="0" y="${HEADER_H-2}" width="${totalW}" height="2" fill="#e0d8ce"/>
     <!-- Smart Stage PRO wordmark -->
     <text x="20" y="28" font-family="Arial,sans-serif" font-size="18" font-weight="700" fill="#b8975a" letter-spacing="0.04em">SMART STAGE PRO™</text>
-    <text x="20" y="50" font-family="Arial,sans-serif" font-size="10" font-weight="400" fill="#7a6f63" letter-spacing="0.1em">THE COMPLETE VIRTUAL STAGING PLATFORM</text>
+    <text x="20" y="50" font-family="Arial,sans-serif" font-size="10" font-weight="400" fill="#aaa098" letter-spacing="0.1em">THE COMPLETE VIRTUAL STAGING PLATFORM</text>
     <!-- AB 723 badge -->
     <rect x="${totalW-310}" y="14" width="130" height="44" rx="4" fill="#2d6a4f" opacity="0.9"/>
     <text x="${totalW-245}" y="34" font-family="Arial,sans-serif" font-size="11" font-weight="700" fill="#fff" text-anchor="middle" letter-spacing="0.06em">AB 723</text>
     <text x="${totalW-245}" y="50" font-family="Arial,sans-serif" font-size="9" font-weight="400" fill="#a8d5b8" text-anchor="middle" letter-spacing="0.06em">COMPLIANCE</text>
     <!-- Divider -->
-    <line x1="${totalW-168}" y1="18" x2="${totalW-168}" y2="${HEADER_H-10}" stroke="#2d2824" stroke-width="1"/>
+    <line x1="${totalW-168}" y1="18" x2="${totalW-168}" y2="${HEADER_H-10}" stroke="#e0d8ce" stroke-width="1"/>
     <!-- Date -->
-    <text x="${totalW-150}" y="32" font-family="Arial,sans-serif" font-size="9" font-weight="400" fill="#7a6f63" letter-spacing="0.06em">DATE GENERATED</text>
-    <text x="${totalW-150}" y="50" font-family="Arial,sans-serif" font-size="12" font-weight="500" fill="#c8bfb0">${formatDate()}</text>
+    <text x="${totalW-150}" y="32" font-family="Arial,sans-serif" font-size="9" font-weight="400" fill="#aaa098" letter-spacing="0.06em">DATE GENERATED</text>
+    <text x="${totalW-150}" y="50" font-family="Arial,sans-serif" font-size="12" font-weight="500" fill="#1a1714">${formatDate()}</text>
   </svg>`;
 }
 
 // ── ADDRESS BAR ──────────────────────────────────────────────────────────────
 function buildAddressSVG(totalW, address) {
   return `<svg width="${totalW}" height="${BADGE_H}" xmlns="http://www.w3.org/2000/svg">
-    <rect width="${totalW}" height="${BADGE_H}" fill="#ffffff"/>
     <rect width="${totalW}" height="${BADGE_H}" fill="#f7f4ef"/>
+    <rect x="0" y="${BADGE_H-1}" width="${totalW}" height="1" fill="#e0d8ce"/>
     <!-- Pin icon -->
     <circle cx="28" cy="24" r="10" fill="#b8975a" opacity="0.15"/>
     <text x="28" y="29" font-family="Arial,sans-serif" font-size="14" fill="#b8975a" text-anchor="middle">📍</text>
@@ -90,25 +91,27 @@ function buildSidebarSVG(h, complianceUrl) {
 
   const urlShort = (complianceUrl||'').replace('https://','').slice(0,30);
 
+  const QR_SZ = 160;
+  const qrY = h - QR_SZ - 60; // QR position from bottom of sidebar
   return `<svg width="${SIDEBAR_W}" height="${h}" xmlns="http://www.w3.org/2000/svg">
     <rect width="${SIDEBAR_W}" height="${h}" fill="#f7f4ef"/>
     <rect x="0" y="0" width="2" height="${h}" fill="#e0d8ce"/>
     <text x="${SIDEBAR_W/2}" y="36" font-family="Arial,sans-serif" font-size="10" font-weight="700" fill="#b8975a" text-anchor="middle" letter-spacing="0.1em">AB 723 COMPLIANCE</text>
     <line x1="16" y1="48" x2="${SIDEBAR_W-16}" y2="48" stroke="#e0d8ce" stroke-width="1"/>
     ${itemsSVG}
-    <line x1="16" y1="${h-52}" x2="${SIDEBAR_W-16}" y2="${h-52}" stroke="#e0d8ce" stroke-width="1"/>
-    <text x="${SIDEBAR_W/2}" y="${h-36}" font-family="Arial,sans-serif" font-size="8" fill="#b8975a" text-anchor="middle" letter-spacing="0.06em">COMPLIANCE PAGE</text>
-    <text x="${SIDEBAR_W/2}" y="${h-22}" font-family="Arial,sans-serif" font-size="7.5" fill="#7a6f63" text-anchor="middle">${escSVG(urlShort)}</text>
-    <text x="${SIDEBAR_W/2}" y="${h-8}" font-family="Arial,sans-serif" font-size="7" fill="#aaa098" text-anchor="middle">smartstagepro.com</text>
+    <line x1="16" y1="${qrY - 16}" x2="${SIDEBAR_W-16}" y2="${qrY - 16}" stroke="#e0d8ce" stroke-width="1"/>
+    <text x="${SIDEBAR_W/2}" y="${qrY - 4}" font-family="Arial,sans-serif" font-size="8" font-weight="700" fill="#b8975a" text-anchor="middle" letter-spacing="0.08em">SCAN FOR ORIGINAL PHOTO</text>
+    <rect x="${(SIDEBAR_W-QR_SZ)/2 - 4}" y="${qrY + 2}" width="${QR_SZ + 8}" height="${QR_SZ + 8}" rx="4" fill="#ffffff" stroke="#e0d8ce" stroke-width="1"/>
+    <text x="${SIDEBAR_W/2}" y="${h-10}" font-family="Arial,sans-serif" font-size="7.5" fill="#7a6f63" text-anchor="middle">${escSVG(urlShort)}</text>
   </svg>`;
 }
 
 // ── NOTICE STRIP ─────────────────────────────────────────────────────────────
 function buildNoticeSVG(w) {
   return `<svg width="${w}" height="${NOTICE_H}" xmlns="http://www.w3.org/2000/svg">
-    <rect width="${w}" height="${NOTICE_H}" fill="#fdfbf8"/>
-    <rect width="${w}" height="${NOTICE_H}" fill="rgba(184,151,90,0.06)"/>
-    <rect x="0" y="0" width="${w}" height="2" fill="rgba(184,151,90,0.2)"/>
+    <rect width="${w}" height="${NOTICE_H}" fill="#ffffff"/>
+    <rect x="0" y="0" width="${w}" height="1" fill="#e0d8ce"/>
+    <rect x="0" y="${NOTICE_H-1}" width="${w}" height="1" fill="#e0d8ce"/>
     <circle cx="30" cy="${NOTICE_H/2}" r="14" fill="rgba(184,151,90,0.15)" stroke="rgba(184,151,90,0.3)" stroke-width="1"/>
     <text x="30" y="${NOTICE_H/2+5}" font-family="Arial,sans-serif" font-size="14" fill="#b8975a" text-anchor="middle">ⓘ</text>
     <text x="56" y="${NOTICE_H/2-6}" font-family="Arial,sans-serif" font-size="11" font-weight="700" fill="#1a1714" letter-spacing="0.04em">THIS IMAGE HAS BEEN VIRTUALLY STAGED</text>
@@ -119,16 +122,28 @@ function buildNoticeSVG(w) {
 // ── FOOTER ───────────────────────────────────────────────────────────────────
 function buildFooterSVG(totalW) {
   return `<svg width="${totalW}" height="${FOOTER_H}" xmlns="http://www.w3.org/2000/svg">
-    <rect width="${totalW}" height="${FOOTER_H}" fill="#1a1714"/>
-    <rect x="0" y="0" width="${totalW}" height="2" fill="#b8975a" opacity="0.4"/>
-    <text x="20" y="22" font-family="Arial,sans-serif" font-size="10" font-weight="700" fill="#b8975a" letter-spacing="0.06em">IMPORTANT DISCLOSURE:</text>
-    <text x="160" y="22" font-family="Arial,sans-serif" font-size="10" fill="#9a8f83">These images include virtual staging. Furniture, décor, and enhancements are digitally added and are</text>
-    <text x="20" y="38" font-family="Arial,sans-serif" font-size="10" fill="#9a8f83">not included in the sale of the property unless otherwise stated in the listing agreement.</text>
-    <text x="20" y="56" font-family="Arial,sans-serif" font-size="9" fill="#5a5048">Smart Stage PRO™  ·  California AB 723 §10140.6  ·  MetroList Rule 11.6.1  ·  smartstagepro.com</text>
+    <rect width="${totalW}" height="${FOOTER_H}" fill="#f0ece4"/>
+    <rect x="0" y="0" width="${totalW}" height="2" fill="#e0d8ce"/>
+    <text x="20" y="22" font-family="Arial,sans-serif" font-size="10" font-weight="700" fill="#1a1714" letter-spacing="0.04em">IMPORTANT DISCLOSURE:</text>
+    <text x="168" y="22" font-family="Arial,sans-serif" font-size="10" fill="#5a5048">These images include virtual staging. Furniture, décor, and enhancements are digitally added and are</text>
+    <text x="20" y="38" font-family="Arial,sans-serif" font-size="10" fill="#5a5048">not included in the sale of the property unless otherwise stated in the listing agreement.</text>
+    <text x="20" y="56" font-family="Arial,sans-serif" font-size="9" fill="#aaa098">Smart Stage PRO™  ·  California AB 723 §10140.6  ·  MetroList Rule 11.6.1  ·  smartstagepro.com</text>
   </svg>`;
 }
 
 // ── MAIN COMPOSITE ───────────────────────────────────────────────────────────
+async function buildSidebarWithQR(h, complianceUrl) {
+  // Generate QR code for compliance URL
+  const QRCode = require("qrcode");
+  const QR_SZ = 160;
+  const qrBuffer = await QRCode.toBuffer(complianceUrl || "https://smartstagepro.com", {
+    type: "png", width: QR_SZ, margin: 1,
+    color: { dark: "#000000", light: "#ffffff" },
+    errorCorrectionLevel: "H"
+  });
+  return qrBuffer;
+}
+
 async function buildSBS(originalBase64, stagedBase64, address, roomName, tier, complianceUrl) {
   const origBuf   = Buffer.from(originalBase64, "base64");
   const stagedBuf = Buffer.from(stagedBase64, "base64");
@@ -151,6 +166,15 @@ async function buildSBS(originalBase64, stagedBase64, address, roomName, tier, c
   const totalW     = imageAreaW + SIDEBAR_W + PAD * 2;
   const totalH     = HEADER_H + BADGE_H + PAD + PANEL_H + PAD + NOTICE_H + FOOTER_H;
   const sidebarH   = BADGE_H + PAD + PANEL_H + PAD + NOTICE_H;
+
+  // Generate QR for sidebar
+  const QRCode = require("qrcode");
+  const QR_SZ = 160;
+  const qrBuffer = await QRCode.toBuffer(complianceUrl || "https://smartstagepro.com", {
+    type: "png", width: QR_SZ, margin: 1,
+    color: { dark: "#000000", light: "#ffffff" },
+    errorCorrectionLevel: "H"
+  });
 
   // Build all SVG layers
   const headerBuf  = Buffer.from(buildHeaderSVG(totalW));
@@ -180,7 +204,7 @@ async function buildSBS(originalBase64, stagedBase64, address, roomName, tier, c
   const sideX  = PAD * 2 + imageAreaW;
 
   const result = await sharp({
-    create: { width: totalW, height: totalH, channels: 3, background: { r:247,g:244,b:239 } }
+    create: { width: totalW, height: totalH, channels: 3, background: { r:255,g:255,b:255 } }
   })
   .composite([
     // Header
@@ -195,6 +219,8 @@ async function buildSBS(originalBase64, stagedBase64, address, roomName, tier, c
     { input: stagedLabelBuf, top: panelY,                          left: stagX },
     // Sidebar
     { input: sidebarBuf,     top: HEADER_H,                        left: sideX },
+    // QR code in sidebar
+    { input: qrBuffer,       top: HEADER_H + sidebarH - QR_SZ - 56, left: sideX + Math.round((SIDEBAR_W - QR_SZ) / 2) },
     // Notice strip
     { input: noticeBuf,      top: panelY + PANEL_H + PAD,         left: 0 },
     // Footer

@@ -116,11 +116,11 @@ exports.handler = async (event) => {
     // ── Fetch listings from Supabase based on role ────────────────────────
     let listingsQuery;
     if (user.role === "broker_admin" && user.brokerage_id) {
-      listingsQuery = `?brokerage_id=eq.${user.brokerage_id}&select=id,address,project_id,compliance_page_url,mls_number,status,created_at,updated_at,user_id&order=updated_at.desc.nullsfirst&limit=100`;
+      listingsQuery = `?brokerage_id=eq.${user.brokerage_id}&status=neq.archived&select=id,address,project_id,compliance_page_url,mls_number,status,created_at,updated_at,user_id&order=updated_at.desc.nullsfirst&limit=100`;
     } else if (user.role === "team_lead" && user.team_id) {
-      listingsQuery = `?team_id=eq.${user.team_id}&select=id,address,project_id,compliance_page_url,mls_number,status,created_at,updated_at,user_id&order=updated_at.desc.nullsfirst&limit=100`;
+      listingsQuery = `?team_id=eq.${user.team_id}&status=neq.archived&select=id,address,project_id,compliance_page_url,mls_number,status,created_at,updated_at,user_id&order=updated_at.desc.nullsfirst&limit=100`;
     } else {
-      listingsQuery = `?user_id=eq.${authUser.id}&select=id,address,project_id,compliance_page_url,mls_number,status,created_at,updated_at,user_id&order=updated_at.desc.nullsfirst&limit=100`;
+      listingsQuery = `?user_id=eq.${authUser.id}&status=neq.archived&select=id,address,project_id,compliance_page_url,mls_number,status,created_at,updated_at,user_id&order=updated_at.desc.nullsfirst&limit=100`;
     }
 
     const listingsResult = await supabase("GET", "listings", null, listingsQuery);

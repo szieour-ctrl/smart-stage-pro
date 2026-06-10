@@ -4474,6 +4474,8 @@ async function showDashboard() {
     .db-action-btn:hover { border-color:var(--gold); color:var(--gold); }
     .db-action-btn.primary { background:var(--ink); color:#fff; border-color:var(--ink); }
     .db-action-btn.primary:hover { background:#2d2824; }
+    .db-action-btn.danger { color:#c0392b; border-color:#f0c0c0; }
+    .db-action-btn.danger:hover { background:#fff5f5; border-color:#c0392b; }
     .db-empty { text-align:center; padding:60px 24px; color:var(--muted); }
     .db-empty-icon { font-size:2.5rem; margin-bottom:16px; opacity:0.4; }
     .db-error { background:#fff0f0; border:1px solid #f0c0c0; border-radius:4px; padding:16px 20px; color:#c0392b; font-size:0.82rem; margin-bottom:20px; }
@@ -4578,6 +4580,7 @@ function renderDashboard(data, filter, search) {
         ${l.complianceUrl ? `<button class="db-action-btn" onclick="window.open('${l.complianceUrl}','_blank')">View Compliance Page</button>` : ''}
         ${l.projectId ? `<button class="db-action-btn" onclick="downloadQR('${l.projectId}','${l.address.replace(/'/g,'')}')">↓ Download QR</button>` : ''}
         <button class="db-action-btn primary" onclick="hideDashboard()">Continue Staging →</button>
+        <button class="db-action-btn danger" onclick="archiveListing('${l.id}','${l.address.replace(/'/g,'').replace(/"/g,'')}')" title="Hide from dashboard — compliance page stays active">Archive</button>
       </div>
     </div>`;
 
@@ -4630,6 +4633,41 @@ function hideDashboard() {
   _dashboardData = null;
   _dbFilter = 'all';
   _dbSearch = '';
+}
+
+async function archiveListing(listingId, address) {
+  const confirmed = confirm(
+    'Archive "' + address + '"?\n\n' +
+    'This will hide the listing from your dashboard. ' +
+    'The compliance page remains permanently active per California AB 723 requirements.'
+  );
+  if (!confirmed) return;
+
+  try {
+    const session = await getSupabase().auth.getSession();
+    const token = session?.data?.session?.access_token;
+    if (!token) { alert('Session expired. Please sign in again.'); return; }
+
+    const res = await fetch('/.netlify/functions/archive-listing', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + token
+      },
+      body: JSON.stringify({ listingId })
+    });
+
+    if (!res.ok) throw new Error('Archive failed: ' + res.status);
+
+    // Remove card from dashboard without full reload
+    if (_dashboardData) {
+      _dashboardData.listings = _dashboardData.listings.filter(l => l.id !== listingId);
+      _dashboardData.stats.totalListings = _dashboardData.listings.length;
+      renderDashboard(_dashboardData, _dbFilter, _dbSearch);
+    }
+  } catch (err) {
+    alert('Archive failed: ' + err.message);
+  }
 }
 
 // ── INIT ─────────────────────────────────────────────────────────────────────

@@ -4398,6 +4398,30 @@ function showLandingPage() {
       border-bottom: 1px solid var(--border);
     }
     .lp-module-img-icon { font-size: 1.8rem; opacity: 0.5; }
+    .mod-sl-label {
+      position: absolute;
+      top: 10px;
+      padding: 3px 9px;
+      border-radius: 20px;
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      pointer-events: none;
+      z-index: 4;
+    }
+    .mod-sl-label-before {
+      left: 10px;
+      background: rgba(0,0,0,0.55);
+      color: #e0e0e0;
+      border: 1px solid rgba(255,255,255,0.15);
+    }
+    .mod-sl-label-after {
+      right: 10px;
+      background: rgba(201,168,76,0.88);
+      color: #1a1a1a;
+      font-weight: 800;
+    }
     .lp-module-body { padding: 16px 18px; }
     .lp-module-name {
       font-family: 'Cormorant Garamond', serif;
@@ -4726,50 +4750,104 @@ function showLandingPage() {
     <div class="lp-section-label" style="color:var(--gold);">Staging modules</div>
     <div class="lp-section-title" style="color:var(--ink);">Six tools. One platform.</div>
     <div class="lp-modules">
+      <!-- Vacant Stage -->
       <div class="lp-module">
-        <div class="lp-module-img">
-          <span class="lp-module-img-icon">🛋️</span>
-          <span>Before / After placeholder</span>
+        <div class="lp-module-img mod-slider-wrap" style="padding:0;overflow:hidden;position:relative;cursor:ew-resize;user-select:none;-webkit-user-select:none;">
+          <img class="mod-sl-after" src="https://res.cloudinary.com/de18zsi7o/image/upload/q_auto/f_auto/v1781184182/FINAL_VirtuallyStaged_MBed1_1_zr7jvc.jpg" alt="Vacant Stage After" draggable="false" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;pointer-events:none;" />
+          <div class="mod-sl-before-wrap" style="position:absolute;inset:0;width:50%;overflow:hidden;pointer-events:none;">
+            <img class="mod-sl-before" src="https://res.cloudinary.com/de18zsi7o/image/upload/q_auto/f_auto/v1781184255/MBed1_vf2qnt.jpg" alt="Vacant Stage Before" draggable="false" style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;object-position:left center;display:block;pointer-events:none;" />
+          </div>
+          <div class="mod-sl-divider" style="position:absolute;top:0;bottom:0;left:50%;width:2px;background:#c9a84c;transform:translateX(-50%);pointer-events:none;z-index:3;">
+            <div class="mod-sl-handle" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:32px;height:32px;filter:drop-shadow(0 2px 6px rgba(0,0,0,0.5));">
+              <svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" style="width:32px;height:32px;"><circle cx="20" cy="20" r="19" fill="#1a1a1a" stroke="#c9a84c" stroke-width="1.5"/><polyline points="16,13 9,20 16,27" fill="none" stroke="#c9a84c" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><polyline points="24,13 31,20 24,27" fill="none" stroke="#c9a84c" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+          </div>
+          <span class="mod-sl-label mod-sl-label-before">BEFORE</span>
+          <span class="mod-sl-label mod-sl-label-after">AFTER</span>
         </div>
         <div class="lp-module-body">
           <div class="lp-module-name">Vacant Stage</div>
           <div class="lp-module-desc">Fully furnish empty rooms with cohesive style and palette guided by your session DNA.</div>
         </div>
       </div>
+
+      <!-- Clean & Stage -->
       <div class="lp-module">
-        <div class="lp-module-img">
-          <span class="lp-module-img-icon">✨</span>
-          <span>Before / After placeholder</span>
+        <div class="lp-module-img mod-slider-wrap" style="padding:0;overflow:hidden;position:relative;cursor:ew-resize;user-select:none;-webkit-user-select:none;">
+          <img class="mod-sl-after" src="https://res.cloudinary.com/de18zsi7o/image/upload/q_auto/f_auto/v1781192520/ChatGPT_Image_Jun_11_2026_08_41_17_AM_qtuzy1.png" alt="Clean &amp; Stage After" draggable="false" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;pointer-events:none;" />
+          <div class="mod-sl-before-wrap" style="position:absolute;inset:0;width:50%;overflow:hidden;pointer-events:none;">
+            <img class="mod-sl-before" src="https://res.cloudinary.com/de18zsi7o/image/upload/q_auto/f_auto/v1781192573/living_room_C_S_fto3mt.jpg" alt="Clean &amp; Stage Before" draggable="false" style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;object-position:left center;display:block;pointer-events:none;" />
+          </div>
+          <div class="mod-sl-divider" style="position:absolute;top:0;bottom:0;left:50%;width:2px;background:#c9a84c;transform:translateX(-50%);pointer-events:none;z-index:3;">
+            <div class="mod-sl-handle" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:32px;height:32px;filter:drop-shadow(0 2px 6px rgba(0,0,0,0.5));">
+              <svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" style="width:32px;height:32px;"><circle cx="20" cy="20" r="19" fill="#1a1a1a" stroke="#c9a84c" stroke-width="1.5"/><polyline points="16,13 9,20 16,27" fill="none" stroke="#c9a84c" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><polyline points="24,13 31,20 24,27" fill="none" stroke="#c9a84c" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+          </div>
+          <span class="mod-sl-label mod-sl-label-before">BEFORE</span>
+          <span class="mod-sl-label mod-sl-label-after">AFTER</span>
         </div>
         <div class="lp-module-body">
           <div class="lp-module-name">Clean &amp; Stage</div>
           <div class="lp-module-desc">Remove clutter and personal items, then restage with fresh, market-ready furnishings.</div>
         </div>
       </div>
+
+      <!-- Exterior Enhancement -->
       <div class="lp-module">
-        <div class="lp-module-img">
-          <span class="lp-module-img-icon">🌿</span>
-          <span>Before / After placeholder</span>
+        <div class="lp-module-img mod-slider-wrap" style="padding:0;overflow:hidden;position:relative;cursor:ew-resize;user-select:none;-webkit-user-select:none;">
+          <img class="mod-sl-after" src="https://res.cloudinary.com/de18zsi7o/image/upload/q_auto/f_auto/v1781200608/FINAL_LandscapeEnhancement_Backyard_n2wtnj.jpg" alt="Exterior Enhancement After" draggable="false" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;pointer-events:none;" />
+          <div class="mod-sl-before-wrap" style="position:absolute;inset:0;width:50%;overflow:hidden;pointer-events:none;">
+            <img class="mod-sl-before" src="https://res.cloudinary.com/de18zsi7o/image/upload/q_auto/f_auto/v1781157260/Backyard_tnco79.jpg" alt="Exterior Enhancement Before" draggable="false" style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;object-position:left center;display:block;pointer-events:none;" />
+          </div>
+          <div class="mod-sl-divider" style="position:absolute;top:0;bottom:0;left:50%;width:2px;background:#c9a84c;transform:translateX(-50%);pointer-events:none;z-index:3;">
+            <div class="mod-sl-handle" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:32px;height:32px;filter:drop-shadow(0 2px 6px rgba(0,0,0,0.5));">
+              <svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" style="width:32px;height:32px;"><circle cx="20" cy="20" r="19" fill="#1a1a1a" stroke="#c9a84c" stroke-width="1.5"/><polyline points="16,13 9,20 16,27" fill="none" stroke="#c9a84c" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><polyline points="24,13 31,20 24,27" fill="none" stroke="#c9a84c" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+          </div>
+          <span class="mod-sl-label mod-sl-label-before">BEFORE</span>
+          <span class="mod-sl-label mod-sl-label-after">AFTER</span>
         </div>
         <div class="lp-module-body">
           <div class="lp-module-name">Exterior Enhancement</div>
           <div class="lp-module-desc">Upgrade curb appeal with landscaping, lighting, and outdoor living additions across 4 lighting conditions.</div>
         </div>
       </div>
+
+      <!-- Declutter -->
       <div class="lp-module">
-        <div class="lp-module-img">
-          <span class="lp-module-img-icon">📦</span>
-          <span>Before / After placeholder</span>
+        <div class="lp-module-img mod-slider-wrap" style="padding:0;overflow:hidden;position:relative;cursor:ew-resize;user-select:none;-webkit-user-select:none;">
+          <img class="mod-sl-after" src="https://res.cloudinary.com/de18zsi7o/image/upload/q_auto/f_auto/v1781126914/smart-stage-finals/szregsolo_235mainst_061026/fa1d52qbfzusbiadetiv.jpg" alt="Declutter After" draggable="false" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;pointer-events:none;" />
+          <div class="mod-sl-before-wrap" style="position:absolute;inset:0;width:50%;overflow:hidden;pointer-events:none;">
+            <img class="mod-sl-before" src="https://res.cloudinary.com/de18zsi7o/image/upload/q_auto/f_auto/v1781124044/smart-stage-originals/xd9ijus7liimbwn9vppp.jpg" alt="Declutter Before" draggable="false" style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;object-position:left center;display:block;pointer-events:none;" />
+          </div>
+          <div class="mod-sl-divider" style="position:absolute;top:0;bottom:0;left:50%;width:2px;background:#c9a84c;transform:translateX(-50%);pointer-events:none;z-index:3;">
+            <div class="mod-sl-handle" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:32px;height:32px;filter:drop-shadow(0 2px 6px rgba(0,0,0,0.5));">
+              <svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" style="width:32px;height:32px;"><circle cx="20" cy="20" r="19" fill="#1a1a1a" stroke="#c9a84c" stroke-width="1.5"/><polyline points="16,13 9,20 16,27" fill="none" stroke="#c9a84c" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><polyline points="24,13 31,20 24,27" fill="none" stroke="#c9a84c" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+          </div>
+          <span class="mod-sl-label mod-sl-label-before">BEFORE</span>
+          <span class="mod-sl-label mod-sl-label-after">AFTER</span>
         </div>
         <div class="lp-module-body">
           <div class="lp-module-name">Declutter</div>
           <div class="lp-module-desc">Remove freestanding items completely — furniture, boxes, personal effects — leaving a clean canvas.</div>
         </div>
       </div>
+
+      <!-- Multi-Angle Group Staging -->
       <div class="lp-module">
-        <div class="lp-module-img">
-          <span class="lp-module-img-icon">🔄</span>
-          <span>Before / After placeholder</span>
+        <div class="lp-module-img mod-slider-wrap" style="padding:0;overflow:hidden;position:relative;cursor:ew-resize;user-select:none;-webkit-user-select:none;">
+          <img class="mod-sl-after" src="https://res.cloudinary.com/de18zsi7o/image/upload/q_auto/f_auto/v1781159231/FINAL_VirtuallyStaged_Open_Plan_3_plryhw.jpg" alt="Multi-Angle Group Staging After" draggable="false" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;pointer-events:none;" />
+          <div class="mod-sl-before-wrap" style="position:absolute;inset:0;width:50%;overflow:hidden;pointer-events:none;">
+            <img class="mod-sl-before" src="https://res.cloudinary.com/de18zsi7o/image/upload/q_auto/f_auto/v1781159311/Open_Plan_3_uxkpt3.jpg" alt="Multi-Angle Group Staging Before" draggable="false" style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;object-position:left center;display:block;pointer-events:none;" />
+          </div>
+          <div class="mod-sl-divider" style="position:absolute;top:0;bottom:0;left:50%;width:2px;background:#c9a84c;transform:translateX(-50%);pointer-events:none;z-index:3;">
+            <div class="mod-sl-handle" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:32px;height:32px;filter:drop-shadow(0 2px 6px rgba(0,0,0,0.5));">
+              <svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" style="width:32px;height:32px;"><circle cx="20" cy="20" r="19" fill="#1a1a1a" stroke="#c9a84c" stroke-width="1.5"/><polyline points="16,13 9,20 16,27" fill="none" stroke="#c9a84c" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><polyline points="24,13 31,20 24,27" fill="none" stroke="#c9a84c" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+          </div>
+          <span class="mod-sl-label mod-sl-label-before">BEFORE</span>
+          <span class="mod-sl-label mod-sl-label-after">AFTER</span>
         </div>
         <div class="lp-module-body">
           <div class="lp-module-name">Multi-Angle Group Staging</div>
@@ -4892,10 +4970,36 @@ function showLandingPage() {
   </footer>
   `;
   setTimeout(initBaSlider, 0);
+  setTimeout(initModuleSliders, 0);
 }
 
 
 // ── Before/After Slider ──────────────────────────────────
+function initModuleSliders() {
+  document.querySelectorAll('.mod-slider-wrap').forEach(function(container) {
+    const beforeWrap = container.querySelector('.mod-sl-before-wrap');
+    const divider    = container.querySelector('.mod-sl-divider');
+    if (!beforeWrap || !divider) return;
+    let isDragging = false;
+    function setPos(pct) {
+      pct = Math.max(2, Math.min(98, pct));
+      beforeWrap.style.width = pct + '%';
+      divider.style.left = pct + '%';
+    }
+    function getPct(clientX) {
+      const rect = container.getBoundingClientRect();
+      return ((clientX - rect.left) / rect.width) * 100;
+    }
+    container.addEventListener('mousedown', function(e) { isDragging = true; setPos(getPct(e.clientX)); e.preventDefault(); });
+    window.addEventListener('mousemove', function(e) { if (isDragging) setPos(getPct(e.clientX)); });
+    window.addEventListener('mouseup', function() { isDragging = false; });
+    container.addEventListener('touchstart', function(e) { isDragging = true; setPos(getPct(e.touches[0].clientX)); e.preventDefault(); }, { passive: false });
+    window.addEventListener('touchmove', function(e) { if (isDragging) setPos(getPct(e.touches[0].clientX)); }, { passive: true });
+    window.addEventListener('touchend', function() { isDragging = false; });
+    setPos(50);
+  });
+}
+
 function initBaSlider() {
   const container  = document.getElementById('ba-slider-container');
   const beforeWrap = document.getElementById('ba-before-wrap');

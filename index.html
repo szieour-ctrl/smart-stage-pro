@@ -1644,11 +1644,13 @@ async function generateDeclutterFinal(roomId) {
   const existingRadio = document.querySelector(`input[name="${intSelId}"][value="${quality}"]`);
   if (existingRadio) existingRadio.checked = true;
 
-  // Swap declutteredBase64 into stagedBase64 so generateFinal uses it as source
+  // Swap clean decluttered base64 so generateFinal uses the unwatermarked image
   const savedStaged = room.stagedBase64;
+  const savedStagedClean = room.stagedCleanBase64;
   const savedFinalStatus = room.finalStatus;
   const savedFinalBase64 = room.finalBase64;
   room.stagedBase64 = room.declutteredBase64;
+  room.stagedCleanBase64 = room.declutteredCleanBase64;
 
   try {
     await generateFinal(roomId, null);
@@ -1658,6 +1660,7 @@ async function generateDeclutterFinal(roomId) {
   } finally {
     // Restore original values
     room.stagedBase64 = savedStaged;
+    room.stagedCleanBase64 = savedStagedClean;
     room.finalStatus = savedFinalStatus;
     room.finalBase64 = savedFinalBase64;
     renderRoomQueue();

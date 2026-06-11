@@ -1840,6 +1840,61 @@ LIGHTING ONLY: Blue-hour sky, warm interior window glow, subtle path lighting, l
 // ── Background fire-and-poll staging ─────────────────────────────────────────
 // Dispatches to stage-openai (returns jobId instantly) then polls check-openai
 // No timeout issues — background function runs up to 15 minutes
+// ── Draft Watermark ───────────────────────────────────────────────────────────
+// Applies a diagonal repeating watermark to draft images before display.
+// The clean base64 from the staging engine is never stored or shown directly.
+// Generate Final uses the original clean image — not room.stagedBase64.
+async function applyDraftWatermark(base64) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const w = img.naturalWidth  || 1024;
+      const h = img.naturalHeight || 768;
+      const canvas = document.createElement('canvas');
+      canvas.width  = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+
+      // Draw the staged image
+      ctx.drawImage(img, 0, 0, w, h);
+
+      // Watermark settings
+      const text     = 'SMART STAGE PRO™ · DRAFT ONLY';
+      const fontSize = Math.round(Math.max(w, h) * 0.032); // ~3.2% of longest dimension
+      ctx.font       = `700 ${fontSize}px Arial, sans-serif`;
+      ctx.fillStyle  = 'rgba(255, 255, 255, 0.13)'; // very light opacity
+      ctx.strokeStyle= 'rgba(0, 0, 0, 0.07)';
+      ctx.lineWidth  = 1;
+      ctx.textAlign  = 'center';
+      ctx.textBaseline = 'middle';
+
+      // Rotate and tile diagonally across the image
+      ctx.save();
+      ctx.translate(w / 2, h / 2);
+      ctx.rotate(-30 * Math.PI / 180);
+
+      const stepX = Math.round(w * 0.55);
+      const stepY = Math.round(h * 0.22);
+      const cols  = Math.ceil(w / stepX) + 2;
+      const rows  = Math.ceil(h / stepY) + 4;
+
+      for (let row = -rows; row <= rows; row++) {
+        for (let col = -cols; col <= cols; col++) {
+          const x = col * stepX;
+          const y = row * stepY;
+          ctx.strokeText(text, x, y);
+          ctx.fillText(text,   x, y);
+        }
+      }
+      ctx.restore();
+
+      resolve(canvas.toDataURL('image/jpeg', 0.92).split(',')[1]);
+    };
+    img.onerror = () => resolve(base64); // fallback — return original if canvas fails
+    img.src = 'data:image/jpeg;base64,' + base64;
+  });
+}
+
 async function callStageAPI(imageBase64, mimeType, prompt, quality) {
   // Client-side compression — protects against oversized DSLR exterior photos
   // Netlify function payload limit is ~6MB; base64 inflates ~33%, so cap source at ~3.5MB
@@ -1899,7 +1954,7 @@ async function callStageAPI(imageBase64, mimeType, prompt, quality) {
       const result = await checkRes.json();
       if (result.status === 'done') {
         if (!result.stagedBase64) throw new Error('No image in completed job');
-        return result.stagedBase64;
+        return await applyDraftWatermark(result.stagedBase64);
       }
       if (result.status === 'error') throw new Error('Staging error: ' + (result.error || 'unknown'));
       // status === 'pending' — keep polling

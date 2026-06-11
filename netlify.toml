@@ -86,11 +86,6 @@
 
 [functions."download-compliance-zip"]
   timeout = 60
-[functions."help-agent"]
-  timeout = 30
-
-[functions."help-feedback"]
-  timeout = 10
 
 [functions."debit-credit"]
   timeout = 10

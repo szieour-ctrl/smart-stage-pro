@@ -86,7 +86,14 @@
 
 [functions."download-compliance-zip"]
   timeout = 60
+[functions."help-agent"]
+  timeout = 30
 
+[functions."help-feedback"]
+  timeout = 10
+
+[functions."debit-credit"]
+  timeout = 10
 # ── Domain redirects ─────────────────────────────────────
 # Redirect Netlify subdomain to custom domain (301 permanent)
 # Must be BEFORE path-based redirects so Netlify processes first

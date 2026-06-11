@@ -1954,7 +1954,9 @@ async function callStageAPI(imageBase64, mimeType, prompt, quality) {
       const result = await checkRes.json();
       if (result.status === 'done') {
         if (!result.stagedBase64) throw new Error('No image in completed job');
-        return await applyDraftWatermark(result.stagedBase64);
+        const watermarked = await applyDraftWatermark(result.stagedBase64);
+        // Return object with both — clean for Generate Final, watermarked for display
+        return { watermarked, clean: result.stagedBase64 };
       }
       if (result.status === 'error') throw new Error('Staging error: ' + (result.error || 'unknown'));
       // status === 'pending' — keep polling
@@ -2127,10 +2129,13 @@ async function stageRoom(roomId) {
     room.promptStatus = 'Generating draft — takes ~15 seconds...';
     renderRoomQueue();
 
-    const stagedBase64 = await callStageAPI(sourceBase64, sourceMime, finalPrompt, 'low');
-    if (!stagedBase64) throw new Error('Staging engine failed — no image returned');
+    const stageResult = await callStageAPI(sourceBase64, sourceMime, finalPrompt, 'low');
+    if (!stageResult) throw new Error('Staging engine failed — no image returned');
+    const stagedBase64 = stageResult.watermarked;
+    const stagedCleanBase64 = stageResult.clean;
 
     room.stagedBase64 = stagedBase64;
+    room.stagedCleanBase64 = stagedCleanBase64;
     // Resize staged image to match original dimensions
     await resizeToMatch(room, orig, null, 'stagedBase64', stagedBase64);
     room.status = 'done';
@@ -2338,8 +2343,10 @@ async function iterateRoom(roomId) {
     renderRoomQueue();
 
     // Send ORIGINAL photo + revised prompt to GPT — never GPT output
-    const stagedBase64 = await callStageAPI(orig.base64, orig.mimeType, approvedPrompt, 'low');
-    if (!stagedBase64) throw new Error('Staging engine failed — no image returned');
+    const stageResult = await callStageAPI(orig.base64, orig.mimeType, approvedPrompt, 'low');
+    if (!stageResult) throw new Error('Staging engine failed — no image returned');
+    const stagedBase64 = stageResult.watermarked;
+    const stagedCleanBase64 = stageResult.clean;
 
     room.stagedBase64 = stagedBase64;
     room.lastPrompt = approvedPrompt;
@@ -2393,8 +2400,10 @@ async function reStageRoom(roomId) {
     renderRoomQueue();
 
     // Send DECLUTTERED photo + revised prompt to GPT
-    const stagedBase64 = await callStageAPI(room.declutteredBase64, 'image/jpeg', approvedPrompt, 'low');
-    if (!stagedBase64) throw new Error('Staging engine failed — no image returned');
+    const stageResult = await callStageAPI(room.declutteredBase64, 'image/jpeg', approvedPrompt, 'low');
+    if (!stageResult) throw new Error('Staging engine failed — no image returned');
+    const stagedBase64 = stageResult.watermarked;
+    const stagedCleanBase64 = stageResult.clean;
 
     room.stagedBase64 = stagedBase64;
     room.lastPrompt = approvedPrompt;
@@ -2423,11 +2432,11 @@ async function generateFinal(roomId,enhId){
   const room=SESSION.rooms.find(r=>r.id===roomId);
   if(!room)return;
 
-  // Use the approved staged draft — NOT the original photo
+  // Use the clean (unwatermarked) staged image for upscaling — NOT the watermarked draft
   // enhId present = exterior final, absent = interior final
   const draftBase64 = enhId
-    ? room.extSelections?.[enhId]?.base64
-    : room.stagedBase64;
+    ? (room.extSelections?.[enhId]?.cleanBase64 || room.extSelections?.[enhId]?.base64)
+    : (room.stagedCleanBase64 || room.stagedBase64);
 
   if(!draftBase64){
     showToast('No staged draft found — stage the room first.','error');
@@ -2579,8 +2588,8 @@ async function callRemoveObjects(imageBase64, mimeType) {
     'Do NOT add any new furniture, staging, or objects. Result must be a completely empty room ready for virtual staging.';
 
   console.log('Remove objects: firing staging with generic removal prompt...');
-  const cleanedBase64 = await callStageAPI(imageBase64, mimeType, removalPrompt, 'low');
-  return cleanedBase64;
+  const cleanResult = await callStageAPI(imageBase64, mimeType, removalPrompt, 'low');
+  return cleanResult ? cleanResult.clean : null;
 }
 
 // DECLUTTER ONLY — Haiku reads room, builds AB 723 compliant removal prompt, modal preview
@@ -2622,8 +2631,10 @@ async function runDeclutterOnly(roomId) {
     room.status = 'processing';
     room.promptStatus = 'Removing objects — takes ~15 seconds...';
     renderRoomQueue();
-    room.declutteredBase64 = await callStageAPI(orig.base64, orig.mimeType, approvedPrompt, 'low');
-    if (!room.declutteredBase64) throw new Error('Declutter failed — no image returned');
+    const dclResult = await callStageAPI(orig.base64, orig.mimeType, approvedPrompt, 'low');
+    if (!dclResult) throw new Error('Declutter failed — no image returned');
+    room.declutteredBase64 = dclResult.watermarked;
+    room.declutteredCleanBase64 = dclResult.clean;
     // Resize decluttered image to match original dimensions
     room.stagedBase64 = room.declutteredBase64;
     await resizeToMatch(room, orig, null, 'stagedBase64', room.declutteredBase64);
@@ -2677,9 +2688,11 @@ async function runCleanAndStage(roomId) {
     room.status = 'processing';
     room.promptStatus = 'Step 1 of 3 — Removing objects...';
     renderRoomQueue();
-    const cleanedBase64 = await callStageAPI(orig.base64, orig.mimeType, approvedDeclutter, 'low');
-    if (!cleanedBase64) throw new Error('Declutter failed — no image returned');
-    room.declutteredBase64 = cleanedBase64;
+    const cnsCleanResult = await callStageAPI(orig.base64, orig.mimeType, approvedDeclutter, 'low');
+    if (!cnsCleanResult) throw new Error('Declutter failed — no image returned');
+    room.declutteredBase64 = cnsCleanResult.watermarked;
+    room.declutteredCleanBase64 = cnsCleanResult.clean;
+    const cleanedBase64 = cnsCleanResult.clean;
 
     // Step 2A: Haiku reads cleaned room for staging
     room.promptStatus = 'Step 2 of 3 — Reading cleaned room for staging...';
@@ -2741,9 +2754,10 @@ async function runCleanAndStage(roomId) {
     console.log('Clean+Stage step 3: compressed from ' + Math.round(cleanedBase64.length/1024) + 'KB to ' + Math.round(compressedCleaned.length/1024) + 'KB');
     room.promptStatus = 'Step 3 of 3 — Generating staged draft...';
     renderRoomQueue();
-    const cleanedStagedBase64 = await callStageAPI(compressedCleaned, 'image/jpeg', approvedStage, 'low');
-    if (!cleanedStagedBase64) throw new Error('No staged image returned');
-    room.stagedBase64 = cleanedStagedBase64;
+    const cnsStageResult = await callStageAPI(compressedCleaned, 'image/jpeg', approvedStage, 'low');
+    if (!cnsStageResult) throw new Error('No staged image returned');
+    room.stagedBase64 = cnsStageResult.watermarked;
+    room.stagedCleanBase64 = cnsStageResult.clean;
     // Resize staged image to match original dimensions
     await resizeToMatch(room, orig, null, 'stagedBase64', cleanedStagedBase64);
     room.status = 'done';
@@ -2793,8 +2807,9 @@ async function runExtEnhancements(roomId){
   
   for(const enh of toRun){
     try{
-      const b64=await callStageAPI(compressedB64,'image/jpeg',buildExteriorPrompt(room,enh,'low'),'low');
-      room.extSelections[enh.id].base64=b64;room.extSelections[enh.id].status='done';
+      const extResult=await callStageAPI(compressedB64,'image/jpeg',buildExteriorPrompt(room,enh,'low'),'low');
+      const b64=extResult.watermarked;const b64Clean=extResult.clean;
+      room.extSelections[enh.id].base64=b64;room.extSelections[enh.id].cleanBase64=b64Clean;room.extSelections[enh.id].status='done';
       await resizeToMatch(room,orig,enh.id,'__extdraft__',b64);
       showToast(`✓ ${enh.label} draft complete.`,'success');
     }catch(err){room.extSelections[enh.id].status='pending';showToast(`${enh.label}: ${err.message}`,'error');}
@@ -2862,9 +2877,12 @@ async function iterateDeclutter(roomId) {
     const revisedPrompt = basePrompt + revisionSuffix;
 
     // Use original image as source for re-declutter
-    const newBase64 = await callStageAPI(orig.base64, orig.mimeType, revisedPrompt, 'low');
-    room.declutteredBase64 = newBase64;
-    room.stagedBase64 = newBase64;
+    const iterResult = await callStageAPI(orig.base64, orig.mimeType, revisedPrompt, 'low');
+    const newBase64 = iterResult.watermarked;
+    room.declutteredBase64 = iterResult.watermarked;
+    room.declutteredCleanBase64 = iterResult.clean;
+    room.stagedBase64 = iterResult.watermarked;
+    room.stagedCleanBase64 = iterResult.clean;
     room.declutterFinalStatus = null;
     room.declutterFinalBase64 = null;
     room.status = 'done';
@@ -2912,8 +2930,10 @@ async function iterateExtEnhancement(roomId, enhId) {
   try {
     const basePrompt = buildExteriorPrompt(room, enh, 'low');
     const revisedPrompt = note ? basePrompt + ` Additional instruction: ${note}` : basePrompt;
-    const b64 = await callStageAPI(compressedB64, 'image/jpeg', revisedPrompt, 'low');
+    const extIterResult = await callStageAPI(compressedB64, 'image/jpeg', revisedPrompt, 'low');
+    const b64 = extIterResult.watermarked;
     room.extSelections[enhId].base64 = b64;
+    room.extSelections[enhId].cleanBase64 = extIterResult.clean;
     room.extSelections[enhId].status = 'done';
     await resizeToMatch(room, orig, enhId, '__extdraft__', b64);
     showToast(`✓ ${enh.label} re-staged.`, 'success');
@@ -2955,8 +2975,10 @@ async function runSingleExtEnhancement(roomId, enhId) {
   });
 
   try {
-    const b64 = await callStageAPI(compressedB64, 'image/jpeg', buildExteriorPrompt(room, enh, 'low'), 'low');
+    const extRestageResult = await callStageAPI(compressedB64, 'image/jpeg', buildExteriorPrompt(room, enh, 'low'), 'low');
+    const b64 = extRestageResult.watermarked;
     room.extSelections[enhId].base64 = b64;
+    room.extSelections[enhId].cleanBase64 = extRestageResult.clean;
     room.extSelections[enhId].status = 'done';
     await resizeToMatch(room, orig, enhId, '__extdraft__', b64);
     showToast(`✓ ${enh.label} restaged.`, 'success');
@@ -3507,8 +3529,10 @@ async function stageRoomWithPrompt(roomId, promptText) {
   renderRoomQueue();
 
   try {
-    const stagedBase64 = await callStageAPI(orig.base64, orig.mimeType, promptText, 'low');
-    if (!stagedBase64) throw new Error('No image returned');
+    const groupResult = await callStageAPI(orig.base64, orig.mimeType, promptText, 'low');
+    if (!groupResult) throw new Error('No image returned');
+    const stagedBase64 = groupResult.watermarked;
+    const stagedCleanBase64 = groupResult.clean;
 
     room.stagedBase64 = stagedBase64;
     room.status = 'done';

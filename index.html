@@ -2722,44 +2722,17 @@ async function runCleanAndStage(roomId) {
       return;
     }
 
-    // Step 3: Compress decluttered image to match working payload size, then stage
+    // Step 3: Stage the cleaned image
     room.status = 'processing';
-    room.promptStatus = 'Step 3 of 3 — Preparing image for staging...';
-    renderRoomQueue();
-    
-    // Compress decluttered image in browser — GPT returns large images that
-    // cause 500 errors on background function triggers
-    const compressedCleaned = await (async (b64) => {
-      return new Promise((resolve, reject) => {
-        const img = new Image();
-        img.onload = () => {
-          const canvas = document.createElement('canvas');
-          const maxDim = 1024;
-          let w = img.width, h = img.height;
-          if (w > maxDim || h > maxDim) {
-            if (w > h) { h = Math.round(h * maxDim / w); w = maxDim; }
-            else { w = Math.round(w * maxDim / h); h = maxDim; }
-          }
-          canvas.width = w; canvas.height = h;
-          const ctx = canvas.getContext('2d');
-          ctx.drawImage(img, 0, 0, w, h);
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
-          resolve(dataUrl.split(',')[1]);
-        };
-        img.onerror = () => reject(new Error('Image compression failed'));
-        img.src = 'data:image/jpeg;base64,' + b64;
-      });
-    })(cleanedBase64);
-    
-    console.log('Clean+Stage step 3: compressed from ' + Math.round(cleanedBase64.length/1024) + 'KB to ' + Math.round(compressedCleaned.length/1024) + 'KB');
     room.promptStatus = 'Step 3 of 3 — Generating staged draft...';
     renderRoomQueue();
-    const cnsStageResult = await callStageAPI(compressedCleaned, 'image/jpeg', approvedStage, 'low');
+    console.log('Clean+Stage step 3: staging cleaned image (' + Math.round(cleanedBase64.length/1024) + 'KB)');
+    const cnsStageResult = await callStageAPI(cleanedBase64, 'image/png', approvedStage, 'low');
     if (!cnsStageResult) throw new Error('No staged image returned');
     room.stagedBase64 = cnsStageResult.watermarked;
     room.stagedCleanBase64 = cnsStageResult.clean;
     // Resize staged image to match original dimensions
-    await resizeToMatch(room, orig, null, 'stagedBase64', cleanedStagedBase64);
+    await resizeToMatch(room, orig, null, 'stagedBase64', cnsStageResult.watermarked);
     room.status = 'done';
     room.promptStatus = null;
     showToast('✓ Cleaned and staged.', 'success');

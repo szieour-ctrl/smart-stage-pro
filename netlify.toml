@@ -155,3 +155,10 @@
 
 [functions."get-user-listings"]
   timeout = 30
+
+# ── Help Agent added June 10, 2026 ───────────────────────
+[functions."help-agent"]
+  timeout = 30
+
+[functions."help-feedback"]
+  timeout = 10

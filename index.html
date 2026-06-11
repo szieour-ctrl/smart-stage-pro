@@ -4501,16 +4501,143 @@ function showLandingPage() {
     <p class="lp-hero-sub">
       Five staging modules. Permanent compliance records. QR codes on every Final image. The only platform built from the ground up for California disclosure requirements.
     </p>
-    <div class="lp-hero-ctas">
-      <button class="lp-btn-primary" onclick="document.getElementById('lp-pricing').scrollIntoView({behavior:'smooth'})">See All Plans →</button>
-    </div>
-    <div class="lp-hero-img">
-      <div class="lp-hero-placeholder">
-        <span class="lp-hero-placeholder-icon">🏠</span>
-        <span>Staged image example — replace with your best before/after</span>
+    <!-- Before/After Slider -->
+    <div class="lp-hero-img" style="padding:0;background:none;border:none;max-width:900px;width:100%;margin:0 auto;">
+      <div id="ba-slider-container">
+        <img id="ba-after" src="https://res.cloudinary.com/de18zsi7o/image/upload/q_auto/f_auto/v1781151892/FINAL_VirtuallyStaged_Great_Room_2_2_gvrjdz.jpg" alt="Virtually Staged Great Room" draggable="false" />
+        <div id="ba-before-wrap">
+          <img id="ba-before" src="https://res.cloudinary.com/de18zsi7o/image/upload/q_auto/f_auto/v1781151945/Great_Room_2_ljkd0b.jpg" alt="Empty Great Room" draggable="false" />
+        </div>
+        <div id="ba-divider">
+          <div id="ba-handle">
+            <svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
+              <circle cx="20" cy="20" r="19" fill="#1a1a1a" stroke="#c9a84c" stroke-width="1.5"/>
+              <polyline points="16,13 9,20 16,27" fill="none" stroke="#c9a84c" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+              <polyline points="24,13 31,20 24,27" fill="none" stroke="#c9a84c" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </div>
+        </div>
+        <div class="ba-label ba-label-before">BEFORE</div>
+        <div class="ba-label ba-label-after">AFTER</div>
+      </div>
+      <div id="hero-slider-caption">
+        <p class="caption-headline">See the Difference.</p>
+        <p class="caption-sub">Architecture Preserved. Furniture Added. California AB 723 Compliant.</p>
       </div>
     </div>
+
+    <!-- See All Plans — below slider -->
+    <div class="lp-hero-ctas" style="margin-top:8px;">
+      <button class="lp-btn-primary" onclick="document.getElementById('lp-pricing').scrollIntoView({behavior:'smooth'})">See All Plans →</button>
+    </div>
   </section>
+
+  <style>
+    #ba-slider-container {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      overflow: hidden;
+      border-radius: 12px;
+      border: 1px solid #2a2a2a;
+      box-shadow: 0 8px 40px rgba(0,0,0,0.6);
+      cursor: ew-resize;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    #ba-after {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+      pointer-events: none;
+    }
+    #ba-before-wrap {
+      position: absolute;
+      inset: 0;
+      width: 50%;
+      overflow: hidden;
+      pointer-events: none;
+    }
+    #ba-before {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: left center;
+      display: block;
+      pointer-events: none;
+    }
+    #ba-divider {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 50%;
+      width: 2px;
+      background: #c9a84c;
+      transform: translateX(-50%);
+      pointer-events: none;
+      z-index: 3;
+    }
+    #ba-handle {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 44px;
+      height: 44px;
+      filter: drop-shadow(0 2px 8px rgba(0,0,0,0.5));
+    }
+    #ba-handle svg { width: 44px; height: 44px; }
+    .ba-label {
+      position: absolute;
+      top: 16px;
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      pointer-events: none;
+      z-index: 4;
+    }
+    .ba-label-before {
+      left: 16px;
+      background: rgba(0,0,0,0.55);
+      color: #e0e0e0;
+      border: 1px solid rgba(255,255,255,0.15);
+    }
+    .ba-label-after {
+      right: 16px;
+      background: rgba(201,168,76,0.88);
+      color: #1a1a1a;
+      font-weight: 800;
+    }
+    #hero-slider-caption {
+      text-align: center;
+      padding: 24px 0 8px;
+    }
+    .caption-headline {
+      margin: 0 0 6px;
+      font-size: clamp(20px, 2.5vw, 28px);
+      font-weight: 700;
+      color: #f0f0f0;
+    }
+    .caption-sub {
+      margin: 0;
+      font-size: clamp(13px, 1.5vw, 15px);
+      color: #c9a84c;
+      letter-spacing: 0.04em;
+    }
+    @media (max-width: 600px) {
+      #ba-slider-container { aspect-ratio: 4 / 3; }
+    }
+  </style>
+
 
   <hr class="lp-divider" />
 
@@ -4709,6 +4836,33 @@ function showLandingPage() {
     </div>
   </footer>
   `;
+  setTimeout(initBaSlider, 0);
+}
+
+
+// ── Before/After Slider ──────────────────────────────────
+function initBaSlider() {
+  const container  = document.getElementById('ba-slider-container');
+  const beforeWrap = document.getElementById('ba-before-wrap');
+  const divider    = document.getElementById('ba-divider');
+  if (!container) return;
+  let isDragging = false;
+  function setPosition(pct) {
+    pct = Math.max(2, Math.min(98, pct));
+    beforeWrap.style.width = pct + '%';
+    divider.style.left = pct + '%';
+  }
+  function getPct(clientX) {
+    const rect = container.getBoundingClientRect();
+    return ((clientX - rect.left) / rect.width) * 100;
+  }
+  container.addEventListener('mousedown', (e) => { isDragging = true; setPosition(getPct(e.clientX)); e.preventDefault(); });
+  window.addEventListener('mousemove', (e) => { if (isDragging) setPosition(getPct(e.clientX)); });
+  window.addEventListener('mouseup', () => { isDragging = false; });
+  container.addEventListener('touchstart', (e) => { isDragging = true; setPosition(getPct(e.touches[0].clientX)); e.preventDefault(); }, { passive: false });
+  window.addEventListener('touchmove', (e) => { if (isDragging) setPosition(getPct(e.touches[0].clientX)); }, { passive: true });
+  window.addEventListener('touchend', () => { isDragging = false; });
+  setPosition(50);
 }
 
 function hideLandingPage() {

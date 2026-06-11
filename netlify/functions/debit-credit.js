@@ -103,8 +103,9 @@ exports.handler = async (event) => {
     // 4. Write debit entry to ledger
     const insertRes = await sbRequest('POST', '/rest/v1/credit_ledger', {
       user_id:       userId,
-      change_amount: -cost,
+      amount:        -cost,
       balance_after: newBalance,
+      type:          'usage',
       reason:        'generate_final',
     });
 

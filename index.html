@@ -4984,5 +4984,515 @@ async function archiveListing(listingId, address) {
 showStep('step-property');
 initAuth();
 </script>
+<!-- ============================================================
+     SMART STAGE PRO™ — HELP AGENT WIDGET
+     Inject before closing </body> tag in index.html
+     ============================================================ -->
+
+<!-- Help Agent Styles -->
+<style>
+  /* ── Launcher Button ── */
+  #help-launcher {
+    position: fixed;
+    bottom: 28px;
+    right: 28px;
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #c9a84c, #a8752e);
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 20px rgba(201, 168, 76, 0.45);
+    z-index: 9999;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+  }
+  #help-launcher:hover {
+    transform: scale(1.08);
+    box-shadow: 0 6px 28px rgba(201, 168, 76, 0.6);
+  }
+  #help-launcher svg {
+    width: 26px;
+    height: 26px;
+    fill: #fff;
+    transition: opacity 0.2s;
+  }
+  #help-launcher.open svg.icon-chat { display: none; }
+  #help-launcher.open svg.icon-close { display: block; }
+  #help-launcher svg.icon-close { display: none; }
+
+  /* ── Chat Panel ── */
+  #help-panel {
+    position: fixed;
+    bottom: 96px;
+    right: 28px;
+    width: 380px;
+    max-height: 560px;
+    background: #1a1a1a;
+    border: 1px solid #333;
+    border-radius: 16px;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 12px 48px rgba(0, 0, 0, 0.6);
+    z-index: 9998;
+    overflow: hidden;
+    transform: scale(0.92) translateY(12px);
+    opacity: 0;
+    pointer-events: none;
+    transition: transform 0.22s ease, opacity 0.22s ease;
+  }
+  #help-panel.open {
+    transform: scale(1) translateY(0);
+    opacity: 1;
+    pointer-events: all;
+  }
+
+  /* ── Panel Header ── */
+  #help-header {
+    background: linear-gradient(135deg, #1e1e1e, #2a2a2a);
+    border-bottom: 1px solid #333;
+    padding: 16px 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-shrink: 0;
+  }
+  #help-header-icon {
+    width: 36px;
+    height: 36px;
+    background: linear-gradient(135deg, #c9a84c, #a8752e);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  #help-header-icon svg {
+    width: 18px;
+    height: 18px;
+    fill: #fff;
+  }
+  #help-header-text h3 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: #f0f0f0;
+    letter-spacing: 0.02em;
+  }
+  #help-header-text p {
+    margin: 2px 0 0;
+    font-size: 11px;
+    color: #c9a84c;
+  }
+
+  /* ── Messages ── */
+  #help-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    scrollbar-width: thin;
+    scrollbar-color: #333 transparent;
+  }
+  #help-messages::-webkit-scrollbar { width: 4px; }
+  #help-messages::-webkit-scrollbar-track { background: transparent; }
+  #help-messages::-webkit-scrollbar-thumb { background: #444; border-radius: 4px; }
+
+  .help-msg {
+    display: flex;
+    flex-direction: column;
+    max-width: 88%;
+  }
+  .help-msg.user { align-self: flex-end; align-items: flex-end; }
+  .help-msg.agent { align-self: flex-start; align-items: flex-start; }
+
+  .help-msg-bubble {
+    padding: 10px 14px;
+    border-radius: 12px;
+    font-size: 13px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .help-msg.user .help-msg-bubble {
+    background: linear-gradient(135deg, #c9a84c, #a8752e);
+    color: #fff;
+    border-bottom-right-radius: 4px;
+  }
+  .help-msg.agent .help-msg-bubble {
+    background: #2a2a2a;
+    color: #e8e8e8;
+    border: 1px solid #383838;
+    border-bottom-left-radius: 4px;
+  }
+
+  /* Typing indicator */
+  .help-typing {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 10px 14px;
+    background: #2a2a2a;
+    border: 1px solid #383838;
+    border-radius: 12px;
+    border-bottom-left-radius: 4px;
+    width: fit-content;
+  }
+  .help-typing span {
+    width: 6px;
+    height: 6px;
+    background: #c9a84c;
+    border-radius: 50%;
+    animation: helpBounce 1.2s infinite;
+  }
+  .help-typing span:nth-child(2) { animation-delay: 0.2s; }
+  .help-typing span:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes helpBounce {
+    0%, 60%, 100% { transform: translateY(0); opacity: 0.5; }
+    30% { transform: translateY(-5px); opacity: 1; }
+  }
+
+  /* Feedback buttons */
+  .help-feedback {
+    display: flex;
+    gap: 6px;
+    margin-top: 4px;
+  }
+  .help-feedback button {
+    background: none;
+    border: 1px solid #383838;
+    border-radius: 6px;
+    padding: 3px 8px;
+    font-size: 12px;
+    color: #666;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .help-feedback button:hover { border-color: #c9a84c; color: #c9a84c; }
+  .help-feedback button.selected-up { border-color: #4caf50; color: #4caf50; }
+  .help-feedback button.selected-down { border-color: #f44336; color: #f44336; }
+
+  /* ── Suggested Prompts ── */
+  #help-suggestions {
+    padding: 0 16px 12px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+  .help-suggestion {
+    background: #242424;
+    border: 1px solid #383838;
+    border-radius: 20px;
+    padding: 5px 12px;
+    font-size: 11.5px;
+    color: #b0b0b0;
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+  .help-suggestion:hover {
+    border-color: #c9a84c;
+    color: #c9a84c;
+    background: #2a2a2a;
+  }
+
+  /* ── Input Row ── */
+  #help-input-row {
+    padding: 12px 16px;
+    border-top: 1px solid #2a2a2a;
+    display: flex;
+    gap: 8px;
+    align-items: flex-end;
+    flex-shrink: 0;
+  }
+  #help-input {
+    flex: 1;
+    background: #242424;
+    border: 1px solid #383838;
+    border-radius: 10px;
+    padding: 9px 12px;
+    font-size: 13px;
+    color: #e8e8e8;
+    resize: none;
+    outline: none;
+    font-family: inherit;
+    line-height: 1.4;
+    max-height: 100px;
+    overflow-y: auto;
+    transition: border-color 0.15s;
+  }
+  #help-input:focus { border-color: #c9a84c; }
+  #help-input::placeholder { color: #555; }
+
+  #help-send {
+    width: 36px;
+    height: 36px;
+    background: linear-gradient(135deg, #c9a84c, #a8752e);
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    transition: opacity 0.15s, transform 0.15s;
+  }
+  #help-send:hover { opacity: 0.9; transform: scale(1.05); }
+  #help-send:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+  #help-send svg { width: 16px; height: 16px; fill: #fff; }
+
+  /* Mobile responsive */
+  @media (max-width: 440px) {
+    #help-panel { width: calc(100vw - 32px); right: 16px; bottom: 88px; }
+    #help-launcher { right: 16px; bottom: 16px; }
+  }
+</style>
+
+<!-- Help Agent HTML -->
+<button id="help-launcher" aria-label="Open Help Agent">
+  <!-- Chat icon -->
+  <svg class="icon-chat" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+    <path d="M12 2C6.477 2 2 6.477 2 12c0 1.821.487 3.53 1.338 5L2.5 21.5l4.5-.838A9.955 9.955 0 0012 22c5.523 0 10-4.477 10-10S17.523 2 12 2zm0 18a7.946 7.946 0 01-4.073-1.114l-.29-.174-3.006.559.559-3.006-.174-.29A7.946 7.946 0 014 12c0-4.418 3.582-8 8-8s8 3.582 8 8-3.582 8-8 8zm4.5-6H7.5a.5.5 0 010-1h9a.5.5 0 010 1zm0-3H7.5a.5.5 0 010-1h9a.5.5 0 010 1z"/>
+  </svg>
+  <!-- Close icon -->
+  <svg class="icon-close" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+    <path d="M18.3 5.71a1 1 0 00-1.41 0L12 10.59 7.11 5.7A1 1 0 005.7 7.11L10.59 12 5.7 16.89a1 1 0 001.41 1.41L12 13.41l4.89 4.89a1 1 0 001.41-1.41L13.41 12l4.89-4.89a1 1 0 000-1.4z"/>
+  </svg>
+</button>
+
+<div id="help-panel" role="dialog" aria-label="Smart Stage PRO Help Agent">
+  <div id="help-header">
+    <div id="help-header-icon">
+      <svg viewBox="0 0 24 24"><path d="M12 2C6.477 2 2 6.477 2 12c0 1.821.487 3.53 1.338 5L2.5 21.5l4.5-.838A9.955 9.955 0 0012 22c5.523 0 10-4.477 10-10S17.523 2 12 2z"/></svg>
+    </div>
+    <div id="help-header-text">
+      <h3>Smart Stage PRO Help</h3>
+      <p>Ask me anything about the platform</p>
+    </div>
+  </div>
+
+  <div id="help-messages">
+    <!-- Welcome message injected by JS -->
+  </div>
+
+  <div id="help-suggestions">
+    <button class="help-suggestion" data-prompt="How do credits work?">How do credits work?</button>
+    <button class="help-suggestion" data-prompt="What is AB 723?">What is AB 723?</button>
+    <button class="help-suggestion" data-prompt="How do I use Clean & Stage?">Clean & Stage</button>
+    <button class="help-suggestion" data-prompt="How does Group Staging work?">Group Staging</button>
+    <button class="help-suggestion" data-prompt="Why does my staged image look wrong?">Troubleshooting</button>
+    <button class="help-suggestion" data-prompt="Which exterior lighting option is best for a luxury listing?">Exterior lighting</button>
+  </div>
+
+  <div id="help-input-row">
+    <textarea
+      id="help-input"
+      placeholder="Ask a question…"
+      rows="1"
+      aria-label="Help question"
+    ></textarea>
+    <button id="help-send" aria-label="Send">
+      <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+    </button>
+  </div>
+</div>
+
+<!-- Help Agent Script -->
+<script>
+(function () {
+  const launcher = document.getElementById('help-launcher');
+  const panel = document.getElementById('help-panel');
+  const messagesEl = document.getElementById('help-messages');
+  const inputEl = document.getElementById('help-input');
+  const sendBtn = document.getElementById('help-send');
+  const suggestions = document.querySelectorAll('.help-suggestion');
+  const suggestionsEl = document.getElementById('help-suggestions');
+
+  let history = [];
+  let isOpen = false;
+  let isLoading = false;
+  let welcomeShown = false;
+
+  // ── Open / Close ──
+  launcher.addEventListener('click', () => {
+    isOpen = !isOpen;
+    launcher.classList.toggle('open', isOpen);
+    panel.classList.toggle('open', isOpen);
+    if (isOpen) {
+      if (!welcomeShown) showWelcome();
+      setTimeout(() => inputEl.focus(), 250);
+    }
+  });
+
+  function showWelcome() {
+    welcomeShown = true;
+    addMessage('agent',
+      "Hi! I'm the Smart Stage PRO Help Agent.\n\nAsk me anything about staging modules, AB 723 compliance, your subscription, or how the platform works. Try one of the suggested questions below or type your own."
+    );
+  }
+
+  // ── Suggested Prompts ──
+  suggestions.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const prompt = btn.dataset.prompt;
+      sendMessage(prompt);
+      // Hide suggestions after first use
+      suggestionsEl.style.display = 'none';
+    });
+  });
+
+  // ── Input auto-resize ──
+  inputEl.addEventListener('input', () => {
+    inputEl.style.height = 'auto';
+    inputEl.style.height = Math.min(inputEl.scrollHeight, 100) + 'px';
+  });
+
+  // ── Send on Enter (Shift+Enter for newline) ──
+  inputEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      if (!isLoading) triggerSend();
+    }
+  });
+
+  sendBtn.addEventListener('click', () => {
+    if (!isLoading) triggerSend();
+  });
+
+  function triggerSend() {
+    const q = inputEl.value.trim();
+    if (!q) return;
+    inputEl.value = '';
+    inputEl.style.height = 'auto';
+    suggestionsEl.style.display = 'none';
+    sendMessage(q);
+  }
+
+  // ── Core Send ──
+  async function sendMessage(question) {
+    if (isLoading) return;
+    isLoading = true;
+    sendBtn.disabled = true;
+
+    addMessage('user', question);
+    const typingEl = addTyping();
+
+    try {
+      const res = await fetch('/.netlify/functions/help-agent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question, history }),
+      });
+
+      const data = await res.json();
+      typingEl.remove();
+
+      if (!res.ok || data.error) {
+        addMessage('agent', data.error || 'Something went wrong. Please try again.');
+      } else {
+        const msgEl = addMessage('agent', data.answer, true);
+        // Update history
+        history.push({ role: 'user', content: question });
+        history.push({ role: 'assistant', content: data.answer });
+        // Keep last 16 messages
+        if (history.length > 16) history = history.slice(-16);
+      }
+    } catch (err) {
+      typingEl.remove();
+      addMessage('agent', 'Unable to connect. Please check your connection and try again.');
+    }
+
+    isLoading = false;
+    sendBtn.disabled = false;
+    inputEl.focus();
+  }
+
+  // ── DOM Helpers ──
+  function addMessage(role, text, withFeedback = false) {
+    const wrapper = document.createElement('div');
+    wrapper.className = `help-msg ${role}`;
+
+    const bubble = document.createElement('div');
+    bubble.className = 'help-msg-bubble';
+    bubble.textContent = text;
+    wrapper.appendChild(bubble);
+
+    if (withFeedback && role === 'agent') {
+      const fb = document.createElement('div');
+      fb.className = 'help-feedback';
+
+      const upBtn = document.createElement('button');
+      upBtn.textContent = '👍';
+      upBtn.title = 'Helpful';
+
+      const downBtn = document.createElement('button');
+      downBtn.textContent = '👎';
+      downBtn.title = 'Not helpful';
+
+      // Get the question that prompted this response
+      const question = history.length >= 1 ? history[history.length - 2]?.content || '' : '';
+
+      upBtn.addEventListener('click', () => {
+        if (upBtn.classList.contains('selected-up')) return;
+        upBtn.classList.add('selected-up');
+        downBtn.disabled = true;
+        logFeedback(question, text, 'up');
+      });
+      downBtn.addEventListener('click', () => {
+        if (downBtn.classList.contains('selected-down')) return;
+        downBtn.classList.add('selected-down');
+        upBtn.disabled = true;
+        logFeedback(question, text, 'down');
+      });
+
+      fb.appendChild(upBtn);
+      fb.appendChild(downBtn);
+      wrapper.appendChild(fb);
+    }
+
+    messagesEl.appendChild(wrapper);
+    scrollToBottom();
+    return wrapper;
+  }
+
+  function addTyping() {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'help-msg agent';
+    wrapper.innerHTML = `
+      <div class="help-typing">
+        <span></span><span></span><span></span>
+      </div>`;
+    messagesEl.appendChild(wrapper);
+    scrollToBottom();
+    return wrapper;
+  }
+
+  function scrollToBottom() {
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+
+  // ── Feedback logging ──
+  async function logFeedback(question, answer, vote) {
+    try {
+      await fetch('/.netlify/functions/help-feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question, answer, vote }),
+      });
+    } catch {
+      // Feedback logging failure is silent — never interrupt the user experience
+    }
+  }
+})();
+</script>
+<!-- ============================================================
+     END HELP AGENT WIDGET
+     ============================================================ -->
+
 </body>
 </html>

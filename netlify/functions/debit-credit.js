@@ -90,8 +90,8 @@ exports.handler = async (event) => {
 
     const userRec = Array.isArray(userRes.body) ? userRes.body[0] : null;
 
-    // Hard block — subscription must be active
-    if (!userRec || userRec.subscription_status !== 'active') {
+    // Hard block — subscription must be active or trial
+    if (!userRec || !['active', 'trial'].includes(userRec.subscription_status)) {
       return {
         statusCode: 402,
         body: JSON.stringify({ error: 'No active subscription', code: 'NO_SUB' }),

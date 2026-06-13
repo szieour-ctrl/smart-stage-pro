@@ -46,18 +46,35 @@ function sbRequest(method, path, body) {
   });
 }
 
+// Credit cost by quality tier — defined server-side so client cannot manipulate
+const QUALITY_COST = { mls: 1, marketing: 2, print: 3 };
+
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: JSON.stringify({ error: 'Method not allowed' }) };
+  }
+
+  // Resolve userId from Authorization header (JWT sub claim)
+  let userId;
+  try {
+    const authHeader = event.headers['authorization'] || event.headers['Authorization'] || '';
+    const token = authHeader.replace('Bearer ', '').trim();
+    if (!token) throw new Error('No token');
+    const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString('utf8'));
+    userId = payload.sub;
+    if (!userId) throw new Error('No sub');
+  } catch {
+    return { statusCode: 401, body: JSON.stringify({ error: 'Unauthorized' }) };
   }
 
   let body;
   try { body = JSON.parse(event.body); }
   catch { return { statusCode: 400, body: JSON.stringify({ error: 'Invalid JSON' }) }; }
 
-  const { userId, cost } = body;
-  if (!userId || typeof cost !== 'number' || cost < 1) {
-    return { statusCode: 400, body: JSON.stringify({ error: 'Missing userId or cost' }) };
+  const { quality } = body;
+  const cost = QUALITY_COST[quality];
+  if (!cost) {
+    return { statusCode: 400, body: JSON.stringify({ error: 'Invalid quality value. Must be mls | marketing | print' }) };
   }
 
   try {
@@ -116,7 +133,7 @@ exports.handler = async (event) => {
 
     return {
       statusCode: 200,
-      body: JSON.stringify({ balance: newBalance, cost, charged: true }),
+      body: JSON.stringify({ balance_after: newBalance, cost, charged: true }),
     };
 
   } catch (err) {

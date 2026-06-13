@@ -29,20 +29,41 @@ function renderPage(project, projectId) {
   const createdAt     = formatDate(project.createdAt);
 
   const imagePairs = images.map((img, i) => {
-    const originalBlock = img.originalUrl
-      ? `<div class="img-panel">
-          <div class="img-label">ORIGINAL — UNALTERED</div>
-          <img src="${img.originalUrl}" alt="Original unaltered photo of ${address}" loading="lazy">
-        </div>`
-      : `<div class="img-panel img-missing"><div class="img-label">ORIGINAL — UNALTERED</div><p>Original image not available</p></div>`;
+    const hasOriginal = !!img.originalUrl;
+    const hasStaged   = !!img.stagedUrl;
 
-    const stagedBlock = img.stagedUrl
-      ? `<div class="img-panel">
-          <div class="img-label">${img.roomName ? img.roomName.toUpperCase() : "STAGED ROOM"} — VIRTUALLY STAGED</div>
+    // If both images present — render interactive slider
+    if (hasOriginal && hasStaged) {
+      return `
+    <div class="image-pair">
+      <div class="pair-header">
+        <span class="pair-num">Image Set ${i + 1}</span>
+        <span class="pair-room">${img.roomName || "Room"}</span>
+        <span class="pair-date">Staged ${formatDate(img.stagedAt)}</span>
+      </div>
+      <div class="pair-grid">
+        <div class="comp-slider" data-slider>
           <img src="${img.stagedUrl}" alt="Virtually staged photo of ${address}" loading="lazy">
-          ${img.sbsUrl ? `<a href="${img.sbsUrl}" download class="dl-link">↓ Download Side-by-Side</a>` : ""}
-        </div>`
-      : "";
+          <div class="sl-before-wrap">
+            <img src="${img.originalUrl}" alt="Original unaltered photo of ${address}" loading="lazy">
+          </div>
+          <div class="sl-divider">
+            <div class="sl-handle">
+              <svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" width="36" height="36"><circle cx="20" cy="20" r="19" fill="#1a1714" stroke="#b8975a" stroke-width="1.5"/><polyline points="15,13 8,20 15,27" fill="none" stroke="#b8975a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><polyline points="25,13 32,20 25,27" fill="none" stroke="#b8975a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+          </div>
+          <span class="comp-sl-label comp-sl-label-before">ORIGINAL</span>
+          <span class="comp-sl-label comp-sl-label-after">STAGED</span>
+        </div>
+        ${img.sbsUrl ? `<div style="padding:10px 12px;background:#f7f4ef;border-top:1px solid #e0d8ce;font-size:11px;"><a href="${img.sbsUrl}" download class="dl-link">↓ Download Side-by-Side Disclosure Document</a></div>` : ""}
+      </div>
+    </div>`;
+    }
+
+    // Fallback — only original or only staged available
+    const fallbackImg = hasOriginal
+      ? `<div style="padding:12px;"><div class="comp-sl-label-before" style="display:inline-block;margin-bottom:8px;padding:4px 10px;border-radius:20px;font-size:10px;font-weight:700;letter-spacing:0.1em;background:rgba(0,0,0,0.08);color:#7a6f63;">ORIGINAL — UNALTERED</div><img src="${img.originalUrl}" alt="Original" style="width:100%;border-radius:4px;" loading="lazy"></div>`
+      : `<div style="padding:40px;text-align:center;color:#b0a090;font-size:13px;">Original image not available</div>`;
 
     return `
     <div class="image-pair">
@@ -51,10 +72,7 @@ function renderPage(project, projectId) {
         <span class="pair-room">${img.roomName || "Room"}</span>
         <span class="pair-date">Staged ${formatDate(img.stagedAt)}</span>
       </div>
-      <div class="pair-grid">
-        ${originalBlock}
-        ${stagedBlock}
-      </div>
+      <div class="pair-grid">${fallbackImg}</div>
     </div>`;
   }).join("\n");
 
@@ -108,14 +126,18 @@ function renderPage(project, projectId) {
     .pair-num { color: #b8975a; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; }
     .pair-room { color: #fff; font-size: 13px; font-weight: 500; flex: 1; }
     .pair-date { color: #7a6f63; font-size: 11px; }
-    .pair-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0; }
-    @media (max-width: 768px) { .pair-grid { grid-template-columns: 1fr; } }
-    .img-panel { padding: 12px; }
-    .img-panel:first-child { border-right: 1px solid #e0d8ce; }
-    .img-label { font-size: 10px; font-weight: 600; letter-spacing: 0.1em; color: #7a6f63; margin-bottom: 8px; }
-    .img-panel img { width: 100%; height: auto; border-radius: 4px; display: block; }
-    .img-missing { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 200px; color: #b0a090; font-size: 13px; }
-    .dl-link { display: inline-block; margin-top: 8px; font-size: 11px; color: #1B3A5C; text-decoration: none; }
+    .pair-grid { position: relative; }
+    /* ── COMPLIANCE SLIDER ── */
+    .comp-slider { position: relative; width: 100%; aspect-ratio: 16/9; overflow: hidden; cursor: ew-resize; user-select: none; -webkit-user-select: none; background: #1a1a1a; }
+    .comp-slider img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
+    .comp-slider .sl-before-wrap { position: absolute; inset: 0; width: 50%; overflow: hidden; pointer-events: none; }
+    .comp-slider .sl-before-wrap img { width: 100%; height: 100%; object-fit: cover; object-position: left center; position: absolute; top: 0; left: 0; }
+    .comp-slider .sl-divider { position: absolute; top: 0; bottom: 0; left: 50%; width: 2px; background: #b8975a; transform: translateX(-50%); pointer-events: none; z-index: 3; }
+    .comp-slider .sl-handle { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); width: 36px; height: 36px; filter: drop-shadow(0 2px 8px rgba(0,0,0,0.6)); }
+    .comp-sl-label { position: absolute; top: 12px; padding: 4px 10px; border-radius: 20px; font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; pointer-events: none; z-index: 4; }
+    .comp-sl-label-before { left: 12px; background: rgba(0,0,0,0.6); color: #e0e0e0; border: 1px solid rgba(255,255,255,0.15); }
+    .comp-sl-label-after { right: 12px; background: rgba(184,151,90,0.92); color: #1a1a1a; font-weight: 800; }
+    .dl-link { display: inline-block; margin-top: 8px; font-size: 11px; color: #1B3A5C; text-decoration: none; padding: 0 12px; }
     .dl-link:hover { text-decoration: underline; }
     .no-images { text-align: center; padding: 60px 24px; color: #7a6f63; font-size: 14px; }
 
@@ -207,6 +229,36 @@ function renderPage(project, projectId) {
   </div>
 </footer>
 
+<script>
+(function() {
+  function initSliders() {
+    document.querySelectorAll('[data-slider]').forEach(function(container) {
+      var beforeWrap = container.querySelector('.sl-before-wrap');
+      var divider    = container.querySelector('.sl-divider');
+      if (!beforeWrap || !divider) return;
+      var dragging = false;
+      function setPos(pct) {
+        pct = Math.max(2, Math.min(98, pct));
+        beforeWrap.style.width = pct + '%';
+        divider.style.left = pct + '%';
+      }
+      function getPct(clientX) {
+        var rect = container.getBoundingClientRect();
+        return ((clientX - rect.left) / rect.width) * 100;
+      }
+      container.addEventListener('mousedown', function(e) { dragging = true; setPos(getPct(e.clientX)); e.preventDefault(); });
+      window.addEventListener('mousemove', function(e) { if (dragging) setPos(getPct(e.clientX)); });
+      window.addEventListener('mouseup', function() { dragging = false; });
+      container.addEventListener('touchstart', function(e) { dragging = true; setPos(getPct(e.touches[0].clientX)); e.preventDefault(); }, { passive: false });
+      window.addEventListener('touchmove', function(e) { if (dragging) setPos(getPct(e.touches[0].clientX)); }, { passive: true });
+      window.addEventListener('touchend', function() { dragging = false; });
+      setPos(50);
+    });
+  }
+  if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', initSliders); }
+  else { initSliders(); }
+})();
+</script>
 </body>
 </html>`;
 }

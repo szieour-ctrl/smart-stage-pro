@@ -2453,6 +2453,49 @@ async function generateFinal(roomId,enhId){
   // Map to scale factor: mls=4x, marketing=6x, print=8x
   const scaleMap = { mls: 4, marketing: 6, print: 8 };
   const scaleFactor = scaleMap[qualityChoice] || 4;
+  // Credit cost: mls=1, marketing=2, print=3
+  const creditCostMap = { mls: 1, marketing: 2, print: 3 };
+  const creditCost = creditCostMap[qualityChoice] || 1;
+
+  // ── DEBIT CREDITS BEFORE UPSCALE ─────────────────────────────────────────
+  // Gate here — if no credits or no active sub, block before any work is done
+  try {
+    const sb = getSupabase();
+    const { data: { session } } = await sb.auth.getSession();
+    const token = session?.access_token;
+    if (!token) {
+      showToast('Session expired — please sign in again.', 'error');
+      return;
+    }
+    const debitRes = await fetch('/.netlify/functions/debit-credit', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + token,
+      },
+      body: JSON.stringify({ quality: qualityChoice })
+    });
+    const debitData = await debitRes.json();
+    if (!debitRes.ok) {
+      if (debitData.code === 'NO_CREDITS') {
+        showOverageModal(debitData.balance ?? 0, creditCost);
+      } else if (debitData.code === 'NO_SUB') {
+        showToast('No active subscription — please subscribe to generate finals.', 'error');
+      } else {
+        showToast('Credit check failed: ' + (debitData.error || 'unknown error'), 'error');
+      }
+      return;
+    }
+    // Update header badge immediately with new balance
+    const creditBadge = document.getElementById('header-credit-badge');
+    if (creditBadge && typeof debitData.balance_after === 'number') {
+      creditBadge.textContent = `${debitData.balance_after} images remaining`;
+      creditBadge.classList.remove('hidden');
+    }
+  } catch (debitErr) {
+    showToast('Could not verify credits — please try again.', 'error');
+    return;
+  }
 
   if(enhId){room.extSelections[enhId].finalStatus='generating';}
   else{room.finalStatus='generating';}

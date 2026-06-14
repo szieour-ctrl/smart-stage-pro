@@ -3,6 +3,8 @@
 // Returns editable prompt to frontend for user modification
 
 const https = require("https");
+const sharp = require("sharp");
+
 
 function httpsRequest(options, body) {
   return new Promise((resolve, reject) => {
@@ -19,6 +21,24 @@ function httpsRequest(options, body) {
     if (body) req.write(body);
     req.end();
   });
+}
+
+// Compress image before sending to Haiku — mobile photos can be 3-5MB
+// Haiku only needs to READ the room, not reproduce it — 768px is plenty
+async function prepareImage(imageBase64, mimeType) {
+  const buffer = Buffer.from(imageBase64, 'base64');
+  const meta = await sharp(buffer).metadata();
+  const sizeKB = Math.round(buffer.length / 1024);
+  const maxDim = Math.max(meta.width || 0, meta.height || 0);
+  if (maxDim <= 768 && sizeKB <= 80) return { base64: imageBase64, mimeType };
+  const compressed = await sharp(buffer)
+    .rotate()
+    .flatten({ background: { r: 255, g: 255, b: 255 } })
+    .resize(768, 768, { fit: 'inside', withoutEnlargement: true })
+    .jpeg({ quality: 82 })
+    .toBuffer();
+  console.log('prepareImage: ' + meta.width + 'x' + meta.height + ' ' + sizeKB + 'KB → ' + Math.round(compressed.length/1024) + 'KB');
+  return { base64: compressed.toString('base64'), mimeType: 'image/jpeg' };
 }
 
 function detectMime(base64) {
@@ -237,10 +257,13 @@ exports.handler = async (event) => {
   };
 
   try {
-    const { imageBase64, mimeType, roomType, designStyle, colorPalette } = JSON.parse(event.body);
+    const { imageBase64: rawBase64, mimeType, roomType, designStyle, colorPalette } = JSON.parse(event.body);
     const claudeKey = process.env.ANTHROPIC_API_KEY;
 
-    if (!imageBase64) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing imageBase64" }) };
+    if (!rawBase64) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing imageBase64" }) };
+
+    // Compress before Haiku — mobile iPhone photos are 3-5MB
+    const { base64: imageBase64 } = await prepareImage(rawBase64, mimeType);
     if (!roomType) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing roomType" }) };
     if (!claudeKey) return { statusCode: 500, headers, body: JSON.stringify({ error: "ANTHROPIC_API_KEY not configured" }) };
 

@@ -86,8 +86,53 @@ AB 723 COMPLIANCE: Virtual staging adds furniture only. Any alteration to perman
 `;
 
 // ✅ HAIKU READS SINGLE VACANT ROOM — Returns anchors, zones, boundaries
+// For open plan rooms (roomType contains '+'), reads per-zone fixtures
 async function readVacantRoom({ imageBase64, roomType, claudeKey }) {
-  const prompt = `You are reading a single vacant room for MLS virtual staging.
+  const isOpenPlan = roomType.includes('+');
+
+  // Build zone list for open plan reads
+  const zoneList = isOpenPlan
+    ? roomType.split('+').map(z => z.trim()).filter(Boolean)
+    : null;
+
+  const prompt = isOpenPlan ? `You are reading a single open-plan space for MLS virtual staging.
+
+Room Type: ${roomType}
+Zones visible: ${zoneList.join(', ')}
+
+TASK: Read this open-plan space and identify EACH ZONE separately with its own fixtures and anchors.
+
+CRITICAL: Every ceiling fixture must be assigned to the correct zone based on its position in the image. A chandelier over a dining area is a DINING anchor. Pendant lights over an island are a KITCHEN anchor. A ceiling fan over a living area is a LIVING anchor.
+
+Return ONLY valid JSON — no markdown, no preamble:
+
+{
+  "roomType": "${roomType}",
+  "preserveList": "Comprehensive list of every permanent architectural element visible: walls, ceiling, flooring material/color, windows with frame color, doors, built-ins, appliances, fixtures, finishes. DO NOT alter any permanent architectural element.",
+  "zones": [
+    ${zoneList.map(zone => `{
+      "name": "${zone}",
+      "ceilingFixture": "Ceiling fixture directly above this zone — specify type, finish, style, and exact position. If none, say NONE.",
+      "focalPoint": "Primary anchor for furniture placement in this zone (fireplace, island, window, chandelier position)",
+      "stagingInstruction": "Specific furniture to place in this zone based on its ceiling fixture and focal point",
+      "keepVacant": false
+    }`).join(',\n    ')}
+  ],
+  "zoneBoundary": {
+    "front": "Front boundary description",
+    "back": "Back boundary description",
+    "left": "Left boundary description",
+    "right": "Right boundary description",
+    "shape": "rectangular or other"
+  },
+  "adjacentVisibleZones": [
+    {
+      "zone": "zone name",
+      "visible": "HOW visible (through opening, window, doorway)",
+      "staging": "KEEP VACANT - do not stage this zone"
+    }
+  ]
+}` : `You are reading a single vacant room for MLS virtual staging.
 
 Room Type: ${roomType}
 
@@ -121,6 +166,38 @@ Return ONLY valid JSON — no markdown, no preamble:
     }
   ]
 }`;
+
+  const payload = JSON.stringify({
+    model: "claude-haiku-4-5",
+    max_tokens: 2000,
+    messages: [{
+      role: "user",
+      content: [
+        { type: "image", source: { type: "base64", media_type: detectMime(imageBase64), data: imageBase64 } },
+        { type: "text", text: prompt }
+      ]
+    }]
+  });
+
+  const result = await httpsRequest({
+    hostname: "api.anthropic.com",
+    path: "/v1/messages",
+    method: "POST",
+    headers: {
+      "x-api-key": claudeKey,
+      "anthropic-version": "2023-06-01",
+      "content-type": "application/json",
+      "content-length": Buffer.byteLength(payload)
+    }
+  }, payload);
+
+  if (result.status !== 200) throw new Error("Haiku vacant read failed: " + (result.body?.error?.message || result.status));
+
+  const text = result.body?.content?.[0]?.text?.trim() || "{}";
+  const clean = text.replace(/```json|```/g, "").trim();
+  try { return JSON.parse(clean); }
+  catch(e) { throw new Error("Vacant room JSON parse failed"); }
+}
 
   const payload = JSON.stringify({
     model: "claude-haiku-4-5",
@@ -160,6 +237,7 @@ function buildVacantPrompt({ roomData, designStyle, colorPalette }) {
   const style = STYLE_LABELS[rawStyle?.toLowerCase().replace(/[^a-z]/g, '')] || rawStyle;
   const palette = colorPalette || 'Warm Neutrals';
   const paletteTones = PALETTE_TONES[palette] || (palette + ' tones');
+  const isOpenPlan = Array.isArray(roomData.zones) && roomData.zones.length > 0;
 
   let p = AB723_HEADER;
 
@@ -177,14 +255,60 @@ function buildVacantPrompt({ roomData, designStyle, colorPalette }) {
   p += `Right: ${roomData.zoneBoundary.right}\n`;
   p += `Shape: ${roomData.zoneBoundary.shape}\n\n`;
 
-  // Anchors
-  p += `ANCHORS (use these to place furniture):\n`;
-  p += `Focal Wall: ${roomData.anchors.focal}\n`;
-  if (roomData.anchors.ceiling) p += `Ceiling: ${roomData.anchors.ceiling}\n`;
-  p += `Back Wall: ${roomData.anchors.backWall}\n`;
-  p += `Left Boundary: ${roomData.anchors.leftBoundary}\n`;
-  p += `Right Boundary: ${roomData.anchors.rightBoundary}\n`;
-  p += `Front Boundary: ${roomData.anchors.frontBoundary}\n\n`;
+  if (isOpenPlan) {
+    // ── OPEN PLAN: per-zone anchor instructions ──────────────────────────────
+    p += `ZONE-BY-ZONE STAGING INSTRUCTIONS:\n`;
+    roomData.zones.forEach(zone => {
+      if (zone.keepVacant) {
+        p += `\n${zone.name.toUpperCase()} ZONE — KEEP VACANT. Do not add any furniture.\n`;
+        return;
+      }
+      p += `\n${zone.name.toUpperCase()} ZONE:\n`;
+      if (zone.ceilingFixture && zone.ceilingFixture !== 'NONE') {
+        p += `Ceiling fixture: ${zone.ceilingFixture} — use this as the anchor for furniture placement in this zone\n`;
+      }
+      p += `Focal point: ${zone.focalPoint}\n`;
+      p += `Staging: ${zone.stagingInstruction}\n`;
+    });
+    p += `\n`;
+  } else {
+    // ── SINGLE ROOM: original anchor block ───────────────────────────────────
+    p += `ANCHORS (use these to place furniture):\n`;
+    p += `Focal Wall: ${roomData.anchors.focal}\n`;
+    if (roomData.anchors.ceiling) p += `Ceiling: ${roomData.anchors.ceiling}\n`;
+    p += `Back Wall: ${roomData.anchors.backWall}\n`;
+    p += `Left Boundary: ${roomData.anchors.leftBoundary}\n`;
+    p += `Right Boundary: ${roomData.anchors.rightBoundary}\n`;
+    p += `Front Boundary: ${roomData.anchors.frontBoundary}\n\n`;
+
+    // Room-specific staging instructions (single room only)
+    if (roomData.roomType.toLowerCase().includes('kitchen')) {
+      p += `KITCHEN STAGING:\n`;
+      p += `Place counter stools below pendant lights (if island present)\n`;
+      p += `Place bowl of fruit or small plant on island/counter\n`;
+      p += `Keep backsplash and cabinetry exactly as shown\n`;
+      p += `Do not extend beyond left/right boundaries\n`;
+      p += `Do not stage into dining area visible through opening\n\n`;
+    } else if (roomData.roomType.toLowerCase().includes('living') || roomData.roomType.toLowerCase().includes('great room')) {
+      p += `LIVING ROOM STAGING:\n`;
+      p += `Place area rug centered under ceiling fixture, extending from ${roomData.anchors.frontBoundary} to 18 inches in front of ${roomData.anchors.backWall}\n`;
+      p += `Place sofa with back against ${roomData.anchors.backWall}, centered on rug, facing ${roomData.anchors.focal}\n`;
+      p += `Place two accent chairs on rug angled inward toward focal point\n`;
+      p += `Place coffee table centered on rug between sofa and focal point\n`;
+      p += `Place console against right wall (${roomData.anchors.rightBoundary})\n`;
+      p += `Place plant right of focal point\n`;
+      p += `Place art piece above focal point\n`;
+      p += `Place arc floor lamp behind left accent chair\n`;
+      p += `Keep all furniture within zone boundary (do not extend past ${roomData.anchors.leftBoundary} or ${roomData.anchors.rightBoundary})\n\n`;
+    } else if (roomData.roomType.toLowerCase().includes('bedroom')) {
+      p += `BEDROOM STAGING:\n`;
+      p += `Place bed headboard against ${roomData.anchors.backWall}, centered\n`;
+      p += `Place matching nightstands flanking bed\n`;
+      p += `Place dresser on opposite wall (${roomData.anchors.focal})\n`;
+      p += `Place bench at foot of bed\n`;
+      p += `Keep all furniture within zone boundary\n\n`;
+    }
+  }
 
   // Design style
   p += `Stage in ${style} design style using a ${palette} palette with ${paletteTones} throughout.\n\n`;
@@ -198,38 +322,15 @@ function buildVacantPrompt({ roomData, designStyle, colorPalette }) {
     p += `\n`;
   }
 
-  // Room-specific staging instructions
-  if (roomData.roomType.toLowerCase().includes('kitchen')) {
-    p += `KITCHEN STAGING:\n`;
-    p += `Place counter stools below pendant lights (if island present)\n`;
-    p += `Place bowl of fruit or small plant on island/counter\n`;
-    p += `Keep backsplash and cabinetry exactly as shown\n`;
-    p += `Do not extend beyond left/right boundaries\n`;
-    p += `Do not stage into dining area visible through opening\n\n`;
-  } else if (roomData.roomType.toLowerCase().includes('living') || roomData.roomType.toLowerCase().includes('great room')) {
-    p += `LIVING ROOM STAGING:\n`;
-    p += `Place area rug centered under ceiling fixture, extending from ${roomData.anchors.frontBoundary} to 18 inches in front of ${roomData.anchors.backWall}\n`;
-    p += `Place sofa with back against ${roomData.anchors.backWall}, centered on rug, facing ${roomData.anchors.focal}\n`;
-    p += `Place two accent chairs on rug angled inward toward focal point\n`;
-    p += `Place coffee table centered on rug between sofa and focal point\n`;
-    p += `Place console against right wall (${roomData.anchors.rightBoundary})\n`;
-    p += `Place plant right of focal point\n`;
-    p += `Place art piece above focal point\n`;
-    p += `Place arc floor lamp behind left accent chair\n`;
-    p += `Keep all furniture within zone boundary (do not extend past ${roomData.anchors.leftBoundary} or ${roomData.anchors.rightBoundary})\n\n`;
-  } else if (roomData.roomType.toLowerCase().includes('bedroom')) {
-    p += `BEDROOM STAGING:\n`;
-    p += `Place bed headboard against ${roomData.anchors.backWall}, centered\n`;
-    p += `Place matching nightstands flanking bed\n`;
-    p += `Place dresser on opposite wall (${roomData.anchors.focal})\n`;
-    p += `Place bench at foot of bed\n`;
-    p += `Keep all furniture within zone boundary\n\n`;
-  }
-
   // Critical rules
   p += `DO NOT stage beyond zone boundary:\n`;
-  p += `— Do not extend furniture past left boundary (${roomData.anchors.leftBoundary})\n`;
-  p += `— Do not extend furniture past right boundary (${roomData.anchors.rightBoundary})\n`;
+  if (isOpenPlan) {
+    p += `— Do not extend furniture past left boundary (${roomData.zoneBoundary.left})\n`;
+    p += `— Do not extend furniture past right boundary (${roomData.zoneBoundary.right})\n`;
+  } else {
+    p += `— Do not extend furniture past left boundary (${roomData.anchors.leftBoundary})\n`;
+    p += `— Do not extend furniture past right boundary (${roomData.anchors.rightBoundary})\n`;
+  }
   p += `— Do not stage adjacent zones (keep vacant)\n`;
   p += `— Do not alter architectural elements\n`;
   p += `— Do not remove or modify permanent fixtures\n`;

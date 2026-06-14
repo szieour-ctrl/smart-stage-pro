@@ -79,7 +79,9 @@ const AB723_HEADER = `PRIMARY ROLE: Stage furniture and decor ONLY.
 
 IMMUTABLE LOCK: Never alter, move, remove, replace, or touch: structural walls | ceilings | kitchen/bathroom cabinets | countertops | lighting fixtures. These must be preserved exactly as photographed.
 
-AB 723 COMPLIANCE: Virtual staging adds furniture only. Any alteration to permanent architecture makes the listing non-compliant and subject to MLS removal.
+ABSOLUTE PROHIBITION: Never ADD architectural elements that do not exist in the original photo. Do NOT add: built-in shelving | niches | alcoves | recessed shelves | bookcases built into walls | fireplace surrounds | wall openings | cabinetry | any structural element. If it is not visible in the original photograph, it cannot appear in the staged image.
+
+AB 723 COMPLIANCE: Virtual staging adds furniture only. Any alteration to permanent architecture — including ADDING elements not present — makes the listing non-compliant and subject to MLS removal.
 
 ═══════════════════════════════════════════════════════════════════════════════
 
@@ -314,6 +316,7 @@ function buildVacantPrompt({ roomData, designStyle, colorPalette }) {
   p += `Maintain realistic furniture scale proportional to the room.\n`;
   p += `Do not scale furniture up to fill the frame.\n`;
   p += `Preserve all architectural features, room dimensions, and camera perspective exactly as photographed.\n`;
+  p += `Do NOT add built-in shelving, niches, alcoves, or any architectural element not visible in the original photo.\n`;
   p += `This image is for MLS listing per California AB 723 §10140.6.\n`;
   p += `Room proportions must be preserved exactly.\n`;
   p += `Virtual staging adds furniture and decor only — any alteration to architecture or spatial geometry is prohibited.`;

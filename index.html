@@ -4113,7 +4113,9 @@ async function acceptTos() {
       body: JSON.stringify({ userId: _currentUser?.id }),
     });
     // Proceed regardless — if DB write fails, terms_accepted_at may already be set via SQL
+    // Brief pause to allow DB trigger to seed free trial credits
     document.getElementById('tos-modal')?.remove();
+    await new Promise(resolve => setTimeout(resolve, 800));
     await handleAuthenticatedUser(_currentUser);
   } catch (err) {
     if (btn) { btn.textContent = 'Accept & Continue →'; btn.disabled = false; checkTosReady(); }

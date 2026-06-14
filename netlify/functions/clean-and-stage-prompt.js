@@ -223,13 +223,7 @@ Return ONLY valid JSON — no markdown, no preamble:
   "roomType": "${roomType}",
   "preserveList": "Comprehensive list of every permanent architectural element visible. DO NOT alter any permanent architectural element.",
   "zones": [
-    ${zoneList.map(zone => `{
-      "name": "${zone}",
-      "ceilingFixture": "Ceiling fixture directly above this zone — specify type, finish, style, and exact position. If none, say NONE.",
-      "focalPoint": "Primary anchor for furniture placement in this zone",
-      "stagingInstruction": "Specific furniture to place in this zone based on its ceiling fixture and focal point",
-      "keepVacant": false
-    }`).join(',\n    ')}
+    ${zoneList.map(zone => '{\n      "name": "' + zone + '",\n      "ceilingFixture": "Ceiling fixture directly above this zone — specify type, finish, style, and exact position. If none, say NONE.",\n      "focalPoint": "Primary anchor for furniture placement in this zone",\n      "stagingInstruction": "Specific furniture to place in this zone based on its ceiling fixture and focal point",\n      "keepVacant": false\n    }').join(',\n    ')}
   ],
   "zoneBoundary": {
     "front": "Front boundary description",

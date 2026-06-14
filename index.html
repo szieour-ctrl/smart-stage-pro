@@ -3820,9 +3820,24 @@ async function handleAuthenticatedUser(user) {
     return;
   }
 
-  // Check subscription status — must be explicitly active
+  // Check subscription status — must be explicitly active OR have free trial credits
   const status = userRec.subscription_status;
   if (status !== 'active') {
+    // Check if user has free trial credits
+    const sb = getSupabase();
+    const { data: trialCredits } = await sb
+      .from('credit_ledger')
+      .select('balance_after')
+      .eq('user_id', user.id)
+      .eq('reason', 'free_trial')
+      .order('created_at', { ascending: false })
+      .limit(1);
+    const trialBalance = trialCredits?.[0]?.balance_after ?? 0;
+    if (trialBalance > 0) {
+      // Free trial user with remaining images — allow into app
+      await showMainApp(user, userRec);
+      return;
+    }
     // If user came from a pricing page subscribe click, go straight to checkout
     if (_pendingCheckoutPlan) {
       const plan = _pendingCheckoutPlan;
@@ -4518,9 +4533,15 @@ function showLandingPage() {
     .lp-compliance-text strong { color: var(--ink); display: block; margin-bottom: 2px; font-weight: 600; }
     .lp-pricing-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-      gap: 20px;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
       margin-top: 48px;
+    }
+    @media (max-width: 1024px) {
+      .lp-pricing-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+    @media (max-width: 600px) {
+      .lp-pricing-grid { grid-template-columns: 1fr; }
     }
     .lp-plan {
       border: 1px solid var(--border);

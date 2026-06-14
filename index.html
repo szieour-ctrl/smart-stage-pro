@@ -3829,7 +3829,7 @@ async function handleAuthenticatedUser(user) {
       .from('credit_ledger')
       .select('balance_after')
       .eq('user_id', user.id)
-      .eq('reason', 'free_trial')
+      .eq('reason', 'signup_trial')
       .order('created_at', { ascending: false })
       .limit(1);
     const trialBalance = trialCredits?.[0]?.balance_after ?? 0;

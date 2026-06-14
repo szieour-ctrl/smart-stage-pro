@@ -1005,61 +1005,22 @@ uploadZone.addEventListener('dragover',e=>{e.preventDefault();uploadZone.classLi
 uploadZone.addEventListener('dragleave',()=>uploadZone.classList.remove('drag-over'));
 uploadZone.addEventListener('drop',e=>{e.preventDefault();uploadZone.classList.remove('drag-over');handleFiles([...e.dataTransfer.files]);});
 fileInput.addEventListener('change',()=>handleFiles([...fileInput.files]));
-// Client-side image compression — runs at upload time before storing in SESSION
-// Keeps all downstream function payloads under mobile-safe limits
-// Target: max 1024px longest side, max 300KB — Haiku reads fine at this size
-function compressImage(file) {
-  return new Promise((resolve) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const img = new Image();
-      img.onload = () => {
-        const MAX_DIM = 1024;
-        const MAX_KB  = 300;
-        let { width, height } = img;
-        // Only resize if needed
-        if (Math.max(width, height) > MAX_DIM) {
-          const scale = MAX_DIM / Math.max(width, height);
-          width  = Math.round(width  * scale);
-          height = Math.round(height * scale);
-        }
-        const canvas = document.createElement('canvas');
-        canvas.width  = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, width, height);
-        ctx.drawImage(img, 0, 0, width, height);
-        // Start at quality 0.88, drop if still over MAX_KB
-        let quality = 0.88;
-        let dataUrl  = canvas.toDataURL('image/jpeg', quality);
-        while (dataUrl.length / 1024 * 0.75 > MAX_KB && quality > 0.5) {
-          quality -= 0.08;
-          dataUrl = canvas.toDataURL('image/jpeg', quality);
-        }
-        const base64 = dataUrl.split(',')[1];
-        console.log('compressImage: ' + img.naturalWidth + 'x' + img.naturalHeight + ' → ' + width + 'x' + height + ' ' + Math.round(base64.length * 0.75 / 1024) + 'KB q=' + quality.toFixed(2));
-        resolve({ base64, mimeType: 'image/jpeg', dataUrl });
-      };
-      img.src = e.target.result;
-    };
-    reader.readAsDataURL(file);
-  });
-}
-
 function handleFiles(files){
   const imgs=files.filter(f=>f.type.startsWith('image/'));
   if(!imgs.length){showToast('No image files found.','error');return;}
-  imgs.forEach(async file=>{
-    // Compress client-side before storing — keeps all function payloads mobile-safe
-    const { base64, mimeType, dataUrl } = await compressImage(file);
-    const id='orig_'+Date.now()+'_'+Math.random().toString(36).slice(2,6);
-    const origObj={id,name:file.name,base64,mimeType,dataUrl,isFloorplan:false,originalUrl:null,ab723Status:'pending'};
-    SESSION.originals.push(origObj);
-    renderThumb(SESSION.originals[SESSION.originals.length-1]);
-    updateUploadUI();
-    // AB 723 §10140.8 — upload original to Cloudinary for permanent public URL
-    uploadOriginalForCompliance(origObj);
+  imgs.forEach(file=>{
+    const reader=new FileReader();
+    reader.onload=e=>{
+      const dataUrl=e.target.result,base64=dataUrl.split(',')[1];
+      const id='orig_'+Date.now()+'_'+Math.random().toString(36).slice(2,6);
+      const origObj={id,name:file.name,base64,mimeType:file.type,dataUrl,isFloorplan:false,originalUrl:null,ab723Status:'pending'};
+      SESSION.originals.push(origObj);
+      renderThumb(SESSION.originals[SESSION.originals.length-1]);
+      updateUploadUI();
+      // AB 723 §10140.8 — upload original to Cloudinary for permanent public URL
+      uploadOriginalForCompliance(origObj);
+    };
+    reader.readAsDataURL(file);
   });
 }
 
@@ -2492,48 +2453,32 @@ async function generateFinal(roomId,enhId){
   // Map to scale factor: mls=4x, marketing=6x, print=8x
   const scaleMap = { mls: 4, marketing: 6, print: 8 };
   const scaleFactor = scaleMap[qualityChoice] || 4;
-  // Credit cost: mls=1, marketing=2, print=3
-  const creditCostMap = { mls: 1, marketing: 2, print: 3 };
-  const creditCost = creditCostMap[qualityChoice] || 1;
 
-  // ── DEBIT CREDITS BEFORE UPSCALE ─────────────────────────────────────────
-  // Gate here — if no credits or no active sub, block before any work is done
-  try {
-    const sb = getSupabase();
-    const { data: { session } } = await sb.auth.getSession();
-    const token = session?.access_token;
-    if (!token) {
-      showToast('Session expired — please sign in again.', 'error');
-      return;
-    }
+  // ── CREDIT GATE — debit before upscale fires ─────────────────────────────
+  const creditCost = { mls: 1, marketing: 2, print: 3 }[qualityChoice] || 1;
+  const _sbUser = (await getSupabase().auth.getUser()).data?.user;
+  if (_sbUser) {
     const debitRes = await fetch('/.netlify/functions/debit-credit', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + token,
-      },
-      body: JSON.stringify({ quality: qualityChoice })
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: _sbUser.id, cost: creditCost }),
     });
     const debitData = await debitRes.json();
     if (!debitRes.ok) {
       if (debitData.code === 'NO_CREDITS') {
         showOverageModal(debitData.balance ?? 0, creditCost);
-      } else if (debitData.code === 'NO_SUB') {
-        showToast('No active subscription — please subscribe to generate finals.', 'error');
-      } else {
-        showToast('Credit check failed: ' + (debitData.error || 'unknown error'), 'error');
+        return;
       }
+      if (debitData.code === 'NO_SUB') {
+        showToast('No active subscription — please subscribe to continue.', 'error');
+        return;
+      }
+      showToast('Credit check failed — please try again.', 'error');
       return;
     }
-    // Update header badge immediately with new balance
-    const creditBadge = document.getElementById('header-credit-badge');
-    if (creditBadge && typeof debitData.balance_after === 'number') {
-      creditBadge.textContent = `${debitData.balance_after} images remaining`;
-      creditBadge.classList.remove('hidden');
-    }
-  } catch (debitErr) {
-    showToast('Could not verify credits — please try again.', 'error');
-    return;
+    // Update header badge immediately
+    const _badge = document.getElementById('header-credit-badge');
+    if (_badge) { _badge.textContent = `${debitData.balance} images remaining`; _badge.classList.remove('hidden'); }
   }
 
   if(enhId){room.extSelections[enhId].finalStatus='generating';}
@@ -3754,6 +3699,39 @@ function resetSession(){
   resetPropertySearch();
 }
 function showToast(msg,type=''){const t=document.getElementById('toast');t.textContent=msg;t.className='show '+(type||'');setTimeout(()=>{t.className='';},4000);}
+
+function showOverageModal(balance, cost) {
+  // Remove any existing modal
+  document.getElementById('overage-modal')?.remove();
+  const m = document.createElement('div');
+  m.id = 'overage-modal';
+  m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.72);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;';
+  m.innerHTML = `
+    <div style="background:#1a1a1a;border:1px solid #c9a84c;border-radius:6px;padding:36px 32px;max-width:440px;width:100%;text-align:center;">
+      <div style="font-size:2rem;margin-bottom:12px;">⚡</div>
+      <div style="font-family:'Cormorant Garamond',serif;font-size:1.45rem;color:#f0f0f0;margin-bottom:8px;">Image Balance Empty</div>
+      <div style="color:#aaa;font-size:0.88rem;margin-bottom:24px;line-height:1.6;">
+        You have <strong style="color:#f0f0f0;">${balance} images</strong> remaining but this Final costs <strong style="color:#f0f0f0;">${cost} image${cost>1?'s':''}</strong>.<br>
+        Upgrade your plan or purchase overage images to continue.
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px;">
+        <button onclick="document.getElementById('overage-modal').remove();document.getElementById('lp-pricing')?.scrollIntoView({behavior:'smooth'});"
+          style="background:linear-gradient(135deg,#c9a84c,#b8963e);color:#1a1a1a;border:none;border-radius:3px;padding:12px 24px;font-weight:700;font-size:0.9rem;cursor:pointer;letter-spacing:0.04em;">
+          Upgrade Plan →
+        </button>
+        <button onclick="document.getElementById('overage-modal').remove();"
+          style="background:transparent;color:#888;border:1px solid #333;border-radius:3px;padding:10px 24px;font-size:0.85rem;cursor:pointer;">
+          Cancel
+        </button>
+      </div>
+      <div style="margin-top:20px;font-size:0.72rem;color:#666;line-height:1.5;">
+        Overage packs: Solo +20 images $25 · Team +50 images $45 · Brokerage +100 images $75<br>
+        Contact <a href="mailto:support@smartstagepro.com" style="color:#c9a84c;">support@smartstagepro.com</a> to add images.
+      </div>
+    </div>`;
+  document.body.appendChild(m);
+  m.addEventListener('click', (e) => { if (e.target === m) m.remove(); });
+}
 function esc(s){return(s||'').replace(/'/g,"&#39;").replace(/"/g,"&quot;");}
 
 // ── Generate Final label updater ─────────────────────────────────────────────
@@ -3842,9 +3820,9 @@ async function handleAuthenticatedUser(user) {
     return;
   }
 
-  // Check subscription status — active or trial both get tool access
+  // Check subscription status — must be explicitly active
   const status = userRec.subscription_status;
-  if (status !== 'active' && status !== 'trial') {
+  if (status !== 'active') {
     // If user came from a pricing page subscribe click, go straight to checkout
     if (_pendingCheckoutPlan) {
       const plan = _pendingCheckoutPlan;
@@ -3884,11 +3862,10 @@ async function updateHeaderForUser(user, userRec) {
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
       .limit(1);
-    const balance = ledger?.[0]?.balance_after ?? null;
-    if (balance !== null) {
-      creditBadge.textContent = `${balance} images remaining`;
-      creditBadge.classList.remove('hidden');
-    }
+    const TIER_DEFAULT = { individual_agent: 50, team_member: 125, team_lead: 125, broker_admin: 400 };
+    const balance = ledger?.[0]?.balance_after ?? TIER_DEFAULT[userRec?.role] ?? 50;
+    creditBadge.textContent = `${balance} images remaining`;
+    creditBadge.classList.remove('hidden');
   }
 }
 
@@ -4981,9 +4958,28 @@ function showLandingPage() {
     <div style="font-size:0.85rem;color:var(--muted);margin-top:-32px;margin-bottom:0;">All plans include AB 723 compliance · Stripe secure billing · Cancel anytime</div>
     <div class="lp-pricing-grid">
 
+      <!-- FREE TRIAL -->
+      <div class="lp-plan" style="background:linear-gradient(135deg,#f9f7f3,#fff);border:1.5px dashed rgba(184,151,90,0.4);">
+        <div class="lp-plan-name">Free Trial</div>
+        <div class="lp-plan-price" style="font-size:2.6rem;">$0</div>
+        <div class="lp-plan-annual" style="color:var(--gold);font-weight:600;letter-spacing:0.02em;">No credit card required</div>
+        <ul class="lp-plan-features">
+          <li>10 staged images</li>
+          <li>All 5 staging modules</li>
+          <li>AB 723 compliance pages</li>
+          <li>QR codes on all Finals</li>
+          <li class="muted">No rollover</li>
+          <li class="muted">Upgrade to Solo anytime</li>
+        </ul>
+        <div style="flex:1;"></div>
+        <div style="font-size:0.7rem;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);text-align:center;margin-bottom:8px;">Free Trial</div>
+        <button class="lp-plan-btn" style="background:var(--ink);color:var(--gold);border:none;" onclick="showAuthModal('signup')">Start Free →</button>
+      </div>
+
       <!-- SOLO -->
       <div class="lp-plan">
         <div class="lp-plan-name">Solo</div>
+        <div style="font-size:0.72rem;color:var(--gold);font-weight:600;letter-spacing:0.04em;margin-bottom:6px;">$0.98 / staged image</div>
         <div class="lp-plan-price">$49<span>/mo</span></div>
         <div class="lp-plan-annual">or $490/yr — 2 months free</div>
         <ul class="lp-plan-features">
@@ -5003,6 +4999,7 @@ function showLandingPage() {
       <div class="lp-plan featured">
         <div class="lp-plan-badge">Most Popular</div>
         <div class="lp-plan-name">Team</div>
+        <div style="font-size:0.72rem;color:var(--gold);font-weight:600;letter-spacing:0.04em;margin-bottom:6px;">$0.79 / staged image</div>
         <div class="lp-plan-price">$99<span>/mo</span></div>
         <div class="lp-plan-annual">or $990/yr — 2 months free</div>
         <ul class="lp-plan-features">
@@ -5020,6 +5017,7 @@ function showLandingPage() {
       <!-- BROKERAGE -->
       <div class="lp-plan">
         <div class="lp-plan-name">Brokerage</div>
+        <div style="font-size:0.72rem;color:var(--gold);font-weight:600;letter-spacing:0.04em;margin-bottom:6px;">$0.69 / staged image</div>
         <div class="lp-plan-price">$279<span>/mo</span></div>
         <div class="lp-plan-annual">or $2,790/yr — 2 months free</div>
         <ul class="lp-plan-features">

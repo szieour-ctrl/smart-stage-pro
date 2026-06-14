@@ -18,8 +18,8 @@ async function prepareImage(imageBase64, mimeType) {
 
   // Netlify function-to-function payload limit is ~300KB
   // Target: max 1024px longest side, max 200KB — ensures payload stays under 280KB
-  const TARGET_MAX_DIM = 1024;
-  const TARGET_MAX_KB  = 200;
+  const TARGET_MAX_DIM = 768;  // Background function payload limit ~100KB — keep well under
+  const TARGET_MAX_KB  = 80;
 
   const needsResize = maxDim > TARGET_MAX_DIM || sizeKB > TARGET_MAX_KB;
   const hasAlpha    = meta.hasAlpha || meta.channels === 4;
@@ -89,6 +89,8 @@ exports.handler = async (event) => {
     if (!imageBase64)   return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing imageBase64" }) };
     if (!stagingPrompt) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing stagingPrompt" }) };
 
+    // Always use Netlify subdomain for function-to-function calls —
+    // custom domain redirects break background function 202 handshake
     // Always use Netlify subdomain for function-to-function calls —
     // custom domain redirects break background function 202 handshake
     const siteUrl = process.env.NETLIFY_URL || "https://smart-stage-pro.netlify.app";

@@ -204,26 +204,183 @@ Result must be a completely vacant, clean room ready for staging.`;
       if (!openAIKey) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing openAIKey" }) };
 
       // At this point, imageBase64 is the DECLUTTERED image (vacant room)
-      // Use stage-vacant-prompt logic to build the staging prompt
-      
+      // Run zone-aware Haiku read — same logic as stage-vacant-prompt.js
+      const isOpenPlan = roomType.includes('+');
+      const zoneList = isOpenPlan ? roomType.split('+').map(z => z.trim()).filter(Boolean) : null;
+
+      const readPrompt = isOpenPlan ? `You are reading a single open-plan space for MLS virtual staging.
+
+Room Type: ${roomType}
+Zones visible: ${zoneList.join(', ')}
+
+TASK: Read this open-plan space and identify EACH ZONE separately with its own fixtures and anchors.
+
+CRITICAL: Every ceiling fixture must be assigned to the correct zone based on its position in the image. A chandelier over a dining area is a DINING anchor. Pendant lights over an island are a KITCHEN anchor. A ceiling fan over a living area is a LIVING anchor.
+
+Return ONLY valid JSON — no markdown, no preamble:
+
+{
+  "roomType": "${roomType}",
+  "preserveList": "Comprehensive list of every permanent architectural element visible. DO NOT alter any permanent architectural element.",
+  "zones": [
+    ${zoneList.map(zone => `{
+      "name": "${zone}",
+      "ceilingFixture": "Ceiling fixture directly above this zone — specify type, finish, style, and exact position. If none, say NONE.",
+      "focalPoint": "Primary anchor for furniture placement in this zone",
+      "stagingInstruction": "Specific furniture to place in this zone based on its ceiling fixture and focal point",
+      "keepVacant": false
+    }`).join(',\n    ')}
+  ],
+  "zoneBoundary": {
+    "front": "Front boundary description",
+    "back": "Back boundary description",
+    "left": "Left boundary description",
+    "right": "Right boundary description",
+    "shape": "rectangular or other"
+  },
+  "adjacentVisibleZones": [
+    {
+      "zone": "zone name",
+      "visible": "HOW visible",
+      "staging": "KEEP VACANT - do not stage this zone"
+    }
+  ]
+}` : `You are reading a single vacant room for MLS virtual staging.
+
+Room Type: ${roomType}
+
+Return ONLY valid JSON — no markdown, no preamble:
+
+{
+  "roomType": "${roomType}",
+  "preserveList": "Comprehensive list of every permanent architectural element visible. DO NOT alter any permanent architectural element.",
+  "anchors": {
+    "focal": "Primary focal point — sofa/seating faces this",
+    "ceiling": "Ceiling fixture description if present with finish and style",
+    "backWall": "Wall where furniture back goes against",
+    "leftBoundary": "Left wall or element that stops furniture extension",
+    "rightBoundary": "Right wall or element that stops furniture extension",
+    "frontBoundary": "Distance in front of focal wall before furniture starts"
+  },
+  "zoneBoundary": {
+    "front": "Front boundary",
+    "back": "Back boundary",
+    "left": "Left boundary",
+    "right": "Right boundary",
+    "shape": "rectangular or other"
+  },
+  "adjacentVisibleZones": []
+}`;
+
+      // Haiku reads the decluttered room
+      const readPayload = JSON.stringify({
+        model: "claude-haiku-4-5",
+        max_tokens: 2000,
+        messages: [{
+          role: "user",
+          content: [
+            { type: "image", source: { type: "base64", media_type: detectMime(readyBase64), data: readyBase64 } },
+            { type: "text", text: readPrompt }
+          ]
+        }]
+      });
+
+      const readResult = await httpsRequest({
+        hostname: "api.anthropic.com",
+        path: "/v1/messages",
+        method: "POST",
+        headers: {
+          "x-api-key": claudeKey,
+          "anthropic-version": "2023-06-01",
+          "content-type": "application/json",
+          "content-length": Buffer.byteLength(readPayload)
+        }
+      }, readPayload);
+
+      if (readResult.status !== 200) throw new Error("Haiku C&S stage read failed: " + (readResult.body?.error?.message || readResult.status));
+
+      const rawText = readResult.body?.content?.[0]?.text?.trim() || "{}";
+      const cleanText = rawText.replace(/```json|```/g, "").trim();
+      let roomData;
+      try { roomData = JSON.parse(cleanText); }
+      catch(e) { throw new Error("C&S stage room JSON parse failed"); }
+
+      // Build zone-aware staging prompt
+      const STYLE_LABELS = {
+        'organicmodern':'Organic Modern','transitional':'Transitional','contemporary':'Contemporary',
+        'modern':'Modern','scandinavian':'Scandinavian','minimalist':'Minimalist',
+        'coastal':'Coastal','farmhouse':'Farmhouse','midcenturymodern':'Mid-Century Modern',
+        'industrial':'Industrial','bohemian':'Bohemian','traditional':'Traditional',
+        'japandi':'Japandi','warmminimalist':'Warm Minimalist','luxemodern':'Luxe Modern',
+        'artdeco':'Art Deco','mediterranean':'Mediterranean','rustic':'Rustic',
+        'grandmillennial':'Grand Millennial','wabi_sabi':'Wabi Sabi',
+      };
+      const PALETTE_TONES = {
+        'Warm Neutrals':'warm cream, taupe, and honey tones',
+        'Bright Airy':'soft white, pale sage, and warm wood tones',
+        'Soft Luxury':'blue, gray, and champagne tones',
+        'Cool Gray':'cool gray, slate, and white tones',
+        'Earth Tones':'terracotta, rust, and warm brown tones',
+        'Bold Contrast':'black, white, and bold accent tones',
+        'Coastal Blue':'ocean blue, sandy neutral, and white tones',
+        'Sage Green':'sage green, warm white, and natural wood tones',
+        'Jewel Tones':'emerald, sapphire, and warm gold tones',
+        'Desert Modern':'sand, clay, and muted terracotta tones',
+      };
+
+      const rawStyle = designStyle || 'Organic Modern';
+      const style = STYLE_LABELS[rawStyle?.toLowerCase().replace(/[^a-z]/g, '')] || rawStyle;
+      const palette = colorPalette || 'Warm Neutrals';
+      const paletteTones = PALETTE_TONES[palette] || (palette + ' tones');
+
+      let stagePrompt = `PRIMARY ROLE: Stage furniture and decor ONLY.\n\nIMMUTABLE LOCK: Never alter, move, remove, replace, or touch: structural walls | ceilings | kitchen/bathroom cabinets | countertops | lighting fixtures. These must be preserved exactly as photographed.\n\nAB 723 COMPLIANCE: Virtual staging adds furniture only. Any alteration to permanent architecture makes the listing non-compliant and subject to MLS removal.\n\n═══════════════════════════════════════════════════════════════════════════════\n\n`;
+
+      stagePrompt += `PRESERVE EXACTLY: ${roomData.preserveList}\n\n`;
+      stagePrompt += `STAGING: ${roomData.roomType} — Stage ONLY within this room boundary\n\n`;
+      stagePrompt += `ZONE BOUNDARY (do not stage beyond):\nFront: ${roomData.zoneBoundary.front}\nBack: ${roomData.zoneBoundary.back}\nLeft: ${roomData.zoneBoundary.left}\nRight: ${roomData.zoneBoundary.right}\nShape: ${roomData.zoneBoundary.shape}\n\n`;
+
+      if (isOpenPlan && Array.isArray(roomData.zones)) {
+        stagePrompt += `ZONE-BY-ZONE STAGING INSTRUCTIONS:\n`;
+        roomData.zones.forEach(zone => {
+          if (zone.keepVacant) {
+            stagePrompt += `\n${zone.name.toUpperCase()} ZONE — KEEP VACANT. Do not add any furniture.\n`;
+            return;
+          }
+          stagePrompt += `\n${zone.name.toUpperCase()} ZONE:\n`;
+          if (zone.ceilingFixture && zone.ceilingFixture !== 'NONE') {
+            stagePrompt += `Ceiling fixture: ${zone.ceilingFixture} — use this as the anchor for furniture placement in this zone\n`;
+          }
+          stagePrompt += `Focal point: ${zone.focalPoint}\n`;
+          stagePrompt += `Staging: ${zone.stagingInstruction}\n`;
+        });
+        stagePrompt += `\n`;
+      } else if (roomData.anchors) {
+        stagePrompt += `ANCHORS (use these to place furniture):\n`;
+        stagePrompt += `Focal Wall: ${roomData.anchors.focal}\n`;
+        if (roomData.anchors.ceiling) stagePrompt += `Ceiling: ${roomData.anchors.ceiling}\n`;
+        stagePrompt += `Back Wall: ${roomData.anchors.backWall}\n`;
+        stagePrompt += `Left Boundary: ${roomData.anchors.leftBoundary}\n`;
+        stagePrompt += `Right Boundary: ${roomData.anchors.rightBoundary}\n`;
+        stagePrompt += `Front Boundary: ${roomData.anchors.frontBoundary}\n\n`;
+      }
+
+      stagePrompt += `Stage in ${style} design style using a ${palette} palette with ${paletteTones} throughout.\n\n`;
+
+      if (roomData.adjacentVisibleZones?.length > 0) {
+        stagePrompt += `ADJACENT ZONES (KEEP VACANT):\n`;
+        roomData.adjacentVisibleZones.forEach(z => {
+          stagePrompt += `${z.zone}: Visible ${z.visible} — Keep completely empty\n`;
+        });
+        stagePrompt += `\n`;
+      }
+
+      const leftBound = isOpenPlan ? roomData.zoneBoundary.left : roomData.anchors?.leftBoundary;
+      const rightBound = isOpenPlan ? roomData.zoneBoundary.right : roomData.anchors?.rightBoundary;
+      stagePrompt += `DO NOT stage beyond zone boundary:\n— Do not extend furniture past left boundary (${leftBound})\n— Do not extend furniture past right boundary (${rightBound})\n— Do not stage adjacent zones (keep vacant)\n— Do not alter architectural elements\n— Maintain open circulation within the zone\n\n`;
+      stagePrompt += `Use ${style} furniture with clean architectural lines.\nMaintain realistic furniture scale proportional to the room.\nPreserve all architectural features, room dimensions, and camera perspective exactly as photographed.\nThis image is for MLS listing per California AB 723 §10140.6.\nVirtual staging adds furniture and decor only — any alteration to architecture or spatial geometry is prohibited.`;
+
       const stageJobId = "stage-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8);
-      
-      // Build basic staging prompt (without full Haiku read, assuming we have room anchors)
-      const stagePrompt = `PRIMARY ROLE: Stage furniture and decor ONLY.
 
-IMMUTABLE LOCK: Never alter, move, remove, replace, or touch: structural walls | ceilings | kitchen/bathroom cabinets | countertops | lighting fixtures. These must be preserved exactly as photographed.
-
-AB 723 COMPLIANCE: Virtual staging adds furniture only. Any alteration to permanent architecture makes the listing non-compliant.
-
-This is the VACANT version of the room (decluttered in Step 1).
-Add furniture and decor using design style: ${designStyle || 'Organic Modern'}
-Color palette: ${colorPalette || 'Warm Neutrals'}
-
-Stage furniture anchored to focal points and zone boundaries.
-Keep all architectural elements preserved.
-Do not alter permanent fixtures, cabinetry, or architectural elements.`;
-
-      // Fire stage job
       await triggerBackground({
         jobId: stageJobId,
         imageBase64: readyBase64,

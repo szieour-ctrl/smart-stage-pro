@@ -40,14 +40,14 @@ async function prepareImage(imageBase64, mimeType) {
   const sizeKB = Math.round(buffer.length / 1024);
   const maxDim = Math.max(meta.width || 0, meta.height || 0);
 
-  if (maxDim <= 1536 && sizeKB <= 1500) {
+  if (maxDim <= 768 && sizeKB <= 80) {
     console.log(`Image OK: ${meta.width}x${meta.height} ${sizeKB}KB`);
     return { base64: imageBase64, mimeType };
   }
 
   const compressed = await sharp(buffer)
-    .resize(1536, 1536, { fit: "inside", withoutEnlargement: true })
-    .jpeg({ quality: 88 })
+    .resize(768, 768, { fit: "inside", withoutEnlargement: true })
+    .jpeg({ quality: 82 })
     .toBuffer();
 
   const compressedKB = Math.round(compressed.length / 1024);
@@ -109,7 +109,7 @@ exports.handler = async (event) => {
     if (!roomType) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing roomType" }) };
     if (!claudeKey) return { statusCode: 500, headers, body: JSON.stringify({ error: "ANTHROPIC_API_KEY not configured" }) };
 
-    const siteUrl = process.env.URL || process.env.DEPLOY_URL;
+    const siteUrl = process.env.NETLIFY_URL || process.env.DEPLOY_URL || "https://smart-stage-pro.netlify.app";
     if (!siteUrl) return { statusCode: 500, headers, body: JSON.stringify({ error: "Site URL not configured" }) };
 
     // Compress image if needed

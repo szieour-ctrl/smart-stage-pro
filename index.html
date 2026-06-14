@@ -3842,9 +3842,9 @@ async function handleAuthenticatedUser(user) {
     return;
   }
 
-  // Check subscription status — must be explicitly active
+  // Check subscription status — active or trial both get tool access
   const status = userRec.subscription_status;
-  if (status !== 'active') {
+  if (status !== 'active' && status !== 'trial') {
     // If user came from a pricing page subscribe click, go straight to checkout
     if (_pendingCheckoutPlan) {
       const plan = _pendingCheckoutPlan;

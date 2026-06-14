@@ -95,6 +95,17 @@ async function readVacantRoom({ imageBase64, roomType, claudeKey }) {
     ? roomType.split('+').map(z => z.trim()).filter(Boolean)
     : null;
 
+  // Pre-build zone template string to avoid nested backtick conflicts
+  const zonesTemplate = isOpenPlan
+    ? zoneList.map(zone => `{
+      "name": "${zone}",
+      "ceilingFixture": "Ceiling fixture directly above this zone — specify type, finish, style, and exact position. If none, say NONE.",
+      "focalPoint": "Primary anchor for furniture placement in this zone (fireplace, island, window, chandelier position)",
+      "stagingInstruction": "Specific furniture to place in this zone based on its ceiling fixture and focal point",
+      "keepVacant": false
+    }`).join(',\n    ')
+    : '';
+
   const prompt = isOpenPlan ? `You are reading a single open-plan space for MLS virtual staging.
 
 Room Type: ${roomType}
@@ -110,13 +121,7 @@ Return ONLY valid JSON — no markdown, no preamble:
   "roomType": "${roomType}",
   "preserveList": "Comprehensive list of every permanent architectural element visible: walls, ceiling, flooring material/color, windows with frame color, doors, built-ins, appliances, fixtures, finishes. DO NOT alter any permanent architectural element.",
   "zones": [
-    ${zoneList.map(zone => `{
-      "name": "${zone}",
-      "ceilingFixture": "Ceiling fixture directly above this zone — specify type, finish, style, and exact position. If none, say NONE.",
-      "focalPoint": "Primary anchor for furniture placement in this zone (fireplace, island, window, chandelier position)",
-      "stagingInstruction": "Specific furniture to place in this zone based on its ceiling fixture and focal point",
-      "keepVacant": false
-    }`).join(',\n    ')}
+    ${zonesTemplate}
   ],
   "zoneBoundary": {
     "front": "Front boundary description",
@@ -170,38 +175,6 @@ Return ONLY valid JSON — no markdown, no preamble:
   const payload = JSON.stringify({
     model: "claude-haiku-4-5",
     max_tokens: 2000,
-    messages: [{
-      role: "user",
-      content: [
-        { type: "image", source: { type: "base64", media_type: detectMime(imageBase64), data: imageBase64 } },
-        { type: "text", text: prompt }
-      ]
-    }]
-  });
-
-  const result = await httpsRequest({
-    hostname: "api.anthropic.com",
-    path: "/v1/messages",
-    method: "POST",
-    headers: {
-      "x-api-key": claudeKey,
-      "anthropic-version": "2023-06-01",
-      "content-type": "application/json",
-      "content-length": Buffer.byteLength(payload)
-    }
-  }, payload);
-
-  if (result.status !== 200) throw new Error("Haiku vacant read failed: " + (result.body?.error?.message || result.status));
-
-  const text = result.body?.content?.[0]?.text?.trim() || "{}";
-  const clean = text.replace(/```json|```/g, "").trim();
-  try { return JSON.parse(clean); }
-  catch(e) { throw new Error("Vacant room JSON parse failed"); }
-}
-
-  const payload = JSON.stringify({
-    model: "claude-haiku-4-5",
-    max_tokens: 1500,
     messages: [{
       role: "user",
       content: [

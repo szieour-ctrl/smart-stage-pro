@@ -83,7 +83,7 @@ exports.handler = async (event) => {
     if (userRec.subscription_status !== 'active') {
       // Check for free trial credits before blocking
       const trialRes = await sbRequest('GET',
-        `/rest/v1/credit_ledger?user_id=eq.${userId}&reason=eq.free_trial&order=created_at.desc&limit=1&select=balance_after`
+        `/rest/v1/credit_ledger?user_id=eq.${userId}&reason=eq.signup_trial&order=created_at.desc&limit=1&select=balance_after`
       );
       const trialBalance = Array.isArray(trialRes.body) && trialRes.body.length > 0
         ? trialRes.body[0].balance_after : 0;

@@ -8,6 +8,7 @@
 // DO NOT modify stage-openai.js or stage-openai-background.js.
 
 const https = require("https");
+const sharp = require("sharp");
 
 // Native HTTPS helper — matches the pattern used by all other functions in this project
 function callClaudeHaiku(apiKey, payload) {
@@ -282,6 +283,24 @@ function assembleExteriorPrompt({ spatialRead, lighting, landscape, outdoorLivin
 // ─────────────────────────────────────────────
 // NETLIFY HANDLER
 // ─────────────────────────────────────────────
+
+// Compress image before sending to Haiku — mobile photos can be 3-5MB
+async function prepareImage(imageBase64, mimeType) {
+  const buffer = Buffer.from(imageBase64, 'base64');
+  const meta = await sharp(buffer).metadata();
+  const sizeKB = Math.round(buffer.length / 1024);
+  const maxDim = Math.max(meta.width || 0, meta.height || 0);
+  if (maxDim <= 768 && sizeKB <= 80) return { base64: imageBase64, mimeType };
+  const compressed = await sharp(buffer)
+    .rotate()
+    .flatten({ background: { r: 255, g: 255, b: 255 } })
+    .resize(768, 768, { fit: 'inside', withoutEnlargement: true })
+    .jpeg({ quality: 82 })
+    .toBuffer();
+  console.log('prepareImage: ' + meta.width + 'x' + meta.height + ' ' + sizeKB + 'KB → ' + Math.round(compressed.length/1024) + 'KB');
+  return { base64: compressed.toString('base64'), mimeType: 'image/jpeg' };
+}
+
 exports.handler = async function (event, context) {
   if (event.httpMethod !== "POST") {
     return {
@@ -301,7 +320,7 @@ exports.handler = async function (event, context) {
   }
 
   const {
-    imageBase64,
+    imageBase64: rawBase64,
     imageMimeType = "image/jpeg",
     lighting = "twilight",
     landscape = "basic-refresh",
@@ -310,12 +329,15 @@ exports.handler = async function (event, context) {
     propertyTier = "move-up"
   } = body;
 
-  if (!imageBase64) {
+  if (!rawBase64) {
     return {
       statusCode: 400,
       body: JSON.stringify({ error: "imageBase64 is required" })
     };
   }
+
+  // Compress before Haiku — mobile iPhone photos are 3-5MB
+  const { base64: imageBase64 } = await prepareImage(rawBase64, imageMimeType);
 
   // Validate options — default to safe fallbacks if unrecognized values arrive
   const validLighting = LIGHTING_PROMPTS[lighting] ? lighting : "twilight";

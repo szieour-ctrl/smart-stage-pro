@@ -4,6 +4,7 @@
 // Sends to stage-openai-background.js for GPT Image 2 inpainting
 
 const https = require("https");
+const sharp = require("sharp");
 
 function httpsRequest(options, body) {
   return new Promise((resolve, reject) => {
@@ -30,6 +31,24 @@ function detectMime(base64) {
     if (buf[0] === 0x52 && buf[1] === 0x49) return 'image/webp';
   } catch(e) {}
   return 'image/jpeg';
+}
+
+// Compress image before sending to Haiku — mobile photos can be 3-5MB
+// Haiku only needs to READ the room, not reproduce it — 768px is plenty
+async function prepareImage(imageBase64, mimeType) {
+  const buffer = Buffer.from(imageBase64, 'base64');
+  const meta = await sharp(buffer).metadata();
+  const sizeKB = Math.round(buffer.length / 1024);
+  const maxDim = Math.max(meta.width || 0, meta.height || 0);
+  if (maxDim <= 768 && sizeKB <= 80) return { base64: imageBase64, mimeType };
+  const compressed = await sharp(buffer)
+    .rotate()
+    .flatten({ background: { r: 255, g: 255, b: 255 } })
+    .resize(768, 768, { fit: 'inside', withoutEnlargement: true })
+    .jpeg({ quality: 82 })
+    .toBuffer();
+  console.log('declutter-prompt: compressed ' + meta.width + 'x' + meta.height + ' ' + sizeKB + 'KB → ' + Math.round(compressed.length/1024) + 'KB');
+  return { base64: compressed.toString('base64'), mimeType: 'image/jpeg' };
 }
 
 // ✅ AB 723 COMPLIANCE HEADER — Every prompt starts with this
@@ -181,11 +200,14 @@ exports.handler = async (event) => {
   };
 
   try {
-    const { imageBase64, mimeType } = JSON.parse(event.body);
+    const { imageBase64: rawBase64, mimeType } = JSON.parse(event.body);
     const claudeKey = process.env.ANTHROPIC_API_KEY;
 
-    if (!imageBase64) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing imageBase64" }) };
+    if (!rawBase64) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing imageBase64" }) };
     if (!claudeKey) return { statusCode: 500, headers, body: JSON.stringify({ error: "ANTHROPIC_API_KEY not configured" }) };
+
+    // Compress before sending to Haiku — mobile iPhone photos are 3-5MB
+    const { base64: imageBase64 } = await prepareImage(rawBase64, mimeType);
 
     // Analyze room via Haiku
     const roomData = await analyzeRoomForDeclutter({ imageBase64, claudeKey });

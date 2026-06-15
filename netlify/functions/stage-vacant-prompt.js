@@ -113,15 +113,39 @@ async function readVacantRoom({ imageBase64, roomType, claudeKey }) {
 Room Type: ${roomType}
 Zones visible: ${zoneList.join(', ')}
 
-TASK: Read this open-plan space and identify EACH ZONE separately with its own fixtures and anchors.
+STEP 1 — SPATIAL INVENTORY (do this first):
+Before assigning anything to zones, identify every ceiling fixture and architectural anchor by its PHYSICAL POSITION in the image frame:
+- Where is it? (left side of frame / center of frame / right side of frame)
+- How far from camera? (foreground / midground / background)
+- What is it? (chandelier, ceiling fan, pendant cluster, recessed lights, etc.)
 
-CRITICAL: Every ceiling fixture must be assigned to the correct zone based on its position in the image. A chandelier over a dining area is a DINING anchor. Pendant lights over an island are a KITCHEN anchor. A ceiling fan over a living area is a LIVING anchor.
+STEP 2 — ZONE MAPPING:
+The user has labeled zones in the order they appear in the space. Map each fixture to a zone based on SPATIAL POSITION ONLY — never by fixture type or zone name assumption. A chandelier over the dining area is a DINING anchor even if it is near the kitchen. A ceiling fan over the living area is a LIVING anchor even if it is near the fireplace.
+
+STEP 3 — STAGING INSTRUCTION:
+For each zone, write a staging instruction that uses the ceiling fixture as the PRIMARY anchor. Furniture must be placed centered beneath or oriented toward that zone's ceiling fixture — not the adjacent zone's fixture.
+
+CRITICAL RULES:
+- A fireplace is a LIVING ZONE focal point — never a dining zone anchor
+- A chandelier/pendant cluster over an open floor area = DINING anchor → place dining table + chairs centered beneath it
+- Island pendant lights = KITCHEN anchor → place counter stools beneath them
+- Ceiling fan = LIVING anchor → place sofa/seating group beneath it
+- Never swap fixtures between zones
+- If two zones share a fixture (open plan without clear separation), assign to the zone whose furniture would naturally sit beneath it
 
 Return ONLY valid JSON — no markdown, no preamble:
 
 {
   "roomType": "${roomType}",
   "preserveList": "Comprehensive list of every permanent architectural element visible: walls, ceiling, flooring material/color, windows with frame color, doors, built-ins, appliances, fixtures, finishes. DO NOT alter any permanent architectural element.",
+  "fixtureInventory": [
+    {
+      "fixture": "description of fixture",
+      "framePosition": "left/center/right of frame",
+      "depth": "foreground/midground/background",
+      "assignedZone": "which zone this belongs to"
+    }
+  ],
   "zones": [
     ${zonesTemplate}
   ],

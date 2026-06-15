@@ -137,7 +137,7 @@ Return ONLY valid JSON — no markdown, no preamble:
 
 {
   "roomType": "${roomType}",
-  "preserveList": "Comprehensive list of every permanent architectural element visible: walls, ceiling, flooring material/color, windows with frame color, doors, built-ins, appliances, fixtures, finishes. DO NOT alter any permanent architectural element.",
+  "preserveList": "Comprehensive list of every permanent architectural element VISIBLE AND CONFIRMED in the photo: walls, ceiling, flooring material/color, windows with frame color, doors, appliances, fixtures, finishes. CRITICAL: Only list built-in shelving or niches if they are UNMISTAKABLY present as recessed permanent wall construction. If uncertain whether something is built-in or freestanding, DO NOT include it as a built-in. Never invent or assume architectural elements. End with: DO NOT alter any permanent architectural element.",
   "fixtureInventory": [
     {
       "fixture": "description of fixture",
@@ -173,7 +173,7 @@ Return ONLY valid JSON — no markdown, no preamble:
 
 {
   "roomType": "${roomType}",
-  "preserveList": "Comprehensive list of every permanent architectural element visible: walls, ceiling, flooring material/color, windows with frame color, doors, built-ins, appliances, fixtures, finishes. End with: DO NOT alter any permanent architectural element.",
+  "preserveList": "Comprehensive list of every permanent architectural element VISIBLE AND CONFIRMED in the photo: walls, ceiling, flooring material/color, windows with frame color, doors, appliances, fixtures, finishes. CRITICAL: Only list built-in shelving or niches if they are UNMISTAKABLY present as recessed permanent wall construction. If uncertain whether something is built-in or freestanding, DO NOT include it as a built-in. Never invent or assume architectural elements. End with: DO NOT alter any permanent architectural element.",
   "anchors": {
     "focal": "Primary focal point (fireplace, window wall, feature wall) — sofa/seating faces this",
     "ceiling": "Ceiling fixture description if present (fan, chandelier, recessed lights) with finish and style ONLY",

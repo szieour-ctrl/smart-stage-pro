@@ -237,7 +237,7 @@ Return ONLY valid JSON — no markdown, no preamble:
 
 {
   "roomType": "${roomType}",
-  "preserveList": "Comprehensive list of every permanent architectural element visible. DO NOT alter any permanent architectural element.",
+  "preserveList": "Comprehensive list of every permanent architectural element VISIBLE AND CONFIRMED in the photo: walls, ceiling, flooring, windows, doors, appliances, fixtures, finishes. CRITICAL: Only list built-in shelving or niches if UNMISTAKABLY present as recessed permanent wall construction. If uncertain, DO NOT include as built-in. Never invent architectural elements. DO NOT alter any permanent architectural element.",
   "fixtureInventory": [
     {
       "fixture": "description",
@@ -271,7 +271,7 @@ Return ONLY valid JSON — no markdown, no preamble:
 
 {
   "roomType": "${roomType}",
-  "preserveList": "Comprehensive list of every permanent architectural element visible. DO NOT alter any permanent architectural element.",
+  "preserveList": "Comprehensive list of every permanent architectural element VISIBLE AND CONFIRMED in the photo: walls, ceiling, flooring, windows, doors, appliances, fixtures, finishes. CRITICAL: Only list built-in shelving or niches if UNMISTAKABLY present as recessed permanent wall construction. If uncertain, DO NOT include as built-in. Never invent architectural elements. DO NOT alter any permanent architectural element.",
   "anchors": {
     "focal": "Primary focal point — sofa/seating faces this",
     "ceiling": "Ceiling fixture description if present with finish and style",

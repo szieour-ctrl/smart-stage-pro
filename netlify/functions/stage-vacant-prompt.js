@@ -126,12 +126,12 @@ STEP 3 — STAGING INSTRUCTION:
 For each zone, write a staging instruction that uses the ceiling fixture as the PRIMARY anchor. Furniture must be placed centered beneath or oriented toward that zone's ceiling fixture — not the adjacent zone's fixture.
 
 CRITICAL RULES:
-- A fireplace is a LIVING ZONE focal point — never a dining zone anchor
-- A chandelier/pendant cluster over an open floor area = DINING anchor → place dining table + chairs centered beneath it
-- Island pendant lights = KITCHEN anchor → place counter stools beneath them
-- Ceiling fan = LIVING anchor → place sofa/seating group beneath it
-- Never swap fixtures between zones
-- If two zones share a fixture (open plan without clear separation), assign to the zone whose furniture would naturally sit beneath it
+- A fireplace is a LIVING ZONE focal point ONLY — sofas and seating face it. A dining table NEVER goes near a fireplace unless a chandelier is directly above that location.
+- A chandelier/pendant cluster hanging from the ceiling over open floor space = DINING anchor → dining table + chairs MUST be centered directly beneath it — regardless of what else is nearby
+- Island pendant lights = KITCHEN anchor → counter stools beneath them
+- Ceiling fan = LIVING anchor → sofa/seating group oriented beneath it facing the fireplace
+- Never place a dining table near a fireplace if a chandelier exists elsewhere in the space
+- The chandelier position IS the dining table position — always
 
 Return ONLY valid JSON — no markdown, no preamble:
 

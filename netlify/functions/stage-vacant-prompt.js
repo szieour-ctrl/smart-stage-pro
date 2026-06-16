@@ -77,7 +77,7 @@ const PALETTE_TONES = {
 // ✅ AB 723 COMPLIANCE HEADER — Every prompt starts with this
 const AB723_HEADER = `PRIMARY ROLE: Stage furniture and decor ONLY.
 
-IMMUTABLE LOCK: Never alter, move, remove, replace, or touch: structural walls | ceilings | kitchen/bathroom cabinets | countertops | lighting fixtures. These must be preserved exactly as photographed.
+IMMUTABLE LOCK: Never alter, move, remove, replace, or touch: structural walls | partial walls | half-walls | pass-through openings and their surrounding wall sections | ceilings | kitchen/bathroom cabinets | countertops | lighting fixtures. These must be preserved exactly as photographed. If a wall has a pass-through opening, both the opening AND the solid wall sections above and below it must remain exactly as photographed — do not enlarge, remove, or modify any wall section.
 
 ABSOLUTE PROHIBITION: Never ADD architectural elements that do not exist in the original photo. Do NOT add: built-in shelving | niches | alcoves | recessed shelves | bookcases built into walls | fireplace surrounds | wall openings | cabinetry | any structural element. If it is not visible in the original photograph, it cannot appear in the staged image.
 
@@ -136,7 +136,7 @@ Return ONLY valid JSON — no markdown, no preamble:
 
 {
   "roomType": "${roomType}",
-  "preserveList": "Comprehensive list of every permanent architectural element visible: walls, ceiling, flooring material/color, windows with frame color, doors, appliances, fixtures, finishes. End with: DO NOT alter any permanent architectural element.",
+  "preserveList": "Comprehensive list of every permanent architectural element visible: walls (including partial walls, half-walls, partition walls, and pass-through openings with their wall sections), ceiling, flooring material/color, windows with frame color, doors, appliances, fixtures, finishes. If a pass-through or opening exists in a wall, describe the full wall including the solid sections — these wall sections are permanent architecture. End with: DO NOT alter any permanent architectural element.",
   "fixtureInventory": [
     {
       "fixture": "description of fixture",
@@ -172,7 +172,7 @@ Return ONLY valid JSON — no markdown, no preamble:
 
 {
   "roomType": "${roomType}",
-  "preserveList": "Comprehensive list of every permanent architectural element visible: walls, ceiling, flooring material/color, windows with frame color, doors, appliances, fixtures, finishes. End with: DO NOT alter any permanent architectural element.",
+  "preserveList": "Comprehensive list of every permanent architectural element visible: walls (including partial walls, half-walls, partition walls, and pass-through openings with their wall sections), ceiling, flooring material/color, windows with frame color, doors, appliances, fixtures, finishes. If a pass-through or opening exists in a wall, describe the full wall including the solid sections — these wall sections are permanent architecture. End with: DO NOT alter any permanent architectural element.",
   "anchors": {
     "focal": "Primary focal point (fireplace, window wall, feature wall) — sofa/seating faces this",
     "ceiling": "Ceiling fixture description if present (fan, chandelier, recessed lights) with finish and style ONLY",

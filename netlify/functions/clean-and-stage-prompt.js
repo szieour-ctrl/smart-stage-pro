@@ -225,6 +225,8 @@ Map each fixture to a zone based on SPATIAL POSITION ONLY — never by fixture t
 STEP 3 — STAGING INSTRUCTION:
 For each zone, write a staging instruction that uses the ceiling fixture as the PRIMARY anchor. Furniture must be placed centered beneath or oriented toward that zone's ceiling fixture.
 
+FLEX/SECONDARY ZONE RULE: Look for the ONE enclosed or partially enclosed space in the frame — it will have its own walls, an angled or defined entry opening, and may have a pass-through window or partial partition wall. This is the flex zone. It is the only space in the image with defined walls. Describe it by its entry opening and boundary walls so GPT can locate it instantly. Place furniture INSIDE that walled space only.
+
 CRITICAL RULES:
 - A fireplace is a LIVING ZONE focal point ONLY — sofas and seating face it. A dining table NEVER goes near a fireplace unless a chandelier is directly above that location.
 - A chandelier/pendant cluster hanging from the ceiling over open floor space = DINING anchor → dining table + chairs MUST be centered directly beneath it — regardless of what else is nearby

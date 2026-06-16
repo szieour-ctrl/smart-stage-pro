@@ -141,6 +141,14 @@ function renderPage(project, projectId) {
     .dl-link:hover { text-decoration: underline; }
     .no-images { text-align: center; padding: 60px 24px; color: #7a6f63; font-size: 14px; }
 
+    /* ── MLS REMARKS BLOCK ── */
+    .remarks-block { background: #1a1a1a; border: 1px solid #b8975a; border-radius: 8px; padding: 20px 24px; margin: 0 24px 28px; max-width: 1400px; margin-left: auto; margin-right: auto; }
+    .remarks-block-label { font-size: 11px; font-weight: 700; letter-spacing: 0.12em; color: #b8975a; text-transform: uppercase; margin-bottom: 10px; }
+    .remarks-block-text { font-size: 14px; color: #e8e8e8; line-height: 1.6; margin-bottom: 16px; }
+    .remarks-copy-btn { display: inline-flex; align-items: center; gap: 8px; background: transparent; border: 1px solid #b8975a; color: #b8975a; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; padding: 8px 16px; border-radius: 4px; cursor: pointer; transition: background 0.2s, color 0.2s; font-family: Arial, Helvetica, sans-serif; }
+    .remarks-copy-btn:hover { background: #b8975a; color: #111; }
+    .remarks-copy-btn.copied { background: #1a3a1a; border-color: #5a9a5a; color: #5a9a5a; }
+
     /* ── LEGAL FOOTER ── */
     .legal-footer { background: #1a1714; color: #7a6f63; padding: 24px; font-size: 11px; line-height: 1.8; }
     .legal-footer strong { color: #b8975a; }
@@ -197,6 +205,16 @@ function renderPage(project, projectId) {
   </div>
 </div>
 
+<!-- MLS REMARKS DISCLOSURE BLOCK -->
+<div class="remarks-block">
+  <div class="remarks-block-label">MLS Public Remarks &mdash; Copy &amp; Paste Disclosure</div>
+  <div class="remarks-block-text" id="remarks-disclosure-text">One or more photos in this listing have been virtually staged using AI-assisted technology. Staged images are for illustrative purposes only and do not represent the current condition of the property. Address: ${address}.</div>
+  <button class="remarks-copy-btn" id="remarks-copy-btn" onclick="copyRemarksText()">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+    Copy for MLS Remarks
+  </button>
+</div>
+
 <!-- IMAGE PAIRS -->
 <div class="images-container">
   ${noImages}
@@ -231,6 +249,34 @@ function renderPage(project, projectId) {
 
 <script>
 (function() {
+  // MLS Remarks copy function
+  window.copyRemarksText = function() {
+    var text = document.getElementById('remarks-disclosure-text').textContent;
+    var btn = document.getElementById('remarks-copy-btn');
+    function setSuccess() {
+      btn.classList.add('copied');
+      btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 16 4 11"/></svg> Copied!';
+      setTimeout(function() {
+        btn.classList.remove('copied');
+        btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy for MLS Remarks';
+      }, 3000);
+    }
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(setSuccess).catch(function() {
+        var ta = document.createElement('textarea');
+        ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+        document.body.appendChild(ta); ta.select(); document.execCommand('copy');
+        document.body.removeChild(ta); setSuccess();
+      });
+    } else {
+      var ta = document.createElement('textarea');
+      ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select(); document.execCommand('copy');
+      document.body.removeChild(ta); setSuccess();
+    }
+  };
+
+  // Slider init
   function initSliders() {
     document.querySelectorAll('[data-slider]').forEach(function(container) {
       var beforeWrap = container.querySelector('.sl-before-wrap');

@@ -73,6 +73,11 @@ function getProjectStore(env) {
 
 // ── PROJECT ID HELPERS ───────────────────────────────────────────────────────
 
+function cleanAddress(address) {
+  // Strip ", USA" suffix appended by Google Places autocomplete
+  return (address || "").replace(/,\s*USA\s*$/i, "").trim();
+}
+
 function addressHash(address) {
   const normalized = address.toLowerCase()
     .replace(/\s+/g, " ")
@@ -111,6 +116,7 @@ function complianceUrl(projectId, siteUrl) {
 // ── ACTION: LOOKUP ───────────────────────────────────────────────────────────
 
 async function lookupProject(address, env) {
+  address = cleanAddress(address);
   const store = getProjectStore(env);
   const key   = "addr_" + addressHash(address);
   try {
@@ -136,6 +142,7 @@ async function lookupProject(address, env) {
 // ── ACTION: CREATE ───────────────────────────────────────────────────────────
 
 async function createProject(address, agentInfo, siteUrl, userId, env) {
+  address = cleanAddress(address);
   const store   = getProjectStore(env);
   const addrKey = "addr_" + addressHash(address);
 

@@ -216,7 +216,8 @@ Zones visible: ${zoneList.join(', ')}
 STEP 1 — SPATIAL INVENTORY (do this first):
 Before assigning anything to zones, identify every ceiling fixture and architectural anchor by its PHYSICAL POSITION in the image frame:
 - Where is it? (left side of frame / center of frame / right side of frame)
-- How far from camera? (foreground / midground / background)
+- How far from camera? (foreground = close to camera lens / midground = middle of frame / background = far from camera). Use camera distance, not room depth.
+- CHANDELIER DEPTH CHECK: If a chandelier is visible, compare it to other ceiling fixtures. The chandelier closest to the camera is FOREGROUND. If the ceiling fan is farther from camera than the chandelier, the chandelier is FOREGROUND — not midground or background. Never describe a chandelier as midground or background if it is closer to the camera than the ceiling fan.
 - What is it? (chandelier, ceiling fan, pendant cluster, recessed lights, etc.)
 
 STEP 2 — ZONE MAPPING:
@@ -234,6 +235,8 @@ CRITICAL RULES:
 - Ceiling fan = LIVING anchor → sofa/seating group oriented beneath it facing the fireplace
 - Never place a dining table near a fireplace if a chandelier exists elsewhere in the space
 - The chandelier position IS the dining table position — always
+- LIVING ZONE furniture (sofa, chairs, coffee table) must be placed in the BACKGROUND area of the frame anchored to the fireplace wall — never pulled toward the camera into the foreground. The sofa back faces the camera, seating faces the fireplace.
+- The foreground floor space (closest to camera) is the circulation path between zones — keep it completely empty in both single-room and open plan staging
 
 Return ONLY valid JSON — no markdown, no preamble:
 
@@ -249,7 +252,7 @@ Return ONLY valid JSON — no markdown, no preamble:
     }
   ],
   "zones": [
-    ${zoneList.map(zone => '{\n      "name": "' + zone + '",\n      "ceilingFixture": "Ceiling fixture directly above this zone — specify type, finish, style, and its position RELATIVE TO THE CAMERA (foreground = close to camera, midground = middle of frame, background = far from camera). This camera-relative position is what GPT uses to place furniture beneath it. If none, say NONE.",\n      "focalPoint": "Primary anchor for furniture placement in this zone",\n      "stagingInstruction": "Specific furniture to place in this zone based on its ceiling fixture and focal point",\n      "stagingInstruction": "Specific furniture to place in this zone. Every user-labeled zone MUST be staged."\n    }').join(',\n    ')}
+    ${zoneList.map(zone => '{\n      "name": "' + zone + '",\n      "ceilingFixture": "Ceiling fixture directly above this zone — specify type, finish, style, and its position RELATIVE TO THE CAMERA (foreground = close to camera, midground = middle of frame, background = far from camera). This camera-relative position is what GPT uses to place furniture beneath it. If none, say NONE.",\n      "focalPoint": "Primary anchor for furniture placement in this zone",\n      "stagingInstruction": "Specific furniture to place in this zone based on its ceiling fixture and focal point. Every user-labeled zone MUST be staged."\n    }').join(',\n    ')}
   ],
   "zoneBoundary": {
     "front": "Front boundary description",

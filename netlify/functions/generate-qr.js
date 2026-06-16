@@ -13,9 +13,9 @@ const sharp  = require("sharp");
 
 const QR_PX      = 460;   // QR code pixel size
 const CANVAS_W   = 600;
-const CANVAS_H   = 760;
+const CANVAS_H   = 820;
 const PADDING    = 70;
-const BRAND_H    = 180;   // Height of branding strip below QR
+const BRAND_H    = 240;   // Height of branding strip below QR
 
 function escSVG(str) {
   return String(str || "")
@@ -33,7 +33,12 @@ function truncateAddress(address, maxLen = 45) {
   return address.slice(0, maxLen) + "…";
 }
 
-function buildCanvasSVG(address, agentName, agentBrokerage) {
+function truncateUrl(url, maxLen = 52) {
+  if (!url || url.length <= maxLen) return url || "";
+  return url.slice(0, maxLen) + "…";
+}
+
+function buildCanvasSVG(address, agentName, agentBrokerage, complianceUrl) {
   const line1 = truncateAddress(address, 42);
   // Split address into two lines if long
   const parts = address ? address.split(",") : [];
@@ -75,14 +80,40 @@ function buildCanvasSVG(address, agentName, agentBrokerage) {
       stroke="#2d2824" stroke-width="1"/>
 
     <!-- AB 723 compliance note -->
-    <text x="${CANVAS_W / 2}" y="${PADDING + QR_PX + 130}"
+    <text x="${CANVAS_W / 2}" y="${PADDING + QR_PX + 128}"
       font-family="Arial, sans-serif" font-size="11" font-weight="400"
       fill="#5a5048" text-anchor="middle" letter-spacing="0.04em">
       California AB 723 §10140.8 Virtual Staging Disclosure
     </text>
 
+    <!-- MLS disclosure text line 1 -->
+    <text x="${CANVAS_W / 2}" y="${PADDING + QR_PX + 152}"
+      font-family="Arial, sans-serif" font-size="10" font-weight="400"
+      fill="#7a6f63" text-anchor="middle">
+      One or more photos have been virtually staged using AI-assisted technology.
+    </text>
+
+    <!-- MLS disclosure text line 2 -->
+    <text x="${CANVAS_W / 2}" y="${PADDING + QR_PX + 168}"
+      font-family="Arial, sans-serif" font-size="10" font-weight="400"
+      fill="#7a6f63" text-anchor="middle">
+      Staged images do not represent the current condition of the property.
+    </text>
+
+    <!-- Compliance URL in gold -->
+    <text x="${CANVAS_W / 2}" y="${PADDING + QR_PX + 190}"
+      font-family="Arial, sans-serif" font-size="10" font-weight="500"
+      fill="#b8975a" text-anchor="middle" letter-spacing="0.02em">
+      ${escSVG(truncateUrl(complianceUrl))}
+    </text>
+
+    <!-- Divider 2 -->
+    <line x1="${PADDING}" y1="${PADDING + QR_PX + 205}"
+      x2="${CANVAS_W - PADDING}" y2="${PADDING + QR_PX + 205}"
+      stroke="#2d2824" stroke-width="1"/>
+
     <!-- Agent name -->
-    ${agentName ? `<text x="${CANVAS_W / 2}" y="${PADDING + QR_PX + 155}"
+    ${agentName ? `<text x="${CANVAS_W / 2}" y="${PADDING + QR_PX + 225}"
       font-family="Arial, sans-serif" font-size="12" font-weight="500"
       fill="#b8975a" text-anchor="middle">
       ${escSVG(agentName)}${agentBrokerage ? "  ·  " + escSVG(agentBrokerage) : ""}
@@ -143,7 +174,7 @@ exports.handler = async (event) => {
     });
 
     // Build canvas SVG for branding layer
-    const canvasSvg = buildCanvasSVG(address, agentName, agentBrokerage);
+    const canvasSvg = buildCanvasSVG(address, agentName, agentBrokerage, cleanUrl);
     const canvasBuffer = Buffer.from(canvasSvg);
 
     // Composite: dark background + branding SVG, then place QR in the white card zone

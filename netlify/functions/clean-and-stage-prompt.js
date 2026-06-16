@@ -249,7 +249,7 @@ Return ONLY valid JSON — no markdown, no preamble:
     }
   ],
   "zones": [
-    ${zoneList.map(zone => '{\n      "name": "' + zone + '",\n      "ceilingFixture": "Ceiling fixture directly above this zone — specify type, finish, style, and exact position. If none, say NONE.",\n      "focalPoint": "Primary anchor for furniture placement in this zone",\n      "stagingInstruction": "Specific furniture to place in this zone based on its ceiling fixture and focal point",\n      "stagingInstruction": "Specific furniture to place in this zone. Every user-labeled zone MUST be staged."\n    }').join(',\n    ')}
+    ${zoneList.map(zone => '{\n      "name": "' + zone + '",\n      "ceilingFixture": "Ceiling fixture directly above this zone — specify type, finish, style, and its position RELATIVE TO THE CAMERA (foreground = close to camera, midground = middle of frame, background = far from camera). This camera-relative position is what GPT uses to place furniture beneath it. If none, say NONE.",\n      "focalPoint": "Primary anchor for furniture placement in this zone",\n      "stagingInstruction": "Specific furniture to place in this zone based on its ceiling fixture and focal point",\n      "stagingInstruction": "Specific furniture to place in this zone. Every user-labeled zone MUST be staged."\n    }').join(',\n    ')}
   ],
   "zoneBoundary": {
     "front": "Front boundary description",

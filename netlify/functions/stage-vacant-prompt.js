@@ -103,7 +103,7 @@ async function readVacantRoom({ imageBase64, roomType, claudeKey }) {
       "name": "${zone}",
       "ceilingFixture": "Ceiling fixture directly above this zone — specify type, finish, style, and exact position. If none visible, say NONE.",
       "focalPoint": "Primary anchor for furniture placement in this zone",
-      "stagingInstruction": "Specific furniture to place in this zone. Every user-labeled zone MUST be staged — never leave a user-labeled zone vacant."
+      "stagingInstruction": "Specific furniture to place in this zone. Every user-labeled zone MUST be staged. If this is the flex/secondary zone, identify it as THE ENCLOSED SPACE WITH DEFINED WALLS visible in the frame — describe its entry opening and boundary walls so GPT places furniture inside it, not in the open plan area."
     }`).join(',\n    ')
     : '';
 
@@ -123,6 +123,8 @@ The user has labeled zones in the order they appear in the space. Map each fixtu
 
 STEP 3 — STAGING INSTRUCTION:
 For each zone, write a staging instruction that uses the ceiling fixture as the PRIMARY anchor. Furniture must be placed centered beneath or oriented toward that zone's ceiling fixture — not the adjacent zone's fixture.
+
+FLEX/SECONDARY ZONE RULE: Look for the ONE enclosed or partially enclosed space in the frame — it will have its own walls, an angled or defined entry opening, and may have a pass-through window or partial partition wall. This is the flex zone. It is the only space in the image with defined walls. Describe it by its entry opening and boundary walls so GPT can locate it instantly. Place furniture INSIDE that walled space only.
 
 CRITICAL RULES:
 - A fireplace is a LIVING ZONE focal point ONLY — sofas and seating face it. A dining table NEVER goes near a fireplace unless a chandelier is directly above that location.

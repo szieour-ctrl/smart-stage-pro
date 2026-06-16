@@ -237,7 +237,7 @@ Return ONLY valid JSON — no markdown, no preamble:
 
 {
   "roomType": "${roomType}",
-  "preserveList": "Comprehensive list of every permanent architectural element VISIBLE AND CONFIRMED in the photo: walls, ceiling, flooring, windows, doors, appliances, fixtures, finishes. CRITICAL: Only list built-in shelving or niches if UNMISTAKABLY present as recessed permanent wall construction. If uncertain, DO NOT include as built-in. Never invent architectural elements. DO NOT alter any permanent architectural element.",
+  "preserveList": "Comprehensive list of every permanent architectural element visible: walls (including partial walls, half-walls, partition walls, and pass-through openings with their wall sections), ceiling, flooring material/color, windows with frame color, doors, appliances, fixtures, finishes. If a pass-through or opening exists in a wall, describe the full wall including the solid sections — these wall sections are permanent architecture. End with: DO NOT alter any permanent architectural element.",
   "fixtureInventory": [
     {
       "fixture": "description",
@@ -247,7 +247,7 @@ Return ONLY valid JSON — no markdown, no preamble:
     }
   ],
   "zones": [
-    ${zoneList.map(zone => '{\n      "name": "' + zone + '",\n      "ceilingFixture": "Ceiling fixture directly above this zone — specify type, finish, style, and exact position. If none, say NONE.",\n      "focalPoint": "Primary anchor for furniture placement in this zone",\n      "stagingInstruction": "Specific furniture to place in this zone based on its ceiling fixture and focal point",\n      "keepVacant": false\n    }').join(',\n    ')}
+    ${zoneList.map(zone => '{\n      "name": "' + zone + '",\n      "ceilingFixture": "Ceiling fixture directly above this zone — specify type, finish, style, and exact position. If none, say NONE.",\n      "focalPoint": "Primary anchor for furniture placement in this zone",\n      "stagingInstruction": "Specific furniture to place in this zone based on its ceiling fixture and focal point",\n      "stagingInstruction": "Specific furniture to place in this zone. Every user-labeled zone MUST be staged."\n    }').join(',\n    ')}
   ],
   "zoneBoundary": {
     "front": "Front boundary description",
@@ -271,7 +271,7 @@ Return ONLY valid JSON — no markdown, no preamble:
 
 {
   "roomType": "${roomType}",
-  "preserveList": "Comprehensive list of every permanent architectural element VISIBLE AND CONFIRMED in the photo: walls, ceiling, flooring, windows, doors, appliances, fixtures, finishes. CRITICAL: Only list built-in shelving or niches if UNMISTAKABLY present as recessed permanent wall construction. If uncertain, DO NOT include as built-in. Never invent architectural elements. DO NOT alter any permanent architectural element.",
+  "preserveList": "Comprehensive list of every permanent architectural element visible: walls (including partial walls, half-walls, partition walls, and pass-through openings with their wall sections), ceiling, flooring material/color, windows with frame color, doors, appliances, fixtures, finishes. If a pass-through or opening exists in a wall, describe the full wall including the solid sections — these wall sections are permanent architecture. End with: DO NOT alter any permanent architectural element.",
   "anchors": {
     "focal": "Primary focal point — sofa/seating faces this",
     "ceiling": "Ceiling fixture description if present with finish and style",
@@ -351,7 +351,7 @@ Return ONLY valid JSON — no markdown, no preamble:
       const palette = colorPalette || 'Warm Neutrals';
       const paletteTones = PALETTE_TONES[palette] || (palette + ' tones');
 
-      let stagePrompt = `PRIMARY ROLE: Stage furniture and decor ONLY.\n\nIMMUTABLE LOCK: Never alter, move, remove, replace, or touch: structural walls | ceilings | kitchen/bathroom cabinets | countertops | lighting fixtures. These must be preserved exactly as photographed.\n\nABSOLUTE PROHIBITION: Never ADD architectural elements that do not exist in the original photo. Do NOT add: built-in shelving | niches | alcoves | recessed shelves | bookcases built into walls | fireplace surrounds | wall openings | cabinetry | any structural element. If it is not visible in the original photograph, it cannot appear in the staged image.\n\nAB 723 COMPLIANCE: Virtual staging adds furniture only. Any alteration to permanent architecture — including ADDING elements not present — makes the listing non-compliant and subject to MLS removal.\n\n═══════════════════════════════════════════════════════════════════════════════\n\n`;
+      let stagePrompt = `PRIMARY ROLE: Stage furniture and decor ONLY.\n\nIMMUTABLE LOCK: Never alter, move, remove, replace, or touch: structural walls | partial walls | half-walls | pass-through openings and their surrounding wall sections | ceilings | kitchen/bathroom cabinets | countertops | lighting fixtures. These must be preserved exactly as photographed. If a wall has a pass-through opening, both the opening AND the solid wall sections above and below it must remain exactly as photographed — do not enlarge, remove, or modify any wall section.\n\nABSOLUTE PROHIBITION: Never ADD architectural elements that do not exist in the original photo. Do NOT add: built-in shelving | niches | alcoves | recessed shelves | bookcases built into walls | fireplace surrounds | wall openings | cabinetry | any structural element. If it is not visible in the original photograph, it cannot appear in the staged image.\n\nAB 723 COMPLIANCE: Virtual staging adds furniture only. Any alteration to permanent architecture — including ADDING elements not present — makes the listing non-compliant and subject to MLS removal.\n\n═══════════════════════════════════════════════════════════════════════════════\n\n`;
 
       stagePrompt += `PRESERVE EXACTLY: ${roomData.preserveList}\n\n`;
       stagePrompt += `STAGING: ${roomData.roomType} — Stage ONLY within this room boundary\n\n`;
@@ -360,11 +360,7 @@ Return ONLY valid JSON — no markdown, no preamble:
       if (isOpenPlan && Array.isArray(roomData.zones)) {
         stagePrompt += `ZONE-BY-ZONE STAGING INSTRUCTIONS:\n`;
         roomData.zones.forEach(zone => {
-          if (zone.keepVacant) {
-            stagePrompt += `\n${zone.name.toUpperCase()} ZONE — KEEP VACANT. Do not add any furniture.\n`;
-            return;
-          }
-          stagePrompt += `\n${zone.name.toUpperCase()} ZONE:\n`;
+stagePrompt += `\n${zone.name.toUpperCase()} ZONE:\n`;
           if (zone.ceilingFixture && zone.ceilingFixture !== 'NONE') {
             stagePrompt += `Ceiling fixture: ${zone.ceilingFixture} — use this as the anchor for furniture placement in this zone\n`;
           }

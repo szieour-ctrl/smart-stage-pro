@@ -101,10 +101,9 @@ async function readVacantRoom({ imageBase64, roomType, claudeKey }) {
   const zonesTemplate = isOpenPlan
     ? zoneList.map(zone => `{
       "name": "${zone}",
-      "ceilingFixture": "Ceiling fixture directly above this zone — specify type, finish, style, and exact position. If none, say NONE.",
-      "focalPoint": "Primary anchor for furniture placement in this zone (fireplace, island, window, chandelier position)",
-      "stagingInstruction": "Specific furniture to place in this zone based on its ceiling fixture and focal point",
-      "keepVacant": false
+      "ceilingFixture": "Ceiling fixture directly above this zone — specify type, finish, style, and exact position. If none visible, say NONE.",
+      "focalPoint": "Primary anchor for furniture placement in this zone",
+      "stagingInstruction": "Specific furniture to place in this zone. Every user-labeled zone MUST be staged — never leave a user-labeled zone vacant."
     }`).join(',\n    ')
     : '';
 
@@ -137,7 +136,7 @@ Return ONLY valid JSON — no markdown, no preamble:
 
 {
   "roomType": "${roomType}",
-  "preserveList": "Comprehensive list of every permanent architectural element VISIBLE AND CONFIRMED in the photo: walls, ceiling, flooring material/color, windows with frame color, doors, appliances, fixtures, finishes. CRITICAL: Only list built-in shelving or niches if they are UNMISTAKABLY present as recessed permanent wall construction. If uncertain whether something is built-in or freestanding, DO NOT include it as a built-in. Never invent or assume architectural elements. End with: DO NOT alter any permanent architectural element.",
+  "preserveList": "Comprehensive list of every permanent architectural element visible: walls, ceiling, flooring material/color, windows with frame color, doors, appliances, fixtures, finishes. End with: DO NOT alter any permanent architectural element.",
   "fixtureInventory": [
     {
       "fixture": "description of fixture",
@@ -173,7 +172,7 @@ Return ONLY valid JSON — no markdown, no preamble:
 
 {
   "roomType": "${roomType}",
-  "preserveList": "Comprehensive list of every permanent architectural element VISIBLE AND CONFIRMED in the photo: walls, ceiling, flooring material/color, windows with frame color, doors, appliances, fixtures, finishes. CRITICAL: Only list built-in shelving or niches if they are UNMISTAKABLY present as recessed permanent wall construction. If uncertain whether something is built-in or freestanding, DO NOT include it as a built-in. Never invent or assume architectural elements. End with: DO NOT alter any permanent architectural element.",
+  "preserveList": "Comprehensive list of every permanent architectural element visible: walls, ceiling, flooring material/color, windows with frame color, doors, appliances, fixtures, finishes. End with: DO NOT alter any permanent architectural element.",
   "anchors": {
     "focal": "Primary focal point (fireplace, window wall, feature wall) — sofa/seating faces this",
     "ceiling": "Ceiling fixture description if present (fan, chandelier, recessed lights) with finish and style ONLY",
@@ -258,10 +257,6 @@ function buildVacantPrompt({ roomData, designStyle, colorPalette }) {
     // ── OPEN PLAN: per-zone anchor instructions ──────────────────────────────
     p += `ZONE-BY-ZONE STAGING INSTRUCTIONS:\n`;
     roomData.zones.forEach(zone => {
-      if (zone.keepVacant) {
-        p += `\n${zone.name.toUpperCase()} ZONE — KEEP VACANT. Do not add any furniture.\n`;
-        return;
-      }
       p += `\n${zone.name.toUpperCase()} ZONE:\n`;
       if (zone.ceilingFixture && zone.ceilingFixture !== 'NONE') {
         p += `Ceiling fixture: ${zone.ceilingFixture} — use this as the anchor for furniture placement in this zone\n`;
@@ -290,7 +285,8 @@ function buildVacantPrompt({ roomData, designStyle, colorPalette }) {
       p += `Do not stage into dining area visible through opening\n\n`;
     } else if (roomData.roomType.toLowerCase().includes('living') || roomData.roomType.toLowerCase().includes('great room')) {
       p += `LIVING ROOM STAGING:\n`;
-      p += `Place area rug centered under ceiling fixture, extending from ${roomData.anchors.frontBoundary} to 18 inches in front of ${roomData.anchors.backWall}\n`;
+      p += `CIRCULATION RULE: The foreground floor space nearest the camera is a walk path between zones — keep it completely empty. All furniture must be placed in the MIDGROUND anchored to the fireplace. Do not place any furniture in the front half of the frame.\n`;
+      p += `Place area rug in the midground centered under ceiling fixture, anchored toward the fireplace — rug must NOT extend into the foreground half of the frame.\n`;
       p += `Place sofa with back against ${roomData.anchors.backWall}, centered on rug, facing ${roomData.anchors.focal}\n`;
       p += `Place two accent chairs on rug angled inward toward focal point\n`;
       p += `Place coffee table centered on rug between sofa and focal point\n`;
@@ -298,7 +294,8 @@ function buildVacantPrompt({ roomData, designStyle, colorPalette }) {
       p += `Place plant right of focal point\n`;
       p += `Place art piece above focal point\n`;
       p += `Place arc floor lamp behind left accent chair\n`;
-      p += `Keep all furniture within zone boundary (do not extend past ${roomData.anchors.leftBoundary} or ${roomData.anchors.rightBoundary})\n\n`;
+      p += `Keep all furniture within zone boundary (do not extend past ${roomData.anchors.leftBoundary} or ${roomData.anchors.rightBoundary})\n`;
+      p += `Keep foreground floor completely empty — this is the circulation path between zones.\n\n`;
     } else if (roomData.roomType.toLowerCase().includes('bedroom')) {
       p += `BEDROOM STAGING:\n`;
       p += `Place bed headboard against ${roomData.anchors.backWall}, centered\n`;
@@ -340,7 +337,6 @@ function buildVacantPrompt({ roomData, designStyle, colorPalette }) {
   p += `Maintain realistic furniture scale proportional to the room.\n`;
   p += `Do not scale furniture up to fill the frame.\n`;
   p += `Preserve all architectural features, room dimensions, and camera perspective exactly as photographed.\n`;
-  p += `Do NOT add built-in shelving, niches, alcoves, or any architectural element not visible in the original photo.\n`;
   p += `This image is for MLS listing per California AB 723 §10140.6.\n`;
   p += `Room proportions must be preserved exactly.\n`;
   p += `Virtual staging adds furniture and decor only — any alteration to architecture or spatial geometry is prohibited.`;

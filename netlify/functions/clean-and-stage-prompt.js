@@ -216,8 +216,7 @@ Zones visible: ${zoneList.join(', ')}
 STEP 1 — SPATIAL INVENTORY (do this first):
 Before assigning anything to zones, identify every ceiling fixture and architectural anchor by its PHYSICAL POSITION in the image frame:
 - Where is it? (left side of frame / center of frame / right side of frame)
-- How far from camera? (foreground = close to camera lens / midground = middle of frame / background = far from camera). Use camera distance, not room depth.
-- CHANDELIER DEPTH CHECK: If a chandelier is visible, compare it to other ceiling fixtures. The chandelier closest to the camera is FOREGROUND. If the ceiling fan is farther from camera than the chandelier, the chandelier is FOREGROUND — not midground or background. Never describe a chandelier as midground or background if it is closer to the camera than the ceiling fan.
+- Note ceiling fixture type and finish only — do not describe position or depth.
 - What is it? (chandelier, ceiling fan, pendant cluster, recessed lights, etc.)
 
 STEP 2 — ZONE MAPPING:
@@ -252,7 +251,7 @@ Return ONLY valid JSON — no markdown, no preamble:
     }
   ],
   "zones": [
-    ${zoneList.map(zone => '{\n      "name": "' + zone + '",\n      "ceilingFixture": "Ceiling fixture directly above this zone — specify type, finish, style, and its position RELATIVE TO THE CAMERA (foreground = close to camera, midground = middle of frame, background = far from camera). This camera-relative position is what GPT uses to place furniture beneath it. If none, say NONE.",\n      "focalPoint": "Primary anchor for furniture placement in this zone",\n      "stagingInstruction": "Specific furniture to place in this zone based on its ceiling fixture and focal point. Every user-labeled zone MUST be staged."\n    }').join(',\n    ')}
+    ${zoneList.map(zone => '{\n      "name": "' + zone + '",\n      "ceilingFixture": "Ceiling fixture directly above this zone — specify type and finish only (e.g. brushed nickel chandelier with clear glass shades, ceiling fan with brushed nickel finish, pendant cluster with glass shades). Do NOT describe position or depth. GPT will find the fixture in the photo and place furniture directly beneath it. If none, say NONE.",\n      "focalPoint": "Primary anchor for furniture placement in this zone",\n      "stagingInstruction": "Specific furniture to place in this zone based on its ceiling fixture and focal point. Every user-labeled zone MUST be staged."\n    }').join(',\n    ')}
   ],
   "zoneBoundary": {
     "front": "Front boundary description",

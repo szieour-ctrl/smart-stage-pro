@@ -101,7 +101,7 @@ async function readVacantRoom({ imageBase64, roomType, claudeKey }) {
   const zonesTemplate = isOpenPlan
     ? zoneList.map(zone => `{
       "name": "${zone}",
-      "ceilingFixture": "Ceiling fixture directly above this zone — specify type, finish, style, and exact position. If none visible, say NONE.",
+      "ceilingFixture": "Ceiling fixture directly above this zone — specify type, finish, style, and its position RELATIVE TO THE CAMERA (foreground = close to camera, midground = middle of frame, background = far from camera). This camera-relative position is what GPT uses to place furniture beneath it. If none visible, say NONE.",
       "focalPoint": "Primary anchor for furniture placement in this zone",
       "stagingInstruction": "Specific furniture to place in this zone. Every user-labeled zone MUST be staged. If this is the flex/secondary zone, identify it as THE ENCLOSED SPACE WITH DEFINED WALLS visible in the frame — describe its entry opening and boundary walls so GPT places furniture inside it, not in the open plan area."
     }`).join(',\n    ')
@@ -115,7 +115,7 @@ Zones visible: ${zoneList.join(', ')}
 STEP 1 — SPATIAL INVENTORY (do this first):
 Before assigning anything to zones, identify every ceiling fixture and architectural anchor by its PHYSICAL POSITION in the image frame:
 - Where is it? (left side of frame / center of frame / right side of frame)
-- How far from camera? (foreground / midground / background)
+- How far from camera? (foreground = close to camera lens / midground = middle of frame / background = far from camera). This is the most important dimension — use camera distance, not room depth.
 - What is it? (chandelier, ceiling fan, pendant cluster, recessed lights, etc.)
 
 STEP 2 — ZONE MAPPING:

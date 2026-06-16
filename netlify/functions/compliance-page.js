@@ -26,6 +26,7 @@ function renderPage(project, projectId) {
   const agentLogoUrl  = project.agentLogoUrl  || process.env.AGENT_LOGO_URL || "";
   const images        = project.images || [];
   const address       = project.address || "Property Address";
+  const compUrl       = project.complianceUrl || `${process.env.URL || "https://smartstagepro.com"}/compliance/${projectId}`;
   const createdAt     = formatDate(project.createdAt);
 
   const imagePairs = images.map((img, i) => {
@@ -208,7 +209,7 @@ function renderPage(project, projectId) {
 <!-- MLS REMARKS DISCLOSURE BLOCK -->
 <div class="remarks-block">
   <div class="remarks-block-label">MLS Public Remarks &mdash; Copy &amp; Paste Disclosure</div>
-  <div class="remarks-block-text" id="remarks-disclosure-text">One or more photos in this listing have been virtually staged using AI-assisted technology. Staged images are for illustrative purposes only and do not represent the current condition of the property. Address: ${address}.</div>
+  <div class="remarks-block-text" id="remarks-disclosure-text">One or more photos in this listing have been virtually staged using AI-assisted technology. Staged images are for illustrative purposes only and do not represent the current condition of the property. Address: ${address}. Virtual staging disclosure: ${compUrl}</div>
   <button class="remarks-copy-btn" id="remarks-copy-btn" onclick="copyRemarksText()">
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
     Copy for MLS Remarks

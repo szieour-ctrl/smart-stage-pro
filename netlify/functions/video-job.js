@@ -135,20 +135,109 @@ async function debitVideoCredits(userId, jobId, amount, description) {
 }
 
 // ── ACTION: FRAMES ───────────────────────────────────────────────────────
-// Returns all staged images for a listing — populates the agent's photo
-// selection UI. Read-only against the existing staged_images table.
+// Returns ALL images available for a listing's video tour — both staged
+// rooms (from Smart Stage PRO's staging engine) and externally-referenced
+// professional photography (MLS/Drive/agent's own site). Populates the
+// agent's photo selection UI with everything in one place, matching the
+// "find everything in one dashboard" platform goal.
+//
+// COMPLIANCE NOTE: the two sources are tagged with `source` so downstream
+// code (and the frontend) can always tell them apart. staged_images carry
+// AB 723 disclosure obligations; external_photos never do, since nothing
+// was virtually altered. Never merge these into a single undifferentiated
+// list without preserving that distinction — see external_photos table
+// comment in the schema for the full reasoning.
 
 async function getFramesForListing(listingId) {
-  const r = await supabase("GET", "staged_images", null,
-    `?listing_id=eq.${listingId}&select=id,mode,cloudinary_original_url,cloudinary_staged_url,created_at&order=created_at.asc`
-  );
-  return r.data || [];
+  const [stagedResult, externalResult] = await Promise.all([
+    supabase("GET", "staged_images", null,
+      `?listing_id=eq.${listingId}&select=id,mode,cloudinary_original_url,cloudinary_staged_url,created_at&order=created_at.asc`
+    ),
+    supabase("GET", "external_photos", null,
+      `?listing_id=eq.${listingId}&select=id,image_url,room_type,source_label,created_at&order=created_at.asc`
+    ),
+  ]);
+
+  const stagedFrames = (stagedResult.data || []).map(row => ({
+    id:            row.id,
+    source:        "staged",
+    mode:           row.mode,
+    originalUrl:    row.cloudinary_original_url,
+    stagedUrl:      row.cloudinary_staged_url,
+    sourceLabel:    "Virtually Staged",
+    createdAt:      row.created_at,
+  }));
+
+  const externalFrames = (externalResult.data || []).map(row => ({
+    id:            row.id,
+    source:        "external",
+    imageUrl:       row.image_url,
+    roomType:       row.room_type,
+    sourceLabel:    row.source_label || "Professional Photography",
+    createdAt:      row.created_at,
+  }));
+
+  return { stagedFrames, externalFrames };
+}
+
+// ── ACTION: ADD EXTERNAL PHOTO ───────────────────────────────────────────
+// Lets an agent attach a photo they already have hosted elsewhere (MLS,
+// Google Drive, their own site) to a listing, purely as a video-assembly
+// input. Smart Stage PRO does not store or manage the file itself — only
+// the URL reference. No AB 723 implications, since nothing is altered.
+
+async function addExternalPhoto({ listingId, userId, imageUrl, roomType, sourceLabel }) {
+  if (!imageUrl) throw new Error("Missing imageUrl");
+
+  const result = await supabase("POST", "external_photos", {
+    listing_id:       listingId,
+    added_by_user_id: userId,
+    image_url:        imageUrl,
+    room_type:        roomType || null,
+    source_label:     sourceLabel || null,
+  });
+
+  const row = result.data?.[0];
+  if (!row) throw new Error("Failed to add external photo");
+
+  return { added: true, id: row.id };
+}
+
+// ── AI MOTION ELIGIBILITY (mirrors klingMotion.js enforceScopeRules) ─────
+// This is intentionally duplicated, not shared code — video-job.js (Netlify)
+// and klingMotion.js (Railway) are separate deploys with separate trust
+// boundaries. The Netlify check exists so a frame can never be BILLED for
+// AI motion it isn't actually eligible for; the Railway check exists as a
+// final, independent guard regardless of what Netlify validated. Both must
+// stay in sync if this rule ever changes — see the reasoning in
+// klingMotion.js's enforceScopeRules comment for the full explanation of
+// why "known pair vs. single image" is the real safety boundary, not
+// "interior vs. exterior."
+
+function validateAiMotionEligibility(frames) {
+  for (const frame of frames) {
+    if (!frame.useAiMotion) continue;
+
+    const hasKnownPair = !!(frame.isBeforeAfter && frame.beforeUrl);
+    const isExterior = frame.roomType === "exterior";
+
+    if (!hasKnownPair && !isExterior) {
+      throw new Error(
+        `AI motion requested for a frame with no paired image (room type "${frame.roomType}"). AI motion requires a real vacant+staged pair for interior rooms — single professional photos can only use standard motion.`
+      );
+    }
+  }
 }
 
 // ── ACTION: CREATE ───────────────────────────────────────────────────────
 
 async function createVideoJob({ listingId, projectId, userId, frames, formats, musicStyle }) {
   if (!frames || frames.length === 0) throw new Error("No frames provided");
+
+  // Reject ineligible AI motion requests before any credits are touched —
+  // see validateAiMotionEligibility for why this check exists independently
+  // of the one inside klingMotion.js on the Railway side.
+  validateAiMotionEligibility(frames);
 
   // Cost now scales with frame count and AI motion usage, not just a flat
   // before/after add-on — see calculateCreditCost for the per-frame logic.
@@ -245,8 +334,18 @@ exports.handler = async (event) => {
     if (action === "frames") {
       const listingId = event.queryStringParameters?.listingId;
       if (!listingId) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing listingId" }) };
-      const frames = await getFramesForListing(listingId);
-      return { statusCode: 200, headers, body: JSON.stringify({ frames }) };
+      const { stagedFrames, externalFrames } = await getFramesForListing(listingId);
+      return { statusCode: 200, headers, body: JSON.stringify({ stagedFrames, externalFrames }) };
+    }
+
+    if (action === "add-external-photo") {
+      const body = JSON.parse(event.body || "{}");
+      const { listingId, userId, imageUrl, roomType, sourceLabel } = body;
+      if (!listingId || !imageUrl) {
+        return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing listingId or imageUrl" }) };
+      }
+      const result = await addExternalPhoto({ listingId, userId, imageUrl, roomType, sourceLabel });
+      return { statusCode: 200, headers, body: JSON.stringify(result) };
     }
 
     if (action === "create") {

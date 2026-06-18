@@ -16,13 +16,6 @@
 
 const https = require("https");
 
-const VIDEO_CREDIT_COSTS = {
-  "16x9":          3,
-  "9x16":          3,
-  "16x9+9x16":     5,
-  before_after_add: 1,
-};
-
 // ── SUPABASE HELPER (same pattern as project-manage.js) ──────────────────
 
 function supabase(method, table, body, queryParams = "") {
@@ -91,12 +84,40 @@ async function getCurrentCreditBalance(userId) {
   return r.data?.[0]?.balance_after ?? 0;
 }
 
-function calculateCreditCost(formats, hasBeforeAfter) {
-  let cost;
-  if (formats.length === 2) cost = VIDEO_CREDIT_COSTS["16x9+9x16"];
-  else cost = VIDEO_CREDIT_COSTS[formats[0]] || 3;
+// Base cost per finished video (covers Cloudinary storage, Mubert music,
+// FFmpeg assembly/compute — flat regardless of room count).
+const BASE_VIDEO_COST = {
+  "16x9":      2,
+  "9x16":      2,
+  "16x9+9x16": 3,
+};
 
-  if (hasBeforeAfter) cost += VIDEO_CREDIT_COSTS.before_after_add;
+// Per-frame cost — charged once per room/frame in the job, since more
+// rooms means more compute time and more underlying API cost (Kling
+// specifically bills per second of real generated video).
+const PER_FRAME_COST = {
+  ken_burns: 1,   // FFmpeg only — negligible real cost, mostly margin
+  ai_motion: 4,   // Kling-backed — real backend cost is ~$0.42-0.50 per 5-6s
+                  // clip at $0.084/sec; 4 credits at $0.10-0.15/credit value
+                  // covers that with healthy margin. Revisit if Kling pricing
+                  // or typical clip duration changes materially.
+  continuation_add: 1, // small surcharge for the optional Ken Burns push-in/
+                        // parallax appended after Kling's transformation —
+                        // extra FFmpeg compute, no extra Kling API cost.
+};
+
+function calculateCreditCost(formats, frames) {
+  let cost = formats.length === 2
+    ? BASE_VIDEO_COST["16x9+9x16"]
+    : (BASE_VIDEO_COST[formats[0]] || BASE_VIDEO_COST["16x9"]);
+
+  for (const frame of frames) {
+    cost += frame.useAiMotion ? PER_FRAME_COST.ai_motion : PER_FRAME_COST.ken_burns;
+    if (frame.useAiMotion && frame.addContinuationMotion) {
+      cost += PER_FRAME_COST.continuation_add;
+    }
+  }
+
   return cost;
 }
 
@@ -129,8 +150,9 @@ async function getFramesForListing(listingId) {
 async function createVideoJob({ listingId, projectId, userId, frames, formats, musicStyle }) {
   if (!frames || frames.length === 0) throw new Error("No frames provided");
 
-  const hasBeforeAfter = frames.some(f => f.isBeforeAfter);
-  const creditCost = calculateCreditCost(formats, hasBeforeAfter);
+  // Cost now scales with frame count and AI motion usage, not just a flat
+  // before/after add-on — see calculateCreditCost for the per-frame logic.
+  const creditCost = calculateCreditCost(formats, frames);
 
   const balance = await getCurrentCreditBalance(userId);
   if (balance < creditCost) {

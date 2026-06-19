@@ -3,11 +3,20 @@
 //
 // Routes via ?action= parameter, same pattern as project-manage.js
 //
-// action=frames  — returns staged images for a listing, for the agent's
-//                   photo selection UI
-// action=create  — validates credits, creates video_jobs + video_job_frames
-//                   rows, sends the job to the Railway render service
-// action=status  — polls Supabase for job status, returns progress + URLs
+// action=frames    — returns staged images for a listing, for the agent's
+//                     photo selection UI
+// action=create    — creates video_jobs + video_job_frames rows, sends the
+//                     job to the Railway render service. FREE — no credits
+//                     touched here. Stores a quoted cost (credits_used) for
+//                     the frontend's running "cart total," but does not debit.
+// action=status     — polls Supabase for job status/progress. Deliberately
+//                     does NOT return the finished output URLs — see
+//                     action=download for why.
+// action=download   — the ONLY action that touches credits. Charges once on
+//                     first download (mirrors how image staging charges at
+//                     "Generate Final," not at generation time), idempotent
+//                     for repeat downloads of the same job, and is the only
+//                     place the real output URLs are ever returned.
 //
 // CRITICAL: This function reads from listings/staged_images (existing
 // PRO tables) but only ever WRITES to video_jobs/video_job_frames (new
@@ -74,23 +83,70 @@ function dispatchToRailway(payload) {
   });
 }
 
-// ── CREDIT HELPERS (same pattern as project-manage.js / debit-credit.js) ──
+// ── CREDIT DEBIT (calls debit-credit.js — same path image staging uses) ──
+//
+// CHANGE: video-job.js used to write directly to credit_ledger via its own
+// getCurrentCreditBalance()/debitVideoCredits() pair, duplicating logic that
+// already existed in debit-credit.js — and missing debit-credit.js's
+// active-subscription/trial check entirely (a user with a cancelled
+// subscription but leftover credit balance could still generate videos,
+// even though the same user staging a single image would be blocked).
+//
+// This now calls debit-credit.js directly over HTTP, so video jobs get the
+// exact same balance check, subscription/trial check, and ledger write that
+// image staging already uses — one implementation, not two diverging ones.
 
-async function getCurrentCreditBalance(userId) {
-  if (!userId || !process.env.SUPABASE_URL) return 0;
-  const r = await supabase("GET", "credit_ledger", null,
-    `?user_id=eq.${userId}&select=balance_after&order=created_at.desc&limit=1`
-  );
-  return r.data?.[0]?.balance_after ?? 0;
+function callDebitCredit(userId, cost, reason) {
+  return new Promise((resolve, reject) => {
+    const url = new URL(`${process.env.SITE_URL}/.netlify/functions/debit-credit`);
+    const bodyStr = JSON.stringify({ userId, cost, reason });
+
+    const req = https.request({
+      hostname: url.hostname,
+      path:     url.pathname,
+      method:   "POST",
+      headers: {
+        "Content-Type":   "application/json",
+        "Content-Length": Buffer.byteLength(bodyStr),
+      }
+    }, res => {
+      let data = "";
+      res.on("data", c => data += c);
+      res.on("end", () => {
+        try { resolve({ status: res.statusCode, data: JSON.parse(data || "{}") }); }
+        catch { resolve({ status: res.statusCode, data }); }
+      });
+    });
+    req.on("error", reject);
+    req.write(bodyStr);
+    req.end();
+  });
 }
 
 // Base cost per finished video (covers Cloudinary storage, Mubert music,
-// FFmpeg assembly/compute — flat regardless of room count).
-const BASE_VIDEO_COST = {
-  "16x9":      2,
-  "9x16":      2,
-  "16x9+9x16": 3,
-};
+// FFmpeg assembly/compute). Flat regardless of room count AND regardless of
+// how many output formats are delivered for Ken Burns-only jobs.
+//
+// CONFIRMED via assemble.js: concatenateClips() and mixAudio() run ONCE,
+// then renderFormat() is called separately per format as a cheap crop/scale
+// pass on the same already-assembled master (9:16 is just
+// `crop=ih*9/16:ih,scale=...` on the 16:9 output) — never a second Kling
+// generation. So bundling both formats for Ken Burns-only jobs is genuinely
+// cheap, not a margin giveaway.
+//
+// AI motion jobs are still restricted to exactly one format regardless —
+// see validateFormatChoiceForAiMotion below. Not a cost issue (confirmed
+// above), a quality issue: that same center-crop is fine on Ken Burns
+// geometry we control, but risky on Kling's AI-chosen composition, which
+// could put the actual generated motion off-center and get cropped out.
+const BASE_VIDEO_COST = 2;
+
+// Max images/frames per video job. Bounded by render time (Railway processes
+// frames sequentially, not in parallel — see renderPipeline.js's for loop)
+// and by what a real listing needs (most top out around 10-15 distinct
+// rooms/areas). Enforced server-side here, not just as a frontend UI limit,
+// so a malformed or scripted request can't bypass it and overload Railway.
+const MAX_FRAMES_PER_JOB = 15;
 
 // Per-frame cost — charged once per room/frame in the job, since more
 // rooms means more compute time and more underlying API cost (Kling
@@ -107,9 +163,9 @@ const PER_FRAME_COST = {
 };
 
 function calculateCreditCost(formats, frames) {
-  let cost = formats.length === 2
-    ? BASE_VIDEO_COST["16x9+9x16"]
-    : (BASE_VIDEO_COST[formats[0]] || BASE_VIDEO_COST["16x9"]);
+  // CHANGE: BASE_VIDEO_COST is now a flat number, not a per-format lookup —
+  // same cost whether the job delivers one format or both.
+  let cost = BASE_VIDEO_COST;
 
   for (const frame of frames) {
     cost += frame.useAiMotion ? PER_FRAME_COST.ai_motion : PER_FRAME_COST.ken_burns;
@@ -119,19 +175,6 @@ function calculateCreditCost(formats, frames) {
   }
 
   return cost;
-}
-
-async function debitVideoCredits(userId, jobId, amount, description) {
-  const balance = await getCurrentCreditBalance(userId);
-  const newBalance = Math.max(0, balance - amount);
-  await supabase("POST", "credit_ledger", {
-    user_id:       userId,
-    type:          "usage",
-    amount:        -amount,
-    balance_after: newBalance,
-    description,
-  });
-  return newBalance;
 }
 
 // ── ACTION: FRAMES ───────────────────────────────────────────────────────
@@ -229,61 +272,95 @@ function validateAiMotionEligibility(frames) {
   }
 }
 
+// ── FORMAT RESTRICTION FOR AI MOTION ─────────────────────────────────────
+// Ken Burns clips can safely bundle both 16:9 and 9:16 for one price — see
+// BASE_VIDEO_COST comment, confirmed via assemble.js that the 9:16 version
+// is just a cheap center crop of the same rendered frames. Kling-generated
+// clips are real AI motion with composition Kling chose, not us — blindly
+// center-cropping that to 9:16 risks cutting off whatever Kling actually
+// rendered (a fireplace sitting off-center, a window view, etc.). So any
+// job containing AI motion must commit to exactly one format up front,
+// rather than risk an automatic crop that could look broken on the premium
+// feature. Enforced server-side so a frontend bug that omits `formats`
+// can't silently default to two formats for an AI motion job.
+
+function validateFormatChoiceForAiMotion(frames, formats) {
+  const hasAiMotion = frames.some(f => f.useAiMotion);
+  if (hasAiMotion && formats.length !== 1) {
+    throw new Error(
+      "AI motion videos must be delivered in a single format — choose 16:9 or 9:16 before submitting. The AI-generated motion can't be safely auto-cropped to a second aspect ratio."
+    );
+  }
+}
+
 // ── ACTION: CREATE ───────────────────────────────────────────────────────
 
 async function createVideoJob({ listingId, projectId, userId, frames, formats, musicStyle }) {
   if (!frames || frames.length === 0) throw new Error("No frames provided");
 
-  // Reject ineligible AI motion requests before any credits are touched —
+  // Reject oversized jobs before any AI motion validation or credit cost
+  // calculation — cheapest possible rejection point, no Supabase/Railway
+  // calls made yet.
+  if (frames.length > MAX_FRAMES_PER_JOB) {
+    throw new Error(
+      `Too many frames: ${frames.length} requested, ${MAX_FRAMES_PER_JOB} max per video.`
+    );
+  }
+
+  // Reject ineligible AI motion requests before any rows are touched —
   // see validateAiMotionEligibility for why this check exists independently
   // of the one inside klingMotion.js on the Railway side.
   validateAiMotionEligibility(frames);
 
-  // Cost now scales with frame count and AI motion usage, not just a flat
-  // before/after add-on — see calculateCreditCost for the per-frame logic.
+  // AI motion jobs must commit to one format — see comment above
+  // validateFormatChoiceForAiMotion for why (composition risk, not cost).
+  validateFormatChoiceForAiMotion(frames, formats);
+
+  // CHANGE: this is now a QUOTE, not a charge. Job creation and rendering
+  // are free — credits are only actually debited at first MP4 download,
+  // via downloadVideoJob() below. This mirrors how image staging already
+  // works: generation is free, only "Generate Final" (the download moment)
+  // charges. creditCost gets stored on the job row as credits_used so the
+  // frontend can show a running "cart total" while building/rendering,
+  // but no debit-credit.js call happens here anymore.
   const creditCost = calculateCreditCost(formats, frames);
 
-  const balance = await getCurrentCreditBalance(userId);
-  if (balance < creditCost) {
-    return { error: "insufficient_credits", required: creditCost, balance };
-  }
-
-  // Create the job row
-  const jobResult = await supabase("POST", "video_jobs", {
-    listing_id:   listingId,
-    user_id:      userId,
-    project_id:   projectId,
-    status:       "queued",
-    formats,
-    music_style:  musicStyle || null,
-    credits_used: creditCost,
-  });
-
-  const job = jobResult.data?.[0];
-  if (!job) throw new Error("Failed to create video_jobs row");
-
-  // Create frame rows, preserving sequence order
-  const frameRows = frames.map((f, i) => ({
-    job_id:           job.id,
-    staged_image_id:  f.stagedImageId || null,
-    image_url:        f.imageUrl,
-    before_url:       f.beforeUrl || null,
-    is_before_after:  !!f.isBeforeAfter,
-    room_type:        f.roomType || "default",
-    motion_preset:    f.motionPreset || "auto",
-    duration_seconds: f.durationSeconds || 4.5,
-    sequence_order:   i,
-  }));
-
-  await supabase("POST", "video_job_frames", frameRows);
-
-  // Debit credits now — job is committed
-  await debitVideoCredits(userId, job.id, creditCost, `Video tour — ${projectId}`);
-
-  // Dispatch to Railway. If this fails, mark job failed but credits stay
-  // debited — agent should contact support rather than silently retry,
-  // since partial Railway failures need investigation.
+  // No credits are at stake in this try block anymore, so failures here
+  // are just "the job didn't start" — not a billing problem. Mark the row
+  // failed if it exists; otherwise let the error bubble to the outer
+  // handler for a clean 500.
+  let job;
   try {
+    // Create the job row
+    const jobResult = await supabase("POST", "video_jobs", {
+      listing_id:   listingId,
+      user_id:      userId,
+      project_id:   projectId,
+      status:       "queued",
+      formats,
+      music_style:  musicStyle || null,
+      credits_used: creditCost, // quoted cost — see credits_charged_at for actual charge
+    });
+
+    job = jobResult.data?.[0];
+    if (!job) throw new Error("Failed to create video_jobs row");
+
+    // Create frame rows, preserving sequence order
+    const frameRows = frames.map((f, i) => ({
+      job_id:           job.id,
+      staged_image_id:  f.stagedImageId || null,
+      image_url:        f.imageUrl,
+      before_url:       f.beforeUrl || null,
+      is_before_after:  !!f.isBeforeAfter,
+      room_type:        f.roomType || "default",
+      motion_preset:    f.motionPreset || "auto",
+      duration_seconds: f.durationSeconds || 4.5,
+      sequence_order:   i,
+    }));
+
+    await supabase("POST", "video_job_frames", frameRows);
+
+    // Dispatch to Railway.
     await dispatchToRailway({
       jobId:      job.id,
       projectId,
@@ -299,20 +376,89 @@ async function createVideoJob({ listingId, projectId, userId, frames, formats, m
         sequenceOrder:   f.sequence_order,
       })),
     });
+
+    return { created: true, jobId: job.id, quotedCost: creditCost };
+
   } catch (err) {
-    console.error("Railway dispatch failed:", err.message);
-    await supabase("PATCH", "video_jobs", { status: "failed", error_message: "Failed to reach render service" }, `?id=eq.${job.id}`);
-    return { error: "dispatch_failed", jobId: job.id };
+    console.error("createVideoJob failed:", err.message, { jobId: job?.id });
+    if (job?.id) {
+      await supabase("PATCH", "video_jobs",
+        { status: "failed", error_message: err.message },
+        `?id=eq.${job.id}`
+      );
+      return { error: "dispatch_failed", jobId: job.id };
+    }
+    throw err; // no job row exists at all — outer handler returns a clean 500
+  }
+}
+
+// ── ACTION: DOWNLOAD ─────────────────────────────────────────────────────
+// The ONLY place credits actually get debited for video. Charges once, on
+// first download, idempotent for any later re-download of the same job.
+// This is also the only place the real output URLs get returned — see
+// getJobStatus below, which deliberately does NOT include them, so polling
+// status alone can never hand over the finished file before it's been paid for.
+
+async function downloadVideoJob({ jobId, userId }) {
+  if (!jobId || !userId) throw new Error("Missing jobId or userId");
+
+  const jobRes = await supabase("GET", "video_jobs", null,
+    `?id=eq.${jobId}&select=id,user_id,status,output_16x9_url,output_9x16_url,credits_used,credits_charged_at`
+  );
+  const job = jobRes.data?.[0];
+
+  if (!job) return { error: "job_not_found" };
+  if (job.user_id !== userId) return { error: "forbidden" };
+  if (job.status !== "complete") return { error: "not_ready", status: job.status };
+
+  // Already charged — idempotent, just hand back the URLs again, no debit.
+  if (job.credits_charged_at) {
+    return {
+      downloadReady: true,
+      output16x9Url: job.output_16x9_url,
+      output9x16Url: job.output_9x16_url,
+    };
   }
 
-  return { created: true, jobId: job.id, creditsUsed: creditCost };
+  // First download for this job — charge now via debit-credit.js, the
+  // exact same balance + active-subscription/trial check image staging uses.
+  const debitResult = await callDebitCredit(userId, job.credits_used, "video_render");
+
+  if (debitResult.status === 402) {
+    return {
+      error:    debitResult.data?.code === "NO_SUB" ? "no_active_subscription" : "insufficient_credits",
+      required: job.credits_used,
+      balance:  debitResult.data?.balance,
+    };
+  }
+  if (debitResult.status !== 200) {
+    throw new Error(`Credit debit failed (status ${debitResult.status}): ${JSON.stringify(debitResult.data)}`);
+  }
+
+  await supabase("PATCH", "video_jobs",
+    { credits_charged_at: new Date().toISOString() },
+    `?id=eq.${jobId}`
+  );
+
+  return {
+    downloadReady: true,
+    output16x9Url: job.output_16x9_url,
+    output9x16Url: job.output_9x16_url,
+  };
 }
 
 // ── ACTION: STATUS ───────────────────────────────────────────────────────
 
 async function getJobStatus(jobId) {
+  // CHANGE: output_16x9_url/output_9x16_url removed from this select.
+  // Those now only ever come back from downloadVideoJob() — the one place
+  // that charges. If status polling could hand them over directly, a user
+  // could grab the finished file the moment it's ready, before any charge
+  // happens, making the whole download-time-charging model pointless.
+  // thumbnail_url stays — that's the watermarked preview, fine to show
+  // freely regardless of charge state, same pattern as image staging drafts.
   const r = await supabase("GET", "video_jobs", null,
-    `?id=eq.${jobId}&select=id,status,output_16x9_url,output_9x16_url,thumbnail_url,error_message,created_at,completed_at`
+    `?id=eq.${jobId}&select=id,status,thumbnail_url,credits_used,credits_charged_at,error_message,created_at,completed_at`
   );
   return r.data?.[0] || null;
 }
@@ -359,7 +505,28 @@ exports.handler = async (event) => {
         formats: formats || ["16x9", "9x16"],
         musicStyle,
       });
-      return { statusCode: result.error ? 402 : 200, headers, body: JSON.stringify(result) };
+      // CHANGE: create no longer touches credits, so the only possible
+      // error here is dispatch_failed — a server problem, not a payment
+      // problem. Always 500 on error now, no PAYMENT_ERRORS map needed.
+      return { statusCode: result.error ? 500 : 200, headers, body: JSON.stringify(result) };
+    }
+
+    if (action === "download") {
+      const body = JSON.parse(event.body || "{}");
+      const { jobId, userId } = body;
+      if (!jobId || !userId) {
+        return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing jobId or userId" }) };
+      }
+      const result = await downloadVideoJob({ jobId, userId });
+      const DOWNLOAD_STATUS_CODES = {
+        job_not_found:         404,
+        forbidden:              403,
+        not_ready:              409, // job exists but isn't complete yet
+        insufficient_credits:   402,
+        no_active_subscription: 402,
+      };
+      const statusCode = result.error ? (DOWNLOAD_STATUS_CODES[result.error] || 500) : 200;
+      return { statusCode, headers, body: JSON.stringify(result) };
     }
 
     if (action === "status") {

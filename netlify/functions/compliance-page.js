@@ -157,7 +157,7 @@ function renderPage(project, projectId) {
     .legal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; max-width: 1000px; }
     @media (max-width: 600px) { .legal-grid { grid-template-columns: 1fr; } }
     .legal-divider { border: none; border-top: 1px solid #2d2824; margin: 20px 0; }
-    .legal-bottom { font-size: 10px; color: #4a4038; max-width: 1000px; }
+    .legal-bottom { font-size: 10px; color: #f7f4ef; max-width: 1000px; }
   </style>
 </head>
 <body>
@@ -176,10 +176,10 @@ function renderPage(project, projectId) {
 
 <!-- COMPLIANCE BANNER -->
 <div class="compliance-banner">
-  <h1>Virtual Staging Disclosure — California AB 723 §10140.6</h1>
+  <h1>Virtual Staging Disclosure — California AB 723 §10140.8</h1>
   <p>
     This page provides the original, unaltered photographs and their corresponding virtually staged versions
-    for the property listed below, in compliance with California Business and Professions Code §10140.6
+    for the property listed below, in compliance with California Business and Professions Code §10140.8
     (Assembly Bill 723, effective October 10, 2025). All staged images have been digitally altered by
     adding virtual furniture and décor for illustrative purposes only. The property is sold as shown
     in the original photographs. This page is maintained by Smart Stage PRO™.

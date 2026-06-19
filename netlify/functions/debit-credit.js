@@ -1,5 +1,5 @@
 // netlify/functions/debit-credit.js
-// Debits credits from credit_ledger on Generate Final.
+// Debits credits from credit_ledger on Generate Final (images) or video render.
 // Returns new balance. Blocks if insufficient credits.
 // Uses service role key — never call with frontend publishable key.
 
@@ -55,7 +55,12 @@ exports.handler = async (event) => {
   try { body = JSON.parse(event.body); }
   catch { return { statusCode: 400, body: JSON.stringify({ error: 'Invalid JSON' }) }; }
 
-  const { userId, cost } = body;
+  // CHANGE: destructure `reason` from the request body. Defaults to
+  // 'generate_final' below at the insert step, so the existing image-staging
+  // caller (which never sends `reason`) behaves identically to before.
+  // video-job.js passes reason: 'video_render' so the ledger correctly
+  // distinguishes video spend from image-staging spend.
+  const { userId, cost, reason } = body;
   if (!userId || typeof cost !== 'number' || cost < 1) {
     return { statusCode: 400, body: JSON.stringify({ error: 'Missing userId or cost' }) };
   }
@@ -115,12 +120,14 @@ exports.handler = async (event) => {
     const newBalance = currentBalance - cost;
 
     // 4. Write debit entry to ledger
+    // CHANGE: reason now comes from the request, falling back to
+    // 'generate_final' for callers that don't send it (unchanged behavior).
     const insertRes = await sbRequest('POST', '/rest/v1/credit_ledger', {
       user_id:       userId,
       amount:        -cost,
       balance_after: newBalance,
       type:          'usage',
-      reason:        'generate_final',
+      reason:        reason || 'generate_final',
     });
 
     if (insertRes.status !== 201) {
@@ -130,7 +137,7 @@ exports.handler = async (event) => {
 
     return {
       statusCode: 200,
-      body: JSON.stringify({ balance: newBalance, cost, charged: true }),
+      body: JSON.stringify({ balance: newBalance, cost, charged: true, reason: reason || 'generate_final' }),
     };
 
   } catch (err) {

@@ -151,7 +151,7 @@ function renderPage(project, projectId) {
     .remarks-copy-btn.copied { background: #1a3a1a; border-color: #5a9a5a; color: #5a9a5a; }
 
     /* ── LEGAL FOOTER ── */
-    .legal-footer { background: #1a1714; color: #7a6f63; padding: 24px; font-size: 11px; line-height: 1.8; }
+    .legal-footer { background: #1a1714; color: #f7f4ef; padding: 24px; font-size: 11px; line-height: 1.8; }
     .legal-footer strong { color: #b8975a; }
     .legal-footer a { color: #9ab0cc; }
     .legal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; max-width: 1000px; }

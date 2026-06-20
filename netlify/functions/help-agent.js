@@ -15,7 +15,7 @@ const KB1_PRODUCT_SPEC = `
 # Smart Stage PRO™ — Product Specification
 
 ## What Is Smart Stage PRO?
-Smart Stage PRO is an AI-powered virtual staging platform built for real estate agents, teams, and brokerages. It transforms property photographs into MLS-ready marketing images — staging vacant rooms, decluttering occupied spaces, enhancing exteriors, and generating professional side-by-side compliance documents. Every image is fully compliant with California AB 723 §10140.6 and MetroList Rule 11.6.1. Accessible at smartstagepro.com.
+Smart Stage PRO is an AI-powered virtual staging platform built for real estate agents, teams, and brokerages. It transforms property photographs into MLS-ready marketing images — staging vacant rooms, decluttering occupied spaces, enhancing exteriors, and generating professional side-by-side compliance documents. Every image is fully compliant with California AB 723 §10140.8 and MetroList Rule 11.6.1. Accessible at smartstagepro.com.
 
 ## The Six Staging Modules
 
@@ -63,6 +63,12 @@ Stats bar: Total Listings, Staged Image Sets, Images Remaining, Subscription pla
 Listing cards: address, project ID, tier badge, image count, compliance status, last staged date, thumbnails.
 Actions per card: View Compliance Page, Download QR, Continue Staging, Archive.
 Role-based scope: Solo/Team member = own listings. Team lead = all team listings. Broker admin = all brokerage listings.
+
+## AI Motion Video (Smart Stage PRO Plus — separate add-on)
+Smart Stage PRO Plus turns a staged image into a short video using AI-generated camera motion. Two kinds:
+- Known-pair motion: interpolates between two real, already-disclosed images (e.g. vacant→staged, or day→twilight) — the camera move happens between two real states the agent already has.
+- Single-image motion: a small set of named presets (camera orbit, focus pull, fireplace flame, curtain sway) that animate camera movement or a dynamic element within one already-staged, already-disclosed photo.
+AI Motion video follows the exact same AB 723 disclosure standard as any staged image — see "AI Motion Video — Disclosure Requirements" in the Business Rules document. There is no separate or lower bar for video.
 
 ## The Staging Workflow
 
@@ -182,19 +188,28 @@ Individual agents (under Brokerage): see own listings only.
 All accounts under a plan share the monthly staged image allocation.
 
 ## AB 723 Compliance Requirements
-California AB 723 §10140.6 (effective January 2025) requires:
+California AB 723 §10140.8 (effective January 1, 2026) requires:
 1. Virtually staged MLS images must be disclosed as digitally altered
-2. Original unaltered image must be available upon request
+2. Original unaltered image must be available — and, per MetroList Rule 11.6.1(b), included with the listing itself, not just linked
 3. Records retained minimum 3 years
 
-MetroList Rule 11.6.1 (Sacramento area): MLS listing must indicate digital alteration; compliance URL or QR code must be provided.
+MetroList Rule 11.6.1 (Sacramento area) has two parts: (a) a disclosure statement with a link/QR to the original, unaltered image, AND (b) the unaltered original image included with the listing — both are required, not either/or.
 
 What agents must do in MLS:
-1. Upload clean staged image (no overlay needed — MLS adds its own label)
+1. Upload BOTH the clean staged image AND the original unaltered photo to the MLS photo gallery (recommended placed next to each other)
 2. Answer "Yes" to digital alteration disclosure question
-3. Copy compliance page URL into MLS public comments
+3. Copy the compliance page URL into MLS public comments, or add the QR code to the photo gallery — whichever method your MLS accepts
 
-What agents do NOT need to do: add text overlays, watermarks, or create their own disclosure documents — Smart Stage PRO handles all of this automatically.
+What agents do NOT need to do: add text overlays, watermarks, or create their own disclosure documents — Smart Stage PRO generates the compliance page, QR code, and Side-by-Side document automatically. Uploading both images to the MLS gallery is the agent's responsibility — Smart Stage PRO provides everything needed to do it correctly, but doesn't submit to the MLS on the agent's behalf.
+
+## AI Motion Video — Disclosure Requirements (Smart Stage PRO Plus)
+AI Motion videos require the exact same disclosure as any staged image — there is no separate or lesser standard for video.
+Before publishing an AI Motion video:
+1. Watch the full clip and compare it to the original photo — AI camera motion can reveal an angle or detail (a flooring type glimpsed in the distance, a cabinet run around a corner) that wasn't actually captured in the source photo.
+2. Make sure the compliance page link/QR code is included with the listing, same as for any staged image.
+3. Make sure the original, un-animated photo is included in the MLS photo gallery — required by MetroList Rule 11.6.1(b), and not satisfied by the video link alone.
+4. If anything in the video doesn't match the real room, regenerate with a different motion preset, or use standard Ken Burns motion instead.
+This applies to every AI Motion preset equally — none of them are exempt from disclosure.
 
 ## Record Retention
 Compliance pages: permanent for life of subscription + minimum 30 days post-cancellation.
@@ -333,6 +348,7 @@ NEVER DISCUSS:
 
 CRITICAL RULES:
 - AB 723 compliance is non-negotiable. Never suggest workarounds, never imply agents can skip disclosure steps.
+- AI Motion videos (Smart Stage PRO Plus) follow the exact same disclosure rules as staged images — never imply video is exempt or held to a lower standard, and never let an agent think the compliance page link alone satisfies the original-in-gallery requirement.
 - Staged images are always called "staged images" — never "credits."
 - Draft images carry a watermark and are for review only — always make this clear if relevant.
 - Compliance pages are permanent and cannot be deleted — archive is soft-delete only.

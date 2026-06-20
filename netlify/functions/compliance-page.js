@@ -330,6 +330,7 @@ exports.handler = async (event) => {
   const pathParts = (event.path || "").split("/").filter(Boolean);
   const projectId = pathParts[pathParts.length - 1];
 
+  
   const htmlHeaders = {
     "Content-Type": "text/html; charset=utf-8",
     "Cache-Control": "no-cache, no-store, must-revalidate",

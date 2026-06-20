@@ -3,6 +3,67 @@
 // URL: /compliance/{projectId}
 
 const { getStore } = require("@netlify/blobs");
+const https = require("https");
+
+// ── VIDEO TOUR DATA (read-only, server-side, service-role) ──────────────
+// Reads video_jobs + video_job_frames directly from Supabase. This is safe
+// to do unauthenticated-public, unlike video-job.js's own status/download
+// actions, because it only ever surfaces jobs where credits_charged_at is
+// already set — i.e. the agent has already paid for and downloaded the
+// video via the normal flow. This function never charges anything and
+// never exposes a not-yet-paid-for video; it just reflects state that the
+// real download flow already legitimately created. Trigger for appearing
+// here is "Download Video," same as Generate Final is the trigger for an
+// image appearing on this page at all.
+
+function supabaseGet(table, queryParams = "") {
+  return new Promise((resolve, reject) => {
+    const url = new URL(`${process.env.SUPABASE_URL}/rest/v1/${table}${queryParams}`);
+    const req = https.request({
+      hostname: url.hostname,
+      path: url.pathname + url.search,
+      method: "GET",
+      headers: {
+        apikey: process.env.SUPABASE_SERVICE_ROLE_KEY,
+        Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
+      },
+    }, (res) => {
+      let data = "";
+      res.on("data", (c) => (data += c));
+      res.on("end", () => {
+        try { resolve({ status: res.statusCode, data: JSON.parse(data || "[]") }); }
+        catch { resolve({ status: res.statusCode, data: [] }); }
+      });
+    });
+    req.on("error", reject);
+    req.end();
+  });
+}
+
+// Returns only video jobs for this project that have actually been
+// downloaded (credits_charged_at IS NOT NULL) — never a rendered-but-unpaid
+// job. Each job's frames come back ordered by sequence_order so the source
+// photo grid matches the order the agent actually built the video in.
+async function getDisclosedVideoJobs(projectId) {
+  const jobsResult = await supabaseGet(
+    "video_jobs",
+    `?project_id=eq.${projectId}&status=eq.complete&credits_charged_at=not.is.null&select=id,output_16x9_url,output_9x16_url,formats,completed_at&order=completed_at.asc`
+  );
+  const jobs = jobsResult.data || [];
+  if (jobs.length === 0) return [];
+
+  const jobsWithFrames = await Promise.all(
+    jobs.map(async (job) => {
+      const framesResult = await supabaseGet(
+        "video_job_frames",
+        `?job_id=eq.${job.id}&select=image_url,before_url,is_before_after,room_type,motion_preset,sequence_order&order=sequence_order.asc`
+      );
+      return { ...job, frames: framesResult.data || [] };
+    })
+  );
+
+  return jobsWithFrames;
+}
 
 function getProjectStore() {
   return getStore({
@@ -19,15 +80,46 @@ function formatDate(isoString) {
   });
 }
 
-function renderPage(project, projectId) {
+function renderPage(project, projectId, videoJobs) {
   const agentName     = project.agentName     || process.env.AGENT_NAME     || "Smart Stage PRO™";
   const agentBrokerage= project.agentBrokerage|| process.env.AGENT_BROKERAGE|| "";
-  const agentDRE      = project.agentDRE      || process.env.AGENT_DRE      || "";
+  const agentDRE       = project.agentDRE      || process.env.AGENT_DRE      || "";
   const agentLogoUrl  = project.agentLogoUrl  || process.env.AGENT_LOGO_URL || "";
   const images        = project.images || [];
   const address       = project.address || "Property Address";
   const compUrl       = project.complianceUrl || `${process.env.URL || "https://smartstagepro.com"}/compliance/${projectId}`;
   const createdAt     = formatDate(project.createdAt);
+  const videoJobsList = videoJobs || [];
+
+  const videoTourSections = videoJobsList.map((job, i) => {
+    const videoUrl = job.output_16x9_url || job.output_9x16_url;
+    if (!videoUrl) return "";
+
+    const sourceThumbs = job.frames.map((f) => {
+      // Before/after frames show the "before" as the source-photo thumbnail —
+      // that's the genuinely original, unaltered state. Single-image frames
+      // (orbit_arc, rack_focus, fireplace_flicker, Ken Burns, exterior, etc.)
+      // show image_url, which IS the original/disclosed source for that frame.
+      const thumbUrl = f.is_before_after ? (f.before_url || f.image_url) : f.image_url;
+      return `<img src="${thumbUrl}" alt="Original photograph used in this AI Motion video" loading="lazy">`;
+    }).join("\n        ");
+
+    return `
+    <div class="video-tour-section">
+      <div class="video-tour-header">
+        <span class="video-tour-label">AI Motion Video Tour ${videoJobsList.length > 1 ? `— Video ${i + 1}` : ""}</span>
+        <span class="video-tour-date">Generated ${formatDate(job.completed_at)}</span>
+      </div>
+      <video class="video-tour-player" controls preload="metadata">
+        <source src="${videoUrl}" type="video/mp4">
+        Your browser does not support embedded video. <a href="${videoUrl}">Download the video directly</a>.
+      </video>
+      <div class="video-tour-sources-label">Original, unaltered photographs used to generate this video (${job.frames.length})</div>
+      <div class="video-tour-sources-grid">
+        ${sourceThumbs}
+      </div>
+    </div>`;
+  }).join("\n");
 
   const imagePairs = images.map((img, i) => {
     const hasOriginal = !!img.originalUrl;
@@ -142,6 +234,17 @@ function renderPage(project, projectId) {
     .dl-link:hover { text-decoration: underline; }
     .no-images { text-align: center; padding: 60px 24px; color: #7a6f63; font-size: 14px; }
 
+    /* ── VIDEO TOUR SECTION (separate container — not a slider, holds the
+       video plus the full set of source photos used to build it) ── */
+    .video-tour-section { max-width: 1400px; margin: 0 auto 24px; padding: 0 24px; }
+    .video-tour-header { background: #1a1714; padding: 12px 18px; display: flex; align-items: center; justify-content: space-between; border-radius: 8px 8px 0 0; flex-wrap: wrap; gap: 8px; }
+    .video-tour-label { color: #b8975a; font-size: 13px; font-weight: 600; letter-spacing: 0.04em; }
+    .video-tour-date { color: #7a6f63; font-size: 11px; }
+    .video-tour-player { display: block; width: 100%; max-height: 720px; background: #000; }
+    .video-tour-sources-label { background: #fff; padding: 14px 18px 8px; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #7a6f63; border-left: 1px solid #e0d8ce; border-right: 1px solid #e0d8ce; }
+    .video-tour-sources-grid { background: #fff; display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; padding: 8px 18px 18px; border-radius: 0 0 8px 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); border-left: 1px solid #e0d8ce; border-right: 1px solid #e0d8ce; border-bottom: 1px solid #e0d8ce; }
+    .video-tour-sources-grid img { width: 100%; aspect-ratio: 4/3; object-fit: cover; border-radius: 4px; display: block; }
+
     /* ── MLS REMARKS BLOCK ── */
     .remarks-block { background: #1a1a1a; border: 1px solid #b8975a; border-radius: 8px; padding: 20px 24px; margin: 0 24px 28px; max-width: 1400px; margin-left: auto; margin-right: auto; }
     .remarks-block-label { font-size: 11px; font-weight: 700; letter-spacing: 0.12em; color: #b8975a; text-transform: uppercase; margin-bottom: 10px; }
@@ -222,6 +325,8 @@ function renderPage(project, projectId) {
   ${noImages}
   ${imagePairs}
 </div>
+
+${videoTourSections}
 
 <!-- LEGAL FOOTER -->
 <footer class="legal-footer">
@@ -360,7 +465,21 @@ exports.handler = async (event) => {
     }
 
     const project = JSON.parse(raw);
-    return { statusCode: 200, headers: htmlHeaders, body: renderPage(project, projectId) };
+
+    // Video data comes from Supabase, a separate system from the Blobs
+    // project record. If this fails for any reason (Supabase down, env
+    // vars missing), the page should still render normally with images
+    // only — a video-fetch failure must never take down the whole
+    // compliance page, since the image disclosure is the part that's
+    // actually legally required.
+    let videoJobs = [];
+    try {
+      videoJobs = await getDisclosedVideoJobs(projectId);
+    } catch (videoErr) {
+      console.error("compliance-page video fetch error (non-fatal):", videoErr.message);
+    }
+
+    return { statusCode: 200, headers: htmlHeaders, body: renderPage(project, projectId, videoJobs) };
 
   } catch (err) {
     console.error("compliance-page error:", err.message);

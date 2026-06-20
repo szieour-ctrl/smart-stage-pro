@@ -257,16 +257,31 @@ async function addExternalPhoto({ listingId, userId, imageUrl, roomType, sourceL
 // why "known pair vs. single image" is the real safety boundary, not
 // "interior vs. exterior."
 
+// SINGLE_IMAGE_INTERIOR_ALLOWED_PRESETS must mirror klingMotion.js's
+// allowlist of the same name exactly — see that file's header comment for
+// the full compliance reasoning (resolved: same disclosed-alteration
+// category as a virtual pool or a wall removal, not a different risk).
+// Applies regardless of whether the source frame is a staged image or an
+// agent's external/professional photo — disclosure attaches to what Kling
+// generates, not to whether the underlying photo was ever staged.
+const SINGLE_IMAGE_INTERIOR_ALLOWED_PRESETS = new Set([
+  "orbit_arc",
+  "rack_focus",
+  "fireplace_flicker",
+]);
+
 function validateAiMotionEligibility(frames) {
   for (const frame of frames) {
     if (!frame.useAiMotion) continue;
 
     const hasKnownPair = !!(frame.isBeforeAfter && frame.beforeUrl);
     const isExterior = frame.roomType === "exterior";
+    const isAllowedSingleImageInteriorPreset =
+      !!frame.motionPreset && SINGLE_IMAGE_INTERIOR_ALLOWED_PRESETS.has(frame.motionPreset);
 
-    if (!hasKnownPair && !isExterior) {
+    if (!hasKnownPair && !isExterior && !isAllowedSingleImageInteriorPreset) {
       throw new Error(
-        `AI motion requested for a frame with no paired image (room type "${frame.roomType}"). AI motion requires a real vacant+staged pair for interior rooms — single professional photos can only use standard motion.`
+        `AI motion requested for a frame with no paired image and no allowed single-image preset (room type "${frame.roomType}", preset "${frame.motionPreset || "(none)"}"). AI motion requires a real vacant+staged pair for interior rooms, an exterior frame, or one of the allowed single-image presets (orbit_arc, rack_focus, fireplace_flicker) — otherwise only standard motion is available.`
       );
     }
   }

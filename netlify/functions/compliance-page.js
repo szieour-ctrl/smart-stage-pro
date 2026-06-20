@@ -156,6 +156,7 @@ function renderPage(project, projectId) {
     .legal-footer a { color: #9ab0cc; }
     .legal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; max-width: 1000px; }
     @media (max-width: 600px) { .legal-grid { grid-template-columns: 1fr; } }
+    .legal-video-disclosure { max-width: 1000px; margin-top: 20px; }
     .legal-divider { border: none; border-top: 1px solid #2d2824; margin: 20px 0; }
     .legal-bottom { font-size: 10px; color: #f7f4ef; max-width: 1000px; }
   </style>
@@ -227,10 +228,12 @@ function renderPage(project, projectId) {
   <div class="legal-grid">
     <div>
       <strong>California AB 723 Compliance Statement</strong><br>
-      All virtually staged images on this page were digitally altered through the use of artificial intelligence
-      to add virtual furniture, décor, and accessories. No structural elements, fixtures, or architectural
-      features have been added, removed, or altered. Images are provided for illustrative purposes only.
-      The property is sold in its actual condition as shown in the original photographs.
+      The images and any video displayed on this page have been digitally altered using artificial
+      intelligence, image editing software, or virtual visualization technology. Alterations may include,
+      but are not limited to: virtual furniture and décor, virtual decluttering, image enhancement, virtual
+      landscaping, virtual renovations, conceptual improvements, exterior enhancements, and architectural
+      visualizations. All alterations are provided solely for illustrative purposes. The property is sold
+      in its actual condition as shown in the original photographs.
     </div>
     <div>
       <strong>Record Retention Policy</strong><br>
@@ -239,6 +242,15 @@ function renderPage(project, projectId) {
       subscription is cancelled, this page will remain accessible for 30 days following cancellation,
       after which all project files will be delivered to the agent of record via email archive.
     </div>
+  </div>
+  <div class="legal-video-disclosure">
+    <strong>AI Video Disclosure</strong><br>
+    Any videos presented on this page may be generated from original photographs, digitally altered images,
+    or both, and may contain simulated camera movement, virtual staging, virtual renovations, conceptual
+    improvements, or other AI-generated visualizations. Video content is intended solely to illustrate
+    potential use, design concepts, or marketing presentation and should not be interpreted as a
+    representation of existing physical conditions unless independently verified. Original photographs and
+    corresponding altered images are provided above for reference.
   </div>
   <hr class="legal-divider">
   <div class="legal-bottom">
@@ -330,7 +342,6 @@ exports.handler = async (event) => {
   const pathParts = (event.path || "").split("/").filter(Boolean);
   const projectId = pathParts[pathParts.length - 1];
 
-  
   const htmlHeaders = {
     "Content-Type": "text/html; charset=utf-8",
     "Cache-Control": "no-cache, no-store, must-revalidate",

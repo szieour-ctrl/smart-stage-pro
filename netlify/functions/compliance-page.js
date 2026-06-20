@@ -181,7 +181,7 @@ function renderPage(project, projectId) {
   <p>
     This page provides the original, unaltered photographs and their corresponding virtually staged versions
     for the property listed below, in compliance with California Business and Professions Code §10140.8
-    (Assembly Bill 723, effective October 10, 2025). All staged images have been digitally altered by
+    (Assembly Bill 723, effective January 1, 2026). All staged images have been digitally altered by
     adding virtual furniture and décor for illustrative purposes only. The property is sold as shown
     in the original photographs. This page is maintained by Smart Stage PRO™.
   </p>

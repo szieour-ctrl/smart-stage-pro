@@ -489,8 +489,20 @@ async function createVideoJob({ listingId, projectId, userId, frames, formats, m
       credits_used:         calculateDownloadCost(frames), // deferred — see downloadVideoJob
     });
 
+    // CHANGE: log the real Supabase response when this fails, instead of
+    // swallowing it into a generic message — exactly the same class of
+    // silent-failure bug found twice already in project-manage.js this
+    // session. Surface the actual status/body so the thrown error is
+    // diagnosable from the Netlify log without needing a second round trip.
     job = jobResult.data?.[0];
-    if (!job) throw new Error("Failed to create video_jobs row");
+    if (!job) {
+      console.error(
+        "video_jobs insert failed — status:", jobResult.status,
+        "| response:", JSON.stringify(jobResult.data),
+        "| projectId received:", projectId, "| listingId:", listingId
+      );
+      throw new Error(`Failed to create video_jobs row (status ${jobResult.status}): ${JSON.stringify(jobResult.data)}`);
+    }
 
     // Create frame rows, preserving sequence order
     const frameRows = frames.map((f, i) => ({

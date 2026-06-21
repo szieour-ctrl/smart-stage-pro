@@ -239,7 +239,23 @@ async function addImage(projectId, imageData, userId, ab723Prompt, env) {
   await store.set(addrKey, updated);
   console.log("Image added to project:", projectId, "room:", imageEntry.roomName, "total:", project.images.length);
 
-  // ── Write to Supabase staged_images + debit credits (new) ────────────────
+  // ── Write to Supabase staged_images (compliance record ONLY) ─────────────
+  // CHANGE: removed the credit_ledger debit that used to live in this block
+  // entirely. This was a real, serious bug: generateFinal() in index.html
+  // already debits 1 Image at click time via debit-credit.js — that's the
+  // correct, only billing event for a staged image. This second debit
+  // (defaulting to 25 Images, completely independent of the first) existed
+  // in the code from an earlier, since-abandoned architecture and had been
+  // silently failing (blocked by the staged_images_mode_check constraint
+  // violation, fixed separately) until that fix accidentally un-silenced
+  // it — at which point every single Generate Final started being charged
+  // TWICE: 1 Image via debit-credit.js, then 25 more Images moments later
+  // via this block. Confirmed directly via credit_ledger query showing
+  // paired -1/-25 entries for the same Generate Final action. addImage()
+  // now ONLY writes the staged_images compliance record — it must never
+  // touch credit_ledger again. If a future session wants to consolidate
+  // billing logic, do it by removing the debit-credit.js call, not by
+  // re-adding one here.
   if (userId && process.env.SUPABASE_URL) {
     try {
       // Find listing ID from Supabase
@@ -249,9 +265,11 @@ async function addImage(projectId, imageData, userId, ab723Prompt, env) {
       const listingId = listingResult.data?.[0]?.id;
 
       if (listingId) {
-        const CREDITS_PER_IMAGE = imageData.creditsUsed || 25;
-
-        // Write staged_images compliance record
+        // Write staged_images compliance record — no credit_used value is
+        // meaningful here anymore since this path never debits; kept at 0
+        // rather than removed, since the column itself may still be read
+        // elsewhere (e.g. compliance audit reports) and NULL could break
+        // a report expecting a number.
         const imgResult = await supabase("POST", "staged_images", {
           listing_id:             listingId,
           user_id:                userId,
@@ -260,19 +278,10 @@ async function addImage(projectId, imageData, userId, ab723Prompt, env) {
           cloudinary_original_url: imageData.originalUrl || null,
           cloudinary_staged_url:   imageData.stagedUrl   || null,
           cloudinary_sbs_url:      imageData.sbsUrl       || null,
-          credits_used:            CREDITS_PER_IMAGE,
+          credits_used:            0,
           ab723_disclosed:         false,
         });
 
-        // CHANGE: a non-2xx here used to fail silently — imgResult.data?.[0]?.id
-        // would just be undefined and the code would carry on as if nothing
-        // happened, debiting credits for a compliance record that was never
-        // actually written. This exact failure mode (staged_images_mode_check
-        // rejecting an invalid `mode` value) went undetected for an unknown
-        // period until traced via a temporary diagnostic log. Now logged
-        // loudly and explicitly whenever the insert doesn't return a row,
-        // and the credit debit is skipped entirely in that case — debiting
-        // for a record that doesn't exist is worse than not debiting at all.
         const stagedImageId = imgResult.data?.[0]?.id || null;
         if (!stagedImageId) {
           console.error(
@@ -280,19 +289,6 @@ async function addImage(projectId, imageData, userId, ab723Prompt, env) {
             "| response:", JSON.stringify(imgResult.data),
             "| projectId:", projectId, "| mode sent:", imageData.mode || imageEntry.tier
           );
-        } else {
-          // Debit credits from ledger — only if the compliance record
-          // actually exists to attach the debit to.
-          const balance = await getCurrentCreditBalance(userId);
-          const newBalance = Math.max(0, balance - CREDITS_PER_IMAGE);
-          await supabase("POST", "credit_ledger", {
-            user_id:          userId,
-            type:             "usage",
-            amount:           -CREDITS_PER_IMAGE,
-            balance_after:    newBalance,
-            staged_image_id:  stagedImageId,
-            description:      `${imageEntry.tier} — ${project.address} — ${imageEntry.roomName}`,
-          });
         }
       } else {
         console.error("addImage: no listing found for projectId — Supabase write skipped:", projectId);

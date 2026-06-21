@@ -552,14 +552,24 @@ async function createVideoJob({ listingId, projectId, userId, frames, formats, m
       formats,
       musicStyle: musicStyle || "default",
       frames: frameRows.map(f => ({
-        imageUrl:        f.image_url,
-        beforeUrl:       f.before_url,
-        isBeforeAfter:   f.is_before_after,
-        useAiMotion:     f.use_ai_motion,
-        roomType:        f.room_type,
-        motionPreset:    f.motion_preset,
-        durationSeconds: f.duration_seconds,
-        sequenceOrder:   f.sequence_order,
+        imageUrl:          f.image_url,
+        beforeUrl:         f.before_url,
+        isBeforeAfter:     f.is_before_after,
+        useAiMotion:       f.use_ai_motion,
+        roomType:          f.room_type,
+        motionPreset:      f.motion_preset,    // Ken Burns reads this field name
+        klingMotionPreset: f.motion_preset,    // FIX: Kling reads THIS name instead —
+                                                 // confirmed via klingMotion.js's
+                                                 // enforceScopeRules()/buildPrompt(), both
+                                                 // read frame.klingMotionPreset, never
+                                                 // frame.motionPreset. Without this line,
+                                                 // every Kling-bound frame arrived with
+                                                 // klingMotionPreset permanently undefined,
+                                                 // which is the exact, confirmed cause of
+                                                 // every "(none — generic default)" log line
+                                                 // seen on real test jobs this session.
+        durationSeconds:   f.duration_seconds,
+        sequenceOrder:     f.sequence_order,
       })),
     });
 
@@ -704,14 +714,17 @@ async function regenerateVideoJob({ jobId, userId, frames, formats, musicStyle }
       formats,
       musicStyle: musicStyle || "default",
       frames: frameRows.map(f => ({
-        imageUrl:        f.image_url,
-        beforeUrl:       f.before_url,
-        isBeforeAfter:   f.is_before_after,
-        useAiMotion:     f.use_ai_motion,
-        roomType:        f.room_type,
-        motionPreset:    f.motion_preset,
-        durationSeconds: f.duration_seconds,
-        sequenceOrder:   f.sequence_order,
+        imageUrl:          f.image_url,
+        beforeUrl:         f.before_url,
+        isBeforeAfter:     f.is_before_after,
+        useAiMotion:       f.use_ai_motion,
+        roomType:          f.room_type,
+        motionPreset:      f.motion_preset,    // Ken Burns reads this field name
+        klingMotionPreset: f.motion_preset,    // FIX: Kling reads THIS name — see
+                                                 // matching comment in createVideoJob
+                                                 // above for the full explanation.
+        durationSeconds:   f.duration_seconds,
+        sequenceOrder:     f.sequence_order,
       })),
     });
 

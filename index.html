@@ -2263,11 +2263,20 @@ async function attachFinalToProject(finalBase64, room, orig, enhId) {
     if (!uploadData.publicUrl) throw new Error('No staged URL from Cloudinary');
 
     // Attach to project in Blobs
+    // FIX: userId was never sent here, which meant project-manage.js's
+    // addImage() — specifically the `if (userId && process.env.SUPABASE_URL)`
+    // guard around the staged_images write + credit ledger entry — was ALWAYS
+    // false, silently. The Blobs write (compliance page) succeeded every
+    // time, masking the fact that staged_images has never received a single
+    // row through this path. Confirmed via direct Supabase query: the table
+    // is completely empty despite the compliance system appearing to work.
+    const _sbUserForAttach = (await getSupabase().auth.getUser()).data?.user;
     await fetch('/.netlify/functions/project-manage?action=add-image', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         projectId: SESSION.projectId,
+        userId: _sbUserForAttach?.id || null,
         imageData: {
           roomName: room.roomName || 'Room',
           tier: enhId ? 'final-enhanced' : 'final',

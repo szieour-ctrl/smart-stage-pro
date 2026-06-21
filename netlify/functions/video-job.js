@@ -421,6 +421,31 @@ function validateFormatChoiceForAiMotion(frames, formats) {
 async function createVideoJob({ listingId, projectId, userId, frames, formats, musicStyle }) {
   if (!frames || frames.length === 0) throw new Error("No frames provided");
 
+  // CHANGE: resolve projectId from the listing record if the caller didn't
+  // supply one. video_jobs.project_id is NOT NULL, and — more importantly
+  // than satisfying that constraint — every video MUST be tied to a real
+  // compliance project (the same szregsolo_..._MMDDYY id the AB 723
+  // compliance page and QR code already use for this property), per the
+  // locked decision: videos need to show up on the same compliance page as
+  // their source images, not exist as orphaned, unlinked rows. Confirmed
+  // via direct Postgres error (23502, "null value in column project_id")
+  // that callers cannot be trusted to always supply this — listingId alone
+  // is what the frontend naturally has at hand, so derive projectId from
+  // it rather than push that burden onto every caller.
+  if (!projectId) {
+    if (!listingId) throw new Error("listingId or projectId is required");
+    const listingRes = await supabase("GET", "listings", null,
+      `?id=eq.${listingId}&select=project_id`
+    );
+    const resolvedProjectId = listingRes.data?.[0]?.project_id;
+    if (!resolvedProjectId) {
+      throw new Error(
+        `Listing ${listingId} has no project_id on file — cannot create a video without a compliance project to attach it to. Create the listing's project first (project-manage.js?action=create).`
+      );
+    }
+    projectId = resolvedProjectId;
+  }
+
   // Reject oversized jobs before anything else touches Supabase, Railway,
   // or the Image balance — cheapest possible rejection point.
   if (frames.length > MAX_FRAMES_PER_JOB) {

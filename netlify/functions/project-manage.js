@@ -240,18 +240,12 @@ async function addImage(projectId, imageData, userId, ab723Prompt, env) {
   console.log("Image added to project:", projectId, "room:", imageEntry.roomName, "total:", project.images.length);
 
   // ── Write to Supabase staged_images + debit credits (new) ────────────────
-  // TEMP DIAGNOSTIC — remove once the silent-failure mystery is resolved.
-  // Logs unconditionally, BEFORE the userId guard, so we can see exactly
-  // what addImage() received even if the guard itself is the problem.
-  console.log("DIAGNOSTIC addImage entry — userId:", userId, "| typeof:", typeof userId, "| SUPABASE_URL set:", !!process.env.SUPABASE_URL);
-
   if (userId && process.env.SUPABASE_URL) {
     try {
       // Find listing ID from Supabase
       const listingResult = await supabase("GET", "listings", null,
         `?project_id=eq.${projectId}&select=id`
       );
-      console.log("DIAGNOSTIC listing lookup result:", JSON.stringify(listingResult.data), "| status:", listingResult.status);
       const listingId = listingResult.data?.[0]?.id;
 
       if (listingId) {
@@ -269,30 +263,44 @@ async function addImage(projectId, imageData, userId, ab723Prompt, env) {
           credits_used:            CREDITS_PER_IMAGE,
           ab723_disclosed:         false,
         });
-        console.log("DIAGNOSTIC staged_images insert result:", JSON.stringify(imgResult.data), "| status:", imgResult.status);
 
+        // CHANGE: a non-2xx here used to fail silently — imgResult.data?.[0]?.id
+        // would just be undefined and the code would carry on as if nothing
+        // happened, debiting credits for a compliance record that was never
+        // actually written. This exact failure mode (staged_images_mode_check
+        // rejecting an invalid `mode` value) went undetected for an unknown
+        // period until traced via a temporary diagnostic log. Now logged
+        // loudly and explicitly whenever the insert doesn't return a row,
+        // and the credit debit is skipped entirely in that case — debiting
+        // for a record that doesn't exist is worse than not debiting at all.
         const stagedImageId = imgResult.data?.[0]?.id || null;
-
-        // Debit credits from ledger
-        const balance = await getCurrentCreditBalance(userId);
-        const newBalance = Math.max(0, balance - CREDITS_PER_IMAGE);
-        await supabase("POST", "credit_ledger", {
-          user_id:          userId,
-          type:             "usage",
-          amount:           -CREDITS_PER_IMAGE,
-          balance_after:    newBalance,
-          staged_image_id:  stagedImageId,
-          description:      `${imageEntry.tier} — ${project.address} — ${imageEntry.roomName}`,
-        });
+        if (!stagedImageId) {
+          console.error(
+            "staged_images insert returned no row — status:", imgResult.status,
+            "| response:", JSON.stringify(imgResult.data),
+            "| projectId:", projectId, "| mode sent:", imageData.mode || imageEntry.tier
+          );
+        } else {
+          // Debit credits from ledger — only if the compliance record
+          // actually exists to attach the debit to.
+          const balance = await getCurrentCreditBalance(userId);
+          const newBalance = Math.max(0, balance - CREDITS_PER_IMAGE);
+          await supabase("POST", "credit_ledger", {
+            user_id:          userId,
+            type:             "usage",
+            amount:           -CREDITS_PER_IMAGE,
+            balance_after:    newBalance,
+            staged_image_id:  stagedImageId,
+            description:      `${imageEntry.tier} — ${project.address} — ${imageEntry.roomName}`,
+          });
+        }
       } else {
-        console.log("DIAGNOSTIC: listingId was falsy — Supabase write SKIPPED for projectId:", projectId);
+        console.error("addImage: no listing found for projectId — Supabase write skipped:", projectId);
       }
     } catch (err) {
       // Non-fatal — Blobs write already succeeded
       console.error("Supabase staged_images write error (non-fatal):", err.message);
     }
-  } else {
-    console.log("DIAGNOSTIC: top-level guard failed — userId:", userId, "SUPABASE_URL:", !!process.env.SUPABASE_URL);
   }
 
   return {

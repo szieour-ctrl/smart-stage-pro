@@ -240,12 +240,18 @@ async function addImage(projectId, imageData, userId, ab723Prompt, env) {
   console.log("Image added to project:", projectId, "room:", imageEntry.roomName, "total:", project.images.length);
 
   // ── Write to Supabase staged_images + debit credits (new) ────────────────
+  // TEMP DIAGNOSTIC — remove once the silent-failure mystery is resolved.
+  // Logs unconditionally, BEFORE the userId guard, so we can see exactly
+  // what addImage() received even if the guard itself is the problem.
+  console.log("DIAGNOSTIC addImage entry — userId:", userId, "| typeof:", typeof userId, "| SUPABASE_URL set:", !!process.env.SUPABASE_URL);
+
   if (userId && process.env.SUPABASE_URL) {
     try {
       // Find listing ID from Supabase
       const listingResult = await supabase("GET", "listings", null,
         `?project_id=eq.${projectId}&select=id`
       );
+      console.log("DIAGNOSTIC listing lookup result:", JSON.stringify(listingResult.data), "| status:", listingResult.status);
       const listingId = listingResult.data?.[0]?.id;
 
       if (listingId) {
@@ -263,6 +269,7 @@ async function addImage(projectId, imageData, userId, ab723Prompt, env) {
           credits_used:            CREDITS_PER_IMAGE,
           ab723_disclosed:         false,
         });
+        console.log("DIAGNOSTIC staged_images insert result:", JSON.stringify(imgResult.data), "| status:", imgResult.status);
 
         const stagedImageId = imgResult.data?.[0]?.id || null;
 
@@ -277,11 +284,15 @@ async function addImage(projectId, imageData, userId, ab723Prompt, env) {
           staged_image_id:  stagedImageId,
           description:      `${imageEntry.tier} — ${project.address} — ${imageEntry.roomName}`,
         });
+      } else {
+        console.log("DIAGNOSTIC: listingId was falsy — Supabase write SKIPPED for projectId:", projectId);
       }
     } catch (err) {
       // Non-fatal — Blobs write already succeeded
       console.error("Supabase staged_images write error (non-fatal):", err.message);
     }
+  } else {
+    console.log("DIAGNOSTIC: top-level guard failed — userId:", userId, "SUPABASE_URL:", !!process.env.SUPABASE_URL);
   }
 
   return {

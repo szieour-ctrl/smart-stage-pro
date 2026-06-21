@@ -1,7 +1,18 @@
 // netlify/functions/debit-credit.js
-// Debits credits from credit_ledger on Generate Final (images) or video render.
-// Returns new balance. Blocks if insufficient credits.
-// Uses service role key — never call with frontend publishable key.
+// Debits credits from credit_ledger on Generate Final (images), video
+// generation/iteration (Kling), or video download. Returns new balance.
+// Blocks if insufficient credits. Uses service role key — never call with
+// frontend publishable key.
+//
+// CHANGE (Image Economy v2): added isRefund support. This exists ONLY for
+// the narrow platform-failure case in video-job.js — a Kling generation
+// debit succeeded, but row creation or Railway dispatch failed afterward,
+// so the user was charged for a video that never got created. This is NOT
+// a general-purpose "undo any charge" mechanism — user-side regret (didn't
+// like the result, changed their mind) is never refundable, per the locked
+// spec. isRefund:true skips the balance-sufficiency check (a refund should
+// never be blocked by "insufficient balance" — that's nonsensical for a
+// credit) and writes a positive ledger entry instead of a negative one.
 
 const https = require('https');
 
@@ -55,12 +66,18 @@ exports.handler = async (event) => {
   try { body = JSON.parse(event.body); }
   catch { return { statusCode: 400, body: JSON.stringify({ error: 'Invalid JSON' }) }; }
 
-  // CHANGE: destructure `reason` from the request body. Defaults to
-  // 'generate_final' below at the insert step, so the existing image-staging
-  // caller (which never sends `reason`) behaves identically to before.
-  // video-job.js passes reason: 'video_render' so the ledger correctly
-  // distinguishes video spend from image-staging spend.
-  const { userId, cost, reason } = body;
+  // CHANGE: destructure `reason` and the new `isRefund` flag from the
+  // request body. reason defaults to 'generate_final' below at the insert
+  // step, so the existing image-staging caller (which never sends `reason`)
+  // behaves identically to before. video-job.js passes reason values like
+  // 'kling_generation', 'kling_generation_iteration', 'video_download', and
+  // on the narrow refund path, isRefund: true with a reason ending in
+  // '_refund_dispatch_failed'.
+  const { userId, cost, reason, isRefund } = body;
+  // cost is always given as a positive magnitude regardless of direction —
+  // isRefund determines whether it's added or subtracted below. This keeps
+  // the validation simple and prevents any caller from passing a negative
+  // number to sneak around the balance check on a real debit.
   if (!userId || typeof cost !== 'number' || cost < 1) {
     return { statusCode: 400, body: JSON.stringify({ error: 'Missing userId or cost' }) };
   }
@@ -71,9 +88,14 @@ exports.handler = async (event) => {
       `/rest/v1/credit_ledger?user_id=eq.${userId}&order=created_at.desc&limit=1&select=balance_after`
     );
 
-    // 2. Get user role for tier allocation
+    // 2. Get user role + team for tier allocation and ledger attribution.
+    // CHANGE (Image Economy v2): added team_id to this existing query — no
+    // new round-trip, just one more column. Needed so video/Kling spend
+    // can be attributed to a team for team-admin spend rollups (existing
+    // image-staging debits never populated this; see ledger insert below
+    // for why that path is intentionally left unchanged).
     const userRes = await sbRequest('GET',
-      `/rest/v1/users?id=eq.${userId}&select=role,subscription_status&limit=1`
+      `/rest/v1/users?id=eq.${userId}&select=role,subscription_status,team_id&limit=1`
     );
 
     const userRec = Array.isArray(userRes.body) ? userRes.body[0] : null;
@@ -104,8 +126,10 @@ exports.handler = async (event) => {
       ? ledgerRes.body[0].balance_after
       : (TIER_ALLOCATION[userRec.role] ?? 50); // First ever — use full allocation
 
-    // 3. Check sufficient balance
-    if (currentBalance < cost) {
+    // 3. Check sufficient balance — SKIPPED for refunds. A refund credits
+    // Images back; there's no version of "insufficient balance" that makes
+    // sense for an operation that only ever increases the balance.
+    if (!isRefund && currentBalance < cost) {
       return {
         statusCode: 402,
         body: JSON.stringify({
@@ -117,17 +141,35 @@ exports.handler = async (event) => {
       };
     }
 
-    const newBalance = currentBalance - cost;
+    const newBalance = isRefund ? currentBalance + cost : currentBalance - cost;
 
-    // 4. Write debit entry to ledger
-    // CHANGE: reason now comes from the request, falling back to
-    // 'generate_final' for callers that don't send it (unchanged behavior).
+    // CHANGE (Image Economy v2): video/Kling reasons attribute this ledger
+    // row to the user's team, so a team admin's spend dashboard can roll
+    // up Kling spend per team. Deliberately scoped to VIDEO_REASONS only —
+    // the existing image-staging path (reason defaults to 'generate_final')
+    // continues writing team_id as null, exactly as it always has. This
+    // was a deliberate choice, not an oversight: extending team attribution
+    // to image-staging charges too is a separate, bigger decision involving
+    // a backfill of historical rows, and wasn't asked for here.
+    const VIDEO_REASONS = new Set([
+      'kling_generation', 'kling_generation_iteration', 'video_download',
+      'kling_generation_refund_dispatch_failed', 'kling_iteration_refund_dispatch_failed',
+    ]);
+    const attributedTeamId = VIDEO_REASONS.has(reason) ? (userRec.team_id || null) : null;
+
+    // 4. Write entry to ledger. CHANGE: amount is now signed based on
+    // isRefund — positive for a refund credit, negative for a normal
+    // debit, same as before. reason comes from the request, falling back
+    // to 'generate_final' for callers that don't send it (unchanged
+    // behavior for existing image-staging calls). team_id is new — see
+    // VIDEO_REASONS above for exactly when it's populated.
     const insertRes = await sbRequest('POST', '/rest/v1/credit_ledger', {
       user_id:       userId,
-      amount:        -cost,
+      amount:        isRefund ? cost : -cost,
       balance_after: newBalance,
-      type:          'usage',
+      type:          isRefund ? 'refund' : 'usage',
       reason:        reason || 'generate_final',
+      team_id:       attributedTeamId,
     });
 
     if (insertRes.status !== 201) {
@@ -137,7 +179,7 @@ exports.handler = async (event) => {
 
     return {
       statusCode: 200,
-      body: JSON.stringify({ balance: newBalance, cost, charged: true, reason: reason || 'generate_final' }),
+      body: JSON.stringify({ balance: newBalance, cost, charged: !isRefund, refunded: !!isRefund, reason: reason || 'generate_final' }),
     };
 
   } catch (err) {

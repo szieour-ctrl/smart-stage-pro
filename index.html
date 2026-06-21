@@ -2246,6 +2246,24 @@ async function stageDecor8Background(payload, onStatus) {
 async function attachFinalToProject(finalBase64, room, orig, enhId) {
   if (!SESSION.projectId) return;
 
+  // FIX: staged_images has a CHECK constraint on `mode` allowing only
+  // vacant_stage/clean_and_stage/exterior_enhancement/declutter/group_staging
+  // — real staging-MODULE values. attachFinalToProject() was sending `tier`
+  // ('final' or 'final-enhanced' — a QUALITY label, draft vs. final) as
+  // `mode` instead, which Postgres correctly rejected every single time
+  // with staged_images_mode_check, the actual cause of every staged image
+  // silently never reaching staged_images. Confirmed via direct Netlify
+  // function log showing the exact Postgres 23514 error. This map translates
+  // the frontend's short internal room.roomMode code to the real constraint
+  // value the database actually requires.
+  const ROOM_MODE_TO_DB_MODE = {
+    stage:     'vacant_stage',
+    declutter: 'declutter',
+    cns:       'clean_and_stage',
+    exterior:  'exterior_enhancement',
+  };
+  const dbMode = ROOM_MODE_TO_DB_MODE[room.roomMode] || 'vacant_stage';
+
   try {
     // Upload staged final to Cloudinary
     const uploadRes = await fetch('/.netlify/functions/upload-staged', {
@@ -2263,13 +2281,9 @@ async function attachFinalToProject(finalBase64, room, orig, enhId) {
     if (!uploadData.publicUrl) throw new Error('No staged URL from Cloudinary');
 
     // Attach to project in Blobs
-    // FIX: userId was never sent here, which meant project-manage.js's
-    // addImage() — specifically the `if (userId && process.env.SUPABASE_URL)`
-    // guard around the staged_images write + credit ledger entry — was ALWAYS
-    // false, silently. The Blobs write (compliance page) succeeded every
-    // time, masking the fact that staged_images has never received a single
-    // row through this path. Confirmed via direct Supabase query: the table
-    // is completely empty despite the compliance system appearing to work.
+    // userId fix (separate, earlier bug): without this, project-manage.js's
+    // addImage() guard (`if (userId && process.env.SUPABASE_URL)`) was
+    // always false, so the Supabase branch never even attempted to run.
     const _sbUserForAttach = (await getSupabase().auth.getUser()).data?.user;
     await fetch('/.netlify/functions/project-manage?action=add-image', {
       method: 'POST',
@@ -2279,7 +2293,8 @@ async function attachFinalToProject(finalBase64, room, orig, enhId) {
         userId: _sbUserForAttach?.id || null,
         imageData: {
           roomName: room.roomName || 'Room',
-          tier: enhId ? 'final-enhanced' : 'final',
+          tier: enhId ? 'final-enhanced' : 'final', // quality label — Blobs/compliance-page display only
+          mode: dbMode,                              // NEW — the real staged_images.mode value
           originalUrl: orig?.originalUrl || null,
           stagedUrl: uploadData.publicUrl,
           fileName: orig?.name || '',

@@ -541,6 +541,15 @@ async function createVideoJob({ listingId, projectId, userId, frames, formats, m
       motion_preset:    f.motionPreset || "auto",
       duration_seconds: f.durationSeconds || 4.5,
       sequence_order:   i,
+      // NEW — carries the real, already-working Kling continuation feature
+      // (confirmed present and correct in klingMotion.js this session,
+      // validated on real footage in a past session: "seamless
+      // transition"). Without these three fields, addContinuationMotion
+      // never reaches klingMotion.js — confirmed missing at every layer
+      // (no column, no insert field, no dispatch field) before this fix.
+      add_continuation_motion:       !!f.addContinuationMotion,
+      continuation_preset:           f.continuationPreset || null,
+      continuation_duration_seconds: f.continuationDurationSeconds || null,
     }));
 
     await supabase("POST", "video_job_frames", frameRows);
@@ -570,6 +579,14 @@ async function createVideoJob({ listingId, projectId, userId, frames, formats, m
                                                  // seen on real test jobs this session.
         durationSeconds:   f.duration_seconds,
         sequenceOrder:     f.sequence_order,
+        // NEW — same fix as klingMotionPreset above, same root cause
+        // (a real backend capability with no path to actually request it).
+        // klingMotion.js's applyKlingMotion() checks frame.addContinuationMotion
+        // directly; without forwarding it here, the continuation feature
+        // remains unreachable regardless of the schema/insert fix above.
+        addContinuationMotion:       f.add_continuation_motion,
+        continuationPreset:          f.continuation_preset,
+        continuationDurationSeconds: f.continuation_duration_seconds,
       })),
     });
 
@@ -705,6 +722,9 @@ async function regenerateVideoJob({ jobId, userId, frames, formats, musicStyle }
       motion_preset:    f.motionPreset || "auto",
       duration_seconds: f.durationSeconds || 4.5,
       sequence_order:   i,
+      add_continuation_motion:       !!f.addContinuationMotion,
+      continuation_preset:           f.continuationPreset || null,
+      continuation_duration_seconds: f.continuationDurationSeconds || null,
     }));
 
     await supabase("POST", "video_job_frames", frameRows);
@@ -725,6 +745,9 @@ async function regenerateVideoJob({ jobId, userId, frames, formats, musicStyle }
                                                  // above for the full explanation.
         durationSeconds:   f.duration_seconds,
         sequenceOrder:     f.sequence_order,
+        addContinuationMotion:       f.add_continuation_motion,
+        continuationPreset:          f.continuation_preset,
+        continuationDurationSeconds: f.continuation_duration_seconds,
       })),
     });
 

@@ -214,7 +214,41 @@ RETURN ONLY THIS JSON — no markdown, no preamble:
   }
 }
 
-// ✅ BUILD PROMPT FOR VACANT ROOM STAGING
+// ✅ TRANSFORM 4-FIELD ZONES INTO ANCHORS (backwards compatibility)
+function zonesIntoAnchors(zones) {
+  if (!zones || zones.length === 0) {
+    // Fallback: no zones, return minimal anchors
+    return {
+      focal: 'primary wall',
+      ceiling: 'ceiling fixture',
+      backWall: 'back wall',
+      leftBoundary: 'left boundary',
+      rightBoundary: 'right boundary',
+      frontBoundary: 'front circulation'
+    };
+  }
+
+  const zone = zones[0]; // Use first/primary zone
+  const anchorTier = zone.anchor_point || {};
+
+  // Extract boundaries from string
+  const boundaryStr = zone.boundaries || '';
+  const parseBoundary = (pattern) => {
+    const match = boundaryStr.match(new RegExp(pattern + ': ([^.]+)', 'i'));
+    return match ? match[1].trim() : 'not specified';
+  };
+
+  return {
+    focal: anchorTier.location || anchorTier.instruction || 'primary focal point',
+    ceiling: zone.fixtures || 'ceiling fixture',
+    backWall: parseBoundary('Back') || 'back wall',
+    leftBoundary: parseBoundary('Left') || 'left boundary',
+    rightBoundary: parseBoundary('Right') || 'right boundary',
+    frontBoundary: parseBoundary('Front') || 'front circulation'
+  };
+}
+
+// ✅ BUILD ROOMDATA FROM HAIKU 4-FIELD ZONES
 function buildVacantPrompt({ roomData, designStyle, colorPalette }) {
   const rawStyle = designStyle || 'Organic Modern';
   const style = STYLE_LABELS[rawStyle?.toLowerCase().replace(/[^a-z]/g, '')] || rawStyle;
@@ -264,16 +298,18 @@ function buildVacantPrompt({ roomData, designStyle, colorPalette }) {
     });
     p += `\n`;
   } else {
-    // ── SINGLE ROOM: original anchor block ───────────────────────────────────
+    // Fallback: no anchors available
+    const anchors = roomData.anchors || {};
     p += `ANCHORS (use these to place furniture):\n`;
-    p += `Focal Wall: ${roomData.anchors.focal}\n`;
-    if (roomData.anchors.ceiling) p += `Ceiling: ${roomData.anchors.ceiling}\n`;
-    p += `Back Wall: ${roomData.anchors.backWall}\n`;
-    p += `Left Boundary: ${roomData.anchors.leftBoundary}\n`;
-    p += `Right Boundary: ${roomData.anchors.rightBoundary}\n`;
-    p += `Front Boundary: ${roomData.anchors.frontBoundary}\n\n`;
+    p += `Focal Wall: ${anchors.focal || 'primary wall'}\n`;
+    if (anchors.ceiling) p += `Ceiling: ${anchors.ceiling}\n`;
+    p += `Back Wall: ${anchors.backWall || 'back wall'}\n`;
+    p += `Left Boundary: ${anchors.leftBoundary || 'left boundary'}\n`;
+    p += `Right Boundary: ${anchors.rightBoundary || 'right boundary'}\n`;
+    p += `Front Boundary: ${anchors.frontBoundary || 'front circulation'}\n\n`;
 
     // Room-specific staging instructions (single room only)
+    const anchors = roomData.anchors || {};
     if (roomData.roomType.toLowerCase().includes('kitchen')) {
       p += `KITCHEN STAGING:\n`;
       p += `Place counter stools below pendant lights (if island present)\n`;
@@ -285,20 +321,20 @@ function buildVacantPrompt({ roomData, designStyle, colorPalette }) {
       p += `LIVING ROOM STAGING:\n`;
       p += `CIRCULATION RULE: The foreground floor space nearest the camera is a walk path between zones — keep it completely empty. All furniture must be placed in the MIDGROUND anchored to the fireplace. Do not place any furniture in the front half of the frame.\n`;
       p += `Place area rug in the midground centered under ceiling fixture, anchored toward the fireplace — rug must NOT extend into the foreground half of the frame.\n`;
-      p += `Place sofa with back against ${roomData.anchors.backWall}, centered on rug, facing ${roomData.anchors.focal}\n`;
+      p += `Place sofa with back against ${anchors.backWall || 'back wall'}, centered on rug, facing ${anchors.focal || 'focal point'}\n`;
       p += `Place two accent chairs on rug angled inward toward focal point\n`;
       p += `Place coffee table centered on rug between sofa and focal point\n`;
-      p += `Place console against right wall (${roomData.anchors.rightBoundary})\n`;
+      p += `Place console against right wall (${anchors.rightBoundary || 'right boundary'})\n`;
       p += `Place plant right of focal point\n`;
       p += `Place art piece above focal point\n`;
       p += `Place arc floor lamp behind left accent chair\n`;
-      p += `Keep all furniture within zone boundary (do not extend past ${roomData.anchors.leftBoundary} or ${roomData.anchors.rightBoundary})\n`;
+      p += `Keep all furniture within zone boundary (do not extend past ${anchors.leftBoundary || 'left boundary'} or ${anchors.rightBoundary || 'right boundary'})\n`;
       p += `Keep foreground floor completely empty — this is the circulation path between zones.\n\n`;
     } else if (roomData.roomType.toLowerCase().includes('bedroom')) {
       p += `BEDROOM STAGING:\n`;
-      p += `Place bed headboard against ${roomData.anchors.backWall}, centered\n`;
+      p += `Place bed headboard against ${anchors.backWall || 'back wall'}, centered\n`;
       p += `Place matching nightstands flanking bed\n`;
-      p += `Place dresser on opposite wall (${roomData.anchors.focal})\n`;
+      p += `Place dresser on opposite wall (${anchors.focal || 'focal wall'})\n`;
       p += `Place bench at foot of bed\n`;
       p += `Keep all furniture within zone boundary\n\n`;
     }
@@ -317,13 +353,14 @@ function buildVacantPrompt({ roomData, designStyle, colorPalette }) {
   }
 
   // Critical rules
+  const anchors = roomData.anchors || {};
   p += `DO NOT stage beyond zone boundary:\n`;
   if (isOpenPlan) {
-    p += `— Do not extend furniture past left boundary (${roomData.zoneBoundary.left})\n`;
-    p += `— Do not extend furniture past right boundary (${roomData.zoneBoundary.right})\n`;
+    p += `— Do not extend furniture past left boundary (${roomData.zoneBoundary?.left || anchors.leftBoundary || 'left boundary'})\n`;
+    p += `— Do not extend furniture past right boundary (${roomData.zoneBoundary?.right || anchors.rightBoundary || 'right boundary'})\n`;
   } else {
-    p += `— Do not extend furniture past left boundary (${roomData.anchors.leftBoundary})\n`;
-    p += `— Do not extend furniture past right boundary (${roomData.anchors.rightBoundary})\n`;
+    p += `— Do not extend furniture past left boundary (${anchors.leftBoundary || 'left boundary'})\n`;
+    p += `— Do not extend furniture past right boundary (${anchors.rightBoundary || 'right boundary'})\n`;
   }
   p += `— Do not stage adjacent zones (keep vacant)\n`;
   p += `— Do not alter architectural elements\n`;
@@ -363,7 +400,14 @@ exports.handler = async (event) => {
     if (!claudeKey) return { statusCode: 500, headers, body: JSON.stringify({ error: "ANTHROPIC_API_KEY not configured" }) };
 
     // Read room via Haiku
-    const roomData = await readVacantRoom({ imageBase64, roomType, claudeKey });
+    const haikuOutput = await readVacantRoom({ imageBase64, roomType, claudeKey });
+    
+    // Transform 4-field zones into anchors (if needed)
+    const roomData = {
+      ...haikuOutput,
+      anchors: haikuOutput.anchors || zonesIntoAnchors(haikuOutput.zones),
+      preserveList: haikuOutput.preserveList || 'Standard preservation'
+    };
 
     // Build prompt
     const stagingPrompt = buildVacantPrompt({ roomData, designStyle, colorPalette });

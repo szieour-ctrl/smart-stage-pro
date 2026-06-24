@@ -87,118 +87,86 @@ AB 723 COMPLIANCE: Virtual staging adds furniture only. Any alteration to perman
 
 `;
 
-// ✅ HAIKU READS SINGLE VACANT ROOM — Returns anchors, zones, boundaries
-// For open plan rooms (roomType contains '+'), reads per-zone fixtures
+// ✅ HAIKU READS SINGLE VACANT ROOM — Returns 4-field zones
+// For open plan rooms (roomType contains '+'), reads multiple zones
+// For single rooms, reads one zone
 async function readVacantRoom({ imageBase64, roomType, claudeKey }) {
   const isOpenPlan = roomType.includes('+');
-
-  // Build zone list for open plan reads
   const zoneList = isOpenPlan
     ? roomType.split('+').map(z => z.trim()).filter(Boolean)
-    : null;
+    : [roomType];
 
-  // Pre-build zone template string to avoid nested backtick conflicts
-  const zonesTemplate = isOpenPlan
-    ? zoneList.map(zone => `{
-      "name": "${zone}",
-      "ceilingFixture": "Ceiling fixture directly above this zone — specify type and finish only (e.g. brushed nickel chandelier with clear glass shades, ceiling fan with brushed nickel finish, pendant cluster with glass shades). Do NOT describe position or depth. GPT will find the fixture in the photo and place furniture directly beneath it. If none visible, say NONE.",
-      "focalPoint": "Primary anchor for furniture placement in this zone",
-      "stagingInstruction": "Furniture for this zone. Place it DIRECTLY BENEATH the ceiling fixture — no spatial coordinates needed, GPT finds the fixture in the photo. Reference walls, windows, and fireplace as orientation boundaries only. Every user-labeled zone MUST be staged. For the flex zone: it is THE ENCLOSED SPACE WITH DEFINED WALLS — place furniture inside those walls only."
-    }`).join(',\n    ')
-    : '';
-
-  const prompt = isOpenPlan ? `You are reading a single open-plan space for MLS virtual staging.
+  const prompt = `You are reading a real estate listing photo to identify furnishing zones.
 
 Room Type: ${roomType}
-Zones visible: ${zoneList.join(', ')}
+Zone type: ${isOpenPlan ? 'OPEN PLAN (multiple interconnected zones)' : 'SINGLE ROOM (one zone)'}
 
-STEP 1 — SPATIAL INVENTORY (do this first):
-Before assigning anything to zones, identify every ceiling fixture and architectural anchor by its PHYSICAL POSITION in the image frame:
-- Where is it? (left side of frame / center of frame / right side of frame)
-- Note ceiling fixture type and finish only — do not describe position or depth.
-- What is it? (chandelier, ceiling fan, pendant cluster, recessed lights, etc.)
+TASK: For each zone visible, return ONLY factual architectural data — no staging instructions, no furniture recommendations, no prose.
 
-STEP 2 — ZONE MAPPING:
-The user has labeled zones in the order they appear in the space. Map each fixture to a zone based on SPATIAL POSITION ONLY — never by fixture type or zone name assumption. A chandelier over the dining area is a DINING anchor even if it is near the kitchen. A ceiling fan over the living area is a LIVING anchor even if it is near the fireplace.
+RULES:
+1. ZONE IDENTIFICATION: Zones are bounded by permanent architectural elements (walls, partitions, openings, fireplaces, islands, windows).
+2. ONE ZONE PER BOUNDED AREA: Kitchen = one zone. Dining = one zone. Living = one zone.
+3. FLOATING ZONES (no enclosing walls): Use TIER 3 anchoring (position in frame + neighbor relationships).
+4. FIXTURE FACTS ONLY: Report what is ACTUALLY VISIBLE. Do not infer. If no fixture visible, set to null.
+5. BOUNDARY NAMING: Name neighbors on EVERY edge. Example: "Left: kitchen island. Right: fireplace wall. Front: circulation. Back: great room."
+6. PRESERVED ARCHITECTURE: Name all permanent elements per zone — distribute across zones, no laundry list.
 
-STEP 3 — STAGING INSTRUCTION:
-For each zone, write a staging instruction that uses the ceiling fixture as the PRIMARY anchor. Furniture must be placed centered beneath or oriented toward that zone's ceiling fixture — not the adjacent zone's fixture.
+ANCHOR TIER CLASSIFICATION:
+TIER 1 (HIGHEST PRECISION) — Zone has a dominant fixture:
+  Examples: Chandelier, fireplace, ceiling fan, island with sink, appliances.
 
-FLEX/SECONDARY ZONE RULE: Look for the ONE enclosed or partially enclosed space in the frame — it will have its own walls, an angled or defined entry opening, and may have a pass-through window or partial partition wall. This is the flex zone. It is the only space in the image with defined walls. Describe it by its entry opening and boundary walls so GPT can locate it instantly. Place furniture INSIDE that walled space only.
+TIER 2 (MEDIUM PRECISION) — Zone has clear wall position but no fixture:
+  Examples: Seating wall with windows, headboard wall, kitchen perimeter wall.
 
-CRITICAL RULES:
-- A fireplace is a LIVING ZONE focal point ONLY — sofas and seating face it. A dining table NEVER goes near a fireplace unless a chandelier is directly above that location.
-- A chandelier/pendant cluster hanging from the ceiling over open floor space = DINING anchor → dining table + chairs MUST be centered directly beneath it — regardless of what else is nearby
-- Island pendant lights = KITCHEN anchor → counter stools beneath them
-- Ceiling fan = LIVING anchor → sofa/seating group oriented beneath it facing the fireplace
-- Never place a dining table near a fireplace if a chandelier exists elsewhere in the space
-- The chandelier position IS the dining table position — always
-- LIVING ZONE furniture (sofa, chairs, coffee table) must be placed in the BACKGROUND area of the frame anchored to the fireplace wall — never pulled toward the camera into the foreground. The sofa back faces the camera, seating faces the fireplace.
-- The foreground floor space (closest to camera) is the circulation path between zones — keep it completely empty in both single-room and open plan staging
+TIER 3 (LOWER PRECISION) — Zone is floating (no walls, no fixtures):
+  Examples: Dining nook in open plan, flex room with no boundaries.
+  Use: FOREGROUND / MIDGROUND / BACKGROUND + LEFT / CENTER / RIGHT + neighbor relationships.
 
-Return ONLY valid JSON — no markdown, no preamble:
+EDGE CASES:
+• Flex Room: Flag flexRoomType as null or inferred (home_office / sitting_room / formal_dining / etc).
+• Multiple recessed lights: Name SPECIFIC location. "Recessed lights centered above dining zone".
+• Sliding doors: Flag doorType: sliding. Clearance is ONE-SIDED.
+• Swinging doors: Flag doorType: swinging. Clearance is ARC-BASED.
+• Ceiling cut off: Flag ceilingVisibility: partial and low confidence.
+• Hallway: Mark isHallway: true, keep empty.
+
+RETURN ONLY THIS JSON — no markdown, no preamble:
 
 {
-  "roomType": "${roomType}",
-  "preserveList": "Comprehensive list of every permanent architectural element visible: walls (including partial walls, half-walls, partition walls, and pass-through openings with their wall sections), ceiling, flooring material/color, windows with frame color, doors, appliances, fixtures, finishes. If a pass-through or opening exists in a wall, describe the full wall including the solid sections — these wall sections are permanent architecture. End with: DO NOT alter any permanent architectural element.",
-  "fixtureInventory": [
-    {
-      "fixture": "description of fixture",
-      "framePosition": "left/center/right of frame",
-      "depth": "foreground/midground/background",
-      "assignedZone": "which zone this belongs to"
-    }
-  ],
   "zones": [
-    ${zonesTemplate}
+    {
+      "name": "Zone name (Kitchen / Dining / Living / Bedroom / Flex Room / Hallway / etc)",
+      "boundaries": "Reciprocal description of boundaries and neighbors on each edge.",
+      "fixtures": "Comma-separated list of ceiling/structural fixtures visible in THIS ZONE ONLY, or null.",
+      "cabinetry": "Kitchen/bathroom built-ins in THIS ZONE ONLY, or null.",
+      "windows_doors": "All openings (windows, doors, pass-throughs) in THIS ZONE's boundaries, or null.",
+      "anchor_point": {
+        "tier": "TIER 1 or TIER 2 or TIER 3",
+        "location": "Specific physical location.",
+        "instruction": "How to use this anchor.",
+        "confidence": "high / medium / low"
+      },
+      "negative_constraints": ["Do not extend past [boundary].", "Do not block [feature]."],
+      "furnishing_specification": {
+        "pieces": "Furniture types with FIXED COUNTS (not ranges).",
+        "decor": "Decorative elements by count, or null.",
+        "notes": "Additional context, or null."
+      },
+      "flags": {
+        "flexRoomType": "null or inferred type",
+        "doorType": "swinging / sliding / null",
+        "ceilingVisibility": "full / partial",
+        "isHallway": "true / false"
+      }
+    }
   ],
-  "zoneBoundary": {
-    "front": "Front boundary description",
-    "back": "Back boundary description",
-    "left": "Left boundary description",
-    "right": "Right boundary description",
-    "shape": "rectangular or other"
-  },
-  "adjacentVisibleZones": [
-    {
-      "zone": "zone name",
-      "visible": "HOW visible (through opening, window, doorway)",
-      "staging": "KEEP VACANT - do not stage this zone"
-    }
-  ]
-}` : `You are reading a single vacant room for MLS virtual staging.
-
-Room Type: ${roomType}
-
-TASK: Read this room and return ONLY the anchors, zone boundaries, and adjacent visible zones.
-
-Return ONLY valid JSON — no markdown, no preamble:
-
-{
-  "roomType": "${roomType}",
-  "preserveList": "Comprehensive list of every permanent architectural element visible: walls (including partial walls, half-walls, partition walls, and pass-through openings with their wall sections), ceiling, flooring material/color, windows with frame color, doors, appliances, fixtures, finishes. If a pass-through or opening exists in a wall, describe the full wall including the solid sections — these wall sections are permanent architecture. End with: DO NOT alter any permanent architectural element.",
-  "anchors": {
-    "focal": "Primary focal point (fireplace, window wall, feature wall) — sofa/seating faces this",
-    "ceiling": "Ceiling fixture description if present (fan, chandelier, recessed lights) with finish and style ONLY",
-    "backWall": "Wall where furniture back goes against (opposite focal wall)",
-    "leftBoundary": "Left wall or architectural element that stops furniture extension",
-    "rightBoundary": "Right wall or architectural element that stops furniture extension",
-    "frontBoundary": "Distance in front of focal wall before furniture starts (e.g., 18 inches from fireplace)"
-  },
-  "zoneBoundary": {
-    "front": "Front boundary description (distance from focal wall)",
-    "back": "Back boundary description (wall or distance)",
-    "left": "Left boundary description (wall edge or opening)",
-    "right": "Right boundary description (wall edge or opening)",
-    "shape": "rectangular or other"
-  },
-  "adjacentVisibleZones": [
-    {
-      "zone": "zone name (dining, kitchen, flex, etc.)",
-      "visible": "HOW visible (through opening, window, doorway, etc.)",
-      "staging": "KEEP VACANT - do not stage this zone"
-    }
-  ]
+  "metadata": {
+    "roomType": "${roomType}",
+    "groupType": "${isOpenPlan ? 'open_plan' : 'single_room'}",
+    "totalZones": "[count]",
+    "conflictsDetected": [],
+    "notes": "Any overall observations."
+  }
 }`;
 
   const payload = JSON.stringify({

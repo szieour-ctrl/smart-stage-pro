@@ -91,10 +91,15 @@ AB 723 COMPLIANCE: Virtual staging adds furniture only. Any alteration to perman
 // For open plan rooms (roomType contains '+'), reads multiple zones
 // For single rooms, reads one zone
 async function readVacantRoom({ imageBase64, roomType, claudeKey }) {
-  const isOpenPlan = roomType.includes('+');
-  const zoneList = isOpenPlan
-    ? roomType.split('+').map(z => z.trim()).filter(Boolean)
-    : [roomType];
+  try {
+    if (!imageBase64 || !roomType || !claudeKey) {
+      throw new Error('Missing required params: imageBase64, roomType, claudeKey');
+    }
+    
+    const isOpenPlan = roomType.includes('+');
+    const zoneList = isOpenPlan
+      ? roomType.split('+').map(z => z.trim()).filter(Boolean)
+      : [roomType];
 
   const prompt = `You are reading a real estate listing photo to identify furnishing zones.
 
@@ -198,7 +203,15 @@ RETURN ONLY THIS JSON — no markdown, no preamble:
   const text = result.body?.content?.[0]?.text?.trim() || "{}";
   const clean = text.replace(/```json|```/g, "").trim();
   try { return JSON.parse(clean); }
-  catch(e) { throw new Error("Vacant room JSON parse failed"); }
+  catch(e) {
+    console.error('Vacant room JSON parse failed:', e.message);
+    console.error('Attempted to parse:', clean.substring(0, 200));
+    throw new Error("Vacant room JSON parse failed: " + e.message);
+  }
+  } catch(error) {
+    console.error('readVacantRoom error:', error.message);
+    throw error;
+  }
 }
 
 // ✅ BUILD PROMPT FOR VACANT ROOM STAGING
@@ -211,19 +224,32 @@ function buildVacantPrompt({ roomData, designStyle, colorPalette }) {
 
   let p = AB723_HEADER;
 
-  // Preserve list
-  p += `PRESERVE EXACTLY: ${roomData.preserveList}\n\n`;
+  // Preserve list (handle missing)
+  p += `PRESERVE EXACTLY: ${roomData.preserveList || 'Standard preservation'}\n\n`;
 
   // Room type and boundaries
   p += `STAGING: ${roomData.roomType} — Stage ONLY within this room boundary\n\n`;
 
-  // Zone boundary definition
-  p += `ZONE BOUNDARY (do not stage beyond):\n`;
-  p += `Front: ${roomData.zoneBoundary.front}\n`;
-  p += `Back: ${roomData.zoneBoundary.back}\n`;
-  p += `Left: ${roomData.zoneBoundary.left}\n`;
-  p += `Right: ${roomData.zoneBoundary.right}\n`;
-  p += `Shape: ${roomData.zoneBoundary.shape}\n\n`;
+  // Zone boundary definition (handle both old object format and new string format)
+  if (roomData.zoneBoundary && typeof roomData.zoneBoundary === 'object') {
+    // Old format: zoneBoundary is an object with front, back, left, right
+    p += `ZONE BOUNDARY (do not stage beyond):\n`;
+    p += `Front: ${roomData.zoneBoundary.front || 'Not specified'}\n`;
+    p += `Back: ${roomData.zoneBoundary.back || 'Not specified'}\n`;
+    p += `Left: ${roomData.zoneBoundary.left || 'Not specified'}\n`;
+    p += `Right: ${roomData.zoneBoundary.right || 'Not specified'}\n`;
+    p += `Shape: ${roomData.zoneBoundary.shape || 'Rectangular'}\n\n`;
+  } else if (isOpenPlan && roomData.zones.length > 0 && roomData.zones[0].boundaries) {
+    // New 4-field format: boundaries is a string in each zone
+    p += `ZONE BOUNDARIES (do not stage beyond):\n`;
+    roomData.zones.forEach(zone => {
+      p += `${zone.name}: ${zone.boundaries}\n`;
+    });
+    p += `\n`;
+  } else {
+    // Fallback: no boundary info available
+    p += `ZONE BOUNDARY: Stage within the visible room area only\n\n`;
+  }
 
   if (isOpenPlan) {
     // ── OPEN PLAN: per-zone anchor instructions ──────────────────────────────
@@ -356,6 +382,7 @@ exports.handler = async (event) => {
 
   } catch (err) {
     console.error("stage-vacant-prompt error:", err.message);
-    return { statusCode: 500, headers, body: JSON.stringify({ error: err.message }) };
+    console.error("Stack trace:", err.stack);
+    return { statusCode: 500, headers, body: JSON.stringify({ error: err.message, details: err.stack }) };
   }
 };

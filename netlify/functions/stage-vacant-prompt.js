@@ -14,7 +14,7 @@ function httpsRequest(options, body) {
       res.on("end", () => {
         const raw = Buffer.concat(chunks).toString("utf8");
         try { resolve({ status: res.statusCode, body: JSON.parse(raw) }); }
-        catch (e) { resolve({ status: res.statusCode, body: { raw } }); }z
+        catch (e) { resolve({ status: res.statusCode, body: { raw } }); }
       });
     });
     req.on("error", reject);

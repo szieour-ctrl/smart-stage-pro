@@ -68,7 +68,134 @@ AB 723 COMPLIANCE: Virtual staging adds furniture only. Any alteration to perman
 
 `;
 
-// ── OPEN PLAN PROMPT BUILDER ──────────────────────────────────────────────────
+// ── NEW PHASE 2: BUILD PROMPT FROM 4-FIELD ZONES ──────────────────────────────
+// Input: zones[] array from rebuilt Haiku (4-field structure)
+// Output: Complete GPT Image 2 staging prompt with FOREGROUND RULE + PHOTOGRAPHIC INTENT
+function buildPromptFrom4FieldZones({ zones, userLabel, designStyle, colorPalette, designDNA }) {
+  if (!zones || zones.length === 0) {
+    throw new Error("No zones provided to buildPromptFrom4FieldZones");
+  }
+
+  const isOpenPlan = userLabel && (userLabel.includes('Open Plan') || userLabel.includes('+'));
+  
+  // Resolve style and palette
+  const rawStyle = designDNA?.overallStyle || designStyle || 'Organic Modern';
+  const style = STYLE_LABELS[rawStyle?.toLowerCase().replace(/[^a-z]/g,'')]|| rawStyle;
+  const palette = colorPalette || 'Warm Neutrals';
+  const paletteTones = PALETTE_TONES[palette] || `${palette} tones`;
+
+  // ✅ START PROMPT WITH AB 723 HEADER
+  let prompt = AB723_HEADER;
+
+  // ✅ BUILD PRESERVE EXACTLY FROM ZONE DATA (distributed, not laundry list)
+  const preserveItems = zones
+    .map(z => [
+      z.fixtures ? `${z.fixtures}` : null,
+      z.cabinetry ? `${z.cabinetry}` : null,
+      z.windows_doors ? `${z.windows_doors}` : null
+    ].filter(Boolean).join('; '))
+    .filter(Boolean)
+    .join('; ');
+
+  prompt += `PRESERVE EXACTLY: ${preserveItems} DO NOT alter any permanent architectural element.\n\n`;
+
+  // ✅ FOREGROUND RULE (validated from June session)
+  const FOREGROUND_RULE = `Do not leave the foreground of the frame empty by default. Real homes have furniture throughout, including the zone closest to camera. Identify which zone occupies the foreground of THIS photo and stage it fully, the same as every other zone — empty foreground is only correct when that space is genuinely a hallway, walkway, or transitional space with no zone assigned to it.`;
+
+  // ✅ PHOTOGRAPHIC INTENT (validated from June session)
+  const PHOTOGRAPHIC_INTENT = `Stage this as a real estate photograph would naturally be composed — not a studio product shot. Real interior photography has depth: foreground elements closer to camera, background elements receding, natural perspective throughout the frame. Furniture should occupy the frame the way it would in an actual photographed room, including being cropped at the frame edge where natural camera position would cause that. Prioritize a believable, photographically natural result over a tidy, fully-contained composition.`;
+
+  // ✅ ADD STANDING RULES TO PROMPT
+  prompt += `STANDING RULES:\n`;
+  prompt += `1. FOREGROUND RULE: ${FOREGROUND_RULE}\n\n`;
+  prompt += `2. PHOTOGRAPHIC INTENT: ${PHOTOGRAPHIC_INTENT}\n\n`;
+
+  // ✅ OPENING ROOM DESCRIPTION
+  const zoneNames = zones.map(z => z.name).join(', ');
+  const roomType = isOpenPlan ? `Open Plan: ${zoneNames}` : zoneNames;
+  prompt += `ROOM: ${roomType}\n`;
+  prompt += `Style: ${style} with ${palette} palette (${paletteTones})\n\n`;
+
+  // ✅ BUILD PER-ZONE INSTRUCTIONS FROM 4-FIELD DATA
+  prompt += `ZONE-BY-ZONE INSTRUCTIONS:\n\n`;
+
+  zones.forEach((zone, idx) => {
+    prompt += `ZONE ${idx + 1}: ${zone.name.toUpperCase()}\n`;
+    prompt += `─────────────────────────────────────────────────────────────\n`;
+
+    // Boundaries
+    if (zone.boundaries) {
+      prompt += `Boundaries: ${zone.boundaries}\n`;
+    }
+
+    // Anchor point with TIER explanation
+    if (zone.anchor_point) {
+      const tierDesc = zone.anchor_point.tier === 'TIER 1' ? '(fixture-based, highest precision)'
+        : zone.anchor_point.tier === 'TIER 2' ? '(wall-based, medium precision)'
+        : '(floating, lowest precision — position in frame + neighbor relationships)';
+      
+      prompt += `Anchor Point ${tierDesc}: ${zone.anchor_point.location}\n`;
+      prompt += `  Instruction: ${zone.anchor_point.instruction}\n`;
+      if (zone.anchor_point.confidence !== 'high') {
+        prompt += `  Confidence: ${zone.anchor_point.confidence}\n`;
+      }
+    }
+
+    // Negative constraints
+    if (zone.negative_constraints && zone.negative_constraints.length > 0) {
+      prompt += `Constraints:\n`;
+      zone.negative_constraints.forEach(constraint => {
+        prompt += `  • ${constraint}\n`;
+      });
+    }
+
+    // Furnishing specification
+    if (zone.furnishing_specification) {
+      prompt += `Furnishing:\n`;
+      if (zone.furnishing_specification.pieces) {
+        prompt += `  Pieces: ${zone.furnishing_specification.pieces}\n`;
+      }
+      if (zone.furnishing_specification.decor) {
+        prompt += `  Decor: ${zone.furnishing_specification.decor}\n`;
+      }
+      if (zone.furnishing_specification.notes) {
+        prompt += `  Notes: ${zone.furnishing_specification.notes}\n`;
+      }
+    }
+
+    // Edge case flags
+    if (zone.flags) {
+      if (zone.flags.flexRoomType === null) {
+        prompt += `[FLAG] Flex Room type: User confirmation needed before staging\n`;
+      }
+      if (zone.flags.doorType === 'sliding') {
+        prompt += `[FLAG] Sliding door: Clearance is ONE-SIDED only\n`;
+      }
+      if (zone.flags.doorType === 'swinging') {
+        prompt += `[FLAG] Swinging door: Clearance is ARC-BASED (swing radius required)\n`;
+      }
+      if (zone.flags.ceilingVisibility === 'partial') {
+        prompt += `[FLAG] Ceiling partially cut at frame edge: Anchor confidence is LOW\n`;
+      }
+      if (zone.flags.isHallway) {
+        prompt += `[FLAG] Hallway/circulation zone: Keep completely empty (no furniture, no decor)\n`;
+      }
+    }
+
+    prompt += `\n`;
+  });
+
+  // ✅ DESIGN DNA INJECTION
+  prompt += `DESIGN EXECUTION:\n`;
+  prompt += `Use ${style} furniture with clean architectural lines, refined materials, and ${paletteTones}.\n`;
+  prompt += `Maintain realistic furniture scale, proportional to room size.\n`;
+  prompt += `Preserve all architectural features, room dimensions, and camera perspective exactly as photographed.\n`;
+  prompt += `The finished image must look like a professionally photographed and staged real property.\n`;
+
+  return prompt;
+}
+
+// ── EXISTING FUNCTIONS BELOW (unchanged) ──────────────────────────────────────
 // Architecture: Claude Haiku reads photo → returns PRESERVE list + fixture names only
 // JS assembles the final deterministic prompt from Sam's proven formula
 // Anchor hierarchy: Walls → Ceiling Fixtures (chandelier/fan) → Fireplace Wall → Island
@@ -413,7 +540,23 @@ exports.handler = async (event) => {
   };
 
   try {
-    const { mode, imageBase64, mimeType, roomName, designStyle, colorPalette, designDNA, openPlanStrategy, openPlanZones, visibleZones, claudeKey, anchorImageUrl, derivedZone, stagingDNA } = JSON.parse(event.body);
+    const { mode, imageBase64, mimeType, roomName, userLabel, designStyle, colorPalette, designDNA, openPlanStrategy, openPlanZones, visibleZones, claudeKey, anchorImageUrl, derivedZone, stagingDNA, zones } = JSON.parse(event.body);
+
+    // ✅ NEW PHASE 2 MODE: Build prompt from 4-field zones (from rebuilt Haiku)
+    if (mode === 'build-from-4field-zones') {
+      if (!zones || zones.length === 0) {
+        return { statusCode: 400, headers, body: JSON.stringify({ error: "No zones provided" }) };
+      }
+      const stagingPrompt = buildPromptFrom4FieldZones({
+        zones,
+        userLabel: userLabel || roomName,
+        designStyle,
+        colorPalette,
+        designDNA
+      });
+      console.log("Phase 2 mode: 4-field zones converted to GPT prompt");
+      return { statusCode: 200, headers, body: JSON.stringify({ stagingPrompt }) };
+    }
 
     if (mode === 'extract-open-plan') {
       const metadata = await extractOpenPlanMetadata({ imageBase64, mimeType, claudeKey });
@@ -437,7 +580,7 @@ exports.handler = async (event) => {
 
     if (mode === 'build-dna-derived') {
       const derivedPrompt = await buildDNADerivedPrompt({
-        anchorImageUrl, vacantImageBase64, mimeType, derivedZone, roomName, designStyle, colorPalette, stagingDNA, claudeKey
+        anchorImageUrl, vacantImageBase64: imageBase64, mimeType, derivedZone, roomName, designStyle, colorPalette, stagingDNA, claudeKey
       });
       return { statusCode: 200, headers, body: JSON.stringify({ stagingPrompt: derivedPrompt }) };
     }

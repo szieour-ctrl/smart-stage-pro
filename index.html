@@ -3532,12 +3532,42 @@ async function approveAndStageAllGroupImages() {
   const unmatched = SESSION.groupImages.filter(g => !g.roomId);
   if (unmatched.length) showToast(unmatched.length + ' image(s) not matched to rooms.', 'error');
 
+  // HOTFIX: Stage anchor room FIRST, extract DNA, then stage others
+  const anchorRoomId = SESSION.anchorRoomId;
+  
+  // Find the index of the anchor room's group image
+  const anchorIndex = SESSION.groupImages.findIndex(gImg => gImg.roomId === anchorRoomId);
+  
+  if (anchorIndex >= 0) {
+    // Stage anchor FIRST
+    const anchorRoom = SESSION.rooms.find(r => r.id === anchorRoomId);
+    if (anchorRoom) {
+      showToast('Staging anchor room first to extract design DNA...', '');
+      await approveAndStageGroupImage(anchorIndex, anchorRoomId);
+      await new Promise(r => setTimeout(r, 1500));
+      
+      // Extract DNA from staged anchor
+      if (anchorRoom.stagedBase64 && !SESSION.stagingDNA) {
+        showToast('Extracting design DNA from anchor room...', '');
+        try {
+          await extractStagingDNA(anchorRoom.stagedBase64, 'image/jpeg');
+        } catch(e) {
+          console.warn('DNA extraction had an issue, continuing anyway:', e.message);
+        }
+        await new Promise(r => setTimeout(r, 1000));
+      }
+    }
+  }
+  
+  // Now stage remaining images (with locked DNA if available)
   for (let i = 0; i < SESSION.groupImages.length; i++) {
     const gImg = SESSION.groupImages[i];
-    if (!gImg.roomId) continue;
+    if (!gImg.roomId || i === anchorIndex) continue; // Skip anchor (already staged)
     await approveAndStageGroupImage(i, gImg.roomId);
     await new Promise(r => setTimeout(r, 1000));
   }
+  
+  showToast('✓ All group images staged with locked design DNA', 'success');
 }
 
 // Legacy stageGroupImage kept for compatibility

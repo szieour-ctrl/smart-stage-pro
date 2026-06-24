@@ -14,7 +14,7 @@ function httpsRequest(options, body) {
       res.on("end", () => {
         const raw = Buffer.concat(chunks).toString("utf8");
         try { resolve({ status: res.statusCode, body: JSON.parse(raw) }); }
-        catch (e) { resolve({ status: res.statusCode, body: { raw } }); }
+        catch (e) { resolve({ status: res.statusCode, body: { raw } }); }z
       });
     });
     req.on("error", reject);
@@ -309,7 +309,6 @@ function buildVacantPrompt({ roomData, designStyle, colorPalette }) {
     p += `Front Boundary: ${anchors.frontBoundary || 'front circulation'}\n\n`;
 
     // Room-specific staging instructions (single room only)
-    const anchors = roomData.anchors || {};
     if (roomData.roomType.toLowerCase().includes('kitchen')) {
       p += `KITCHEN STAGING:\n`;
       p += `Place counter stools below pendant lights (if island present)\n`;

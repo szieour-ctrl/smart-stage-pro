@@ -85,77 +85,97 @@ async function compressForRead(imageBase64) {
   } catch(e) { return imageBase64; }
 }
 
-// ── MODE 1: SPATIAL READ ─────────────────────────────────────────────────────
+// ── MODE 1: SPATIAL READ — 4-FIELD ZONE FORMAT ───────────────────────────────
 async function runSpatialRead({ images, groupType, claudeKey }) {
-  const isBedroom = groupType === 'bedroom';
+  const isSingleRoom = groupType === 'bedroom' || images.length === 1;
 
   const imageBlocks = images.map((img, i) => ([
     { type: "image", source: { type: "base64", media_type: detectMime(img.base64), data: img.base64 } },
-    { type: "text", text: "IMAGE " + (i + 1) + " — " + (img.label || img.fileName || ('Angle ' + (i + 1))) }
+    { type: "text", text: "IMAGE " + (i + 1) + (img.label ? " — " + img.label : " — Angle " + (i + 1)) }
   ])).flat();
 
-  const perImageSchema = images.map((img, i) => {
-    const label = img.label || img.fileName || ('Angle ' + (i + 1));
-    return [
-      '{',
-      '  "imageIndex": ' + i + ',',
-      '  "imageLabel": "' + label + '",',
-      '  "visibleZones": ["list ONLY zones with stageable floor area visible in THIS image: kitchen, dining, living, flex, bedroom"],',
-      '  "cameraPosition": "one sentence",',
-      '  "zoneAnchors": {',
-      '    "dining": { "present": true/false, "ceilingFixture": "LCD classification: e.g. 5-arm brushed nickel chandelier with clear glass shades — or null if not visible in this image", "fixtureType": "chandelier or pendant or null", "spatialContext": "open floor adjacent to kitchen (dining/nook) or walled room with entrance (flex/formal) or null", "instruction": "Center rug and table under [fixture] or null" },',
-      '    "kitchen": { "present": true/false, "ceilingFixture": "LCD classification: e.g. 2 individual pendant lights with brushed nickel finish and clear glass shades hanging over island — or null", "islandDescription": "island desc or null", "islandBarOverhang": true/false, "stoolSide": "dining-zone-facing or null", "instruction": "Place N stools below [pendants] or null" },',
-      '    "living": { "present": true/false, "ceilingFixture": "LCD classification: e.g. brushed nickel ceiling fan with 4 black blades and light kit — or null", "frontWall": "fireplace desc or null", "backWall": "PRIORITY ORDER: (1) if a partition wall with an opening/cutout is visible anywhere in the frame, that wall IS the back wall — use it. (2) if no partition wall, use the solid interior wall opposite the fireplace. (3) NEVER use an exterior wall, window wall, or glass door wall as the back wall.", "zoneScale": "foreground or background", "instruction": "Place rug under [fan]. Sofa against [backWall] facing [fireplace] or null" },',
-      '    "bedroom": { "present": ' + (isBedroom ? 'true' : 'false') + ', "headboardWall": "desc or null", "instruction": "Place bed headboard against [wall] or null" }',
-      '  },',
-      '  "wallOpenings": ["each wall opening visible: type, location, what is beyond — do not assign zone anchors to rooms beyond openings"],',
-      '  "boundaryAnchors": {',
-      '    "livingLeft": "landmark stopping living zone left or null",',
-      '    "livingRight": "landmark stopping living zone right or null",',
-      '    "livingFront": "18 inches in front of [hearth desc] or null",',
-      '    "livingBack": "18 inches in front of [back wall desc] or null",',
-      '    "diningLeft": "landmark stopping dining zone on kitchen side or null",',
-      '    "diningRight": "landmark stopping dining zone on living side or null"',
-      '  }',
-      '}'
-    ].join('\n');
-  }).join(',\n');
-
   const prompt = [
-    'You are reading ' + images.length + ' listing photos of the same ' + (isBedroom ? 'bedroom' : 'open plan space') + ' from different angles.',
-    'TASK: Identify visible zones and ceiling fixture anchors for each image.',
-    'Return ONLY zone/anchor assignments — no PRESERVE lists, no furniture, no staging prose.',
+    // ── ROLE & CONTEXT ───────────────────────────────────────────────────────
+    `You are reading ${images.length} real estate listing photo(s) to identify furnishing zones.`,
+    `Zone type: ${isSingleRoom ? 'SINGLE ROOM (one zone)' : 'OPEN PLAN (multiple interconnected zones)'}`,
     '',
+    'TASK: For each zone visible, return ONLY factual architectural data — no staging instructions, no furniture recommendations, no prose.',
+    '',
+    
+    // ── CRITICAL RULES ───────────────────────────────────────────────────────
     'RULES:',
-    '1. visibleZones: list ONLY zones with stageable floor area in THIS image. If kitchen not visible — omit kitchen.',
-    '2. Fixtures visible through wall openings belong to the room beyond — do not assign them here.',
-    '3. LIGHTING CLASSIFICATION DICTIONARY (LCD) — classify every hanging fixture using this logic:',
-    '   Step A: COUNT the arms/lights on each fixture accurately. A single fixture with 5 arms is ONE chandelier, not "two pendants."',
-    '   Step B: CHECK what is directly below the fixture:',
-    '     - Island countertop below → PENDANT LIGHT → KITCHEN anchor.',
-    '     - Bathroom vanity below → PENDANT LIGHT → BATHROOM anchor.',
-    '     - Open floor (no surface below) → go to Step C.',
-    '   Step C: CLASSIFY the fixture type hanging over open floor:',
-    '     - Multi-arm fixture with branching arms/lights on one canopy = CHANDELIER.',
-    '     - Individual fixtures each on their own cord/chain = PENDANT LIGHTS.',
-    '   Step D: DETERMINE the zone for CHANDELIERS based on spatial context:',
-    '     - Chandelier hanging over OPEN FLOOR SPACE adjacent to kitchen with NO enclosing walls between it and the main living area = DINING/NOOK zone anchor. The defining feature is OPEN SPACE — no walls, partitions, or columns enclosing the area under the fixture.',
-    '     - Chandelier hanging INSIDE A ROOM that has walls, partitions, or columns forming an enclosed or semi-enclosed space with an archway, doorway, or pass-through opening = FLEX ROOM zone anchor. The defining feature is WALLS AROUND IT — if you can trace walls enclosing the fixture, it is in a Flex Room, NOT a dining zone.',
-    '     - A fixture visible THROUGH a wall opening is in the ADJACENT room, not in this room. Do not assign it as an anchor for this room.',
-    '   Step E: OTHER ceiling fixtures:',
-    '     - Recessed/can lights = zone-neutral, not an anchor. Include in PRESERVE only.',
-    '     - Ceiling fan (with or without light kit) = LIVING zone anchor. Always.',
-    '     - Flush-mount globe/dome = FLEX ROOM, BEDROOM, or LAUNDRY anchor (context-dependent).',
-    '   CRITICAL: Describe the fixture as it actually appears. Do not invent fixtures not visible in the frame.',
-    '   CRITICAL: If a fixture is not visible in THIS image, set ceilingFixture to null for that zone.',
-    '4. List every wall opening in wallOpenings[] — do not stage rooms visible through openings.',
-    '5. Return ONLY valid JSON — no markdown, no preamble.',
+    '1. ZONE IDENTIFICATION: Zones are bounded by permanent architectural elements (walls, partitions, openings, fireplaces, islands, windows).',
+    '2. ONE ZONE PER BOUNDED AREA: Kitchen = one zone. Dining = one zone. Living = one zone. Bedroom = one zone.',
+    '3. FLOATING ZONES (no enclosing walls): Use TIER 3 anchoring (position in frame + neighbor relationships).',
+    '4. FIXTURE FACTS ONLY: Report what is ACTUALLY VISIBLE. Do not infer. If no fixture visible, set field to null.',
+    '5. BOUNDARY NAMING: Name neighbors on EVERY edge. Example: "Left: kitchen island. Right: fireplace wall. Front: circulation. Back: great room."',
+    '6. PRESERVED ARCHITECTURE: Name all permanent elements per zone. Distribute across zones — no laundry list.',
+    '',
+    
+    // ── ANCHOR TIER SYSTEM ───────────────────────────────────────────────────
+    'ANCHOR TIER CLASSIFICATION:',
+    'TIER 1 (HIGHEST PRECISION) — Zone has a dominant fixture:',
+    '  Examples: Chandelier, fireplace, ceiling fan, island with sink, appliances.',
+    '  Instruction: "Center [furniture] directly under/on/facing [fixture location]"',
+    '',
+    'TIER 2 (MEDIUM PRECISION) — Zone has clear wall position but no fixture:',
+    '  Examples: Seating wall with windows, headboard wall, kitchen perimeter wall.',
+    '  Instruction: "Place [furniture] against [wall direction]"',
+    '',
+    'TIER 3 (LOWER PRECISION) — Zone is floating (no walls, no fixtures):',
+    '  Examples: Dining nook in open plan, flex room with no boundaries.',
+    '  Use: FOREGROUND / MIDGROUND / BACKGROUND + LEFT / CENTER / RIGHT + neighbor relationships.',
+    '  Instruction: "Place [furniture] in [location], between [neighbor] and [neighbor]"',
+    '',
+    
+    // ── EDGE CASE HANDLING ───────────────────────────────────────────────────
+    'EDGE CASES:',
+    '• Flex Room: Flag flexRoomType as null or inferred (home_office / sitting_room / formal_dining / etc).',
+    '• Multiple recessed lights: Name SPECIFIC location. "Recessed lights centered above dining zone".',
+    '• Sliding doors: Flag doorType: sliding. Clearance is ONE-SIDED.',
+    '• Swinging doors: Flag doorType: swinging. Clearance is ARC-BASED.',
+    '• Ceiling cut off: Flag ceilingVisibility: partial and low confidence.',
+    '• Hallway: Mark isHallway: true, keep empty.',
+    '',
+    
+    // ── OUTPUT JSON SCHEMA ───────────────────────────────────────────────────
+    'RETURN ONLY THIS JSON — no markdown, no preamble:',
     '',
     '{',
-    '  "groupType": "' + groupType + '",',
-    '  "anglesRead": ' + images.length + ',',
-    '  "conflictsDetected": [{ "element": "name", "conflict": "what was ambiguous", "resolution": "correct answer" }],',
-    '  "perImageAssignments": [' + perImageSchema + ']',
+    '  "zones": [',
+    '    {',
+    '      "name": "Zone name (Kitchen / Dining / Living / Bedroom / Flex Room / Hallway / etc)",',
+    '      "boundaries": "Reciprocal description of boundaries and neighbors on each edge.",',
+    '      "fixtures": "Comma-separated list of ceiling/structural fixtures visible in THIS ZONE ONLY, or null.",',
+    '      "cabinetry": "Kitchen/bathroom built-ins in THIS ZONE ONLY, or null.",',
+    '      "windows_doors": "All openings (windows, doors, pass-throughs) in THIS ZONE\'S boundaries, or null.",',
+    '      "anchor_point": {',
+    '        "tier": "TIER 1 or TIER 2 or TIER 3",',
+    '        "location": "Specific physical location.",',
+    '        "instruction": "How to use this anchor.",',
+    '        "confidence": "high / medium / low"',
+    '      },',
+    '      "negative_constraints": ["Do not extend past [boundary].", "Do not block [feature]."],',
+    '      "furnishing_specification": {',
+    '        "pieces": "Furniture types with FIXED COUNTS (not ranges).",',
+    '        "decor": "Decorative elements by count, or null.",',
+    '        "notes": "Additional context, or null."',
+    '      },',
+    '      "flags": {',
+    '        "flexRoomType": "null or inferred type",',
+    '        "doorType": "swinging / sliding / null",',
+    '        "ceilingVisibility": "full / partial",',
+    '        "isHallway": "true / false"',
+    '      }',
+    '    }',
+    '  ],',
+    '  "metadata": {',
+    '    "imageCount": ' + images.length + ',',
+    '    "groupType": "' + (isSingleRoom ? 'single_room' : 'open_plan') + '",',
+    '    "totalZones": "[count]",',
+    '    "conflictsDetected": [],',
+    '    "notes": "Any overall observations."',
+    '  }',
     '}'
   ].join('\n');
 
@@ -197,6 +217,8 @@ async function runSpatialRead({ images, groupType, claudeKey }) {
     }
   }
 }
+
+// ✅ REBUILT SPATIAL READ FUNCTION — 4-FIELD ZONES NOW ACTIVE
 
 // ── MODE 2: PRESERVE READ ────────────────────────────────────────────────────
 async function runPreserveRead({ imageBase64, imageLabel, claudeKey }) {

@@ -249,125 +249,137 @@ function zonesIntoAnchors(zones) {
 }
 
 // ✅ BUILD ROOMDATA FROM HAIKU 4-FIELD ZONES
+
+// ✅ BUILD PROMPT FOR VACANT ROOM STAGING — TEMPLATE STRUCTURE (COMPLETE REBUILD)
 function buildVacantPrompt({ roomData, designStyle, colorPalette }) {
   const rawStyle = designStyle || 'Organic Modern';
   const style = STYLE_LABELS[rawStyle?.toLowerCase().replace(/[^a-z]/g, '')] || rawStyle;
   const palette = colorPalette || 'Warm Neutrals';
   const paletteTones = PALETTE_TONES[palette] || (palette + ' tones');
-  const isOpenPlan = Array.isArray(roomData.zones) && roomData.zones.length > 0;
+  
+  let p = '';
 
-  let p = AB723_HEADER;
+  // ════════════════════════════════════════════════════════════════════════════════
+  // SECTION 1-8: BOILERPLATE (IDENTICAL FOR ALL IMAGES)
+  // ════════════════════════════════════════════════════════════════════════════════
 
-  // Preserve list (handle missing)
-  p += `PRESERVE EXACTLY: ${roomData.preserveList || 'Standard preservation'}\n\n`;
+  p += `PRIMARY ROLE: You are a professional luxury real estate interior designer, home stager, and architectural photographer.\n\n`;
 
-  // Room type and boundaries
-  p += `STAGING: ${roomData.roomType} — Stage ONLY within this room boundary\n\n`;
+  p += `AB 723 COMPLIANCE REQUIREMENTS (HIGHEST PRIORITY)\n\n`;
 
-  // Zone boundary definition (handle both old object format and new string format)
-  if (roomData.zoneBoundary && typeof roomData.zoneBoundary === 'object') {
-    // Old format: zoneBoundary is an object with front, back, left, right
-    p += `ZONE BOUNDARY (do not stage beyond):\n`;
-    p += `Front: ${roomData.zoneBoundary.front || 'Not specified'}\n`;
-    p += `Back: ${roomData.zoneBoundary.back || 'Not specified'}\n`;
-    p += `Left: ${roomData.zoneBoundary.left || 'Not specified'}\n`;
-    p += `Right: ${roomData.zoneBoundary.right || 'Not specified'}\n`;
-    p += `Shape: ${roomData.zoneBoundary.shape || 'Rectangular'}\n\n`;
-  } else if (isOpenPlan && roomData.zones.length > 0 && roomData.zones[0].boundaries) {
-    // New 4-field format: boundaries is a string in each zone
-    p += `ZONE BOUNDARIES (do not stage beyond):\n`;
-    roomData.zones.forEach(zone => {
-      p += `${zone.name}: ${zone.boundaries}\n`;
-    });
-    p += `\n`;
-  } else {
-    // Fallback: no boundary info available
-    p += `ZONE BOUNDARY: Stage within the visible room area only\n\n`;
-  }
+  p += `IMMUTABLE LOCK: Never alter, move, remove, replace, or touch: structural walls | partial walls | half-walls | pass-through openings and their surrounding wall sections | ceilings | kitchen/bathroom cabinets | countertops | lighting fixtures. These must be preserved exactly as photographed. If a wall has a pass-through opening, both the opening AND the solid wall sections above and below it must remain exactly as photographed — do not enlarge, remove, or modify any wall section.\n\n`;
 
-  if (isOpenPlan) {
-    // ── OPEN PLAN: per-zone anchor instructions ──────────────────────────────
-    p += `ZONE-BY-ZONE STAGING INSTRUCTIONS:\n`;
-    roomData.zones.forEach(zone => {
-      p += `\n${zone.name.toUpperCase()} ZONE:\n`;
-      if (zone.ceilingFixture && zone.ceilingFixture !== 'NONE') {
-        p += `Ceiling fixture: ${zone.ceilingFixture} — use this as the anchor for furniture placement in this zone\n`;
-      }
-      p += `Focal point: ${zone.focalPoint}\n`;
-      p += `Staging: ${zone.stagingInstruction}\n`;
-    });
-    p += `\n`;
-  } else {
-    // Fallback: no anchors available
-    const anchors = roomData.anchors || {};
-    p += `ANCHORS (use these to place furniture):\n`;
-    p += `Focal Wall: ${anchors.focal || 'primary wall'}\n`;
-    if (anchors.ceiling) p += `Ceiling: ${anchors.ceiling}\n`;
-    p += `Back Wall: ${anchors.backWall || 'back wall'}\n`;
-    p += `Left Boundary: ${anchors.leftBoundary || 'left boundary'}\n`;
-    p += `Right Boundary: ${anchors.rightBoundary || 'right boundary'}\n`;
-    p += `Front Boundary: ${anchors.frontBoundary || 'front circulation'}\n\n`;
+  p += `ABSOLUTE PROHIBITION: Never ADD architectural elements that do not exist in the original photo. Do NOT add: built-in shelving | niches | alcoves | recessed shelves | bookcases built into walls | fireplace surrounds | wall openings | cabinetry | any structural element. If it is not visible in the original photograph, it cannot appear in the staged image.\n\n`;
 
-    // Room-specific staging instructions (single room only)
-    if (roomData.roomType.toLowerCase().includes('kitchen')) {
-      p += `KITCHEN STAGING:\n`;
-      p += `Place counter stools below pendant lights (if island present)\n`;
-      p += `Place bowl of fruit or small plant on island/counter\n`;
-      p += `Keep backsplash and cabinetry exactly as shown\n`;
-      p += `Do not extend beyond left/right boundaries\n`;
-      p += `Do not stage into dining area visible through opening\n\n`;
-    } else if (roomData.roomType.toLowerCase().includes('living') || roomData.roomType.toLowerCase().includes('great room')) {
-      p += `LIVING ROOM STAGING:\n`;
-      p += `CIRCULATION RULE: The foreground floor space nearest the camera is a walk path between zones — keep it completely empty. All furniture must be placed in the MIDGROUND anchored to the fireplace. Do not place any furniture in the front half of the frame.\n`;
-      p += `Place area rug in the midground centered under ceiling fixture, anchored toward the fireplace — rug must NOT extend into the foreground half of the frame.\n`;
-      p += `Place sofa with back against ${anchors.backWall || 'back wall'}, centered on rug, facing ${anchors.focal || 'focal point'}\n`;
-      p += `Place two accent chairs on rug angled inward toward focal point\n`;
-      p += `Place coffee table centered on rug between sofa and focal point\n`;
-      p += `Place console against right wall (${anchors.rightBoundary || 'right boundary'})\n`;
-      p += `Place plant right of focal point\n`;
-      p += `Place art piece above focal point\n`;
-      p += `Place arc floor lamp behind left accent chair\n`;
-      p += `Keep all furniture within zone boundary (do not extend past ${anchors.leftBoundary || 'left boundary'} or ${anchors.rightBoundary || 'right boundary'})\n`;
-      p += `Keep foreground floor completely empty — this is the circulation path between zones.\n\n`;
-    } else if (roomData.roomType.toLowerCase().includes('bedroom')) {
-      p += `BEDROOM STAGING:\n`;
-      p += `Place bed headboard against ${anchors.backWall || 'back wall'}, centered\n`;
-      p += `Place matching nightstands flanking bed\n`;
-      p += `Place dresser on opposite wall (${anchors.focal || 'focal wall'})\n`;
-      p += `Place bench at foot of bed\n`;
-      p += `Keep all furniture within zone boundary\n\n`;
-    }
-  }
+  p += `AB 723 COMPLIANCE: Virtual staging adds furniture only. Any alteration to permanent architecture — including ADDING elements not present — makes the listing non-compliant and subject to MLS removal.\n\n`;
 
-  // Design style
+  p += `════════════════════════════════════════════════════════════════════════════════\n\n`;
+
+  p += `(SPATIAL READ) TASK\n`;
+  p += `Analyze the uploaded room photograph and identify all functional furnishing zones based solely on the visible architecture, fixtures, openings, windows, cabinetry, fireplaces, built-ins, ceiling features, and circulation paths.\n`;
+  p += `Determine a visual spatial map that clearly illustrates where furniture should be placed within the room or zone.\n\n`;
+
+  p += `ZONE IDENTIFICATION RULES\n`;
+  p += `Determine zone boundaries using architectural cues including: walls, partial walls, openings, doorways, windows, sliding glass doors, fireplaces, kitchen islands, cabinetry, ceiling changes, chandeliers, pendant lighting, ceiling fans, built-ins, hallways (stay unobstructed), and circulation paths.\n\n`;
+
+  p += `PRESERVE EXACTLY: All architectural elements, room dimensions, ceiling heights, wall locations, window locations, door locations, fireplaces, cabinetry, countertops, appliances, flooring, lighting fixtures, HVAC vents, trim, skylights, built-ins, and all permanent fixtures.\n`;
+  p += `Do not add, remove, relocate, resize, conceal, replace, or alter any permanent architectural feature.\n`;
+  p += `Do not modify room dimensions, ceiling heights, window sizes, window locations, door locations, cabinetry, fireplaces, flooring, or structural openings.\n`;
+  p += `Virtual staging may add furniture, rugs, artwork, plants, electronics, lighting accessories, and decorative objects only.\n`;
+  p += `Any alteration to permanent architecture violates California AB 723 compliance standards.\n\n`;
+
+  p += `SPATIAL PRESERVATION\n`;
+  p += `Respect the exact camera position, focal length, perspective, room proportions, and spatial geometry shown in the original photograph.\n`;
+  p += `Maintain all architectural sightlines, circulation paths, and relationships between walls, openings, windows, cabinetry, and fixtures.\n`;
+  p += `Treat each furnishing zone as an independent furnishing area bounded by permanent architectural elements.\n`;
+  p += `Furniture must remain entirely within its assigned zone and may not extend into adjacent zones, hallways, kitchen work areas, doorways, fireplaces, windows, or architectural openings.\n\n`;
+
+  p += `PHOTOGRAPHIC DEPTH & COMPOSITION\n`;
+  p += `Create strong foreground, midground, and background visual layers to increase depth perception.\n`;
+  p += `Arrange furnishings to create a natural visual progression through the room rather than placing all furniture against walls.\n`;
+  p += `Use furniture groupings, rugs, tables, plants, artwork, and accessories to establish realistic spatial hierarchy.\n`;
+  p += `Maintain proper furniture scale and realistic spacing throughout the room.\n`;
+  p += `Anchor all furniture naturally to the floor with realistic contact shadows.\n\n`;
+
+  p += `LIGHTING & REALISM\n`;
+  p += `Preserve all existing natural and artificial light sources exactly as photographed.\n`;
+  p += `Maintain realistic daylight behavior from windows, skylights, and glass doors.\n`;
+  p += `Create natural shadow falloff, reflected light, and subtle contrast variations.\n`;
+  p += `Avoid flat lighting, excessive brightness, blown highlights, or artificial HDR appearance.\n`;
+  p += `Use realistic material behavior for wood, fabric, stone, metal, glass, and upholstery.\n\n`;
+
+  p += `DESIGN EXECUTION\n`;
+  p += `Stage in the selected design style and color palette.\n`;
+  p += `Create a professionally designed, market-ready interior suitable for luxury real estate marketing.\n`;
+  p += `Add carefully curated furniture, artwork, accessories, greenery, and styling details that support the selected buyer profile.\n`;
+  p += `Avoid clutter, overcrowding, exaggerated furniture sizes, or unrealistic luxury elements.\n\n`;
+
+  p += `FINAL IMAGE REQUIREMENTS\n`;
+  p += `The finished image must appear indistinguishable from a professionally photographed and professionally staged real property.\n`;
+  p += `The result should feel spatially accurate, naturally furnished, architecturally preserved, and fully compliant with California AB 723 virtual staging requirements.\n`;
+  p += `The final image must look like a real photograph, not a rendering, illustration, CGI image, or AI-generated composition.\n\n`;
+
+  p += `DESIGN STYLE & PALETTE\n`;
   p += `Stage in ${style} design style using a ${palette} palette with ${paletteTones} throughout.\n\n`;
 
-  // Adjacent zones to preserve
-  if (roomData.adjacentVisibleZones && roomData.adjacentVisibleZones.length > 0) {
-    p += `ADJACENT ZONES (KEEP VACANT - do NOT stage):\n`;
-    roomData.adjacentVisibleZones.forEach(zone => {
-      p += `${zone.zone}: Visible ${zone.visible} — Keep completely empty, do not add furniture\n`;
+  // ════════════════════════════════════════════════════════════════════════════════
+  // SECTION 9: ZONE-BY-ZONE STAGING INSTRUCTIONS
+  // ════════════════════════════════════════════════════════════════════════════════
+
+  const isOpenPlan = Array.isArray(roomData.zones) && roomData.zones.length > 0;
+
+  if (isOpenPlan && roomData.zones && roomData.zones.length > 0) {
+    // OPEN PLAN: Per-zone bullet format
+    p += `ZONE-BY-ZONE STAGING INSTRUCTIONS:\n\n`;
+
+    roomData.zones.forEach(zone => {
+      p += `Zone: ${zone.name || 'Unknown Zone'}\n`;
+      p += `• Boundaries: ${zone.boundaries || 'Not specified'}\n`;
+      p += `• Fixtures: ${zone.fixtures || 'None visible'}\n`;
+      p += `• Cabinetry: ${zone.cabinetry || 'None visible'}\n`;
+      p += `• Windows/Doors: ${zone.windows_doors || 'None visible'}\n`;
+      p += `• Anchor Point: ${zone.anchor_point?.location || 'Not specified'}\n`;
+      p += `• Focal Point: ${zone.anchor_point?.instruction || 'Not specified'}\n`;
+      p += `• Furnishing — Style & Main Pieces: ${zone.furnishing_specification?.pieces || 'Not specified'}\n`;
+      p += `  Incorporate tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic.\n\n`;
     });
-    p += `\n`;
+  } else {
+    // SINGLE ROOM: Format as single zone
+    const anchors = roomData.anchors || {};
+    const boundaries = roomData.zoneBoundary 
+      ? `Front: ${roomData.zoneBoundary.front || 'circulation'}, Back: ${roomData.zoneBoundary.back || 'wall'}, Left: ${roomData.zoneBoundary.left || 'boundary'}, Right: ${roomData.zoneBoundary.right || 'boundary'}`
+      : 'As photographed';
+
+    p += `Zone: ${roomData.roomType || 'Room'}\n`;
+    p += `• Boundaries: ${boundaries}\n`;
+    p += `• Fixtures: ${anchors.ceiling || 'As photographed'}\n`;
+    p += `• Cabinetry: None visible\n`;
+    p += `• Windows/Doors: As photographed\n`;
+    p += `• Anchor Point: ${anchors.focal || 'Primary focal wall'}\n`;
+    p += `• Focal Point: ${anchors.focal || 'Primary focal point'}\n`;
+
+    // Furnishing per room type
+    let furnishing = 'Furniture anchored to focal point; maintain zone boundaries.';
+    if (roomData.roomType && roomData.roomType.toLowerCase().includes('kitchen')) {
+      furnishing = 'Counter seating anchored to island; minimal additional furniture for working zone function.';
+    } else if (roomData.roomType && (roomData.roomType.toLowerCase().includes('living') || roomData.roomType.toLowerCase().includes('great room'))) {
+      furnishing = 'Seating group anchored to focal point with area rug; sofa, accent chairs, coffee table arranged for conversation and flow.';
+    } else if (roomData.roomType && roomData.roomType.toLowerCase().includes('bedroom')) {
+      furnishing = 'Bed centered on headboard wall; matching nightstands; dresser on opposite wall; bench at foot of bed.';
+    }
+
+    p += `• Furnishing — Style & Main Pieces: ${furnishing}\n`;
+    p += `  Incorporate tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic.\n\n`;
   }
 
-  // Critical rules
-  const anchors = roomData.anchors || {};
-  p += `DO NOT stage beyond zone boundary:\n`;
-  if (isOpenPlan) {
-    p += `— Do not extend furniture past left boundary (${roomData.zoneBoundary?.left || anchors.leftBoundary || 'left boundary'})\n`;
-    p += `— Do not extend furniture past right boundary (${roomData.zoneBoundary?.right || anchors.rightBoundary || 'right boundary'})\n`;
-  } else {
-    p += `— Do not extend furniture past left boundary (${anchors.leftBoundary || 'left boundary'})\n`;
-    p += `— Do not extend furniture past right boundary (${anchors.rightBoundary || 'right boundary'})\n`;
-  }
+  p += `DO NOT STAGE BEYOND ZONE BOUNDARY:\n`;
+  p += `— Do not extend furniture past left boundary\n`;
+  p += `— Do not extend furniture past right boundary\n`;
   p += `— Do not stage adjacent zones (keep vacant)\n`;
   p += `— Do not alter architectural elements\n`;
   p += `— Do not remove or modify permanent fixtures\n`;
   p += `— Maintain open circulation within the zone\n\n`;
 
-  // Compliance footer
-  p += `Use ${style} furniture with clean architectural lines, refined materials, and metallic accents.\n`;
   p += `Maintain realistic furniture scale proportional to the room.\n`;
   p += `Do not scale furniture up to fill the frame.\n`;
   p += `Preserve all architectural features, room dimensions, and camera perspective exactly as photographed.\n`;
@@ -377,6 +389,7 @@ function buildVacantPrompt({ roomData, designStyle, colorPalette }) {
 
   return p.trim();
 }
+
 
 exports.handler = async (event) => {
   if (event.httpMethod !== "POST") return { statusCode: 405, body: "Method Not Allowed" };

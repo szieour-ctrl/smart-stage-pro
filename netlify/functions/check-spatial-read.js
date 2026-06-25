@@ -1,6 +1,6 @@
 // check-spatial-read.js — Poll for group spatial read result
 // Client calls every 3 seconds with jobId until status is done or error.
-// Uses same Netlify Blobs store as staging jobs.
+// Uses same Netlify Blobs store as background spatial read function.
 
 const { getStore } = require("@netlify/blobs");
 
@@ -17,7 +17,7 @@ exports.handler = async (event) => {
 
     const siteID = process.env.SZREG_SITE_ID || process.env.NETLIFY_SITE_ID;
     const token  = process.env.NETLIFY_ACCESS_TOKEN;
-    const store  = getStore({ name: "staging-jobs", siteID, token });
+    const store  = getStore({ name: "spatial-jobs", siteID, token });  // ✅ FIXED: matches background function
 
     const data = await store.get(jobId, { type: "json" });
 

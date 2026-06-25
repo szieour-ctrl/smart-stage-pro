@@ -8,7 +8,7 @@ const { getStore } = require("@netlify/blobs");
 
 // ── PHASE 5A IMPORTS ───────────────────────────────────────────────────────
 const { applyTierLogic, buildVacantPrompt } = require('./buildVacantPrompt__PHASE5A__');
-const { assembleGPT2StagingPrompt } = require('./utils/assembleGPT2StagingPrompt');
+const { assembleGPT2StagingPrompt } = require('./assembleGPT2StagingPrompt');
 
 function httpsRequest(options, body) {
   return new Promise((resolve, reject) => {

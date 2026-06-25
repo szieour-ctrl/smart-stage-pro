@@ -143,138 +143,40 @@ async function runPreserveRead({ imageBase64, imageLabel, claudeKey }) {
     }
   }, payload);
 
-  if (result.status !== 200) throw new Error("Preserve read failed: " + (result.body?.error?.message || result.status));
-  const text = result.body?.content?.[0]?.text?.trim() || "{}";
-  const clean = text.replace(/```json|```/g, "").trim();
-  try { return JSON.parse(clean); }
-  catch(e) { throw new Error("Preserve read returned invalid JSON"); }
+  if (result.status !== 200) throw new Error("Haiku preserve read failed: " + result.status);
+  const text = result.body.content?.find(c => c.type === 'text')?.text || '';
+  try { return JSON.parse(text); }
+  catch(e) { throw new Error("Preserve JSON parse failed"); }
 }
 
 function assemblePrompt({ imageAssignment, preserveData, designStyle, colorPalette, groupSpatialPlan, imageLabel }) {
-  const rawStyle = designStyle || 'Organic Modern';
-  const style = STYLE_LABELS[rawStyle?.toLowerCase().replace(/[^a-z]/g, '')] || rawStyle;
-  const palette = colorPalette || 'Warm Neutrals';
-  const paletteTones = PALETTE_TONES[palette] || (palette + ' tones');
+  if (!imageAssignment) throw new Error("imageAssignment required");
+  if (!preserveData) throw new Error("preserveData required");
 
-  const zones = [...(imageAssignment.visibleZones || [])];
-  const anchors = JSON.parse(JSON.stringify(imageAssignment.zoneAnchors || {}));
-  const boundaries = imageAssignment.boundaryAnchors || {};
-  const wallOpenings = imageAssignment.wallOpenings || [];
-
-  // ✅ ZONE FILTER — If user labeled this as a single room, ONLY stage that zone
-  // "Living Room" → living only. "Kitchen" → kitchen only.
-  // "Open Plan: Kitchen + Dining + Living" → keep all zones (no filter)
-  let isSingleRoomLabel = false;
-  if (imageLabel) {
-    const label = imageLabel.toLowerCase();
-    const isOpenPlan = label.includes('open plan') || (label.includes('+') && (label.includes('kitchen') || label.includes('dining') || label.includes('living')));
-    
-    if (!isOpenPlan) {
-      isSingleRoomLabel = true;
-      let allowedZone = null;
-      if (label.includes('living') || label.includes('great room') || label.includes('family room')) allowedZone = 'living';
-      else if (label.includes('kitchen'))  allowedZone = 'kitchen';
-      else if (label.includes('dining'))   allowedZone = 'dining';
-      else if (label.includes('bedroom'))  allowedZone = 'bedroom';
-      
-      if (allowedZone) {
-        // Remove all zones except the labeled one
-        while (zones.length) zones.pop();
-        zones.push(allowedZone);
-        console.log('ZONE FILTER: imageLabel="' + imageLabel + '" → staging ONLY: ' + allowedZone);
-      }
-    }
-  }
-
-  // MULTI-ANGLE MERGE: pull confirmed zone anchors from other images in the group
-  // ✅ SKIP merge for single-room labels — prevents phantom zone injection
-  if (!isSingleRoomLabel && groupSpatialPlan?.perImageAssignments) {
-    for (const otherImage of groupSpatialPlan.perImageAssignments) {
-      if (otherImage === imageAssignment) continue;
-
-      // Merge confirmed dining anchor
-      if (!anchors.dining?.present && otherImage.zoneAnchors?.dining?.present && otherImage.zoneAnchors?.dining?.ceilingFixture) {
-        anchors.dining = { ...otherImage.zoneAnchors.dining, confirmedFromOtherAngle: true };
-        if (!zones.includes('dining')) zones.push('dining');
-        // Use boundary anchors from this image if available, else from confirming image
-        if (!boundaries.diningLeft  && otherImage.boundaryAnchors?.diningLeft)  boundaries.diningLeft  = otherImage.boundaryAnchors.diningLeft;
-        if (!boundaries.diningRight && otherImage.boundaryAnchors?.diningRight) boundaries.diningRight = otherImage.boundaryAnchors.diningRight;
-      }
-
-      // Merge confirmed living anchor (ceiling fan) if missing
-      if (!anchors.living?.ceilingFixture && otherImage.zoneAnchors?.living?.ceilingFixture) {
-        anchors.living = anchors.living || {};
-        anchors.living.ceilingFixture = otherImage.zoneAnchors.living.ceilingFixture;
-      }
-    }
-  }
-  const preserveList = preserveData?.preserveList || '';
-  const adjacentRooms = preserveData?.adjacentRoomsVisible || [];
-
-  const hasLiving  = zones.includes('living');
-  const hasDining  = zones.includes('dining');
-  const hasKitchen = zones.includes('kitchen');
-  const hasBedroom = zones.includes('bedroom');
+  const style = STYLE_LABELS[designStyle?.toLowerCase()] || designStyle || 'Transitional';
+  const palette = PALETTE_TONES[colorPalette] || colorPalette || 'Warm Neutrals';
 
   let p = AB723_HEADER;
 
-  p += 'PRESERVE EXACTLY: ' + preserveList + '\n\n';
-  p += 'Stage with furniture and decor only. Do not alter any permanent architectural element. ';
-  p += 'Stage in ' + style + ' design style using a ' + palette + ' palette with ' + paletteTones + ' throughout.\n\n';
+  const zones = imageAssignment.zones || [];
+  const wallOpenings = preserveData.wallOpenings || [];
+  const adjacentRooms = preserveData.adjacentRoomsVisible || [];
 
-  // ✅ EXPLICIT ZONE SCOPE — tells GPT exactly which zones to stage
-  p += 'STAGING ZONE SCOPE — Stage ONLY these zones visible in THIS image: ' + zones.map(z => z.toUpperCase()).join(', ') + '.\n';
-  if (!zones.includes('kitchen')) p += 'Kitchen is NOT visible — DO NOT add kitchen furniture, stools, or island accessories.\n';
-  if (!zones.includes('dining'))  p += 'Dining zone is NOT visible — DO NOT add a dining table, dining chairs, or dining rug.\n';
-  if (!zones.includes('living'))  p += 'Living zone is NOT visible — DO NOT add sofas, accent chairs, coffee tables, or living room furniture.\n';
-  if (!zones.includes('bedroom')) p += 'Bedroom is NOT visible — DO NOT add beds, nightstands, or bedroom furniture.\n';
-  p += '\n';
+  // Unpack groupSpatialPlan if provided (multi-angle context)
+  const hasKitchen = zones.includes('kitchen') || (groupSpatialPlan?.zonePresence?.kitchen ?? false);
+  const hasDining = zones.includes('dining') || (groupSpatialPlan?.zonePresence?.dining ?? false);
+  const hasLiving = zones.includes('living') || (groupSpatialPlan?.zonePresence?.living ?? false);
+  const hasBedroom = zones.includes('bedroom') || (groupSpatialPlan?.zonePresence?.bedroom ?? false);
 
-  const anchorBlocks = [];
-  if (hasDining && anchors.dining?.present) {
-    if (anchors.dining.ceilingFixture) {
-      anchorBlocks.push('DINING ZONE ANCHOR LOCK — ' + anchors.dining.ceilingFixture + ': This fixture is the permanent anchor for the Dining Zone. Dining rug and table center directly under this fixture. This is NOT a kitchen fixture. DO NOT replace, alter, remove, restyle, or substitute this fixture. It must remain exactly as photographed — same arm count, same finish, same shades, same position.');
-    } else {
-      const leftB  = boundaries.diningLeft  ? boundaries.diningLeft  : 'kitchen island';
-      const rightB = boundaries.diningRight ? boundaries.diningRight : 'living zone';
-      anchorBlocks.push('DINING ZONE: No chandelier visible in this image. Center dining table and rug in the open floor area between ' + leftB + ' and ' + rightB + '.');
-    }
-  }
-  if (hasKitchen && anchors.kitchen?.present && anchors.kitchen?.ceilingFixture) {
-    anchorBlocks.push('KITCHEN ZONE ANCHOR LOCK — ' + anchors.kitchen.ceilingFixture + ': Kitchen Zone anchor over island. DO NOT replace, alter, or substitute these fixtures. ' + (anchors.kitchen.islandDescription ? 'FLOATING KITCHEN ISLAND CABINET: ' + anchors.kitchen.islandDescription + ' — do not remove, relocate, resize, or alter.' : 'DO NOT alter the floating kitchen island cabinet.'));
-  }
-  if (hasLiving && anchors.living?.present) {
-    const lv = anchors.living;
-    let ll = 'LIVING ZONE ANCHOR LOCKS:\n';
-    if (lv.ceilingFixture) ll += '  Ceiling: ' + lv.ceilingFixture + ' — rug centers directly under this fixture. DO NOT replace, alter, or substitute this fixture.\n';
-    if (lv.frontWall)      ll += '  Front wall: ' + lv.frontWall + ' — all seating faces this wall.\n';
-    if (lv.backWall)       ll += '  Back wall: ' + lv.backWall + ' — sofa back goes against this wall facing the fireplace.\n';
-    anchorBlocks.push(ll.trim());
-  }
-  if (hasBedroom && anchors.bedroom?.present && anchors.bedroom?.headboardWall) {
-    anchorBlocks.push('BEDROOM ZONE ANCHOR LOCKS:\n  Headboard wall: ' + anchors.bedroom.headboardWall + ' — place bed headboard against this wall centered.');
-  }
-  if (anchorBlocks.length) p += anchorBlocks.join('\n\n') + '\n\n';
-
-  const boundaryLines = [];
-  if (hasLiving) {
-    if (boundaries.livingFront) boundaryLines.push(boundaries.livingFront + '.');
-    if (boundaries.livingBack)  boundaryLines.push(boundaries.livingBack + '.');
-    if (boundaries.livingLeft)  boundaryLines.push('Left boundary: ' + boundaries.livingLeft + '.');
-    if (boundaries.livingRight) boundaryLines.push('Right boundary: ' + boundaries.livingRight + '.');
-    if (anchors.living?.zoneScale === 'background') boundaryLines.push('Living zone is in far background — scale as background depth, do not extend toward camera.');
-  }
-  if (hasDining) {
-    if (boundaries.diningLeft)  boundaryLines.push('Dining left boundary: ' + boundaries.diningLeft + '.');
-    if (boundaries.diningRight) boundaryLines.push('Dining right boundary: ' + boundaries.diningRight + '.');
-  }
-  if (boundaryLines.length) p += 'FURNITURE BOUNDARY ANCHORS:\n' + boundaryLines.join(' ') + '\n\n';
+  const anchors = groupSpatialPlan?.anchors || {};
+  const boundaries = groupSpatialPlan?.boundaries || {};
 
   const stagingBlocks = [];
+
+  // Dining zone
   if (hasDining && anchors.dining?.present) {
     if (anchors.dining.ceilingFixture) {
-      // Confirmed chandelier anchor
-      stagingBlocks.push('DINING ZONE: Place a round area rug centered directly under the ' + anchors.dining.ceilingFixture + '. Place a round dining table centered on the rug. Place 6 upholstered dining chairs around the table. Place one tall vase with stems on the table center.');
+      stagingBlocks.push('DINING ZONE: Place an area rug centered in the open floor area under the ' + anchors.dining.ceilingFixture + '. Place a round dining table centered on the rug. Place 6 upholstered dining chairs around the table. Place one tall vase with stems on the table center.');
     } else {
       // No confirmed chandelier — center in open floor between boundaries
       const leftB  = boundaries.diningLeft  ? ' to the right of the ' + boundaries.diningLeft  : '';
@@ -350,7 +252,8 @@ async function triggerBackground(payload, siteUrl) {
       const chunks = [];
       res.on("data", c => chunks.push(c));
       res.on("end", () => {
-        console.log('Background response: status=' + res.statusCode + ' body=' + Buffer.concat(chunks).toString("utf8").slice(0, 200));
+        const resp = Buffer.concat(chunks).toString("utf8");
+        console.log('Background response: status=' + res.statusCode + ' body=' + resp.slice(0, 200));
         resolve(res.statusCode);
       });
     });
@@ -371,7 +274,7 @@ exports.handler = async (event) => {
 
     // MODE: spatial — fire background, return jobId
     if (body.mode === 'spatial' || (!body.mode && body.images && !body.imageBase64)) {
-      const { images, groupType } = body;
+      const { images, groupType, designStyle, colorPalette, groupSpatialPlan } = body;
       if (!images || images.length < 1) return { statusCode: 400, headers, body: JSON.stringify({ error: "At least 1 image required" }) };
       if (images.length > 5)            return { statusCode: 400, headers, body: JSON.stringify({ error: "Maximum 5 images" }) };
 
@@ -385,7 +288,15 @@ exports.handler = async (event) => {
       const jobId = "gsr-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8);
       console.log('Group spatial read dispatch: jobId=' + jobId + ' images=' + images.length);
 
-      const triggerStatus = await triggerBackground({ jobId, mode: 'spatial', images: readyImages, groupType }, siteUrl);
+      // ✅ FIXED: Pass imageDataArray, designStyle, colorPalette, groupSpatialPlan
+      const triggerStatus = await triggerBackground({ 
+        jobId, 
+        mode: 'spatial', 
+        imageDataArray: readyImages,
+        designStyle: designStyle || 'Transitional',
+        colorPalette: colorPalette || 'Warm Neutrals',
+        groupSpatialPlan: groupSpatialPlan || null
+      }, siteUrl);
       console.log('Job ' + jobId + ': background trigger status = ' + triggerStatus);
 
       if (triggerStatus !== 202) {

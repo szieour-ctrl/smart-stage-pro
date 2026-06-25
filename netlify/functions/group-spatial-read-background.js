@@ -7,7 +7,7 @@ const sharp = require("sharp");
 const { getStore } = require("@netlify/blobs");
 
 // ── PHASE 5A IMPORTS ───────────────────────────────────────────────────────
-const { applyTierLogic, buildVacantPrompt } = require('./buildVacantPrompt__PHASE5A__');
+const { applyTierLogic, buildVacantPrompt } = require('./buildVacantPrompt');
 const { assembleGPT2StagingPrompt } = require('./assembleGPT2StagingPrompt');
 
 function httpsRequest(options, body) {

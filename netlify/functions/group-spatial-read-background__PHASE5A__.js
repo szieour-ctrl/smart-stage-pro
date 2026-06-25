@@ -1,10 +1,14 @@
-// group-spatial-read-background__PHASE5A__.js — REBUILT
-// Returns CLEAN SPATIAL READ ONLY (6-field format, factual, no furnishing instructions)
-// Tier 1/2 anchor logic applied separately in buildVacantPrompt()
+// group-spatial-read-background__PHASE5A_INTEGRATED__.js
+// PHASE 5A: Integrated Tier 1/2 anchor logic
+// Runs Haiku spatial read → applies tier logic → assembles GPT2 prompt
 
 const https = require("https");
 const sharp = require("sharp");
 const { getStore } = require("@netlify/blobs");
+
+// ── PHASE 5A IMPORTS ───────────────────────────────────────────────────────
+const { applyTierLogic, buildVacantPrompt } = require('./buildVacantPrompt__PHASE5A__');
+const { assembleGPT2StagingPrompt } = require('./utils/assembleGPT2StagingPrompt');
 
 function httpsRequest(options, body) {
   return new Promise((resolve, reject) => {
@@ -33,6 +37,16 @@ function detectMime(base64) {
   return 'image/jpeg';
 }
 
+const STYLE_LABELS = {
+  'organicmodern':'Organic Modern','transitional':'Transitional','contemporary':'Contemporary',
+  'modern':'Modern','scandinavian':'Scandinavian','minimalist':'Minimalist',
+  'coastal':'Coastal','farmhouse':'Farmhouse','midcenturymodern':'Mid-Century Modern',
+  'industrial':'Industrial','bohemian':'Bohemian','traditional':'Traditional',
+  'japandi':'Japandi','warmminimalist':'Warm Minimalist','luxemodern':'Luxe Modern',
+  'artdeco':'Art Deco','mediterranean':'Mediterranean','rustic':'Rustic',
+  'grandmillennial':'Grand Millennial','wabi_sabi':'Wabi Sabi',
+};
+
 async function compressForRead(imageBase64) {
   try {
     const buffer = Buffer.from(imageBase64, "base64");
@@ -48,7 +62,7 @@ async function compressForRead(imageBase64) {
   } catch(e) { return imageBase64; }
 }
 
-// ── PHASE 5A: SPATIAL READ — CLEAN 6-FIELD FACTS ONLY ───────────────────────
+// ── PHASE 5A: HAIKU SPATIAL READ — CLEAN 6-FIELD FACTS ONLY ───────────────
 async function runSpatialRead({ images, groupType, claudeKey }) {
   const imageBlocks = images.map((img, i) => ([
     { type: "image", source: { type: "base64", media_type: detectMime(img.base64), data: img.base64 } },
@@ -73,98 +87,30 @@ Zone: [Kitchen | Dining/Nook | Living Room | Bedroom | Hallway | Other]
 • Anchor Point: [Visible architectural feature that could anchor furniture] OR [Simple location description] OR None
 • Focal Point: [Primary architectural feature in this zone] OR None
 
-EXAMPLES:
-
-Zone: Kitchen
-• Boundaries: Left wall; island center-left
-• Fixtures: Island with cabinetry
-• Cabinetry: Left wall full cabinetry; island cabinetry
-• Windows/Doors: Window on left wall; door on left wall
-• Anchor Point: Island
-• Focal Point: Island
-
-Zone: Dining/Nook
-• Boundaries: Open floor space; no walls
-• Fixtures: None
-• Cabinetry: None
-• Windows/Doors: None
-• Anchor Point: Open space
-• Focal Point: None
-
-Zone: Living Room
-• Boundaries: Back wall; right wall with glass doors
-• Fixtures: Fireplace on back wall; windows on back wall
-• Cabinetry: None
-• Windows/Doors: Windows on back wall; large glass patio doors on right wall
-• Anchor Point: Fireplace
-• Focal Point: Fireplace
-
-Zone: Hallway
-• Boundaries: Right side passage
-• Fixtures: None
-• Cabinetry: None
-• Windows/Doors: Doorway opening
-• Anchor Point: None
-• Focal Point: None
-
 CRITICAL RULES:
 
-1. DO NOT INFER: If you cannot see it clearly (60%+ confidence), say "None". Do not hallucinate details.
-2. DO NOT MIX ZONES: Report only what is IN each zone. Do not include items from adjacent zones.
-3. DO NOT ADD FURNITURE INSTRUCTIONS: This is a spatial read only. Furnishing is handled separately.
-4. DO NOT MENTION TIERS: Do not classify as Tier 1, Tier 2, etc. Just report the facts.
-5. HALLWAYS & CIRCULATION: Mark as separate zones. Do not add furnishing instructions.
-6. ANCHOR POINT: This is ONLY the visible architectural feature that could guide furniture placement. Examples:
-   - Island (in Kitchen)
-   - Fireplace (in Living Room)
-   - Ceiling fixture if clearly visible (chandelier, ceiling fan)
-   - "Open space" (if no fixtures)
-   - None (if uncertain)
+1. DO NOT INFER: If you cannot see it clearly (60%+ confidence), say "None".
+2. DO NOT MIX ZONES: Report only what is IN each zone.
+3. DO NOT ADD FURNITURE INSTRUCTIONS: This is a spatial read only.
+4. HALLWAYS & CIRCULATION: Mark as separate zones. Do not add furnishing instructions.
 
-RETURN ONLY JSON — no markdown, no preamble, no explanations:
+RETURN ONLY JSON — no markdown, no preamble:
 
 {
   "zones": [
     {
       "zoneName": "Kitchen",
-      "boundaries": "Left wall; island center-left",
-      "fixtures": "Island with cabinetry",
-      "cabinetry": "Left wall full cabinetry; island cabinetry",
-      "windowsDoors": "Window on left wall; door on left wall",
-      "anchorPoint": "Island",
-      "focalPoint": "Island"
-    },
-    {
-      "zoneName": "Dining/Nook",
-      "boundaries": "Open floor space; no walls",
-      "fixtures": "None",
-      "cabinetry": "None",
-      "windowsDoors": "None",
-      "anchorPoint": "Open space",
-      "focalPoint": "None"
-    },
-    {
-      "zoneName": "Living Room",
-      "boundaries": "Back wall; right wall with glass doors",
-      "fixtures": "Fireplace on back wall; windows on back wall",
-      "cabinetry": "None",
-      "windowsDoors": "Windows on back wall; large glass patio doors on right wall",
-      "anchorPoint": "Fireplace",
-      "focalPoint": "Fireplace"
-    },
-    {
-      "zoneName": "Hallway",
-      "boundaries": "Right side passage",
-      "fixtures": "None",
-      "cabinetry": "None",
-      "windowsDoors": "Doorway opening",
-      "anchorPoint": "None",
-      "focalPoint": "None"
+      "boundaries": "...",
+      "fixtures": "...",
+      "cabinetry": "...",
+      "windowsDoors": "...",
+      "anchorPoint": "...",
+      "focalPoint": "..."
     }
   ]
 }`;
 
-  console.log('Sending spatial read prompt to Claude Haiku...');
+  console.log('Sending Phase 5A spatial read prompt to Claude Haiku...');
   
   const response = await httpsRequest({
     hostname: 'api.anthropic.com',
@@ -208,8 +154,48 @@ RETURN ONLY JSON — no markdown, no preamble, no explanations:
   return spatialData;
 }
 
+// ── PHASE 5A: ASSEMBLE PROMPT WITH TIER LOGIC ──────────────────────────────
+async function assemblePrompt({ images, designStyle, colorPalette, claudeKey, groupType }) {
+  /**
+   * PHASE 5A PIPELINE:
+   * 1. Run Haiku spatial read (returns clean 6-field zones)
+   * 2. Apply Tier 1/2 logic (generate furnishing instructions)
+   * 3. Assemble GPT2 prompt (boilerplate + zones)
+   */
+
+  console.log('Phase 5A: Starting spatial read + tier logic pipeline...');
+
+  // Step 1: Haiku spatial read (clean 6-field zones)
+  const spatialData = await runSpatialRead({ 
+    images, 
+    groupType: groupType || 'openplan', 
+    claudeKey 
+  });
+
+  // Step 2: Apply Tier 1/2 logic (generate furnishing instructions)
+  const tieredData = buildVacantPrompt(
+    spatialData,
+    designStyle,
+    colorPalette
+  );
+
+  console.log(`Tier logic applied: ${tieredData.furnishedZones} furnished, ${tieredData.vacantZones} vacant`);
+
+  // Step 3: Assemble complete GPT2 prompt
+  const gpt2Prompt = assembleGPT2StagingPrompt(tieredData, images.length);
+
+  console.log('GPT2 prompt assembled and ready for rendering');
+
+  return {
+    prompt: gpt2Prompt,
+    spatialData: spatialData,
+    tieredData: tieredData
+  };
+}
+
 // Export for use by other functions
 module.exports.runSpatialRead = runSpatialRead;
+module.exports.assemblePrompt = assemblePrompt;
 module.exports.compressForRead = compressForRead;
 
 // ── BACKGROUND HANDLER ────────────────────────────────────────────────────────
@@ -220,26 +206,41 @@ exports.handler = async (event) => {
   let jobId;
 
   try {
-    const { jobId: jId, images, groupType } = JSON.parse(event.body);
+    const { 
+      jobId: jId, 
+      images, 
+      groupType,
+      designStyle,
+      colorPalette
+    } = JSON.parse(event.body);
+    
     jobId = jId;
-    console.log('Phase 5A spatial read: jobId=' + jobId + ' images=' + images.length);
+    console.log(`Phase 5A group read: jobId=${jobId} images=${images.length} type=${groupType}`);
 
     const store = getStore({ name: "staging-jobs", siteID, token });
     await store.setJSON(jobId, { status: "processing", startedAt: Date.now() });
 
-    const spatialData = await runSpatialRead({ images, groupType: groupType || 'openplan', claudeKey });
+    // Phase 5A pipeline: spatial read → tier logic → prompt assembly
+    const result = await assemblePrompt({
+      images,
+      groupType: groupType || 'openplan',
+      designStyle: designStyle || 'Transitional',
+      colorPalette: colorPalette || 'Organic Natural',
+      claudeKey
+    });
 
     await store.setJSON(jobId, {
       status: "done",
-      spatialData,
-      anglesRead: images.length,
+      prompt: result.prompt,
+      spatialData: result.spatialData,
+      tieredData: result.tieredData,
       timestamp: Date.now()
     });
 
-    console.log('Job ' + jobId + ': spatial read stored');
+    console.log(`Job ${jobId}: Phase 5A pipeline complete`);
 
   } catch (err) {
-    console.error('Job ' + (jobId || 'unknown') + ' error:', err.message);
+    console.error(`Job ${jobId || 'unknown'} error:`, err.message);
     try {
       const store = getStore({ name: "staging-jobs", siteID, token });
       await store.setJSON(jobId, { status: "error", error: err.message });

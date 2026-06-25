@@ -69,46 +69,85 @@ async function runSpatialRead({ images, groupType, claudeKey }) {
     { type: "text", text: "IMAGE " + (i + 1) + (img.label ? " — " + img.label : " — Angle " + (i + 1)) }
   ])).flat();
 
-  const prompt = `You are reading real estate listing photos to identify furnishing zones.
+  const prompt = `You are Claude Vision: an Architectural Planner reading a real estate listing photo.
 
-TASK: Return ONLY factual architectural data for each zone visible. No staging instructions. No furniture recommendations. No inferences.
+YOUR ROLE: Read the image spatially and LIST architectural boundaries and anchors.
+- Identify zone boundaries (walls, doors, windows, hallways, vacant space)
+- Identify Tier 1 anchors (ceiling-mounted fixtures at 60%+ confidence)
+- Report ONLY facts at specified confidence thresholds
+- Do NOT infer, directional-ize, or assign furniture layouts
 
-CONFIDENCE THRESHOLD: Report only facts at 60%+ confidence. If confidence is below 60%, answer "None".
+GPT Image 2 will handle staging and rendering.
 
-ZONE BOUNDARIES: Zones are bounded by permanent architectural elements (walls, islands, fireplaces, windows, doors).
+---
 
-OUTPUT FORMAT: For each zone, return EXACTLY these 6 fields in JSON:
-
-Zone: [Kitchen | Dining/Nook | Living Room | Bedroom | Hallway | Other]
-• Boundaries: [What physically defines this zone]
-• Fixtures: [What architectural fixtures are IN this zone]
-• Cabinetry: [What cabinetry is IN this zone]
-• Windows/Doors: [What windows/doors are IN this zone]
-• Anchor Point: [Visible architectural feature that could anchor furniture] OR [Simple location description] OR None
-• Focal Point: [Primary architectural feature in this zone] OR None
-
-CRITICAL RULES:
-
-1. DO NOT INFER: If you cannot see it clearly (60%+ confidence), say "None".
-2. DO NOT MIX ZONES: Report only what is IN each zone.
-3. DO NOT ADD FURNITURE INSTRUCTIONS: This is a spatial read only.
-4. HALLWAYS & CIRCULATION: Mark as separate zones. Do not add furnishing instructions.
-
-RETURN ONLY JSON — no markdown, no preamble:
+FOR EACH ZONE, RETURN THIS JSON (FACTS ONLY):
 
 {
   "zones": [
     {
-      "zoneName": "Kitchen",
-      "boundaries": "...",
-      "fixtures": "...",
-      "cabinetry": "...",
-      "windowsDoors": "...",
-      "anchorPoint": "...",
-      "focalPoint": "..."
+      "zoneName": "Zone name (Kitchen | Dining/Nook | Living | Bedroom | Hallway | Other)",
+      "boundaries": "ONLY what is present in or attached to this zone (70%+ confidence) OR 'None'",
+      "fixtures": "ONLY visible architectural fixtures present in this zone (70%+ confidence) OR 'None'",
+      "cabinetry": "ONLY what is present in or attached to this zone (70%+ confidence) OR 'None'",
+      "windowsDoors": "ONLY what is present in or attached to this zone (70%+ confidence) OR 'None'",
+      "anchorPoint": "ONLY if Tier 1 anchor present at 60%+ confidence: [Fixture name] OR 'None'",
+      "focalPoint": "ONLY what is present in this zone (70%+ confidence) OR 'None'",
+      "furnishing": "[CONDITIONAL ON ANCHOR]"
     }
   ]
-}`;
+}
+
+---
+
+FURNISHING FIELD LOGIC:
+
+IF anchorPoint = "Fireplace":
+  furnishing: "Place an area rug proportional for the seating group 18\\" in front of the Fireplace anchoring the seating group to the Fireplace wall. Place a coffee table centered on the rug and Fireplace."
+
+IF anchorPoint = "Ceiling fan":
+  furnishing: "Place an area rug proportional for the seating group centered beneath the ceiling fan. Place a coffee table centered on the rug and ceiling fan."
+
+IF anchorPoint = "Chandelier" OR "Pendant lights":
+  furnishing: "Place an area rug proportional to seating group with a round or rectangular dining table and seating not to exceed 6 chairs, in the open space."
+
+IF anchorPoint = "None" (No Tier 1 anchor, Tier 2 open space):
+  furnishing: "Style & Main Pieces: [Transitional]. A round or rectangular dining table and seating not to exceed 6 chairs. Place an area rug proportional to seating group. Incorporate gentle tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic. Floor runners are prohibited."
+
+IF zoneName = "Hallway" OR "Circulation" OR "Entry" OR "Foyer" OR "Passage":
+  furnishing: "LEAVE VACANT"
+
+---
+
+CONFIDENCE THRESHOLDS:
+
+- Boundaries: 70%+ confidence only
+- Fixtures: 70%+ confidence only
+- Cabinetry: 70%+ confidence only
+- Windows/Doors: 70%+ confidence only
+- Anchor Point: 60%+ confidence IF Tier 1 anchor
+- Focal Point: 70%+ confidence only
+
+---
+
+TIER 1 ANCHORS (60%+ confidence):
+
+- Fireplace
+- Ceiling fan
+- Chandelier
+- Pendant lights
+- Recessed lighting groups
+
+---
+
+CRITICAL RULES:
+
+1. NO INFERENCE: Below threshold = 'None'
+2. NO DIRECTIONAL LANGUAGE: No "left of", "adjacent to", relationships
+3. NO FURNITURE ASSIGNMENTS: Facts only
+4. FLOOR RUNNERS PROHIBITED
+
+RETURN ONLY JSON — no markdown, no preamble.`;
 
   console.log('Sending Phase 5A spatial read prompt to Claude Haiku...');
   

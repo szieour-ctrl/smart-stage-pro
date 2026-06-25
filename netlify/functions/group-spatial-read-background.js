@@ -1,9 +1,10 @@
 // group-spatial-read-background.js — Phase 5A Multi-Angle Open-Plan Spatial Read
-// Reads 3+ angles of open-plan rooms, detects Tier 1/2 anchors, returns furnishing instructions
-// Returns structured zones with tier-specific furnishing logic for GPT Image 2
+// Reads 3+ angles of open-plan rooms, detects Tier 1/2 anchors, stores result in Netlify Blobs
+// Client polls check-spatial-read.js every 3 seconds for result
 
 const https = require("https");
 const sharp = require("sharp");
+const { getStore } = require("@netlify/blobs");
 
 function httpsRequest(options, body) {
   return new Promise((resolve, reject) => {
@@ -277,7 +278,7 @@ async function runSpatialRead({ imageDataArray, claudeKey }) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════════
-// MAIN HANDLER
+// MAIN HANDLER — BLOB STORAGE PATTERN (following stage-openai-background)
 // ════════════════════════════════════════════════════════════════════════════════
 
 exports.handler = async (event) => {
@@ -289,16 +290,27 @@ exports.handler = async (event) => {
     "Content-Type": "application/json",
   };
 
+  const siteID = process.env.SZREG_SITE_ID || process.env.NETLIFY_SITE_ID;
+  const token  = process.env.NETLIFY_ACCESS_TOKEN;
+  let jobId;
+
   try {
-    const { imageDataArray, designStyle, colorPalette } = JSON.parse(event.body);
+    const { jobId: jId, imageDataArray, designStyle, colorPalette } = JSON.parse(event.body);
+    jobId = jId;
     const claudeKey = process.env.ANTHROPIC_API_KEY;
 
-    if (!imageDataArray || imageDataArray.length === 0) {
-      return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing imageDataArray" }) };
-    }
-    if (!claudeKey) {
-      return { statusCode: 500, headers, body: JSON.stringify({ error: "ANTHROPIC_API_KEY not configured" }) };
-    }
+    console.log(`Job ${jobId} starting... siteID=${siteID ? "SET" : "MISSING"} token=${token ? "SET" : "MISSING"}`);
+
+    if (!siteID) throw new Error("NETLIFY_SITE_ID not configured");
+    if (!token)  throw new Error("NETLIFY_ACCESS_TOKEN not configured");
+    if (!claudeKey) throw new Error("ANTHROPIC_API_KEY not configured");
+    if (!imageDataArray || imageDataArray.length === 0) throw new Error("Missing imageDataArray");
+
+    const store = getStore({ name: "spatial-jobs", siteID, token });
+
+    // Write heartbeat immediately — confirms background function is running
+    await store.setJSON(jobId, { status: "processing", startedAt: Date.now() });
+    console.log(`Job ${jobId}: heartbeat written`);
 
     // Prepare images
     const preparedImages = await Promise.all(
@@ -311,20 +323,18 @@ exports.handler = async (event) => {
       claudeKey
     });
 
-    // Return spatial data to frontend
-    return {
-      statusCode: 200,
-      headers,
-      body: JSON.stringify({
-        success: true,
-        spatialData,
-        message: "Spatial read complete. Zones identified with furnishing instructions."
-      })
-    };
+    console.log(`Job ${jobId}: spatial read complete, ${spatialData.zones?.length || 0} zones`);
+
+    // Store result via SDK — no presigned URL expiry issues
+    await store.setJSON(jobId, { status: "done", spatialData });
+    console.log(`Job ${jobId}: stored in Blobs`);
 
   } catch (err) {
-    console.error("group-spatial-read-background error:", err.message);
+    console.error(`Job ${jobId} error:`, err.message);
     console.error("Stack trace:", err.stack);
-    return { statusCode: 500, headers, body: JSON.stringify({ error: err.message, details: err.stack }) };
+    try {
+      const store = getStore({ name: "spatial-jobs", siteID, token });
+      await store.setJSON(jobId, { status: "error", error: err.message });
+    } catch(e) {}
   }
 };

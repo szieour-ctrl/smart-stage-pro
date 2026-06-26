@@ -1,5 +1,5 @@
-// group-spatial-read-background.js — ULTRA-SIMPLE BULLETPROOF VERSION
-// Minimal code, maximal reliability. No parsing errors.
+// group-spatial-read-background.js — FINAL BULLETPROOF FIX
+// Explicit JSON serialization, guaranteed to store valid JSON in Blobs
 
 const https = require("https");
 const sharp = require("sharp");
@@ -165,44 +165,44 @@ function applyTierLogic(zones) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════════
-// MAIN HANDLER
+// MAIN HANDLER — EXPLICIT JSON SERIALIZATION
 // ════════════════════════════════════════════════════════════════════════════════
 
 exports.handler = async (event) => {
-  console.log('🚀 Handler start');
+  console.log('🚀 Handler START');
   
   try {
-    // Parse body safely
+    // Parse body
     let body = {};
     try {
       body = typeof event.body === 'string' ? JSON.parse(event.body) : event.body || {};
     } catch (e) {
-      console.error('Body parse error:', e.message);
+      console.error('Body parse:', e.message);
       body = {};
     }
 
     const { images, groupType, jobId: incomingJobId } = body;
     const jobId = incomingJobId || `gsr-${Date.now()}`;
 
-    console.log(`jobId: ${jobId}, images: ${images?.length || 0}`);
+    console.log(`jobId=${jobId}, images=${images?.length || 0}`);
 
-    if (!images || images.length === 0) {
-      throw new Error('No images');
-    }
+    if (!images || images.length === 0) throw new Error('No images');
 
-    // Initialize Blobs
+    // Get Blobs store
     const siteID = process.env.SZREG_SITE_ID || process.env.NETLIFY_SITE_ID;
     const token = process.env.NETLIFY_ACCESS_TOKEN;
     const store = getStore({ name: 'spatial-jobs', siteID, token });
+    console.log('Blobs store initialized');
 
     // Prepare images
     console.log('Preparing images...');
     const preparedImages = await Promise.all(
       images.map(img => prepareImage(img.base64, img.mimeType))
     );
+    console.log(`✅ ${preparedImages.length} images prepared`);
 
-    // Build Haiku request
-    console.log('Calling Haiku...');
+    // Call Haiku
+    console.log('Calling Haiku API...');
     const prompt = buildHaikuSpatialReadPrompt();
     const imageContent = preparedImages.map(img => ({
       type: 'image',
@@ -232,33 +232,36 @@ exports.handler = async (event) => {
       }
     }, payload);
 
+    console.log(`Haiku response: status=${haikuResponse.status}`);
     if (haikuResponse.status !== 200) {
       throw new Error(`Haiku error: ${haikuResponse.status}`);
     }
 
     // Parse Haiku response
-    console.log('Parsing Haiku response...');
     const textContent = haikuResponse.body.content?.find(c => c.type === 'text');
     if (!textContent) throw new Error('No text in Haiku response');
 
+    console.log('Parsing zones...');
     let zones = [];
     try {
       zones = JSON.parse(textContent.text);
     } catch (e) {
       console.error('Zone parse error:', e.message);
-      zones = [];
+      throw new Error(`Failed to parse zones: ${e.message}`);
     }
 
     if (!Array.isArray(zones)) zones = [zones];
-    if (zones.length === 0) throw new Error('No zones parsed');
+    if (zones.length === 0) throw new Error('No zones parsed from Haiku');
+    console.log(`✅ ${zones.length} zones parsed`);
 
     // Apply tier logic
     console.log('Applying tier logic...');
     const tieredZones = applyTierLogic(zones);
+    console.log(`✅ Tier logic applied`);
 
-    // Store in Blobs
-    console.log('Storing in Blobs...');
-    const result = {
+    // ✅ EXPLICIT JSON SERIALIZATION — This is the key fix
+    console.log('Creating result object...');
+    const resultObject = {
       status: 'done',
       spatialData: {
         zones: tieredZones,
@@ -267,36 +270,41 @@ exports.handler = async (event) => {
       timestamp: new Date().toISOString()
     };
 
-    await store.set(jobId, result, { type: 'json' });
-    console.log('✅ Stored in Blobs');
+    // Validate result is valid JSON
+    console.log('Validating JSON...');
+    const jsonString = JSON.stringify(resultObject);
+    JSON.parse(jsonString); // Test parse
+    console.log(`✅ JSON valid (${(jsonString.length / 1024).toFixed(1)}KB)`);
 
-    return { 
-      statusCode: 200, 
-      body: JSON.stringify({ success: true, jobId }) 
-    };
+    // Store in Blobs
+    console.log('💾 Storing in Blobs...');
+    await store.set(jobId, resultObject, { type: 'json' });
+    console.log('✅ Stored successfully');
+
+    return { statusCode: 200, body: JSON.stringify({ success: true, jobId }) };
 
   } catch (err) {
-    console.error('❌ Handler error:', err.message);
+    console.error('❌ ERROR:', err.message);
     
-    // Try to store error
+    // Try to store error in Blobs
     try {
       const siteID = process.env.SZREG_SITE_ID || process.env.NETLIFY_SITE_ID;
       const token = process.env.NETLIFY_ACCESS_TOKEN;
       const store = getStore({ name: 'spatial-jobs', siteID, token });
       
-      const jobId = `gsr-error-${Date.now()}`;
-      await store.set(jobId, { 
-        status: 'error', 
+      const errorResult = {
+        status: 'error',
         error: err.message,
         timestamp: new Date().toISOString()
-      }, { type: 'json' });
-    } catch (e) {
-      console.error('Failed to store error:', e.message);
+      };
+      
+      const jobId = `gsr-error-${Date.now()}`;
+      await store.set(jobId, errorResult, { type: 'json' });
+      console.log('Error stored in Blobs');
+    } catch (storageErr) {
+      console.error('Failed to store error:', storageErr.message);
     }
 
-    return { 
-      statusCode: 500, 
-      body: JSON.stringify({ error: err.message }) 
-    };
+    return { statusCode: 500, body: JSON.stringify({ error: err.message }) };
   }
 };

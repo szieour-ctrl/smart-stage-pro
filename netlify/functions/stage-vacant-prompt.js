@@ -56,12 +56,16 @@ function detectMime(base64) {
 // ════════════════════════════════════════════════════════════════════════════════
 
 function applyTierLogic(zones) {
+  console.log('applyTierLogic called with:', JSON.stringify(zones).slice(0, 200));
+  
   if (!Array.isArray(zones)) zones = [zones];
   
-  return zones.map(zone => {
+  return zones.map((zone, idx) => {
     const zoneName = (zone.name || '').toLowerCase();
     const anchorPoint = (zone.anchor_point?.location || '').toLowerCase();
     const hasAnchor = anchorPoint && anchorPoint !== 'none' && anchorPoint.length > 0;
+    
+    console.log(`Zone ${idx}: name="${zone.name}" anchor="${zone.anchor_point?.location}" → furnishing applied`);
     
     let furnishing = '';
 
@@ -473,9 +477,13 @@ exports.handler = async (event) => {
     // Read room via Haiku
     const haikuOutput = await readVacantRoom({ imageBase64, roomType, claudeKey });
     
+    console.log('Haiku output zones:', JSON.stringify(haikuOutput.zones).slice(0, 300));
+    
     // ✅ APPLY TIER LOGIC to zones (Tier 1/2 anchor rules)
     if (haikuOutput.zones && Array.isArray(haikuOutput.zones)) {
+      console.log('Applying tier logic to', haikuOutput.zones.length, 'zones');
       haikuOutput.zones = applyTierLogic(haikuOutput.zones);
+      console.log('After tier logic:', JSON.stringify(haikuOutput.zones).slice(0, 300));
     }
     
     // Transform 4-field zones into anchors (if needed)

@@ -1,5 +1,5 @@
-// group-spatial-read-background.js — BULLETPROOF DIAGNOSTIC VERSION
-// Logs EVERYTHING to Blobs so we can debug even with hidden background logs
+// group-spatial-read-background.js — ULTRA-SIMPLE BULLETPROOF VERSION
+// Minimal code, maximal reliability. No parsing errors.
 
 const https = require("https");
 const sharp = require("sharp");
@@ -12,8 +12,11 @@ function httpsRequest(options, body) {
       res.on("data", (c) => chunks.push(c));
       res.on("end", () => {
         const raw = Buffer.concat(chunks).toString("utf8");
-        try { resolve({ status: res.statusCode, body: JSON.parse(raw) }); }
-        catch (e) { resolve({ status: res.statusCode, body: { raw } }); }
+        try { 
+          resolve({ status: res.statusCode, body: JSON.parse(raw) }); 
+        } catch (e) { 
+          resolve({ status: res.statusCode, body: { raw } }); 
+        }
       });
     });
     req.on("error", reject);
@@ -69,9 +72,7 @@ CONFIDENCE THRESHOLDS (Below = "None", no inference):
 
 ═════════════════════════════════════════════════════════════════════════════════
 
-TIER 1 ANCHORS (60%+ confidence — Explicit furnishing instructions):
-
-Physical fixtures located IN the zone that anchor seating:
+TIER 1 ANCHORS (60%+ confidence):
 - Fireplace (gas or wood-burning insert visible IN the zone)
 - Ceiling fan (mounted IN the zone ceiling)
 - Chandelier or pendant light groups (mounted IN the zone ceiling)
@@ -107,26 +108,6 @@ IF Zone = Bedroom:
 
 ═════════════════════════════════════════════════════════════════════════════════
 
-STRICT RULES FOR EACH OUTPUT FIELD:
-
-**zoneName:** Exact zone type ONLY. Examples: "Kitchen", "Dining Zone", "Living/Great Room", "Hallway/Circulation", "Bedroom"
-
-**boundaries:** ONLY walls, partitions, openings physically visible IN this zone. NO relationships to other zones.
-
-**fixtures:** ONLY ceiling and wall-mounted fixtures physically located IN this zone at 70%+ confidence. If none: "None"
-
-**cabinetry:** ONLY built-in cabinetry physically present IN this zone at 70%+ confidence. If none: "None"
-
-**windowsDoors:** ONLY windows and doors that open FROM this zone at 70%+ confidence. If none: "None"
-
-**anchorPoint:** Tier 1 anchor physically located IN this zone at 60%+ confidence. Examples: "Fireplace (center-back wall)", "Ceiling fan (center-ceiling)", "Chandelier (center-zone)", "None"
-
-**focalPoint:** Architectural feature or fixture physically located IN this zone at 70%+ confidence. NOT furniture placement.
-
-**furnishing:** EXACT instruction from logic rules above. Do NOT modify.
-
-═════════════════════════════════════════════════════════════════════════════════
-
 OUTPUT FORMAT (STRICT JSON ONLY):
 
 Return ONLY a valid JSON array. One object per zone. NO additional text.
@@ -148,13 +129,12 @@ Now analyze the uploaded photo. Return ONLY valid JSON.`;
 }
 
 function applyTierLogic(zones) {
-  if (!Array.isArray(zones)) return zones;
+  if (!Array.isArray(zones)) zones = [zones];
   
   return zones.map(zone => {
-    const zoneName = (zone.zoneName || '').trim().toLowerCase();
-    const anchorPoint = (zone.anchorPoint || '').trim();
-    const hasAnchor = anchorPoint && anchorPoint !== 'None' && anchorPoint.length > 0;
-    const anchorLower = hasAnchor ? anchorPoint.toLowerCase() : '';
+    const zoneName = (zone.zoneName || '').toLowerCase();
+    const anchorPoint = (zone.anchorPoint || '').toLowerCase();
+    const hasAnchor = anchorPoint && anchorPoint !== 'none' && anchorPoint.length > 0;
     
     let furnishing = '';
 
@@ -164,16 +144,16 @@ function applyTierLogic(zones) {
     else if (zoneName.includes('kitchen')) {
       furnishing = 'Style & Main Pieces: Kitchen island (1), bar stools (quantity per clearance), cabinetry (built-in, fixed). Incorporate tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic.';
     }
-    else if (zoneName.includes('dining') && (anchorLower.includes('chandelier') || anchorLower.includes('pendant'))) {
+    else if (zoneName.includes('dining') && (anchorPoint.includes('chandelier') || anchorPoint.includes('pendant'))) {
       furnishing = 'Place an area rug proportional to seating group with a round or rectangular dining table and seating not to exceed 6 chairs, in the open space. Incorporate gentle tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic. Floor runners are prohibited.';
     }
     else if (zoneName.includes('dining') && !hasAnchor) {
       furnishing = 'Style & Main Pieces: [Transitional]. A round or rectangular dining table and seating not to exceed 6 chairs. Place an area rug proportional to seating group. Incorporate gentle tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic. Floor runners are prohibited.';
     }
-    else if ((zoneName.includes('living') || zoneName.includes('great room')) && anchorLower.includes('fireplace')) {
+    else if ((zoneName.includes('living') || zoneName.includes('great room')) && anchorPoint.includes('fireplace')) {
       furnishing = 'Place an area rug proportional for the seating group 18" in front of the Fireplace anchoring the seating group to the Fireplace wall. Place a coffee table centered on the rug and Fireplace. Incorporate gentle tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic.';
     }
-    else if ((zoneName.includes('living') || zoneName.includes('great room')) && anchorLower.includes('ceiling fan')) {
+    else if ((zoneName.includes('living') || zoneName.includes('great room')) && anchorPoint.includes('ceiling fan')) {
       furnishing = 'Place an area rug proportional for the seating group centered beneath the ceiling fan. Place a coffee table centered on the rug and ceiling fan. Incorporate gentle tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic.';
     }
     else if ((zoneName.includes('living') || zoneName.includes('great room')) && !hasAnchor) {
@@ -185,66 +165,46 @@ function applyTierLogic(zones) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════════
-// MAIN HANDLER — With comprehensive logging stored in Blobs
+// MAIN HANDLER
 // ════════════════════════════════════════════════════════════════════════════════
 
-exports.handler = async (event, context) => {
-  const startTime = Date.now();
-  const diagnosticLogs = [];
-  let jobId = null;
-
-  function log(msg) {
-    const timestamp = new Date().toISOString();
-    const fullMsg = `[${timestamp}] ${msg}`;
-    console.log(fullMsg);
-    diagnosticLogs.push(fullMsg);
-  }
-
+exports.handler = async (event) => {
+  console.log('🚀 Handler start');
+  
   try {
-    log('🚀 Handler started');
-    
-    // Parse request
-    log('Parsing request body...');
-    const body = JSON.parse(event.body || '{}');
-    const { images, groupType, jobId: incomingJobId } = body;
-    jobId = incomingJobId || `gsr-${Date.now()}-auto`;
-
-    log(`jobId: ${jobId}`);
-    log(`groupType: ${groupType}`);
-    log(`images count: ${images?.length || 0}`);
-
-    if (!images || images.length === 0) {
-      throw new Error('No images provided');
+    // Parse body safely
+    let body = {};
+    try {
+      body = typeof event.body === 'string' ? JSON.parse(event.body) : event.body || {};
+    } catch (e) {
+      console.error('Body parse error:', e.message);
+      body = {};
     }
 
-    // Get Blobs store
-    log('Initializing Blobs store...');
+    const { images, groupType, jobId: incomingJobId } = body;
+    const jobId = incomingJobId || `gsr-${Date.now()}`;
+
+    console.log(`jobId: ${jobId}, images: ${images?.length || 0}`);
+
+    if (!images || images.length === 0) {
+      throw new Error('No images');
+    }
+
+    // Initialize Blobs
     const siteID = process.env.SZREG_SITE_ID || process.env.NETLIFY_SITE_ID;
     const token = process.env.NETLIFY_ACCESS_TOKEN;
     const store = getStore({ name: 'spatial-jobs', siteID, token });
-    log(`Store initialized: siteID=${siteID}`);
 
     // Prepare images
-    log('Preparing images...');
+    console.log('Preparing images...');
     const preparedImages = await Promise.all(
-      images.map((img, idx) => {
-        log(`  Preparing image ${idx}...`);
-        return prepareImage(img.base64, img.mimeType);
-      })
+      images.map(img => prepareImage(img.base64, img.mimeType))
     );
-    log(`✅ ${preparedImages.length} images prepared`);
 
-    // Build Haiku prompt
-    log('Building Haiku prompt...');
+    // Build Haiku request
+    console.log('Calling Haiku...');
     const prompt = buildHaikuSpatialReadPrompt();
-    log(`✅ Prompt built (${prompt.length} chars)`);
-
-    // Prepare Haiku request
-    log('Preparing Haiku API request...');
-    const claudeKey = process.env.ANTHROPIC_API_KEY;
-    if (!claudeKey) throw new Error('ANTHROPIC_API_KEY not configured');
-
-    const imageContent = preparedImages.map((img, idx) => ({
+    const imageContent = preparedImages.map(img => ({
       type: 'image',
       source: { type: 'base64', media_type: img.mimeType, data: img.base64 }
     }));
@@ -256,11 +216,9 @@ exports.handler = async (event, context) => {
       messages: [{ role: 'user', content: imageContent }]
     });
 
-    log(`Payload size: ${(Buffer.byteLength(payload) / 1024).toFixed(1)}KB`);
+    const claudeKey = process.env.ANTHROPIC_API_KEY;
+    if (!claudeKey) throw new Error('ANTHROPIC_API_KEY missing');
 
-    // Call Haiku
-    log('🧠 Calling Haiku API...');
-    const haikuStart = Date.now();
     const haikuResponse = await httpsRequest({
       hostname: 'api.anthropic.com',
       port: 443,
@@ -273,82 +231,72 @@ exports.handler = async (event, context) => {
         'Content-Length': Buffer.byteLength(payload)
       }
     }, payload);
-    const haikuDuration = Date.now() - haikuStart;
-
-    log(`✅ Haiku response: status=${haikuResponse.status}, duration=${haikuDuration}ms`);
 
     if (haikuResponse.status !== 200) {
-      throw new Error(`Haiku API error: ${haikuResponse.status} - ${JSON.stringify(haikuResponse.body).slice(0, 200)}`);
+      throw new Error(`Haiku error: ${haikuResponse.status}`);
     }
 
     // Parse Haiku response
-    log('Parsing Haiku response...');
+    console.log('Parsing Haiku response...');
     const textContent = haikuResponse.body.content?.find(c => c.type === 'text');
-    if (!textContent) throw new Error('No text content in Haiku response');
+    if (!textContent) throw new Error('No text in Haiku response');
 
     let zones = [];
     try {
       zones = JSON.parse(textContent.text);
-      log(`✅ Parsed zones: ${zones.length}`);
     } catch (e) {
-      log(`⚠️  JSON parse failed: ${e.message}`);
-      log(`Raw response (first 500 chars): ${textContent.text.slice(0, 500)}`);
-      throw new Error(`Failed to parse Haiku JSON: ${e.message}`);
+      console.error('Zone parse error:', e.message);
+      zones = [];
     }
 
     if (!Array.isArray(zones)) zones = [zones];
+    if (zones.length === 0) throw new Error('No zones parsed');
 
     // Apply tier logic
-    log('Applying tier logic...');
+    console.log('Applying tier logic...');
     const tieredZones = applyTierLogic(zones);
-    log(`✅ Tier logic applied to ${tieredZones.length} zones`);
 
     // Store in Blobs
-    log('💾 Storing results in Blobs...');
+    console.log('Storing in Blobs...');
     const result = {
       status: 'done',
       spatialData: {
         zones: tieredZones,
         confidence: 'HIGH'
       },
-      diagnosticLogs: diagnosticLogs,
-      timestamp: new Date().toISOString(),
-      duration: Date.now() - startTime
+      timestamp: new Date().toISOString()
     };
 
     await store.set(jobId, result, { type: 'json' });
-    log(`✅ Results stored in Blobs`);
+    console.log('✅ Stored in Blobs');
 
-    // SUCCESS
-    log(`✅ Handler completed successfully in ${Date.now() - startTime}ms`);
-    return { statusCode: 200, body: JSON.stringify({ success: true, jobId, duration: Date.now() - startTime }) };
+    return { 
+      statusCode: 200, 
+      body: JSON.stringify({ success: true, jobId }) 
+    };
 
   } catch (err) {
-    log(`❌ ERROR: ${err.message}`);
-    log(`Stack: ${err.stack?.slice(0, 300) || 'N/A'}`);
-
-    // Store error in Blobs
+    console.error('❌ Handler error:', err.message);
+    
+    // Try to store error
     try {
-      if (jobId) {
-        const siteID = process.env.SZREG_SITE_ID || process.env.NETLIFY_SITE_ID;
-        const token = process.env.NETLIFY_ACCESS_TOKEN;
-        const store = getStore({ name: 'spatial-jobs', siteID, token });
-        
-        const errorResult = {
-          status: 'error',
-          error: err.message,
-          diagnosticLogs: diagnosticLogs,
-          timestamp: new Date().toISOString(),
-          duration: Date.now() - startTime
-        };
-        
-        await store.set(jobId, errorResult, { type: 'json' });
-        log(`✅ Error stored in Blobs`);
-      }
-    } catch (storageErr) {
-      log(`⚠️  Failed to store error in Blobs: ${storageErr.message}`);
+      const siteID = process.env.SZREG_SITE_ID || process.env.NETLIFY_SITE_ID;
+      const token = process.env.NETLIFY_ACCESS_TOKEN;
+      const store = getStore({ name: 'spatial-jobs', siteID, token });
+      
+      const jobId = `gsr-error-${Date.now()}`;
+      await store.set(jobId, { 
+        status: 'error', 
+        error: err.message,
+        timestamp: new Date().toISOString()
+      }, { type: 'json' });
+    } catch (e) {
+      console.error('Failed to store error:', e.message);
     }
 
-    return { statusCode: 500, body: JSON.stringify({ error: err.message, diagnosticLogs }) };
+    return { 
+      statusCode: 500, 
+      body: JSON.stringify({ error: err.message }) 
+    };
   }
 };

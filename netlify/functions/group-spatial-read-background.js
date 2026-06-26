@@ -132,32 +132,39 @@ function applyTierLogic(zones) {
   if (!Array.isArray(zones)) zones = [zones];
   
   return zones.map(zone => {
-    const zoneName = (zone.zoneName || '').toLowerCase();
-    const anchorPoint = (zone.anchorPoint || '').toLowerCase();
+    const zoneName = (zone.name || zone.zoneName || '').toLowerCase();
+    const anchorPoint = (zone.anchor_point?.location || zone.anchorPoint || '').toLowerCase();
     const hasAnchor = anchorPoint && anchorPoint !== 'none' && anchorPoint.length > 0;
     
     let furnishing = '';
 
+    // HALLWAY / CIRCULATION
     if (zoneName.includes('hallway') || zoneName.includes('circulation') || zoneName.includes('entry') || zoneName.includes('foyer')) {
       furnishing = 'LEAVE VACANT';
     }
+    // KITCHEN
     else if (zoneName.includes('kitchen')) {
       furnishing = 'Style & Main Pieces: Kitchen island (1), bar stools (quantity per clearance), cabinetry (built-in, fixed). Incorporate tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic.';
     }
-    else if (zoneName.includes('dining') && (anchorPoint.includes('chandelier') || anchorPoint.includes('pendant'))) {
+    // DINING NOOK/ROOM + CHANDELIER ONLY (Tier 1 — NO pendant, NO fireplace)
+    else if (zoneName.includes('dining') && anchorPoint.includes('chandelier')) {
       furnishing = 'Place an area rug proportional to seating group with a round or rectangular dining table and seating not to exceed 6 chairs, in the open space. Incorporate gentle tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic. Floor runners are prohibited.';
     }
+    // DINING NOOK/ROOM + NO ANCHOR (Tier 2 — let GPT Image 2 infer placement)
     else if (zoneName.includes('dining') && !hasAnchor) {
       furnishing = 'Style & Main Pieces: [Transitional]. A round or rectangular dining table and seating not to exceed 6 chairs. Place an area rug proportional to seating group. Incorporate gentle tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic. Floor runners are prohibited.';
     }
-    else if ((zoneName.includes('living') || zoneName.includes('great room')) && anchorPoint.includes('fireplace')) {
+    // LIVING/GREAT/FAMILY ROOM + FIREPLACE (Tier 1 — 18" from front of fireplace)
+    else if ((zoneName.includes('living') || zoneName.includes('great room') || zoneName.includes('family room')) && anchorPoint.includes('fireplace')) {
       furnishing = 'Place an area rug proportional for the seating group 18" in front of the Fireplace anchoring the seating group to the Fireplace wall. Place a coffee table centered on the rug and Fireplace. Incorporate gentle tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic.';
     }
-    else if ((zoneName.includes('living') || zoneName.includes('great room')) && anchorPoint.includes('ceiling fan')) {
-      furnishing = 'Place an area rug proportional for the seating group centered beneath the ceiling fan. Place a coffee table centered on the rug and ceiling fan. Incorporate gentle tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic.';
-    }
-    else if ((zoneName.includes('living') || zoneName.includes('great room')) && !hasAnchor) {
+    // LIVING/GREAT/FAMILY ROOM + NO FIREPLACE (Tier 2)
+    else if ((zoneName.includes('living') || zoneName.includes('great room') || zoneName.includes('family room')) && !hasAnchor) {
       furnishing = 'Style & Main Pieces: [Transitional]. Seating arrangement with sofa and accent chairs. Place an area rug proportional to seating group. Incorporate gentle tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic. Floor runners are prohibited.';
+    }
+    // BEDROOM
+    else if (zoneName.includes('bedroom')) {
+      furnishing = 'Style & Main Pieces: Bed (1), nightstands (2), accent seating (optional). Incorporate tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic.';
     }
 
     return { ...zone, furnishing };

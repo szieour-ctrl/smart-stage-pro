@@ -51,6 +51,60 @@ function detectMime(base64) {
   return 'image/jpeg';
 }
 
+// ════════════════════════════════════════════════════════════════════════════════
+// PHASE 5A TIER 1/2 ANCHOR LOGIC — Apply furnishing instructions based on anchors
+// ════════════════════════════════════════════════════════════════════════════════
+
+function applyTierLogic(zones) {
+  if (!Array.isArray(zones)) zones = [zones];
+  
+  return zones.map(zone => {
+    const zoneName = (zone.name || '').toLowerCase();
+    const anchorPoint = (zone.anchor_point?.location || '').toLowerCase();
+    const hasAnchor = anchorPoint && anchorPoint !== 'none' && anchorPoint.length > 0;
+    
+    let furnishing = '';
+
+    // HALLWAY / CIRCULATION
+    if (zoneName.includes('hallway') || zoneName.includes('circulation') || zoneName.includes('entry') || zoneName.includes('foyer')) {
+      furnishing = 'LEAVE VACANT';
+    }
+    // KITCHEN
+    else if (zoneName.includes('kitchen')) {
+      furnishing = 'Style & Main Pieces: Kitchen island (1), bar stools (quantity per clearance), cabinetry (built-in, fixed). Incorporate tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic.';
+    }
+    // DINING + CHANDELIER/PENDANT (TIER 1)
+    else if (zoneName.includes('dining') && (anchorPoint.includes('chandelier') || anchorPoint.includes('pendant'))) {
+      furnishing = 'Place an area rug proportional to seating group with a round or rectangular dining table and seating not to exceed 6 chairs, in the open space. Incorporate gentle tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic. Floor runners are prohibited.';
+    }
+    // DINING + NO ANCHOR (TIER 2)
+    else if (zoneName.includes('dining') && !hasAnchor) {
+      furnishing = 'Style & Main Pieces: [Transitional]. A round or rectangular dining table and seating not to exceed 6 chairs. Place an area rug proportional to seating group. Incorporate gentle tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic. Floor runners are prohibited.';
+    }
+    // LIVING + FIREPLACE (TIER 1)
+    else if ((zoneName.includes('living') || zoneName.includes('great room')) && anchorPoint.includes('fireplace')) {
+      furnishing = 'Place an area rug proportional for the seating group 18" in front of the Fireplace anchoring the seating group to the Fireplace wall. Place a coffee table centered on the rug and Fireplace. Incorporate gentle tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic.';
+    }
+    // LIVING + CEILING FAN (TIER 1)
+    else if ((zoneName.includes('living') || zoneName.includes('great room')) && anchorPoint.includes('ceiling fan')) {
+      furnishing = 'Place an area rug proportional for the seating group centered beneath the ceiling fan. Place a coffee table centered on the rug and ceiling fan. Incorporate gentle tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic.';
+    }
+    // LIVING + NO ANCHOR (TIER 2)
+    else if ((zoneName.includes('living') || zoneName.includes('great room')) && !hasAnchor) {
+      furnishing = 'Style & Main Pieces: [Transitional]. Seating arrangement with sofa and accent chairs. Place an area rug proportional to seating group. Incorporate gentle tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic. Floor runners are prohibited.';
+    }
+    // BEDROOM
+    else if (zoneName.includes('bedroom')) {
+      furnishing = 'Style & Main Pieces: Bed (1), nightstands (2), accent seating (optional). Incorporate tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic.';
+    }
+
+    return { 
+      ...zone, 
+      furnishing 
+    };
+  });
+}
+
 const STYLE_LABELS = {
   'organicmodern':'Organic Modern','transitional':'Transitional','contemporary':'Contemporary',
   'modern':'Modern','scandinavian':'Scandinavian','minimalist':'Minimalist',
@@ -340,7 +394,7 @@ function buildVacantPrompt({ roomData, designStyle, colorPalette }) {
       p += `• Windows/Doors: ${zone.windows_doors || 'None visible'}\n`;
       p += `• Anchor Point: ${zone.anchor_point?.location || 'Not specified'}\n`;
       p += `• Focal Point: ${zone.anchor_point?.instruction || 'Not specified'}\n`;
-      p += `• Furnishing — Style & Main Pieces: ${zone.furnishing_specification?.pieces || 'Not specified'}\n`;
+      p += `• Furnishing — Style & Main Pieces: ${zone.furnishing || zone.furnishing_specification?.pieces || 'Not specified'}\n`;
       p += `  Incorporate tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic.\n\n`;
     });
   } else {
@@ -358,14 +412,19 @@ function buildVacantPrompt({ roomData, designStyle, colorPalette }) {
     p += `• Anchor Point: ${anchors.focal || 'Primary focal wall'}\n`;
     p += `• Focal Point: ${anchors.focal || 'Primary focal point'}\n`;
 
-    // Furnishing per room type
+    // ✅ Use tier-logic-applied furnishing if available from zones
     let furnishing = 'Furniture anchored to focal point; maintain zone boundaries.';
-    if (roomData.roomType && roomData.roomType.toLowerCase().includes('kitchen')) {
-      furnishing = 'Counter seating anchored to island; minimal additional furniture for working zone function.';
-    } else if (roomData.roomType && (roomData.roomType.toLowerCase().includes('living') || roomData.roomType.toLowerCase().includes('great room'))) {
-      furnishing = 'Seating group anchored to focal point with area rug; sofa, accent chairs, coffee table arranged for conversation and flow.';
-    } else if (roomData.roomType && roomData.roomType.toLowerCase().includes('bedroom')) {
-      furnishing = 'Bed centered on headboard wall; matching nightstands; dresser on opposite wall; bench at foot of bed.';
+    if (roomData.zones && Array.isArray(roomData.zones) && roomData.zones.length > 0) {
+      furnishing = roomData.zones[0].furnishing || furnishing;
+    } else if (roomData.roomType) {
+      // Fallback to generic furnishing per room type
+      if (roomData.roomType.toLowerCase().includes('kitchen')) {
+        furnishing = 'Counter seating anchored to island; minimal additional furniture for working zone function.';
+      } else if (roomData.roomType.toLowerCase().includes('living') || roomData.roomType.toLowerCase().includes('great room')) {
+        furnishing = 'Seating group anchored to focal point with area rug; sofa, accent chairs, coffee table arranged for conversation and flow.';
+      } else if (roomData.roomType.toLowerCase().includes('bedroom')) {
+        furnishing = 'Bed centered on headboard wall; matching nightstands; dresser on opposite wall; bench at foot of bed.';
+      }
     }
 
     p += `• Furnishing — Style & Main Pieces: ${furnishing}\n`;
@@ -413,6 +472,11 @@ exports.handler = async (event) => {
 
     // Read room via Haiku
     const haikuOutput = await readVacantRoom({ imageBase64, roomType, claudeKey });
+    
+    // ✅ APPLY TIER LOGIC to zones (Tier 1/2 anchor rules)
+    if (haikuOutput.zones && Array.isArray(haikuOutput.zones)) {
+      haikuOutput.zones = applyTierLogic(haikuOutput.zones);
+    }
     
     // Transform 4-field zones into anchors (if needed)
     const roomData = {

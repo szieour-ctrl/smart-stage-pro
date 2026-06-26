@@ -288,11 +288,11 @@ exports.handler = async (event) => {
       const jobId = "gsr-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8);
       console.log('Group spatial read dispatch: jobId=' + jobId + ' images=' + images.length);
 
-      // ✅ FIXED: Pass imageDataArray, designStyle, colorPalette, groupSpatialPlan
+      // ✅ FIXED: Pass images (NOT imageDataArray), designStyle, colorPalette, groupSpatialPlan
       const triggerStatus = await triggerBackground({ 
         jobId, 
         mode: 'spatial', 
-        imageDataArray: readyImages,
+        images: readyImages,
         designStyle: designStyle || 'Transitional',
         colorPalette: colorPalette || 'Warm Neutrals',
         groupSpatialPlan: groupSpatialPlan || null

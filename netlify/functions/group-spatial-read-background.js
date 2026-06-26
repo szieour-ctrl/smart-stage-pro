@@ -1,10 +1,9 @@
-// group-spatial-read-background.js — Phase 5A Multi-Angle Open-Plan Spatial Read
-// Reads 3+ angles of open-plan rooms, detects Tier 1/2 anchors, returns furnishing instructions
-// CRITICAL: Stores results in Netlify Blobs so check-spatial-read.js can retrieve them
+// group-spatial-read-background.js — BULLETPROOF DIAGNOSTIC VERSION
+// Logs EVERYTHING to Blobs so we can debug even with hidden background logs
 
 const https = require("https");
 const sharp = require("sharp");
-const { getStore } = require("@netlify/blobs"); // ✅ CRITICAL: Blobs storage for polling
+const { getStore } = require("@netlify/blobs");
 
 function httpsRequest(options, body) {
   return new Promise((resolve, reject) => {
@@ -35,23 +34,8 @@ async function prepareImage(imageBase64, mimeType) {
     .resize(768, 768, { fit: 'inside', withoutEnlargement: true })
     .jpeg({ quality: 82 })
     .toBuffer();
-  console.log('prepareImage: ' + meta.width + 'x' + meta.height + ' ' + sizeKB + 'KB → ' + Math.round(compressed.length/1024) + 'KB');
   return { base64: compressed.toString('base64'), mimeType: 'image/jpeg' };
 }
-
-function detectMime(base64) {
-  try {
-    const buf = Buffer.from(base64.slice(0, 16), 'base64');
-    if (buf[0] === 0x89 && buf[1] === 0x50) return 'image/png';
-    if (buf[0] === 0xFF && buf[1] === 0xD8) return 'image/jpeg';
-    if (buf[0] === 0x52 && buf[1] === 0x49) return 'image/webp';
-  } catch(e) {}
-  return 'image/jpeg';
-}
-
-// ════════════════════════════════════════════════════════════════════════════════
-// PHASE 5A HAIKU SPATIAL READ PROMPT — Returns 6-field zones with furnishing logic
-// ════════════════════════════════════════════════════════════════════════════════
 
 function buildHaikuSpatialReadPrompt() {
   return `YOU ARE A PROFESSIONAL SPATIAL ARCHITECT ANALYZING REAL ESTATE PHOTOGRAPHS.
@@ -82,7 +66,6 @@ CONFIDENCE THRESHOLDS (Below = "None", no inference):
 - Windows/Doors: 70%+ confidence only
 - Anchor Point: 60%+ confidence IF Tier 1 anchor physically located IN this zone
 - Focal Point: 70%+ confidence only
-- Furnishing: Based on zone type + anchor presence
 
 ═════════════════════════════════════════════════════════════════════════════════
 
@@ -96,75 +79,57 @@ Physical fixtures located IN the zone that anchor seating:
 
 ═════════════════════════════════════════════════════════════════════════════════
 
-FURNISHING LOGIC — Generate based on zone name + anchor presence:
+FURNISHING LOGIC:
 
 IF Zone = Kitchen:
-"Style & Main Pieces: Kitchen island (1), bar stools (quantity per clearance), cabinetry (built-in, fixed).
-Incorporate tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic."
+"Style & Main Pieces: Kitchen island (1), bar stools (quantity per clearance), cabinetry (built-in, fixed). Incorporate tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic."
 
-IF Zone = Dining & Tier 1 Anchor (Chandelier/Pendant Lights):
+IF Zone = Dining & Tier 1 Anchor (Chandelier/Pendant):
 "Place an area rug proportional to seating group with a round or rectangular dining table and seating not to exceed 6 chairs, in the open space. Incorporate gentle tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic. Floor runners are prohibited."
 
-IF Zone = Dining & NO Tier 1 Anchor (Tier 2 Open Space):
+IF Zone = Dining & NO Tier 1 Anchor:
 "Style & Main Pieces: [Transitional]. A round or rectangular dining table and seating not to exceed 6 chairs. Place an area rug proportional to seating group. Incorporate gentle tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic. Floor runners are prohibited."
 
 IF Zone = Living/Great Room & Tier 1 Anchor (Fireplace):
-"Place an area rug proportional for the seating group 18\" in front of the Fireplace anchoring the seating group to the Fireplace wall. Place a coffee table centered on the rug and Fireplace. Incorporate gentle tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic."
+"Place an area rug proportional for the seating group 18\\" in front of the Fireplace anchoring the seating group to the Fireplace wall. Place a coffee table centered on the rug and Fireplace. Incorporate gentle tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic."
 
 IF Zone = Living/Great Room & Tier 1 Anchor (Ceiling Fan):
 "Place an area rug proportional for the seating group centered beneath the ceiling fan. Place a coffee table centered on the rug and ceiling fan. Incorporate gentle tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic."
 
-IF Zone = Living/Great Room & NO Tier 1 Anchor (Tier 2 Open Space):
+IF Zone = Living/Great Room & NO Tier 1 Anchor:
 "Style & Main Pieces: [Transitional]. Seating arrangement with sofa and accent chairs. Place an area rug proportional to seating group. Incorporate gentle tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic. Floor runners are prohibited."
 
-IF Zone = Hallway, Circulation, Entry, Foyer, Passage, or Corridor:
+IF Zone = Hallway, Circulation, Entry, Foyer, Passage, Corridor:
 "LEAVE VACANT"
 
 IF Zone = Bedroom:
-"Style & Main Pieces: Bed (1), nightstands (2), accent seating (optional).
-Incorporate tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic."
+"Style & Main Pieces: Bed (1), nightstands (2), accent seating (optional). Incorporate tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic."
 
 ═════════════════════════════════════════════════════════════════════════════════
 
 STRICT RULES FOR EACH OUTPUT FIELD:
 
-**zoneName:** Exact zone type ONLY. Examples: "Kitchen", "Dining Zone", "Living/Great Room", "Hallway/Circulation", "Bedroom", "Entry/Foyer"
+**zoneName:** Exact zone type ONLY. Examples: "Kitchen", "Dining Zone", "Living/Great Room", "Hallway/Circulation", "Bedroom"
 
-**boundaries:** ONLY walls, partitions, openings physically visible IN this zone.
-Example CORRECT: "White drywall walls on left, back, right. Single doorway opening on front edge."
-Example WRONG: "Left: kitchen island. Right: fireplace wall." ← NO relationships to other zones
+**boundaries:** ONLY walls, partitions, openings physically visible IN this zone. NO relationships to other zones.
 
-**fixtures:** ONLY ceiling and wall-mounted fixtures physically located IN this zone at 70%+ confidence.
-Example CORRECT: "Recessed ceiling lights (3, distributed). Fireplace insert on back wall."
-Example WRONG: "Chandelier over kitchen island" ← If island is NOT in this zone, don't list it.
-If none at 70%+ confidence: "None"
+**fixtures:** ONLY ceiling and wall-mounted fixtures physically located IN this zone at 70%+ confidence. If none: "None"
 
-**cabinetry:** ONLY built-in cabinetry physically present IN this zone at 70%+ confidence.
-Example CORRECT: "Base cabinetry along back wall. Upper cabinetry with integrated appliances."
-Example WRONG: "Island with sink" ← If island is NOT in this zone, don't mention it.
-If none visible: "None"
+**cabinetry:** ONLY built-in cabinetry physically present IN this zone at 70%+ confidence. If none: "None"
 
-**windowsDoors:** ONLY windows and doors that open FROM this zone at 70%+ confidence.
-Example CORRECT: "Sliding glass door (4-panel, black frame). Single window (upper left)."
-Example WRONG: "Pass-through to kitchen" ← If pass-through leads to adjacent zone, describe the opening itself only.
-If none: "None"
+**windowsDoors:** ONLY windows and doors that open FROM this zone at 70%+ confidence. If none: "None"
 
-**anchorPoint:** Tier 1 anchor (fireplace, ceiling fan, chandelier, etc.) physically located IN this zone at 60%+ confidence.
-Examples: "Fireplace (center-back wall)", "Ceiling fan (center-ceiling)", "Chandelier (center-zone)", "None"
-NEVER use spatial relationships or adjacency.
+**anchorPoint:** Tier 1 anchor physically located IN this zone at 60%+ confidence. Examples: "Fireplace (center-back wall)", "Ceiling fan (center-ceiling)", "Chandelier (center-zone)", "None"
 
 **focalPoint:** Architectural feature or fixture physically located IN this zone at 70%+ confidence. NOT furniture placement.
-Examples: "Fireplace wall with marble surround", "Large window wall", "Built-in cabinetry", "Open floor plane"
-NOT: "Use fireplace as anchor" or "Face towards kitchen" ← NO furniture instructions.
 
-**furnishing:** EXACT instruction from logic rules above. Use zone name + anchor type to select correct instruction.
-Do NOT modify. Do NOT add personal variations.
+**furnishing:** EXACT instruction from logic rules above. Do NOT modify.
 
 ═════════════════════════════════════════════════════════════════════════════════
 
 OUTPUT FORMAT (STRICT JSON ONLY):
 
-Return ONLY a valid JSON array. One object per zone. NO additional text, NO markdown, NO explanations.
+Return ONLY a valid JSON array. One object per zone. NO additional text.
 
 [
   {
@@ -176,503 +141,214 @@ Return ONLY a valid JSON array. One object per zone. NO additional text, NO mark
     "anchorPoint": "...",
     "focalPoint": "...",
     "furnishing": "..."
-  },
-  {
-    "zoneName": "Dining Zone",
-    "boundaries": "...",
-    "fixtures": "None",
-    "cabinetry": "None",
-    "windowsDoors": "...",
-    "anchorPoint": "...",
-    "focalPoint": "...",
-    "furnishing": "..."
   }
 ]
 
-═════════════════════════════════════════════════════════════════════════════════
-
-Now analyze the uploaded photo. Identify each distinct zone based on visible architecture and boundaries.
-For each zone, return ONLY the 7-field JSON object above.
-Use confidence thresholds strictly. List ONLY what is present in or attached to each zone.
-Return ONLY valid JSON. No other output.`;
+Now analyze the uploaded photo. Return ONLY valid JSON.`;
 }
-
-// ════════════════════════════════════════════════════════════════════════════════
-// PHASE 5A TIER LOGIC WITH DEBUG LOGGING STORED IN BLOBS
-// Returns debug logs you can actually see in the response
-// ════════════════════════════════════════════════════════════════════════════════
-
-function applyTierLogicWithLogging(zones) {
-  if (!Array.isArray(zones)) {
-    console.log('applyTierLogic: Input is not array, returning as-is');
-    return { zones, logs: ['Input is not array, returning as-is'] };
-  }
-
-  const logs = [];
-  logs.push(`[DEBUG] applyTierLogic: Processing ${zones.length} zones`);
-
-  const processedZones = zones.map((zone, idx) => {
-    const zoneName = (zone.zoneName || '').trim().toLowerCase();
-    const anchorPoint = (zone.anchorPoint || '').trim();
-    
-    // Detect if Tier 1 anchor exists
-    const hasAnchor = anchorPoint && anchorPoint !== 'None' && anchorPoint.length > 0;
-    const anchorLower = hasAnchor ? anchorPoint.toLowerCase() : '';
-
-    logs.push(`[Zone ${idx}] INPUT: name="${zone.zoneName}" anchor="${anchorPoint}"`);
-
-    let furnishing = '';
-    let ruleApplied = '';
-
-    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    // TIER LOGIC
-    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-    // 1. HALLWAY / CIRCULATION
-    if (zoneName.includes('hallway') || zoneName.includes('circulation') || 
-        zoneName.includes('entry') || zoneName.includes('foyer') || 
-        zoneName.includes('passage') || zoneName.includes('corridor')) {
-      furnishing = 'LEAVE VACANT';
-      ruleApplied = 'HALLWAY_RULE';
-      logs.push(`  → MATCHED: Hallway/Circulation (Rule #1)`);
-    }
-    
-    // 2. KITCHEN
-    else if (zoneName.includes('kitchen')) {
-      furnishing = 'Style & Main Pieces: Kitchen island (1), bar stools (quantity per clearance), cabinetry (built-in, fixed). Incorporate tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic.';
-      ruleApplied = 'KITCHEN_RULE';
-      logs.push(`  → MATCHED: Kitchen (Rule #2)`);
-    }
-
-    // 3. DINING + CHANDELIER/PENDANT (TIER 1)
-    else if (zoneName.includes('dining') && (anchorLower.includes('chandelier') || anchorLower.includes('pendant'))) {
-      furnishing = 'Place an area rug proportional to seating group with a round or rectangular dining table and seating not to exceed 6 chairs, in the open space. Incorporate gentle tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic. Floor runners are prohibited.';
-      ruleApplied = 'DINING_TIER1_CHANDELIER';
-      logs.push(`  → MATCHED: Dining + Chandelier/Pendant Tier 1 (Rule #3)`);
-    }
-
-    // 4. DINING + NO ANCHOR (TIER 2)
-    else if (zoneName.includes('dining') && !hasAnchor) {
-      furnishing = 'Style & Main Pieces: [Transitional]. A round or rectangular dining table and seating not to exceed 6 chairs. Place an area rug proportional to seating group. Incorporate gentle tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic. Floor runners are prohibited.';
-      ruleApplied = 'DINING_TIER2_NOANCHOR';
-      logs.push(`  → MATCHED: Dining Tier 2 (no anchor) (Rule #4)`);
-    }
-
-    // 5. LIVING + FIREPLACE (TIER 1)
-    else if ((zoneName.includes('living') || zoneName.includes('great room')) && anchorLower.includes('fireplace')) {
-      furnishing = 'Place an area rug proportional for the seating group 18" in front of the Fireplace anchoring the seating group to the Fireplace wall. Place a coffee table centered on the rug and Fireplace. Incorporate gentle tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic.';
-      ruleApplied = 'LIVING_TIER1_FIREPLACE';
-      logs.push(`  → MATCHED: Living + Fireplace Tier 1 (Rule #5)`);
-    }
-
-    // 6. LIVING + CEILING FAN (TIER 1)
-    else if ((zoneName.includes('living') || zoneName.includes('great room')) && anchorLower.includes('ceiling fan')) {
-      furnishing = 'Place an area rug proportional for the seating group centered beneath the ceiling fan. Place a coffee table centered on the rug and ceiling fan. Incorporate gentle tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic.';
-      ruleApplied = 'LIVING_TIER1_CEILINGFAN';
-      logs.push(`  → MATCHED: Living + Ceiling Fan Tier 1 (Rule #6)`);
-    }
-
-    // 7. LIVING + NO ANCHOR (TIER 2)
-    else if ((zoneName.includes('living') || zoneName.includes('great room')) && !hasAnchor) {
-      furnishing = 'Style & Main Pieces: [Transitional]. Seating arrangement with sofa and accent chairs. Place an area rug proportional to seating group. Incorporate gentle tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic. Floor runners are prohibited.';
-      ruleApplied = 'LIVING_TIER2_NOANCHOR';
-      logs.push(`  → MATCHED: Living Tier 2 (no anchor) (Rule #7)`);
-    }
-
-    // 8. BEDROOM
-    else if (zoneName.includes('bedroom')) {
-      furnishing = 'Style & Main Pieces: Bed (1), nightstands (2), accent seating (optional). Incorporate tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic.';
-      ruleApplied = 'BEDROOM_RULE';
-      logs.push(`  → MATCHED: Bedroom (Rule #8)`);
-    }
-
-    // 9. FALLBACK
-    else {
-      furnishing = zone.furnishing || 'Generic styling. Incorporate tasteful props and decorative art to enhance visual depth.';
-      ruleApplied = 'FALLBACK';
-      logs.push(`  → NO RULE MATCHED, using fallback (Rule #9)`);
-    }
-
-    logs.push(`  → FURNISHING: ${furnishing.substring(0, 80)}...`);
-    logs.push(`  → RULE APPLIED: ${ruleApplied}`);
-    logs.push('');
-
-    return { 
-      ...zone, 
-      furnishing,
-      _ruleApplied: ruleApplied  // Store which rule was applied (optional, for debugging)
-    };
-  });
-
-  return { zones: processedZones, logs };
-}
-
-// ════════════════════════════════════════════════════════════════════════════════
-// USAGE IN runSpatialRead():
-// ════════════════════════════════════════════════════════════════════════════════
-//
-//   let zones = [];
-//   try {
-//     zones = JSON.parse(textContent.text);
-//   } catch (e) { ... }
-//
-//   if (!Array.isArray(zones)) zones = [zones];
-//
-//   // ✅ Apply tier logic WITH DEBUG LOGGING
-//   const tierResult = applyTierLogicWithLogging(zones);
-//   const tieredZones = tierResult.zones;
-//   const debugLogs = tierResult.logs;
-//
-//   console.log('Tier Logic Debug Logs:');
-//   debugLogs.forEach(log => console.log(log));
-//
-//   // Store the logs in Blobs so they're visible in the response
-//   // (Add to the result object before storing in Blobs)
-//
-//   return {
-//     zones: tieredZones,
-//     debugLogs: debugLogs,  // ✅ RETURN LOGS SO YOU CAN SEE THEM
-//     confidence: 'HIGH'
-//   };
-// ════════════════════════════════════════════════════════════════════════════════
-
-
-    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    // TIER LOGIC — Explicit priority order
-    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-    // 1. HALLWAY / CIRCULATION — ALWAYS LEAVE VACANT
-    if (zoneName.includes('hallway') || zoneName.includes('circulation') || 
-        zoneName.includes('entry') || zoneName.includes('foyer') || 
-        zoneName.includes('passage') || zoneName.includes('corridor')) {
-      furnishing = 'LEAVE VACANT';
-      console.log(`  → Hallway/Circulation rule matched`);
-    }
-    
-    // 2. KITCHEN — Always this instruction
-    else if (zoneName.includes('kitchen')) {
-      furnishing = 'Style & Main Pieces: Kitchen island (1), bar stools (quantity per clearance), cabinetry (built-in, fixed). Incorporate tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic.';
-      console.log(`  → Kitchen rule matched`);
-    }
-
-    // 3. DINING + CHANDELIER/PENDANT (TIER 1)
-    else if (zoneName.includes('dining') && (anchorLower.includes('chandelier') || anchorLower.includes('pendant'))) {
-      furnishing = 'Place an area rug proportional to seating group with a round or rectangular dining table and seating not to exceed 6 chairs, in the open space. Incorporate gentle tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic. Floor runners are prohibited.';
-      console.log(`  → Dining + Chandelier/Pendant (Tier 1) matched`);
-    }
-
-    // 4. DINING + NO ANCHOR (TIER 2)
-    else if (zoneName.includes('dining') && !hasAnchor) {
-      furnishing = 'Style & Main Pieces: [Transitional]. A round or rectangular dining table and seating not to exceed 6 chairs. Place an area rug proportional to seating group. Incorporate gentle tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic. Floor runners are prohibited.';
-      console.log(`  → Dining Tier 2 (no anchor) matched`);
-    }
-
-    // 5. LIVING + FIREPLACE (TIER 1)
-    else if ((zoneName.includes('living') || zoneName.includes('great room')) && anchorLower.includes('fireplace')) {
-      furnishing = 'Place an area rug proportional for the seating group 18" in front of the Fireplace anchoring the seating group to the Fireplace wall. Place a coffee table centered on the rug and Fireplace. Incorporate gentle tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic.';
-      console.log(`  → Living + Fireplace (Tier 1) matched`);
-    }
-
-    // 6. LIVING + CEILING FAN (TIER 1)
-    else if ((zoneName.includes('living') || zoneName.includes('great room')) && anchorLower.includes('ceiling fan')) {
-      furnishing = 'Place an area rug proportional for the seating group centered beneath the ceiling fan. Place a coffee table centered on the rug and ceiling fan. Incorporate gentle tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic.';
-      console.log(`  → Living + Ceiling Fan (Tier 1) matched`);
-    }
-
-    // 7. LIVING + NO ANCHOR (TIER 2)
-    else if ((zoneName.includes('living') || zoneName.includes('great room')) && !hasAnchor) {
-      furnishing = 'Style & Main Pieces: [Transitional]. Seating arrangement with sofa and accent chairs. Place an area rug proportional to seating group. Incorporate gentle tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic. Floor runners are prohibited.';
-      console.log(`  → Living Tier 2 (no anchor) matched`);
-    }
-
-    // 8. BEDROOM
-    else if (zoneName.includes('bedroom')) {
-      furnishing = 'Style & Main Pieces: Bed (1), nightstands (2), accent seating (optional). Incorporate tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic.';
-      console.log(`  → Bedroom rule matched`);
-    }
-
-    // 9. FALLBACK (Unknown zone type — preserve original or generic)
-    else {
-      furnishing = zone.furnishing || 'Generic styling. Incorporate tasteful props and decorative art to enhance visual depth.';
-      console.log(`  → No rule matched, using fallback`);
-    }
-
-    // Return updated zone with overwritten furnishing
-    return { 
-      ...zone, 
-      furnishing 
-    };
-  });
-}
-
-// ════════════════════════════════════════════════════════════════════════════════
-// USAGE in runSpatialRead():
-// ════════════════════════════════════════════════════════════════════════════════
-// 
-//   let zones = [];
-//   try {
-//     zones = JSON.parse(textContent.text);
-//   } catch (e) { ... }
-//
-//   if (!Array.isArray(zones)) zones = [zones];
-//
-// ════════════════════════════════════════════════════════════════════════════════
-// PHASE 5A TIER LOGIC — BULLETPROOF VERSION
-// Replace your current applyTierLogic with this version
-// ════════════════════════════════════════════════════════════════════════════════
 
 function applyTierLogic(zones) {
-  if (!Array.isArray(zones)) {
-    console.log('applyTierLogic: Input is not array, returning as-is');
-    return zones;
-  }
-
-  console.log(`applyTierLogic: Processing ${zones.length} zones`);
-
-  return zones.map((zone, idx) => {
+  if (!Array.isArray(zones)) return zones;
+  
+  return zones.map(zone => {
     const zoneName = (zone.zoneName || '').trim().toLowerCase();
     const anchorPoint = (zone.anchorPoint || '').trim();
-    
-    // Detect if Tier 1 anchor exists
     const hasAnchor = anchorPoint && anchorPoint !== 'None' && anchorPoint.length > 0;
     const anchorLower = hasAnchor ? anchorPoint.toLowerCase() : '';
-
-    console.log(`[Zone ${idx}] name="${zone.zoneName}" anchor="${anchorPoint}" hasAnchor=${hasAnchor}`);
-
+    
     let furnishing = '';
 
-    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    // TIER LOGIC — Explicit priority order
-    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-    // 1. HALLWAY / CIRCULATION — ALWAYS LEAVE VACANT
-    if (zoneName.includes('hallway') || zoneName.includes('circulation') || 
-        zoneName.includes('entry') || zoneName.includes('foyer') || 
-        zoneName.includes('passage') || zoneName.includes('corridor')) {
+    if (zoneName.includes('hallway') || zoneName.includes('circulation') || zoneName.includes('entry') || zoneName.includes('foyer')) {
       furnishing = 'LEAVE VACANT';
-      console.log(`  → Hallway/Circulation rule matched`);
     }
-    
-    // 2. KITCHEN — Always this instruction
     else if (zoneName.includes('kitchen')) {
       furnishing = 'Style & Main Pieces: Kitchen island (1), bar stools (quantity per clearance), cabinetry (built-in, fixed). Incorporate tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic.';
-      console.log(`  → Kitchen rule matched`);
     }
-
-    // 3. DINING + CHANDELIER/PENDANT (TIER 1)
     else if (zoneName.includes('dining') && (anchorLower.includes('chandelier') || anchorLower.includes('pendant'))) {
       furnishing = 'Place an area rug proportional to seating group with a round or rectangular dining table and seating not to exceed 6 chairs, in the open space. Incorporate gentle tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic. Floor runners are prohibited.';
-      console.log(`  → Dining + Chandelier/Pendant (Tier 1) matched`);
     }
-
-    // 4. DINING + NO ANCHOR (TIER 2)
     else if (zoneName.includes('dining') && !hasAnchor) {
       furnishing = 'Style & Main Pieces: [Transitional]. A round or rectangular dining table and seating not to exceed 6 chairs. Place an area rug proportional to seating group. Incorporate gentle tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic. Floor runners are prohibited.';
-      console.log(`  → Dining Tier 2 (no anchor) matched`);
     }
-
-    // 5. LIVING + FIREPLACE (TIER 1)
     else if ((zoneName.includes('living') || zoneName.includes('great room')) && anchorLower.includes('fireplace')) {
       furnishing = 'Place an area rug proportional for the seating group 18" in front of the Fireplace anchoring the seating group to the Fireplace wall. Place a coffee table centered on the rug and Fireplace. Incorporate gentle tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic.';
-      console.log(`  → Living + Fireplace (Tier 1) matched`);
     }
-
-    // 6. LIVING + CEILING FAN (TIER 1)
     else if ((zoneName.includes('living') || zoneName.includes('great room')) && anchorLower.includes('ceiling fan')) {
       furnishing = 'Place an area rug proportional for the seating group centered beneath the ceiling fan. Place a coffee table centered on the rug and ceiling fan. Incorporate gentle tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic.';
-      console.log(`  → Living + Ceiling Fan (Tier 1) matched`);
     }
-
-    // 7. LIVING + NO ANCHOR (TIER 2)
     else if ((zoneName.includes('living') || zoneName.includes('great room')) && !hasAnchor) {
       furnishing = 'Style & Main Pieces: [Transitional]. Seating arrangement with sofa and accent chairs. Place an area rug proportional to seating group. Incorporate gentle tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic. Floor runners are prohibited.';
-      console.log(`  → Living Tier 2 (no anchor) matched`);
     }
 
-    // 8. BEDROOM
-    else if (zoneName.includes('bedroom')) {
-      furnishing = 'Style & Main Pieces: Bed (1), nightstands (2), accent seating (optional). Incorporate tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic.';
-      console.log(`  → Bedroom rule matched`);
-    }
-
-    // 9. FALLBACK (Unknown zone type — preserve original or generic)
-    else {
-      furnishing = zone.furnishing || 'Generic styling. Incorporate tasteful props and decorative art to enhance visual depth.';
-      console.log(`  → No rule matched, using fallback`);
-    }
-
-    // Return updated zone with overwritten furnishing
-    return { 
-      ...zone, 
-      furnishing 
-    };
+    return { ...zone, furnishing };
   });
 }
 
 // ════════════════════════════════════════════════════════════════════════════════
-// USAGE in runSpatialRead():
-// ════════════════════════════════════════════════════════════════════════════════
-// 
-//   let zones = [];
-//   try {
-//     zones = JSON.parse(textContent.text);
-//   } catch (e) { ... }
-//
-//   if (!Array.isArray(zones)) zones = [zones];
-//
-//   // ✅ Apply tier logic (OVERWRITES furnishing field)
-//   const tieredZones = applyTierLogic(zones);
-//
-//   return {
-//     zones: tieredZones,
-//     confidence: 'HIGH'
-//   };
-// ════════════════════════════════════════════════════════════════════════════════
-
-// ════════════════════════════════════════════════════════════════════════════════
-
-// ════════════════════════════════════════════════════════════════════════════════
-// PHASE 5A HAIKU SPATIAL READ — Multi-angle group read
-// ════════════════════════════════════════════════════════════════════════════════
-
-async function runSpatialRead({ imageDataArray, claudeKey }) {
-  if (!imageDataArray || imageDataArray.length === 0) {
-    throw new Error('No images provided');
-  }
-
-  const prompt = buildHaikuSpatialReadPrompt();
-
-  const imageContent = imageDataArray.map((img, idx) => ({
-    type: 'image',
-    source: {
-      type: 'base64',
-      media_type: img.mimeType,
-      data: img.base64
-    }
-  }));
-
-  imageContent.push({
-    type: 'text',
-    text: prompt
-  });
-
-  const body = JSON.stringify({
-    model: 'claude-3-5-haiku-20241022',
-    max_tokens: 2000,
-    messages: [
-      {
-        role: 'user',
-        content: imageContent
-      }
-    ]
-  });
-
-  const options = {
-    hostname: 'api.anthropic.com',
-    port: 443,
-    path: '/v1/messages',
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': claudeKey,
-      'anthropic-version': '2023-06-01',
-      'Content-Length': Buffer.byteLength(body)
-    }
-  };
-
-  const response = await httpsRequest(options, body);
-  if (response.status !== 200) {
-    throw new Error(`Haiku API error: ${response.status} - ${JSON.stringify(response.body)}`);
-  }
-
-  const textContent = response.body.content?.find(c => c.type === 'text');
-  if (!textContent) throw new Error('No text response from Haiku');
-
-  let zones = [];
-  try {
-    zones = JSON.parse(textContent.text);
-  } catch (e) {
-    console.error('Haiku JSON parse failed:', e.message);
-    console.error('Raw response:', textContent.text);
-    throw new Error('Failed to parse Haiku response as JSON');
-  }
-
-  if (!Array.isArray(zones)) zones = [zones];
-
-  // Apply tier logic
-  const tieredZones = applyTierLogic(zones);
-
-  return {
-    zones: tieredZones,
-    confidence: 'HIGH'
-  };
-}
-
-// ════════════════════════════════════════════════════════════════════════════════
-// MAIN BACKGROUND HANDLER — Stores results in Blobs for polling
+// MAIN HANDLER — With comprehensive logging stored in Blobs
 // ════════════════════════════════════════════════════════════════════════════════
 
 exports.handler = async (event, context) => {
-  const jobId = event.queryStringParameters?.jobId;
-  
+  const startTime = Date.now();
+  const diagnosticLogs = [];
+  let jobId = null;
+
+  function log(msg) {
+    const timestamp = new Date().toISOString();
+    const fullMsg = `[${timestamp}] ${msg}`;
+    console.log(fullMsg);
+    diagnosticLogs.push(fullMsg);
+  }
+
   try {
-    if (!jobId) {
-      console.error('No jobId in handler call');
-      return { statusCode: 400, body: JSON.stringify({ error: "Missing jobId" }) };
+    log('🚀 Handler started');
+    
+    // Parse request
+    log('Parsing request body...');
+    const body = JSON.parse(event.body || '{}');
+    const { images, groupType, jobId: incomingJobId } = body;
+    jobId = incomingJobId || `gsr-${Date.now()}-auto`;
+
+    log(`jobId: ${jobId}`);
+    log(`groupType: ${groupType}`);
+    log(`images count: ${images?.length || 0}`);
+
+    if (!images || images.length === 0) {
+      throw new Error('No images provided');
     }
 
-    const { images, groupType } = JSON.parse(event.rawBody || '{}');
-    const claudeKey = process.env.ANTHROPIC_API_KEY;
-
-    if (!claudeKey) {
-      throw new Error("ANTHROPIC_API_KEY not configured");
-    }
-
-    console.log(`🚀 Background handler: jobId=${jobId}, images=${images?.length || 0}`);
+    // Get Blobs store
+    log('Initializing Blobs store...');
+    const siteID = process.env.SZREG_SITE_ID || process.env.NETLIFY_SITE_ID;
+    const token = process.env.NETLIFY_ACCESS_TOKEN;
+    const store = getStore({ name: 'spatial-jobs', siteID, token });
+    log(`Store initialized: siteID=${siteID}`);
 
     // Prepare images
+    log('Preparing images...');
     const preparedImages = await Promise.all(
-      (images || []).map(img => prepareImage(img.base64, img.mimeType || detectMime(img.base64)))
+      images.map((img, idx) => {
+        log(`  Preparing image ${idx}...`);
+        return prepareImage(img.base64, img.mimeType);
+      })
     );
+    log(`✅ ${preparedImages.length} images prepared`);
 
-    // Run Haiku spatial read with tier logic applied
-    console.log('📝 Running Haiku spatial read...');
-    const spatialData = await runSpatialRead({
-      imageDataArray: preparedImages,
-      claudeKey
+    // Build Haiku prompt
+    log('Building Haiku prompt...');
+    const prompt = buildHaikuSpatialReadPrompt();
+    log(`✅ Prompt built (${prompt.length} chars)`);
+
+    // Prepare Haiku request
+    log('Preparing Haiku API request...');
+    const claudeKey = process.env.ANTHROPIC_API_KEY;
+    if (!claudeKey) throw new Error('ANTHROPIC_API_KEY not configured');
+
+    const imageContent = preparedImages.map((img, idx) => ({
+      type: 'image',
+      source: { type: 'base64', media_type: img.mimeType, data: img.base64 }
+    }));
+    imageContent.push({ type: 'text', text: prompt });
+
+    const payload = JSON.stringify({
+      model: 'claude-3-5-haiku-20241022',
+      max_tokens: 2000,
+      messages: [{ role: 'user', content: imageContent }]
     });
 
-    console.log('✅ Spatial read complete:', spatialData.zones?.length, 'zones');
+    log(`Payload size: ${(Buffer.byteLength(payload) / 1024).toFixed(1)}KB`);
 
-    // ✅ CRITICAL: Store results in Blobs so check-spatial-read can retrieve them
-    const siteID = process.env.SZREG_SITE_ID || process.env.NETLIFY_SITE_ID;
-    const token  = process.env.NETLIFY_ACCESS_TOKEN;
-    const store  = getStore({ name: "spatial-jobs", siteID, token });
+    // Call Haiku
+    log('🧠 Calling Haiku API...');
+    const haikuStart = Date.now();
+    const haikuResponse = await httpsRequest({
+      hostname: 'api.anthropic.com',
+      port: 443,
+      path: '/v1/messages',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': claudeKey,
+        'anthropic-version': '2023-06-01',
+        'Content-Length': Buffer.byteLength(payload)
+      }
+    }, payload);
+    const haikuDuration = Date.now() - haikuStart;
 
-    const result = {
-      status: "done",
-      spatialData,
-      timestamp: new Date().toISOString()
-    };
+    log(`✅ Haiku response: status=${haikuResponse.status}, duration=${haikuDuration}ms`);
 
-    await store.set(jobId, result, { type: "json" });
-    console.log(`💾 Stored results in Blobs: jobId=${jobId}`);
-
-    return { statusCode: 200, body: JSON.stringify({ success: true, jobId }) };
-
-  } catch (err) {
-    console.error("group-spatial-read-background error:", err.message);
-    
-    // Store error in Blobs so polling knows to fail
-    try {
-      const siteID = process.env.SZREG_SITE_ID || process.env.NETLIFY_SITE_ID;
-      const token  = process.env.NETLIFY_ACCESS_TOKEN;
-      const store  = getStore({ name: "spatial-jobs", siteID, token });
-      await store.set(jobId, { status: "error", error: err.message }, { type: "json" });
-    } catch(e) {
-      console.error("Error storing failure in Blobs:", e.message);
+    if (haikuResponse.status !== 200) {
+      throw new Error(`Haiku API error: ${haikuResponse.status} - ${JSON.stringify(haikuResponse.body).slice(0, 200)}`);
     }
 
-    return { statusCode: 500, body: JSON.stringify({ error: err.message }) };
+    // Parse Haiku response
+    log('Parsing Haiku response...');
+    const textContent = haikuResponse.body.content?.find(c => c.type === 'text');
+    if (!textContent) throw new Error('No text content in Haiku response');
+
+    let zones = [];
+    try {
+      zones = JSON.parse(textContent.text);
+      log(`✅ Parsed zones: ${zones.length}`);
+    } catch (e) {
+      log(`⚠️  JSON parse failed: ${e.message}`);
+      log(`Raw response (first 500 chars): ${textContent.text.slice(0, 500)}`);
+      throw new Error(`Failed to parse Haiku JSON: ${e.message}`);
+    }
+
+    if (!Array.isArray(zones)) zones = [zones];
+
+    // Apply tier logic
+    log('Applying tier logic...');
+    const tieredZones = applyTierLogic(zones);
+    log(`✅ Tier logic applied to ${tieredZones.length} zones`);
+
+    // Store in Blobs
+    log('💾 Storing results in Blobs...');
+    const result = {
+      status: 'done',
+      spatialData: {
+        zones: tieredZones,
+        confidence: 'HIGH'
+      },
+      diagnosticLogs: diagnosticLogs,
+      timestamp: new Date().toISOString(),
+      duration: Date.now() - startTime
+    };
+
+    await store.set(jobId, result, { type: 'json' });
+    log(`✅ Results stored in Blobs`);
+
+    // SUCCESS
+    log(`✅ Handler completed successfully in ${Date.now() - startTime}ms`);
+    return { statusCode: 200, body: JSON.stringify({ success: true, jobId, duration: Date.now() - startTime }) };
+
+  } catch (err) {
+    log(`❌ ERROR: ${err.message}`);
+    log(`Stack: ${err.stack?.slice(0, 300) || 'N/A'}`);
+
+    // Store error in Blobs
+    try {
+      if (jobId) {
+        const siteID = process.env.SZREG_SITE_ID || process.env.NETLIFY_SITE_ID;
+        const token = process.env.NETLIFY_ACCESS_TOKEN;
+        const store = getStore({ name: 'spatial-jobs', siteID, token });
+        
+        const errorResult = {
+          status: 'error',
+          error: err.message,
+          diagnosticLogs: diagnosticLogs,
+          timestamp: new Date().toISOString(),
+          duration: Date.now() - startTime
+        };
+        
+        await store.set(jobId, errorResult, { type: 'json' });
+        log(`✅ Error stored in Blobs`);
+      }
+    } catch (storageErr) {
+      log(`⚠️  Failed to store error in Blobs: ${storageErr.message}`);
+    }
+
+    return { statusCode: 500, body: JSON.stringify({ error: err.message, diagnosticLogs }) };
   }
 };

@@ -108,24 +108,33 @@ IF Zone = Bedroom:
 
 ═════════════════════════════════════════════════════════════════════════════════
 
-OUTPUT FORMAT (STRICT JSON ONLY):
+OUTPUT FORMAT (CRITICAL - JSON ARRAY ONLY, ABSOLUTELY NO MARKDOWN):
 
-Return ONLY a valid JSON array. One object per zone. NO additional text.
+You MUST output ONLY a raw JSON array. NOT IN CODE BLOCKS. NOT IN MARKDOWN. NO BACKTICKS. NO EXPLANATION.
 
+Raw JSON format (nothing else):
 [
   {
-    "zoneName": "Kitchen",
+    "name": "Kitchen",
     "boundaries": "...",
     "fixtures": "...",
     "cabinetry": "...",
-    "windowsDoors": "...",
-    "anchorPoint": "...",
-    "focalPoint": "...",
-    "furnishing": "..."
+    "windows_doors": "...",
+    "anchor_point": {"location": "Chandelier | Fireplace | None", "confidence": "HIGH"},
+    "focal_point": "..."
   }
 ]
 
-Now analyze the uploaded photo. Return ONLY valid JSON.`;
+CRITICAL RULES:
+- Output ONLY the JSON array
+- NO markdown code blocks
+- NO backticks
+- NO triple backticks
+- NO explanatory text before or after
+- START with [ and END with ]
+- If you use backticks, the output will fail
+
+Now analyze the uploaded photo. Output ONLY raw JSON array.`;
 }
 
 function applyTierLogic(zones) {
@@ -251,9 +260,17 @@ exports.handler = async (event) => {
     console.log('Parsing zones...');
     let zones = [];
     try {
-      zones = JSON.parse(textContent.text);
+      // Defensive parsing: strip Markdown backticks if present
+      let jsonText = textContent.text.trim();
+      if (jsonText.startsWith('```json')) jsonText = jsonText.slice(7); // Remove ```json
+      if (jsonText.startsWith('```')) jsonText = jsonText.slice(3);     // Remove ```
+      if (jsonText.endsWith('```')) jsonText = jsonText.slice(0, -3);   // Remove trailing ```
+      jsonText = jsonText.trim();
+      
+      zones = JSON.parse(jsonText);
     } catch (e) {
       console.error('Zone parse error:', e.message);
+      console.error('Raw text first 200 chars:', textContent.text.slice(0, 200));
       throw new Error(`Failed to parse zones: ${e.message}`);
     }
 
@@ -315,4 +332,3 @@ exports.handler = async (event) => {
     return { statusCode: 500, body: JSON.stringify({ error: err.message }) };
   }
 };
-

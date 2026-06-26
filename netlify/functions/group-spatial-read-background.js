@@ -198,6 +198,225 @@ Return ONLY valid JSON. No other output.`;
 }
 
 // ════════════════════════════════════════════════════════════════════════════════
+// PHASE 5A TIER LOGIC WITH DEBUG LOGGING STORED IN BLOBS
+// Returns debug logs you can actually see in the response
+// ════════════════════════════════════════════════════════════════════════════════
+
+function applyTierLogicWithLogging(zones) {
+  if (!Array.isArray(zones)) {
+    console.log('applyTierLogic: Input is not array, returning as-is');
+    return { zones, logs: ['Input is not array, returning as-is'] };
+  }
+
+  const logs = [];
+  logs.push(`[DEBUG] applyTierLogic: Processing ${zones.length} zones`);
+
+  const processedZones = zones.map((zone, idx) => {
+    const zoneName = (zone.zoneName || '').trim().toLowerCase();
+    const anchorPoint = (zone.anchorPoint || '').trim();
+    
+    // Detect if Tier 1 anchor exists
+    const hasAnchor = anchorPoint && anchorPoint !== 'None' && anchorPoint.length > 0;
+    const anchorLower = hasAnchor ? anchorPoint.toLowerCase() : '';
+
+    logs.push(`[Zone ${idx}] INPUT: name="${zone.zoneName}" anchor="${anchorPoint}"`);
+
+    let furnishing = '';
+    let ruleApplied = '';
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // TIER LOGIC
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    // 1. HALLWAY / CIRCULATION
+    if (zoneName.includes('hallway') || zoneName.includes('circulation') || 
+        zoneName.includes('entry') || zoneName.includes('foyer') || 
+        zoneName.includes('passage') || zoneName.includes('corridor')) {
+      furnishing = 'LEAVE VACANT';
+      ruleApplied = 'HALLWAY_RULE';
+      logs.push(`  → MATCHED: Hallway/Circulation (Rule #1)`);
+    }
+    
+    // 2. KITCHEN
+    else if (zoneName.includes('kitchen')) {
+      furnishing = 'Style & Main Pieces: Kitchen island (1), bar stools (quantity per clearance), cabinetry (built-in, fixed). Incorporate tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic.';
+      ruleApplied = 'KITCHEN_RULE';
+      logs.push(`  → MATCHED: Kitchen (Rule #2)`);
+    }
+
+    // 3. DINING + CHANDELIER/PENDANT (TIER 1)
+    else if (zoneName.includes('dining') && (anchorLower.includes('chandelier') || anchorLower.includes('pendant'))) {
+      furnishing = 'Place an area rug proportional to seating group with a round or rectangular dining table and seating not to exceed 6 chairs, in the open space. Incorporate gentle tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic. Floor runners are prohibited.';
+      ruleApplied = 'DINING_TIER1_CHANDELIER';
+      logs.push(`  → MATCHED: Dining + Chandelier/Pendant Tier 1 (Rule #3)`);
+    }
+
+    // 4. DINING + NO ANCHOR (TIER 2)
+    else if (zoneName.includes('dining') && !hasAnchor) {
+      furnishing = 'Style & Main Pieces: [Transitional]. A round or rectangular dining table and seating not to exceed 6 chairs. Place an area rug proportional to seating group. Incorporate gentle tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic. Floor runners are prohibited.';
+      ruleApplied = 'DINING_TIER2_NOANCHOR';
+      logs.push(`  → MATCHED: Dining Tier 2 (no anchor) (Rule #4)`);
+    }
+
+    // 5. LIVING + FIREPLACE (TIER 1)
+    else if ((zoneName.includes('living') || zoneName.includes('great room')) && anchorLower.includes('fireplace')) {
+      furnishing = 'Place an area rug proportional for the seating group 18" in front of the Fireplace anchoring the seating group to the Fireplace wall. Place a coffee table centered on the rug and Fireplace. Incorporate gentle tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic.';
+      ruleApplied = 'LIVING_TIER1_FIREPLACE';
+      logs.push(`  → MATCHED: Living + Fireplace Tier 1 (Rule #5)`);
+    }
+
+    // 6. LIVING + CEILING FAN (TIER 1)
+    else if ((zoneName.includes('living') || zoneName.includes('great room')) && anchorLower.includes('ceiling fan')) {
+      furnishing = 'Place an area rug proportional for the seating group centered beneath the ceiling fan. Place a coffee table centered on the rug and ceiling fan. Incorporate gentle tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic.';
+      ruleApplied = 'LIVING_TIER1_CEILINGFAN';
+      logs.push(`  → MATCHED: Living + Ceiling Fan Tier 1 (Rule #6)`);
+    }
+
+    // 7. LIVING + NO ANCHOR (TIER 2)
+    else if ((zoneName.includes('living') || zoneName.includes('great room')) && !hasAnchor) {
+      furnishing = 'Style & Main Pieces: [Transitional]. Seating arrangement with sofa and accent chairs. Place an area rug proportional to seating group. Incorporate gentle tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic. Floor runners are prohibited.';
+      ruleApplied = 'LIVING_TIER2_NOANCHOR';
+      logs.push(`  → MATCHED: Living Tier 2 (no anchor) (Rule #7)`);
+    }
+
+    // 8. BEDROOM
+    else if (zoneName.includes('bedroom')) {
+      furnishing = 'Style & Main Pieces: Bed (1), nightstands (2), accent seating (optional). Incorporate tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic.';
+      ruleApplied = 'BEDROOM_RULE';
+      logs.push(`  → MATCHED: Bedroom (Rule #8)`);
+    }
+
+    // 9. FALLBACK
+    else {
+      furnishing = zone.furnishing || 'Generic styling. Incorporate tasteful props and decorative art to enhance visual depth.';
+      ruleApplied = 'FALLBACK';
+      logs.push(`  → NO RULE MATCHED, using fallback (Rule #9)`);
+    }
+
+    logs.push(`  → FURNISHING: ${furnishing.substring(0, 80)}...`);
+    logs.push(`  → RULE APPLIED: ${ruleApplied}`);
+    logs.push('');
+
+    return { 
+      ...zone, 
+      furnishing,
+      _ruleApplied: ruleApplied  // Store which rule was applied (optional, for debugging)
+    };
+  });
+
+  return { zones: processedZones, logs };
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// USAGE IN runSpatialRead():
+// ════════════════════════════════════════════════════════════════════════════════
+//
+//   let zones = [];
+//   try {
+//     zones = JSON.parse(textContent.text);
+//   } catch (e) { ... }
+//
+//   if (!Array.isArray(zones)) zones = [zones];
+//
+//   // ✅ Apply tier logic WITH DEBUG LOGGING
+//   const tierResult = applyTierLogicWithLogging(zones);
+//   const tieredZones = tierResult.zones;
+//   const debugLogs = tierResult.logs;
+//
+//   console.log('Tier Logic Debug Logs:');
+//   debugLogs.forEach(log => console.log(log));
+//
+//   // Store the logs in Blobs so they're visible in the response
+//   // (Add to the result object before storing in Blobs)
+//
+//   return {
+//     zones: tieredZones,
+//     debugLogs: debugLogs,  // ✅ RETURN LOGS SO YOU CAN SEE THEM
+//     confidence: 'HIGH'
+//   };
+// ════════════════════════════════════════════════════════════════════════════════
+
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // TIER LOGIC — Explicit priority order
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    // 1. HALLWAY / CIRCULATION — ALWAYS LEAVE VACANT
+    if (zoneName.includes('hallway') || zoneName.includes('circulation') || 
+        zoneName.includes('entry') || zoneName.includes('foyer') || 
+        zoneName.includes('passage') || zoneName.includes('corridor')) {
+      furnishing = 'LEAVE VACANT';
+      console.log(`  → Hallway/Circulation rule matched`);
+    }
+    
+    // 2. KITCHEN — Always this instruction
+    else if (zoneName.includes('kitchen')) {
+      furnishing = 'Style & Main Pieces: Kitchen island (1), bar stools (quantity per clearance), cabinetry (built-in, fixed). Incorporate tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic.';
+      console.log(`  → Kitchen rule matched`);
+    }
+
+    // 3. DINING + CHANDELIER/PENDANT (TIER 1)
+    else if (zoneName.includes('dining') && (anchorLower.includes('chandelier') || anchorLower.includes('pendant'))) {
+      furnishing = 'Place an area rug proportional to seating group with a round or rectangular dining table and seating not to exceed 6 chairs, in the open space. Incorporate gentle tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic. Floor runners are prohibited.';
+      console.log(`  → Dining + Chandelier/Pendant (Tier 1) matched`);
+    }
+
+    // 4. DINING + NO ANCHOR (TIER 2)
+    else if (zoneName.includes('dining') && !hasAnchor) {
+      furnishing = 'Style & Main Pieces: [Transitional]. A round or rectangular dining table and seating not to exceed 6 chairs. Place an area rug proportional to seating group. Incorporate gentle tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic. Floor runners are prohibited.';
+      console.log(`  → Dining Tier 2 (no anchor) matched`);
+    }
+
+    // 5. LIVING + FIREPLACE (TIER 1)
+    else if ((zoneName.includes('living') || zoneName.includes('great room')) && anchorLower.includes('fireplace')) {
+      furnishing = 'Place an area rug proportional for the seating group 18" in front of the Fireplace anchoring the seating group to the Fireplace wall. Place a coffee table centered on the rug and Fireplace. Incorporate gentle tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic.';
+      console.log(`  → Living + Fireplace (Tier 1) matched`);
+    }
+
+    // 6. LIVING + CEILING FAN (TIER 1)
+    else if ((zoneName.includes('living') || zoneName.includes('great room')) && anchorLower.includes('ceiling fan')) {
+      furnishing = 'Place an area rug proportional for the seating group centered beneath the ceiling fan. Place a coffee table centered on the rug and ceiling fan. Incorporate gentle tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic.';
+      console.log(`  → Living + Ceiling Fan (Tier 1) matched`);
+    }
+
+    // 7. LIVING + NO ANCHOR (TIER 2)
+    else if ((zoneName.includes('living') || zoneName.includes('great room')) && !hasAnchor) {
+      furnishing = 'Style & Main Pieces: [Transitional]. Seating arrangement with sofa and accent chairs. Place an area rug proportional to seating group. Incorporate gentle tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic. Floor runners are prohibited.';
+      console.log(`  → Living Tier 2 (no anchor) matched`);
+    }
+
+    // 8. BEDROOM
+    else if (zoneName.includes('bedroom')) {
+      furnishing = 'Style & Main Pieces: Bed (1), nightstands (2), accent seating (optional). Incorporate tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic.';
+      console.log(`  → Bedroom rule matched`);
+    }
+
+    // 9. FALLBACK (Unknown zone type — preserve original or generic)
+    else {
+      furnishing = zone.furnishing || 'Generic styling. Incorporate tasteful props and decorative art to enhance visual depth.';
+      console.log(`  → No rule matched, using fallback`);
+    }
+
+    // Return updated zone with overwritten furnishing
+    return { 
+      ...zone, 
+      furnishing 
+    };
+  });
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// USAGE in runSpatialRead():
+// ════════════════════════════════════════════════════════════════════════════════
+// 
+//   let zones = [];
+//   try {
+//     zones = JSON.parse(textContent.text);
+//   } catch (e) { ... }
+//
+//   if (!Array.isArray(zones)) zones = [zones];
+//
+// ════════════════════════════════════════════════════════════════════════════════
 // PHASE 5A TIER LOGIC — BULLETPROOF VERSION
 // Replace your current applyTierLogic with this version
 // ════════════════════════════════════════════════════════════════════════════════
@@ -308,6 +527,8 @@ function applyTierLogic(zones) {
 //     zones: tieredZones,
 //     confidence: 'HIGH'
 //   };
+// ════════════════════════════════════════════════════════════════════════════════
+
 // ════════════════════════════════════════════════════════════════════════════════
 
 // ════════════════════════════════════════════════════════════════════════════════

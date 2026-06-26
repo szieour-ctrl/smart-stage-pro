@@ -19,13 +19,15 @@ exports.handler = async (event) => {
     const token  = process.env.NETLIFY_ACCESS_TOKEN;
     const store  = getStore({ name: "spatial-jobs", siteID, token });  // ✅ FIXED: matches background function
 
-    const data = await store.get(jobId, { type: "json" });
+    const result = await store.get(jobId);
 
-    if (!data) {
+    if (!result) {
       // Not yet written — background function hasn't started yet
       return { statusCode: 200, headers, body: JSON.stringify({ status: "pending" }) };
     }
 
+    // store.get() returns {key, value, shared} — extract the value
+    const data = typeof result.value === 'string' ? JSON.parse(result.value) : result.value;
     return { statusCode: 200, headers, body: JSON.stringify(data) };
 
   } catch (err) {

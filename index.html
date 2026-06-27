@@ -3370,8 +3370,10 @@ async function runGroupSpatialRead() {
     });
 
     const dispatch = await dispatchRes.json();
+    console.log('🔍 DISPATCHER RESPONSE:', dispatch);
     if (!dispatchRes.ok || dispatch.error) throw new Error(dispatch.error || 'Dispatch failed');
     const jobId = dispatch.jobId;
+    console.log('✅ EXTRACTED jobId:', jobId);
 
     // Step 2: Poll check-spatial-read every 3 seconds until done
     let data = null;
@@ -3380,8 +3382,11 @@ async function runGroupSpatialRead() {
     while (attempts < maxAttempts) {
       await new Promise(r => setTimeout(r, 3000));
       attempts++;
-      const pollRes = await fetch(`/.netlify/functions/check-spatial-read?jobId=${jobId}`);
+      const pollUrl = `/.netlify/functions/check-spatial-read?jobId=${jobId}`;
+      console.log(`🔄 POLL ATTEMPT ${attempts}: ${pollUrl}`);
+      const pollRes = await fetch(pollUrl);
       const pollData = await pollRes.json();
+      console.log(`📊 POLL RESPONSE:`, pollData);
       if (pollData.status === 'done')  { data = pollData; break; }
       if (pollData.status === 'error') throw new Error(pollData.error || 'Spatial read failed in background');
     }

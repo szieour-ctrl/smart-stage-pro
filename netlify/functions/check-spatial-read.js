@@ -24,7 +24,7 @@ exports.handler = async (event) => {
     const token = process.env.NETLIFY_ACCESS_TOKEN;
     console.log('siteID=' + (siteID ? 'SET' : 'MISSING') + ', token=' + (token ? 'SET' : 'MISSING'));
     
-    const store = getStore({ name: "spatial-jobs", siteID, token });
+    const store = getStore({ name: "staging-jobs", siteID, token });
     console.log('✅ Store initialized');
 
     // Fetch from Blobs

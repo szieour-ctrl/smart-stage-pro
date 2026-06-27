@@ -3369,8 +3369,13 @@ async function runGroupSpatialRead() {
       })
     });
 
+    console.log('📡 RAW RESPONSE STATUS:', dispatchRes.status, dispatchRes.statusText);
+    console.log('📡 RAW RESPONSE URL:', dispatchRes.url);
     const dispatch = await dispatchRes.json();
     console.log('🔍 DISPATCHER RESPONSE:', dispatch);
+    console.log('🔍 RESPONSE KEYS:', Object.keys(dispatch));
+    console.log('🔍 dispatch.jobId:', dispatch.jobId);
+    console.log('🔍 dispatch.error:', dispatch.error);
     if (!dispatchRes.ok || dispatch.error) throw new Error(dispatch.error || 'Dispatch failed');
     const jobId = dispatch.jobId;
     console.log('✅ EXTRACTED jobId:', jobId);

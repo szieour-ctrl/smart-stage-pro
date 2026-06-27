@@ -2141,6 +2141,7 @@ async function stageRoom(roomId) {
     room.stagedCleanBase64 = stagedCleanBase64;
     // Resize staged image to match original dimensions
     await resizeToMatch(room, orig, null, 'stagedBase64', stagedBase64);
+    await resizeToMatch(room, orig, null, 'stagedCleanBase64', stagedCleanBase64);
     room.status = 'done';
     room.promptStatus = null;
     room.approvedDNA = `${i.style_label} style, ${i.palette_label} palette, ${i.intensity_label} staging, ${i.buyer_label} buyer target, ${i.feeling_label} mood.`;
@@ -2376,10 +2377,12 @@ async function iterateRoom(roomId) {
     const stagedCleanBase64 = stageResult.clean;
 
     room.stagedBase64 = stagedBase64;
+    room.stagedCleanBase64 = stagedCleanBase64;
     room.lastPrompt = approvedPrompt;
     room.status = 'done';
     room.promptStatus = null;
     await resizeToMatch(room, orig, null, 'stagedBase64', stagedBase64);
+    await resizeToMatch(room, orig, null, 'stagedCleanBase64', stagedCleanBase64);
     renderRoomQueue();
     showToast(`✓ ${room.roomName} re-staged successfully.`, 'success');
   } catch (err) {
@@ -2433,11 +2436,13 @@ async function reStageRoom(roomId) {
     const stagedCleanBase64 = stageResult.clean;
 
     room.stagedBase64 = stagedBase64;
+    room.stagedCleanBase64 = stagedCleanBase64;
     room.lastPrompt = approvedPrompt;
     room.status = 'done';
     room.promptStatus = null;
     const orig = SESSION.originals.find(o => o.id === room.originalId);
     await resizeToMatch(room, orig, null, 'stagedBase64', stagedBase64);
+    await resizeToMatch(room, orig, null, 'stagedCleanBase64', stagedCleanBase64);
     renderRoomQueue();
     showToast(`✓ ${room.roomName} re-staged successfully.`, 'success');
   } catch (err) {
@@ -2787,6 +2792,7 @@ async function runCleanAndStage(roomId) {
     room.stagedCleanBase64 = cnsStageResult.clean;
     // Resize staged image to match original dimensions
     await resizeToMatch(room, orig, null, 'stagedBase64', cnsStageResult.watermarked);
+    await resizeToMatch(room, orig, null, 'stagedCleanBase64', cnsStageResult.clean);
     room.status = 'done';
     room.promptStatus = null;
     showToast('✓ Cleaned and staged.', 'success');
@@ -3602,6 +3608,7 @@ async function stageRoomWithPrompt(roomId, promptText) {
     const stagedCleanBase64 = groupResult.clean;
 
     room.stagedBase64 = stagedBase64;
+    room.stagedCleanBase64 = stagedCleanBase64;
     room.status = 'done';
     room.promptStatus = null;
     room.approvedDNA = SESSION.intake.style_label + ' style, ' + SESSION.intake.palette_label + ' palette.';
@@ -3610,6 +3617,7 @@ async function stageRoomWithPrompt(roomId, promptText) {
     if (!SESSION.anchorRoomId) SESSION.anchorRoomId = room.id;
 
     await resizeToMatch(room, orig, null, 'stagedBase64', stagedBase64);
+    await resizeToMatch(room, orig, null, 'stagedCleanBase64', stagedCleanBase64);
     renderRoomQueue();
     showToast('✓ ' + room.roomName + ' staged.', 'success');
 

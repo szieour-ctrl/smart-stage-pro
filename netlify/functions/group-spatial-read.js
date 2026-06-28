@@ -159,18 +159,23 @@ function assemblePrompt({ imageAssignment, preserveData, designStyle, colorPalet
 
   let p = AB723_HEADER;
 
-  const zones = imageAssignment.zones || [];
-  const wallOpenings = preserveData.wallOpenings || [];
+  // Real schema (matches the Haiku spatial-read JSON shown in the UI editable textarea):
+  // imageAssignment.visibleZones / .zoneAnchors / .boundaryAnchors / .wallOpenings
+  const zones = imageAssignment.visibleZones || imageAssignment.zones || [];
+  const anchors = imageAssignment.zoneAnchors || {};
+  const boundaries = imageAssignment.boundaryAnchors || {};
+  const wallOpenings = imageAssignment.wallOpenings || preserveData.wallOpenings || [];
   const adjacentRooms = preserveData.adjacentRoomsVisible || [];
+  const preserveList = preserveData.preserveList || '';
 
-  // Unpack groupSpatialPlan if provided (multi-angle context)
-  const hasKitchen = zones.includes('kitchen') || (groupSpatialPlan?.zonePresence?.kitchen ?? false);
-  const hasDining = zones.includes('dining') || (groupSpatialPlan?.zonePresence?.dining ?? false);
-  const hasLiving = zones.includes('living') || (groupSpatialPlan?.zonePresence?.living ?? false);
-  const hasBedroom = zones.includes('bedroom') || (groupSpatialPlan?.zonePresence?.bedroom ?? false);
+  const hasKitchen = zones.includes('kitchen');
+  const hasDining = zones.includes('dining');
+  const hasLiving = zones.includes('living');
+  const hasBedroom = zones.includes('bedroom');
+  const hasFlex = zones.includes('flex');
 
-  const anchors = groupSpatialPlan?.anchors || {};
-  const boundaries = groupSpatialPlan?.boundaries || {};
+  // 1. PRESERVE
+  if (preserveList) p += 'PRESERVE EXACTLY: ' + preserveList + '\n\n';
 
   const stagingBlocks = [];
 
@@ -179,7 +184,6 @@ function assemblePrompt({ imageAssignment, preserveData, designStyle, colorPalet
     if (anchors.dining.ceilingFixture) {
       stagingBlocks.push('DINING ZONE: Place an area rug centered in the open floor area under the ' + anchors.dining.ceilingFixture + '. Place a round dining table centered on the rug. Place 6 upholstered dining chairs around the table. Place one tall vase with stems on the table center.');
     } else {
-      // No confirmed chandelier — center in open floor between boundaries
       const leftB  = boundaries.diningLeft  ? ' to the right of the ' + boundaries.diningLeft  : '';
       const rightB = boundaries.diningRight ? ' and to the left of the ' + boundaries.diningRight : '';
       stagingBlocks.push('DINING ZONE: Place a round area rug centered in the open floor area' + leftB + rightB + '. Place a round dining table centered on the rug. Place 6 upholstered dining chairs around the table. Place one tall vase with stems on the table center.');
@@ -187,7 +191,7 @@ function assemblePrompt({ imageAssignment, preserveData, designStyle, colorPalet
   }
   if (hasKitchen && anchors.kitchen?.present && anchors.kitchen?.ceilingFixture) {
     if (anchors.kitchen.islandBarOverhang) {
-      stagingBlocks.push('KITCHEN ZONE: Place 3 counter stools on the dining-zone-facing side of the island only, directly below the ' + anchors.kitchen.ceilingFixture + '. Place one small bowl of fruit on the island countertop. Keep all other surfaces clean.');
+      stagingBlocks.push('KITCHEN ZONE: Place 3 counter stools on the dining-zone-facing side of the island only, directly below the ' + anchors.kitchen.ceilingFixture + '. ' + (anchors.kitchen.islandDescription ? 'FLOATING KITCHEN ISLAND CABINET: ' + anchors.kitchen.islandDescription + ' — do not remove, relocate, resize, or alter. ' : '') + 'Place one small bowl of fruit on the island countertop. Keep all other surfaces clean.');
     } else {
       stagingBlocks.push('KITCHEN ZONE: No bar overhang — DO NOT add stools. Place one small bowl of fruit on the island countertop. Keep all other surfaces clean.');
     }
@@ -221,6 +225,9 @@ function assemblePrompt({ imageAssignment, preserveData, designStyle, colorPalet
   }
   if (!hasKitchen) prohibitions.push('DO NOT add kitchen cabinetry, island, or kitchen fixtures — kitchen is not visible in this photograph.');
   if (!hasDining)  prohibitions.push('DO NOT add a dining table, dining chairs, or dining chandelier — dining zone is not visible in this photograph.');
+  if (!hasFlex && wallOpenings.some(w => /flex|arch|enclosed|semi-enclosed|walled room/i.test(w))) {
+    prohibitions.push('A Flex Room is visible through a wall opening — DO NOT stage furniture inside the Flex Room. DO NOT assign any fixture inside the Flex Room as a dining anchor. Any chandelier inside an enclosed or semi-enclosed space with walls is a Flex Room fixture, not a dining/nook anchor.');
+  }
   if (hasDining && anchors.dining?.present && !anchors.dining?.ceilingFixture) {
     prohibitions.push('DINING ZONE: Open floor area is visible but the dining anchor fixture (chandelier) is NOT in this frame. DO NOT stage the dining area in this image. DO NOT add any chandelier, pendant, dining table, or dining chairs. This zone will be staged from a different angle where the chandelier is visible.');
   }

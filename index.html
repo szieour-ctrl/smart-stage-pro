@@ -385,7 +385,17 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
       <div class="summary-grid" id="summary-grid"></div>
       <div class="mls-disclosure-note">⚖️ <span><strong>MetroList Rule 11.6.1 Active:</strong> Every staged/enhanced image includes disclosure. Publish original immediately before altered version in Matrix.</span></div>
     </div>
-    <div class="panel" id="group-session-panel">
+    <!-- Multi-Angle Group Staging — RETIRED (Phase 6.2). GPT Image 2 now does its own
+         anchor detection per-image via the SPATIAL ZONE ANALYSIS template, so the
+         cross-angle Haiku read that justified this panel is no longer needed — Haiku's
+         multi-angle output was never even seen by GPT2, it only fed the old prompt
+         assembler. The one genuinely useful side effect (Design DNA capture) now
+         triggers automatically off ANY staged Open Plan room, via any path, and
+         persists across "+ Add More Rooms" — see extractStagingDNA() call sites.
+         Hidden, not deleted: every underlying function (runGroupSpatialRead,
+         approveAndStageGroupImage, clearGroupSession, etc.) is left intact in case
+         this needs reviving. Remove the style="display:none" below to bring it back. -->
+    <div class="panel" id="group-session-panel" style="display:none;">
       <div class="panel-title">Multi-Angle Group Staging <span style="font-size:0.72rem;font-weight:400;color:var(--muted);margin-left:8px;">Optional — for Open Plan or Bedroom multi-angle sets</span></div>
       <div class="panel-sub" id="group-session-sub">Select 2–5 photos that show the <strong>same space from different angles</strong>. The Smart Stage engine reads all angles simultaneously to build one Master Staging Plan — then writes individual prompts for each image using visible landmarks as anchors.</div>
       <div id="group-select-area" style="margin-top:12px;"></div>
@@ -921,20 +931,22 @@ function startNewSession() {
 
 function continueProject() {
   // Add more rooms to the current project without resetting staging queue
-  // Just go back to upload step — project context is preserved
+  // Just go back to upload step — project context AND captured Design DNA are preserved
   if (!SESSION.projectId) {
     showToast('No active project — please search for a property first.', 'error');
     showStep('step-property');
     return;
   }
-  // Clear only originals and rooms, keep project context
+  // Clear per-batch state, but deliberately KEEP SESSION.stagingDNA — once captured,
+  // it should carry across every batch of rooms added to this project, not just the
+  // first one. (Previously this was wiped here, which meant newly-added rooms never
+  // inherited the established furnishings DNA.)
   SESSION.originals = [];
   SESSION.rooms = [];
   SESSION.floorplanRoomMap = null;
   SESSION.photoRoomMap = {};
   SESSION.anchorRoomId = null;
   SESSION.anchorImageUrl = null;
-  SESSION.stagingDNA = null;
   SESSION.openPlanRoomId = null;
   SESSION.groupMode = false;
   SESSION.groupImages = [];
@@ -945,7 +957,7 @@ function continueProject() {
   document.getElementById('upload-actions').classList.add('hidden');
   fileInput.value = '';
   showStep('step-upload');
-  showToast(`Continuing project: ${SESSION.projectAddress} — upload additional rooms`, 'success');
+  showToast(`Continuing project: ${SESSION.projectAddress} — upload additional rooms${SESSION.stagingDNA ? ' (Design DNA carried over)' : ''}`, 'success');
 }
 
 function updateSessionButtons() {
@@ -1229,7 +1241,7 @@ function confirmMapping(){
     showToast(`Label all photos before continuing — ${unlabeled.length} remaining.`,'error');
     return;
   }
-  buildSummary();buildRoomQueue();showStep('step-staging');
+  buildSummary();buildRoomQueue();showStep('step-staging');updateSessionButtons();
 }
 
 // ══════════════════════════════════════════
@@ -2242,19 +2254,22 @@ async function stageRoom(roomId) {
   renderRoomQueue();
 
   try {
-    // Step 1: Haiku reads THIS image only — builds single-room prompt with AB 723 compliance
+    // Step 1: assemble the staging prompt from this room's Image Assignment selections —
+    // no Haiku call (Phase 6.2 template)
     const promptRes = await fetch('/.netlify/functions/stage-vacant-prompt', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        imageBase64: sourceBase64,
-        mimeType: sourceMime,
         roomType: room.roomName || getDecor8RoomType(room.roomName, room.adjacentRooms, room.decor8Type),
         zoneList: room.zoneList || [],
         flexNote: room.flexNote || '',
         isOpenPlan: !!room.isOpenPlan,
         designStyle: i.style_label || 'Organic Modern',
         colorPalette: i.palette_label || 'Warm Neutrals',
+        buyerProfile: i.buyer_label || '',
+        desiredFeeling: i.feeling_label || '',
+        stagingLevel: i.intensity_label || '',
+        furnishingsDNA: SESSION.stagingDNA || null,
       })
     });
 
@@ -2913,21 +2928,24 @@ async function runCleanAndStage(roomId) {
     room.declutteredCleanBase64 = cnsCleanResult.clean;
     const cleanedBase64 = cnsCleanResult.clean;
 
-    // Step 2A: Haiku reads cleaned room for staging
-    room.promptStatus = 'Step 2 of 3 — Reading cleaned room for staging...';
+    // Step 2A: assemble staging prompt from this room's Image Assignment selections —
+    // no Haiku call (Phase 6.2 template)
+    room.promptStatus = 'Step 2 of 3 — Assembling staging prompt...';
     renderRoomQueue();
     const stageRes = await fetch('/.netlify/functions/stage-vacant-prompt', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        imageBase64: cleanedBase64,
-        mimeType: orig.mimeType,
         roomType: room.roomName,
         zoneList: room.zoneList || [],
         flexNote: room.flexNote || '',
         isOpenPlan: !!room.isOpenPlan,
         designStyle: i.style_label || 'Organic Modern',
         colorPalette: i.palette_label || 'Warm Neutrals',
+        buyerProfile: i.buyer_label || '',
+        desiredFeeling: i.feeling_label || '',
+        stagingLevel: i.intensity_label || '',
+        furnishingsDNA: SESSION.stagingDNA || null,
       })
     });
     if (!stageRes.ok) throw new Error('Stage prompt failed: ' + stageRes.status);
@@ -2960,6 +2978,18 @@ async function runCleanAndStage(roomId) {
     room.promptStatus = null;
     showToast('✓ Cleaned and staged.', 'success');
     renderRoomQueue();
+
+    // DNA extraction if open plan — same trigger as stageRoom()/stageRoomWithPrompt(),
+    // so Clean+Stage participates in the same once-per-project DNA capture
+    if (room.isOpenPlan && !SESSION.stagingDNA) {
+      room.dnaStatus = 'extracting';
+      renderRoomQueue();
+      extractStagingDNA(cnsStageResult.clean, 'image/jpeg').then(dna => {
+        if (dna) { SESSION.stagingDNA = dna; room.dnaStatus = 'done'; showToast('✓ Design DNA locked — ' + dna.overallStyle, 'success'); }
+        else room.dnaStatus = 'failed';
+        renderRoomQueue();
+      }).catch(() => { room.dnaStatus = 'failed'; renderRoomQueue(); });
+    }
   } catch(err) {
     room.status = 'error';
     room.promptStatus = null;

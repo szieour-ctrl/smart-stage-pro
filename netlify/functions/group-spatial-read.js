@@ -39,29 +39,6 @@ function detectMime(base64) {
   return 'image/jpeg';
 }
 
-const STYLE_LABELS = {
-  'organicmodern':'Organic Modern','transitional':'Transitional','contemporary':'Contemporary',
-  'modern':'Modern','scandinavian':'Scandinavian','minimalist':'Minimalist',
-  'coastal':'Coastal','farmhouse':'Farmhouse','midcenturymodern':'Mid-Century Modern',
-  'industrial':'Industrial','bohemian':'Bohemian','traditional':'Traditional',
-  'japandi':'Japandi','warmminimalist':'Warm Minimalist','luxemodern':'Luxe Modern',
-  'artdeco':'Art Deco','mediterranean':'Mediterranean','rustic':'Rustic',
-  'grandmillennial':'Grand Millennial','wabi_sabi':'Wabi Sabi',
-};
-
-const PALETTE_TONES = {
-  'Warm Neutrals':    'warm cream, taupe, and honey tones',
-  'Bright Airy':      'soft white, pale sage, and warm wood tones',
-  'Soft Luxury':      'blue, gray, and champagne tones',
-  'Cool Gray':        'cool gray, slate, and white tones',
-  'Earth Tones':      'terracotta, rust, and warm brown tones',
-  'Bold Contrast':    'black, white, and bold accent tones',
-  'Coastal Blue':     'ocean blue, sandy neutral, and white tones',
-  'Sage Green':       'sage green, warm white, and natural wood tones',
-  'Jewel Tones':      'emerald, sapphire, and warm gold tones',
-  'Desert Modern':    'sand, clay, and muted terracotta tones',
-};
-
 // ✅ AB 723 COMPLIANCE HEADER — Prepended to every prompt
 const AB723_HEADER = `PRIMARY ROLE: Stage furniture and decor ONLY.
 
@@ -99,132 +76,13 @@ async function compressForRead(imageBase64) {
 // no per-zone hand-written furniture scripts. The user's own zone selections are
 // the only "translation" — everything else is the fixed template text below, verbatim.
 // ══════════════════════════════════════════════════════════════════════════
-const SPATIAL_ZONE_TEMPLATE = [
-'SPATIAL ZONE ANALYSIS MODE',
-'',
-'PRIMARY ROLE: You are an architectural space planning analyst specializing in residential interiors.',
-'SECONDARY ROLE: You are a professional luxury real estate interior designer, home stager, and architectural photographer.',
-'',
-'TASK',
-'Analyze the uploaded room photograph and identify all functional furnishing zones based solely on the visible architecture, fixtures, openings, windows, cabinetry, fireplaces, built-ins, ceiling features, and circulation paths before you place furnishings',
-'',
-'ZONE IDENTIFICATION RULES',
-'Identify each functional furnishing zone visible in the image.',
-'Examples include:',
-'• Living Room',
-'• Dining Area',
-'• Kitchen',
-'• Breakfast Nook',
-'• Flex Room',
-'• Office',
-'• Entry',
-'• Loft',
-'• Primary Bedroom',
-'• Sitting Area',
-'',
-'Determine zone boundaries using architectural cues including:',
-'• Walls',
-'• Partial walls',
-'• Openings',
-'• Doorways',
-'• Windows',
-'• Sliding glass doors',
-'• Fireplaces',
-'• Kitchen islands',
-'• Cabinetry',
-'• Ceiling changes',
-'• Chandeliers',
-'• Pendant lighting',
-'• Ceiling fans',
-'• Built-ins',
-'• Hallways',
-'• Circulation paths',
-'',
-'SPATIAL ACCURACY RULES',
-'Respect the exact perspective, geometry, scale, camera angle, and architectural proportions shown in the original photograph.',
-'Zone boundaries must align with actual architectural features and not arbitrary visual estimates.',
-'',
-'Use zone anchors whenever present:',
-'• Chandeliers typically define dining zones.',
-'• Pendant lights typically define seating zones.',
-'• Ceiling fans typically define living zones.',
-'• Fireplaces typically define living zones',
-'',
-'Your job is to identify the find and stage only the Zones that are listed, if the zone is not listed the area is to be left vacant:',
-'Find: {{room_assignment_variables}} go here',
-'',
-'"IF" Zone Anchors exist or do not exist you must follow these rules:',
-'• "IF" Chandelier is found, this is the dining zone, place an area rug, table and chairs sized for the space centered directly below chandelier',
-'• "If "no Chandelier is found, place an area rug, table and chairs sized for the dining zone sized appropriately for the open space',
-'• "IF", Fireplace is found, place an area rug 18" from the front on the floor and centered on the fireplace with a coffee table',
-'• "IF, Entry or Hallway is found, a 48" circular pathway must be maintained',
-'• IF, Ceiling fan is found center furniture grouping around it.',
-'',
-'Identify the most logical furniture placement for each zone Incorporate tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic. circulation paths between zone boundaries.',
-'',
-'DESIGN STYLE & PALETTE',
-'{{all_design_style_&_palette}} variables go here User Selected DNA {{variables}}',
-'',
-'OUTPUT REQUIREMENTS',
-'Do not alter architecture.',
-'',
-'AB 723 COMPLIANCE',
-'This analysis is for planning and visualization purposes only.',
-'Do not alter, remove, relocate, resize, conceal, or modify any architectural element including walls, windows, doors, cabinetry, fireplaces, flooring, ceilings, lighting fixtures, appliances, or built-in features.',
-'All architectural elements must remain exactly as photographed.'
-].join('\n');
-
-// Build the {{room_assignment_variables}} value: plain zone names, Flex Room inlined with its
-// user-typed freetext (e.g. "Kitchen, Dining, Office (Flex Room)") — a name only, never a furniture script.
-function buildRoomAssignmentVariable({ zoneList, flexNote, roomName, isOpenPlan }) {
-  if (!isOpenPlan) return roomName || 'this room';
-  if (!zoneList || !zoneList.length) return roomName || 'this room';
-  const names = zoneList.map(z => {
-    const zo = OPEN_PLAN_ZONE_LABELS[z] || z;
-    return (z === 'flex' && flexNote) ? `${flexNote} (Flex Room)` : zo;
-  });
-  return names.join(', ');
-}
-const OPEN_PLAN_ZONE_LABELS = { kitchen: 'Kitchen', dining: 'Dining', living: 'Living Room', family: 'Family Room', flex: 'Flex Room' };
-
-// Build the Design DNA block: full Session DNA — Buyer Profile, Desired Feeling, Style, Staging Level, Palette —
-// plus, when this image is part of a Multi-Angle Group locked to an already-staged Open Plan anchor,
-// the captured furnishings DNA from extract-staging-dna.js (continuity only — no placement language).
-function buildDesignDnaVariable({ style, palette, buyerProfile, desiredFeeling, stagingLevel, furnishingsDNA }) {
-  const parts = [];
-  if (style)         parts.push('Design Style: ' + style);
-  if (palette)        parts.push('Color Palette: ' + palette);
-  if (buyerProfile)   parts.push('Buyer Profile: ' + buyerProfile);
-  if (desiredFeeling)  parts.push('Desired Feeling: ' + desiredFeeling);
-  if (stagingLevel)    parts.push('Staging Level: ' + stagingLevel);
-  let dnaText = parts.join('. ') + (parts.length ? '.' : '');
-  if (furnishingsDNA) {
-    const f = furnishingsDNA;
-    const furnishingParts = [];
-    if (f.continuityPrompt) furnishingParts.push(f.continuityPrompt);
-    else {
-      if (f.sofa) furnishingParts.push('Sofa: ' + f.sofa + '.');
-      if (f.woodTones) furnishingParts.push('Wood tones: ' + f.woodTones + '.');
-      if (f.metalFinishes) furnishingParts.push('Metal finishes: ' + f.metalFinishes + '.');
-      if (f.colorPalette) furnishingParts.push('Palette: ' + (Array.isArray(f.colorPalette) ? f.colorPalette.join(', ') : f.colorPalette) + '.');
-    }
-    if (furnishingParts.length) {
-      dnaText += '\n\nMATCH ESTABLISHED FURNISHINGS (from the staged anchor image in this group): ' + furnishingParts.join(' ');
-    }
-  }
-  return dnaText;
-}
-
-// assembleSpatialZonePrompt — pure template substitution, no Haiku, no scripted per-zone furniture.
-// zones: { zoneList, flexNote, roomName, isOpenPlan } — the user's own Image Assignment selections.
-// dna: { style, palette, buyerProfile, desiredFeeling, stagingLevel } — Session DNA.
-function assembleSpatialZonePrompt({ zones, dna }) {
-  const roomAssignmentValue = buildRoomAssignmentVariable(zones || {});
-  const designDnaValue = buildDesignDnaVariable(dna || {});
-  return SPATIAL_ZONE_TEMPLATE
-    .replace('{{room_assignment_variables}} go here', roomAssignmentValue)
-    .replace('{{all_design_style_&_palette}} variables go here User Selected DNA {{variables}}', designDnaValue);
-}
+// SPATIAL ZONE ANALYSIS MODE — proofed prompt template (Phase 6.2)
+// Now lives in spatial-zone-template.js (shared with stage-vacant-prompt.js) so
+// every staging prompt in the app — Multi-Angle Group Stage (if revived), plain
+// Vacant Stage, and Clean+Stage step 2 — all use the exact same template/assembler.
+// No per-file duplicate copies that can drift.
+// ══════════════════════════════════════════════════════════════════════════
+const { assembleSpatialZonePrompt, STYLE_LABELS, PALETTE_TONES } = require('./spatial-zone-template');
 
 async function triggerBackground(payload, siteUrl) {
   const body = Buffer.from(JSON.stringify(payload));

@@ -514,6 +514,14 @@ function getOpenPlanZones(zoneList, flexNote) {
   if (!ordered.length) return null;
   return ordered.map(z => z.key==='flex' && flexNote ? `${z.label} (${flexNote})` : z.label).join(' + ');
 }
+// Small badge for room cards showing which zones were selected for this Open Plan image,
+// so the user knows what's being staged without opening the Decor8 debug modal.
+function zoneBadgeHtml(room) {
+  if (!room.isOpenPlan) return '';
+  const summary = getOpenPlanZones(room.zoneList, room.flexNote);
+  if (!summary) return '';
+  return `<span style="font-size:0.65rem;background:#eef3f8;color:var(--sky);border:1px solid #c9dcea;padding:1px 6px;border-radius:2px;font-weight:600;letter-spacing:0.04em;margin-left:4px;">${summary}</span>`;
+}
 // ── Decor8 API mappings ───────────────────────────────────────────────────────
 const DECOR8_ROOM_TYPE = {
   "Entry": "foyer", "Foyer": "foyer",
@@ -1452,7 +1460,7 @@ function renderRoomQueue(){
 
     if(room.isReference)return `<div class="room-card is-reference" id="card-${room.id}">
       <div class="room-card-header"><img class="room-card-thumb" src="${orig.dataUrl}" />
-      <div class="room-card-info"><div class="room-card-name">${room.roomName} <span class="ref-badge">Reference Only</span></div>
+      <div class="room-card-info"><div class="room-card-name">${room.roomName} <span class="ref-badge">Reference Only</span>${zoneBadgeHtml(room)}</div>
       <div class="room-card-status pending">Not staged — spatial reference only</div></div></div></div>`;
 
     const mode=room.roomMode||'stage';
@@ -1506,7 +1514,7 @@ function renderRoomQueue(){
       }).join('');
       return `<div class="room-card is-exterior" id="card-${room.id}">
         <div class="room-card-header"><img class="room-card-thumb" src="${orig.dataUrl}" onclick="openLightbox('${room.id}')" title="Click to set Shot Focus" />
-        <div class="room-card-info"><div class="room-card-name">${room.roomName} <span class="ext-badge">Exterior</span></div>${sfBadge}
+        <div class="room-card-info"><div class="room-card-name">${room.roomName} <span class="ext-badge">Exterior</span>${zoneBadgeHtml(room)}</div>${sfBadge}
         <div class="room-card-status" style="color:var(--sky);">Select enhancements · Click photo to set Shot Focus</div></div>
         <div class="room-card-actions">${runBtn}${modeToggle}</div></div>
         <div class="ext-panel"><div class="ext-panel-title">Choose Exterior Enhancements — Multiple Allowed</div>
@@ -1544,7 +1552,7 @@ function renderRoomQueue(){
         <div class="room-card-header">
           <img class="room-card-thumb" src="${orig.dataUrl}" onclick="openLightbox('${room.id}')" />
           <div class="room-card-info">
-            <div class="room-card-name">${room.roomName} <span style="font-size:0.65rem;background:#f4ede6;color:#7c5c3e;border:1px solid #d4b99a;padding:1px 6px;border-radius:2px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;">Declutter Only</span></div>
+            <div class="room-card-name">${room.roomName} <span style="font-size:0.65rem;background:#f4ede6;color:#7c5c3e;border:1px solid #d4b99a;padding:1px 6px;border-radius:2px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;">Declutter Only</span>${zoneBadgeHtml(room)}</div>
             ${sfBadge}
             <div class="room-card-status" style="color:#7c5c3e;">${isProcessing?(room.promptStatus||'Removing objects...'):'Remove clutter · 1 Credit'}</div>
           </div>
@@ -1585,7 +1593,7 @@ function renderRoomQueue(){
         <div class="room-card-header">
           <img class="room-card-thumb" src="${orig.dataUrl}" onclick="openLightbox('${room.id}')" />
           <div class="room-card-info">
-            <div class="room-card-name">${room.roomName} <span style="font-size:0.65rem;background:#edf4ec;color:#4a6741;border:1px solid #b0ccab;padding:1px 6px;border-radius:2px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;">Clean + Stage</span></div>
+            <div class="room-card-name">${room.roomName} <span style="font-size:0.65rem;background:#edf4ec;color:#4a6741;border:1px solid #b0ccab;padding:1px 6px;border-radius:2px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;">Clean + Stage</span>${zoneBadgeHtml(room)}</div>
             ${sfBadge}
             <div class="room-card-status" style="color:#4a6741;">${isProcessing?(room.promptStatus||'Processing...'):'Remove clutter then restage · 2 Credits'}</div>
           </div>
@@ -1700,7 +1708,7 @@ function renderRoomQueue(){
     })();
     return `<div class="room-card ${isAnchor?'is-anchor':''}" id="card-${room.id}">
       <div class="room-card-header"><img class="room-card-thumb" src="${orig.dataUrl}" onclick="openLightbox('${room.id}')" title="Click to set Shot Focus" />
-      <div class="room-card-info"><div class="room-card-name">${room.roomName} ${isAnchor?'<span class="anchor-badge">Design Anchor</span>':''}</div>
+      <div class="room-card-info"><div class="room-card-name">${room.roomName} ${isAnchor?'<span class="anchor-badge">Design Anchor</span>':''}${zoneBadgeHtml(room)}</div>
       ${room.adjacentRooms.length?`<div class="room-card-adj">Adjacent: ${room.adjacentRooms.join(', ')}</div>`:''}${sfBadge}${spatialBadge}
       <div class="room-card-status ${room.status}">${statusLabel}</div></div>
       <div class="room-card-actions">${actions}${modeToggle}</div></div>
@@ -2242,6 +2250,9 @@ async function stageRoom(roomId) {
         imageBase64: sourceBase64,
         mimeType: sourceMime,
         roomType: room.roomName || getDecor8RoomType(room.roomName, room.adjacentRooms, room.decor8Type),
+        zoneList: room.zoneList || [],
+        flexNote: room.flexNote || '',
+        isOpenPlan: !!room.isOpenPlan,
         designStyle: i.style_label || 'Organic Modern',
         colorPalette: i.palette_label || 'Warm Neutrals',
       })
@@ -2912,6 +2923,9 @@ async function runCleanAndStage(roomId) {
         imageBase64: cleanedBase64,
         mimeType: orig.mimeType,
         roomType: room.roomName,
+        zoneList: room.zoneList || [],
+        flexNote: room.flexNote || '',
+        isOpenPlan: !!room.isOpenPlan,
         designStyle: i.style_label || 'Organic Modern',
         colorPalette: i.palette_label || 'Warm Neutrals',
       })

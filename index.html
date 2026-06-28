@@ -3350,6 +3350,18 @@ function showDecor8Payload(roomId) {
 
   const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
+  // Selected zones banner — shown for Open Plan rooms so the user knows which rooms/zones to look for in the prompt below
+  const zoneBannerHtml = room.isOpenPlan && (room.zoneList||[]).length
+    ? `<div style="background:var(--warm);border:1px solid var(--gold);border-radius:5px;padding:10px 14px;margin-bottom:16px;">
+         <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.06em;color:var(--muted);margin-bottom:4px;">Selected Rooms / Zones for This Image</div>
+         <div style="font-size:0.88rem;color:var(--ink);font-weight:600;">${esc(room.zoneList.map(z=>{
+           const zo=OPEN_PLAN_ZONES.find(o=>o.key===z);
+           const label=zo?.label||z;
+           return z==='flex'&&room.flexNote ? label+' ('+room.flexNote+')' : label;
+         }).join('  +  '))}</div>
+       </div>`
+    : '';
+
   const payloadHtml = payloadText
     ? `<div style="color:#666;margin-bottom:4px;font-size:0.7rem;">Staging engine parameters:</div>
        <pre style="color:#e8e8e8;margin:0;white-space:pre-wrap;word-break:break-word;">${esc(payloadText)}</pre>`
@@ -3368,6 +3380,7 @@ function showDecor8Payload(roomId) {
         <button onclick="closeDebugModal()" style="background:none;border:none;font-size:1.2rem;cursor:pointer;color:#888;">✕</button>
       </div>
       <div style="overflow-y:auto;flex:1;padding:20px 24px;background:#1a1a1a;">
+        ${zoneBannerHtml}
         ${payloadHtml}
         ${promptHtml}
       </div>
@@ -3466,6 +3479,8 @@ function toggleGroupImage(origId) {
       originalId: origId,
       roomId: room?.id || null,
       label: room?.roomName || orig.name,
+      userZones: room?.zoneList || [],
+      flexNote: room?.flexNote || '',
       imageIndex: SESSION.groupImages.length + 1,
       base64: orig.base64,
       mimeType: orig.mimeType,
@@ -3525,6 +3540,8 @@ async function runGroupSpatialRead() {
           mimeType: g.mimeType,
           label: g.label,
           fileName: g.fileName,
+          userZones: g.userZones || [],
+          flexNote: g.flexNote || '',
         })),
         groupType: SESSION.groupType || 'openplan',
       })
@@ -3635,46 +3652,44 @@ function renderGroupAssignments(data) {
 
 // ── STEP 3: PRESERVE READ + PROMPT ASSEMBLY + STAGING ─────────────────────────
 // Fires when user clicks "Approve & Stage" for one image.
-// Calls group-spatial-read in preserve mode → gets PRESERVE list from single image.
-// JS assembles final prompt. Shows in editable Review modal. User approves → GPT stages.
+// Calls group-spatial-read in preserve mode → assembles the SPATIAL ZONE ANALYSIS template
+// directly from this room's Image Assignment selections + Session DNA (+ captured furnishings
+// DNA if this group already has a staged anchor image). No Haiku call. Shows result in the
+// editable Review modal (showPromptModal) so you can see the assembled prompt before staging.
 async function approveAndStageGroupImage(assignmentIndex, roomId) {
-  const ta = document.getElementById('group-assignment-ta-' + assignmentIndex);
-  let imageAssignment;
-  try {
-    imageAssignment = JSON.parse(ta ? ta.value : '{}');
-  } catch(e) {
-    showToast('Invalid assignment JSON — please fix and try again.', 'error');
-    return;
-  }
-
   const gImg = SESSION.groupImages[assignmentIndex];
   const room = SESSION.rooms.find(r => r.id === roomId);
   const orig = room ? SESSION.originals.find(o => o.id === room.originalId) : null;
   if (!room || !orig || !gImg) { showToast('Room not found.', 'error'); return; }
 
   const btn = document.querySelector(`[onclick="approveAndStageGroupImage(${assignmentIndex}, '${roomId}')"]`);
-  if (btn) { btn.disabled = true; btn.textContent = 'Reading image...'; }
+  if (btn) { btn.disabled = true; btn.textContent = 'Assembling prompt...'; }
 
   try {
     const intake = SESSION.intake;
 
-    // Step 3: Preserve read + prompt assembly
+    // Step 3: template prompt assembly (no Haiku — pure variable substitution)
     const res = await fetch('/.netlify/functions/group-spatial-read', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         mode: 'preserve',
-        imageBase64: gImg.base64,
         imageLabel: gImg.label || gImg.fileName,
-        imageAssignment,
-        groupSpatialPlan: SESSION.groupSpatialPlan || null,
+        zoneList: room.zoneList || [],
+        flexNote: room.flexNote || '',
+        roomName: room.roomName,
+        isOpenPlan: !!room.isOpenPlan,
         designStyle: intake.style_label || 'Organic Modern',
         colorPalette: intake.palette_label || 'Warm Neutrals',
+        buyerProfile: intake.buyer_label || '',
+        desiredFeeling: intake.feeling_label || '',
+        stagingLevel: intake.intensity_label || '',
+        furnishingsDNA: SESSION.stagingDNA || null,
       })
     });
 
     const data = await res.json();
-    if (!res.ok || data.error) throw new Error(data.error || 'Preserve read failed');
+    if (!res.ok || data.error) throw new Error(data.error || 'Prompt assembly failed');
 
     // Store prompt + SHOW MODAL for user review before staging
     room.groupPromptOverride = data.promptText;

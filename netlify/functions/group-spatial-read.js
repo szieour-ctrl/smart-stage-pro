@@ -88,193 +88,142 @@ async function compressForRead(imageBase64) {
   } catch(e) { return imageBase64; }
 }
 
-async function runPreserveRead({ imageBase64, imageLabel, claudeKey }) {
-  const prompt = [
-    'You are reading a real estate listing photo to generate a PRESERVE list for MLS virtual staging.',
-    'Describe every permanent architectural element visible in this photograph only.',
-    'Do not infer or describe anything outside the frame.',
-    '',
-    'RULES:',
-    '1. Every ceiling fixture: type, arm/bulb count, finish, shade style.',
-    '2. All cabinetry: color, door style, hardware finish.',
-    '3. All countertops: material and color.',
-    '4. All flooring: material, color.',
-    '5. All windows: pane pattern, frame color.',
-    '6. All doors: type, color.',
-    '7. Fireplace: surround color, profile, hearth, firebox.',
-    '8. Island: base color, countertop, visible appliances.',
-    '9. Backsplash: material, pattern, color.',
-    '10. All visible appliances.',
-    '11. Wall openings: describe exactly what is visible — e.g. "partition wall with rectangular opening upper left", "sliding glass door right wall", "archway to hallway".',
-    '12. End with: DO NOT alter any permanent architectural element.',
-    '13. Do NOT include anything not visible in this photograph.',
-    '',
-    'Return ONLY valid JSON — no markdown, no preamble.',
-    '',
-    '{',
-    '  "imageLabel": "' + (imageLabel || 'image') + '",',
-    '  "preserveList": "comma-separated list of every permanent element visible, ending with: DO NOT alter any permanent architectural element.",',
-    '  "wallOpenings": ["each wall opening: type and location"],',
-    '  "adjacentRoomsVisible": ["each room visible through an opening — do not stage from this image"]',
-    '}'
-  ].join('\n');
+// NOTE: runPreserveRead (Haiku-based PRESERVE list generation) was removed here in Phase 6.2.
+// The "preserve" mode name is kept for frontend/endpoint compatibility, but it no longer calls
+// Haiku — see assembleSpatialZonePrompt below for the new template-substitution approach.
 
-  const payload = JSON.stringify({
-    model: "claude-haiku-4-5",
-    max_tokens: 1500,
-    messages: [{
-      role: "user",
-      content: [
-        { type: "image", source: { type: "base64", media_type: detectMime(imageBase64), data: imageBase64 } },
-        { type: "text", text: prompt }
-      ]
-    }]
+// ══════════════════════════════════════════════════════════════════════════
+// SPATIAL ZONE ANALYSIS MODE — proofed prompt template (Phase 6.2)
+// Two variable slots only: {{room_assignment_variables}} and the Design DNA block.
+// GPT Image 2 does its own spatial/anchor reasoning — no Haiku description layer,
+// no per-zone hand-written furniture scripts. The user's own zone selections are
+// the only "translation" — everything else is the fixed template text below, verbatim.
+// ══════════════════════════════════════════════════════════════════════════
+const SPATIAL_ZONE_TEMPLATE = [
+'SPATIAL ZONE ANALYSIS MODE',
+'',
+'PRIMARY ROLE: You are an architectural space planning analyst specializing in residential interiors.',
+'SECONDARY ROLE: You are a professional luxury real estate interior designer, home stager, and architectural photographer.',
+'',
+'TASK',
+'Analyze the uploaded room photograph and identify all functional furnishing zones based solely on the visible architecture, fixtures, openings, windows, cabinetry, fireplaces, built-ins, ceiling features, and circulation paths before you place furnishings',
+'',
+'ZONE IDENTIFICATION RULES',
+'Identify each functional furnishing zone visible in the image.',
+'Examples include:',
+'• Living Room',
+'• Dining Area',
+'• Kitchen',
+'• Breakfast Nook',
+'• Flex Room',
+'• Office',
+'• Entry',
+'• Loft',
+'• Primary Bedroom',
+'• Sitting Area',
+'',
+'Determine zone boundaries using architectural cues including:',
+'• Walls',
+'• Partial walls',
+'• Openings',
+'• Doorways',
+'• Windows',
+'• Sliding glass doors',
+'• Fireplaces',
+'• Kitchen islands',
+'• Cabinetry',
+'• Ceiling changes',
+'• Chandeliers',
+'• Pendant lighting',
+'• Ceiling fans',
+'• Built-ins',
+'• Hallways',
+'• Circulation paths',
+'',
+'SPATIAL ACCURACY RULES',
+'Respect the exact perspective, geometry, scale, camera angle, and architectural proportions shown in the original photograph.',
+'Zone boundaries must align with actual architectural features and not arbitrary visual estimates.',
+'',
+'Use zone anchors whenever present:',
+'• Chandeliers typically define dining zones.',
+'• Pendant lights typically define seating zones.',
+'• Ceiling fans typically define living zones.',
+'• Fireplaces typically define living zones',
+'',
+'Your job is to identify the find and stage only the Zones that are listed, if the zone is not listed the area is to be left vacant:',
+'Find: {{room_assignment_variables}} go here',
+'',
+'"IF" Zone Anchors exist or do not exist you must follow these rules:',
+'• "IF" Chandelier is found, this is the dining zone, place an area rug, table and chairs sized for the space centered directly below chandelier',
+'• "If "no Chandelier is found, place an area rug, table and chairs sized for the dining zone sized appropriately for the open space',
+'• "IF", Fireplace is found, place an area rug 18" from the front on the floor and centered on the fireplace with a coffee table',
+'• "IF, Entry or Hallway is found, a 48" circular pathway must be maintained',
+'• IF, Ceiling fan is found center furniture grouping around it.',
+'',
+'Identify the most logical furniture placement for each zone Incorporate tasteful props and decorative art throughout the zone to enhance visual depth and create a curated, market-ready aesthetic. circulation paths between zone boundaries.',
+'',
+'DESIGN STYLE & PALETTE',
+'{{all_design_style_&_palette}} variables go here User Selected DNA {{variables}}',
+'',
+'OUTPUT REQUIREMENTS',
+'Do not alter architecture.',
+'',
+'AB 723 COMPLIANCE',
+'This analysis is for planning and visualization purposes only.',
+'Do not alter, remove, relocate, resize, conceal, or modify any architectural element including walls, windows, doors, cabinetry, fireplaces, flooring, ceilings, lighting fixtures, appliances, or built-in features.',
+'All architectural elements must remain exactly as photographed.'
+].join('\n');
+
+// Build the {{room_assignment_variables}} value: plain zone names, Flex Room inlined with its
+// user-typed freetext (e.g. "Kitchen, Dining, Office (Flex Room)") — a name only, never a furniture script.
+function buildRoomAssignmentVariable({ zoneList, flexNote, roomName, isOpenPlan }) {
+  if (!isOpenPlan) return roomName || 'this room';
+  if (!zoneList || !zoneList.length) return roomName || 'this room';
+  const names = zoneList.map(z => {
+    const zo = OPEN_PLAN_ZONE_LABELS[z] || z;
+    return (z === 'flex' && flexNote) ? `${flexNote} (Flex Room)` : zo;
   });
+  return names.join(', ');
+}
+const OPEN_PLAN_ZONE_LABELS = { kitchen: 'Kitchen', dining: 'Dining', living: 'Living Room', family: 'Family Room', flex: 'Flex Room' };
 
-  const result = await httpsRequest({
-    hostname: "api.anthropic.com",
-    path: "/v1/messages",
-    method: "POST",
-    headers: {
-      "x-api-key": claudeKey,
-      "anthropic-version": "2023-06-01",
-      "content-type": "application/json",
-      "content-length": Buffer.byteLength(payload)
+// Build the Design DNA block: full Session DNA — Buyer Profile, Desired Feeling, Style, Staging Level, Palette —
+// plus, when this image is part of a Multi-Angle Group locked to an already-staged Open Plan anchor,
+// the captured furnishings DNA from extract-staging-dna.js (continuity only — no placement language).
+function buildDesignDnaVariable({ style, palette, buyerProfile, desiredFeeling, stagingLevel, furnishingsDNA }) {
+  const parts = [];
+  if (style)         parts.push('Design Style: ' + style);
+  if (palette)        parts.push('Color Palette: ' + palette);
+  if (buyerProfile)   parts.push('Buyer Profile: ' + buyerProfile);
+  if (desiredFeeling)  parts.push('Desired Feeling: ' + desiredFeeling);
+  if (stagingLevel)    parts.push('Staging Level: ' + stagingLevel);
+  let dnaText = parts.join('. ') + (parts.length ? '.' : '');
+  if (furnishingsDNA) {
+    const f = furnishingsDNA;
+    const furnishingParts = [];
+    if (f.continuityPrompt) furnishingParts.push(f.continuityPrompt);
+    else {
+      if (f.sofa) furnishingParts.push('Sofa: ' + f.sofa + '.');
+      if (f.woodTones) furnishingParts.push('Wood tones: ' + f.woodTones + '.');
+      if (f.metalFinishes) furnishingParts.push('Metal finishes: ' + f.metalFinishes + '.');
+      if (f.colorPalette) furnishingParts.push('Palette: ' + (Array.isArray(f.colorPalette) ? f.colorPalette.join(', ') : f.colorPalette) + '.');
     }
-  }, payload);
-
-  if (result.status !== 200) throw new Error("Haiku preserve read failed: " + (result.body?.error?.message || result.status));
-  const text = result.body.content?.find(c => c.type === 'text')?.text?.trim() || "{}";
-  const clean = text.replace(/```json|```/g, "").trim();
-  try { return JSON.parse(clean); }
-  catch(e) { throw new Error("Preserve read returned invalid JSON"); }
+    if (furnishingParts.length) {
+      dnaText += '\n\nMATCH ESTABLISHED FURNISHINGS (from the staged anchor image in this group): ' + furnishingParts.join(' ');
+    }
+  }
+  return dnaText;
 }
 
-// Flex Room: pass through whatever room type the user typed (Office, Den, Media, Dining, etc.)
-// with NO scripted furniture list — GPT Image 2 decides furniture from the room type name alone.
-// This matches the Phase 6 architecture direction: the assembler hands GPT2 the zone name,
-// not a pre-written placement script.
-function buildFlexZoneInstruction(flex) {
-  const roomType = (flex.roomType || '').trim();
-  const label = roomType ? roomType.toUpperCase() + ' (FLEX ROOM)' : 'FLEX ROOM';
-  const wallNote = flex.backWall ? ' Anchor the main furniture piece against the ' + flex.backWall + '.' : '';
-  const fixtureNote = flex.ceilingFixture ? ' Existing ceiling fixture (' + flex.ceilingFixture + ') must remain exactly as photographed.' : '';
-  return label + ' ZONE: Stage this room appropriately for its function as a ' + (roomType || 'flex space') + '.' + wallNote + fixtureNote;
-}
-
-function assemblePrompt({ imageAssignment, preserveData, designStyle, colorPalette, groupSpatialPlan, imageLabel }) {
-  if (!imageAssignment) throw new Error("imageAssignment required");
-  if (!preserveData) throw new Error("preserveData required");
-
-  const style = STYLE_LABELS[designStyle?.toLowerCase()] || designStyle || 'Transitional';
-  const palette = PALETTE_TONES[colorPalette] || colorPalette || 'Warm Neutrals';
-
-  let p = AB723_HEADER;
-
-  // Real schema (matches the Haiku spatial-read JSON shown in the UI editable textarea):
-  // imageAssignment.visibleZones / .zoneAnchors / .boundaryAnchors / .wallOpenings
-  const zones = imageAssignment.visibleZones || imageAssignment.zones || [];
-  const anchors = imageAssignment.zoneAnchors || {};
-  const boundaries = imageAssignment.boundaryAnchors || {};
-  const wallOpenings = imageAssignment.wallOpenings || preserveData.wallOpenings || [];
-  const adjacentRooms = preserveData.adjacentRoomsVisible || [];
-  const preserveList = preserveData.preserveList || '';
-
-  const hasKitchen = zones.includes('kitchen');
-  const hasDining = zones.includes('dining');
-  const hasLiving = zones.includes('living');
-  const hasFamily = zones.includes('family');
-  const hasBedroom = zones.includes('bedroom');
-  const hasFlex = zones.includes('flex');
-
-  // 1. PRESERVE
-  if (preserveList) p += 'PRESERVE EXACTLY: ' + preserveList + '\n\n';
-
-  const stagingBlocks = [];
-
-  // Dining zone
-  if (hasDining && anchors.dining?.present) {
-    if (anchors.dining.ceilingFixture) {
-      stagingBlocks.push('DINING ZONE: Place an area rug centered in the open floor area under the ' + anchors.dining.ceilingFixture + '. Place a round dining table centered on the rug. Place 6 upholstered dining chairs around the table. Place one tall vase with stems on the table center.');
-    } else {
-      const leftB  = boundaries.diningLeft  ? ' to the right of the ' + boundaries.diningLeft  : '';
-      const rightB = boundaries.diningRight ? ' and to the left of the ' + boundaries.diningRight : '';
-      stagingBlocks.push('DINING ZONE: Place a round area rug centered in the open floor area' + leftB + rightB + '. Place a round dining table centered on the rug. Place 6 upholstered dining chairs around the table. Place one tall vase with stems on the table center.');
-    }
-  }
-  if (hasKitchen && anchors.kitchen?.present && anchors.kitchen?.ceilingFixture) {
-    if (anchors.kitchen.islandBarOverhang) {
-      stagingBlocks.push('KITCHEN ZONE: Place 3 counter stools on the dining-zone-facing side of the island only, directly below the ' + anchors.kitchen.ceilingFixture + '. ' + (anchors.kitchen.islandDescription ? 'FLOATING KITCHEN ISLAND CABINET: ' + anchors.kitchen.islandDescription + ' — do not remove, relocate, resize, or alter. ' : '') + 'Place one small bowl of fruit on the island countertop. Keep all other surfaces clean.');
-    } else {
-      stagingBlocks.push('KITCHEN ZONE: No bar overhang — DO NOT add stools. Place one small bowl of fruit on the island countertop. Keep all other surfaces clean.');
-    }
-  }
-  if (hasLiving && anchors.living?.present) {
-    const lv = anchors.living;
-    const fan   = lv.ceilingFixture || 'ceiling fan';
-    const front = lv.frontWall      || 'fireplace';
-    // Safety check — never allow glass door, window, or exterior wall as sofa back wall
-    const backRaw = lv.backWall || 'back wall';
-    const badBack = /glass|window|exterior|sliding|door|patio/i.test(backRaw);
-    const back = badBack ? 'partition wall or interior wall opposite the fireplace' : backRaw;
-    const leftB = boundaries.livingLeft ? ', not extending past ' + boundaries.livingLeft : '';
-    stagingBlocks.push('LIVING ZONE: Place a large area rug centered directly under the ' + fan + ', extending from 18 inches in front of the ' + front + ' back to 18 inches in front of the ' + back + leftB + '. Place a light linen sofa with its back against the ' + back + ', centered on the rug, facing the fireplace. Place two upholstered accent chairs on the rug angled inward toward the fireplace. Place a round coffee table centered on the rug between the sofa and the fireplace. Place a dark wood console against the right wall. Place one large plant right of the fireplace. Place one landscape art piece centered above the fireplace surround. Place one arc floor lamp behind the left accent chair.');
-  }
-  if (hasFamily && anchors.family?.present) {
-    const fm = anchors.family;
-    const fixture = fm.ceilingFixture || 'ceiling fixture';
-    const front = fm.frontWall || 'focal wall';
-    const backRaw = fm.backWall || 'back wall';
-    const badBack = /glass|window|exterior|sliding|door|patio/i.test(backRaw);
-    const back = badBack ? 'partition wall or interior wall opposite the focal wall' : backRaw;
-    const compact = fm.roomScale !== 'standard'; // default to compact unless explicitly read as standard-sized
-    if (compact) {
-      stagingBlocks.push('FAMILY ROOM ZONE: This is a smaller, casual gathering space — keep furniture scaled down and informal, not a formal living room layout. Place a medium area rug centered under the ' + fixture + '. Place a compact sectional or loveseat with its back against the ' + back + ', facing the ' + front + '. Place one accent chair angled toward the seating. Place a small coffee table or ottoman centered on the rug. Place one media console or low cabinet against the ' + front + ' wall if no fireplace is present. Keep the layout open and uncluttered given the smaller footprint.');
-    } else {
-      stagingBlocks.push('FAMILY ROOM ZONE: Casual gathering space, standard scale. Place an area rug centered under the ' + fixture + '. Place a sectional or sofa with its back against the ' + back + ', facing the ' + front + '. Place one or two accent chairs. Place a coffee table centered on the rug. Keep the overall feel relaxed and informal rather than editorial-formal.');
-    }
-  }
-  if (hasFlex && anchors.flex?.present) {
-    stagingBlocks.push(buildFlexZoneInstruction(anchors.flex));
-  }
-  if (hasBedroom && anchors.bedroom?.present) {
-    stagingBlocks.push('BEDROOM ZONE: Place bed with headboard against the ' + (anchors.bedroom.headboardWall || 'back wall') + '. Place matching nightstands flanking the bed. Place a dresser on the opposite wall. Place a bench at the foot of the bed.');
-  }
-  if (stagingBlocks.length) p += 'POSITIVE STAGING INSTRUCTIONS:\n\n' + stagingBlocks.join('\n\n') + '\n\n';
-
-  const prohibitions = [];
-  if (wallOpenings.length) {
-    prohibitions.push('DO NOT stage furniture inside or through wall openings — ' + wallOpenings.join('; ') + '.');
-    prohibitions.push('DO NOT add ceiling fixtures, pendants, cabinetry, or counters through or near wall openings.');
-    prohibitions.push('DO NOT add architectural elements, furniture, or objects inside the room visible through any wall opening.');
-  }
-  if (adjacentRooms.length) prohibitions.push('DO NOT stage rooms visible through wall openings: ' + adjacentRooms.join('; ') + '.');
-  if (hasKitchen) {
-    prohibitions.push('DO NOT place bar stools on the camera-facing side of the island.');
-    prohibitions.push('DO NOT remove, relocate, resize, or alter the floating kitchen island cabinet.');
-  }
-  if (!hasKitchen) prohibitions.push('DO NOT add kitchen cabinetry, island, or kitchen fixtures — kitchen is not visible in this photograph.');
-  if (!hasDining)  prohibitions.push('DO NOT add a dining table, dining chairs, or dining chandelier — dining zone is not visible in this photograph.');
-  if (!hasFamily)  prohibitions.push('DO NOT add family room seating furniture — family room zone is not visible in this photograph.');
-  if (!hasFlex && wallOpenings.some(w => /flex|arch|enclosed|semi-enclosed|walled room/i.test(w))) {
-    prohibitions.push('A Flex Room is visible through a wall opening — DO NOT stage furniture inside the Flex Room. DO NOT assign any fixture inside the Flex Room as a dining anchor. Any chandelier inside an enclosed or semi-enclosed space with walls is a Flex Room fixture, not a dining/nook anchor.');
-  }
-  if (hasDining && anchors.dining?.present && !anchors.dining?.ceilingFixture) {
-    prohibitions.push('DINING ZONE: Open floor area is visible but the dining anchor fixture (chandelier) is NOT in this frame. DO NOT stage the dining area in this image. DO NOT add any chandelier, pendant, dining table, or dining chairs. This zone will be staged from a different angle where the chandelier is visible.');
-  }
-  prohibitions.push('DO NOT replace, alter, restyle, or substitute any existing ceiling fixture — chandeliers, pendants, fans, and recessed lights must remain exactly as photographed.');
-  prohibitions.push('DO NOT add ceiling fixtures or chandeliers not visible in this photograph.');
-  prohibitions.push('DO NOT add walls, enclosures, or any architectural element not photographed.');
-  prohibitions.push('DO NOT add exterior features not visible in this photograph.');
-  p += prohibitions.join('\n') + '\n\n';
-
-  p += 'Use ' + style + ' furniture with clean architectural lines, refined materials, and metallic accents. ';
-  p += 'Maintain realistic furniture scale proportional to the room. Do not scale furniture up to fill the frame. ';
-  p += 'Preserve all architectural features, room dimensions, and camera perspective exactly as photographed. ';
-  p += 'This image is for MLS listing per California AB 723 §10140.6. Room proportions must be preserved exactly. ';
-  p += 'Virtual staging adds furniture and decor only — any alteration to architecture or spatial geometry is prohibited.';
-
-  return p.trim();
+// assembleSpatialZonePrompt — pure template substitution, no Haiku, no scripted per-zone furniture.
+// zones: { zoneList, flexNote, roomName, isOpenPlan } — the user's own Image Assignment selections.
+// dna: { style, palette, buyerProfile, desiredFeeling, stagingLevel } — Session DNA.
+function assembleSpatialZonePrompt({ zones, dna }) {
+  const roomAssignmentValue = buildRoomAssignmentVariable(zones || {});
+  const designDnaValue = buildDesignDnaVariable(dna || {});
+  return SPATIAL_ZONE_TEMPLATE
+    .replace('{{room_assignment_variables}} go here', roomAssignmentValue)
+    .replace('{{all_design_style_&_palette}} variables go here User Selected DNA {{variables}}', designDnaValue);
 }
 
 async function triggerBackground(payload, siteUrl) {
@@ -309,11 +258,11 @@ exports.handler = async (event) => {
   try {
     const body = JSON.parse(event.body);
     console.log('🔍 DISPATCHER RECEIVED body:', JSON.stringify({ mode: body.mode, imagesCount: body.images?.length, hasImageBase64: !!body.imageBase64 }));
-    const claudeKey = process.env.ANTHROPIC_API_KEY;
-    if (!claudeKey) return { statusCode: 500, headers, body: JSON.stringify({ error: "ANTHROPIC_API_KEY not configured" }) };
 
     // MODE: spatial — fire background, return jobId
     if (body.mode === 'spatial' || (!body.mode && body.images && !body.imageBase64)) {
+      const claudeKey = process.env.ANTHROPIC_API_KEY;
+      if (!claudeKey) return { statusCode: 500, headers, body: JSON.stringify({ error: "ANTHROPIC_API_KEY not configured" }) };
       console.log('📡 SPATIAL MODE DETECTED - extracting images');
       const { images, groupType, designStyle, colorPalette, groupSpatialPlan } = body;
       console.log('✅ Extracted images count:', images?.length || 'undefined');
@@ -348,19 +297,27 @@ exports.handler = async (event) => {
       return { statusCode: 200, headers, body: JSON.stringify({ jobId }) };
     }
 
-    // MODE: preserve — inline, fast (~2-3s)
+    // MODE: preserve — kept as the endpoint name for frontend compatibility, but no longer
+    // calls Haiku. Phase 6.2: assembles the SPATIAL ZONE ANALYSIS template directly from the
+    // user's own Image Assignment selections + Session DNA. No AI translation layer.
     if (body.mode === 'preserve') {
-      const { imageBase64, imageLabel, imageAssignment, designStyle, colorPalette } = body;
-      if (!imageBase64)     return { statusCode: 400, headers, body: JSON.stringify({ error: "imageBase64 required" }) };
-      if (!imageAssignment) return { statusCode: 400, headers, body: JSON.stringify({ error: "imageAssignment required" }) };
+      const { imageLabel, zoneList, flexNote, roomName, isOpenPlan, designStyle, colorPalette, buyerProfile, desiredFeeling, stagingLevel, furnishingsDNA } = body;
 
-      console.log('Preserve read: ' + imageLabel);
-      const compressedBase64 = await compressForRead(imageBase64);
-      const preserveData = await runPreserveRead({ imageBase64: compressedBase64, imageLabel, claudeKey });
-      const promptText = assemblePrompt({ imageAssignment, preserveData, designStyle, colorPalette, groupSpatialPlan: body.groupSpatialPlan || null, imageLabel });
+      console.log('Assembling spatial zone prompt: ' + imageLabel + (furnishingsDNA ? ' (with furnishings DNA)' : ''));
+      const promptText = assembleSpatialZonePrompt({
+        zones: { zoneList: zoneList || [], flexNote: flexNote || '', roomName: roomName || imageLabel, isOpenPlan: !!isOpenPlan },
+        dna: {
+          style: STYLE_LABELS[designStyle?.toLowerCase()] || designStyle || 'Transitional',
+          palette: PALETTE_TONES[colorPalette] || colorPalette || 'Warm Neutrals',
+          buyerProfile: buyerProfile || '',
+          desiredFeeling: desiredFeeling || '',
+          stagingLevel: stagingLevel || '',
+          furnishingsDNA: furnishingsDNA || null,
+        }
+      });
 
-      console.log('Preserve + assembly complete: ' + promptText.length + ' chars');
-      return { statusCode: 200, headers, body: JSON.stringify({ mode: 'preserve', preserveData, promptText }) };
+      console.log('Prompt assembly complete: ' + promptText.length + ' chars');
+      return { statusCode: 200, headers, body: JSON.stringify({ mode: 'preserve', promptText }) };
     }
 
     return { statusCode: 400, headers, body: JSON.stringify({ error: "Invalid mode — use spatial or preserve" }) };

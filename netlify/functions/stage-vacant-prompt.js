@@ -142,25 +142,33 @@ AB 723 COMPLIANCE: Virtual staging adds furniture only. Any alteration to perman
 `;
 
 // ✅ HAIKU READS SINGLE VACANT ROOM — Returns 4-field zones
-// For open plan rooms (roomType contains '+'), reads multiple zones
-// For single rooms, reads one zone
-async function readVacantRoom({ imageBase64, roomType, claudeKey }) {
+// isOpenPlan/zoneList/flexNote come from the user's own Image Assignment selections
+// (the lightbox checkboxes) — NOT inferred from a '+' in the roomType string.
+// Haiku is constrained to only the zones the user actually selected; anything else
+// must be left vacant, matching the "Find: {{zones}}... if not listed, leave vacant"
+// philosophy already used in the Phase 6.2 template (assembleSpatialZonePrompt).
+async function readVacantRoom({ imageBase64, roomType, claudeKey, isOpenPlan, zoneList, flexNote }) {
   try {
     if (!imageBase64 || !roomType || !claudeKey) {
       throw new Error('Missing required params: imageBase64, roomType, claudeKey');
     }
-    
-    const isOpenPlan = roomType.includes('+');
-    const zoneList = isOpenPlan
-      ? roomType.split('+').map(z => z.trim()).filter(Boolean)
+
+    const OPEN_PLAN_ZONE_LABELS = { kitchen: 'Kitchen', dining: 'Dining', living: 'Living Room', family: 'Family Room', flex: 'Flex Room' };
+    const userZoneNames = (isOpenPlan && Array.isArray(zoneList) && zoneList.length)
+      ? zoneList.map(z => (z === 'flex' && flexNote) ? `${flexNote} (Flex Room)` : (OPEN_PLAN_ZONE_LABELS[z] || z))
       : [roomType];
+    const zoneList_ = userZoneNames; // the only zones Haiku is permitted to identify
 
   const prompt = `You are reading a real estate listing photo to identify furnishing zones.
 
 Room Type: ${roomType}
 Zone type: ${isOpenPlan ? 'OPEN PLAN (multiple interconnected zones)' : 'SINGLE ROOM (one zone)'}
 
-TASK: For each zone visible, return ONLY factual architectural data — no staging instructions, no furniture recommendations, no prose.
+USER-SELECTED ZONES (the only zones you are permitted to identify and stage): ${zoneList_.join(', ')}
+
+TASK: For EACH zone listed above, return ONLY factual architectural data — no staging instructions, no furniture recommendations, no prose.
+
+CRITICAL CONSTRAINT: You must return exactly one zone entry per USER-SELECTED ZONE listed above — no more, no fewer. Do NOT identify or return any additional zone (e.g. a dining nook, breakfast area, or sitting area) that is not in the USER-SELECTED ZONES list, even if you can see open floor space that could visually support one. Any area of the room not covered by a user-selected zone must remain unaddressed here — it will be left vacant downstream. If a user-selected zone has no clear visible anchor in this image, still return it with anchor_point.confidence: "low" rather than omitting it or substituting a different zone you think fits better.
 
 RULES:
 1. ZONE IDENTIFICATION: Zones are bounded by permanent architectural elements (walls, partitions, openings, fireplaces, islands, windows).
@@ -182,7 +190,7 @@ TIER 3 (LOWER PRECISION) — Zone is floating (no walls, no fixtures):
   Use: FOREGROUND / MIDGROUND / BACKGROUND + LEFT / CENTER / RIGHT + neighbor relationships.
 
 EDGE CASES:
-• Flex Room: Flag flexRoomType as null or inferred (home_office / sitting_room / formal_dining / etc).
+• Flex Room: roomType for this zone is provided by the user above (e.g. "Office (Flex Room)") — use it as-is, do not re-infer a different type.
 • Multiple recessed lights: Name SPECIFIC location. "Recessed lights centered above dining zone".
 • Sliding doors: Flag doorType: sliding. Clearance is ONE-SIDED.
 • Swinging doors: Flag doorType: swinging. Clearance is ARC-BASED.
@@ -194,7 +202,7 @@ RETURN ONLY THIS JSON — no markdown, no preamble:
 {
   "zones": [
     {
-      "name": "Zone name (Kitchen / Dining / Living / Bedroom / Flex Room / Hallway / etc)",
+      "name": "Must be one of the USER-SELECTED ZONES listed above, verbatim.",
       "boundaries": "Reciprocal description of boundaries and neighbors on each edge.",
       "fixtures": "Comma-separated list of ceiling/structural fixtures visible in THIS ZONE ONLY, or null.",
       "cabinetry": "Kitchen/bathroom built-ins in THIS ZONE ONLY, or null.",
@@ -460,7 +468,7 @@ exports.handler = async (event) => {
   };
 
   try {
-    const { imageBase64: rawBase64, mimeType, roomType, designStyle, colorPalette } = JSON.parse(event.body);
+    const { imageBase64: rawBase64, mimeType, roomType, designStyle, colorPalette, isOpenPlan, zoneList, flexNote } = JSON.parse(event.body);
     const claudeKey = process.env.ANTHROPIC_API_KEY;
 
     if (!rawBase64) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing imageBase64" }) };
@@ -470,8 +478,9 @@ exports.handler = async (event) => {
     if (!roomType) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing roomType" }) };
     if (!claudeKey) return { statusCode: 500, headers, body: JSON.stringify({ error: "ANTHROPIC_API_KEY not configured" }) };
 
-    // Read room via Haiku
-    const haikuOutput = await readVacantRoom({ imageBase64, roomType, claudeKey });
+    // Read room via Haiku — constrained to the user's own selected zones (isOpenPlan/zoneList/flexNote),
+    // not inferred from a '+' in roomType
+    const haikuOutput = await readVacantRoom({ imageBase64, roomType, claudeKey, isOpenPlan: !!isOpenPlan, zoneList: zoneList || [], flexNote: flexNote || '' });
     
     console.log('Haiku output zones:', JSON.stringify(haikuOutput.zones).slice(0, 300));
     

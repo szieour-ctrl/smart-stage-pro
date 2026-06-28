@@ -2516,9 +2516,20 @@ async function iterateRoom(roomId) {
   const orig = SESSION.originals.find(o => o.id === room.originalId);
   if (!orig) return;
 
-  // Surgical iteration: original approved prompt + revision appended
-  // Skips Claude Vision entirely — no fresh read, no dart throws
-  const revisionPrompt = room.lastPrompt + '\n\nREVISION — Apply these changes to the staging above. Everything not mentioned stays exactly the same:\n' + note;
+  // Capture the CURRENT staged result (unwatermarked) BEFORE anything below clears it —
+  // this is the actual photo GPT2 will edit, so revisions are true surgical edits on
+  // what was actually produced, not a from-scratch re-imagining of the empty room.
+  const priorStagedClean = room.stagedCleanBase64;
+  const hasPriorStaged = !!priorStagedClean;
+
+  // Edit-only instruction when a prior staged result exists: GPT2 is looking at the
+  // already-staged photo, not the empty room, so it only needs the specific change —
+  // not the full original staging prompt (style/palette/zone rules/etc) repeated.
+  const revisionPrompt = hasPriorStaged
+    ? 'PRIMARY ROLE: Edit this already-staged photo. Make ONLY the change(s) described below — everything else in the photo (furniture, decor, architecture, lighting, camera angle) must remain exactly as shown.\n\n' +
+      'REQUESTED CHANGE:\n' + note + '\n\n' +
+      'Do not re-stage, restyle, or regenerate the room. Do not alter anything not explicitly mentioned above. Preserve all architectural elements exactly as photographed — this image is for MLS listing per California AB 723 §10140.6.'
+    : room.lastPrompt + '\n\nREVISION — Apply these changes to the staging above. Everything not mentioned stays exactly the same:\n' + note;
 
   room.status = 'processing';
   room.promptStatus = 'Re-staging with revision...';
@@ -2545,8 +2556,12 @@ async function iterateRoom(roomId) {
     room.promptStatus = 'Generating revised draft — takes ~15 seconds...';
     renderRoomQueue();
 
-    // Send ORIGINAL photo + revised prompt to GPT — never GPT output
-    const stageResult = await callStageAPI(orig.base64, orig.mimeType, approvedPrompt, 'low');
+    // Send the PRIOR STAGED photo (unwatermarked) + edit-only prompt to GPT — true
+    // surgical edit. Falls back to the original empty-room photo only if no prior
+    // staged result was captured.
+    const sourceImage = hasPriorStaged ? priorStagedClean : orig.base64;
+    const sourceMime = hasPriorStaged ? 'image/jpeg' : orig.mimeType;
+    const stageResult = await callStageAPI(sourceImage, sourceMime, approvedPrompt, 'low');
     if (!stageResult) throw new Error('Staging engine failed — no image returned');
     const stagedBase64 = stageResult.watermarked;
     const stagedCleanBase64 = stageResult.clean;
@@ -2575,9 +2590,21 @@ async function reStageRoom(roomId) {
   if (!room.lastPrompt) { showToast('No prior prompt found — run Clean + Stage first.', 'error'); return; }
   if (!room.declutteredBase64) { showToast('No cleaned image found — run Clean + Stage first.', 'error'); return; }
 
-  // Surgical iteration: original approved prompt + revision appended
-  // Uses decluttered photo (not original occupied photo) as image source
-  const revisionPrompt = room.lastPrompt + '\n\nREVISION — Apply these changes to the staging above. Everything not mentioned stays exactly the same:\n' + note;
+  // Capture the CURRENT staged result (unwatermarked) BEFORE it gets cleared below —
+  // this is the actual photo GPT2 will edit, so revisions are true surgical edits on
+  // what was actually produced, not a from-scratch re-imagining of an empty room.
+  const priorStagedClean = room.stagedCleanBase64;
+  const hasPriorStaged = !!priorStagedClean;
+
+  // Edit-only instruction: GPT2 is looking at the already-staged photo, not an empty
+  // room, so it only needs the specific change — not the full original staging prompt
+  // (style/palette/zone rules/etc) repeated. Falls back to the old append-to-full-prompt
+  // approach if no prior staged image is available for some reason (e.g. legacy state).
+  const revisionPrompt = hasPriorStaged
+    ? 'PRIMARY ROLE: Edit this already-staged photo. Make ONLY the change(s) described below — everything else in the photo (furniture, decor, architecture, lighting, camera angle) must remain exactly as shown.\n\n' +
+      'REQUESTED CHANGE:\n' + note + '\n\n' +
+      'Do not re-stage, restyle, or regenerate the room. Do not alter anything not explicitly mentioned above. Preserve all architectural elements exactly as photographed — this image is for MLS listing per California AB 723 §10140.6.'
+    : room.lastPrompt + '\n\nREVISION — Apply these changes to the staging above. Everything not mentioned stays exactly the same:\n' + note;
 
   room.status = 'processing';
   room.promptStatus = 'Re-staging with revision...';
@@ -2604,8 +2631,12 @@ async function reStageRoom(roomId) {
     room.promptStatus = 'Generating revised draft — takes ~15 seconds...';
     renderRoomQueue();
 
-    // Send DECLUTTERED photo + revised prompt to GPT
-    const stageResult = await callStageAPI(room.declutteredBase64, 'image/jpeg', approvedPrompt, 'low');
+    // Send the PRIOR STAGED photo (unwatermarked) + edit-only prompt to GPT — true
+    // surgical edit. Falls back to the decluttered empty room only if no prior staged
+    // result was captured.
+    const sourceImage = hasPriorStaged ? priorStagedClean : room.declutteredBase64;
+    const sourceMime = hasPriorStaged ? 'image/jpeg' : 'image/jpeg';
+    const stageResult = await callStageAPI(sourceImage, sourceMime, approvedPrompt, 'low');
     if (!stageResult) throw new Error('Staging engine failed — no image returned');
     const stagedBase64 = stageResult.watermarked;
     const stagedCleanBase64 = stageResult.clean;
@@ -2971,6 +3002,7 @@ async function runCleanAndStage(roomId) {
     if (!cnsStageResult) throw new Error('No staged image returned');
     room.stagedBase64 = cnsStageResult.watermarked;
     room.stagedCleanBase64 = cnsStageResult.clean;
+    room.lastPrompt = approvedStage; // so reStageRoom() can find this for revisions
     // Resize staged image to match original dimensions
     await resizeToMatch(room, orig, null, 'stagedBase64', cnsStageResult.watermarked);
     await resizeToMatch(room, orig, null, 'stagedCleanBase64', cnsStageResult.clean);

@@ -52,11 +52,17 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
 .room-map-name{font-weight:500;font-size:0.9rem;}
 .room-map-adj{font-size:0.72rem;color:var(--muted);margin-top:2px;}
 .photo-assign-list,.no-fp-label-list{display:flex;flex-direction:column;gap:8px;}
-.photo-assign-row{display:flex;align-items:center;gap:10px;background:var(--cream);border:1px solid var(--border);border-radius:3px;padding:8px 12px;}
+.photo-assign-row{display:flex;align-items:center;gap:10px;background:var(--cream);border:1px solid var(--border);border-radius:3px;padding:8px 12px;flex-wrap:wrap;}
 .photo-assign-thumb{width:52px;height:40px;object-fit:cover;border-radius:2px;flex-shrink:0;cursor:pointer;transition:opacity 0.15s;}
 .photo-assign-thumb:hover{opacity:0.8;}
-.photo-assign-name{font-size:0.78rem;color:var(--muted);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.photo-assign-name{font-size:0.78rem;color:var(--muted);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:flex;align-items:center;gap:8px;min-width:120px;}
 .photo-assign-select{font-size:0.8rem;padding:4px 8px;border:1px solid var(--border);border-radius:3px;background:#fff;color:var(--ink);cursor:pointer;flex-shrink:0;}
+.pa-saved-badge{font-size:0.68rem;color:var(--success);font-weight:600;white-space:nowrap;}
+.pa-mode-btns{display:flex;gap:6px;flex-shrink:0;}
+.pa-mode-btn{font-size:0.74rem;font-weight:600;letter-spacing:0.02em;padding:8px 14px;border:1px solid var(--ink);border-radius:3px;background:#fff;color:var(--ink);cursor:pointer;transition:all 0.15s;white-space:nowrap;}
+.pa-mode-btn:hover{background:var(--warm);}
+.pa-mode-btn.pa-saved{background:var(--success);border-color:var(--success);color:#fff;}
+.pa-mode-btn.pa-saved:hover{background:var(--success);opacity:0.9;}
 .summary-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-top:8px;}
 .summary-chip{background:var(--cream);border:1px solid var(--border);border-radius:3px;padding:8px 12px;}
 .summary-chip-label{font-size:0.65rem;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);}
@@ -144,14 +150,14 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
 .lb-room-select{width:100%;border:1px solid var(--border);border-radius:3px;padding:10px 14px;font-family:'DM Sans',sans-serif;font-size:0.92rem;color:var(--ink);background:var(--cream);cursor:pointer;}
 .lb-room-select:focus{outline:none;border-color:var(--gold);}
 .lb-zone-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
-.lb-zone-card{display:flex;align-items:flex-start;gap:10px;border:1px solid var(--border);border-radius:5px;padding:12px;cursor:pointer;background:#fff;transition:all 0.15s;}
+.lb-zone-sub{font-size:0.74rem;color:var(--muted);margin-bottom:10px;}
+.lb-zone-card{display:flex;align-items:center;gap:8px;border:1px solid var(--border);border-radius:5px;padding:12px;cursor:pointer;background:#fff;transition:all 0.15s;flex-wrap:wrap;}
 .lb-zone-card:hover{border-color:var(--gold);}
 .lb-zone-card.checked{border-color:var(--gold);background:var(--warm);}
-.lb-zone-card input{margin-top:2px;width:18px;height:18px;accent-color:var(--gold);cursor:pointer;flex-shrink:0;}
-.lb-zone-card-text{display:flex;flex-direction:column;gap:2px;}
+.lb-zone-card input[type=checkbox]{width:18px;height:18px;accent-color:var(--gold);cursor:pointer;flex-shrink:0;}
 .lb-zone-card-name{font-weight:600;font-size:0.88rem;}
-.lb-zone-card-desc{font-size:0.7rem;color:var(--muted);line-height:1.35;}
-.lb-zone-hint{font-size:0.74rem;color:var(--muted);margin-top:8px;line-height:1.5;}
+.lb-zone-freetext{flex:1;min-width:90px;border:1px solid var(--border);border-radius:3px;padding:5px 8px;font-size:0.78rem;font-family:'DM Sans',sans-serif;background:var(--cream);}
+.lb-zone-freetext:focus{outline:none;border-color:var(--gold);}
 .lb-empty-state{font-size:0.82rem;color:var(--muted);padding:14px;text-align:center;border:1px dashed var(--border);border-radius:5px;}
 .btn{display:inline-flex;align-items:center;gap:6px;padding:9px 18px;border-radius:3px;font-family:'DM Sans',sans-serif;font-size:0.82rem;font-weight:500;letter-spacing:0.04em;cursor:pointer;border:none;transition:all 0.15s;text-transform:uppercase;}
 .btn-primary{background:var(--gold);color:var(--ink);}
@@ -288,14 +294,16 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
       <div class="lb-mode-tabs" id="lb-mode-tabs"></div>
       <div id="lb-mode-body"></div>
 
-      <div class="lb-section-label" id="lb-shotfocus-label">Shot Focus Instructions</div>
-      <div class="lightbox-sub" id="lb-shotfocus-sub">Tell the AI what to emphasize in this photo. Critical for open-concept shots showing multiple spaces — without this the AI tries to fill every visible room equally.</div>
-      <textarea class="lightbox-input" id="lightbox-input" rows="3" placeholder='e.g. "Focus on the Great Room seating area — the kitchen in the background is secondary and should not be over-furnished"'></textarea>
-      <div class="lightbox-examples" id="lightbox-examples"></div>
+      <div id="lb-shotfocus-wrap" style="display:none;">
+        <div class="lb-section-label">Shot Focus Instructions</div>
+        <div class="lightbox-sub">Tell the AI what to emphasize in this photo. Critical for open-concept shots showing multiple spaces — without this the AI tries to fill every visible room equally.</div>
+        <textarea class="lightbox-input" id="lightbox-input" rows="3" placeholder='e.g. "Focus on the Great Room seating area — the kitchen in the background is secondary and should not be over-furnished"'></textarea>
+        <div class="lightbox-examples" id="lightbox-examples"></div>
+      </div>
     </div>
     <div class="lightbox-footer">
       <button class="btn btn-ghost" onclick="closeLightbox()">Cancel</button>
-      <button class="btn btn-primary" onclick="saveShotFocus()">Save →</button>
+      <button class="btn btn-primary" id="lightbox-footer-save" onclick="saveShotFocus()">Save →</button>
     </div>
   </div>
 </div>
@@ -419,13 +427,8 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
 // ── Room Options — Display label maps directly to Decor8 room_type ─────────────
 // Format: "Display Name || decor8_room_type"
 // What you select = what gets sent to Decor8. No hidden translation.
-const ROOM_OPTIONS = [
-  "── REFERENCE ────────────────── || __fp__",
-  "Floor Plan / Reference Only || __fp__",
-
-  "── OPEN PLAN (Multi-Zone) ────── || __fp__",
-  "Open Plan (choose zones below) || openplan",
-
+// ── Single Room dropdown — Main Living + Den/Study + Bedroom/Bath + Utility ─────
+const SINGLE_ROOM_OPTIONS = [
   "── MAIN LIVING ─────────────────── || __fp__",
   "Great Room || greatroom",
   "Living Room || livingroom",
@@ -438,7 +441,10 @@ const ROOM_OPTIONS = [
   "Sun Room || sunroom",
   "Basement || basement",
   "Loft || familyroom",
-  "Flex Room || familyroom",
+
+  "── DEN / STUDY ──────────────────── || __fp__",
+  "Office || office",
+  "Study Room || study_room",
 
   "── BEDROOM / BATH ──────────────── || __fp__",
   "Primary Suite / Bedroom || bedroom",
@@ -450,10 +456,6 @@ const ROOM_OPTIONS = [
   "Powder Room || powderroom",
   "Walk-In Closet || walkincloset",
 
-  "── OFFICE / STUDY ──────────────── || __fp__",
-  "Office || office",
-  "Study Room || study_room",
-
   "── UTILITY ─────────────────────── || __fp__",
   "Laundry Room || laundryroom",
   "Mud Room || mudroom",
@@ -462,7 +464,12 @@ const ROOM_OPTIONS = [
   "Toy Room || toyroom",
   "Balcony || balcony",
 
-  "── EXTERIOR ────────────────────── || __fp__",
+  "── REFERENCE ────────────────── || __fp__",
+  "Floor Plan / Reference Only || __fp__",
+];
+
+// ── Exterior dropdown — its own standalone list ─────────────────────────────
+const EXTERIOR_ROOM_OPTIONS = [
   "Covered Patio || back_patio",
   "Backyard / Back Porch || back_porch",
   "Exterior Front / Front Porch || front_porch",
@@ -488,23 +495,24 @@ function parseRoomOption(val, explicitZones) {
 }
 
 // ── Open Plan zone metadata — single source of truth for the zone checkbox UI ────
+// No prescriptive descriptions: GPT Image 2's first-pass placement can't be guaranteed,
+// and the iterate/re-stage loop is the correction mechanism — not the zone label.
+// 'Great Room' is intentionally excluded from Open Plan zones: GPT2 reads that label as
+// implying two rooms and tends to add an unwanted table. Use Living Room instead.
 const OPEN_PLAN_ZONES = [
-  { key: 'kitchen', label: 'Kitchen', desc: 'Island with sink/appliances, bar seating on far side from camera.' },
-  { key: 'dining',  label: 'Dining',  desc: 'Table under chandelier/pendant fixture over open floor space, chairs.' },
-  { key: 'living',  label: 'Living / Great Room', desc: 'Sofa facing fireplace or feature wall, accent chair, coffee table, area rug.' },
-  { key: 'flex',    label: 'Flex Room', desc: 'Semi-enclosed space with walls and an archway/opening — furniture stays inside it.' },
+  { key: 'kitchen', label: 'Kitchen' },
+  { key: 'dining',  label: 'Dining/Nook' },
+  { key: 'living',  label: 'Living Room' },
+  { key: 'family',  label: 'Family Room' },
+  { key: 'flex',    label: 'Flex Room', hasFreetext: true },
 ];
 
-// Build a human-readable zone description from a checked zoneList array, for the Claude/Haiku prompt
-function getOpenPlanZones(zoneList) {
+// Build a simple zone-name summary from a checked zoneList array (no prescriptive placement copy)
+function getOpenPlanZones(zoneList, flexNote) {
   if (!zoneList || !zoneList.length) return null;
-  const descMap = Object.fromEntries(OPEN_PLAN_ZONES.map(z => [z.key, z.desc]));
   const ordered = OPEN_PLAN_ZONES.filter(z => zoneList.includes(z.key));
   if (!ordered.length) return null;
-  const count = ordered.length;
-  const countWord = {1:'One',2:'Two',3:'Three',4:'Four'}[count] || String(count);
-  const parts = ordered.map((z,i) => `(${i+1}) ${z.label} zone — ${descMap[z.key]}`);
-  return `${countWord} zone${count>1?'s':''}: ${parts.join('; ')}`;
+  return ordered.map(z => z.key==='flex' && flexNote ? `${z.label} (${flexNote})` : z.label).join(' + ');
 }
 // ── Decor8 API mappings ───────────────────────────────────────────────────────
 const DECOR8_ROOM_TYPE = {
@@ -1157,14 +1165,14 @@ function showMappingWithFloorplan(rooms){
   const photos=SESSION.originals.filter(o=>!o.isFloorplan);
   const roomOpts=rooms.map(r=>`<option value="${r.id}">${r.name}${r.floor?' (Fl.'+r.floor+')':''}</option>`).join('');
   document.getElementById('mapping-body').innerHTML=`
-    <div class="panel-sub" style="margin-bottom:16px;">AI identified <strong>${rooms.length} rooms</strong>. Assign each photo. Click any thumbnail to set Shot Focus for open-concept shots.</div>
+    <div class="panel-sub" style="margin-bottom:16px;">AI identified <strong>${rooms.length} rooms</strong>. Assign each photo.</div>
     <div class="room-map-grid">
       <div><div class="section-label">Floor Plan Rooms</div><div class="room-map-list">
         ${rooms.map(r=>`<div class="room-map-item"><div class="room-map-name">${r.name}${r.floor?' · Floor '+r.floor:''}</div>${r.adjacentTo?.length?`<div class="room-map-adj">Adjacent: ${r.adjacentTo.map(aid=>rooms.find(x=>x.id===aid)?.name||aid).join(', ')}</div>`:''}</div>`).join('')}
       </div></div>
       <div><div class="section-label">Assign Photos to Rooms</div><div class="photo-assign-list">
         ${photos.map(p=>`<div class="photo-assign-row">
-          <img class="photo-assign-thumb" src="${p.dataUrl}" onclick="openLightboxMapping('${p.id}')" title="Click to set Shot Focus" />
+          <img class="photo-assign-thumb" src="${p.dataUrl}" onclick="openLightboxMapping('${p.id}')" title="Click to view photo" />
           <span class="photo-assign-name">${p.name}</span>
           <select class="photo-assign-select" onchange="updatePhotoRoom('${p.id}',this.value)">
             <option value="">— Select room —</option>${roomOpts}
@@ -1184,72 +1192,46 @@ function updatePhotoRoom(photoId,roomId){
 function showMappingManual(){
   const photos=SESSION.originals.filter(o=>!o.isFloorplan);
   document.getElementById('mapping-body').innerHTML=`
-    <div class="panel-sub" style="margin-bottom:16px;">Label each photo. "Floor Plan / Reference Only" marks a photo as reference — it won't be staged. Click thumbnails to set Shot Focus or label Open Plan zones.</div>
+    <div class="panel-sub" style="margin-bottom:16px;">Label each photo. Critical for open-concept shots showing multiple spaces — select all rooms/zone(s) that apply. Click Exterior and Single Room to choose staging options, without this the AI tries to fill every space.</div>
     <div class="no-fp-label-list">
-      ${photos.map(p=>{
-        const m=SESSION.photoRoomMap[p.id];
-        const selectedVal=m?._lbRawVal||'';
-        const zoneBadge=m?.isOpenPlan ? `<span style="font-size:0.65rem;color:var(--muted);margin-left:6px;">${(m.zoneList||[]).length?m.zoneList.map(z=>OPEN_PLAN_ZONES.find(o=>o.key===z)?.label||z).join(' + '):'⚠ no zones selected'}</span>` : '';
-        return `<div class="photo-assign-row">
-        <img class="photo-assign-thumb" src="${p.dataUrl}" onclick="openLightboxMapping('${p.id}')" title="Click to set Shot Focus" />
-        <span class="photo-assign-name">${p.name}${zoneBadge}</span>
-        <select class="photo-assign-select" onchange="updatePhotoRoomManual('${p.id}',this.value)">
-          <option value="">— Label this room —</option>${roomOptsHtml(ROOM_OPTIONS,selectedVal)}
-        </select>
-      </div>`;}).join('')}
+      ${photos.map(p=>renderPhotoAssignRow(p)).join('')}
     </div>`;
 }
-function updatePhotoRoomManual(photoId,val){
-  if(!val){delete SESSION.photoRoomMap[photoId];return;}
-  const parsed = parseRoomOption(val);
-  if(!parsed) return; // divider row — ignore
-  if(parsed.isFloorplan){
-    const orig=SESSION.originals.find(o=>o.id===photoId);
-    if(orig)orig.isFloorplan=true;
-    SESSION.photoRoomMap[photoId]={roomId:'floorplan',roomName:'Floor Plan',adjacentNames:[],isExterior:false,isReference:true,decor8Type:'floorplan'};
-    return;
-  }
-  if(parsed.isOpenPlan){
-    // Open Plan needs zone selection — hand off to the lightbox rather than saving an empty zoneList
-    SESSION.photoRoomMap[photoId]={...SESSION.photoRoomMap[photoId]||{},roomId:'openplan',roomName:'Open Plan',decor8Type:'openplan',adjacentNames:[],isExterior:false,isOpenPlan:true,isReference:false,zoneList:SESSION.photoRoomMap[photoId]?.zoneList||[]};
-    showToast('Select which zones are visible →','');
-    openLightboxMapping(photoId);
-    return;
-  }
-  SESSION.photoRoomMap[photoId]={
-    ...SESSION.photoRoomMap[photoId]||{},
-    roomId: parsed.decor8Type,
-    roomName: parsed.label,
-    decor8Type: parsed.decor8Type,
-    adjacentNames:[],
-    isExterior: parsed.isExterior,
-    isOpenPlan: parsed.isOpenPlan,
-    isReference:false,
-    zoneList: parsed.zoneList || [],
-    _lbRawVal: val
-  };
+function renderPhotoAssignRow(p){
+  const m=SESSION.photoRoomMap[p.id];
+  const saved = !!(m && m.roomName);
+  const savedLabel = saved ? (m.isOpenPlan ? (m.zoneList||[]).map(z=>OPEN_PLAN_ZONES.find(o=>o.key===z)?.label||z).join(' + ')||'Open Plan' : m.roomName) : '';
+  const isOpenPlanMode = m?.isOpenPlan;
+  const isExteriorMode = m?.isExterior;
+  const isSingleMode = saved && !isOpenPlanMode && !isExteriorMode;
+  return `<div class="photo-assign-row">
+        <img class="photo-assign-thumb" src="${p.dataUrl}" onclick="openLightboxMapping('${p.id}')" title="Click to label this photo" />
+        <span class="photo-assign-name">${p.name}${saved?`<span class="pa-saved-badge">✓ ${savedLabel}</span>`:''}</span>
+        <div class="pa-mode-btns">
+          <button class="pa-mode-btn ${isOpenPlanMode?'pa-saved':''}" onclick="openLightboxMapping('${p.id}','openplan')">Open Plan (Multiple Zones)</button>
+          <button class="pa-mode-btn ${isSingleMode?'pa-saved':''}" onclick="openLightboxMapping('${p.id}','single')">Single Room</button>
+          <button class="pa-mode-btn ${isExteriorMode?'pa-saved':''}" onclick="openLightboxMapping('${p.id}','exterior')">Exterior</button>
+        </div>
+      </div>`;
 }
-function confirmMapping(){buildSummary();buildRoomQueue();showStep('step-staging');}
+function confirmMapping(){
+  const photos=SESSION.originals.filter(o=>!o.isFloorplan);
+  const unlabeled=photos.filter(p=>!SESSION.photoRoomMap[p.id]?.roomName);
+  if(unlabeled.length){
+    showToast(`Label all photos before continuing — ${unlabeled.length} remaining.`,'error');
+    return;
+  }
+  buildSummary();buildRoomQueue();showStep('step-staging');
+}
 
 // ══════════════════════════════════════════
 // LIGHTBOX
 // ══════════════════════════════════════════
-let _lbMode = null;        // 'openplan' | 'single' | 'exterior' | null (Shot-Focus-only mode)
+let _lbMode = null;        // 'openplan' | 'single' | 'exterior' | null (Shot-Focus-only mode, for openLightbox)
 let _lbZones = [];         // checked zone keys for Open Plan mode
-let _lbSingleVal = '';     // selected ROOM_OPTIONS value for Single Room / Exterior mode
+let _lbFlexNote = '';      // freetext for the Flex Room zone
+let _lbSingleVal = '';     // selected dropdown value for Single Room / Exterior mode
 
-// Single Room dropdown options = MAIN LIVING + BEDROOM/BATH + OFFICE/STUDY + UTILITY sections (everything except Open Plan/Exterior/Reference)
-function getSingleRoomOptions(){
-  return ROOM_OPTIONS.filter(r=>{
-    if(r.startsWith('──')) return r.includes('MAIN LIVING')||r.includes('BEDROOM')||r.includes('OFFICE')||r.includes('UTILITY');
-    const type=r.split(' || ')[1]?.trim();
-    return !['__fp__','openplan','back_patio','back_porch','front_porch'].includes(type) || r.startsWith('──');
-  });
-}
-function getExteriorRoomOptions(){
-  const idx=ROOM_OPTIONS.findIndex(r=>r.includes('EXTERIOR ─'));
-  return idx===-1?[]:ROOM_OPTIONS.slice(idx);
-}
 function roomOptsHtml(list,selectedVal){
   return list.map(r=>{
     const isDivider=r.startsWith('──');
@@ -1271,31 +1253,30 @@ function openLightbox(roomId){
   document.getElementById('lb-mode-tabs').innerHTML='';
   document.getElementById('lb-mode-body').innerHTML='';
   document.getElementById('lightbox-sub').style.display='none';
-  document.getElementById('lb-shotfocus-label').textContent='Shot Focus Instructions';
+  document.getElementById('lb-shotfocus-wrap').style.display='block';
   document.getElementById('lightbox-input').value=room.shotFocus||'';
   const hints=SHOT_FOCUS_HINTS[room.roomName]||DEFAULT_HINTS;
   document.getElementById('lightbox-examples').innerHTML=hints.map(h=>`<div class="lightbox-example" onclick="setLightboxExample(this)">${h}</div>`).join('');
+  document.getElementById('lightbox-footer-save').setAttribute('onclick','saveShotFocus()');
   document.getElementById('lightbox').classList.remove('hidden');
 }
 
-// Mapping step — full "Label this Image" lightbox with mode tabs
-function openLightboxMapping(photoId){
+// Mapping step — "Label this Image" lightbox. presetMode: 'openplan'|'single'|'exterior' when opened from a row button.
+function openLightboxMapping(photoId, presetMode){
   const orig=SESSION.originals.find(o=>o.id===photoId);
   if(!orig)return;
   _lbRoomId='__mapping__:'+photoId;
   const existing=SESSION.photoRoomMap[photoId];
-  _lbMode = existing?.isOpenPlan ? 'openplan' : existing?.isExterior ? 'exterior' : existing?.roomName ? 'single' : null;
+  _lbMode = presetMode || (existing?.isOpenPlan ? 'openplan' : existing?.isExterior ? 'exterior' : existing?.roomName ? 'single' : null);
   _lbZones = existing?.zoneList ? [...existing.zoneList] : [];
+  _lbFlexNote = existing?.flexNote || '';
   _lbSingleVal = existing?._lbRawVal || '';
 
   document.getElementById('lightbox-img').src=orig.dataUrl;
   document.getElementById('lightbox-title').textContent='Label this Image';
   document.getElementById('lightbox-sub').style.display='block';
-  document.getElementById('lightbox-sub').textContent='Choose how this photo should be staged, then set Shot Focus if needed.';
-  document.getElementById('lb-shotfocus-label').textContent='Shot Focus Instructions (optional)';
-  document.getElementById('lightbox-input').value=existing?.shotFocus||'';
-  const hints=SHOT_FOCUS_HINTS[existing?.roomName]||DEFAULT_HINTS;
-  document.getElementById('lightbox-examples').innerHTML=hints.map(h=>`<div class="lightbox-example" onclick="setLightboxExample(this)">${h}</div>`).join('');
+  document.getElementById('lb-shotfocus-wrap').style.display='none';
+  document.getElementById('lightbox-footer-save').setAttribute('onclick','saveLbMapping()');
 
   renderLbModeTabs();
   renderLbModeBody();
@@ -1310,38 +1291,44 @@ function renderLbModeTabs(){
 }
 function setLbMode(mode){
   _lbMode=mode;
-  if(mode==='single') _lbSingleVal = getSingleRoomOptions().some(r=>!r.startsWith('──')&&r===_lbSingleVal) ? _lbSingleVal : '';
-  if(mode==='exterior') _lbSingleVal = getExteriorRoomOptions().some(r=>!r.startsWith('──')&&r===_lbSingleVal) ? _lbSingleVal : '';
+  if(mode==='single') _lbSingleVal = SINGLE_ROOM_OPTIONS.some(r=>!r.startsWith('──')&&r===_lbSingleVal) ? _lbSingleVal : '';
+  if(mode==='exterior') _lbSingleVal = EXTERIOR_ROOM_OPTIONS.some(r=>!r.startsWith('──')&&r===_lbSingleVal) ? _lbSingleVal : '';
   renderLbModeTabs();
   renderLbModeBody();
 }
 function renderLbModeBody(){
   const body=document.getElementById('lb-mode-body');
+  const sub=document.getElementById('lightbox-sub');
   if(_lbMode==='openplan'){
+    sub.textContent='Select every zone actually visible — any combination is fine. This drives the spatial read for furniture anchoring.';
     body.innerHTML=`
       <div class="lb-section-label">Which zones are visible in this photo?</div>
+      <div class="lb-zone-sub">Check all that apply</div>
       <div class="lb-zone-grid">
         ${OPEN_PLAN_ZONES.map(z=>`
           <label class="lb-zone-card ${_lbZones.includes(z.key)?'checked':''}" onclick="event.preventDefault();toggleLbZone('${z.key}')">
             <input type="checkbox" ${_lbZones.includes(z.key)?'checked':''} readonly />
-            <div class="lb-zone-card-text"><div class="lb-zone-card-name">${z.label}</div><div class="lb-zone-card-desc">${z.desc}</div></div>
+            <div class="lb-zone-card-name">${z.label}${z.hasFreetext?':':''}</div>
+            ${z.hasFreetext?`<input type="text" class="lb-zone-freetext" placeholder="specify type" value="${(_lbFlexNote||'').replace(/"/g,'&quot;')}" onclick="event.stopPropagation()" oninput="_lbFlexNote=this.value" />`:''}
           </label>`).join('')}
-      </div>
-      <div class="lb-zone-hint">Select every zone actually visible — any combination is fine. This drives the spatial read for furniture anchoring.</div>`;
+      </div>`;
   } else if(_lbMode==='single'){
+    sub.textContent='Use the drop-down to select what zone to stage';
     body.innerHTML=`
       <div class="lb-section-label">Room Type</div>
       <select class="lb-room-select" id="lb-single-select" onchange="_lbSingleVal=this.value">
-        <option value="">— Select room —</option>${roomOptsHtml(getSingleRoomOptions(),_lbSingleVal)}
+        <option value="">— Select room —</option>${roomOptsHtml(SINGLE_ROOM_OPTIONS,_lbSingleVal)}
       </select>`;
   } else if(_lbMode==='exterior'){
+    sub.textContent='Use the drop-down to select what zone to stage';
     body.innerHTML=`
       <div class="lb-section-label">Exterior Type</div>
       <select class="lb-room-select" id="lb-single-select" onchange="_lbSingleVal=this.value">
-        <option value="">— Select exterior type —</option>${roomOptsHtml(getExteriorRoomOptions(),_lbSingleVal)}
+        <option value="">— Select exterior type —</option>${roomOptsHtml(EXTERIOR_ROOM_OPTIONS,_lbSingleVal)}
       </select>`;
   } else {
-    body.innerHTML=`<div class="lb-empty-state">Pick a mode above to label this photo.</div>`;
+    sub.textContent='Choose how this photo should be staged.';
+    body.innerHTML=`<div class="lb-empty-state">Pick a Photo Type above to label this photo.</div>`;
   }
 }
 function toggleLbZone(key){
@@ -1351,52 +1338,55 @@ function toggleLbZone(key){
 }
 
 function setLightboxExample(el){document.getElementById('lightbox-input').value=el.textContent;}
-function closeLightbox(){document.getElementById('lightbox').classList.add('hidden');_lbRoomId=null;_lbMode=null;_lbZones=[];_lbSingleVal='';}
-function saveShotFocus(){
-  const val=document.getElementById('lightbox-input').value.trim();
-  if(_lbRoomId?.startsWith('__mapping__:')){
-    const photoId=_lbRoomId.split(':')[1];
-    if(!SESSION.photoRoomMap[photoId])SESSION.photoRoomMap[photoId]={};
+function closeLightbox(){document.getElementById('lightbox').classList.add('hidden');_lbRoomId=null;_lbMode=null;_lbZones=[];_lbFlexNote='';_lbSingleVal='';}
 
-    if(_lbMode==='openplan'){
-      if(!_lbZones.length){showToast('Select at least one zone for Open Plan.','error');return;}
+// Save handler for the mapping lightbox (Open Plan / Single Room / Exterior — no Shot Focus)
+function saveLbMapping(){
+  const photoId=_lbRoomId.split(':')[1];
+  if(!SESSION.photoRoomMap[photoId])SESSION.photoRoomMap[photoId]={};
+
+  if(_lbMode==='openplan'){
+    if(!_lbZones.length){showToast('Select at least one zone for Open Plan.','error');return;}
+    SESSION.photoRoomMap[photoId]={
+      ...SESSION.photoRoomMap[photoId],
+      roomId:'openplan', roomName:'Open Plan', decor8Type:'openplan',
+      adjacentNames:[], isExterior:false, isOpenPlan:true, isReference:false,
+      zoneList:zonesInOrder(_lbZones), flexNote:_lbZones.includes('flex')?_lbFlexNote.trim():'', _lbRawVal:''
+    };
+  } else if(_lbMode==='single'||_lbMode==='exterior'){
+    if(!_lbSingleVal){showToast('Select a room type.','error');return;}
+    const parsed=parseRoomOption(_lbSingleVal);
+    if(!parsed){showToast('Select a room type.','error');return;}
+    if(parsed.isFloorplan){
+      const orig=SESSION.originals.find(o=>o.id===photoId);
+      if(orig)orig.isFloorplan=true;
+      SESSION.photoRoomMap[photoId]={roomId:'floorplan',roomName:'Floor Plan',adjacentNames:[],isExterior:false,isReference:true,decor8Type:'floorplan',_lbRawVal:_lbSingleVal};
+    } else {
       SESSION.photoRoomMap[photoId]={
         ...SESSION.photoRoomMap[photoId],
-        roomId:'openplan', roomName:'Open Plan', decor8Type:'openplan',
-        adjacentNames:[], isExterior:false, isOpenPlan:true, isReference:false,
-        zoneList:[...ZBoxOrder(_lbZones)], shotFocus:val, _lbRawVal:''
+        roomId:parsed.decor8Type, roomName:parsed.label, decor8Type:parsed.decor8Type,
+        adjacentNames:[], isExterior:parsed.isExterior, isOpenPlan:false, isReference:false,
+        zoneList:parsed.zoneList||[], _lbRawVal:_lbSingleVal
       };
-    } else if(_lbMode==='single'||_lbMode==='exterior'){
-      if(!_lbSingleVal){showToast('Select a room type.','error');return;}
-      const parsed=parseRoomOption(_lbSingleVal);
-      if(!parsed){showToast('Select a room type.','error');return;}
-      if(parsed.isFloorplan){
-        const orig=SESSION.originals.find(o=>o.id===photoId);
-        if(orig)orig.isFloorplan=true;
-        SESSION.photoRoomMap[photoId]={roomId:'floorplan',roomName:'Floor Plan',adjacentNames:[],isExterior:false,isReference:true,decor8Type:'floorplan',shotFocus:val,_lbRawVal:_lbSingleVal};
-      } else {
-        SESSION.photoRoomMap[photoId]={
-          ...SESSION.photoRoomMap[photoId],
-          roomId:parsed.decor8Type, roomName:parsed.label, decor8Type:parsed.decor8Type,
-          adjacentNames:[], isExterior:parsed.isExterior, isOpenPlan:false, isReference:false,
-          zoneList:parsed.zoneList||[], shotFocus:val, _lbRawVal:_lbSingleVal
-        };
-      }
-    } else {
-      // No mode picked yet — Shot Focus saved alone, label unchanged
-      SESSION.photoRoomMap[photoId].shotFocus=val;
     }
-    refreshMappingBodyIfPresent();
   } else {
-    const room=SESSION.rooms.find(r=>r.id===_lbRoomId);
-    if(room){room.shotFocus=val;renderRoomQueue();}
+    showToast('Pick a Photo Type before saving.','error');
+    return;
   }
+  refreshMappingBodyIfPresent();
   showToast('Saved.','success');
   closeLightbox();
 }
-// Keep zone order consistent: kitchen, dining, living, flex
-function ZBoxOrder(keys){
-  const order=['kitchen','dining','living','flex'];
+function saveShotFocus(){
+  const val=document.getElementById('lightbox-input').value.trim();
+  const room=SESSION.rooms.find(r=>r.id===_lbRoomId);
+  if(room){room.shotFocus=val;renderRoomQueue();}
+  showToast('Shot Focus saved.','success');
+  closeLightbox();
+}
+// Keep zone order consistent: kitchen, dining, living, family, flex
+function zonesInOrder(keys){
+  const order=['kitchen','dining','living','family','flex'];
   return order.filter(k=>keys.includes(k));
 }
 function refreshMappingBodyIfPresent(){
@@ -1424,7 +1414,7 @@ function buildRoomQueue(){
   SESSION.rooms=photos.map(orig=>{
     const m=SESSION.photoRoomMap[orig.id];
     const isOpenPlan=m?.isOpenPlan||false;
-    return {id:'room_'+orig.id,originalId:orig.id,roomName:m?.roomName||orig.name,decor8Type:m?.decor8Type||null,isOpenPlan,adjacentRooms:m?.adjacentNames||[],zoneList:m?.zoneList||[],isExterior:m?.isExterior||false,isReference:m?.isReference||false,shotFocus:m?.shotFocus||'',status:'pending',stagedBase64:null,finalBase64:null,finalStatus:null,iterationNote:'',approvedDNA:null,extSelections:{},spatialAnalysis:null,spatialStatus:null,dnaStatus:null,roomMode:'stage',declutteredBase64:null};
+    return {id:'room_'+orig.id,originalId:orig.id,roomName:m?.roomName||orig.name,decor8Type:m?.decor8Type||null,isOpenPlan,adjacentRooms:m?.adjacentNames||[],zoneList:m?.zoneList||[],flexNote:m?.flexNote||'',isExterior:m?.isExterior||false,isReference:m?.isReference||false,shotFocus:m?.shotFocus||'',status:'pending',stagedBase64:null,finalBase64:null,finalStatus:null,iterationNote:'',approvedDNA:null,extSelections:{},spatialAnalysis:null,spatialStatus:null,dnaStatus:null,roomMode:'stage',declutteredBase64:null};
   });
   // Track Open Plan room ID for enforcement
   const openPlanRoom = SESSION.rooms.find(r => r.isOpenPlan);

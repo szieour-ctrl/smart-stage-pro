@@ -143,10 +143,11 @@ async function runPreserveRead({ imageBase64, imageLabel, claudeKey }) {
     }
   }, payload);
 
-  if (result.status !== 200) throw new Error("Haiku preserve read failed: " + result.status);
-  const text = result.body.content?.find(c => c.type === 'text')?.text || '';
-  try { return JSON.parse(text); }
-  catch(e) { throw new Error("Preserve JSON parse failed"); }
+  if (result.status !== 200) throw new Error("Haiku preserve read failed: " + (result.body?.error?.message || result.status));
+  const text = result.body.content?.find(c => c.type === 'text')?.text?.trim() || "{}";
+  const clean = text.replace(/```json|```/g, "").trim();
+  try { return JSON.parse(clean); }
+  catch(e) { throw new Error("Preserve read returned invalid JSON"); }
 }
 
 function assemblePrompt({ imageAssignment, preserveData, designStyle, colorPalette, groupSpatialPlan, imageLabel }) {

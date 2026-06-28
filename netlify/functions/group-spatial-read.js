@@ -150,6 +150,18 @@ async function runPreserveRead({ imageBase64, imageLabel, claudeKey }) {
   catch(e) { throw new Error("Preserve read returned invalid JSON"); }
 }
 
+// Flex Room: pass through whatever room type the user typed (Office, Den, Media, Dining, etc.)
+// with NO scripted furniture list — GPT Image 2 decides furniture from the room type name alone.
+// This matches the Phase 6 architecture direction: the assembler hands GPT2 the zone name,
+// not a pre-written placement script.
+function buildFlexZoneInstruction(flex) {
+  const roomType = (flex.roomType || '').trim();
+  const label = roomType ? roomType.toUpperCase() + ' (FLEX ROOM)' : 'FLEX ROOM';
+  const wallNote = flex.backWall ? ' Anchor the main furniture piece against the ' + flex.backWall + '.' : '';
+  const fixtureNote = flex.ceilingFixture ? ' Existing ceiling fixture (' + flex.ceilingFixture + ') must remain exactly as photographed.' : '';
+  return label + ' ZONE: Stage this room appropriately for its function as a ' + (roomType || 'flex space') + '.' + wallNote + fixtureNote;
+}
+
 function assemblePrompt({ imageAssignment, preserveData, designStyle, colorPalette, groupSpatialPlan, imageLabel }) {
   if (!imageAssignment) throw new Error("imageAssignment required");
   if (!preserveData) throw new Error("preserveData required");
@@ -171,6 +183,7 @@ function assemblePrompt({ imageAssignment, preserveData, designStyle, colorPalet
   const hasKitchen = zones.includes('kitchen');
   const hasDining = zones.includes('dining');
   const hasLiving = zones.includes('living');
+  const hasFamily = zones.includes('family');
   const hasBedroom = zones.includes('bedroom');
   const hasFlex = zones.includes('flex');
 
@@ -207,6 +220,23 @@ function assemblePrompt({ imageAssignment, preserveData, designStyle, colorPalet
     const leftB = boundaries.livingLeft ? ', not extending past ' + boundaries.livingLeft : '';
     stagingBlocks.push('LIVING ZONE: Place a large area rug centered directly under the ' + fan + ', extending from 18 inches in front of the ' + front + ' back to 18 inches in front of the ' + back + leftB + '. Place a light linen sofa with its back against the ' + back + ', centered on the rug, facing the fireplace. Place two upholstered accent chairs on the rug angled inward toward the fireplace. Place a round coffee table centered on the rug between the sofa and the fireplace. Place a dark wood console against the right wall. Place one large plant right of the fireplace. Place one landscape art piece centered above the fireplace surround. Place one arc floor lamp behind the left accent chair.');
   }
+  if (hasFamily && anchors.family?.present) {
+    const fm = anchors.family;
+    const fixture = fm.ceilingFixture || 'ceiling fixture';
+    const front = fm.frontWall || 'focal wall';
+    const backRaw = fm.backWall || 'back wall';
+    const badBack = /glass|window|exterior|sliding|door|patio/i.test(backRaw);
+    const back = badBack ? 'partition wall or interior wall opposite the focal wall' : backRaw;
+    const compact = fm.roomScale !== 'standard'; // default to compact unless explicitly read as standard-sized
+    if (compact) {
+      stagingBlocks.push('FAMILY ROOM ZONE: This is a smaller, casual gathering space — keep furniture scaled down and informal, not a formal living room layout. Place a medium area rug centered under the ' + fixture + '. Place a compact sectional or loveseat with its back against the ' + back + ', facing the ' + front + '. Place one accent chair angled toward the seating. Place a small coffee table or ottoman centered on the rug. Place one media console or low cabinet against the ' + front + ' wall if no fireplace is present. Keep the layout open and uncluttered given the smaller footprint.');
+    } else {
+      stagingBlocks.push('FAMILY ROOM ZONE: Casual gathering space, standard scale. Place an area rug centered under the ' + fixture + '. Place a sectional or sofa with its back against the ' + back + ', facing the ' + front + '. Place one or two accent chairs. Place a coffee table centered on the rug. Keep the overall feel relaxed and informal rather than editorial-formal.');
+    }
+  }
+  if (hasFlex && anchors.flex?.present) {
+    stagingBlocks.push(buildFlexZoneInstruction(anchors.flex));
+  }
   if (hasBedroom && anchors.bedroom?.present) {
     stagingBlocks.push('BEDROOM ZONE: Place bed with headboard against the ' + (anchors.bedroom.headboardWall || 'back wall') + '. Place matching nightstands flanking the bed. Place a dresser on the opposite wall. Place a bench at the foot of the bed.');
   }
@@ -225,6 +255,7 @@ function assemblePrompt({ imageAssignment, preserveData, designStyle, colorPalet
   }
   if (!hasKitchen) prohibitions.push('DO NOT add kitchen cabinetry, island, or kitchen fixtures — kitchen is not visible in this photograph.');
   if (!hasDining)  prohibitions.push('DO NOT add a dining table, dining chairs, or dining chandelier — dining zone is not visible in this photograph.');
+  if (!hasFamily)  prohibitions.push('DO NOT add family room seating furniture — family room zone is not visible in this photograph.');
   if (!hasFlex && wallOpenings.some(w => /flex|arch|enclosed|semi-enclosed|walled room/i.test(w))) {
     prohibitions.push('A Flex Room is visible through a wall opening — DO NOT stage furniture inside the Flex Room. DO NOT assign any fixture inside the Flex Room as a dining anchor. Any chandelier inside an enclosed or semi-enclosed space with walls is a Flex Room fixture, not a dining/nook anchor.');
   }

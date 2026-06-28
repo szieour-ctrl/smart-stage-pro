@@ -67,6 +67,9 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
 .summary-chip{background:var(--cream);border:1px solid var(--border);border-radius:3px;padding:8px 12px;}
 .summary-chip-label{font-size:0.65rem;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);}
 .summary-chip-val{font-size:0.88rem;font-weight:500;color:var(--ink);margin-top:2px;}
+.lb-readonly-room{background:var(--cream);border:1px solid var(--border);border-radius:5px;padding:12px 14px;}
+.lb-readonly-room-name{font-size:1rem;font-weight:600;color:var(--ink);}
+.lb-readonly-zones{font-size:0.82rem;color:var(--muted);margin-top:4px;}
 .room-queue{display:flex;flex-direction:column;gap:14px;}
 .room-card{border:1px solid var(--border);border-radius:4px;overflow:hidden;background:#fff;}
 .room-card.is-anchor{border-color:var(--gold);}
@@ -302,7 +305,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
       </div>
     </div>
     <div class="lightbox-footer">
-      <button class="btn btn-ghost" onclick="closeLightbox()">Cancel</button>
+      <button class="btn btn-ghost" id="lightbox-footer-cancel" onclick="closeLightbox()">Cancel</button>
       <button class="btn btn-primary" id="lightbox-footer-save" onclick="saveShotFocus()">Save →</button>
     </div>
   </div>
@@ -1262,6 +1265,11 @@ function roomOptsHtml(list,selectedVal){
 }
 
 // Existing staged room — Shot Focus only, no mode tabs (room type already locked in)
+// Room Staging Queue thumbnail lightbox — read-only summary of this room's Image
+// Assignment selections + Session Design DNA. No Shot Focus, nothing editable here;
+// the room's label/zones are set during Image Assignment (openLightboxMapping) and
+// the DNA is set during intake — this view exists purely so the user can confirm
+// what's about to be staged without re-opening either of those earlier steps.
 function openLightbox(roomId){
   const room=SESSION.rooms.find(r=>r.id===roomId);
   const orig=SESSION.originals.find(o=>o.id===room?.originalId);
@@ -1269,15 +1277,35 @@ function openLightbox(roomId){
   _lbRoomId=roomId;
   _lbMode=null;
   document.getElementById('lightbox-img').src=orig.dataUrl;
-  document.getElementById('lightbox-title').textContent='Shot Focus — '+room.roomName;
+  document.getElementById('lightbox-title').textContent=room.roomName;
   document.getElementById('lb-mode-tabs').innerHTML='';
-  document.getElementById('lb-mode-body').innerHTML='';
-  document.getElementById('lightbox-sub').style.display='none';
-  document.getElementById('lb-shotfocus-wrap').style.display='block';
-  document.getElementById('lightbox-input').value=room.shotFocus||'';
-  const hints=SHOT_FOCUS_HINTS[room.roomName]||DEFAULT_HINTS;
-  document.getElementById('lightbox-examples').innerHTML=hints.map(h=>`<div class="lightbox-example" onclick="setLightboxExample(this)">${h}</div>`).join('');
-  document.getElementById('lightbox-footer-save').setAttribute('onclick','saveShotFocus()');
+  document.getElementById('lightbox-sub').style.display='block';
+  document.getElementById('lightbox-sub').textContent='What this room is labeled, and the Session Design DNA it will be staged with.';
+  document.getElementById('lb-shotfocus-wrap').style.display='none';
+
+  // Room / zone selection summary (read-only) — mirrors the zone badge used on room cards
+  const zoneSummary = room.isOpenPlan ? getOpenPlanZones(room.zoneList, room.flexNote) : null;
+  const roomLabelHtml = `
+    <div class="lb-section-label">Room Label</div>
+    <div class="lb-readonly-room">
+      <span class="lb-readonly-room-name">${escHtml(room.roomName)}</span>
+      ${room.isExterior?'<span class="ext-badge" style="margin-left:8px;">Exterior</span>':''}
+      ${zoneSummary?`<div class="lb-readonly-zones">${escHtml(zoneSummary)}</div>`:''}
+    </div>`;
+
+  // Session Design DNA (read-only) — same chip styling as the Session Design DNA panel
+  const i = SESSION.intake || {};
+  const DNA_KEYS=[{key:'buyer_label',label:'Buyer Profile'},{key:'feeling_label',label:'Desired Feeling'},{key:'style_label',label:'Design Style'},{key:'intensity_label',label:'Staging Level'},{key:'palette_label',label:'Color Direction'}];
+  const dnaHtml = `
+    <div class="lb-section-label" style="margin-top:16px;">Session Design DNA</div>
+    <div class="summary-grid" style="margin-top:8px;">
+      ${DNA_KEYS.map(s=>`<div class="summary-chip"><div class="summary-chip-label">${s.label}</div><div class="summary-chip-val">${escHtml(i[s.key]||'—')}</div></div>`).join('')}
+    </div>`;
+
+  document.getElementById('lb-mode-body').innerHTML = roomLabelHtml + dnaHtml;
+
+  document.getElementById('lightbox-footer-save').style.display='none';
+  document.getElementById('lightbox-footer-cancel').textContent='Close';
   document.getElementById('lightbox').classList.remove('hidden');
 }
 
@@ -1296,7 +1324,9 @@ function openLightboxMapping(photoId, presetMode){
   document.getElementById('lightbox-title').textContent='Label this Image';
   document.getElementById('lightbox-sub').style.display='block';
   document.getElementById('lb-shotfocus-wrap').style.display='none';
+  document.getElementById('lightbox-footer-save').style.display='inline-block';
   document.getElementById('lightbox-footer-save').setAttribute('onclick','saveLbMapping()');
+  document.getElementById('lightbox-footer-cancel').textContent='Cancel';
 
   renderLbModeTabs();
   renderLbModeBody();

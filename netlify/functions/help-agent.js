@@ -310,6 +310,14 @@ Effective iteration instructions:
 - Specific: "sofa is too large — replace with a loveseat" not "make it smaller"
 - One issue at a time if complex
 - Declutter: "wall area where mirror was removed still shows a shadow — clean the floor" is actionable
+
+### State the goal, not the coordinates
+Iteration instructions only change what is explicitly mentioned — everything else in the photo stays exactly as it is. This is what makes iteration reliable, but it also means an instruction that names a specific location can box the engine in if that exact spot will not actually fit the item.
+
+Example: "Add 2 stools right here" forces the engine to make 2 stools fit in that exact spot — even if there is not really room, which can lead to it altering the cabinetry itself to manufacture clearance (a real architecture violation). "Add stools" gives the engine the freedom to find where they actually belong given everything else already in frame.
+- Bad: "add 2 stools [at this exact spot]"
+- Good: "add stools"
+- If a change requires moving or removing something else to make room, say so directly: "remove the accent chair and add 2 stools behind the island" — don't make the engine guess that something needs to go.
 `;
 
 // ─── System Prompt ────────────────────────────────────────────────────────────

@@ -1611,15 +1611,27 @@ function clearRefinePreset(){
 // Bridges the lightbox textarea to the existing iter-${roomId} flow so
 // iterateRoom()/reStageRoom() — and the AB 723 edit-only pipeline they already
 // implement — work completely unchanged. We just relay the value through.
+// IMPORTANT: there are two separate revision functions in this app, gated on
+// which flow a room went through — iterateRoom() for directly-staged rooms,
+// reStageRoom() for rooms that went through Clean+Stage (gated on
+// room.declutteredBase64 being present). Calling the wrong one always fails:
+// reStageRoom() on a directly-staged room hits its declutteredBase64 guard
+// every time, with no possible state change between retries.
 async function submitRefineRevision(){
   const roomId=_lbRoomId.replace('__refine__:','');
   const note=document.getElementById('lb-refine-textarea')?.value?.trim()||'';
   if(!note){ showToast('Enter revision instructions first.','error'); return; }
+  const room=SESSION.rooms.find(r=>r.id===roomId);
+  if(!room){ showToast('Could not find this room.','error'); return; }
   closeLightbox();
   const legacyInput=document.getElementById('iter-'+roomId);
   if(legacyInput){
     legacyInput.value=note;
-    await reStageRoom(roomId);
+    if(room.declutteredBase64){
+      await reStageRoom(roomId);
+    } else {
+      await iterateRoom(roomId);
+    }
   } else {
     showToast('Could not find revision target for this room.','error');
   }
@@ -1627,8 +1639,9 @@ async function submitRefineRevision(){
 async function submitRefinePreset(){
   const roomId=_lbRoomId.replace('__refine__:','');
   if(!_lbPresetKey){ showToast('Pick a preset first.','error'); return; }
+  const chosenPresetKey=_lbPresetKey; // capture BEFORE closeLightbox() nulls _lbPresetKey
   closeLightbox();
-  await applyPreset(roomId, _lbPresetKey);
+  await applyPreset(roomId, chosenPresetKey);
 }
 
 function setLightboxExample(el){document.getElementById('lightbox-input').value=el.textContent;}

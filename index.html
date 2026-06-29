@@ -1926,12 +1926,17 @@ function renderRoomQueue(){
       }
       if(room.status==='prompt-review')return `<button class="btn btn-primary btn-sm" onclick="document.getElementById('prompt-modal').classList.remove('hidden');setTimeout(()=>{document.getElementById('pm-prompt').focus();},60);">✏️ Review Prompt →</button>`;
       if(room.status==='processing')return `<button class="btn btn-outline btn-sm" disabled><span class="spinner"></span> Generating</button>`;
-      if(room.status==='done')return `
+      if(room.status==='done'){
+        const presetActions = room.presetCleanBase64 ? `
+        <button class="btn btn-outline btn-sm" onclick="downloadWatermarked('${room.id}','data:image/jpeg;base64,'+getRoomB64('${room.id}','preset'),'DRAFT_Preset_'+bName(getOrigName('${room.id}'))+'.jpg','${(PHOTOGRAPHIC_PRESETS[room.presetKey]?.label||'PRESET').toUpperCase()} · DRAFT')">↓ Preset Draft</button>
+        <button class="btn btn-outline btn-sm" onclick="downloadSideBySide('${room.id}',null,'preset')">↓ Preset Side-by-Side</button>` : '';
+        return `
         <button class="btn btn-outline btn-sm" onclick="downloadOriginal('${room.id}')">↓ Original</button>
         <button class="btn btn-outline btn-sm" onclick="downloadWatermarked('${room.id}','data:image/jpeg;base64,'+getRoomB64('${room.id}','draft'),'DRAFT_'+bName(getOrigName('${room.id}'))+'.jpg','VIRTUALLY STAGED · DRAFT')">↓ Draft</button>
-        <button class="btn btn-outline btn-sm" onclick="downloadSideBySide('${room.id}',null,'draft')">↓ Side-by-Side</button>
+        <button class="btn btn-outline btn-sm" onclick="downloadSideBySide('${room.id}',null,'draft')">↓ Side-by-Side</button>${presetActions}
         ${!isAnchor?`<button class="btn btn-ghost btn-sm" onclick="resetRoom('${room.id}')">Re-Stage</button>`:''}
         <button class="btn btn-ghost btn-sm" onclick="showDecor8Payload('${room.id}')" title="Show exact JSON sent to Decor8 API">{ } API Payload</button>`;
+      }
       return '';
     })();
     // Open Plan Strategy Toggle (always visible for open plan rooms)
@@ -1973,9 +1978,12 @@ function renderRoomQueue(){
     const iterHtml=room.status==='done'?`<div class="iterate-panel">
       <div style="flex:1;">
         <textarea class="iterate-input" id="iter-${room.id}" placeholder='Revision — e.g. "warmer lighting, less furniture, match great room sofa"' rows="2"></textarea>
-        <div class="iterate-hint">Specify only what to change — everything else stays the same. Need more room, or want a photographic preset? <a href="javascript:void(0)" onclick="openLightboxRefine('${room.id}','revise')">Open Refine →</a></div>
+        <div class="iterate-hint">Specify only what to change — everything else stays the same.</div>
       </div>
-      <button class="btn btn-primary btn-sm" onclick="iterateRoom('${room.id}')">Re-Stage Draft</button>
+      <div style="display:flex;flex-direction:column;gap:6px;">
+        <button class="btn btn-primary btn-sm" onclick="iterateRoom('${room.id}')">Re-Stage Draft</button>
+        <button class="btn btn-outline btn-sm" onclick="openLightboxRefine('${room.id}','revise')">Make Revision →</button>
+      </div>
     </div>`:'';
     const finalHtml=room.status==='done'?renderFinalPanel(room.id,null):'';
     // Replicate result panel — button now in header actions, this shows result/progress only
@@ -2149,13 +2157,15 @@ function renderFinalPanel(roomId,enhId){
   if(!draftReady)return '';
   if(fs==='generating')return `<div class="final-panel"><span class="final-panel-label">Generating Final...</span><span class="final-progress"><span class="spinner spinner-green"></span> Processing at selected quality — this may take 30–60 seconds...</span></div>`;
   if(fs==='done'&&fb64){
-    const tag=enh?enh.label.replace(/\s+/g,''):'VirtuallyStaged';
+    const wasFromPreset = !enhId && !!room.presetCleanBase64;
+    const presetLabel = wasFromPreset && PHOTOGRAPHIC_PRESETS[room.presetKey] ? PHOTOGRAPHIC_PRESETS[room.presetKey].label : null;
+    const tag=enh?enh.label.replace(/\s+/g,'') : presetLabel ? presetLabel.replace(/\s+/g,'') : 'VirtuallyStaged';
     const orig=SESSION.originals.find(o=>o.id===room.originalId);
     return `<div class="result-viewer" style="padding:12px 16px;">
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><span class="tier-label tier-final">Final — MLS Quality</span></div>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><span class="tier-label tier-final">Final — MLS Quality</span>${presetLabel?`<span style="font-size:0.72rem;color:var(--muted);">Includes ${presetLabel} preset</span>`:''}</div>
       <div class="result-pair">
         <div class="result-img-wrap"><img src="${orig.dataUrl}" /><div class="result-img-badge">Original</div></div>
-        <div class="result-img-wrap"><img src="data:image/jpeg;base64,${fb64}" /><div class="result-img-badge final-badge">Final · ${enh?enh.mlsTag:'Virtually Staged'}</div></div>
+        <div class="result-img-wrap"><img src="data:image/jpeg;base64,${fb64}" /><div class="result-img-badge final-badge">Final · ${enh?enh.mlsTag:(presetLabel||'Virtually Staged')}</div></div>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
         <button class="btn btn-success btn-sm" onclick="downloadB64('data:image/jpeg;base64,'+getFinalB64('${roomId}','${enhId||''}'),'FINAL_${tag}_'+bName(getOrigName('${roomId}'))+'.jpg')">↓ Final</button>
@@ -2166,27 +2176,32 @@ function renderFinalPanel(roomId,enhId){
     </div>`;
   }
   const selId=`qsel-${roomId}-${enhId||'int'}`;
-  // Credit cost by selection
-  const creditMap = {'mls':1,'marketing':2,'print':3};
+  // Credit cost by selection. A Photographic Preset adds +1 on top of the
+  // selected tier (interior path only — presets don't apply to exterior).
+  // Keep in sync with the same hasPreset logic in generateFinal().
+  const hasPreset = !enhId && !!room.presetCleanBase64;
+  const baseCreditMap = {'mls':1,'marketing':2,'print':3};
+  const initialCost = baseCreditMap.mls + (hasPreset ? 1 : 0);
+  const presetSurchargeNote = hasPreset ? ` <span style="color:#4a5fa5;font-weight:600;">+1 preset</span>` : '';
   return `<div class="final-panel">
     <span class="final-panel-label">Generate Final</span>
     <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
       <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:0.78rem;padding:5px 10px;border:1px solid #b8ddd0;border-radius:3px;background:#fff;">
         <input type="radio" name="${selId}" value="mls" checked style="accent-color:var(--success);" onchange="updateFinalLabel('${roomId}','${enhId||''}')">
-        <span><strong>MLS Ready</strong> <span style="color:var(--muted);font-size:0.72rem;">— Included</span></span>
+        <span><strong>MLS Ready</strong> <span style="color:var(--muted);font-size:0.72rem;">— Included${presetSurchargeNote}</span></span>
       </label>
       <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:0.78rem;padding:5px 10px;border:1px solid #b8ddd0;border-radius:3px;background:#fff;">
         <input type="radio" name="${selId}" value="marketing" style="accent-color:var(--success);" onchange="updateFinalLabel('${roomId}','${enhId||''}')">
-        <span><strong>Marketing Quality</strong> <span style="color:var(--muted);font-size:0.72rem;">+1 image</span></span>
+        <span><strong>Marketing Quality</strong> <span style="color:var(--muted);font-size:0.72rem;">+1 image${presetSurchargeNote}</span></span>
       </label>
       <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:0.78rem;padding:5px 10px;border:1px solid #b8ddd0;border-radius:3px;background:#fff;">
         <input type="radio" name="${selId}" value="print" style="accent-color:var(--success);" onchange="updateFinalLabel('${roomId}','${enhId||''}')">
-        <span><strong>Print Quality</strong> <span style="color:var(--muted);font-size:0.72rem;">+2 images</span></span>
+        <span><strong>Print Quality</strong> <span style="color:var(--muted);font-size:0.72rem;">+2 images${presetSurchargeNote}</span></span>
       </label>
     </div>
     <div style="display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap;">
       <button class="btn btn-success btn-sm" id="gen-final-btn-${roomId}-${enhId||'int'}" onclick="generateFinal('${roomId}','${enhId||''}')">Generate Final — MLS Ready →</button>
-      <span id="gen-final-note-${roomId}-${enhId||'int'}" style="font-size:0.72rem;color:var(--muted);">Uses 1 staged image from your plan</span>
+      <span id="gen-final-note-${roomId}-${enhId||'int'}" style="font-size:0.72rem;color:var(--muted);">${hasPreset ? `Uses ${initialCost} staged images from your plan (includes +1 for Photographic Preset)` : `Uses ${initialCost} staged image from your plan`}</span>
     </div>
   </div>`;
 }
@@ -3055,7 +3070,13 @@ async function generateFinal(roomId,enhId){
   const scaleFactor = scaleMap[qualityChoice] || 4;
 
   // ── CREDIT GATE — debit before upscale fires ─────────────────────────────
-  const creditCost = { mls: 1, marketing: 2, print: 3 }[qualityChoice] || 1;
+  // A Photographic Preset adds +1 credit on top of the selected tier — it's an
+  // additional rendering pass on top of the staged draft, distinct from (and
+  // additive to) the MLS/Marketing/Print tier cost. Interior path only
+  // (enhId present = exterior, which doesn't have presets).
+  const hasPreset = !enhId && !!room.presetCleanBase64;
+  const baseCreditCost = { mls: 1, marketing: 2, print: 3 }[qualityChoice] || 1;
+  const creditCost = baseCreditCost + (hasPreset ? 1 : 0);
   const _sbUser = (await getSupabase().auth.getUser()).data?.user;
   if (_sbUser) {
     const debitRes = await fetch('/.netlify/functions/debit-credit', {
@@ -3654,7 +3675,7 @@ function resizeToMatch(room,orig,enhId,storeKey,incomingB64){
 // DOWNLOADS
 // ══════════════════════════════════════════
 function getOrigName(roomId){const room=SESSION.rooms.find(r=>r.id===roomId);const orig=SESSION.originals.find(o=>o.id===room?.originalId);return orig?.name||'photo';}
-function getRoomB64(roomId,tier){const room=SESSION.rooms.find(r=>r.id===roomId);if(tier==='decluttered')return room?.declutteredBase64;return tier==='final'?room?.finalBase64:room?.stagedBase64;}
+function getRoomB64(roomId,tier){const room=SESSION.rooms.find(r=>r.id===roomId);if(tier==='decluttered')return room?.declutteredBase64;if(tier==='preset')return room?.presetCleanBase64;return tier==='final'?room?.finalBase64:room?.stagedBase64;}
 function getExtB64(roomId,enhId,tier){const room=SESSION.rooms.find(r=>r.id===roomId);return tier==='final'?room?.extSelections[enhId]?.finalBase64:room?.extSelections[enhId]?.base64;}
 function getFinalB64(roomId,enhId){return enhId?getExtB64(roomId,enhId,'final'):getRoomB64(roomId,'final');}
 function bName(n){return(n||'photo').replace(/\.[^.]+$/,'');}
@@ -3738,7 +3759,10 @@ async function downloadSideBySide(roomId, enhId, tier) {
   // For other tiers send the raw staged image
   const stagedB64 = b64;
 
-  const sfx = tier==='declutter' ? 'Decluttered' : tier==='cns' ? 'CleanedStaged' : enh ? enh.label.replace(/\s+/g,'') : 'VirtuallyStaged';
+  const presetLabelForFilename = (tier==='preset' && room?.presetKey && PHOTOGRAPHIC_PRESETS[room.presetKey])
+    ? PHOTOGRAPHIC_PRESETS[room.presetKey].label.replace(/\s+/g,'')
+    : null;
+  const sfx = tier==='declutter' ? 'Decluttered' : tier==='cns' ? 'CleanedStaged' : tier==='preset' ? (presetLabelForFilename||'Preset') : enh ? enh.label.replace(/\s+/g,'') : 'VirtuallyStaged';
   const filename = (tier==='final' ? 'FINAL_SBS_' : 'SBS_') + sfx + '_' + bName(orig.name) + '.jpg';
 
   // Show loading indicator on the button
@@ -4424,11 +4448,19 @@ function updateFinalLabel(roomId, enhId) {
   const noteId = 'gen-final-note-' + roomId + '-' + (enhId || 'int');
   const selected = document.querySelector(`input[name="${selId}"]:checked`)?.value || 'mls';
   const labels = { mls: 'MLS Ready', marketing: 'Marketing Quality', print: 'Print Quality' };
-  const costs = { mls: '1 staged image', marketing: '2 staged images', print: '3 staged images' };
+  const baseCosts = { mls: 1, marketing: 2, print: 3 };
+  // A Photographic Preset adds +1 credit on top of the selected tier — interior
+  // path only (enhId present = exterior, which doesn't have presets). Keep this
+  // note in sync with the actual debit logic in generateFinal().
+  const room = SESSION.rooms.find(r => r.id === roomId);
+  const hasPreset = !enhId && !!room?.presetCleanBase64;
+  const totalCost = baseCosts[selected] + (hasPreset ? 1 : 0);
   const btn = document.getElementById(btnId);
   const note = document.getElementById(noteId);
   if (btn) btn.textContent = `Generate Final — ${labels[selected]} →`;
-  if (note) note.textContent = `Uses ${costs[selected]} from your plan`;
+  if (note) note.textContent = hasPreset
+    ? `Uses ${totalCost} staged images from your plan (includes +1 for Photographic Preset)`
+    : `Uses ${totalCost} staged image${totalCost>1?'s':''} from your plan`;
 }
 
 // ══════════════════════════════════════════

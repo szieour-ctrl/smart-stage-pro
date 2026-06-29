@@ -1928,7 +1928,7 @@ function renderRoomQueue(){
       if(room.status==='processing')return `<button class="btn btn-outline btn-sm" disabled><span class="spinner"></span> Generating</button>`;
       if(room.status==='done'){
         const presetActions = room.presetCleanBase64 ? `
-        <button class="btn btn-outline btn-sm" onclick="downloadWatermarked('${room.id}','data:image/jpeg;base64,'+getRoomB64('${room.id}','preset'),'DRAFT_Preset_'+bName(getOrigName('${room.id}'))+'.jpg','${(PHOTOGRAPHIC_PRESETS[room.presetKey]?.label||'PRESET').toUpperCase()} · DRAFT')">↓ Preset Draft</button>
+        <button class="btn btn-outline btn-sm" onclick="downloadPresetDraft('${room.id}')">↓ Preset Draft</button>
         <button class="btn btn-outline btn-sm" onclick="downloadSideBySide('${room.id}',null,'preset')">↓ Preset Side-by-Side</button>` : '';
         return `
         <button class="btn btn-outline btn-sm" onclick="downloadOriginal('${room.id}')">↓ Original</button>
@@ -3681,6 +3681,22 @@ function getFinalB64(roomId,enhId){return enhId?getExtB64(roomId,enhId,'final'):
 function bName(n){return(n||'photo').replace(/\.[^.]+$/,'');}
 function downloadOriginal(roomId){const room=SESSION.rooms.find(r=>r.id===roomId);const orig=SESSION.originals.find(o=>o.id===room?.originalId);if(orig)triggerDownload(orig.dataUrl,'ORIGINAL_'+bName(orig.name)+'.jpg');}
 function downloadB64(dataUrl,filename){if(dataUrl&&!dataUrl.endsWith('undefined')&&!dataUrl.endsWith('null'))triggerDownload(dataUrl,filename);}
+
+// ── PRESET DRAFT DOWNLOAD ─────────────────────────────────────────────────────
+// presetCleanBase64 is stored clean (no tiled DRAFT watermark) because
+// generateFinal() needs it unwatermarked for the upscale step.
+// At download time for a draft we apply applyDraftWatermark() on the fly —
+// same approach as staged drafts (stagedBase64 is pre-watermarked at stage time,
+// but the mechanism is identical: DRAFT watermark before the user gets the file).
+async function downloadPresetDraft(roomId) {
+  const room = SESSION.rooms.find(r => r.id === roomId);
+  if (!room?.presetCleanBase64) return;
+  const presetLabel = (PHOTOGRAPHIC_PRESETS[room.presetKey]?.label || 'PRESET').toUpperCase();
+  const origName = getOrigName(roomId);
+  const filename = `DRAFT_Preset_${presetLabel.replace(/\s+/g,'_')}_${bName(origName)}.jpg`;
+  const watermarked = await applyDraftWatermark(room.presetCleanBase64);
+  downloadWatermarked(roomId, 'data:image/jpeg;base64,' + watermarked, filename, `${presetLabel} · DRAFT`);
+}
 
 // ── WATERMARKED SINGLE IMAGE DOWNLOAD ────────────────────────────────────────
 // All staged/cleaned/final downloads pass through here — adds disclosure footer

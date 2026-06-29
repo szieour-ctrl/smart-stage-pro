@@ -162,6 +162,20 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
 .lb-zone-freetext{flex:1;min-width:90px;border:1px solid var(--border);border-radius:3px;padding:5px 8px;font-size:0.78rem;font-family:'DM Sans',sans-serif;background:var(--cream);}
 .lb-zone-freetext:focus{outline:none;border-color:var(--gold);}
 .lb-empty-state{font-size:0.82rem;color:var(--muted);padding:14px;text-align:center;border:1px dashed var(--border);border-radius:5px;}
+/* Lightbox — Refine Image (Free Revision + Presets) */
+.lb-refine-textarea{width:100%;min-height:140px;border:1px solid var(--border);border-radius:4px;padding:12px 14px;font-family:'DM Sans',sans-serif;font-size:0.92rem;color:var(--ink);background:var(--cream);resize:vertical;line-height:1.5;}
+.lb-refine-textarea:focus{outline:none;border-color:var(--gold);}
+.lb-preset-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+@media(max-width:580px){.lb-preset-grid{grid-template-columns:1fr;}}
+.lb-preset-card{border:1px solid var(--border);border-radius:5px;padding:12px;cursor:pointer;background:#fff;transition:all 0.15s;}
+.lb-preset-card:hover{border-color:var(--gold);}
+.lb-preset-card.checked{border-color:var(--gold);background:var(--warm);}
+.lb-preset-card-name{font-weight:600;font-size:0.88rem;margin-bottom:3px;}
+.lb-preset-card-desc{font-size:0.74rem;color:var(--muted);line-height:1.4;}
+.lb-preset-clear{font-size:0.74rem;color:var(--muted);text-decoration:underline;cursor:pointer;margin-top:10px;display:inline-block;}
+.result-pair.has-preset{grid-template-columns:1fr 1fr 1fr;}
+@media(max-width:760px){.result-pair.has-preset{grid-template-columns:1fr;}}
+.result-img-badge.preset{background:rgba(74,95,165,0.92);color:#fff;}
 .btn{display:inline-flex;align-items:center;gap:6px;padding:9px 18px;border-radius:3px;font-family:'DM Sans',sans-serif;font-size:0.82rem;font-weight:500;letter-spacing:0.04em;cursor:pointer;border:none;transition:all 0.15s;text-transform:uppercase;}
 .btn-primary{background:var(--gold);color:var(--ink);}
 .btn-primary:hover{background:var(--gold-light);}
@@ -520,7 +534,135 @@ const OPEN_PLAN_ZONES = [
   { key: 'flex',    label: 'Flex Room', hasFreetext: true },
 ];
 
-// Build a simple zone-name summary from a checked zoneList array (no prescriptive placement copy)
+// ── Photographic Presets — PRO feature (client-side, mirrors photographic-presets.js) ──
+// DEV NOTE: prompt text lives here (client-visible, shows in the Prompt Review modal)
+// intentionally for now, so Sam can see/tune assembled preset prompts while testing.
+// Same exposure as staging/revision prompts already visible in showPromptModal().
+// FUTURE: when the Prompt Review step is eventually locked down/removed (see
+// 06_DECISIONS, item #7 from June 28 session), move preset prompt assembly server-side
+// at the same time as revision prompts — same IP-exposure problem, one hardening pass.
+// A preset is rendering-only: it must never mention furniture, layout, staging, decor,
+// or camera position — that's the Cinematic Asset Generator's job (PRO Plus, separate).
+const PRESET_EDIT_INSTRUCTION_HEADER =
+  'PRIMARY ROLE: Apply a photographic rendering preset to this already-staged photo. ' +
+  'Make ONLY the rendering adjustments described below — furniture, decor, staging, ' +
+  'architecture, camera position, and composition must remain exactly as shown.\n\n' +
+  'Do not re-stage, restage, restyle, move, add, or remove any furniture or decor. ' +
+  'Do not alter architecture, cabinetry, countertops, lighting fixtures, walls, or ' +
+  'ceilings. This is a rendering/post-processing pass only — this image is for MLS ' +
+  'listing per California AB 723 §10140.6, and any change beyond photographic ' +
+  'rendering makes the listing non-compliant.\n\n';
+
+const PHOTOGRAPHIC_PRESETS = {
+  mls_bright: {
+    key: 'mls_bright', label: 'MLS Bright',
+    shortDescription: 'Neutral white balance, brighter exposure, crisp detail, clean whites.',
+    instructionBody:
+      'Improve only the photographic rendering by:\n' +
+      '• Brightening overall exposure evenly across the frame\n' +
+      '• Setting a neutral, true-to-life white balance — no warm or cool color cast\n' +
+      '• Sharpening detail crisply without introducing noise or haloing\n' +
+      '• Rendering whites (trim, cabinetry, walls) clean and neutral, not yellow or blue\n' +
+      '• Keeping contrast natural and even — no dramatic shadows\n' +
+      'Modify only the photographic rendering quality.',
+  },
+  luxury_editorial: {
+    key: 'luxury_editorial', label: 'Luxury Editorial',
+    shortDescription: 'Softer contrast, richer materials, premium color grading.',
+    instructionBody:
+      'Improve only the photographic rendering by:\n' +
+      '• Softening contrast slightly for a refined, premium feel\n' +
+      '• Deepening and enriching material tones (wood grain, stone, fabric) without oversaturating\n' +
+      '• Applying a premium, editorial-style color grade — warm but restrained\n' +
+      '• Producing clean, low-noise image quality\n' +
+      '• Preserving realistic skin-of-the-room ambiance — no artificial gloss\n' +
+      'Modify only the photographic rendering quality.',
+  },
+  magazine: {
+    key: 'magazine', label: 'Magazine',
+    shortDescription: 'Slightly moodier with directional light and higher perceived depth.',
+    instructionBody:
+      'Improve only the photographic rendering by:\n' +
+      '• Introducing slightly moodier overall tonality, directional rather than flat lighting\n' +
+      '• Increasing perceived depth through subtle tonal separation between foreground and background\n' +
+      '• Maintaining natural, believable shadow detail — not underexposed\n' +
+      '• Producing clean, low-noise image quality\n' +
+      '• Avoiding exaggerated HDR halos or over-sharpening\n' +
+      'Modify only the photographic rendering quality.',
+  },
+  builder_showcase: {
+    key: 'builder_showcase', label: 'Builder Showcase',
+    shortDescription: 'Bright, airy, very even lighting, neutral colors.',
+    instructionBody:
+      'Improve only the photographic rendering by:\n' +
+      '• Producing bright, airy, very even lighting across the entire frame\n' +
+      '• Minimizing shadow contrast for a clean, showroom-like presentation\n' +
+      '• Maintaining neutral, true-to-life color across all materials\n' +
+      '• Producing clean, low-noise image quality\n' +
+      '• Keeping the look consistent and repeatable across different rooms/angles\n' +
+      'Modify only the photographic rendering quality.',
+  },
+  twilight_boost: {
+    key: 'twilight_boost', label: 'Twilight Boost',
+    shortDescription: 'Refines an existing twilight render with warmer interior glow.',
+    instructionBody:
+      'Improve only the photographic rendering by:\n' +
+      '• Warming interior light sources (lamps, fixtures, ambient glow) for an inviting twilight feel\n' +
+      '• Balancing interior glow against window/exterior light so neither is blown out\n' +
+      '• Deepening ambient room tone slightly without losing shadow detail\n' +
+      '• Producing clean, low-noise image quality\n' +
+      '• Maintaining a natural, believable twilight atmosphere — no artificial glow halos\n' +
+      'Modify only the photographic rendering quality.',
+  },
+  hdr_natural: {
+    key: 'hdr_natural', label: 'HDR Natural',
+    shortDescription: 'Expands dynamic range while avoiding the overprocessed HDR look.',
+    instructionBody:
+      'Improve only the photographic rendering by:\n' +
+      '• Expanding dynamic range naturally\n' +
+      '• Recovering highlight detail in windows\n' +
+      '• Brightening shadow detail without flattening contrast\n' +
+      '• Maintaining neutral daylight white balance\n' +
+      '• Preserving realistic material textures and colors\n' +
+      '• Producing clean, low-noise image quality\n' +
+      '• Maintaining natural contrast with no exaggerated HDR halos or over-sharpening\n' +
+      'Modify only the photographic rendering quality.',
+  },
+  premium_detail: {
+    key: 'premium_detail', label: 'Premium Detail',
+    shortDescription: 'Enhances texture, wood grain, stone, fabrics, and cabinetry.',
+    instructionBody:
+      'Improve only the photographic rendering by:\n' +
+      '• Enhancing fine surface texture in wood grain, stone, and cabinetry\n' +
+      '• Bringing out fabric weave and material detail in furnishings and decor\n' +
+      '• Increasing micro-contrast/clarity without introducing noise or artifacts\n' +
+      '• Keeping color and white balance neutral and true to the original render\n' +
+      '• Producing clean, low-noise image quality\n' +
+      '• Avoiding over-sharpening halos around edges\n' +
+      'Modify only the photographic rendering quality.',
+  },
+  window_recovery: {
+    key: 'window_recovery', label: 'Window Recovery',
+    shortDescription: 'Preserves exterior views and balances interior exposure.',
+    instructionBody:
+      'Improve only the photographic rendering by:\n' +
+      '• Recovering and preserving detail in exterior views visible through windows\n' +
+      '• Balancing interior exposure against bright window light so neither is blown out nor underexposed\n' +
+      '• Maintaining neutral white balance across both interior and exterior-visible light\n' +
+      '• Preserving realistic material textures and colors throughout\n' +
+      '• Producing clean, low-noise image quality\n' +
+      '• Maintaining natural contrast with no exaggerated HDR halos\n' +
+      'Modify only the photographic rendering quality.',
+  },
+};
+const PRESET_ORDER = ['mls_bright','luxury_editorial','magazine','builder_showcase','twilight_boost','hdr_natural','premium_detail','window_recovery'];
+function buildPresetPrompt(presetKey) {
+  const preset = PHOTOGRAPHIC_PRESETS[presetKey];
+  if (!preset) throw new Error('Unknown preset key: ' + presetKey);
+  return PRESET_EDIT_INSTRUCTION_HEADER + preset.instructionBody;
+}
+
+
 function getOpenPlanZones(zoneList, flexNote) {
   if (!zoneList || !zoneList.length) return null;
   const ordered = OPEN_PLAN_ZONES.filter(z => zoneList.includes(z.key));
@@ -1254,6 +1396,8 @@ let _lbMode = null;        // 'openplan' | 'single' | 'exterior' | null (Shot-Fo
 let _lbZones = [];         // checked zone keys for Open Plan mode
 let _lbFlexNote = '';      // freetext for the Flex Room zone
 let _lbSingleVal = '';     // selected dropdown value for Single Room / Exterior mode
+let _lbPresetKey = null;   // selected preset key in the Refine Image lightbox (Presets tab)
+let _lbRefineTab = 'revise'; // 'revise' | 'presets' — which tab the Refine Image lightbox shows
 
 function roomOptsHtml(list,selectedVal){
   return list.map(r=>{
@@ -1387,8 +1531,108 @@ function toggleLbZone(key){
   renderLbModeBody();
 }
 
+// ── Refine Image lightbox — Free Revision + Photographic Presets ──────────────
+// Opened by clicking the STAGED image (not the original — that still opens the
+// read-only summary via openLightbox(), and the upload-time mapping flow via
+// openLightboxMapping() is untouched). Namespaced with '__refine__:' so it can
+// never collide with those two. Gives the revision textarea much more room than
+// the old inline panel, and adds a Presets tab using the same edit-only pipeline.
+function openLightboxRefine(roomId, startTab){
+  const room=SESSION.rooms.find(r=>r.id===roomId);
+  if(!room||!room.stagedCleanBase64&&!room.stagedBase64)return;
+  _lbRoomId='__refine__:'+roomId;
+  _lbMode=null;
+  _lbRefineTab = startTab || 'revise';
+  _lbPresetKey = room.presetKey || null;
+
+  document.getElementById('lightbox-img').src='data:image/jpeg;base64,'+(room.presetCleanBase64||room.stagedCleanBase64||room.stagedBase64);
+  document.getElementById('lightbox-title').textContent='Refine — '+room.roomName;
+  document.getElementById('lightbox-sub').style.display='block';
+  document.getElementById('lb-shotfocus-wrap').style.display='none';
+  document.getElementById('lightbox-footer-save').style.display='inline-block';
+  document.getElementById('lightbox-footer-cancel').textContent='Cancel';
+
+  renderRefineTabs();
+  renderRefineBody();
+  document.getElementById('lightbox').classList.remove('hidden');
+}
+function setRefineTab(tab){
+  _lbRefineTab=tab;
+  renderRefineTabs();
+  renderRefineBody();
+}
+function renderRefineTabs(){
+  const tabs=[{key:'revise',label:'Free Revision'},{key:'presets',label:'Presets'}];
+  document.getElementById('lb-mode-tabs').innerHTML=tabs.map(t=>
+    `<div class="lb-mode-tab ${_lbRefineTab===t.key?'active':''}" onclick="setRefineTab('${t.key}')">${t.label}</div>`
+  ).join('');
+}
+function renderRefineBody(){
+  const body=document.getElementById('lb-mode-body');
+  const sub=document.getElementById('lightbox-sub');
+  const saveBtn=document.getElementById('lightbox-footer-save');
+  const roomId=_lbRoomId.replace('__refine__:','');
+  const room=SESSION.rooms.find(r=>r.id===roomId);
+
+  if(_lbRefineTab==='revise'){
+    sub.textContent='Specify only what to change — everything else stays exactly the same.';
+    body.innerHTML=`<textarea class="lb-refine-textarea" id="lb-refine-textarea" placeholder='Revision — e.g. "warmer lighting, less furniture, match great room sofa"'>${room?.iterationNote||''}</textarea>`;
+    saveBtn.textContent='Re-Stage Draft →';
+    saveBtn.setAttribute('onclick','submitRefineRevision()');
+  } else {
+    sub.textContent='Choose a professional rendering style for this staged photo. Staging itself is unchanged — only the photographic rendering is adjusted.';
+    body.innerHTML=`
+      <div class="lb-preset-grid">
+        ${PRESET_ORDER.map(key=>{
+          const p=PHOTOGRAPHIC_PRESETS[key];
+          return `<div class="lb-preset-card ${_lbPresetKey===key?'checked':''}" onclick="selectRefinePreset('${key}')">
+            <div class="lb-preset-card-name">${p.label}</div>
+            <div class="lb-preset-card-desc">${p.shortDescription}</div>
+          </div>`;
+        }).join('')}
+      </div>
+      ${room?.presetKey?`<div class="lb-preset-clear" onclick="clearRefinePreset()">Remove preset — revert to staged draft</div>`:''}
+    `;
+    saveBtn.textContent='Apply Preset →';
+    saveBtn.setAttribute('onclick','submitRefinePreset()');
+  }
+}
+function selectRefinePreset(key){
+  _lbPresetKey = (_lbPresetKey===key) ? null : key;
+  renderRefineBody();
+}
+function clearRefinePreset(){
+  const roomId=_lbRoomId.replace('__refine__:','');
+  const room=SESSION.rooms.find(r=>r.id===roomId);
+  if(room){ room.presetCleanBase64=null; room.presetKey=null; room.presetStatus=null; renderRoomQueue(); }
+  closeLightbox();
+  showToast('Preset removed — back to staged draft.', '');
+}
+// Bridges the lightbox textarea to the existing iter-${roomId} flow so
+// iterateRoom()/reStageRoom() — and the AB 723 edit-only pipeline they already
+// implement — work completely unchanged. We just relay the value through.
+async function submitRefineRevision(){
+  const roomId=_lbRoomId.replace('__refine__:','');
+  const note=document.getElementById('lb-refine-textarea')?.value?.trim()||'';
+  if(!note){ showToast('Enter revision instructions first.','error'); return; }
+  closeLightbox();
+  const legacyInput=document.getElementById('iter-'+roomId);
+  if(legacyInput){
+    legacyInput.value=note;
+    await reStageRoom(roomId);
+  } else {
+    showToast('Could not find revision target for this room.','error');
+  }
+}
+async function submitRefinePreset(){
+  const roomId=_lbRoomId.replace('__refine__:','');
+  if(!_lbPresetKey){ showToast('Pick a preset first.','error'); return; }
+  closeLightbox();
+  await applyPreset(roomId, _lbPresetKey);
+}
+
 function setLightboxExample(el){document.getElementById('lightbox-input').value=el.textContent;}
-function closeLightbox(){document.getElementById('lightbox').classList.add('hidden');_lbRoomId=null;_lbMode=null;_lbZones=[];_lbFlexNote='';_lbSingleVal='';}
+function closeLightbox(){document.getElementById('lightbox').classList.add('hidden');_lbRoomId=null;_lbMode=null;_lbZones=[];_lbFlexNote='';_lbSingleVal='';_lbPresetKey=null;_lbRefineTab='revise';}
 
 // Save handler for the mapping lightbox (Open Plan / Single Room / Exterior — no Shot Focus)
 function saveLbMapping(){
@@ -1703,17 +1947,20 @@ function renderRoomQueue(){
     })() : '';
 
     const resultHtml=room.status==='done'?`<div class="result-viewer">
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><span class="tier-label tier-draft">Staged — Draft</span><span style="font-size:0.72rem;color:var(--muted);">Iterate with revision instructions below. Generate Final for highest resolution MLS download.</span></div>
-      <div class="result-pair">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><span class="tier-label tier-draft">Staged — Draft</span><span style="font-size:0.72rem;color:var(--muted);">Click the staged photo to revise or apply a preset. Generate Final for highest resolution MLS download.</span></div>
+      <div class="result-pair ${(room.presetCleanBase64||room.presetStatus==='processing')?'has-preset':''}">
         <div class="result-img-wrap"><img src="${orig.dataUrl}" onclick="openLightbox('${room.id}')" title="Click to update Shot Focus" /><div class="result-img-badge">Original</div></div>
-        <div class="result-img-wrap"><img src="data:image/jpeg;base64,${room.stagedBase64}" /><div class="result-img-badge staged">Virtually Staged · Draft</div></div>
+        <div class="result-img-wrap"><img src="data:image/jpeg;base64,${room.stagedBase64}" onclick="openLightboxRefine('${room.id}','revise')" title="Click to revise" /><div class="result-img-badge staged">Virtually Staged · Draft</div></div>
+        ${room.presetStatus==='processing'
+          ?`<div class="result-img-wrap" style="display:flex;align-items:center;justify-content:center;background:var(--cream);min-height:140px;border:1px solid var(--border);border-radius:3px;"><span class="spinner"></span></div>`
+          :room.presetCleanBase64?`<div class="result-img-wrap"><img src="data:image/jpeg;base64,${room.presetCleanBase64}" onclick="openLightboxRefine('${room.id}','presets')" title="Click to change preset" /><div class="result-img-badge preset">${PHOTOGRAPHIC_PRESETS[room.presetKey]?.label||'Preset'}</div></div>`:''}
       </div>
       <div class="mls-disclosure-note" style="font-size:0.73rem;">⚖️ <strong>MLS Upload: Original first → Staged second.</strong> Label "Virtually Staged" in Matrix.</div>
     </div>`:'';
     const iterHtml=room.status==='done'?`<div class="iterate-panel">
       <div style="flex:1;">
         <textarea class="iterate-input" id="iter-${room.id}" placeholder='Revision — e.g. "warmer lighting, less furniture, match great room sofa"' rows="2"></textarea>
-        <div class="iterate-hint">Specify only what to change — everything else stays the same.</div>
+        <div class="iterate-hint">Specify only what to change — everything else stays the same. Need more room, or want a photographic preset? <a href="javascript:void(0)" onclick="openLightboxRefine('${room.id}','revise')">Open Refine →</a></div>
       </div>
       <button class="btn btn-primary btn-sm" onclick="iterateRoom('${room.id}')">Re-Stage Draft</button>
     </div>`:'';
@@ -2537,6 +2784,69 @@ function downloadMarketingQR() {
   showToast('↓ Downloading marketing QR code...', 'success');
 }
 
+// ── PHOTOGRAPHIC PRESETS (PRO feature) ───────────────────────────────────────
+// Rendering-only pass over the CURRENT staged result, via the exact same
+// edit-only callStageAPI() pipeline reStageRoom()/iterateRoom() already use.
+// Deliberately writes to room.presetCleanBase64 / room.presetKey — a SEPARATE
+// field from room.stagedCleanBase64 / room.lastPrompt. This is intentional and
+// load-bearing, not a stylistic choice:
+//   1. Non-destructive — user can preview/swap/remove a preset freely without
+//      burning a re-stage call or losing the underlying staged draft.
+//   2. Never touches room.lastPrompt — that field is the staging revision
+//      chain's memory (iterateRoom()/reStageRoom() build the next revision on
+//      top of it). If a preset overwrote it, the NEXT staging revision would
+//      silently build on top of a rendering-only instruction instead of the
+//      real staging prompt — a corruption bug that would be hard to trace.
+// generateFinal() prefers presetCleanBase64 over stagedCleanBase64 when present.
+async function applyPreset(roomId, presetKey) {
+  const room = SESSION.rooms.find(r => r.id === roomId);
+  if (!room) return;
+  const sourceClean = room.stagedCleanBase64 || room.stagedBase64;
+  if (!sourceClean) { showToast('No staged draft found — stage this room first.', 'error'); return; }
+  const preset = PHOTOGRAPHIC_PRESETS[presetKey];
+  if (!preset) { showToast('Unknown preset.', 'error'); return; }
+
+  const presetPrompt = buildPresetPrompt(presetKey);
+
+  room.presetStatus = 'processing';
+  room.promptStatus = '✏️ Review preset prompt before applying...';
+  renderRoomQueue();
+
+  try {
+    // Same Prompt Review step as staging/revisions — Sam wants to see assembled
+    // preset prompts while testing. A throwaway room-shaped object satisfies
+    // showPromptModal()'s signature without disturbing the real room.lastPrompt.
+    const approvedPrompt = await showPromptModal({ ...room, lastPrompt: presetPrompt }, presetPrompt);
+    if (approvedPrompt === null) {
+      room.presetStatus = null;
+      renderRoomQueue();
+      showToast('Preset cancelled.', '');
+      return;
+    }
+
+    room.presetStatus = 'processing';
+    room.promptStatus = `Applying ${preset.label} preset — takes ~15 seconds...`;
+    renderRoomQueue();
+
+    const presetResult = await callStageAPI(sourceClean, 'image/jpeg', approvedPrompt, 'low');
+    if (!presetResult) throw new Error('Preset rendering failed — no image returned');
+
+    room.presetCleanBase64 = presetResult.clean;
+    room.presetKey = presetKey;
+    room.presetStatus = 'done';
+    room.promptStatus = null;
+    const orig = SESSION.originals.find(o => o.id === room.originalId);
+    await resizeToMatch(room, orig, null, 'presetCleanBase64', presetResult.clean);
+    renderRoomQueue();
+    showToast(`✓ ${preset.label} preset applied to ${room.roomName}.`, 'success');
+  } catch (err) {
+    room.presetStatus = 'error';
+    room.promptStatus = null;
+    renderRoomQueue();
+    showToast('Preset error: ' + err.message, 'error');
+  }
+}
+
 async function iterateRoom(roomId) {
   const note = document.getElementById('iter-' + roomId)?.value?.trim() || '';
   if (!note) { showToast('Enter revision instructions first.', 'error'); return; }
@@ -2599,6 +2909,11 @@ async function iterateRoom(roomId) {
     room.stagedBase64 = stagedBase64;
     room.stagedCleanBase64 = stagedCleanBase64;
     room.lastPrompt = approvedPrompt;
+    // A revision changes the underlying staged photo, so any preset previously
+    // applied to the OLD staged photo no longer matches — clear it rather than
+    // silently showing a mismatched preset thumbnail.
+    room.presetCleanBase64 = null;
+    room.presetKey = null;
     room.status = 'done';
     room.promptStatus = null;
     await resizeToMatch(room, orig, null, 'stagedBase64', stagedBase64);
@@ -2674,6 +2989,10 @@ async function reStageRoom(roomId) {
     room.stagedBase64 = stagedBase64;
     room.stagedCleanBase64 = stagedCleanBase64;
     room.lastPrompt = approvedPrompt;
+    // Same reasoning as iterateRoom(): a revision changes the underlying staged
+    // photo, so any preset applied to the OLD staged photo no longer matches.
+    room.presetCleanBase64 = null;
+    room.presetKey = null;
     room.status = 'done';
     room.promptStatus = null;
     const orig = SESSION.originals.find(o => o.id === room.originalId);
@@ -2690,7 +3009,7 @@ async function reStageRoom(roomId) {
 }
 function resetRoom(roomId){
   const room=SESSION.rooms.find(r=>r.id===roomId);
-  if(room){room.status='pending';room.stagedBase64=null;room.finalBase64=null;room.finalStatus=null;room.approvedDNA=null;if(SESSION.anchorRoomId===roomId)SESSION.anchorRoomId=null;renderRoomQueue();}
+  if(room){room.status='pending';room.stagedBase64=null;room.finalBase64=null;room.finalStatus=null;room.approvedDNA=null;room.presetCleanBase64=null;room.presetKey=null;room.presetStatus=null;if(SESSION.anchorRoomId===roomId)SESSION.anchorRoomId=null;renderRoomQueue();}
 }
 
 // ══════════════════════════════════════════
@@ -2702,9 +3021,12 @@ async function generateFinal(roomId,enhId){
 
   // Use the clean (unwatermarked) staged image for upscaling — NOT the watermarked draft
   // enhId present = exterior final, absent = interior final
+  // Interior path prefers presetCleanBase64 when a Photographic Preset has been
+  // applied — it's the same upscale target slot, just a rendering-refined version
+  // of the same staged result. Falls back to stagedCleanBase64 when no preset exists.
   const draftBase64 = enhId
     ? (room.extSelections?.[enhId]?.cleanBase64 || room.extSelections?.[enhId]?.base64)
-    : (room.stagedCleanBase64 || room.stagedBase64);
+    : (room.presetCleanBase64 || room.stagedCleanBase64 || room.stagedBase64);
 
   if(!draftBase64){
     showToast('No staged draft found — stage the room first.','error');

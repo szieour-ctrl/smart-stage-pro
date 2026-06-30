@@ -526,11 +526,16 @@ function parseRoomOption(val, explicitZones) {
 // and the iterate/re-stage loop is the correction mechanism — not the zone label.
 // 'Great Room' is intentionally excluded from Open Plan zones: GPT2 reads that label as
 // implying two rooms and tends to add an unwanted table. Use Living Room instead.
+// 'Family Room' was removed for the same reason (Sam, June 30 session): Family Room
+// and Great Room are functionally the same single-room concept as Living Room, but
+// having it as a SEPARATE checkable zone alongside Living caused GPT2 to treat them
+// as two distinct spatial areas requiring a circulation path between them — leading
+// to dropped/missing dining zones and duplicated living-zone furniture across what
+// should have been one continuous living area. Use Living Room for family rooms too.
 const OPEN_PLAN_ZONES = [
   { key: 'kitchen', label: 'Kitchen' },
   { key: 'dining',  label: 'Dining/Nook' },
   { key: 'living',  label: 'Living Room' },
-  { key: 'family',  label: 'Family Room' },
   { key: 'flex',    label: 'Flex Room', hasFreetext: true },
 ];
 
@@ -1691,9 +1696,9 @@ function saveShotFocus(){
   showToast('Shot Focus saved.','success');
   closeLightbox();
 }
-// Keep zone order consistent: kitchen, dining, living, family, flex
+// Keep zone order consistent: kitchen, dining, living, flex
 function zonesInOrder(keys){
-  const order=['kitchen','dining','living','family','flex'];
+  const order=['kitchen','dining','living','flex'];
   return order.filter(k=>keys.includes(k));
 }
 function refreshMappingBodyIfPresent(){

@@ -3771,9 +3771,11 @@ async function downloadSideBySide(roomId, enhId, tier) {
   // Get original as base64 from dataUrl
   const origB64 = orig.dataUrl.includes(',') ? orig.dataUrl.split(',')[1] : orig.dataUrl;
 
-  // For final tier the staged image has the AB723 footer baked in — send as-is
-  // For other tiers send the raw staged image
-  const stagedB64 = b64;
+  // For 'preset' tier, presetCleanBase64 is stored clean (no tiled DRAFT watermark)
+  // because generateFinal() needs it unwatermarked for upscaling. Apply the watermark
+  // now before compositing into the SBS layout, so the preset SBS matches the
+  // regular draft SBS (which uses stagedBase64, pre-watermarked at staging time).
+  const stagedB64 = (tier === 'preset') ? await applyDraftWatermark(b64) : b64;
 
   const presetLabelForFilename = (tier==='preset' && room?.presetKey && PHOTOGRAPHIC_PRESETS[room.presetKey])
     ? PHOTOGRAPHIC_PRESETS[room.presetKey].label.replace(/\s+/g,'')

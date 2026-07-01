@@ -2580,6 +2580,7 @@ async function stageRoom(roomId) {
         desiredFeeling: i.feeling_label || '',
         stagingLevel: i.intensity_label || '',
         furnishingsDNA: SESSION.stagingDNA || null,
+        projectId: SESSION.projectId || null,
       })
     });
 
@@ -3368,6 +3369,7 @@ async function runCleanAndStage(roomId) {
         desiredFeeling: i.feeling_label || '',
         stagingLevel: i.intensity_label || '',
         furnishingsDNA: SESSION.stagingDNA || null,
+        projectId: SESSION.projectId || null,
       })
     });
     if (!stageRes.ok) throw new Error('Stage prompt failed: ' + stageRes.status);
@@ -4173,6 +4175,7 @@ async function approveAndStageGroupImage(assignmentIndex, roomId) {
         desiredFeeling: intake.feeling_label || '',
         stagingLevel: intake.intensity_label || '',
         furnishingsDNA: SESSION.stagingDNA || null,
+        projectId: SESSION.projectId || null,
       })
     });
 

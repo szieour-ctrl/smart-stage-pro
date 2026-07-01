@@ -12,6 +12,12 @@
 // Used by:
 //   - stageRoom() in index.html — plain "Stage This Room" on a vacant/original photo
 //   - runCleanAndStage() in index.html — step 2, staging the decluttered image
+//
+// v1 addition: projectId is now passed through to assembleSpatialZonePrompt so the
+// shared module can deterministically pick a per-project Furniture Profile from
+// STYLE_FURNITURE_VOCABULARY — same project always gets the same furniture across
+// rooms, different projects of the same style get different furniture. See
+// spatial-zone-template.js for the full mechanism.
 
 const { assembleSpatialZonePrompt, STYLE_LABELS, PALETTE_TONES } = require('./spatial-zone-template');
 
@@ -29,7 +35,7 @@ exports.handler = async (event) => {
       roomType, designStyle, colorPalette,
       isOpenPlan, zoneList, flexNote,
       buyerProfile, desiredFeeling, stagingLevel,
-      furnishingsDNA,
+      furnishingsDNA, projectId,
     } = JSON.parse(event.body);
 
     if (!roomType) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing roomType" }) };
@@ -48,10 +54,11 @@ exports.handler = async (event) => {
         desiredFeeling: desiredFeeling || '',
         stagingLevel: stagingLevel || '',
         furnishingsDNA: furnishingsDNA || null,
+        projectId: projectId || null,
       }
     });
 
-    console.log('stage-vacant-prompt: assembled ' + stagingPrompt.length + ' chars for "' + roomType + '"' + (isOpenPlan ? ' (open plan: ' + (zoneList || []).join(',') + ')' : '') + (furnishingsDNA ? ' [with furnishings DNA]' : ''));
+    console.log('stage-vacant-prompt: assembled ' + stagingPrompt.length + ' chars for "' + roomType + '"' + (isOpenPlan ? ' (open plan: ' + (zoneList || []).join(',') + ')' : '') + (furnishingsDNA ? ' [with furnishings DNA]' : '') + (projectId ? ' [projectId: ' + projectId + ']' : ' [no projectId — furniture profile will not be deterministic across rooms]'));
 
     return {
       statusCode: 200,

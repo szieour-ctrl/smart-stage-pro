@@ -203,6 +203,7 @@ const SPATIAL_ZONE_TEMPLATE = [
 'ZONE RULES',
 '═══════════════════════════════════════════════════════',
 'IF a Chandelier exists, THEN center the Dining Table, Area Rug, and Dining Chairs beneath the chandelier.',
+'IF no Chandelier exists, THEN determine the Dining Zone using the previously locked Room Boundaries and center the dining furniture appropriately.',
 '────────────────────────────────────────',
 'IF a Fireplace exists, THEN center the Living Room seating group on the fireplace. Center the Area Rug on the fireplace. Center the Coffee Table on the Area Rug.',
 '────────────────────────────────────────',

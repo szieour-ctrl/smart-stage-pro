@@ -159,7 +159,7 @@ exports.handler = async (event) => {
     // calls Haiku. Phase 6.2: assembles the SPATIAL ZONE ANALYSIS template directly from the
     // user's own Image Assignment selections + Session DNA. No AI translation layer.
     if (body.mode === 'preserve') {
-      const { imageLabel, zoneList, flexNote, roomName, isOpenPlan, designStyle, colorPalette, buyerProfile, desiredFeeling, stagingLevel, furnishingsDNA } = body;
+      const { imageLabel, zoneList, flexNote, roomName, isOpenPlan, designStyle, colorPalette, buyerProfile, desiredFeeling, stagingLevel, furnishingsDNA, projectId } = body;
 
       console.log('Assembling spatial zone prompt: ' + imageLabel + (furnishingsDNA ? ' (with furnishings DNA)' : ''));
       const promptText = assembleSpatialZonePrompt({
@@ -171,6 +171,7 @@ exports.handler = async (event) => {
           desiredFeeling: desiredFeeling || '',
           stagingLevel: stagingLevel || '',
           furnishingsDNA: furnishingsDNA || null,
+          projectId: projectId || null,
         }
       });
 

@@ -76,6 +76,12 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
 .room-card.is-exterior{border-color:var(--sky);}
 .room-card.is-reference{border-color:#bbb;opacity:0.75;}
 .room-card-header{display:flex;align-items:center;gap:10px;padding:12px 16px;background:var(--cream);border-bottom:1px solid var(--border);flex-wrap:wrap;}
+/* Split layout — thumbnail+info on their own row, staging option tabs on a row below.
+   Used only by the main Stage Vacant/Interior card so Open Plan zone badges (which can
+   wrap to several lines) no longer squeeze the STAGE THIS ROOM / mode-toggle tabs into a
+   narrow column and balloon the card's height. */
+.room-card-header.room-card-header-split{flex-direction:column;align-items:stretch;gap:10px;}
+.room-card-toprow{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
 .room-card-thumb{width:60px;height:45px;object-fit:cover;border-radius:2px;border:1px solid var(--border);flex-shrink:0;cursor:pointer;transition:transform 0.15s,box-shadow 0.15s;}
 .room-card-thumb:hover{transform:scale(1.04);box-shadow:0 2px 10px rgba(0,0,0,0.18);}
 .room-card-info{flex:1;min-width:0;}
@@ -2022,10 +2028,11 @@ function renderRoomQueue(){
       return '';
     })();
     return `<div class="room-card ${isAnchor?'is-anchor':''}" id="card-${room.id}">
-      <div class="room-card-header"><img class="room-card-thumb" src="${orig.dataUrl}" onclick="openLightbox('${room.id}')" title="Click to set Shot Focus" />
+      <div class="room-card-header room-card-header-split">
+      <div class="room-card-toprow"><img class="room-card-thumb" src="${orig.dataUrl}" onclick="openLightbox('${room.id}')" title="Click to set Shot Focus" />
       <div class="room-card-info"><div class="room-card-name">${room.roomName} ${isAnchor?'<span class="anchor-badge">Design Anchor</span>':''}${zoneBadgeHtml(room)}</div>
       ${room.adjacentRooms.length?`<div class="room-card-adj">Adjacent: ${room.adjacentRooms.join(', ')}</div>`:''}${sfBadge}${spatialBadge}
-      <div class="room-card-status ${room.status}">${statusLabel}</div></div>
+      <div class="room-card-status ${room.status}">${statusLabel}</div></div></div>
       <div class="room-card-actions">${actions}${modeToggle}</div></div>
       ${strategyToggle}${resultHtml}${dnaPanel}${iterHtml}${finalHtml}</div>`;
   }).join('');
@@ -4313,8 +4320,13 @@ function showPromptModal(room, prompt) {
     _promptModalResolve = resolve;
     const i = SESSION.intake;
 
-    // Room name + meta chips
-    document.getElementById('pm-room-name').textContent = room.roomName;
+    // Room name + meta chips — for Open Plan rooms, show the selected zones
+    // (e.g. "Kitchen + Dining/Nook + Flex Room"), same convention already used
+    // in the photo-assignment list, instead of the bare generic "Open Plan" label.
+    const roomTitle = room.isOpenPlan
+      ? (room.zoneList||[]).map(z=>OPEN_PLAN_ZONES.find(o=>o.key===z)?.label||z).join(' + ') || 'Open Plan'
+      : room.roomName;
+    document.getElementById('pm-room-name').textContent = roomTitle;
     const meta = [
       { label: 'Style', val: i.style_label },
       { label: 'Palette', val: i.palette_label },

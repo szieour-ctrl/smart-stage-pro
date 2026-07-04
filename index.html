@@ -466,7 +466,7 @@ const SINGLE_ROOM_OPTIONS = [
   "Great Room || greatroom",
   "Living Room || livingroom",
   "Family Room || familyroom",
-  "Dining Room || diningroom",
+  "Formal Dining Room || diningroom",
   "Kitchen || kitchen",
   "Entry / Foyer || foyer",
   "Home Bar || homebar",
@@ -540,7 +540,7 @@ function parseRoomOption(val, explicitZones) {
 // should have been one continuous living area. Use Living Room for family rooms too.
 const OPEN_PLAN_ZONES = [
   { key: 'kitchen', label: 'Kitchen' },
-  { key: 'dining',  label: 'Dining/Nook' },
+  { key: 'dining',  label: 'Dining Zone' },
   { key: 'living',  label: 'Living Room' },
   { key: 'flex',    label: 'Flex Room', hasFreetext: true },
 ];
@@ -692,7 +692,7 @@ function zoneBadgeHtml(room) {
 const DECOR8_ROOM_TYPE = {
   "Entry": "foyer", "Foyer": "foyer",
   "Great Room": "greatroom", "Living Room": "livingroom", "Family Room": "familyroom",
-  "Kitchen": "kitchen", "Dining Room": "diningroom",
+  "Kitchen": "kitchen", "Formal Dining Room": "diningroom",
   "Primary Suite": "bedroom", "Bedroom 2": "bedroom", "Bedroom 3": "bedroom", "Bedroom 4": "bedroom",
   "Primary Bath": "bathroom", "Powder Room": "powderroom",
   "Office": "office", "Study": "office", "Loft": "familyroom", "Flex Room": "familyroom",
@@ -703,16 +703,18 @@ const DECOR8_ROOM_TYPE = {
 };
 
 // If Kitchen visible with Great Room/Dining → openplan
-// Rooms that share the open plan DNA (same physical space)
-const OPENPLAN_CONNECTED_TYPES = ["openplan","livingroom","greatroom","diningroom","kitchen","familyroom"];
+// Rooms that share the open plan DNA (same physical space). Formal Dining Room removed —
+// it's now explicitly an enclosed room (2+ walls, its own physical space per the v6.3
+// Zone Identification Rules), so it no longer belongs with the truly open/connected types.
+const OPENPLAN_CONNECTED_TYPES = ["openplan","livingroom","greatroom","kitchen","familyroom"];
 
-// Rooms that get Style DNA only (separate physical spaces)
+// Rooms that get Style DNA only (separate physical spaces) — diningroom added here to match.
 const STYLE_DNA_ONLY_TYPES = ["bedroom","bathroom","powderroom","office","study_room",
   "laundryroom","mudroom","garage","gym","toyroom","kidsroom","walkincloset",
-  "sunroom","readingnook","basement","balcony","foyer",
+  "sunroom","readingnook","basement","balcony","foyer","diningroom",
   "back_patio","back_porch","front_porch"];
 
-const OPENPLAN_ROOMS = ["Great Room","Kitchen","Dining Room","Living Room","Family Room"];
+const OPENPLAN_ROOMS = ["Great Room","Kitchen","Living Room","Family Room"];
 
 const DECOR8_DESIGN_STYLE = {
   "Organic Modern": "organicmodern",
@@ -793,7 +795,7 @@ const ROOM_STAGING_RULES = {
 const SHOT_FOCUS_HINTS = {
   "Great Room":["Focus on the Great Room seating area — kitchen in background is secondary","Emphasize the fireplace wall as the focal point — do not over-furnish visible adjacent spaces","The open space should feel expansive — avoid crowding any visible connecting rooms"],
   "Kitchen":["Focus on the kitchen island — living area behind is secondary and should remain lightly staged","Emphasize counter space and pendant lighting over the island","Stage bar stools at island — keep great room furniture minimal if visible"],
-  "Dining Room":["This is the Dining Room — do not over-furnish the living area visible behind","Focus on dining table and chandelier above it","Keep staging centered on dining space — adjoining rooms are background only"],
+  "Formal Dining Room":["This is an enclosed Formal Dining Room — no adjoining rooms should be visible, keep staging fully contained to this space","Focus on the dining table and chandelier as the sole focal point","Stage against the room's own walls — a sideboard or buffet only if wall space is clearly visible in the photo"],
   "Family Room":["Focus on the family room — do not fill the kitchen or entry visible behind","Emphasize comfortable seating facing the TV wall","Keep it warm and livable — this is the everyday gathering space"],
   "Living Room":["Focus on the living room seating — kitchen visible behind is secondary","Emphasize the fireplace as the room anchor","Stage a conversational seating arrangement around the focal wall"],
   "Primary Suite":["This is a bedroom — bed wall is the hero element","Emphasize the suite feel — nightstands, soft lighting, luxury textiles","Keep bathroom door area clean — do not stage the bath visible behind"],
@@ -4321,7 +4323,7 @@ function showPromptModal(room, prompt) {
     const i = SESSION.intake;
 
     // Room name + meta chips — for Open Plan rooms, show the selected zones
-    // (e.g. "Kitchen + Dining/Nook + Flex Room"), same convention already used
+    // (e.g. "Kitchen + Dining Zone + Flex Room"), same convention already used
     // in the photo-assignment list, instead of the bare generic "Open Plan" label.
     const roomTitle = room.isOpenPlan
       ? (room.zoneList||[]).map(z=>OPEN_PLAN_ZONES.find(o=>o.key===z)?.label||z).join(' + ') || 'Open Plan'

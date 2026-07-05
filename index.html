@@ -2105,6 +2105,7 @@ function renderRoomQueue(){
       </div>
     </div>`:'';
     const finalHtml=room.status==='done'?renderFinalPanel(room.id,null):'';
+     const cinematicAssetPanel=room.status==='done'?renderCinematicAssetPanel(room.id):'';
     // Replicate result panel — button now in header actions, this shows result/progress only
     const repBtn=(()=>{
       if(!room.replicateStatus) return ''; // button is in header actions now
@@ -2142,7 +2143,7 @@ function renderRoomQueue(){
       ${room.adjacentRooms.length?`<div class="room-card-adj">Adjacent: ${room.adjacentRooms.join(', ')}</div>`:''}${sfBadge}${spatialBadge}
       <div class="room-card-status ${room.status}">${statusLabel}</div></div></div>
       <div class="room-card-actions">${actions}${modeToggle}</div></div>
-      ${strategyToggle}${resultHtml}${dnaPanel}${iterHtml}${finalHtml}</div>`;
+      ${strategyToggle}${resultHtml}${dnaPanel}${iterHtml}${finalHtml}${cinematicAssetPanel}</div>`;
   }).join('');
 }
 
@@ -3058,6 +3059,93 @@ async function generateHeroDetailShot(roomId, assignmentId, qualityChoice) {
   const baseCreditCost = { mls: 1, marketing: 2, print: 3 }[quality] || 1;
   const hasPreset = !!room.presetCleanBase64;
   const creditCost = baseCreditCost + (hasPreset ? 1 : 0);
+// ── Cinematic Asset Generator: room-card UI panel ────────────────────────────
+// Renders a quality-tier selector + grid of shot-assignment buttons for any
+// room where getKbRoomTypeKey() resolves (Open Plan Kitchen-Living only, in
+// this first draft). Mirrors the visual language already used for presets/
+// final panels (btn/btn-outline/btn-sm, result-img-wrap, spinner, tier-label)
+// so it doesn't need any new CSS.
+//
+// WIRING — two edits to index.html:
+//   1. Right after this line (search for it):
+//        const finalHtml=room.status==='done'?renderFinalPanel(room.id,null):'';
+//      add:
+//        const cinematicAssetPanel=room.status==='done'?renderCinematicAssetPanel(room.id):'';
+//   2. In the room-card assembly line (search for it):
+//        ${strategyToggle}${resultHtml}${dnaPanel}${iterHtml}${finalHtml}</div>`;
+//      change to:
+//        ${strategyToggle}${resultHtml}${dnaPanel}${iterHtml}${finalHtml}${cinematicAssetPanel}</div>`;
+
+function renderCinematicAssetPanel(roomId) {
+  const room = SESSION.rooms.find(r => r.id === roomId);
+  if (!room) return '';
+
+  const roomTypeKey = getKbRoomTypeKey(room);
+  if (!roomTypeKey) return ''; // No shot library for this room type yet — panel hidden, not broken.
+
+  const assignments = listAssignments(roomTypeKey);
+  const shots = room.heroDetailShots || {};
+  const qSelName = `cag-qsel-${roomId}`;
+
+  const tiles = assignments.map(a => {
+    const shot = shots[a.assignment_id];
+
+    if (shot?.status === 'processing') {
+      return `<div class="result-img-wrap" style="display:flex;flex-direction:column;align-items:center;justify-content:center;background:var(--cream);min-height:110px;border:1px solid var(--border);border-radius:3px;gap:6px;">
+        <span class="spinner"></span>
+        <span style="font-size:0.65rem;color:var(--muted);">${a.assignment_name}</span>
+      </div>`;
+    }
+
+    if (shot?.status === 'done' && shot.finalBase64) {
+      return `<div class="result-img-wrap">
+        <img src="data:image/jpeg;base64,${shot.finalBase64}" onclick="downloadHeroDetailShot('${roomId}','${a.assignment_id}')" title="Click to download" />
+        <div class="result-img-badge">${a.assignment_name}</div>
+      </div>`;
+    }
+
+    if (shot?.status === 'error') {
+      return `<div class="result-img-wrap" style="display:flex;flex-direction:column;align-items:center;justify-content:center;background:#fff8e7;min-height:110px;border:1px solid #f0d080;border-radius:3px;gap:4px;padding:8px;text-align:center;">
+        <span style="font-size:0.65rem;color:#7a6000;">${a.assignment_name} failed</span>
+        <button class="btn btn-outline btn-sm" onclick="generateHeroDetailShot('${roomId}','${a.assignment_id}', document.querySelector('input[name=\\'${qSelName}\\']:checked')?.value)">Retry</button>
+      </div>`;
+    }
+
+    // Not yet generated
+    return `<button class="btn btn-outline btn-sm" style="width:100%;height:100%;min-height:60px;" onclick="generateHeroDetailShot('${roomId}','${a.assignment_id}', document.querySelector('input[name=\\'${qSelName}\\']:checked')?.value)">
+      ${a.assignment_name}<br><span style="font-size:0.6rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;">${a.shot_type}</span>
+    </button>`;
+  }).join('');
+
+  return `<div class="cinematic-asset-panel" style="border-top:1px solid var(--border);padding:12px 16px;">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+      <span class="tier-label tier-draft">Cinematic Asset Generator</span>
+      <span style="font-size:0.72rem;color:var(--muted);">Generate magazine-quality hero/detail shots from this staged room.</span>
+    </div>
+    <div style="display:flex;gap:14px;align-items:center;margin-bottom:10px;font-size:0.75rem;">
+      <label><input type="radio" name="${qSelName}" value="mls" checked> MLS (1 credit)</label>
+      <label><input type="radio" name="${qSelName}" value="marketing"> Marketing (2 credits)</label>
+      <label><input type="radio" name="${qSelName}" value="print"> Print (3 credits)</label>
+      ${room.presetCleanBase64 ? '<span style="color:var(--muted);">+1 credit — preset applied</span>' : ''}
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px;">
+      ${tiles}
+    </div>
+  </div>`;
+}
+
+function downloadHeroDetailShot(roomId, assignmentId) {
+  const room = SESSION.rooms.find(r => r.id === roomId);
+  const shot = room?.heroDetailShots?.[assignmentId];
+  if (!shot?.finalBase64) return;
+  const a = document.createElement('a');
+  a.href = 'data:image/jpeg;base64,' + shot.finalBase64;
+  const safeName = (shot.assignmentName || assignmentId).replace(/[^a-z0-9]/gi, '_');
+  a.download = `CinematicAsset_${safeName}_${bName(getOrigName(roomId))}.jpg`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
 
   // ── CREDIT GATE — debit before generation fires, same pattern as generateFinal() ──
   const _sbUser = (await getSupabase().auth.getUser()).data?.user;

@@ -11,6 +11,18 @@
 // same template/assembler logic powers every staging prompt in the app — no per-file
 // duplicate copies that can silently drift apart.
 //
+// v6.3.2 (July 2026): fixed two v6.3.1 render failures.
+// (1) Chandelier hallucination — added NON-CREATION CHANDELIER RULES hard block: no
+//     chandelier/pendant/overhead fixture may be added unless one exists in the original
+//     photo; style/room-type/aesthetic inference are explicitly invalid grounds.
+// (2) Bar stool placement errors — the expanded seating-face rule set (angle tolerances,
+//     error codes) that was manually patched in as an interim v6.3.1 fix caused the model
+//     to hesitate and omit stools; it has been REMOVED ENTIRELY, not restored. No bar
+//     stool rule of any kind remains in this template.
+// Also added: formal RENDER-PHASE IMMUTABILITY VERIFICATION (RPIV) gate with an explicit
+// checklist and mandatory pass-confirmation statement (previously just a bullet list with
+// no defined pass/fail behavior).
+//
 // Two variable slots: {{room_assignment_variables}} and the Design DNA block (style,
 // palette, buyer/feeling/staging-level, plus a per-project Furniture Profile drawn from
 // STYLE_FURNITURE_VOCABULARY, plus captured furnishingsDNA continuity when present).
@@ -44,6 +56,20 @@ const SPATIAL_ZONE_TEMPLATE = [
 'If any proposed staging action deletes, conceals, duplicates, or adds fixtures, flag a violation: "IMMUTABILITY CONTRADICTION DETECTED." Reject the staging plan and restage using only existing fixtures.',
 'No new chandeliers, cabinets, or architectural features may be created. No existing fixtures may be removed or relocated. All staging must occur within the immutable architectural boundaries.',
 '',
+'RENDER-PHASE IMMUTABILITY VERIFICATION (RPIV)',
+'Before finalizing ANY virtual staging render, compare staged output to the original photograph. Confirm all permanent architectural fixtures remain EXACTLY as photographed: cabinetry; partial walls; columns, headers, soffits; fireplaces; chandeliers, pendant lights, recessed lights; ceiling fans; built-ins; flooring direction and transitions.',
+'If ANY discrepancy is detected: Flag "RENDER-PHASE IMMUTABILITY VIOLATION." Reject the render. Restage using ONLY the original fixture inventory.',
+'Mandatory render-phase checks:',
+'• Cabinetry count and placement identical',
+'• No removed or concealed partial walls',
+'• No hallucinated chandeliers or duplicated fixtures',
+'• No architectural element altered for composition or symmetry',
+'• No widening, narrowing, or reinterpretation of openings',
+'• Island seating-face classification locked before any furniture placed',
+'• Only user-specified rooms and zones staged; all others left vacant',
+'• Design style and palette applied only from the Design Style & Palette block below',
+'Output requirement: State "All permanent fixtures preserved exactly as photographed. AB-723 compliant."',
+'',
 'TASK',
 'Analyze the uploaded room photograph and identify all functional furnishing Rooms and Zones based solely on pre-existing visible architecture, fixtures, openings, windows, cabinetry, fireplaces, built-ins, ceiling features, and circulation paths before placing furnishings.',
 '',
@@ -69,7 +95,7 @@ const SPATIAL_ZONE_TEMPLATE = [
 '• Kitchen: cabinets, countertops, appliances, island base cabinets',
 '• Family Room / Primary Bedroom / Loft / Flex Room: two or more connected walls',
 '• Flex Room examples: Office, Formal Dining Room, Media Room, Play Room, Music Room',
-'• Circulation Zones: Entry = light décor only; Hallway = maintain circular path, no furniture',
+'• Circulation Zones: Entry = light décor only; Hallway = maintain clear path, no furniture',
 '',
 'ZONE BOUNDARIES',
 'Determine zone boundaries using architectural cues: walls, partial walls, openings, doorways, windows, sliding doors, fireplaces, kitchen islands, cabinetry, ceiling changes, chandeliers, pendant lighting, ceiling fans, built-ins, hallways, and circulation paths.',
@@ -81,8 +107,17 @@ const SPATIAL_ZONE_TEMPLATE = [
 '• Fireplace LOCKS Living Zone. If fireplace is pre-existing, lock the fireplace wall and connected walls as the Living Zone.',
 '• Ceiling Fans typically define Living Zones.',
 '',
-'Your job is to identify the find and stage only the Zones that are listed, if the zone is not listed the area is to be left vacant:',
-'Find: {{room_assignment_variables}} go here',
+'ROOMS AND ZONES TO STAGE — USER SELECTIONS',
+'Your job is to identify, find, and stage ONLY the Rooms and Zones listed below. If a zone is not listed, that area must be left completely vacant.',
+'Find and stage: {{room_assignment_variables}} go here',
+'',
+'NON-CREATION CHANDELIER RULES',
+'Do NOT add any chandelier, pendant cluster, or decorative overhead fixture to the staged render unless one already exists in the original photograph.',
+'Chandeliers are NEVER inferred from room type, event style, or aesthetic context. If no chandelier is visible in the original photo, none may appear in the render.',
+'If a chandelier exists in the original photograph:',
+'• It locks the Dining Zone (centered table and chairs directly below)',
+'• It may not be repositioned, resized, duplicated, or removed in the render',
+'• It must not visually block the primary furniture arrangement from camera origin; if so, adjust only camera framing — never the fixture',
 '',
 'FIXTURE–FURNITURE CONTRADICTION ENFORCEMENT',
 'Before placing furniture, perform a mandatory contradiction check between pre-existing architectural fixtures and proposed furniture placement. Permanent fixtures ALWAYS outrank furniture. If furniture placement contradicts fixture-anchored zone identity, reject and flag the contradiction.',
@@ -109,7 +144,7 @@ const SPATIAL_ZONE_TEMPLATE = [
 '',
 'Fixture Priority Hierarchy',
 'Resolve contradictions in this order:',
-'1. Fireplace   2. Chandelier   3. Ceiling Fan   4. Kitchen Fixtures   5. Furniture',
+'1. Fireplace   2. Chandelier   3. Ceiling Fan   4. Kitchen Fixtures (island, cabinetry)   5. Furniture',
 'Furniture NEVER outranks fixtures.',
 '',
 'Mandatory Output Behavior',
@@ -118,15 +153,16 @@ const SPATIAL_ZONE_TEMPLATE = [
 '• Reject incorrect furniture interpretation',
 '• Reclassify zones based only on fixtures',
 '• Restage correctly',
-'• Ignore user intent if conflicting',
+'• Ignore user intent if conflicting with fixture hierarchy',
 '• Preserve Original Image Immutability',
 '',
 'DESIGN STYLE & PALETTE',
 '{{all_design_style_&_palette}} variables go here User Selected DNA {{variables}}',
 '',
 'OUTPUT REQUIREMENTS',
-'Do not alter architecture. AB 723 COMPLIANCE — Planning and visualization only.',
-'Do not alter, remove, relocate, resize, conceal, or modify any architectural element including walls, windows, doors, cabinetry, fireplaces, flooring, ceilings, lighting fixtures, appliances, or built-ins. All architectural elements must remain exactly as photographed.'
+'Do not alter architecture. AB-723 COMPLIANCE — Planning and visualization only.',
+'Do not alter, remove, relocate, resize, conceal, or modify any architectural element including walls, windows, doors, cabinetry, fireplaces, flooring, ceilings, lighting fixtures, appliances, or built-ins. All architectural elements must remain exactly as photographed.',
+'State: "All permanent fixtures preserved exactly as photographed. AB-723 compliant."'
 ].join('\n');
 
 const OPEN_PLAN_ZONE_LABELS = { kitchen: 'Kitchen', dining: 'Dining Zone', living: 'Living Room', family: 'Family Room', flex: 'Flex Room' };

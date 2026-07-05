@@ -554,6 +554,112 @@ const OPEN_PLAN_ZONES = [
 // at the same time as revision prompts — same IP-exposure problem, one hardening pass.
 // A preset is rendering-only: it must never mention furniture, layout, staging, decor,
 // or camera position — that's the Cinematic Asset Generator's job (PRO Plus, separate).
+   // ── KB Assignment Library (Cinematic Asset Generator, PRO Plus) ──────────────
+// FIRST DRAFT. Only K301 (Range Hero) is a confirmed ground-truth spec, taken
+// directly from the Photographer/Director Workflow board. All other codes are
+// first-draft placeholders inferred from the board's shot list and thumbnail
+// descriptions — review and correct before this goes live for real users.
+//
+// This is the feature referenced in the PRESET_EDIT_INSTRUCTION_HEADER comment
+// above ("that's the Cinematic Asset Generator's job (PRO Plus, separate)").
+//
+// Storage location intentionally left as a plain in-file object for this first
+// draft (per Sam: "decide after seeing a first draft"). If it later moves to
+// Supabase, only KB_ASSIGNMENT_LIBRARY/getAssignment/listAssignments below need
+// to change — nothing that calls them does.
+
+const KB_ASSIGNMENT_LIBRARY = {
+  'Open Plan Kitchen-Living': {
+    K101: { assignment_id:'K101', assignment_name:'Master Shot', room:'Open Plan Kitchen-Living', shot_type:'Wide',
+      composition:'Wide Establishing Angle', camera_height:'Eye Level', lens_behavior:'Natural Perspective',
+      focus_priority:['Overall Room','Kitchen','Dining','Living'], secondary_elements:['Flooring','Lighting','Windows'],
+      lighting:'Natural + Soft Overhead', depth_of_field:'Deep', material_priority:['Stone','Wood','Stainless Steel'],
+      mood:'Luxury Editorial', negative_space:'Natural', render_style:'Magazine Quality' },
+    K201: { assignment_id:'K201', assignment_name:'Island Hero', room:'Open Plan Kitchen-Living', shot_type:'Hero',
+      composition:'Three-Quarter Angle', camera_height:'Counter Height', lens_behavior:'Natural Perspective',
+      focus_priority:['Island','Countertop','Seating Face'], secondary_elements:['Pendant Lighting','Cabinetry','Backsplash'],
+      lighting:'Natural + Soft Overhead', depth_of_field:'Moderate', material_priority:['Stone','Wood','Brass'],
+      mood:'Luxury Editorial', negative_space:'Controlled', render_style:'Magazine Quality' },
+    K301: { assignment_id:'K301', assignment_name:'Range Hero', room:'Open Plan Kitchen-Living', shot_type:'Hero',
+      composition:'Three-Quarter Angle', camera_height:'Counter Height', lens_behavior:'Natural Perspective',
+      focus_priority:['Range','Knobs','Backsplash'], secondary_elements:['Hood','Cabinetry','Stone'],
+      lighting:'Natural + Soft Overhead', depth_of_field:'Moderate', material_priority:['Stainless Steel','Stone','Tile'],
+      mood:'Luxury Editorial', negative_space:'Controlled', render_style:'Magazine Quality' },
+    K401: { assignment_id:'K401', assignment_name:'Pantry Hero', room:'Open Plan Kitchen-Living', shot_type:'Hero',
+      composition:'Centered Angle', camera_height:'Eye Level', lens_behavior:'Natural Perspective',
+      focus_priority:['Shelving','Pantry Door/Opening','Storage Styling'], secondary_elements:['Cabinetry','Flooring'],
+      lighting:'Natural + Interior Accent', depth_of_field:'Moderate', material_priority:['Wood','Glass Jars','Wicker'],
+      mood:'Luxury Editorial', negative_space:'Controlled', render_style:'Magazine Quality' },
+    K501: { assignment_id:'K501', assignment_name:'Faucet Detail', room:'Open Plan Kitchen-Living', shot_type:'Detail',
+      composition:'Close-Up', camera_height:'Counter Height', lens_behavior:'Macro-Leaning Perspective',
+      focus_priority:['Faucet','Sink Basin'], secondary_elements:['Countertop','Window Light'],
+      lighting:'Natural, Soft Reflective Highlights', depth_of_field:'Shallow', material_priority:['Brass','Stone'],
+      mood:'Luxury Editorial', negative_space:'Tight', render_style:'Magazine Quality' },
+    K601: { assignment_id:'K601', assignment_name:'Cabinet Detail', room:'Open Plan Kitchen-Living', shot_type:'Detail',
+      composition:'Close-Up', camera_height:'Counter Height', lens_behavior:'Natural Perspective',
+      focus_priority:['Cabinetry Face','Hardware'], secondary_elements:['Countertop Edge'],
+      lighting:'Natural + Soft Overhead', depth_of_field:'Shallow', material_priority:['Wood','Brass'],
+      mood:'Luxury Editorial', negative_space:'Tight', render_style:'Magazine Quality' },
+    K701: { assignment_id:'K701', assignment_name:'Dining Hero', room:'Open Plan Kitchen-Living', shot_type:'Hero',
+      composition:'Three-Quarter Angle', camera_height:'Eye Level', lens_behavior:'Natural Perspective',
+      focus_priority:['Dining Table','Chairs','Table Styling'], secondary_elements:['Chandelier/Pendant','Flooring'],
+      lighting:'Natural + Soft Overhead', depth_of_field:'Moderate', material_priority:['Wood','Linen','Ceramic'],
+      mood:'Luxury Editorial', negative_space:'Controlled', render_style:'Magazine Quality' },
+    K801: { assignment_id:'K801', assignment_name:'Living Hero', room:'Open Plan Kitchen-Living', shot_type:'Hero',
+      composition:'Three-Quarter Angle', camera_height:'Eye Level', lens_behavior:'Natural Perspective',
+      focus_priority:['Seating Arrangement','Fireplace'], secondary_elements:['Rug','Windows','Decor'],
+      lighting:'Natural + Soft Overhead', depth_of_field:'Moderate', material_priority:['Linen','Wood','Stone'],
+      mood:'Luxury Editorial', negative_space:'Controlled', render_style:'Magazine Quality' },
+    K901: { assignment_id:'K901', assignment_name:'Fireplace Detail', room:'Open Plan Kitchen-Living', shot_type:'Detail',
+      composition:'Centered Close-Up', camera_height:'Eye Level', lens_behavior:'Natural Perspective',
+      focus_priority:['Fireplace Surround','Firebox'], secondary_elements:['Mantel Styling'],
+      lighting:'Natural + Warm Accent', depth_of_field:'Shallow', material_priority:['Stone','Wood','Metal'],
+      mood:'Luxury Editorial', negative_space:'Tight', render_style:'Magazine Quality' },
+    K1001: { assignment_id:'K1001', assignment_name:'Flooring Detail', room:'Open Plan Kitchen-Living', shot_type:'Detail',
+      composition:'Low-Angle Close-Up', camera_height:'Low Angle', lens_behavior:'Natural Perspective',
+      focus_priority:['Flooring Texture','Grain/Pattern'], secondary_elements:['Furniture Legs (if in frame)'],
+      lighting:'Natural, Raking Light', depth_of_field:'Shallow', material_priority:['Wood'],
+      mood:'Luxury Editorial', negative_space:'Tight', render_style:'Magazine Quality' },
+    K1101: { assignment_id:'K1101', assignment_name:'Lighting Detail', room:'Open Plan Kitchen-Living', shot_type:'Detail',
+      composition:'Upward Close-Up', camera_height:'Low Angle', lens_behavior:'Natural Perspective',
+      focus_priority:['Pendant/Fixture Body','Shade Material'], secondary_elements:['Ceiling','Island Below (if in frame)'],
+      lighting:'Fixture-Lit + Natural Fill', depth_of_field:'Shallow', material_priority:['Glass','Metal'],
+      mood:'Luxury Editorial', negative_space:'Tight', render_style:'Magazine Quality' },
+    K1201: { assignment_id:'K1201', assignment_name:'Decor Detail', room:'Open Plan Kitchen-Living', shot_type:'Detail',
+      composition:'Close-Up', camera_height:'Counter Height', lens_behavior:'Natural Perspective',
+      focus_priority:['Styling Object(s)','Accessory Grouping'], secondary_elements:['Countertop or Surface Beneath'],
+      lighting:'Natural + Soft Overhead', depth_of_field:'Shallow', material_priority:['Ceramic','Wood','Greenery'],
+      mood:'Luxury Editorial', negative_space:'Tight', render_style:'Magazine Quality' }
+  }
+};
+
+// Maps a room object (room.isOpenPlan / room.zoneList / room.roomName, same shape
+// used everywhere else in this file) to a KB_ASSIGNMENT_LIBRARY key. Only Open Plan
+// Kitchen-Living is populated in this first draft — other room types return null,
+// which the caller should treat as "no shot library available for this room yet."
+function getKbRoomTypeKey(room) {
+  if (room?.isOpenPlan && (room.zoneList || []).includes('kitchen')) {
+    return 'Open Plan Kitchen-Living';
+  }
+  return null;
+}
+
+function getAssignment(roomTypeKey, assignmentId) {
+  const roomLibrary = KB_ASSIGNMENT_LIBRARY[roomTypeKey];
+  if (!roomLibrary) throw new Error(`No KB library for room type "${roomTypeKey}"`);
+  const assignment = roomLibrary[assignmentId];
+  if (!assignment) throw new Error(`No assignment "${assignmentId}" for room type "${roomTypeKey}"`);
+  return assignment;
+}
+
+function listAssignments(roomTypeKey) {
+  const roomLibrary = KB_ASSIGNMENT_LIBRARY[roomTypeKey];
+  if (!roomLibrary) return [];
+  return Object.values(roomLibrary).map(a => ({
+    assignment_id: a.assignment_id, assignment_name: a.assignment_name, shot_type: a.shot_type
+  }));
+}
+
 const PRESET_EDIT_INSTRUCTION_HEADER =
   'PRIMARY ROLE: Apply a photographic rendering preset to this already-staged photo. ' +
   'Make ONLY the rendering adjustments described below — furniture, decor, staging, ' +
@@ -2887,6 +2993,139 @@ async function applyPreset(roomId, presetKey) {
     room.promptStatus = null;
     renderRoomQueue();
     showToast('Preset error: ' + err.message, 'error');
+  }
+}
+// ── Cinematic Asset Generator (PRO Plus) — Hero/Detail Photographer prompt ───
+// Same convention as PRESET_EDIT_INSTRUCTION_HEADER: a rendering/reframing-only
+// instruction header, no re-staging language. AB-723 header is still prepended
+// server-side in stage-openai-background.js regardless — this local mention is
+// belt-and-suspenders, matching the existing preset prompt's own convention.
+const HERO_DETAIL_INSTRUCTION_HEADER =
+  'PRIMARY ROLE: Award-winning architectural magazine photographer. Reframe and re-render ' +
+  'a specific asset within this already-staged photo as a magazine-quality hero or detail shot.\n\n' +
+  'Do NOT add, remove, relocate, resize, restyle, duplicate, or reinterpret any permanent ' +
+  'architectural element, or any furniture/decor/styling object already placed in the staged ' +
+  'image. Only reframe, crop, and re-render at higher fidelity what is already visible. If the ' +
+  'requested composition would require anything not already present in the staged image, choose ' +
+  'the closest composition achievable from what is actually visible instead.\n\n' +
+  'This is a rendering/reframing pass only — this image is for MLS/marketing use per California ' +
+  'AB 723 §10140.6, and any change beyond reframing/re-rendering makes it non-compliant.\n\n';
+
+function buildHeroDetailPrompt(assignment) {
+  const lines = [
+    `Create a ${assignment.shot_type.toUpperCase()} image of the ${assignment.assignment_name} from the provided staged ${assignment.room} image.`,
+    `Focus on capturing as the subject: ${assignment.focus_priority.join(', ')}.`,
+    `Use a ${assignment.camera_height} camera height with ${assignment.lens_behavior}, composed as a ${assignment.composition}.`,
+    `Secondary elements to include in frame where visible: ${assignment.secondary_elements.join(', ')}.`,
+    `Highlight these materials/finishes as they already appear in the staged image: ${assignment.material_priority.join(', ')}.`,
+    `Lighting: ${assignment.lighting}. Depth of field: ${assignment.depth_of_field}. Negative space: ${assignment.negative_space}.`,
+    `Mood: ${assignment.mood}. Render style: ${assignment.render_style}.`,
+    'Maintain consistent style, lighting, and color palette from the staged wide shot. Keep the background minimal and complementary.'
+  ];
+  return HERO_DETAIL_INSTRUCTION_HEADER + lines.join('\n');
+}
+
+// ── Cinematic Asset Generator: shot generation — mirrors applyPreset() exactly ──
+// Deliberately writes to room.heroDetailShots[assignmentId] — a SEPARATE,
+// non-destructive slot from stagedCleanBase64/presetCleanBase64/lastPrompt, for
+// the same reason applyPreset() keeps presets separate: never corrupt the
+// staging revision chain, and let the user regenerate/discard freely.
+//
+// Credit cost mirrors generateFinal()'s exact formula:
+//   base tier {mls:1, marketing:2, print:3} + (+1 if a preset is applied to the
+//   source image). Quality tier maps to the same upscale scaleFactor generateFinal
+//   uses (mls=4x, marketing=6x, print=8x) via upscale-image.js.
+async function generateHeroDetailShot(roomId, assignmentId, qualityChoice) {
+  const room = SESSION.rooms.find(r => r.id === roomId);
+  if (!room) return;
+
+  const sourceClean = room.presetCleanBase64 || room.stagedCleanBase64 || room.stagedBase64;
+  if (!sourceClean) { showToast('No staged draft found — stage this room first.', 'error'); return; }
+
+  const roomTypeKey = getKbRoomTypeKey(room);
+  if (!roomTypeKey) { showToast('No shot library available for this room type yet.', 'error'); return; }
+
+  let assignment;
+  try {
+    assignment = getAssignment(roomTypeKey, assignmentId);
+  } catch (err) {
+    showToast(err.message, 'error');
+    return;
+  }
+
+  const quality = qualityChoice || 'mls';
+  const scaleMap = { mls: 4, marketing: 6, print: 8 };
+  const baseCreditCost = { mls: 1, marketing: 2, print: 3 }[quality] || 1;
+  const hasPreset = !!room.presetCleanBase64;
+  const creditCost = baseCreditCost + (hasPreset ? 1 : 0);
+
+  // ── CREDIT GATE — debit before generation fires, same pattern as generateFinal() ──
+  const _sbUser = (await getSupabase().auth.getUser()).data?.user;
+  if (_sbUser) {
+    const debitRes = await fetch('/.netlify/functions/debit-credit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: _sbUser.id, cost: creditCost, reason: 'hero_detail_generate' }),
+    });
+    const debitData = await debitRes.json();
+    if (!debitRes.ok) {
+      if (debitData.code === 'NO_CREDITS') { showOverageModal(debitData.balance ?? 0, creditCost); return; }
+      if (debitData.code === 'NO_SUB') { showToast('No active subscription — please subscribe to continue.', 'error'); return; }
+      showToast('Credit check failed — please try again.', 'error');
+      return;
+    }
+  }
+
+  const heroDetailPrompt = buildHeroDetailPrompt(assignment);
+
+  room.heroDetailShots = room.heroDetailShots || {};
+  room.heroDetailShots[assignmentId] = { status: 'processing', assignmentName: assignment.assignment_name };
+  renderRoomQueue();
+
+  try {
+    // Same Prompt Review step as staging/presets — Sam wants to see assembled prompts.
+    const approvedPrompt = await showPromptModal({ ...room, lastPrompt: heroDetailPrompt }, heroDetailPrompt);
+    if (approvedPrompt === null) {
+      delete room.heroDetailShots[assignmentId];
+      renderRoomQueue();
+      showToast('Hero/Detail shot cancelled.', '');
+      return;
+    }
+
+    room.heroDetailShots[assignmentId].status = 'processing';
+    renderRoomQueue();
+
+    // Reuses the EXACT same fire-and-poll pipeline as staging and presets — no new
+    // Netlify functions needed. Result comes back already at the small "draft"
+    // resolution stage-openai-background.js produces.
+    const result = await callStageAPI(sourceClean, 'image/jpeg', approvedPrompt, 'low');
+    if (!result) throw new Error('Hero/Detail rendering failed — no image returned');
+
+    // Upscale to the selected quality tier, same as generateFinal()'s upscale step.
+    const scaleFactor = scaleMap[quality] || 4;
+    const upscaleRes = await fetch('/.netlify/functions/upscale-image', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ imageBase64: result.clean, mimeType: 'image/jpeg', scaleFactor }),
+    });
+    const upscaleData = await upscaleRes.json();
+    if (!upscaleRes.ok || !upscaleData.upscaledBase64) throw new Error(upscaleData.error || 'Upscale failed');
+
+    room.heroDetailShots[assignmentId] = {
+      status: 'done',
+      assignmentId,
+      assignmentName: assignment.assignment_name,
+      cleanBase64: result.clean,
+      finalBase64: upscaleData.upscaledBase64,
+      qualityChoice: quality,
+      creditCost,
+    };
+    renderRoomQueue();
+    showToast(`✓ ${assignment.assignment_name} generated for ${room.roomName}.`, 'success');
+  } catch (err) {
+    room.heroDetailShots[assignmentId] = { status: 'error', assignmentName: assignment.assignment_name, error: err.message };
+    renderRoomQueue();
+    showToast('Hero/Detail error: ' + err.message, 'error');
   }
 }
 

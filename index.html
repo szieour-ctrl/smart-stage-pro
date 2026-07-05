@@ -3036,6 +3036,16 @@ function buildHeroDetailPrompt(assignment) {
 //   base tier {mls:1, marketing:2, print:3} + (+1 if a preset is applied to the
 //   source image). Quality tier maps to the same upscale scaleFactor generateFinal
 //   uses (mls=4x, marketing=6x, print=8x) via upscale-image.js.
+// ── Cinematic Asset Generator: shot generation — mirrors applyPreset() exactly ──
+// Deliberately writes to room.heroDetailShots[assignmentId] — a SEPARATE,
+// non-destructive slot from stagedCleanBase64/presetCleanBase64/lastPrompt, for
+// the same reason applyPreset() keeps presets separate: never corrupt the
+// staging revision chain, and let the user regenerate/discard freely.
+//
+// Credit cost mirrors generateFinal()'s exact formula:
+//   base tier {mls:1, marketing:2, print:3} + (+1 if a preset is applied to the
+//   source image). Quality tier maps to the same upscale scaleFactor generateFinal
+//   uses (mls=4x, marketing=6x, print=8x) via upscale-image.js.
 async function generateHeroDetailShot(roomId, assignmentId, qualityChoice) {
   const room = SESSION.rooms.find(r => r.id === roomId);
   if (!room) return;
@@ -3059,6 +3069,76 @@ async function generateHeroDetailShot(roomId, assignmentId, qualityChoice) {
   const baseCreditCost = { mls: 1, marketing: 2, print: 3 }[quality] || 1;
   const hasPreset = !!room.presetCleanBase64;
   const creditCost = baseCreditCost + (hasPreset ? 1 : 0);
+
+  // ── CREDIT GATE — debit before generation fires, same pattern as generateFinal() ──
+  const _sbUser = (await getSupabase().auth.getUser()).data?.user;
+  if (_sbUser) {
+    const debitRes = await fetch('/.netlify/functions/debit-credit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: _sbUser.id, cost: creditCost, reason: 'hero_detail_generate' }),
+    });
+    const debitData = await debitRes.json();
+    if (!debitRes.ok) {
+      if (debitData.code === 'NO_CREDITS') { showOverageModal(debitData.balance ?? 0, creditCost); return; }
+      if (debitData.code === 'NO_SUB') { showToast('No active subscription — please subscribe to continue.', 'error'); return; }
+      showToast('Credit check failed — please try again.', 'error');
+      return;
+    }
+  }
+
+  const heroDetailPrompt = buildHeroDetailPrompt(assignment);
+
+  room.heroDetailShots = room.heroDetailShots || {};
+  room.heroDetailShots[assignmentId] = { status: 'processing', assignmentName: assignment.assignment_name };
+  renderRoomQueue();
+
+  try {
+    // Same Prompt Review step as staging/presets — Sam wants to see assembled prompts.
+    const approvedPrompt = await showPromptModal({ ...room, lastPrompt: heroDetailPrompt }, heroDetailPrompt);
+    if (approvedPrompt === null) {
+      delete room.heroDetailShots[assignmentId];
+      renderRoomQueue();
+      showToast('Hero/Detail shot cancelled.', '');
+      return;
+    }
+
+    room.heroDetailShots[assignmentId].status = 'processing';
+    renderRoomQueue();
+
+    // Reuses the EXACT same fire-and-poll pipeline as staging and presets — no new
+    // Netlify functions needed. Result comes back already at the small "draft"
+    // resolution stage-openai-background.js produces.
+    const result = await callStageAPI(sourceClean, 'image/jpeg', approvedPrompt, 'low');
+    if (!result) throw new Error('Hero/Detail rendering failed — no image returned');
+
+    // Upscale to the selected quality tier, same as generateFinal()'s upscale step.
+    const scaleFactor = scaleMap[quality] || 4;
+    const upscaleRes = await fetch('/.netlify/functions/upscale-image', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ imageBase64: result.clean, mimeType: 'image/jpeg', scaleFactor }),
+    });
+    const upscaleData = await upscaleRes.json();
+    if (!upscaleRes.ok || !upscaleData.upscaledBase64) throw new Error(upscaleData.error || 'Upscale failed');
+
+    room.heroDetailShots[assignmentId] = {
+      status: 'done',
+      assignmentId,
+      assignmentName: assignment.assignment_name,
+      cleanBase64: result.clean,
+      finalBase64: upscaleData.upscaledBase64,
+      qualityChoice: quality,
+      creditCost,
+    };
+    renderRoomQueue();
+    showToast(`✓ ${assignment.assignment_name} generated for ${room.roomName}.`, 'success');
+  } catch (err) {
+    room.heroDetailShots[assignmentId] = { status: 'error', assignmentName: assignment.assignment_name, error: err.message };
+    renderRoomQueue();
+    showToast('Hero/Detail error: ' + err.message, 'error');
+  }
+}
 // ── Cinematic Asset Generator: room-card UI panel ────────────────────────────
 // Renders a quality-tier selector + grid of shot-assignment buttons for any
 // room where getKbRoomTypeKey() resolves (Open Plan Kitchen-Living only, in
@@ -3147,75 +3227,6 @@ function downloadHeroDetailShot(roomId, assignmentId) {
   document.body.removeChild(a);
 }
 
-  // ── CREDIT GATE — debit before generation fires, same pattern as generateFinal() ──
-  const _sbUser = (await getSupabase().auth.getUser()).data?.user;
-  if (_sbUser) {
-    const debitRes = await fetch('/.netlify/functions/debit-credit', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId: _sbUser.id, cost: creditCost, reason: 'hero_detail_generate' }),
-    });
-    const debitData = await debitRes.json();
-    if (!debitRes.ok) {
-      if (debitData.code === 'NO_CREDITS') { showOverageModal(debitData.balance ?? 0, creditCost); return; }
-      if (debitData.code === 'NO_SUB') { showToast('No active subscription — please subscribe to continue.', 'error'); return; }
-      showToast('Credit check failed — please try again.', 'error');
-      return;
-    }
-  }
-
-  const heroDetailPrompt = buildHeroDetailPrompt(assignment);
-
-  room.heroDetailShots = room.heroDetailShots || {};
-  room.heroDetailShots[assignmentId] = { status: 'processing', assignmentName: assignment.assignment_name };
-  renderRoomQueue();
-
-  try {
-    // Same Prompt Review step as staging/presets — Sam wants to see assembled prompts.
-    const approvedPrompt = await showPromptModal({ ...room, lastPrompt: heroDetailPrompt }, heroDetailPrompt);
-    if (approvedPrompt === null) {
-      delete room.heroDetailShots[assignmentId];
-      renderRoomQueue();
-      showToast('Hero/Detail shot cancelled.', '');
-      return;
-    }
-
-    room.heroDetailShots[assignmentId].status = 'processing';
-    renderRoomQueue();
-
-    // Reuses the EXACT same fire-and-poll pipeline as staging and presets — no new
-    // Netlify functions needed. Result comes back already at the small "draft"
-    // resolution stage-openai-background.js produces.
-    const result = await callStageAPI(sourceClean, 'image/jpeg', approvedPrompt, 'low');
-    if (!result) throw new Error('Hero/Detail rendering failed — no image returned');
-
-    // Upscale to the selected quality tier, same as generateFinal()'s upscale step.
-    const scaleFactor = scaleMap[quality] || 4;
-    const upscaleRes = await fetch('/.netlify/functions/upscale-image', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ imageBase64: result.clean, mimeType: 'image/jpeg', scaleFactor }),
-    });
-    const upscaleData = await upscaleRes.json();
-    if (!upscaleRes.ok || !upscaleData.upscaledBase64) throw new Error(upscaleData.error || 'Upscale failed');
-
-    room.heroDetailShots[assignmentId] = {
-      status: 'done',
-      assignmentId,
-      assignmentName: assignment.assignment_name,
-      cleanBase64: result.clean,
-      finalBase64: upscaleData.upscaledBase64,
-      qualityChoice: quality,
-      creditCost,
-    };
-    renderRoomQueue();
-    showToast(`✓ ${assignment.assignment_name} generated for ${room.roomName}.`, 'success');
-  } catch (err) {
-    room.heroDetailShots[assignmentId] = { status: 'error', assignmentName: assignment.assignment_name, error: err.message };
-    renderRoomQueue();
-    showToast('Hero/Detail error: ' + err.message, 'error');
-  }
-}
 
 async function iterateRoom(roomId) {
   const note = document.getElementById('iter-' + roomId)?.value?.trim() || '';

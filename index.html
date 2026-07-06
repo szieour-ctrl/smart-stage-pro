@@ -3001,68 +3001,168 @@ async function applyPreset(roomId, presetKey) {
 // instruction header, no re-staging language. AB-723 header is still prepended
 // server-side in stage-openai-background.js regardless — this local mention is
 // belt-and-suspenders, matching the existing preset prompt's own convention.
-const HERO_DETAIL_INSTRUCTION_HEADER =
-  'PRIMARY ROLE: Award-winning architectural magazine photographer. Reframe and re-render ' +
-  'a specific asset within this already-staged photo as a magazine-quality hero or detail shot.\n\n' +
-  'Do NOT add, remove, relocate, resize, restyle, duplicate, or reinterpret any permanent ' +
-  'architectural element, or any furniture/decor/styling object already placed in the staged ' +
-  'image. Only reframe, crop, and re-render at higher fidelity what is already visible. If the ' +
-  'requested composition would require anything not already present in the staged image, choose ' +
-  'the closest composition achievable from what is actually visible instead.\n\n' +
-  'This is a rendering/reframing pass only — this image is for MLS/marketing use per California ' +
-  'AB 723 §10140.6, and any change beyond reframing/re-rendering makes it non-compliant.\n\n';
-
-function buildHeroDetailPrompt(assignment) {
-  const lines = [
-    `Create a ${assignment.shot_type.toUpperCase()} image of the ${assignment.assignment_name} from the provided staged ${assignment.room} image.`,
-    `Focus on capturing as the subject: ${assignment.focus_priority.join(', ')}.`,
-    `Use a ${assignment.camera_height} camera height with ${assignment.lens_behavior}, composed as a ${assignment.composition}.`,
-    `Secondary elements to include in frame where visible: ${assignment.secondary_elements.join(', ')}.`,
-    `Highlight these materials/finishes as they already appear in the staged image: ${assignment.material_priority.join(', ')}.`,
-    `Lighting: ${assignment.lighting}. Depth of field: ${assignment.depth_of_field}. Negative space: ${assignment.negative_space}.`,
-    `Mood: ${assignment.mood}. Render style: ${assignment.render_style}.`,
-    'Maintain consistent style, lighting, and color palette from the staged wide shot. Keep the background minimal and complementary.'
-  ];
-  return HERO_DETAIL_INSTRUCTION_HEADER + lines.join('\n');
-}
-
-// ── Cinematic Asset Generator: shot generation — mirrors applyPreset() exactly ──
-// Deliberately writes to room.heroDetailShots[assignmentId] — a SEPARATE,
-// non-destructive slot from stagedCleanBase64/presetCleanBase64/lastPrompt, for
-// the same reason applyPreset() keeps presets separate: never corrupt the
-// staging revision chain, and let the user regenerate/discard freely.
+// ── Cinematic Asset Generator v2: Claude Vision hero-shot detection + selection ──
+// Full workflow per Sam's PDF: GPT Image 2 (staging) → Claude Vision (detect
+// hero shot candidates) → GPT Image 2 (render selected shots).
 //
-// Credit cost mirrors generateFinal()'s exact formula:
-//   base tier {mls:1, marketing:2, print:3} + (+1 if a preset is applied to the
-//   source image). Quality tier maps to the same upscale scaleFactor generateFinal
-//   uses (mls=4x, marketing=6x, print=8x) via upscale-image.js.
-// ── Cinematic Asset Generator: shot generation — mirrors applyPreset() exactly ──
-// Deliberately writes to room.heroDetailShots[assignmentId] — a SEPARATE,
-// non-destructive slot from stagedCleanBase64/presetCleanBase64/lastPrompt, for
-// the same reason applyPreset() keeps presets separate: never corrupt the
-// staging revision chain, and let the user regenerate/discard freely.
-//
-// Credit cost mirrors generateFinal()'s exact formula:
-//   base tier {mls:1, marketing:2, print:3} + (+1 if a preset is applied to the
-//   source image). Quality tier maps to the same upscale scaleFactor generateFinal
-//   uses (mls=4x, marketing=6x, print=8x) via upscale-image.js.
-async function generateHeroDetailShot(roomId, assignmentId, qualityChoice) {
+// REPLACES the manual crop-modal version (openCropModal/generateHeroDetailShot
+// from the previous round) — this is a different UX: instead of the Director
+// freehand-dragging a box, Claude Vision proposes numbered candidate crops
+// grounded in what's actually visible in the photo, the Director checks which
+// ones to generate, then each selected crop is rendered via GPT Image 2 using
+// a prompt built from Claude's own description of that specific crop (not
+// generic KB mood/material words) — this is what keeps generation anchored to
+// the actual room instead of hallucinating.
+
+// ── Entry point: call this instead of opening the old crop modal ─────────────
+async function openHeroShotMapModal(roomId) {
   const room = SESSION.rooms.find(r => r.id === roomId);
   if (!room) return;
-
   const sourceClean = room.presetCleanBase64 || room.stagedCleanBase64 || room.stagedBase64;
   if (!sourceClean) { showToast('No staged draft found — stage this room first.', 'error'); return; }
 
-  const roomTypeKey = getKbRoomTypeKey(room);
-  if (!roomTypeKey) { showToast('No shot library available for this room type yet.', 'error'); return; }
+  showToast('Analyzing staged image for hero shot opportunities…', '');
 
-  let assignment;
+  let detection;
   try {
-    assignment = getAssignment(roomTypeKey, assignmentId);
+    const res = await fetch('/.netlify/functions/detect-hero-shots', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ imageBase64: sourceClean, mimeType: 'image/jpeg' }),
+    });
+    detection = await res.json();
+    if (!res.ok || !Array.isArray(detection.suggested_hero_shots)) {
+      throw new Error(detection.error || 'Detection failed');
+    }
   } catch (err) {
-    showToast(err.message, 'error');
+    showToast('Hero shot detection error: ' + err.message, 'error');
     return;
   }
+
+  if (detection.suggested_hero_shots.length === 0) {
+    showToast('No well-composed hero shots detected in this photo.', 'error');
+    return;
+  }
+
+  renderHeroShotMapUI(roomId, sourceClean, detection);
+}
+
+const _CAG_BOX_COLORS = ['#e94f37','#2a6bab','#3aa76d','#e0a800','#8a4fd1','#d15fa8','#4fb8d1','#c97b3a','#5f7fd1','#a3a83a'];
+
+function renderHeroShotMapUI(roomId, sourceClean, detection) {
+  const room = SESSION.rooms.find(r => r.id === roomId);
+  const shots = detection.suggested_hero_shots;
+
+  const overlay = document.createElement('div');
+  overlay.id = 'cag-heromap-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:9999;display:flex;align-items:center;justify-content:center;';
+
+  const panel = document.createElement('div');
+  panel.style.cssText = 'background:#fff;border-radius:6px;padding:16px;max-width:96vw;max-height:94vh;overflow:auto;display:flex;gap:16px;flex-wrap:wrap;';
+
+  // ── Left: image with numbered box overlay ──
+  const left = document.createElement('div');
+  left.style.cssText = 'position:relative;display:inline-block;line-height:0;flex:1 1 500px;max-width:640px;';
+  const img = document.createElement('img');
+  img.src = 'data:image/jpeg;base64,' + sourceClean;
+  img.style.cssText = 'width:100%;display:block;border-radius:4px;';
+  left.appendChild(img);
+
+  const boxLayer = document.createElement('div');
+  boxLayer.style.cssText = 'position:absolute;inset:0;pointer-events:none;';
+  left.appendChild(boxLayer);
+
+  function drawBoxes() {
+    boxLayer.innerHTML = '';
+    const w = img.clientWidth, h = img.clientHeight;
+    shots.forEach((s, i) => {
+      const color = _CAG_BOX_COLORS[i % _CAG_BOX_COLORS.length];
+      const b = document.createElement('div');
+      b.style.cssText = `position:absolute;left:${s.bbox.x*w}px;top:${s.bbox.y*h}px;width:${s.bbox.w*w}px;height:${s.bbox.h*h}px;border:2px solid ${color};box-sizing:border-box;`;
+      const label = document.createElement('div');
+      label.textContent = s.id;
+      label.style.cssText = `position:absolute;top:-2px;left:-2px;background:${color};color:#fff;font-size:0.7rem;font-weight:700;padding:2px 6px;border-radius:2px;`;
+      b.appendChild(label);
+      boxLayer.appendChild(b);
+    });
+  }
+  if (img.complete) drawBoxes(); else img.onload = drawBoxes;
+  window.addEventListener('resize', drawBoxes);
+
+  panel.appendChild(left);
+
+  // ── Right: checklist ──
+  const right = document.createElement('div');
+  right.style.cssText = 'flex:1 1 280px;max-width:340px;display:flex;flex-direction:column;gap:10px;';
+
+  const title = document.createElement('div');
+  title.innerHTML = `<div style="font-size:1rem;font-weight:600;">Hero Shot Selector</div>
+    <div style="font-size:0.75rem;color:var(--muted);margin-top:2px;">${detection.room_type || ''} — recommended shots preselected.</div>`;
+  right.appendChild(title);
+
+  const qWrap = document.createElement('div');
+  qWrap.style.cssText = 'display:flex;gap:12px;font-size:0.75rem;';
+  qWrap.innerHTML = `<label><input type="radio" name="cag-heromap-quality" value="mls" checked> MLS (1cr)</label>
+    <label><input type="radio" name="cag-heromap-quality" value="marketing"> Marketing (2cr)</label>
+    <label><input type="radio" name="cag-heromap-quality" value="print"> Print (3cr)</label>`;
+  right.appendChild(qWrap);
+
+  const list = document.createElement('div');
+  list.style.cssText = 'display:flex;flex-direction:column;gap:6px;max-height:50vh;overflow:auto;';
+  shots.forEach((s, i) => {
+    const color = _CAG_BOX_COLORS[i % _CAG_BOX_COLORS.length];
+    const row = document.createElement('label');
+    row.style.cssText = 'display:flex;align-items:flex-start;gap:8px;padding:8px;border:1px solid var(--border);border-radius:4px;cursor:pointer;';
+    row.innerHTML = `<input type="checkbox" data-shot-id="${s.id}" ${s.confidence === 'high' ? 'checked' : ''} style="margin-top:2px;">
+      <span style="width:10px;height:10px;border-radius:50%;background:${color};display:inline-block;margin-top:4px;flex-shrink:0;"></span>
+      <span>
+        <div style="font-weight:600;font-size:0.85rem;">${s.id}. ${s.name} <span style="font-weight:400;font-size:0.7rem;color:var(--muted);">(${s.confidence})</span></div>
+        <div style="font-size:0.72rem;color:var(--muted);">${s.reason}</div>
+      </span>`;
+    list.appendChild(row);
+  });
+  right.appendChild(list);
+
+  const footer = document.createElement('div');
+  footer.style.cssText = 'display:flex;justify-content:space-between;gap:8px;margin-top:auto;';
+  const cancelBtn = document.createElement('button');
+  cancelBtn.className = 'btn btn-ghost btn-sm';
+  cancelBtn.textContent = 'Cancel';
+  const genBtn = document.createElement('button');
+  genBtn.className = 'btn btn-primary btn-sm';
+  function updateGenLabel() {
+    const n = list.querySelectorAll('input[type=checkbox]:checked').length;
+    genBtn.textContent = `Generate ${n} Hero Shot${n === 1 ? '' : 's'}`;
+    genBtn.disabled = n === 0;
+  }
+  list.addEventListener('change', updateGenLabel);
+  updateGenLabel();
+  footer.appendChild(cancelBtn);
+  footer.appendChild(genBtn);
+  right.appendChild(footer);
+
+  panel.appendChild(right);
+  overlay.appendChild(panel);
+  document.body.appendChild(overlay);
+
+  function closeModal() { document.body.removeChild(overlay); }
+  cancelBtn.onclick = closeModal;
+  genBtn.onclick = async () => {
+    const quality = document.querySelector('input[name="cag-heromap-quality"]:checked')?.value || 'mls';
+    const selectedIds = Array.from(list.querySelectorAll('input[type=checkbox]:checked')).map(el => parseInt(el.dataset.shotId));
+    const selectedShots = shots.filter(s => selectedIds.includes(s.id));
+    closeModal();
+    for (const shot of selectedShots) {
+      await generateHeroShotFromDetection(roomId, sourceClean, shot, quality);
+    }
+  };
+}
+
+// ── Call 3 — crop to the detected bbox, then render via GPT Image 2 using a
+// prompt grounded in Claude's own "reason" description of that specific crop.
+async function generateHeroShotFromDetection(roomId, sourceClean, shot, qualityChoice) {
+  const room = SESSION.rooms.find(r => r.id === roomId);
+  if (!room) return;
 
   const quality = qualityChoice || 'mls';
   const scaleMap = { mls: 4, marketing: 6, print: 8 };
@@ -3070,7 +3170,6 @@ async function generateHeroDetailShot(roomId, assignmentId, qualityChoice) {
   const hasPreset = !!room.presetCleanBase64;
   const creditCost = baseCreditCost + (hasPreset ? 1 : 0);
 
-  // ── CREDIT GATE — debit before generation fires, same pattern as generateFinal() ──
   const _sbUser = (await getSupabase().auth.getUser()).data?.user;
   if (_sbUser) {
     const debitRes = await fetch('/.netlify/functions/debit-credit', {
@@ -3087,64 +3186,73 @@ async function generateHeroDetailShot(roomId, assignmentId, qualityChoice) {
     }
   }
 
-  const heroDetailPrompt = buildHeroDetailPrompt(assignment);
-
   room.heroDetailShots = room.heroDetailShots || {};
-  room.heroDetailShots[assignmentId] = { status: 'processing', assignmentName: assignment.assignment_name };
+  room.heroDetailShots[shot.id] = { status: 'processing', assignmentName: shot.name };
   renderRoomQueue();
 
   try {
-    // Same Prompt Review step as staging/presets — Sam wants to see assembled prompts.
-    const approvedPrompt = await showPromptModal({ ...room, lastPrompt: heroDetailPrompt }, heroDetailPrompt);
-    if (approvedPrompt === null) {
-      delete room.heroDetailShots[assignmentId];
-      renderRoomQueue();
-      showToast('Hero/Detail shot cancelled.', '');
-      return;
-    }
+    // Deterministic crop to the detected bbox first — narrows the model's canvas
+    // to just this subject, same technique as the earlier crop tool, but here
+    // it's a pre-processing step before generation, not the final output.
+    const cropRes = await fetch('/.netlify/functions/crop-and-upscale-image', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        imageBase64: sourceClean,
+        mimeType: 'image/jpeg',
+        crop: { x: shot.bbox.x, y: shot.bbox.y, width: shot.bbox.w, height: shot.bbox.h },
+        scaleFactor: 1, // no upscale yet — GPT Image 2 will render at its own output size
+      }),
+    });
+    const cropData = await cropRes.json();
+    if (!cropRes.ok || !cropData.croppedUpscaledBase64) throw new Error(cropData.error || 'Crop failed');
 
-    room.heroDetailShots[assignmentId].status = 'processing';
-    renderRoomQueue();
+    // Prompt grounded in Claude's own description of THIS crop — not generic
+    // KB style words. This is what's meant to prevent the earlier hallucination.
+    const groundedPrompt =
+      `This is a cropped detail from an already-staged real estate photo. The following is ` +
+      `already visible and must be preserved EXACTLY as shown, with no new materials, fixtures, ` +
+      `furniture, or decor invented: ${shot.reason}\n\n` +
+      `Enhance this into a polished, magazine-quality real estate marketing image — improve ` +
+      `lighting, sharpness, and rendering quality only. Do not add, remove, relocate, resize, or ` +
+      `restyle anything visible. Do not change materials, colors, or finishes from what is shown.`;
 
-    // Reuses the EXACT same fire-and-poll pipeline as staging and presets — no new
-    // Netlify functions needed. Result comes back already at the small "draft"
-    // resolution stage-openai-background.js produces.
-    const result = await callStageAPI(sourceClean, 'image/jpeg', approvedPrompt, 'low');
-    if (!result) throw new Error('Hero/Detail rendering failed — no image returned');
+    const result = await callStageAPI(cropData.croppedUpscaledBase64, 'image/jpeg', groundedPrompt, 'low');
+    if (!result) throw new Error('Hero shot rendering failed — no image returned');
 
-    // Upscale to the selected quality tier, same as generateFinal()'s upscale step.
+    // Final upscale to the selected quality tier.
     const scaleFactor = scaleMap[quality] || 4;
-    const upscaleRes = await fetch('/.netlify/functions/upscale-image', {
+    const upRes = await fetch('/.netlify/functions/upscale-image', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ imageBase64: result.clean, mimeType: 'image/jpeg', scaleFactor }),
     });
-    const upscaleData = await upscaleRes.json();
-    if (!upscaleRes.ok || !upscaleData.upscaledBase64) throw new Error(upscaleData.error || 'Upscale failed');
+    const upData = await upRes.json();
+    if (!upRes.ok || !upData.upscaledBase64) throw new Error(upData.error || 'Upscale failed');
 
-    room.heroDetailShots[assignmentId] = {
+    room.heroDetailShots[shot.id] = {
       status: 'done',
-      assignmentId,
-      assignmentName: assignment.assignment_name,
-      cleanBase64: result.clean,
-      finalBase64: upscaleData.upscaledBase64,
+      assignmentId: shot.id,
+      assignmentName: shot.name,
+      finalBase64: upData.upscaledBase64,
       qualityChoice: quality,
       creditCost,
     };
     renderRoomQueue();
-    showToast(`✓ ${assignment.assignment_name} generated for ${room.roomName}.`, 'success');
+    showToast(`✓ ${shot.name} generated for ${room.roomName}.`, 'success');
   } catch (err) {
-    room.heroDetailShots[assignmentId] = { status: 'error', assignmentName: assignment.assignment_name, error: err.message };
+    room.heroDetailShots[shot.id] = { status: 'error', assignmentName: shot.name, error: err.message };
     renderRoomQueue();
-    showToast('Hero/Detail error: ' + err.message, 'error');
+    showToast(`${shot.name} error: ` + err.message, 'error');
   }
 }
-// ── Cinematic Asset Generator: room-card UI panel ────────────────────────────
-// Renders a quality-tier selector + grid of shot-assignment buttons for any
-// room where getKbRoomTypeKey() resolves (Open Plan Kitchen-Living only, in
-// this first draft). Mirrors the visual language already used for presets/
-// final panels (btn/btn-outline/btn-sm, result-img-wrap, spinner, tier-label)
-// so it doesn't need any new CSS.
+
+
+// ── Cinematic Asset Generator: room-card UI panel (v2 — Claude Vision detection) ──
+// Replaces the static 12-button KB grid with a single entry point: clicking
+// "Create Hero Shots" runs Claude Vision detection on THIS specific staged
+// photo (openHeroShotMapModal), which returns only the shots that are actually
+// well-composed in this image — not a fixed list that may not apply.
 //
 // WIRING — two edits to index.html:
 //   1. Right after this line (search for it):
@@ -3159,58 +3267,36 @@ async function generateHeroDetailShot(roomId, assignmentId, qualityChoice) {
 function renderCinematicAssetPanel(roomId) {
   const room = SESSION.rooms.find(r => r.id === roomId);
   if (!room) return '';
+  if (!room.isOpenPlan) return ''; // v1 scope: open-plan rooms only, per Sam's board
 
-  const roomTypeKey = getKbRoomTypeKey(room);
-  if (!roomTypeKey) return ''; // No shot library for this room type yet — panel hidden, not broken.
-
-  const assignments = listAssignments(roomTypeKey);
   const shots = room.heroDetailShots || {};
-  const qSelName = `cag-qsel-${roomId}`;
+  const doneShots = Object.values(shots).filter(s => s.status === 'done' || s.status === 'processing' || s.status === 'error');
 
-  const tiles = assignments.map(a => {
-    const shot = shots[a.assignment_id];
-
-    if (shot?.status === 'processing') {
+  const tiles = doneShots.map(shot => {
+    if (shot.status === 'processing') {
       return `<div class="result-img-wrap" style="display:flex;flex-direction:column;align-items:center;justify-content:center;background:var(--cream);min-height:110px;border:1px solid var(--border);border-radius:3px;gap:6px;">
         <span class="spinner"></span>
-        <span style="font-size:0.65rem;color:var(--muted);">${a.assignment_name}</span>
+        <span style="font-size:0.65rem;color:var(--muted);">${shot.assignmentName}</span>
       </div>`;
     }
-
-    if (shot?.status === 'done' && shot.finalBase64) {
+    if (shot.status === 'done' && shot.finalBase64) {
       return `<div class="result-img-wrap">
-        <img src="data:image/jpeg;base64,${shot.finalBase64}" onclick="downloadHeroDetailShot('${roomId}','${a.assignment_id}')" title="Click to download" />
-        <div class="result-img-badge">${a.assignment_name}</div>
+        <img src="data:image/jpeg;base64,${shot.finalBase64}" onclick="downloadHeroDetailShot('${roomId}','${shot.assignmentId}')" title="Click to download" />
+        <div class="result-img-badge">${shot.assignmentName}</div>
       </div>`;
     }
-
-    if (shot?.status === 'error') {
-      return `<div class="result-img-wrap" style="display:flex;flex-direction:column;align-items:center;justify-content:center;background:#fff8e7;min-height:110px;border:1px solid #f0d080;border-radius:3px;gap:4px;padding:8px;text-align:center;">
-        <span style="font-size:0.65rem;color:#7a6000;">${a.assignment_name} failed</span>
-        <button class="btn btn-outline btn-sm" onclick="generateHeroDetailShot('${roomId}','${a.assignment_id}', document.querySelector('input[name=\\'${qSelName}\\']:checked')?.value)">Retry</button>
-      </div>`;
-    }
-
-    // Not yet generated
-    return `<button class="btn btn-outline btn-sm" style="width:100%;height:100%;min-height:60px;" onclick="generateHeroDetailShot('${roomId}','${a.assignment_id}', document.querySelector('input[name=\\'${qSelName}\\']:checked')?.value)">
-      ${a.assignment_name}<br><span style="font-size:0.6rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;">${a.shot_type}</span>
-    </button>`;
+    return `<div class="result-img-wrap" style="display:flex;flex-direction:column;align-items:center;justify-content:center;background:#fff8e7;min-height:110px;border:1px solid #f0d080;border-radius:3px;gap:4px;padding:8px;text-align:center;">
+      <span style="font-size:0.65rem;color:#7a6000;">${shot.assignmentName} failed</span>
+    </div>`;
   }).join('');
 
   return `<div class="cinematic-asset-panel" style="border-top:1px solid var(--border);padding:12px 16px;">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
       <span class="tier-label tier-draft">Cinematic Asset Generator</span>
-      <span style="font-size:0.72rem;color:var(--muted);">Generate magazine-quality hero/detail shots from this staged room.</span>
+      <span style="font-size:0.72rem;color:var(--muted);">Claude Vision finds the best hero/detail shots in this photo — you pick which to render.</span>
     </div>
-    <div style="display:flex;gap:14px;align-items:center;margin-bottom:10px;font-size:0.75rem;">
-      <label><input type="radio" name="${qSelName}" value="mls" checked> MLS (1 credit)</label>
-      <label><input type="radio" name="${qSelName}" value="marketing"> Marketing (2 credits)</label>
-      <label><input type="radio" name="${qSelName}" value="print"> Print (3 credits)</label>
-      ${room.presetCleanBase64 ? '<span style="color:var(--muted);">+1 credit — preset applied</span>' : ''}
-    </div>
-    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px;">
-      ${tiles}
-    </div>
+    <button class="btn btn-outline btn-sm" onclick="openHeroShotMapModal('${roomId}')" style="margin-bottom:10px;">Create Hero Shots</button>
+    ${tiles ? `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px;">${tiles}</div>` : ''}
   </div>`;
 }
 
@@ -3220,12 +3306,14 @@ function downloadHeroDetailShot(roomId, assignmentId) {
   if (!shot?.finalBase64) return;
   const a = document.createElement('a');
   a.href = 'data:image/jpeg;base64,' + shot.finalBase64;
-  const safeName = (shot.assignmentName || assignmentId).replace(/[^a-z0-9]/gi, '_');
+  const safeName = (shot.assignmentName || assignmentId).toString().replace(/[^a-z0-9]/gi, '_');
   a.download = `CinematicAsset_${safeName}_${bName(getOrigName(roomId))}.jpg`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
 }
+
+
 
 
 async function iterateRoom(roomId) {

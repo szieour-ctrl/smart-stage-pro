@@ -186,6 +186,16 @@ exports.handler = async (event) => {
       throw new Error("Response missing hero_shots array");
     }
 
+    // TEMP DEBUG (July 2026 — rule-mismatch investigation, remove once resolved):
+    // logs Claude's raw pre-enrichment picks so we can see exactly which rule_id
+    // it matched each shot to, alongside its own reason text, before the fixed
+    // catalog's composition/camera_technique gets bolted on. This is what lets us
+    // confirm whether e.g. an island sink is getting force-fit into R06_SINK_WINDOW_HERO
+    // (a wall-sink rule) instead of flagging a genuine gap in the 12-rule catalog.
+    console.log("detect-hero-shots: RAW pre-enrichment picks:", JSON.stringify(
+      parsed.hero_shots.map(s => ({ id: s.id, rule_id: s.rule_id, name: s.name, reason: s.reason, confidence: s.confidence }))
+    ));
+
     parsed.hero_shots = enrichWithRuleData(parsed.hero_shots);
 
     console.log(`detect-hero-shots: ${parsed.hero_shots.length} shots suggested for ${parsed.room_type}`);

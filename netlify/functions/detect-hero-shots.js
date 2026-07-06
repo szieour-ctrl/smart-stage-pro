@@ -64,11 +64,17 @@ const HERO_SHOT_RULES = [
 ];
 
 function callClaudeVision(imageBase64, mimeType, apiKey) {
-  const rulesJson = JSON.stringify(HERO_SHOT_RULES);
+  // Only send rule_id + use_when to the model — not full camera_technique/disallow
+  // text — so Claude's job is just "pick the right rule," not "transcribe a large
+  // object verbatim." This is what was causing truncated/invalid JSON: asking for
+  // the full camera_technique + disallow copied per shot blew past max_tokens
+  // once more than a couple of shots were suggested.
+  const ruleSummaries = HERO_SHOT_RULES.map(r => ({ rule_id: r.rule_id, name: r.name, use_when: r.use_when }));
+  const rulesJson = JSON.stringify(ruleSummaries);
 
   const body = JSON.stringify({
     model: "claude-haiku-4-5-20251001",
-    max_tokens: 3000,
+    max_tokens: 2048,
     messages: [{
       role: "user",
       content: [
@@ -76,25 +82,22 @@ function callClaudeVision(imageBase64, mimeType, apiKey) {
         { type: "text", text:
           "You are analyzing an already-staged real estate interior photo to suggest premium hero/detail shots for a real estate marketing tool, using a FIXED catalog of photographer-direction rules. Look ONLY at what is actually visible in this specific photo.\n\n" +
           "IMPORTANT FRAMING NOTE: do not cluster your suggested crops toward the ceiling or upper portion of the frame — there is rarely anything worth featuring on a ceiling. Bias your suggested bboxes toward the foreground and floor-level two-thirds of the image, where furniture, fixtures, cabinetry, and staged assets actually are. A bbox with y-origin near 0 covering mostly ceiling/upper-wall is almost always wrong for a hero/detail shot.\n\n" +
-          "RULE CATALOG (select the single best-fitting rule_id for each suggested shot; do not invent new rules):\n" + rulesJson + "\n\n" +
-          "Return ONLY valid JSON, no other text, no markdown fences, in exactly this shape:\n" +
+          "RULE CATALOG (select the single best-fitting rule_id for each suggested shot by name/use_when; do not invent new rule_ids):\n" + rulesJson + "\n\n" +
+          "Return ONLY valid JSON, no other text, no markdown fences, no explanation. Keep each field SHORT — reason must be one short sentence, not a paragraph. Exact shape:\n" +
           "{\n" +
           '  "room_type": "<short description of the room type as shown>",\n' +
           '  "hero_shots": [\n' +
           "    {\n" +
           '      "id": <integer, 1-indexed>,\n' +
-          '      "rule_id": "<one of the rule_id values from the catalog above>",\n' +
-          '      "name": "<short user-facing shot name, e.g. \'Island + Faucet Hero\'>",\n' +
+          '      "rule_id": "<one rule_id from the catalog above>",\n' +
+          '      "name": "<short user-facing shot name>",\n' +
           '      "confidence": "high" | "medium" | "low",\n' +
           '      "bbox": { "x": <0-1>, "y": <0-1>, "w": <0-1>, "h": <0-1> },\n' +
-          '      "camera_technique": <copy the camera_technique object from the matched rule, unmodified>,\n' +
-          '      "render_constraints": ["preserve architecture", "do not invent new fixtures", "<any other specific preserve-instructions relevant to what is visible in this crop>"],\n' +
-          '      "disallow": <copy the disallow array from the matched rule, unmodified>,\n' +
-          '      "reason": "<one sentence describing exactly what is visible and readable in this crop \u2014 specific materials/colors/objects, not generic style language>"\n' +
+          '      "reason": "<one short sentence: what specific materials/colors/objects are visible in this crop>"\n' +
           "    }\n" +
           "  ]\n" +
           "}\n\n" +
-          "bbox values are fractions of the image width/height (0-1), x/y is the top-left corner. Only suggest a shot where its rule's use_when condition is clearly satisfied by what is actually visible — do not suggest a rule whose subject is poorly framed, cut off, or absent. Suggest between 3 and 10 hero shots depending on how many distinct, well-composed, rule-eligible assets this specific photo actually contains."
+          "bbox values are fractions of the image width/height (0-1), x/y is the top-left corner. Only suggest a shot where its rule's use_when condition is clearly satisfied by what is actually visible. Suggest between 3 and 8 hero shots — fewer, well-chosen shots are better than many marginal ones."
         }
       ]
     }]
@@ -131,6 +134,25 @@ function callClaudeVision(imageBase64, mimeType, apiKey) {
   });
 }
 
+// Attaches the full camera_technique/disallow from the matched rule — done
+// programmatically, not by asking Claude to transcribe it, so it's always
+// exactly correct and never truncated.
+function enrichWithRuleData(heroShots) {
+  return heroShots.map(shot => {
+    const rule = HERO_SHOT_RULES.find(r => r.rule_id === shot.rule_id);
+    if (!rule) {
+      console.warn(`detect-hero-shots: unknown rule_id "${shot.rule_id}" for shot ${shot.id}, dropping camera_technique`);
+      return { ...shot, camera_technique: {}, render_constraints: ["preserve architecture", "do not invent new fixtures"], disallow: [] };
+    }
+    return {
+      ...shot,
+      camera_technique: rule.camera_technique,
+      render_constraints: ["preserve architecture", "do not invent new fixtures", "do not move visible furniture, fixtures, or built-ins"],
+      disallow: rule.disallow,
+    };
+  });
+}
+
 exports.handler = async (event) => {
   if (event.httpMethod !== "POST") return { statusCode: 405, body: "Method Not Allowed" };
   const headers = {
@@ -163,6 +185,8 @@ exports.handler = async (event) => {
     if (!Array.isArray(parsed.hero_shots)) {
       throw new Error("Response missing hero_shots array");
     }
+
+    parsed.hero_shots = enrichWithRuleData(parsed.hero_shots);
 
     console.log(`detect-hero-shots: ${parsed.hero_shots.length} shots suggested for ${parsed.room_type}`);
     return { statusCode: 200, headers, body: JSON.stringify(parsed) };

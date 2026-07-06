@@ -3200,12 +3200,24 @@ async function generateDraftCollage(roomId, sourceClean, selectedShots) {
       if (!cropRes.ok || !cropData.croppedUpscaledBase64) throw new Error(cropData.error || 'Crop failed');
 
       const ct = shot.camera_technique || {};
+      // PRECEDENCE FIX (July 2026 — rule-mismatch investigation): the rule catalog's
+      // composition/camera_technique text is a FIXED, generic description tied to the
+      // matched rule_id — it is not necessarily a match for what's actually in this
+      // specific crop (e.g. a rule written for a wall-mounted sink can still get
+      // attached to an island-sink shot). shot.reason is Claude's own grounded
+      // observation of THIS crop and must win on content; camera_technique fields are
+      // photographic DIRECTION ONLY (angle/lens/lighting/DOF) and must never be read
+      // as a description of what's physically present or where fixtures are located.
       const groundedPrompt =
-        `This is a cropped detail from an already-staged real estate photo. The following is ` +
-        `already visible and must be preserved EXACTLY as shown, with no new materials, fixtures, ` +
-        `furniture, or decor invented: ${shot.reason}\n\n` +
-        `Render this as a "${shot.name}" using this photographic direction: camera angle — ${ct.camera_angle || 'as shown'}; ` +
-        `lens feel — ${ct.lens_feel || 'natural'}; composition — ${ct.composition || 'as framed'}; ` +
+        `This is a cropped detail from an already-staged real estate photo. Render ONLY what is ` +
+        `actually visible in this crop — do not add, move, or relocate any fixture, material, ` +
+        `furniture, or decor. The ground-truth description of what's actually in this crop is: ` +
+        `${shot.reason}\n\n` +
+        `Apply this photographic direction for camera angle, lens, lighting, and depth of field ONLY — ` +
+        `these describe HOW to shoot it, not WHAT is in it. If any wording below conflicts with the ` +
+        `ground-truth description above (e.g. implies a different fixture location or layout), the ` +
+        `ground-truth description above always wins: camera angle — ${ct.camera_angle || 'as shown'}; ` +
+        `lens feel — ${ct.lens_feel || 'natural'}; general framing style — ${ct.composition || 'as framed'}; ` +
         `depth of field — ${ct.depth_of_field || 'natural'}; lighting — ${ct.lighting || 'as shown'}.\n\n` +
         `Constraints: ${(shot.render_constraints || []).join('; ')}.\n` +
         `Do not: ${(shot.disallow || []).join('; ')}.`;

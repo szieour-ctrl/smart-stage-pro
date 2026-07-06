@@ -1,46 +1,100 @@
 // detect-hero-shots.js — Netlify Function
-// Call 2 of the Cinematic Asset Generator workflow: GPT Image 2 → Claude Vision → GPT Image 2.
-// Reads the APPROVED staged image and returns structured hero-shot suggestions
-// (id, name, confidence, bbox as 0-1 fractions, reason). Netlify does no vision
-// work itself — this function is the only place that calls Claude.
+// Call 2 of the Cinematic Asset Generator workflow. Reads the APPROVED staged
+// image and returns structured hero-shot suggestions, each grounded in one of
+// the 12 fixed Photographer-Direction rules (Smart Stage PRO Hero Shot
+// Photographer-Direction Rules v1) rather than freeform camera description.
+//
+// v2 fixes (per Sam's 1st-iteration review):
+// - Vision focus was clustering bboxes toward the ceiling/upper frame, where
+//   there's little to extract. Explicit instruction added: bias toward the
+//   foreground/floor-level two-thirds of the frame, where furniture, fixtures,
+//   and staged assets actually are.
+// - Added the 12-rule catalog so each suggested shot carries a specific
+//   camera_technique (angle, lens_feel, composition, depth_of_field, lighting,
+//   aspect ratio), render_direction, and disallow list — not generic style
+//   words, and not just a bbox.
 //
 // FLAG FOR SAM: env var name (ANTHROPIC_API_KEY) and model string
-// (claude-haiku-4-5-20251001) are inferred, not confirmed against your existing
-// Haiku spatial-read function. If your other Haiku calls use a different env
-// var or model string, tell me and I'll match it exactly.
+// (claude-haiku-4-5-20251001) are still inferred, not confirmed against your
+// existing Haiku spatial-read function.
 
 const https = require("https");
 
+// Condensed from Smart Stage PRO™ Hero Shot Photographer-Direction Rules v1.
+// Full purpose/eligibility prose trimmed to what Claude needs to SELECT a rule
+// and populate camera_technique — this is reference data for the model, not
+// user-facing text.
+const HERO_SHOT_RULES = [
+  { rule_id: "R01_ROOM_MASTER_HERO", name: "Room Master Hero", use_when: "full room or dominant zone clearly readable, layout/scale understandable",
+    camera_technique: { camera_angle: "eye-level architectural interior perspective", lens_feel: "22-28mm architectural interior lens feel", composition: "wide balanced composition, straight verticals, full-room context", depth_of_field: "deep focus", lighting: "natural daylight balanced with interior lighting", recommended_aspect_ratios: ["16:9","4:3"] },
+    disallow: ["do not over-tighten into a detail crop", "do not move architectural features", "do not invent additional room width, height, windows, doors, furniture, fixtures, or built-ins"] },
+  { rule_id: "R02_OPEN_PLAN_LIFESTYLE_HERO", name: "Open Plan Lifestyle Hero", use_when: "two or more connected zones visible (kitchen+dining, kitchen+living, living+dining, etc)",
+    camera_technique: { camera_angle: "3/4 lifestyle perspective across connected zones", lens_feel: "24-35mm interior lifestyle lens feel", composition: "foreground/midground/background layering showing zone relationship", depth_of_field: "medium to deep focus", lighting: "natural daylight, warm interior balance", recommended_aspect_ratios: ["16:9","4:3"] },
+    disallow: ["do not invent missing zones", "do not crowd furniture into circulation paths", "do not block sliders, doors, halls, fireplaces, islands, or major openings"] },
+  { rule_id: "R03_FOREGROUND_DEPTH_HERO", name: "Foreground Depth Hero", use_when: "strong visible leading lines: runner, island edge, cabinet run, sofa line, hallway edge, flooring direction",
+    camera_technique: { camera_angle: "low-to-eye-level perspective aligned with visible leading lines", lens_feel: "24-28mm interior perspective lens feel", composition: "strong foreground anchor with midground/background rhythm", depth_of_field: "medium to deep focus", lighting: "balanced natural light with crisp depth cues", recommended_aspect_ratios: ["16:9","4:3"] },
+    disallow: ["do not create an ultra-wide distorted look", "do not stretch the room", "do not add new space, openings, rugs, furniture, or architectural depth"] },
+  { rule_id: "R04_ISLAND_HERO", name: "Island Hero", use_when: "kitchen island visible and readable — countertop, cabinet face, sink, faucet, seating face, or styling",
+    camera_technique: { camera_angle: "counter-height or slightly low 3/4 angle along the island edge", lens_feel: "28-35mm editorial interior lens feel", composition: "island as foreground subject, kitchen context behind", depth_of_field: "moderate", lighting: "natural daylight with controlled countertop highlights", recommended_aspect_ratios: ["4:3","16:9","4:5"] },
+    disallow: ["do not change island size, shape, color, material, sink position, faucet position, or cabinet layout", "do not add stools unless already present in the approved staged image", "do not move the island or alter its seating face"] },
+  { rule_id: "R05_RANGE_HOOD_HERO", name: "Range / Hood Hero", use_when: "range, cooktop, hood, or cooking wall clearly visible",
+    camera_technique: { camera_angle: "clean 3/4 or centered feature perspective facing the cooking wall", lens_feel: "35-50mm interior feature lens feel", composition: "range and hood as subject, framed by cabinetry/backsplash/counters", depth_of_field: "moderate", lighting: "natural daylight with subtle under-hood/under-cabinet glow", recommended_aspect_ratios: ["4:3","16:9","1:1"] },
+    disallow: ["do not change appliance type, burner count, finish, hood style, backsplash, or cabinet layout", "do not add pot fillers, new lighting, new tile, or new appliances unless visible"] },
+  { rule_id: "R06_SINK_WINDOW_HERO", name: "Sink / Window Hero", use_when: "sink wall and window clearly readable together",
+    camera_technique: { camera_angle: "balanced eye-level composition centered or slightly angled toward the sink wall", lens_feel: "35mm interior feature lens feel", composition: "sink and window framed by cabinetry and counter surfaces", depth_of_field: "medium to deep focus", lighting: "bright natural daylight from the window", recommended_aspect_ratios: ["4:3","16:9","1:1"] },
+    disallow: ["do not change window size/placement/exterior view", "do not change sink location, faucet type, or cabinet layout", "do not add scenery outside the window"] },
+  { rule_id: "R07_APPLIANCE_DETAIL_HERO", name: "Appliance Detail Hero", use_when: "premium appliance visible: double ovens, built-in fridge, wine fridge, coffee station, laundry machines",
+    camera_technique: { camera_angle: "tight 3/4 or front-biased feature composition", lens_feel: "50-70mm detail lens feel", composition: "appliance as subject with surrounding cabinetry for context", depth_of_field: "moderate shallow", lighting: "controlled natural light with realistic reflections", recommended_aspect_ratios: ["4:5","1:1","4:3"] },
+    disallow: ["do not invent appliances", "do not change appliance finish, display panel, handle style, cabinet integration, or location", "do not add readable brand logos or fake display text"] },
+  { rule_id: "R08_FURNITURE_GROUPING_HERO", name: "Furniture Grouping Hero", use_when: "staged seating group, bedroom group, office setup, reading nook, or flex-space grouping visible",
+    camera_technique: { camera_angle: "eye-level or slightly low lifestyle composition facing the furniture grouping", lens_feel: "28-40mm interior lifestyle lens feel", composition: "furniture grouping as subject, room boundaries/anchors preserved", depth_of_field: "medium", lighting: "natural daylight balanced with room lighting", recommended_aspect_ratios: ["4:3","16:9","4:5"] },
+    disallow: ["do not move the furniture grouping outside its approved zone", "do not block fireplace, doors, windows, sliders, hallways, built-ins, or circulation", "do not add major furniture pieces not present in the approved staged image"] },
+  { rule_id: "R09_DINING_TABLE_HERO", name: "Dining Table Hero", use_when: "dining table and chairs clearly visible, table itself is the subject (not just open-plan relationship)",
+    camera_technique: { camera_angle: "warm 3/4 lifestyle perspective at seated or standing height", lens_feel: "35-50mm lifestyle lens feel", composition: "dining table as subject with chairs, centerpiece, and adjacent zone context", depth_of_field: "moderate", lighting: "soft natural daylight with warm lifestyle balance", recommended_aspect_ratios: ["4:3","16:9","4:5"] },
+    disallow: ["do not move the dining table under a different fixture", "do not invent chandeliers, pendants, sconces, additional chairs, or table settings", "do not block sliders, doors, walkways, or kitchen circulation"] },
+  { rule_id: "R10_MATERIAL_FINISH_DETAIL", name: "Material / Finish Detail", use_when: "distinctive visible material/finish/hardware/millwork/flooring/backsplash/countertop edge/built-in worth a close-up",
+    camera_technique: { camera_angle: "tight low or side-angle editorial detail composition", lens_feel: "50-70mm detail lens feel", composition: "surface, edge, grain, hardware, or finish as main subject", depth_of_field: "shallow", lighting: "soft directional light highlighting texture without exaggeration", recommended_aspect_ratios: ["4:5","1:1","4:3"] },
+    disallow: ["do not change material type, color, pattern, veining, hardware, cabinet profile, tile layout, flooring species, or finish level", "do not exaggerate luxury beyond what is visible"] },
+  { rule_id: "R11_FIXTURE_DETAIL", name: "Fixture Detail", use_when: "visible fixture: faucet, pendant, chandelier, sconce, fireplace, ceiling fan, or specialty lighting",
+    camera_technique: { camera_angle: "close-up or medium feature composition aligned to the fixture", lens_feel: "50-85mm fixture/detail lens feel", composition: "fixture as subject with soft room context", depth_of_field: "shallow to moderate shallow", lighting: "controlled highlights preserving realistic fixture finish", recommended_aspect_ratios: ["4:5","1:1","4:3"] },
+    disallow: ["do not invent fixtures", "do not change fixture type, count, location, finish, shape, scale, or mounting point", "do not add a chandelier, pendant, sconce, faucet, fireplace, or fan not visible in the approved image"] },
+  { rule_id: "R12_INDOOR_OUTDOOR_CONNECTION_HERO", name: "Indoor / Outdoor Connection Hero", use_when: "slider, patio door, balcony door, large window, or outdoor view visible and connected to the interior",
+    camera_technique: { camera_angle: "lifestyle composition angled across interior space toward the exterior opening", lens_feel: "24-35mm interior lifestyle lens feel", composition: "interior foreground with visible exterior connection in midground/background", depth_of_field: "medium to deep focus", lighting: "balanced exposure between interior and exterior daylight", recommended_aspect_ratios: ["16:9","4:3"] },
+    disallow: ["do not change the exterior view", "do not add landscaping, pools, patio furniture, decks, balconies, skyline, water, or outdoor features not visible", "do not alter slider, door, window, or opening location"] },
+];
+
 function callClaudeVision(imageBase64, mimeType, apiKey) {
+  const rulesJson = JSON.stringify(HERO_SHOT_RULES);
+
   const body = JSON.stringify({
     model: "claude-haiku-4-5-20251001",
-    max_tokens: 1500,
+    max_tokens: 3000,
     messages: [{
       role: "user",
       content: [
         { type: "image", source: { type: "base64", media_type: mimeType, data: imageBase64 } },
         { type: "text", text:
-          "You are analyzing an already-staged real estate interior photo to identify possible " +
-          "hero/detail shot crops for a real estate marketing tool. Look ONLY at what is actually " +
-          "visible in this specific photo — do not assume standard kitchen features that aren't shown.\n\n" +
+          "You are analyzing an already-staged real estate interior photo to suggest premium hero/detail shots for a real estate marketing tool, using a FIXED catalog of photographer-direction rules. Look ONLY at what is actually visible in this specific photo.\n\n" +
+          "IMPORTANT FRAMING NOTE: do not cluster your suggested crops toward the ceiling or upper portion of the frame — there is rarely anything worth featuring on a ceiling. Bias your suggested bboxes toward the foreground and floor-level two-thirds of the image, where furniture, fixtures, cabinetry, and staged assets actually are. A bbox with y-origin near 0 covering mostly ceiling/upper-wall is almost always wrong for a hero/detail shot.\n\n" +
+          "RULE CATALOG (select the single best-fitting rule_id for each suggested shot; do not invent new rules):\n" + rulesJson + "\n\n" +
           "Return ONLY valid JSON, no other text, no markdown fences, in exactly this shape:\n" +
           "{\n" +
           '  "room_type": "<short description of the room type as shown>",\n' +
-          '  "suggested_hero_shots": [\n' +
+          '  "hero_shots": [\n' +
           "    {\n" +
           '      "id": <integer, 1-indexed>,\n' +
-          '      "name": "<short shot name, e.g. \'Island + Faucet Hero\'>",\n' +
+          '      "rule_id": "<one of the rule_id values from the catalog above>",\n' +
+          '      "name": "<short user-facing shot name, e.g. \'Island + Faucet Hero\'>",\n' +
           '      "confidence": "high" | "medium" | "low",\n' +
           '      "bbox": { "x": <0-1>, "y": <0-1>, "w": <0-1>, "h": <0-1> },\n' +
-          '      "reason": "<one sentence describing exactly what is visible and readable in this crop \u2014 be specific about the actual materials, colors, and objects you see, not generic style language>"\n' +
+          '      "camera_technique": <copy the camera_technique object from the matched rule, unmodified>,\n' +
+          '      "render_constraints": ["preserve architecture", "do not invent new fixtures", "<any other specific preserve-instructions relevant to what is visible in this crop>"],\n' +
+          '      "disallow": <copy the disallow array from the matched rule, unmodified>,\n' +
+          '      "reason": "<one sentence describing exactly what is visible and readable in this crop \u2014 specific materials/colors/objects, not generic style language>"\n' +
           "    }\n" +
           "  ]\n" +
           "}\n\n" +
-          "bbox values are fractions of the image width/height (0-1), where x/y is the top-left corner. " +
-          "Only suggest crops where the subject is clearly, unambiguously visible and well-composed in " +
-          "THIS photo — do not suggest a crop for an asset that is poorly framed, partially cut off, or " +
-          "not actually present. Suggest between 3 and 10 hero shots depending on how many distinct, " +
-          "well-composed assets this specific photo actually contains."
+          "bbox values are fractions of the image width/height (0-1), x/y is the top-left corner. Only suggest a shot where its rule's use_when condition is clearly satisfied by what is actually visible — do not suggest a rule whose subject is poorly framed, cut off, or absent. Suggest between 3 and 10 hero shots depending on how many distinct, well-composed, rule-eligible assets this specific photo actually contains."
         }
       ]
     }]
@@ -98,7 +152,6 @@ exports.handler = async (event) => {
     const textBlock = result?.content?.find(b => b.type === "text");
     if (!textBlock) throw new Error("No text content in Claude response");
 
-    // Strip markdown fences defensively, in case the model wraps the JSON anyway
     const cleaned = textBlock.text.trim().replace(/^```json\s*/i, "").replace(/```\s*$/,"");
     let parsed;
     try {
@@ -107,11 +160,11 @@ exports.handler = async (event) => {
       throw new Error("Claude did not return valid JSON: " + cleaned.slice(0, 200));
     }
 
-    if (!Array.isArray(parsed.suggested_hero_shots)) {
-      throw new Error("Response missing suggested_hero_shots array");
+    if (!Array.isArray(parsed.hero_shots)) {
+      throw new Error("Response missing hero_shots array");
     }
 
-    console.log(`detect-hero-shots: ${parsed.suggested_hero_shots.length} shots suggested for ${parsed.room_type}`);
+    console.log(`detect-hero-shots: ${parsed.hero_shots.length} shots suggested for ${parsed.room_type}`);
     return { statusCode: 200, headers, body: JSON.stringify(parsed) };
 
   } catch (err) {

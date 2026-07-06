@@ -40,9 +40,9 @@ const HERO_SHOT_RULES = [
   { rule_id: "R05_RANGE_HOOD_HERO", name: "Range / Hood Hero", use_when: "range, cooktop, hood, or cooking wall clearly visible",
     camera_technique: { camera_angle: "clean 3/4 or centered feature perspective facing the cooking wall", lens_feel: "35-50mm interior feature lens feel", composition: "range and hood as subject, framed by cabinetry/backsplash/counters", depth_of_field: "moderate", lighting: "natural daylight with subtle under-hood/under-cabinet glow", recommended_aspect_ratios: ["4:3","16:9","1:1"] },
     disallow: ["do not change appliance type, burner count, finish, hood style, backsplash, or cabinet layout", "do not add pot fillers, new lighting, new tile, or new appliances unless visible"] },
-  { rule_id: "R06_SINK_WINDOW_HERO", name: "Sink / Window Hero", use_when: "sink wall and window clearly readable together",
-    camera_technique: { camera_angle: "balanced eye-level composition centered or slightly angled toward the sink wall", lens_feel: "35mm interior feature lens feel", composition: "sink and window framed by cabinetry and counter surfaces", depth_of_field: "medium to deep focus", lighting: "bright natural daylight from the window", recommended_aspect_ratios: ["4:3","16:9","1:1"] },
-    disallow: ["do not change window size/placement/exterior view", "do not change sink location, faucet type, or cabinet layout", "do not add scenery outside the window"] },
+  { rule_id: "R06_SINK_HERO", name: "Sink Hero", use_when: "sink is clearly readable, whether wall-mounted or island-mounted, with or without a background view",
+    camera_technique: { camera_angle: "balanced eye-level composition centered or slightly angled toward the sink face", lens_feel: "35mm interior feature lens feel", composition: "sink framed by cabinetry and counter surfaces, with whatever background is actually present as context", depth_of_field: "medium to deep focus", lighting: "bright natural daylight", recommended_aspect_ratios: ["4:3","16:9","1:1"] },
+    disallow: ["do not change sink location, faucet type, or cabinet layout", "do not change or add a background view, window, or exterior scenery not actually visible in the approved staged image", "do not invent a window if none is present in this crop"] },
   { rule_id: "R07_APPLIANCE_DETAIL_HERO", name: "Appliance Detail Hero", use_when: "premium appliance visible: double ovens, built-in fridge, wine fridge, coffee station, laundry machines",
     camera_technique: { camera_angle: "tight 3/4 or front-biased feature composition", lens_feel: "50-70mm detail lens feel", composition: "appliance as subject with surrounding cabinetry for context", depth_of_field: "moderate shallow", lighting: "controlled natural light with realistic reflections", recommended_aspect_ratios: ["4:5","1:1","4:3"] },
     disallow: ["do not invent appliances", "do not change appliance finish, display panel, handle style, cabinet integration, or location", "do not add readable brand logos or fake display text"] },
@@ -81,6 +81,7 @@ function callClaudeVision(imageBase64, mimeType, apiKey) {
         { type: "image", source: { type: "base64", media_type: mimeType, data: imageBase64 } },
         { type: "text", text:
           "You are analyzing an already-staged real estate interior photo to suggest premium hero/detail shots for a real estate marketing tool, using a FIXED catalog of photographer-direction rules. Look ONLY at what is actually visible in this specific photo.\n\n" +
+          "CRITICAL — DO NOT INFER TYPICAL LAYOUTS: every specific fixture, feature, or element you mention in 'reason' must be something you can point to directly and unambiguously in THIS exact photo. Do not assume a feature is present because it's commonly found near another feature (for example: do not assume a sink is near a window just because sinks are often placed near windows — many sinks, including island sinks, have no window nearby at all). If you are not certain a feature is actually visible in the frame, leave it out of 'reason' entirely rather than guessing or describing a typical/expected layout.\n\n" +
           "IMPORTANT FRAMING NOTE: do not cluster your suggested crops toward the ceiling or upper portion of the frame — there is rarely anything worth featuring on a ceiling. Bias your suggested bboxes toward the foreground and floor-level two-thirds of the image, where furniture, fixtures, cabinetry, and staged assets actually are. A bbox with y-origin near 0 covering mostly ceiling/upper-wall is almost always wrong for a hero/detail shot.\n\n" +
           "RULE CATALOG (select the single best-fitting rule_id for each suggested shot by name/use_when; do not invent new rule_ids):\n" + rulesJson + "\n\n" +
           "Return ONLY valid JSON, no other text, no markdown fences, no explanation. Keep each field SHORT — reason must be one short sentence, not a paragraph. Exact shape:\n" +
@@ -93,6 +94,7 @@ function callClaudeVision(imageBase64, mimeType, apiKey) {
           '      "name": "<short user-facing shot name>",\n' +
           '      "confidence": "high" | "medium" | "low",\n' +
           '      "bbox": { "x": <0-1>, "y": <0-1>, "w": <0-1>, "h": <0-1> },\n' +
+          '      "window_visible": <true if a window is actually visible within this specific bbox crop, false otherwise — a forced explicit judgment, do not default to true>,\n' +
           '      "reason": "<one short sentence: what specific materials/colors/objects are visible in this crop>"\n' +
           "    }\n" +
           "  ]\n" +
@@ -153,6 +155,29 @@ function enrichWithRuleData(heroShots) {
   });
 }
 
+// GATE (July 2026 — rule-mismatch investigation): Claude's structured
+// window_visible boolean is a forced explicit judgment, harder to hallucinate
+// past than free-text. If window_visible === false but 'reason' still mentions
+// a window (the model contradicting its own structured field — exactly what we
+// saw in production logs), strip the window claim from reason server-side
+// rather than trusting the free text. Always logged so we can see how often
+// this actually fires.
+function gateWindowClaims(heroShots) {
+  return heroShots.map(shot => {
+    const mentionsWindow = typeof shot.reason === "string" && /window/i.test(shot.reason);
+    if (shot.window_visible === false && mentionsWindow) {
+      console.warn(`detect-hero-shots: shot ${shot.id} (${shot.rule_id}) claimed window_visible:false but reason mentioned a window — stripping window claim. Original reason: "${shot.reason}"`);
+      const cleanedReason = shot.reason
+        .replace(/[,;]?\s*(?:with|near|at|by|next to)?\s*[^,.;]*\bwindow[^,.;]*/gi, "")
+        .replace(/\s{2,}/g, " ")
+        .replace(/^\s*[,;]\s*/, "")
+        .trim() || "Fixture and surrounding cabinetry are clearly visible.";
+      return { ...shot, reason: cleanedReason };
+    }
+    return shot;
+  });
+}
+
 exports.handler = async (event) => {
   if (event.httpMethod !== "POST") return { statusCode: 405, body: "Method Not Allowed" };
   const headers = {
@@ -188,14 +213,14 @@ exports.handler = async (event) => {
 
     // TEMP DEBUG (July 2026 — rule-mismatch investigation, remove once resolved):
     // logs Claude's raw pre-enrichment picks so we can see exactly which rule_id
-    // it matched each shot to, alongside its own reason text, before the fixed
-    // catalog's composition/camera_technique gets bolted on. This is what lets us
-    // confirm whether e.g. an island sink is getting force-fit into R06_SINK_WINDOW_HERO
-    // (a wall-sink rule) instead of flagging a genuine gap in the 12-rule catalog.
+    // it matched each shot to, alongside its own reason text and window_visible
+    // judgment, before the fixed catalog's composition/camera_technique gets
+    // bolted on and before the window-claim gate runs.
     console.log("detect-hero-shots: RAW pre-enrichment picks:", JSON.stringify(
-      parsed.hero_shots.map(s => ({ id: s.id, rule_id: s.rule_id, name: s.name, reason: s.reason, confidence: s.confidence }))
+      parsed.hero_shots.map(s => ({ id: s.id, rule_id: s.rule_id, name: s.name, reason: s.reason, window_visible: s.window_visible, confidence: s.confidence }))
     ));
 
+    parsed.hero_shots = gateWindowClaims(parsed.hero_shots);
     parsed.hero_shots = enrichWithRuleData(parsed.hero_shots);
 
     console.log(`detect-hero-shots: ${parsed.hero_shots.length} shots suggested for ${parsed.room_type}`);

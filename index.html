@@ -3095,7 +3095,13 @@ function renderHeroShotMapUI(roomId, sourceClean, detection) {
       boxLayer.appendChild(b);
     });
   }
-  if (img.complete) drawBoxes(); else img.onload = drawBoxes;
+  // BUGFIX (July 2026 — intermittent missing-grid investigation): do NOT check
+  // img.complete/attach onload here — at this point in the function, img isn't
+  // attached to document.body yet, so img.clientWidth/clientHeight are always 0
+  // regardless of decode state. That silently produced 0x0 boxes whenever the
+  // data-URI happened to decode synchronously fast enough for img.complete to
+  // already read true. The actual draw trigger is moved below, after
+  // document.body.appendChild(overlay), where layout is guaranteed to exist.
   window.addEventListener('resize', drawBoxes);
 
   panel.appendChild(left);
@@ -3146,6 +3152,19 @@ function renderHeroShotMapUI(roomId, sourceClean, detection) {
   panel.appendChild(right);
   overlay.appendChild(panel);
   document.body.appendChild(overlay);
+
+  // BUGFIX (July 2026): now that the overlay is actually in the document,
+  // img.clientWidth/clientHeight will report real values. img.decode() resolves
+  // once the image is decoded and safe to measure/paint; fall back to the
+  // complete/onload check for older browsers or edge cases where decode() isn't
+  // supported, since by this point attachment timing is no longer the issue.
+  if (typeof img.decode === 'function') {
+    img.decode().then(drawBoxes).catch(() => { if (img.complete) drawBoxes(); else img.onload = drawBoxes; });
+  } else if (img.complete) {
+    drawBoxes();
+  } else {
+    img.onload = drawBoxes;
+  }
 
   function closeModal() { document.body.removeChild(overlay); }
   cancelBtn.onclick = closeModal;

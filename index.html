@@ -384,6 +384,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
     <div id="thumb-grid" class="thumb-grid"></div>
     <div id="upload-actions" class="hidden" style="margin-top:20px;display:flex;gap:10px;align-items:center;">
       <button class="btn btn-primary" onclick="startIntake()">Begin Session Setup →</button>
+      <button class="btn btn-outline" onclick="runSmartCorrectBatch()" title="Deterministic photo correction — white balance, exposure, perspective, noise reduction. No AI staging, no AB 723 disclosure required.">✨ Auto-Correct Photos (Smart Connect™)</button>
       <span id="upload-count-label" style="font-size:0.8rem;color:var(--muted);"></span>
     </div>
   </div>
@@ -1388,6 +1389,227 @@ function updateUploadUI(){
   const actions=document.getElementById('upload-actions'),label=document.getElementById('upload-count-label');
   if(n>0){actions.classList.remove('hidden');actions.style.display='flex';label.textContent=`${n} photo${n!==1?'s':''} loaded`;}
   else actions.classList.add('hidden');
+}
+
+// ══════════════════════════════════════════
+// SMART CONNECT™ — SMART CORRECT™ BATCH CORRECTION
+// ══════════════════════════════════════════
+// Module 1/2 deterministic image correction (white balance, exposure,
+// perspective, noise, vignette — conditional shadow/highlight/texture).
+// Runs on all currently-loaded SESSION.originals as a single batch.
+//
+// Per the July 7, 2026 decision: the whole batch runs in parallel on
+// Railway, but the UI WAITS for the full batch to complete before showing
+// any result — no progressive per-image display. This matches the existing
+// staging poll pattern (3-second interval) already used by check-openai.
+//
+// SSC path ("Corrected MLS Photos") explicitly never touches the
+// compliance page — see generate-corrected-final.js. Choosing "Use for
+// Staging" instead just swaps the corrected image into SESSION.originals
+// in place, so it flows into the existing, unmodified staging pipeline
+// exactly like any other uploaded photo would.
+
+let _smartCorrectResults = {}; // keyed by original.id → {status, correctedBase64, modulesApplied, ...}
+
+function generateBatchId() {
+  return 'sc_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+}
+
+async function runSmartCorrectBatch() {
+  if (SESSION.originals.length === 0) {
+    showToast('Upload photos first.', 'error');
+    return;
+  }
+
+  const batchId = generateBatchId();
+  const images = SESSION.originals.map(o => ({ id: o.id, imageBase64: o.base64, mimeType: o.mimeType }));
+
+  renderSmartCorrectProcessingModal(images.length);
+
+  try {
+    const dispatchRes = await fetch('/.netlify/functions/smart-correct-batch-background', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ batchId, images }),
+    });
+    if (!dispatchRes.ok) throw new Error('Failed to start batch correction');
+
+    await pollSmartCorrectBatch(batchId);
+
+  } catch (err) {
+    document.getElementById('smart-correct-modal')?.remove();
+    showToast('Smart Correct error: ' + err.message, 'error');
+  }
+}
+
+async function pollSmartCorrectBatch(batchId) {
+  // Same cadence as the existing staging poll (check-openai): 3-second
+  // interval, generous timeout since a real batch of 5-20 images running
+  // OpenCV correction in parallel could reasonably take a couple minutes.
+  const maxPolls = 100; // ~5 minutes at 3s/poll
+  for (let poll = 0; poll < maxPolls; poll++) {
+    await new Promise(r => setTimeout(r, 3000));
+    try {
+      const checkRes = await fetch(`/.netlify/functions/check-smart-correct-batch?batchId=${encodeURIComponent(batchId)}`);
+      if (!checkRes.ok) continue;
+      const result = await checkRes.json();
+
+      if (result.status === 'done') {
+        result.results.forEach(r => { _smartCorrectResults[r.id] = r; });
+        document.getElementById('smart-correct-modal')?.remove();
+        renderSmartCorrectResultsModal(batchId, result.results);
+        return;
+      }
+      if (result.status === 'error') {
+        throw new Error(result.error || 'Batch correction failed');
+      }
+      // status === 'pending' — keep polling
+    } catch (err) {
+      if (err.message && err.message !== 'Batch correction failed' && !err.message.includes('failed')) continue; // network blip
+      document.getElementById('smart-correct-modal')?.remove();
+      showToast('Smart Correct error: ' + err.message, 'error');
+      return;
+    }
+  }
+  document.getElementById('smart-correct-modal')?.remove();
+  showToast('Smart Correct timed out after 5 minutes — please try again.', 'error');
+}
+
+function renderSmartCorrectProcessingModal(count) {
+  document.getElementById('smart-correct-modal')?.remove();
+  const m = document.createElement('div');
+  m.id = 'smart-correct-modal';
+  m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.72);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;';
+  m.innerHTML = `
+    <div style="background:#fff;border-radius:6px;padding:40px 36px;max-width:420px;width:100%;text-align:center;">
+      <span class="spinner" style="display:inline-block;margin-bottom:16px;"></span>
+      <div style="font-family:'Cormorant Garamond',serif;font-size:1.3rem;color:var(--ink,#1a1714);margin-bottom:8px;">
+        Correcting ${count} photo${count !== 1 ? 's' : ''}…
+      </div>
+      <div style="color:var(--muted,#7a6f63);font-size:0.85rem;line-height:1.6;">
+        White balance, exposure, perspective, and noise correction — running in parallel. This can take a minute or two for larger batches.
+      </div>
+    </div>`;
+  document.body.appendChild(m);
+}
+
+function renderSmartCorrectResultsModal(batchId, results) {
+  document.getElementById('smart-correct-modal')?.remove();
+
+  const tiles = results.map(r => {
+    const orig = SESSION.originals.find(o => o.id === r.id);
+    if (!orig) return '';
+
+    if (r.status === 'error') {
+      return `<div style="border:1px solid var(--border,#e0d8ce);border-radius:4px;padding:12px;">
+        <div style="font-size:0.75rem;color:#b0453a;font-weight:600;margin-bottom:6px;">⚠ Correction failed</div>
+        <img src="${orig.dataUrl}" style="width:100%;border-radius:3px;opacity:0.6;" />
+        <div style="font-size:0.7rem;color:var(--muted,#7a6f63);margin-top:6px;">${esc(r.error || 'Unknown error')}</div>
+      </div>`;
+    }
+
+    const badges = (r.modulesApplied || []).map(m =>
+      `<span style="display:inline-block;background:var(--cream,#f7f4ef);border:1px solid var(--border,#e0d8ce);border-radius:12px;padding:2px 8px;font-size:0.65rem;color:var(--muted,#7a6f63);margin:2px 3px 0 0;">${m.replace(/_/g, ' ')}</span>`
+    ).join('');
+
+    return `<div style="border:1px solid var(--border,#e0d8ce);border-radius:4px;padding:12px;">
+      <div style="font-size:0.75rem;font-weight:600;margin-bottom:6px;color:var(--ink,#1a1714);">${esc(orig.name)}</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px;">
+        <div>
+          <div style="font-size:0.6rem;color:var(--muted,#7a6f63);margin-bottom:2px;">ORIGINAL</div>
+          <img src="${orig.dataUrl}" style="width:100%;border-radius:3px;" />
+        </div>
+        <div>
+          <div style="font-size:0.6rem;color:var(--muted,#7a6f63);margin-bottom:2px;">CORRECTED</div>
+          <img src="data:image/jpeg;base64,${r.correctedBase64}" style="width:100%;border-radius:3px;" />
+        </div>
+      </div>
+      <div style="margin-bottom:10px;">${badges}</div>
+      <div style="display:flex;gap:6px;">
+        <button class="btn btn-outline btn-sm" onclick="useCorrectedForStaging('${r.id}')" style="flex:1;">Use for Staging</button>
+        <button class="btn btn-outline btn-sm" onclick="downloadCorrectedOnly('${r.id}')" style="flex:1;">Download Corrected</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  const m = document.createElement('div');
+  m.id = 'smart-correct-modal';
+  m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.72);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;';
+  m.innerHTML = `
+    <div style="background:#fff;border-radius:6px;padding:24px;max-width:900px;width:100%;max-height:88vh;overflow-y:auto;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <div style="font-family:'Cormorant Garamond',serif;font-size:1.4rem;color:var(--ink,#1a1714);">Smart Correct™ Results</div>
+        <button onclick="document.getElementById('smart-correct-modal').remove()" style="background:none;border:none;font-size:1.4rem;cursor:pointer;color:var(--muted,#7a6f63);">×</button>
+      </div>
+      <div style="font-size:0.8rem;color:var(--muted,#7a6f63);margin-bottom:16px;line-height:1.6;">
+        Corrected photos are ready. <strong>Use for Staging</strong> swaps the corrected version into this session and continues to the normal staging flow. <strong>Download Corrected</strong> saves the corrected photo directly for MLS — no virtual staging, no AB 723 disclosure required for this path.
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px;">
+        ${tiles}
+      </div>
+    </div>`;
+  document.body.appendChild(m);
+  m.addEventListener('click', (e) => { if (e.target === m) m.remove(); });
+}
+
+function useCorrectedForStaging(imageId) {
+  const result = _smartCorrectResults[imageId];
+  const orig = SESSION.originals.find(o => o.id === imageId);
+  if (!result || !orig || result.status !== 'done') return;
+
+  // Swap the corrected image into the existing originals array in place —
+  // everything downstream (intake, room mapping, staging) treats this
+  // exactly like any other uploaded photo. No pipeline changes needed.
+  orig.base64 = result.correctedBase64;
+  orig.dataUrl = 'data:image/jpeg;base64,' + result.correctedBase64;
+  // Re-upload the corrected version as the new AB723 original reference —
+  // if this room later goes through SSP staging, the compliance "original"
+  // should be the corrected photo actually used as input, not the
+  // pre-correction camera file.
+  orig.originalUrl = null;
+  orig.ab723Status = 'pending';
+  uploadOriginalForCompliance(orig);
+
+  // Refresh the thumbnail to show the corrected version
+  const thumbEl = document.querySelector(`.thumb-item[data-id="${imageId}"] img`);
+  if (thumbEl) thumbEl.src = orig.dataUrl;
+
+  showToast(`✓ ${orig.name} updated with corrected version.`, 'success');
+}
+
+async function downloadCorrectedOnly(imageId) {
+  const result = _smartCorrectResults[imageId];
+  const orig = SESSION.originals.find(o => o.id === imageId);
+  if (!result || !orig || result.status !== 'done') return;
+
+  try {
+    const res = await fetch('/.netlify/functions/generate-corrected-final', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        imageBase64: result.correctedBase64,
+        mimeType: 'image/jpeg',
+        projectId: SESSION.projectId || null,
+        roomName: orig.name,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.publicUrl) throw new Error(data.error || 'Upload failed');
+
+    // Trigger browser download of the corrected image directly — the
+    // Cloudinary upload (SSC final) already happened above; this download
+    // is just a convenience so the user has the file locally too.
+    const a = document.createElement('a');
+    a.href = 'data:image/jpeg;base64,' + result.correctedBase64;
+    a.download = `Corrected_${(orig.name || 'photo').replace(/[^a-z0-9.]/gi, '_')}`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+
+    showToast(`✓ Corrected photo saved — no AB 723 disclosure required (correction-only).`, 'success');
+  } catch (err) {
+    showToast('Download error: ' + err.message, 'error');
+  }
 }
 
 // ══════════════════════════════════════════

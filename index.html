@@ -3379,11 +3379,93 @@ async function generateHeroShotFinal(roomId, shotId, qualityChoice) {
     };
     renderRoomQueue();
     showToast(`✓ ${shot.name} final ready for ${room.roomName}.`, 'success');
+
+    // COMPLIANCE FIX (July 7, 2026): hero shots are AI-generated still images
+    // (Claude Vision detection → GPT Image 2 render → Sharp upscale), not a
+    // pure deterministic crop — same AB 723 category as a virtually staged
+    // image. Prior to this fix, generateHeroShotFinal() charged credits and
+    // delivered the final shot but never wrote an original/altered pair to
+    // the compliance page. Fire-and-forget, same as attachFinalToProject —
+    // must never block the shot from reaching the user if this fails.
+    attachHeroShotToProject(upData.upscaledBase64, room, shot).catch(err => {
+      console.warn('attachHeroShotToProject error:', err.message);
+    });
   } catch (err) {
     room.heroDetailShots[shotId] = { ...shot, status: 'error', error: err.message };
     renderRoomQueue();
     showToast(`${shot.name} error: ` + err.message, 'error');
   }
+}
+
+// ── COMPLIANCE FIX: attach a Cinematic Asset Generator hero shot to the
+// property's compliance page, same original/altered pairing the main
+// staging flow already does via attachFinalToProject(). ──────────────────
+//
+// KEY DECISION: the "original" side of this pair is the true camera-ready
+// upload (orig.originalUrl — the same value attachFinalToProject uses),
+// NOT the staged image that Claude Vision actually read to detect this
+// shot. Even though the staged image is the input to hero-shot detection,
+// pairing compliance against an already-altered intermediate would
+// understate how much alteration happened between the true original and
+// what's now being marketed — same reasoning the SSP path spec states
+// explicitly: "The AB 723 original should be the original uploaded image,
+// not the Smart Correct™ master." That principle generalizes here.
+async function attachHeroShotToProject(finalBase64, room, shot) {
+  if (!SESSION.projectId) return;
+
+  const orig = SESSION.originals.find(o => o.id === room?.originalId);
+
+  // Same CHECK-constraint mapping attachFinalToProject uses — staged_images.mode
+  // only accepts vacant_stage/clean_and_stage/exterior_enhancement/declutter/
+  // group_staging. A hero shot is derived from an already-staged Open Plan
+  // room, so it's reasonable to tag it with that room's own staging mode
+  // rather than inventing a new mode value the DB would reject.
+  const ROOM_MODE_TO_DB_MODE = {
+    stage:     'vacant_stage',
+    declutter: 'declutter',
+    cns:       'clean_and_stage',
+    exterior:  'exterior_enhancement',
+  };
+  const dbMode = ROOM_MODE_TO_DB_MODE[room.roomMode] || 'vacant_stage';
+
+  // Upload the final hero shot to Cloudinary — reuses the existing
+  // upload-staged.js function unchanged, same finals folder convention
+  // as the main staging flow, tagged with the shot name for identification
+  // on the compliance page image-pair list.
+  const uploadRes = await fetch('/.netlify/functions/upload-staged', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      imageBase64: finalBase64,
+      mimeType: 'image/jpeg',
+      projectId: SESSION.projectId,
+      roomName: `${room.roomName || 'Room'} — ${shot.name || 'Hero Shot'}`,
+      tier: 'hero_shot',
+    })
+  });
+  const uploadData = await uploadRes.json();
+  if (!uploadData.publicUrl) throw new Error('No hero shot URL from Cloudinary');
+
+  const _sbUserForHero = (await getSupabase().auth.getUser()).data?.user;
+  await fetch('/.netlify/functions/project-manage?action=add-image', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      projectId: SESSION.projectId,
+      userId: _sbUserForHero?.id || null,
+      imageData: {
+        roomName: `${room.roomName || 'Room'} — ${shot.name || 'Hero Shot'}`,
+        tier: 'hero_shot',           // quality label — Blobs/compliance-page display only
+        mode: dbMode,                // real staged_images.mode value (constraint-safe)
+        originalUrl: orig?.originalUrl || null,  // true camera-ready original, NOT the staged image
+        stagedUrl: uploadData.publicUrl,
+        fileName: orig?.name || '',
+      }
+    })
+  });
+
+  console.log('Hero shot attached to project:', SESSION.projectId, 'shot:', shot.name, 'room:', room.roomName);
+  showToast(`✓ Hero shot added to compliance project: ${SESSION.projectAddress || SESSION.projectId}`, 'success');
 }
 
 

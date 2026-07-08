@@ -204,10 +204,10 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
 .spinner-green{border-color:#b8ddd0;border-top-color:var(--success);}
 @keyframes spin{to{transform:rotate(360deg);}}
 .hidden{display:none!important;}
-#toast{position:fixed;bottom:24px;right:24px;background:var(--ink);color:#fff;padding:12px 20px;border-radius:4px;font-size:0.82rem;opacity:0;pointer-events:none;transition:opacity 0.3s;z-index:9999;max-width:340px;}
+#toast{position:fixed;bottom:24px;left:24px;background:var(--ink);color:#fff;padding:12px 20px;border-radius:4px;font-size:0.82rem;font-weight:600;opacity:0;pointer-events:none;transition:opacity 0.3s;z-index:9999;max-width:340px;box-shadow:0 4px 16px rgba(0,0,0,0.25);}
 #toast.show{opacity:1;}
-#toast.error{background:var(--danger);}
-#toast.success{background:var(--success);}
+#toast.error{background:#d64535;}
+#toast.success{background:#2f8f5f;}
 #sbs-canvas{display:none;}
 /* ── Open Plan Strategy Toggle ── */
 .op-strategy-wrap{display:flex;align-items:center;gap:8px;margin-bottom:12px;padding:10px 14px;background:var(--cream);border:1px solid var(--border);border-radius:3px;}
@@ -468,6 +468,7 @@ const SINGLE_ROOM_OPTIONS = [
   "Living Room || livingroom",
   "Family Room || familyroom",
   "Formal Dining Room || diningroom",
+  "Dining Zone (Informal / Breakfast Nook) || diningroom",
   "Kitchen || kitchen",
   "Entry / Foyer || foyer",
   "Home Bar || homebar",
@@ -903,6 +904,7 @@ const SHOT_FOCUS_HINTS = {
   "Great Room":["Focus on the Great Room seating area — kitchen in background is secondary","Emphasize the fireplace wall as the focal point — do not over-furnish visible adjacent spaces","The open space should feel expansive — avoid crowding any visible connecting rooms"],
   "Kitchen":["Focus on the kitchen island — living area behind is secondary and should remain lightly staged","Emphasize counter space and pendant lighting over the island","Stage bar stools at island — keep great room furniture minimal if visible"],
   "Formal Dining Room":["This is an enclosed Formal Dining Room — no adjoining rooms should be visible, keep staging fully contained to this space","Focus on the dining table and chandelier as the sole focal point","Stage against the room's own walls — a sideboard or buffet only if wall space is clearly visible in the photo"],
+  "Dining Zone (Informal / Breakfast Nook)":["This is an informal dining nook — it's normal for the kitchen or adjacent living space to be visible in frame, unlike a fully enclosed formal dining room","Focus on the everyday dining table as the main subject — keep the style casual, not formal","A smaller table setting, simple centerpiece, or casual seating is appropriate — avoid overly formal dining staging"],
   "Family Room":["Focus on the family room — do not fill the kitchen or entry visible behind","Emphasize comfortable seating facing the TV wall","Keep it warm and livable — this is the everyday gathering space"],
   "Living Room":["Focus on the living room seating — kitchen visible behind is secondary","Emphasize the fireplace as the room anchor","Stage a conversational seating arrangement around the focal wall"],
   "Primary Suite":["This is a bedroom — bed wall is the hero element","Emphasize the suite feel — nightstands, soft lighting, luxury textiles","Keep bathroom door area clean — do not stage the bath visible behind"],

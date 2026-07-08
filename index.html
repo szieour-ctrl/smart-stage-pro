@@ -2215,22 +2215,48 @@ function renderRoomQueue(){
         :isDone
           ?`<button class="btn btn-ghost btn-sm" onclick="resetRoom('${room.id}')">Re-Stage</button>`
           :`<button class="btn btn-sm" style="background:#4a6741;color:#fff;" onclick="runCleanAndStage('${room.id}')">🧹 Clean + Stage</button>`;
+      // Preset download actions — same pattern as Vacant Stage (line ~2275).
+      // applyPreset()/downloadPresetDraft()/downloadSideBySide(...,'preset')
+      // are all mode-agnostic (only require room.stagedCleanBase64||stagedBase64),
+      // so this is a straight port, not new backend logic.
+      const presetActions = room.presetCleanBase64 ? `
+        <button class="btn btn-outline btn-sm" onclick="downloadPresetDraft('${room.id}')">↓ Preset Draft</button>
+        <button class="btn btn-outline btn-sm" onclick="downloadSideBySide('${room.id}',null,'preset')">↓ Preset Side-by-Side</button>` : '';
       const downloads=isDone&&room.stagedBase64?`
         <button class="btn btn-outline btn-sm" onclick="downloadOriginal('${room.id}')">↓ Original</button>
         <button class="btn btn-outline btn-sm" onclick="downloadWatermarked('${room.id}','data:image/jpeg;base64,'+getRoomB64('${room.id}','draft'),'DRAFT_'+bName(getOrigName('${room.id}'))+'.jpg','CLEANED + STAGED · DRAFT')">↓ Draft</button>
-        <button class="btn btn-outline btn-sm" onclick="downloadSideBySide('${room.id}',null,'cns')">↓ Side-by-Side</button>
+        <button class="btn btn-outline btn-sm" onclick="downloadSideBySide('${room.id}',null,'cns')">↓ Side-by-Side</button>${presetActions}
         <button class="btn btn-ghost btn-sm" onclick="showDecor8Payload('${room.id}')">{ } API Payload</button>`:'';
+      // resultHtml: staged image now opens the Refine lightbox (revise tab) on
+      // click, and — when a preset has been applied — a third tile shows the
+      // preset result, opening the lightbox on the presets tab. Same pattern
+      // as Vacant Stage's result-pair (line ~2312-2320), just with CNS's own
+      // badge copy and status line kept intact.
       const resultHtml=isDone&&room.stagedBase64?`<div class="result-viewer">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><span class="dcl-result-badge cns-badge">Cleaned + Staged</span><span style="font-size:0.72rem;color:var(--muted);">Objects removed · Restaged virtually · Iterate below.</span></div>
-        <div class="result-pair">
-          <div class="result-img-wrap"><img src="${orig.dataUrl}" /><div class="result-img-badge">Original</div></div>
-          <div class="result-img-wrap"><img src="data:image/jpeg;base64,${room.stagedBase64}" /><div class="result-img-badge staged">Cleaned + Staged · Draft</div></div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><span class="dcl-result-badge cns-badge">Cleaned + Staged</span><span style="font-size:0.72rem;color:var(--muted);">Objects removed · Restaged virtually · Click photo to revise or apply a preset.</span></div>
+        <div class="result-pair ${(room.presetCleanBase64||room.presetStatus==='processing')?'has-preset':''}">
+          <div class="result-img-wrap"><img src="${orig.dataUrl}" onclick="openLightbox('${room.id}')" title="Click to update Shot Focus" /><div class="result-img-badge">Original</div></div>
+          <div class="result-img-wrap"><img src="data:image/jpeg;base64,${room.stagedBase64}" onclick="openLightboxRefine('${room.id}','revise')" title="Click to revise" /><div class="result-img-badge staged">Cleaned + Staged · Draft</div></div>
+          ${room.presetStatus==='processing'
+            ?`<div class="result-img-wrap" style="display:flex;align-items:center;justify-content:center;background:var(--cream);min-height:140px;border:1px solid var(--border);border-radius:3px;"><span class="spinner"></span></div>`
+            :room.presetCleanBase64?`<div class="result-img-wrap"><img src="data:image/jpeg;base64,${room.presetCleanBase64}" onclick="openLightboxRefine('${room.id}','presets')" title="Click to change preset" /><div class="result-img-badge preset">${PHOTOGRAPHIC_PRESETS[room.presetKey]?.label||'Preset'}</div></div>`:''}
         </div>
         <div class="mls-disclosure-note" style="font-size:0.73rem;">⚖️ <strong>MLS Upload: Original first → Staged second.</strong> Label "Virtually Staged" in Matrix.</div>
       </div>`:'';
+      // iterHtml: kept CNS's existing quick inline textarea (calls reStageRoom
+      // directly) AND added the "Make Revision →" lightbox entry point, same
+      // as Vacant Stage. submitRefineRevision() already branches correctly
+      // for CNS rooms (checks room.declutteredBase64 → reStageRoom), so this
+      // is UI wiring only, no backend/routing changes needed.
       const iterHtml=isDone&&room.stagedBase64?`<div class="iterate-panel">
-        <textarea class="iterate-input" id="iter-${room.id}" placeholder='Revision — e.g. "warmer tones, lighter rug"'>${room.iterationNote||''}</textarea>
-        <button class="btn btn-primary btn-sm" onclick="reStageRoom('${room.id}')">Re-Stage Draft</button>
+        <div style="flex:1;">
+          <textarea class="iterate-input" id="iter-${room.id}" placeholder='Revision — e.g. "warmer tones, lighter rug"'>${room.iterationNote||''}</textarea>
+          <div class="iterate-hint">Specify only what to change — everything else stays the same.</div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          <button class="btn btn-primary btn-sm" onclick="reStageRoom('${room.id}')">Re-Stage Draft</button>
+          <button class="btn btn-outline btn-sm" onclick="openLightboxRefine('${room.id}','revise')">Make Revision →</button>
+        </div>
       </div>`:'';
       const finalHtml=isDone&&room.stagedBase64?renderFinalPanel(room.id,null):'';
       return `<div class="room-card" id="card-${room.id}" style="border-left:3px solid #4a6741;">

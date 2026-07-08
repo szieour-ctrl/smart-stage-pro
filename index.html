@@ -1427,12 +1427,16 @@ async function runSmartCorrectBatch() {
   renderSmartCorrectProcessingModal(images.length);
 
   try {
-    const dispatchRes = await fetch('/.netlify/functions/smart-correct-batch-background', {
+    const dispatchRes = await fetch('/.netlify/functions/smart-correct-batch-dispatch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ batchId, images }),
     });
-    if (!dispatchRes.ok) throw new Error('Failed to start batch correction');
+    if (!dispatchRes.ok) {
+      let errMsg = 'Failed to start batch correction';
+      try { const errData = await dispatchRes.json(); errMsg = errData.error || errMsg; } catch (e) {}
+      throw new Error(errMsg);
+    }
 
     await pollSmartCorrectBatch(batchId);
 

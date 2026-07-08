@@ -2259,6 +2259,7 @@ function renderRoomQueue(){
         </div>
       </div>`:'';
       const finalHtml=isDone&&room.stagedBase64?renderFinalPanel(room.id,null):'';
+      const cinematicAssetPanel=isDone&&room.stagedBase64?renderCinematicAssetPanel(room.id):'';
       return `<div class="room-card" id="card-${room.id}" style="border-left:3px solid #4a6741;">
         <div class="room-card-header">
           <img class="room-card-thumb" src="${orig.dataUrl}" onclick="openLightbox('${room.id}')" />
@@ -2269,7 +2270,7 @@ function renderRoomQueue(){
           </div>
           <div class="room-card-actions">${actionBtn}${downloads}${modeToggle}</div>
         </div>
-        ${resultHtml}${iterHtml}${finalHtml}
+        ${resultHtml}${iterHtml}${finalHtml}${cinematicAssetPanel}
       </div>`;
     }
 
@@ -3740,7 +3741,22 @@ async function attachHeroShotToProject(finalBase64, room, shot) {
 function renderCinematicAssetPanel(roomId) {
   const room = SESSION.rooms.find(r => r.id === roomId);
   if (!room) return '';
-  if (!room.isOpenPlan) return '';
+  // SCOPE EXTENSION (July 9, 2026): originally gated to Open Plan rooms
+  // only (`if (!room.isOpenPlan) return '';`). Per Sam's explicit decision
+  // ("Worth extending — single rooms could use hero shots too"), removed.
+  // This is a low-risk extension, not a redesign: the underlying 12-rule
+  // catalog in detect-hero-shots.js was never actually Open-Plan-specific —
+  // only 5 of 12 rules are kitchen/dining-oriented (Island, Range/Hood,
+  // Appliance Detail, Dining Table, Open Plan Lifestyle). The other 7 are
+  // either fully generic (Room Master, Foreground Depth, Material/Finish
+  // Detail) or explicitly written for other room types — R06 "Sink Hero"
+  // covers "wall-mounted or island-mounted" sinks (a bathroom vanity
+  // qualifies directly), R08 "Furniture Grouping" explicitly mentions
+  // bedroom groupings and reading nooks, R11 "Fixture Detail" covers
+  // faucets/sconces/fireplaces. Claude Vision already picks whichever rule
+  // actually fits what's visible — a bathroom photo will naturally match
+  // Sink Hero, Fixture Detail, or Material/Finish Detail rather than the
+  // kitchen-specific rules, with no prompt or rule-catalog changes needed.
 
   const shots = room.heroDetailShots || {};
   const shotList = Object.entries(shots);

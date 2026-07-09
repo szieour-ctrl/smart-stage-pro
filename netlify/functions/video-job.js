@@ -395,9 +395,11 @@ async function addExternalPhoto({ listingId, userId, imageUrl, roomType, sourceL
 // klingMotion.js's allowlist but never mirrored here, meaning every one of
 // them would have been rejected at this Netlify pre-validation layer before
 // Railway ever saw the request — a real, silent request-shape mismatch, not
-// a hypothetical one. room_reveal, living_room_ambient, and
-// corner_to_corner_drift are deliberately NOT included here either, same as
-// klingMotion.js — pending Sam's review / Playground verification.
+// a hypothetical one.
+//
+// SYNC FIX (July 9, 2026): room_reveal, living_room_ambient, and
+// corner_to_corner_drift cleared in klingMotion.js after Sam's fal.ai
+// Playground verification — mirrored here for the same reason as above.
 const SINGLE_IMAGE_INTERIOR_ALLOWED_PRESETS = new Set([
   "orbit_arc",
   "rack_focus",
@@ -409,6 +411,9 @@ const SINGLE_IMAGE_INTERIOR_ALLOWED_PRESETS = new Set([
   "architectural_glide",
   "crane_up",
   "crane_down",
+  "room_reveal",
+  "living_room_ambient",
+  "corner_to_corner_drift",
 ]);
 
 function validateAiMotionEligibility(frames) {
@@ -422,7 +427,7 @@ function validateAiMotionEligibility(frames) {
 
     if (!hasKnownPair && !isExterior && !isAllowedSingleImageInteriorPreset) {
       throw new Error(
-        `AI motion requested for a frame with no paired image and no allowed single-image preset (room type "${frame.roomType}", preset "${frame.motionPreset || "(none)"}"). AI motion requires a real vacant+staged pair for interior rooms, an exterior frame, or one of the allowed single-image presets (orbit_arc, rack_focus, fireplace_flicker, cinematic_push, luxury_drift, floating_camera_drift, parallax_push, architectural_glide, crane_up, crane_down) — otherwise only standard motion is available.`
+        `AI motion requested for a frame with no paired image and no allowed single-image preset (room type "${frame.roomType}", preset "${frame.motionPreset || "(none)"}"). AI motion requires a real vacant+staged pair for interior rooms, an exterior frame, or one of the allowed single-image presets (orbit_arc, rack_focus, fireplace_flicker, cinematic_push, luxury_drift, floating_camera_drift, parallax_push, architectural_glide, crane_up, crane_down, room_reveal, living_room_ambient, corner_to_corner_drift) — otherwise only standard motion is available.`
       );
     }
   }

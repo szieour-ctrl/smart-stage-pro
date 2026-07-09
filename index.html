@@ -204,7 +204,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
 .spinner-green{border-color:#b8ddd0;border-top-color:var(--success);}
 @keyframes spin{to{transform:rotate(360deg);}}
 .hidden{display:none!important;}
-#toast{position:fixed;bottom:24px;left:24px;background:var(--ink);color:#fff;padding:12px 20px;border-radius:4px;font-size:0.82rem;font-weight:600;opacity:0;pointer-events:none;transition:opacity 0.3s;z-index:9999;max-width:340px;box-shadow:0 4px 16px rgba(0,0,0,0.25);}
+#toast{position:fixed;bottom:24px;left:24px;background:var(--ink);color:#fff;padding:12px 20px;border-radius:4px;font-size:0.82rem;font-weight:600;opacity:0;pointer-events:none;transition:opacity 0.3s;z-index:10050;max-width:340px;box-shadow:0 4px 16px rgba(0,0,0,0.25);}
 #toast.show{opacity:1;}
 #toast.error{background:#d64535;}
 #toast.success{background:#2f8f5f;}
@@ -1331,35 +1331,25 @@ function handleFiles(files){
       SESSION.originals.push(origObj);
       renderThumb(SESSION.originals[SESSION.originals.length-1]);
       updateUploadUI();
-      // AB 723 §10140.8 — upload original to Cloudinary for permanent public URL
-      uploadOriginalForCompliance(origObj);
+      // AB 723 §10140.8 — the compliance original is uploaded LAZILY, only at
+      // Generate Final time (see generateFinal()'s "if (!orig.originalUrl)"
+      // check), not here. Uploading eagerly on every raw upload — including
+      // drafts, Smart Correct test runs, and photos that never get finalized
+      // — would fill Cloudinary with images that are never actually posted
+      // to MLS and never need a compliance record at all.
     };
     reader.readAsDataURL(file);
   });
 }
 
-// ── AB 723 COMPLIANCE — ORIGINAL UPLOAD ─────────────────────────────────────
-async function uploadOriginalForCompliance(origObj) {
-  try {
-    const res = await fetch('/.netlify/functions/upload-original', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ imageBase64: origObj.base64, mimeType: origObj.mimeType, listingId: SESSION.projectId || null })
-    });
-    const data = await res.json();
-    if (!res.ok || data.error) {
-      console.warn('AB723 upload failed for', origObj.name, ':', data.error);
-      origObj.ab723Status = 'error';
-      return;
-    }
-    origObj.originalUrl = data.publicUrl;
-    origObj.ab723Status = 'ready';
-    console.log('AB723 original uploaded:', origObj.name, '->', data.publicUrl);
-  } catch (err) {
-    console.warn('AB723 upload error:', err.message);
-    origObj.ab723Status = 'error';
-  }
-}
+// AB 723 §10140.8 compliance uploads happen in exactly one place now:
+// generateFinal()'s lazy "if (!orig.originalUrl)" check. Removed the old
+// uploadOriginalForCompliance() helper (July 9, 2026) that used to be
+// called eagerly from here and from Smart Correct's "Use for Staging" —
+// having two upload paths was exactly the kind of duplicate-logic setup
+// that's already caused sync bugs elsewhere in this codebase (the
+// SINGLE_IMAGE_INTERIOR_ALLOWED_PRESETS allowlist drift between
+// klingMotion.js and video-job.js). One upload path, one place it can drift.
 function renderThumb(orig){
   const grid=document.getElementById('thumb-grid');
   const item=document.createElement('div');
@@ -1572,9 +1562,15 @@ function useCorrectedForStaging(imageId) {
   // if this room later goes through SSP staging, the compliance "original"
   // should be the corrected photo actually used as input, not the
   // pre-correction camera file.
+  // Reset the compliance reference so generateFinal()'s lazy upload check
+  // re-uploads the CORRECTED version (not the pre-correction camera file)
+  // as the AB723 "original" — but only if this room actually reaches
+  // Generate Final. Smart Correct runs are frequently just tests/previews
+  // that never get finalized, so uploading here eagerly (the old behavior)
+  // meant Cloudinary was filling up with corrected versions of photos that
+  // were never posted to MLS and never needed a compliance record.
   orig.originalUrl = null;
   orig.ab723Status = 'pending';
-  uploadOriginalForCompliance(orig);
 
   // Refresh the thumbnail to show the corrected version
   const thumbEl = document.querySelector(`.thumb-item[data-id="${imageId}"] img`);

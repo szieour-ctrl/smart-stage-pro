@@ -1741,6 +1741,7 @@ let _lbFlexNote = '';      // freetext for the Flex Room zone
 let _lbSingleVal = '';     // selected dropdown value for Single Room / Exterior mode
 let _lbPresetKey = null;   // selected preset key in the Refine Image lightbox (Presets tab)
 let _lbRefineTab = 'revise'; // 'revise' | 'presets' — which tab the Refine Image lightbox shows
+let _lbEnhId = null;       // set when the Refine Image lightbox is refining an Exterior enhancement (Outdoor Living/Landscape/Golden Hour/Twilight) rather than a single-image room
 
 function roomOptsHtml(list,selectedVal){
   return list.map(r=>{
@@ -1880,16 +1881,33 @@ function toggleLbZone(key){
 // openLightboxMapping() is untouched). Namespaced with '__refine__:' so it can
 // never collide with those two. Gives the revision textarea much more room than
 // the old inline panel, and adds a Presets tab using the same edit-only pipeline.
-function openLightboxRefine(roomId, startTab){
+//
+// enhId (optional): when set, this is an Exterior enhancement revision
+// (Outdoor Living Staging / Landscape Enhancement / Golden Hour / Twilight)
+// rather than a single-image-per-room revision. Exterior rooms can carry
+// several enhancements at once (room.extSelections keyed by enh.id), unlike
+// Vacant Stage/Clean+Stage's single stagedBase64 — so the source image and
+// save target both need to branch on whether enhId is present. Brings
+// Exterior to the same lightbox experience Vacant Stage and Clean+Stage
+// already had, instead of the old inline textarea-in-the-panel pattern.
+function openLightboxRefine(roomId, startTab, enhId){
   const room=SESSION.rooms.find(r=>r.id===roomId);
-  if(!room||!room.stagedCleanBase64&&!room.stagedBase64)return;
+  if(enhId){
+    const es = room?.extSelections?.[enhId];
+    if(!room||!es||!es.base64)return;
+  } else {
+    if(!room||!room.stagedCleanBase64&&!room.stagedBase64)return;
+  }
   _lbRoomId='__refine__:'+roomId;
   _lbMode=null;
   _lbRefineTab = startTab || 'revise';
+  _lbEnhId = enhId || null;
   _lbPresetKey = room.presetKey || null;
 
-  document.getElementById('lightbox-img').src='data:image/jpeg;base64,'+(room.presetCleanBase64||room.stagedCleanBase64||room.stagedBase64);
-  document.getElementById('lightbox-title').textContent='Refine — '+room.roomName;
+  const srcBase64 = enhId ? room.extSelections[enhId].base64 : (room.presetCleanBase64||room.stagedCleanBase64||room.stagedBase64);
+  const enh = enhId ? EXT_ENHANCEMENTS.find(e=>e.id===enhId) : null;
+  document.getElementById('lightbox-img').src='data:image/jpeg;base64,'+srcBase64;
+  document.getElementById('lightbox-title').textContent='Refine — '+room.roomName+(enh?' · '+enh.label:'');
   document.getElementById('lightbox-sub').style.display='block';
   document.getElementById('lb-shotfocus-wrap').style.display='none';
   document.getElementById('lightbox-footer-save').style.display='inline-block';
@@ -1905,7 +1923,14 @@ function setRefineTab(tab){
   renderRefineBody();
 }
 function renderRefineTabs(){
-  const tabs=[{key:'revise',label:'Free Revision'},{key:'presets',label:'Presets'}];
+  // Presets tab is hidden for exterior enhancements — submitRefinePreset()/
+  // applyPreset() write to room.presetCleanBase64, which has no meaning in
+  // the exterior enhancement context (room.extSelections[enhId] is the
+  // relevant data there instead). Free Revision is the only supported
+  // action for exterior, matching what was actually requested.
+  const tabs=_lbEnhId
+    ? [{key:'revise',label:'Free Revision'}]
+    : [{key:'revise',label:'Free Revision'},{key:'presets',label:'Presets'}];
   document.getElementById('lb-mode-tabs').innerHTML=tabs.map(t=>
     `<div class="lb-mode-tab ${_lbRefineTab===t.key?'active':''}" onclick="setRefineTab('${t.key}')">${t.label}</div>`
   ).join('');
@@ -1919,7 +1944,10 @@ function renderRefineBody(){
 
   if(_lbRefineTab==='revise'){
     sub.textContent='Specify only what to change — everything else stays exactly the same.';
-    body.innerHTML=`<textarea class="lb-refine-textarea" id="lb-refine-textarea" placeholder='Revision — e.g. "warmer lighting, less furniture, match great room sofa"'>${room?.iterationNote||''}</textarea>`;
+    const enh = _lbEnhId ? EXT_ENHANCEMENTS.find(e=>e.id===_lbEnhId) : null;
+    const placeholder = enh ? 'Revision — e.g. "more dramatic lighting, add potted plants at entry"' : 'Revision — e.g. "warmer lighting, less furniture, match great room sofa"';
+    const existingNote = enh ? (room?.extSelections?.[_lbEnhId]?.iterationNote||'') : (room?.iterationNote||'');
+    body.innerHTML=`<textarea class="lb-refine-textarea" id="lb-refine-textarea" placeholder='${placeholder}'>${existingNote}</textarea>`;
     saveBtn.textContent='Re-Stage Draft →';
     saveBtn.setAttribute('onclick','submitRefineRevision()');
   } else {
@@ -1966,7 +1994,21 @@ async function submitRefineRevision(){
   if(!note){ showToast('Enter revision instructions first.','error'); return; }
   const room=SESSION.rooms.find(r=>r.id===roomId);
   if(!room){ showToast('Could not find this room.','error'); return; }
+  const enhId=_lbEnhId; // capture BEFORE closeLightbox() nulls _lbEnhId
   closeLightbox();
+  if(enhId){
+    // Exterior enhancement — iterateExtEnhancement() reads its note directly
+    // from the iter-ext-{roomId}-{enhId} textarea (not a parameter), so write
+    // the lightbox's note there first, same pattern as the legacyInput below.
+    const extInput=document.getElementById(`iter-ext-${roomId}-${enhId}`);
+    if(extInput){
+      extInput.value=note;
+      await iterateExtEnhancement(roomId, enhId);
+    } else {
+      showToast('Could not find revision target for this enhancement.','error');
+    }
+    return;
+  }
   const legacyInput=document.getElementById('iter-'+roomId);
   if(legacyInput){
     legacyInput.value=note;
@@ -1988,7 +2030,7 @@ async function submitRefinePreset(){
 }
 
 function setLightboxExample(el){document.getElementById('lightbox-input').value=el.textContent;}
-function closeLightbox(){document.getElementById('lightbox').classList.add('hidden');_lbRoomId=null;_lbMode=null;_lbZones=[];_lbFlexNote='';_lbSingleVal='';_lbPresetKey=null;_lbRefineTab='revise';}
+function closeLightbox(){document.getElementById('lightbox').classList.add('hidden');_lbRoomId=null;_lbMode=null;_lbZones=[];_lbFlexNote='';_lbSingleVal='';_lbPresetKey=null;_lbRefineTab='revise';_lbEnhId=null;}
 
 // Save handler for the mapping lightbox (Open Plan / Single Room / Exterior — no Shot Focus)
 function saveLbMapping(){
@@ -2141,14 +2183,17 @@ function renderRoomQueue(){
           </div></div>
           <div class="result-viewer" style="padding:12px;"><div class="result-pair">
             <div class="result-img-wrap"><img src="${orig.dataUrl}" onclick="openLightbox('${room.id}')" /><div class="result-img-badge">Original</div></div>
-            <div class="result-img-wrap"><img src="data:image/jpeg;base64,${es.base64}" /><div class="result-img-badge ext-enhanced">${enh.mlsTag}</div></div>
+            <div class="result-img-wrap"><img src="data:image/jpeg;base64,${es.base64}" onclick="openLightboxRefine('${room.id}','revise','${enh.id}')" title="Click to revise" /><div class="result-img-badge ext-enhanced">${enh.mlsTag}</div></div>
           </div></div>
           <div class="iterate-panel">
             <div style="flex:1;">
               <textarea class="iterate-input" id="iter-ext-${room.id}-${enh.id}" placeholder='Revision — e.g. "more dramatic lighting, add potted plants at entry"' rows="2"></textarea>
               <div class="iterate-hint">Specify only what to change — everything else stays the same.</div>
             </div>
-            <button class="btn btn-primary btn-sm" onclick="iterateExtEnhancement('${room.id}','${enh.id}')">Re-Stage</button>
+            <div style="display:flex;flex-direction:column;gap:6px;">
+              <button class="btn btn-primary btn-sm" onclick="iterateExtEnhancement('${room.id}','${enh.id}')">Re-Stage</button>
+              <button class="btn btn-outline btn-sm" onclick="openLightboxRefine('${room.id}','revise','${enh.id}')">Make Revision →</button>
+            </div>
           </div>
           ${renderFinalPanel(room.id,enh.id)}</div>`;
         if(es.status==='processing')return `<div class="ext-enhancement-item"><div class="ext-enhancement-header"><span class="ext-enhancement-name">${enh.icon} ${enh.label}</span><span style="font-size:0.75rem;color:var(--sky);display:flex;align-items:center;gap:6px;"><span class="spinner spinner-sky"></span> Generating draft...</span></div></div>`;

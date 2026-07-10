@@ -1,0 +1,1294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Smart Stage PRO Plus — Build a Video (demo)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink:#1a1714;--cream:#f7f4ef;--warm:#e8e0d4;--gold:#b8975a;--gold-light:#d4b87a;
+  --muted:#7a6f63;--danger:#c0392b;--success:#2d6a4f;--border:#ddd5c8;--sky:#3a7ca5;
+  --shadow:0 2px 20px rgba(26,23,20,0.08);
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);min-height:100vh;font-size:15px;line-height:1.6;}
+
+.stage{max-width:680px;margin:0 auto;padding:0 20px 100px;}
+
+.demo-banner{background:var(--ink);color:var(--warm);font-size:0.7rem;letter-spacing:0.08em;text-transform:uppercase;text-align:center;padding:8px 12px;}
+.demo-banner b{color:var(--gold-light);}
+
+.app-header{display:flex;align-items:baseline;justify-content:space-between;padding:24px 0 18px;border-bottom:1px solid var(--border);margin-bottom:20px;}
+.app-title{font-family:'Cormorant Garamond',serif;font-size:1.5rem;font-weight:500;letter-spacing:0.01em;}
+.app-title em{color:var(--gold);font-style:normal;}
+.balance-chip{font-size:0.78rem;color:var(--muted);background:#fff;border:1px solid var(--border);border-radius:20px;padding:5px 14px;white-space:nowrap;}
+.balance-chip b{color:var(--ink);font-weight:600;}
+
+.steps{display:flex;gap:6px;margin-bottom:22px;}
+.step-pill{flex:1;text-align:center;font-size:0.68rem;text-transform:uppercase;letter-spacing:0.06em;font-weight:600;padding:7px 4px;border-radius:14px;background:var(--warm);color:var(--muted);}
+.step-pill.active{background:var(--ink);color:var(--cream);}
+.step-pill.done{background:#eaf3ee;color:var(--success);}
+
+.panel{background:#fff;border:1px solid var(--border);border-radius:6px;box-shadow:var(--shadow);overflow:hidden;margin-bottom:18px;}
+.panel-pad{padding:22px;}
+
+.eyebrow{font-size:0.68rem;text-transform:uppercase;letter-spacing:0.12em;color:var(--gold);font-weight:600;margin-bottom:6px;}
+.panel-title{font-family:'Cormorant Garamond',serif;font-size:1.35rem;font-weight:500;margin-bottom:4px;}
+.panel-sub{font-size:0.85rem;color:var(--muted);}
+
+.upload-zone{border:2px dashed var(--border);border-radius:4px;padding:36px 20px;text-align:center;cursor:pointer;transition:all 0.2s;background:var(--cream);margin-top:14px;position:relative;}
+.upload-zone:hover,.upload-zone.drag-over{border-color:var(--gold);background:#faf7f2;}
+.upload-zone input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;}
+.upload-zone-text{font-family:'Cormorant Garamond',serif;font-size:1.1rem;color:var(--muted);margin-bottom:3px;}
+.upload-zone-hint{font-size:0.75rem;color:var(--muted);}
+.upload-zone-icon{font-size:1.8rem;margin-bottom:8px;opacity:0.6;}
+
+.thumb-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:12px;margin-top:16px;}
+.thumb-card{border-radius:4px;overflow:hidden;border:1px solid var(--border);background:#fff;}
+.thumb-preview{position:relative;aspect-ratio:4/3;background:var(--warm);display:flex;align-items:center;justify-content:center;font-size:1.8rem;overflow:hidden;}
+.thumb-preview img{width:100%;height:100%;object-fit:cover;display:block;}
+.thumb-remove{position:absolute;top:5px;right:5px;width:20px;height:20px;border-radius:50%;background:rgba(26,23,20,0.7);color:#fff;border:none;font-size:0.7rem;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:2;}
+.thumb-untagged-flag{position:absolute;bottom:5px;left:5px;background:#fbeceA;color:var(--danger);font-size:0.62rem;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;padding:2px 7px;border-radius:8px;}
+.thumb-fields{padding:8px;border-top:1px solid var(--border);}
+.thumb-room-select{width:100%;border:1px solid var(--border);border-radius:3px;padding:5px 6px;font-family:'DM Sans',sans-serif;font-size:0.74rem;color:var(--ink);background:#fff;margin-bottom:6px;}
+.thumb-other-input{width:100%;border:1px solid var(--gold);border-radius:3px;padding:5px 6px;font-family:'DM Sans',sans-serif;font-size:0.74rem;color:var(--ink);background:#fff;margin-bottom:6px;}
+.thumb-other-input::placeholder{color:var(--muted);}
+.thumb-io-toggle{display:flex;gap:4px;}
+.thumb-io-btn{flex:1;padding:4px 4px;border:1px solid var(--border);background:#fff;border-radius:10px;font-size:0.64rem;font-weight:700;letter-spacing:0.03em;text-transform:uppercase;color:var(--muted);cursor:pointer;text-align:center;}
+.thumb-io-btn.active{background:var(--ink);color:var(--cream);border-color:var(--ink);}
+.upload-count-bar{display:flex;justify-content:space-between;align-items:center;padding:10px 0 0;font-size:0.78rem;color:var(--muted);}
+.upload-count-bar.warn{color:var(--danger);}
+
+.frame-card{border-top:1px solid var(--border);padding:16px 22px;display:flex;gap:14px;align-items:flex-start;}
+.frame-card:first-of-type{border-top:1px solid var(--border);}
+.drag-handle{cursor:grab;color:var(--muted);font-size:1rem;padding-top:4px;user-select:none;}
+.drag-handle:active{cursor:grabbing;}
+.frame-thumb-sm{width:56px;height:42px;border-radius:3px;background:var(--warm);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:1.2rem;overflow:hidden;}
+.frame-thumb-sm img{width:100%;height:100%;object-fit:cover;display:block;}
+.frame-main{flex:1;min-width:0;}
+.frame-order-num{font-family:'Cormorant Garamond',serif;color:var(--gold);font-weight:600;font-size:0.95rem;margin-right:6px;}
+
+.room-select{width:100%;border:1px solid var(--border);border-radius:3px;padding:7px 10px;font-family:'DM Sans',sans-serif;font-size:0.82rem;color:var(--ink);background:#fff;margin-bottom:8px;}
+.room-select:focus{outline:none;border-color:var(--gold);}
+
+.motion-toggle{display:flex;gap:6px;margin-bottom:8px;}
+.motion-btn{flex:1;padding:7px 10px;border:1px solid var(--border);background:#fff;border-radius:20px;font-size:0.72rem;font-weight:600;letter-spacing:0.02em;color:var(--muted);cursor:pointer;transition:all 0.15s;text-align:center;}
+.motion-btn.active.kenburns{background:var(--warm);color:var(--ink);border-color:var(--warm);}
+.motion-btn.active.kling{background:var(--ink);color:var(--gold-light);border-color:var(--ink);}
+
+.preset-select{width:100%;border:1px solid var(--border);border-radius:3px;padding:7px 10px;font-family:'DM Sans',sans-serif;font-size:0.78rem;color:var(--ink);background:#fff;}
+.preset-select:focus{outline:none;border-color:var(--gold);}
+.preset-desc{font-size:0.72rem;color:var(--muted);margin-top:5px;line-height:1.45;}
+.preset-disabled-note{font-size:0.72rem;color:var(--muted);margin-top:5px;line-height:1.45;font-style:italic;}
+
+.before-after-chip{display:inline-flex;align-items:center;gap:5px;font-size:0.68rem;background:#eaf3ee;color:var(--success);border-radius:10px;padding:3px 9px;margin-top:6px;font-weight:600;}
+
+.count-bar{display:flex;justify-content:space-between;align-items:center;padding:14px 22px;background:var(--cream);border-top:1px solid var(--border);font-size:0.8rem;color:var(--muted);}
+.count-bar b{color:var(--ink);}
+
+.format-row{display:flex;gap:8px;padding:16px 22px 0;}
+.format-btn{flex:1;padding:9px 12px;border:1px solid var(--border);background:#fff;border-radius:20px;font-size:0.78rem;font-weight:600;color:var(--muted);cursor:pointer;text-align:center;}
+.format-btn.active{background:var(--ink);color:var(--cream);border-color:var(--ink);}
+.format-btn:disabled{opacity:0.4;cursor:not-allowed;}
+.format-note{font-size:0.72rem;color:var(--muted);padding:8px 22px 18px;line-height:1.5;}
+
+.action-row{display:flex;gap:10px;padding:0 22px 22px;}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:11px 18px;border-radius:3px;font-family:'DM Sans',sans-serif;font-size:0.82rem;font-weight:600;letter-spacing:0.04em;cursor:pointer;border:none;transition:all 0.15s;text-transform:uppercase;flex:1;}
+.btn-primary{background:var(--gold);color:var(--ink);}
+.btn-primary:hover{background:var(--gold-light);}
+.btn-primary:disabled{background:var(--border);color:var(--muted);cursor:not-allowed;}
+.btn-ghost{background:transparent;color:var(--muted);border:1px solid var(--border);}
+.btn-ghost:hover{border-color:var(--ink);color:var(--ink);}
+
+.divider-label{font-size:0.7rem;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);padding:14px 22px 6px;border-top:1px solid var(--border);}
+.frame-row{display:flex;align-items:center;gap:12px;padding:11px 22px;border-top:1px solid var(--border);}
+.frame-name{font-size:0.88rem;font-weight:500;}
+.frame-tag{font-size:0.72rem;color:var(--muted);}
+.frame-badge{font-size:0.66rem;text-transform:uppercase;letter-spacing:0.06em;font-weight:700;padding:3px 8px;border-radius:10px;white-space:nowrap;}
+.badge-included{background:#eaf3ee;color:var(--success);}
+.badge-billable{background:#fbeceA;color:var(--danger);}
+.badge-kenburns{background:var(--warm);color:var(--muted);}
+.cost-table{padding:4px 22px 18px;}
+.cost-line{display:flex;justify-content:space-between;align-items:baseline;padding:7px 0;font-size:0.88rem;}
+.cost-line.muted{color:var(--muted);font-size:0.82rem;}
+.cost-line .val{font-weight:600;}
+.cost-total{display:flex;justify-content:space-between;align-items:baseline;padding:14px 0 4px;border-top:1px solid var(--border);margin-top:6px;}
+.cost-total .label{font-family:'Cormorant Garamond',serif;font-size:1.05rem;}
+.cost-total .val{font-family:'Cormorant Garamond',serif;font-size:1.6rem;color:var(--gold);font-weight:600;}
+.balance-line{display:flex;justify-content:space-between;font-size:0.8rem;color:var(--muted);padding:10px 0 0;}
+.balance-line .after{font-weight:600;color:var(--ink);}
+.balance-line .after.negative{color:var(--danger);}
+.warn-box{margin:0 22px 18px;background:#fff8e7;border:1px solid #f0d080;border-left:3px solid var(--gold);border-radius:3px;padding:12px 14px;font-size:0.82rem;line-height:1.5;color:#5c4a1f;}
+.warn-box strong{display:block;font-size:0.7rem;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:5px;}
+.consent-row{display:flex;align-items:flex-start;gap:10px;margin:0 22px 18px;padding:12px 14px;background:var(--cream);border:1px solid var(--border);border-radius:4px;}
+.consent-row input{margin-top:3px;accent-color:var(--gold);width:15px;height:15px;flex-shrink:0;cursor:pointer;}
+.consent-row label{font-size:0.8rem;color:var(--ink);cursor:pointer;line-height:1.5;}
+.quota-pill{font-size:0.72rem;color:var(--muted);text-align:center;padding:10px 22px 0;}
+.result-center{text-align:center;padding:36px 22px;}
+.result-icon{font-size:2rem;margin-bottom:8px;}
+.result-title{font-family:'Cormorant Garamond',serif;font-size:1.3rem;margin-bottom:6px;}
+.result-body{font-size:0.85rem;color:var(--muted);line-height:1.6;}
+
+.hidden{display:none;}
+
+.frame-thumb-clickable{cursor:pointer;}
+.preset-row{display:flex;gap:6px;align-items:stretch;}
+.preset-row .preset-select{flex:1;}
+.preview-btn{flex-shrink:0;background:var(--ink);color:var(--gold-light);border:none;border-radius:3px;padding:7px 12px;font-size:0.7rem;font-weight:600;letter-spacing:0.03em;cursor:pointer;white-space:nowrap;}
+.preview-btn:hover{background:#2a241e;}
+
+.overlay{position:fixed;inset:0;background:rgba(26,23,20,0.86);z-index:1000;display:flex;align-items:center;justify-content:center;padding:24px;}
+.overlay.hidden{display:none;}
+.lightbox-box{background:#fff;border-radius:6px;max-width:560px;width:100%;max-height:90vh;overflow-y:auto;}
+.lightbox-img-wrap{background:var(--ink);display:flex;align-items:center;justify-content:center;max-height:60vh;overflow:hidden;}
+.lightbox-img-wrap img{width:100%;max-height:60vh;object-fit:contain;display:block;}
+.lightbox-close{position:absolute;top:14px;right:14px;width:32px;height:32px;border-radius:50%;background:rgba(26,23,20,0.7);color:#fff;border:none;font-size:1rem;cursor:pointer;z-index:2;}
+.lightbox-body{padding:18px 20px;position:relative;}
+.lightbox-body .panel-sub{margin-bottom:14px;}
+
+.preview-box{background:#fff;border-radius:6px;max-width:420px;width:100%;text-align:center;padding:0;overflow:hidden;}
+.preview-stage{background:var(--ink);aspect-ratio:16/9;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:var(--gold-light);position:relative;}
+.preview-stage .play-icon{font-size:2.2rem;opacity:0.7;}
+.preview-stage .coming-soon{font-size:0.7rem;text-transform:uppercase;letter-spacing:0.1em;color:var(--warm);}
+.preview-info{padding:18px 20px;text-align:left;}
+.preview-info .panel-title{font-size:1.2rem;margin-bottom:6px;}
+
+.gallery-loading{font-size:0.82rem;color:var(--muted);padding:16px 0;}
+.photo-gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin-top:14px;}
+.gallery-card{position:relative;border-radius:5px;overflow:hidden;border:2px solid var(--border);cursor:pointer;background:#fff;transition:border-color 0.15s,box-shadow 0.15s;}
+.gallery-card:hover{border-color:var(--gold-light);}
+.gallery-card.selected{border-color:var(--gold);box-shadow:0 0 0 2px var(--gold-light);}
+.gallery-thumb{aspect-ratio:4/3;background:var(--warm);overflow:hidden;}
+.gallery-thumb img{width:100%;height:100%;object-fit:cover;display:block;}
+.gallery-select-check{position:absolute;top:6px;right:6px;width:24px;height:24px;border-radius:50%;background:rgba(255,255,255,0.92);border:2px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:0.8rem;color:transparent;transition:all 0.15s;}
+.gallery-card.selected .gallery-select-check{background:var(--gold);border-color:var(--gold);color:var(--ink);}
+.gallery-pair-badge{position:absolute;top:6px;left:6px;background:rgba(45,106,79,0.92);color:#fff;font-size:0.62rem;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;padding:3px 8px;border-radius:9px;display:flex;align-items:center;gap:3px;}
+.gallery-info{padding:8px 9px;}
+.gallery-room{font-size:0.8rem;font-weight:600;color:var(--ink);}
+.gallery-source{font-size:0.7rem;color:var(--muted);}
+.upload-zone-secondary{padding:22px 16px;margin-top:0;}
+.upload-zone-secondary .upload-zone-icon{font-size:1.4rem;margin-bottom:5px;}
+.upload-zone-secondary .upload-zone-text{font-size:0.95rem;}
+
+.order-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:16px 22px;}
+.order-card{border:1px solid var(--border);border-radius:4px;overflow:hidden;background:#fff;cursor:grab;transition:opacity 0.15s;}
+.order-card:active{cursor:grabbing;}
+.order-card.drag-ghost{opacity:0.4;}
+.order-thumb{position:relative;aspect-ratio:4/3;background:var(--warm);overflow:hidden;}
+.order-thumb img{width:100%;height:100%;object-fit:cover;display:block;}
+.order-num-badge{position:absolute;top:5px;left:5px;background:rgba(26,23,20,0.78);color:var(--gold-light);font-family:'Cormorant Garamond',serif;font-weight:600;font-size:0.85rem;width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;}
+.order-info{padding:7px 8px;}
+.order-room{font-size:0.74rem;font-weight:600;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.order-motion{font-size:0.66rem;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+@media (max-width:480px){.order-grid{grid-template-columns:repeat(2,1fr);}}
+</style>
+</head>
+<body>
+
+<div class="demo-banner">LIVE — real photos, real Images charged, real renders. Not a demo.</div>
+
+<div class="stage">
+
+  <div class="app-header">
+    <div class="app-title">Smart Stage <em>PRO Plus</em></div>
+    <div class="balance-chip">Balance: <b id="balanceDisplay">&hellip;</b> Images</div>
+  </div>
+
+  <div class="steps">
+    <div class="step-pill" id="stepPill1">1. Photos</div>
+    <div class="step-pill" id="stepPill2">2. Motion</div>
+    <div class="step-pill" id="stepPill3">3. Order &amp; format</div>
+    <div class="step-pill" id="stepPill4">4. Confirm</div>
+  </div>
+
+  <div class="panel" id="stepUpload">
+    <div class="panel-pad">
+      <div class="eyebrow">Step 1</div>
+      <div class="panel-title">Choose your photos</div>
+      <div class="panel-sub">Click any staged photo from this listing to add it. Rooms with a known before/after pair are marked automatically — nothing to select or upload for those.</div>
+      <div class="gallery-loading" id="galleryLoading">Loading staged photos for this listing&hellip;</div>
+      <div class="photo-gallery" id="photoGallery"></div>
+    </div>
+    <div class="panel-pad" style="padding-top:4px;border-top:1px solid var(--border);">
+      <div class="eyebrow" style="margin-top:14px;">Don't see a room?</div>
+      <div class="panel-sub" style="margin-bottom:10px;">Add your own professional photography — for photos that were never run through staging, so there's no before/after pair on file.</div>
+      <div class="upload-zone upload-zone-secondary" id="uploadZone">
+        <input type="file" id="fileInput" accept="image/*" multiple>
+        <div class="upload-zone-icon">&#128193;</div>
+        <div class="upload-zone-text">Drop photos here or click to browse</div>
+        <div class="upload-zone-hint">From your device — these are tagged "Professional Photography," no Kling before/after option.</div>
+      </div>
+    </div>
+    <div class="thumb-grid" id="thumbGrid"></div>
+    <div class="panel-pad" style="padding-top:0;">
+      <div class="upload-count-bar" id="uploadCountBar"></div>
+    </div>
+    <div class="action-row">
+      <button class="btn btn-ghost" onclick="resetDemo()">Reset</button>
+      <button class="btn btn-primary" id="toStep2Btn" onclick="goToStep(2)" disabled>Next — Assign Motion</button>
+    </div>
+  </div>
+
+  <div class="panel hidden" id="stepMotion">
+    <div class="panel-pad" style="padding-bottom:0;">
+      <div class="eyebrow">Step 2</div>
+      <div class="panel-title">Assign room &amp; motion</div>
+      <div class="panel-sub">Tag each photo's room, then choose Ken Burns or AI Motion (Kling). First 3 Kling frames per video are included on the first generation.</div>
+    </div>
+    <div id="motionList"></div>
+    <div class="count-bar" id="klingCountBar"></div>
+    <div class="action-row" style="padding-top:18px;">
+      <button class="btn btn-ghost" onclick="goToStep(1)">Back</button>
+      <button class="btn btn-primary" onclick="goToStep(3)">Next — Order &amp; Format</button>
+    </div>
+  </div>
+
+  <div class="panel hidden" id="stepOrder">
+    <div class="panel-pad" style="padding-bottom:0;">
+      <div class="eyebrow">Step 3</div>
+      <div class="panel-title">Put them in order</div>
+      <div class="panel-sub">Drag rooms into the sequence you want them to appear.</div>
+    </div>
+    <div class="order-grid" id="orderList"></div>
+    <div class="divider-label">Output format</div>
+    <div class="format-row" id="formatRow"></div>
+    <div class="format-note" id="formatNote"></div>
+    <div class="action-row">
+      <button class="btn btn-ghost" onclick="goToStep(2)">Back</button>
+      <button class="btn btn-primary" onclick="goToStep(4)">Review Cost</button>
+    </div>
+  </div>
+
+  <div class="panel hidden" id="stepConfirm">
+    <div class="panel-pad">
+      <div class="eyebrow" id="genLabel">First generation</div>
+      <div class="panel-title">Review before you generate</div>
+      <div class="panel-sub" id="panelSub"></div>
+    </div>
+    <div id="frameList"></div>
+    <div class="divider-label">Cost breakdown</div>
+    <div class="cost-table" id="costTable"></div>
+    <div id="warnSlot"></div>
+    <div id="consentSlot"></div>
+    <div class="action-row" id="actionRow"></div>
+    <div class="quota-pill" id="quotaPill"></div>
+  </div>
+
+  <div class="panel hidden" id="resultPanel">
+    <div class="result-center" id="resultContent"></div>
+  </div>
+
+</div>
+
+<!-- LIGHTBOX: full-size photo with room/motion controls reachable inline -->
+<div class="overlay hidden" id="lightboxOverlay" onclick="if(event.target===this) closeLightbox()">
+  <div class="lightbox-box">
+    <div class="lightbox-img-wrap"><img id="lightboxImg" src="" alt=""></div>
+    <div class="lightbox-body">
+      <button class="lightbox-close" onclick="closeLightbox()">&times;</button>
+      <div id="lightboxControls"></div>
+    </div>
+  </div>
+</div>
+
+<!-- MOTION PREVIEW: placeholder until real stock clips are produced -->
+<div class="overlay hidden" id="previewOverlay" onclick="if(event.target===this) closePreview()">
+  <div class="preview-box">
+    <div class="preview-stage">
+      <button class="lightbox-close" onclick="closePreview()">&times;</button>
+      <div class="play-icon">&#9654;</div>
+      <div class="coming-soon">Video coming soon</div>
+    </div>
+    <div class="preview-info" id="previewInfo"></div>
+  </div>
+</div>
+
+<script>
+const KEN_BURNS_PRESETS = {
+  auto: { label: "Auto", desc: "We pick a sensible movement based on the room type." },
+  push_in: { label: "Push In", desc: "Slow dolly toward a feature wall, front door, or bed." },
+  pull_back: { label: "Pull Back", desc: "Zoom-out reveal — approximates a drone boom-up feel." },
+  pan_left: { label: "Pan Left", desc: "Tracking left, good for flowing into an adjacent room." },
+  pan_right: { label: "Pan Right", desc: "Tracking right — favors countertops and vanities." },
+  tilt_up: { label: "Tilt Up", desc: "Rising reveal — ceilings, beams, chandeliers." },
+  tilt_down: { label: "Tilt Down", desc: "Flooring or tile reveal." },
+  drift: { label: "Drift", desc: "Slow diagonal dolly, corner to corner." },
+  float: { label: "Float", desc: "Gentle sine-wave breathing motion — wide, MLS-safe." },
+  static: { label: "Static", desc: "No motion — maximum clarity for a key MLS shot." },
+};
+
+const KLING_PRESETS = {
+  orbit_arc: { label: "Orbit / Arc", desc: "Slow cinematic orbit around a central feature — a kitchen island, dining table, or pool.", eligibility: "single_or_pair" },
+  rack_focus: { label: "Rack Focus", desc: "Foreground detail (hardware, a vignette) racks into sharp focus on the room behind it.", eligibility: "single_or_pair" },
+  fireplace_flicker: { label: "Fireplace Flicker", desc: "Locked-off shot with the fireplace flame flickering naturally — real motion, not a still.", eligibility: "single_or_pair" },
+  drone_boom_up: { label: "Drone Boom-Up", desc: "Rising, slightly-forward reveal of the exterior and surrounding landscaping.", eligibility: "exterior_only" },
+  water_motion: { label: "Water Motion", desc: "Gentle, realistic water movement across a pool or fountain.", eligibility: "exterior_only" },
+  day_to_twilight: { label: "Day → Twilight", desc: "Smooth transition from daylight to dusk — interior, porch, garage, and landscape lighting gradually turn on as the sky deepens to blue-hour with a sunset glow.", eligibility: "pair_required_exterior" },
+  twilight_to_day: { label: "Twilight → Day", desc: "The reverse — dusk gradually brightens to clear daytime, all exterior and interior lighting turning off as the sun comes up.", eligibility: "pair_required_exterior" },
+  day_to_twilight_timelapse: { label: "Day → Twilight (Time-Lapse)", desc: "Same day-to-dusk transformation as Day → Twilight, but compressed into a rapid time-lapse with streaking clouds — lights switching on in sequence as if hours pass in seconds.", eligibility: "pair_required_exterior" },
+  twilight_to_day_timelapse: { label: "Twilight → Day (Time-Lapse)", desc: "The reverse time-lapse — dusk rapidly brightens to day, streaking clouds, all lighting switching off in sequence.", eligibility: "pair_required_exterior" },
+  twilight_night_day_timelapse: { label: "Twilight → Night → Day (Time-Lapse)", desc: "The most complete cycle: dusk deepens into full night, interior lights switch off first while exterior/landscape lighting stays on through the night on a timer, then dawn breaks and everything turns off. Longest and most complex of the time-lapse options — give it extra duration.", eligibility: "pair_required_exterior" },
+
+  // ── New Motion Library (July 2026) — added because 3+ Kling movements per
+  // video is now the actual product decision (Ken Burns continuation read as
+  // "the image moving, not the camera" in real footage testing), so a video
+  // with multiple rooms needs real preset variety to avoid every room
+  // reading as the same 2-3 moves repeated.
+  cinematic_push: { label: "Cinematic Push", desc: "Kling-quality dolly push toward the room's focal point — deeper, more natural depth-of-field than Ken Burns push_in.", eligibility: "single_or_pair" },
+  luxury_drift: { label: "Luxury Drift", desc: "Slow, elegant lateral drift across the room with real parallax between foreground and background.", eligibility: "single_or_pair" },
+  floating_camera_drift: { label: "Floating Camera Drift", desc: "Gentle floating/breathing motion, as if suspended weightlessly in the room — subtler than a directional pan.", eligibility: "single_or_pair" },
+  parallax_push: { label: "Parallax Push", desc: "Push-in with foreground elements moving faster than background — real dimensional depth, not just zoom.", eligibility: "single_or_pair" },
+  architectural_glide: { label: "Architectural Glide", desc: "Smooth lateral glide along a hallway or open-plan sightline, emphasizing flow between spaces.", eligibility: "single_or_pair" },
+  crane_up: { label: "Crane Up", desc: "Rising, slightly-tilting reveal of the upper room — ceiling, chandelier, fan, high windows. The interior counterpart to Drone Boom-Up.", eligibility: "single_or_pair" },
+  crane_down: { label: "Crane Down", desc: "Descending, slightly-tilting reveal of the lower room — flooring, tilework, a rug.", eligibility: "single_or_pair" },
+  room_reveal: { label: "Room Reveal", desc: "Slow pull-back widening to show more of the already-visible room. Single-image use requires an exterior room for now — for interior, use with a real before/after pair (Kling has two known images to work from rather than inferring the wider view from one).", eligibility: "exterior_or_pair" },
+
+  // ── Pending your Playground verification (per your own flag on these
+  // three) — single-image interior use is intentionally not offered yet,
+  // since each risks inventing an element (fireplace, water, unphotographed
+  // wall/floor) not actually present in the source photo. Available now only
+  // with a real before/after pair, where Kling has two known images to
+  // anchor to instead of inferring from one.
+  living_room_ambient: { label: "Living Room Ambient (pending verification)", desc: "Subtle ambient motion — flame flicker, curtain sway, plant movement — but only for elements already visible in the photo. Needs a Playground check before single-image interior use; available now only with a before/after pair.", eligibility: "pair_required" },
+  corner_to_corner_drift: { label: "Corner-to-Corner Drift (pending verification)", desc: "Diagonal drift across the room, most useful in larger/open spaces. Needs a Playground check in a small room specifically before single-image interior use; available now only with a before/after pair.", eligibility: "pair_required" },
+};
+
+// NOTE: vacant_staged_pair was an earlier placeholder name used before the
+// real klingMotion.js preset table was directly verified this session —
+// it does not exist in the actual codebase and has been removed. The real
+// "before/after hero shot" behavior in the live product is NOT a named
+// preset at all — it's triggered automatically whenever isBeforeAfter is
+// true and roomType is interior (see klingMotion.js's enforceScopeRules:
+// hasKnownPair alone satisfies the scope check, no preset name required).
+// The "before/after pair" checkbox below already sets isBeforeAfter
+// correctly — no separate dropdown entry was ever needed for that case.
+
+// Room TYPE is purely a label for the user's own reference now — it no
+// longer drives Kling eligibility at all. That's controlled by the
+// separate, explicit isExterior toggle below, set per-photo by the user.
+// "Other" reveals a freeform text input instead of using this fixed name.
+const ROOM_TYPES = ["Kitchen", "Living Room", "Family Room", "Primary Bedroom", "Bedroom", "Dining Room", "Bathroom", "Office", "Loft", "Open Plan", "Flex Room", "Backyard / Pool", "Front Yard", "Other"];
+
+// Distinct icon per room type — fixed the earlier bug where Living Room
+// and Primary Bedroom shared the same bed icon by mistake.
+const ROOM_ICONS = {
+  "Kitchen": "&#127858;", "Living Room": "&#128715;", "Primary Bedroom": "&#128719;",
+  "Bedroom": "&#128719;", "Dining Room": "&#127869;", "Bathroom": "&#128703;",
+  "Office": "&#128188;", "Backyard / Pool": "&#127958;", "Front Yard": "&#127968;",
+  "Other": "&#128247;",
+};
+const UNTAGGED_ICON = "&#128247;"; // generic camera — shown until a room is picked
+
+const MAX_FRAMES = 20;
+const KLING_INCLUDED_FRAMES_FIRST_GEN = 3;
+const KLING_IMAGE_COST_PER_FRAME = 5;
+
+// ── REAL BACKEND WIRING (July 10, 2026) ──────────────────────────────────
+// This page is launched with real identifiers in the URL — from the main
+// Smart Stage PRO tool, or eventually the compliance-page picker. There is
+// deliberately no manual-entry fallback UI for these: a user with no
+// legitimate path to a real listingId/userId has no legitimate reason to
+// be on this page at all.
+const API_BASE = "/.netlify/functions/video-job";
+const urlParams = new URLSearchParams(window.location.search);
+const REAL_LISTING_ID = urlParams.get("listingId");
+const REAL_USER_ID    = urlParams.get("userId");
+const REAL_PROJECT_ID = urlParams.get("projectId"); // optional — createVideoJob resolves it from the listing if omitted
+
+// The demo's room labels are for the AGENT's own reference/readability.
+// The real backend's roomType vocabulary (AUTO_PRESETS / enforceScopeRules)
+// is a small fixed set — this maps one to the other. isExterior (an
+// explicit per-photo toggle, not inferred from this label) always wins for
+// "exterior" regardless of what's mapped here — see buildRealFrame() below.
+const ROOM_TYPE_TO_BACKEND = {
+  "Kitchen": "kitchen",
+  "Living Room": "living",
+  "Family Room": "living",
+  "Primary Bedroom": "bedroom",
+  "Bedroom": "bedroom",
+  "Dining Room": "dining",
+  "Bathroom": "bathroom",
+  "Office": "flex",
+  "Loft": "flex",
+  "Open Plan": "openplan",
+  "Flex Room": "flex",
+  "Backyard / Pool": "exterior",
+  "Front Yard": "exterior",
+  "Other": "default",
+};
+
+// Converts one demo `frame` object into exactly the shape video-job.js's
+// action=quote/action=create expect. Single source of truth so the quote
+// call and the create call can never quietly drift apart from each other.
+function buildRealFrame(f) {
+  const roomType = f.isExterior ? "exterior" : (ROOM_TYPE_TO_BACKEND[f.room] || "default");
+  const useAiMotion = f.motion === "kling";
+  return {
+    imageUrl:      f.realUrl || f.dataUrl, // realUrl is the uploaded/Cloudinary URL once available — see uploadAsIsPhoto()
+    beforeUrl:     f.isBeforeAfter ? f.beforeUrl : undefined,
+    isBeforeAfter: !!f.isBeforeAfter,
+    useAiMotion,
+    roomType,
+    motionPreset:  useAiMotion ? f.preset : (f.kenBurnsPreset || "auto"),
+    isOpenPlan:    f.room === "Open Plan",
+    // durationSeconds intentionally omitted — motionPresets.js's
+    // resolveDuration() already has real per-roomType defaults; there is
+    // no duration control in this UI, so let the backend's own sensible
+    // default apply rather than hardcoding a guess here.
+  };
+}
+
+let balance = null; // null = not yet loaded — real value comes from action=balance
+let generationCount = 1; // 1 = first generation; handleIterate() bumps this on every regenerate
+let frames = [];
+let frameIdCounter = 0;
+let draggedId = null;
+
+// Populated by loadGallery() from the real action=frames response. Kept as
+// module-level state (not local to loadGallery) since toggleGalleryItem()/
+// renderGallery() both need to look items up by id after the fetch resolves.
+let galleryStagedFrames = [];
+let galleryExternalFrames = [];
+
+// Selection state for the gallery — separate from `frames` (the final,
+// ordered, fully-configured list) since gallery cards are just "available
+// to add," not yet part of the video until clicked.
+const gallerySelectedIds = new Set();
+
+async function loadGallery() {
+  if (!REAL_LISTING_ID) {
+    document.getElementById("galleryLoading").textContent =
+      "No listing selected — this page needs a real ?listingId= in the URL.";
+    return;
+  }
+  try {
+    const res = await fetch(`${API_BASE}?action=frames&listingId=${encodeURIComponent(REAL_LISTING_ID)}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to load photos");
+
+    // Map the real action=frames response shape (id, mode, originalUrl,
+    // stagedUrl / imageUrl, roomType, sourceLabel) onto the fields
+    // renderGallery()/toggleGalleryItem() already expect (roomLabel).
+    galleryStagedFrames = (data.stagedFrames || []).map(f => ({ ...f, roomLabel: humanizeRoomType(f.mode, f.roomType) }));
+    galleryExternalFrames = (data.externalFrames || []).map(f => ({ ...f, roomLabel: f.roomType || f.sourceLabel || "Photo" }));
+
+    document.getElementById("galleryLoading").style.display = "none";
+    renderGallery();
+  } catch (err) {
+    document.getElementById("galleryLoading").textContent = `Couldn't load photos for this listing: ${err.message}`;
+  }
+}
+
+// action=frames doesn't return a pre-built display label — it returns
+// mode (vacant_stage / clean_and_stage / exterior_enhancement / declutter)
+// and whatever roomType was tagged in the staging tool. This turns that
+// into something readable for the gallery card without needing a new
+// backend field just for display text.
+function humanizeRoomType(mode, roomType) {
+  if (roomType) return roomType.charAt(0).toUpperCase() + roomType.slice(1);
+  const MODE_LABELS = {
+    vacant_stage: "Staged Room", clean_and_stage: "Clean & Staged Room",
+    exterior_enhancement: "Exterior Enhancement", declutter: "Decluttered Room",
+  };
+  return MODE_LABELS[mode] || "Room";
+}
+
+function renderGallery() {
+  const gallery = document.getElementById("photoGallery");
+  const allGalleryItems = [
+    ...galleryStagedFrames.map(f => ({ ...f, hasPair: !!f.originalUrl })),
+    ...galleryExternalFrames.map(f => ({ ...f, hasPair: false })),
+  ];
+
+  if (allGalleryItems.length === 0) {
+    gallery.innerHTML = `<div class="gallery-loading">No staged photos found for this listing yet — use the upload area below to add photos directly.</div>`;
+    return;
+  }
+
+  gallery.innerHTML = allGalleryItems.map(item => {
+    const isSelected = gallerySelectedIds.has(item.id);
+    const thumbUrl = item.source === "staged" ? item.stagedUrl : item.imageUrl;
+    return `
+    <div class="gallery-card ${isSelected ? 'selected' : ''}" onclick="toggleGalleryItem('${item.id}')">
+      <div class="gallery-thumb"><img src="${thumbUrl}" alt="${item.roomLabel}" loading="lazy"></div>
+      ${item.hasPair ? `<div class="gallery-pair-badge">&#10003; Pair available</div>` : ""}
+      <div class="gallery-select-check">&#10003;</div>
+      <div class="gallery-info">
+        <div class="gallery-room">${item.roomLabel}</div>
+        <div class="gallery-source">${item.source === "staged" ? "Virtually Staged" : "Professional Photography"}</div>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+function toggleGalleryItem(itemId) {
+  const item = [...galleryStagedFrames, ...galleryExternalFrames].find(f => f.id === itemId);
+  if (!item) return;
+
+  if (gallerySelectedIds.has(itemId)) {
+    // Deselect — remove the corresponding frame
+    gallerySelectedIds.delete(itemId);
+    frames = frames.filter(f => f.galleryId !== itemId);
+  } else {
+    if (frames.length >= MAX_FRAMES) { alert("20 photo max per video reached."); return; }
+    gallerySelectedIds.add(itemId);
+    const isStaged = item.source === "staged";
+    frames.push({
+      id: ++frameIdCounter,
+      galleryId: itemId, // links back to the gallery item for deselect/toggle
+      fileName: item.roomLabel,
+      dataUrl: isStaged ? item.stagedUrl : item.imageUrl,
+      realUrl: isStaged ? item.stagedUrl : item.imageUrl, // already a real, hosted Cloudinary URL — no upload step needed
+      room: item.roomLabel,      // already tagged — came from PRO's real room data, no re-tagging needed
+      roomOther: "",
+      isExterior: (item.mode || "").startsWith("exterior") || /exterior|yard|landscap/i.test(item.roomLabel),
+      motion: "kenburns",
+      kenBurnsPreset: "auto",
+      preset: null,
+      isBeforeAfter: isStaged && !!item.originalUrl, // set AUTOMATICALLY from real data — never a user checkbox
+      beforeUrl: isStaged ? item.originalUrl : null,  // the actual pair URL, carried silently — never shown to the user
+    });
+  }
+  renderGallery();
+  renderUpload(); // keep the as-is upload thumb grid / count bar in sync
+}
+
+// Real file handling — for "as-is" professional photography only now (see
+// the secondary upload zone). Mirrors PRO's handleFiles()/FileReader
+// pattern in index.html exactly. Each selected/dropped image is read via
+// FileReader for an immediate local preview, then actually uploaded to
+// Cloudinary via upload-original.js so realUrl is a real, hosted URL by
+// the time this frame reaches action=quote/action=create — those calls
+// need a URL Railway can fetch, not a local data: URL sitting in this
+// browser tab.
+function handleFiles(fileList) {
+  const files = Array.from(fileList).filter(f => f.type.startsWith("image/"));
+  if (!files.length) { alert("No image files found in that selection."); return; }
+
+  const room = frames.length;
+  if (room >= MAX_FRAMES) { alert("20 photo max per video reached."); return; }
+  const toAdd = files.slice(0, MAX_FRAMES - room);
+  if (toAdd.length < files.length) {
+    alert(`Only added ${toAdd.length} of ${files.length} — that's the 20-photo cap for this video.`);
+  }
+
+  toAdd.forEach(file => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const dataUrl = e.target.result;
+      const newFrame = {
+        id: ++frameIdCounter,
+        fileName: file.name,
+        dataUrl,             // local preview — shows immediately
+        realUrl: null,       // filled in once uploadAsIsPhoto() resolves
+        uploadStatus: "uploading",
+        room: null,        // untagged until the user picks from the dropdown
+        roomOther: "",      // freeform text, used only when room === "Other"
+        isExterior: false,  // explicit toggle — drives Kling eligibility, NOT the room label
+        motion: "kenburns",
+        kenBurnsPreset: "auto",
+        preset: null,
+        isBeforeAfter: false,
+      };
+      frames.push(newFrame);
+      renderUpload();
+      uploadAsIsPhoto(newFrame, file, dataUrl);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+// Uploads one as-is photo to Cloudinary via the existing upload-original.js
+// endpoint, purely as a hosting mechanism to get a real, fetchable URL —
+// NOT registering it as an AB 723 compliance original (this photo was
+// never staged or altered, so there's nothing to disclose). Deliberately
+// reuses this endpoint rather than building a new one: it already does
+// exactly the one thing needed here (base64 in, real Cloudinary URL out).
+async function uploadAsIsPhoto(frame, file, dataUrl) {
+  try {
+    const base64 = dataUrl.split(",")[1];
+    const res = await fetch("/.netlify/functions/upload-original", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ imageBase64: base64, mimeType: file.type, listingId: REAL_LISTING_ID || null }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.publicUrl) throw new Error(data.error || "Upload failed");
+    frame.realUrl = data.publicUrl;
+    frame.uploadStatus = "ready";
+  } catch (err) {
+    frame.uploadStatus = "error";
+    frame.uploadError = err.message;
+  }
+  renderUpload();
+}
+
+function removePhoto(id) {
+  frames = frames.filter(f => f.id !== id);
+  renderUpload();
+}
+
+function updatePhotoRoom(id, room) {
+  const f = frames.find(x => x.id === id);
+  f.room = room;
+  if (room !== "Other") f.roomOther = "";
+  renderUpload();
+}
+
+function updatePhotoRoomOther(id, text) {
+  const f = frames.find(x => x.id === id);
+  f.roomOther = text;
+  // Deliberately NOT calling the full renderUpload() here — that rebuilds
+  // every card's DOM from scratch on every keystroke, which steals focus
+  // out of the text field the user is actively typing in. Instead, just
+  // refresh the two small bits of UI that depend on tagged state: this
+  // card's own "Untagged" flag, and the global count bar / Next button.
+  refreshTaggedStateUI();
+}
+
+function refreshTaggedStateUI() {
+  frames.forEach(f => {
+    const card = document.querySelector(`.thumb-card[data-frame-id="${f.id}"]`);
+    if (!card) return;
+    const isTagged = !!f.room && (f.room !== "Other" || f.roomOther.trim().length > 0);
+    const flag = card.querySelector(".thumb-untagged-flag");
+    if (isTagged && flag) flag.remove();
+    if (!isTagged && !flag) {
+      const preview = card.querySelector(".thumb-preview");
+      const el = document.createElement("div");
+      el.className = "thumb-untagged-flag";
+      el.textContent = "Untagged";
+      preview.appendChild(el);
+    }
+  });
+
+  const untaggedCount = frames.filter(f => !displayRoomName(f)).length;
+  const uploadingCount = frames.filter(f => f.uploadStatus === "uploading").length;
+  const uploadErrorCount = frames.filter(f => f.uploadStatus === "error").length;
+  const countBar = document.getElementById("uploadCountBar");
+  if (frames.length === 0) {
+    countBar.textContent = "";
+  } else if (uploadingCount > 0) {
+    countBar.className = "upload-count-bar warn";
+    countBar.textContent = `Uploading ${uploadingCount} photo${uploadingCount===1?"":"s"}\u2026`;
+  } else if (uploadErrorCount > 0) {
+    countBar.className = "upload-count-bar warn";
+    countBar.textContent = `${uploadErrorCount} photo${uploadErrorCount===1?"":"s"} failed to upload — remove and try again.`;
+  } else if (untaggedCount > 0) {
+    countBar.className = "upload-count-bar warn";
+    countBar.textContent = `${frames.length} photo${frames.length===1?"":"s"} added — ${untaggedCount} still need${untaggedCount===1?"s":""} a room before you continue.`;
+  } else {
+    countBar.className = "upload-count-bar";
+    countBar.textContent = `${frames.length} photo${frames.length===1?"":"s"} added, all tagged.`;
+  }
+  document.getElementById("toStep2Btn").disabled = frames.length === 0 || untaggedCount > 0 || uploadingCount > 0 || uploadErrorCount > 0;
+}
+
+function updatePhotoExterior(id, isExterior) {
+  const f = frames.find(x => x.id === id);
+  f.isExterior = isExterior;
+  // Changing interior/exterior can invalidate an already-chosen Kling
+  // preset (e.g. water_motion only makes sense for exterior) — same
+  // re-validation pattern as updatePhotoRoom() in renderUpload.
+  if (f.motion === "kling" && f.preset) {
+    const stillEligible = eligiblePresetsFor(f).some(([key]) => key === f.preset);
+    if (!stillEligible) f.preset = null;
+  }
+}
+
+function displayRoomName(f) {
+  if (!f.room) return null;
+  return f.room === "Other" ? (f.roomOther || "Other (unnamed)") : f.room;
+}
+
+function renderUpload() {
+  const grid = document.getElementById("thumbGrid");
+  // Only as-is device uploads render here — gallery-sourced frames (from
+  // toggleGalleryItem) already have everything they need (real room name,
+  // real isExterior, real pairing) and render in their own gallery instead.
+  // This grid exists purely for the secondary "don't see a room? upload
+  // your own" path.
+  const uploadedFrames = frames.filter(f => !f.galleryId);
+
+  grid.innerHTML = uploadedFrames.map(f => {
+    const isTagged = !!f.room && (f.room !== "Other" || f.roomOther.trim().length > 0);
+    return `
+    <div class="thumb-card" data-frame-id="${f.id}">
+      <div class="thumb-preview frame-thumb-clickable" onclick="openLightbox(${f.id})">
+        <img src="${f.dataUrl}" alt="${f.fileName || 'Uploaded photo'}">
+        <button class="thumb-remove" onclick="event.stopPropagation(); removePhoto(${f.id})">&times;</button>
+        ${!isTagged ? `<div class="thumb-untagged-flag">Untagged</div>` : ""}
+        ${f.uploadStatus === "uploading" ? `<div class="thumb-untagged-flag" style="background:#fff8e7;color:#5c4a1f;">Uploading&hellip;</div>` : ""}
+        ${f.uploadStatus === "error" ? `<div class="thumb-untagged-flag" title="${f.uploadError||''}">Upload failed — remove and try again</div>` : ""}
+      </div>
+      <div class="thumb-fields">
+        <select class="thumb-room-select" onchange="updatePhotoRoom(${f.id}, this.value)">
+          <option value="" ${!f.room ? "selected" : ""} disabled>Choose room...</option>
+          ${ROOM_TYPES.map(r => `<option value="${r}" ${f.room === r ? "selected" : ""}>${r}</option>`).join("")}
+        </select>
+        ${f.room === "Other" ? `
+          <input class="thumb-other-input" type="text" placeholder="Name this room..." value="${f.roomOther}" oninput="updatePhotoRoomOther(${f.id}, this.value)">
+        ` : ""}
+        <div class="thumb-io-toggle">
+          <button class="thumb-io-btn ${!f.isExterior ? 'active' : ''}" onclick="updatePhotoExterior(${f.id}, false); renderUpload();">Interior</button>
+          <button class="thumb-io-btn ${f.isExterior ? 'active' : ''}" onclick="updatePhotoExterior(${f.id}, true); renderUpload();">Exterior</button>
+        </div>
+      </div>
+    </div>`;
+  }).join("");
+
+  refreshTaggedStateUI();
+}
+
+function goToStep(n) {
+  ["stepUpload","stepMotion","stepOrder","stepConfirm","resultPanel"].forEach(id => document.getElementById(id).classList.add("hidden"));
+  [1,2,3,4].forEach(i => {
+    const pill = document.getElementById("stepPill"+i);
+    pill.classList.remove("active","done");
+    if (i < n) pill.classList.add("done");
+    if (i === n) pill.classList.add("active");
+  });
+  if (n === 1) document.getElementById("stepUpload").classList.remove("hidden");
+  if (n === 2) { document.getElementById("stepMotion").classList.remove("hidden"); renderMotionStep(); }
+  if (n === 3) { document.getElementById("stepOrder").classList.remove("hidden"); renderOrderStep(); }
+  if (n === 4) { document.getElementById("stepConfirm").classList.remove("hidden"); renderConfirmStep(); }
+}
+
+function eligiblePresetsFor(frame) {
+  const isExterior = frame.isExterior; // explicit flag from Step 1 — never inferred from the room label
+  return Object.entries(KLING_PRESETS).filter(([key, p]) => {
+    if (p.eligibility === "single_or_pair") return true;
+    if (p.eligibility === "exterior_only") return isExterior;
+    if (p.eligibility === "pair_required") return frame.isBeforeAfter;
+    if (p.eligibility === "pair_required_exterior") return frame.isBeforeAfter && isExterior;
+    if (p.eligibility === "exterior_or_pair") return isExterior || frame.isBeforeAfter;
+    return false;
+  });
+}
+
+function renderMotionStep() {
+  const list = document.getElementById("motionList");
+  list.innerHTML = frames.map((f, i) => {
+    const eligible = eligiblePresetsFor(f);
+    const presetOptions = eligible.map(([key, p]) => `<option value="${key}" ${f.preset === key ? "selected" : ""}>${p.label}</option>`).join("");
+    const selectedKlingPreset = KLING_PRESETS[f.preset];
+    const kenBurnsOptions = Object.entries(KEN_BURNS_PRESETS).map(([key, p]) => `<option value="${key}" ${(f.kenBurnsPreset || "auto") === key ? "selected" : ""}>${p.label}</option>`).join("");
+    const selectedKenBurnsPreset = KEN_BURNS_PRESETS[f.kenBurnsPreset || "auto"];
+    return `
+    <div class="frame-card">
+      <div class="frame-thumb-sm frame-thumb-clickable" onclick="openLightbox(${f.id})"><img src="${f.dataUrl}" alt=""></div>
+      <div class="frame-main">
+        <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:8px;">
+          <div><span class="frame-order-num">${i+1}</span><span class="frame-name">${displayRoomName(f)}</span></div>
+          <span class="frame-tag" style="text-transform:uppercase;letter-spacing:0.04em;font-size:0.66rem;">${f.isExterior ? "Exterior" : "Interior"}</span>
+        </div>
+        <label style="display:flex;align-items:center;gap:6px;font-size:0.76rem;color:var(--muted);margin-bottom:8px;cursor:pointer;">
+          <input type="checkbox" ${f.isBeforeAfter ? "checked" : ""} onchange="toggleBeforeAfter(${f.id}, this.checked)" style="accent-color:var(--gold);">
+          I have a before/after pair for this room (vacant + staged)
+        </label>
+        ${f.isBeforeAfter ? `<div class="before-after-chip">&#10003; Known pair — eligible for hero transformation presets</div>` : ""}
+        <div class="motion-toggle">
+          <button class="motion-btn kenburns ${f.motion==='kenburns'?'active kenburns':''}" onclick="setMotion(${f.id}, 'kenburns')">Ken Burns</button>
+          <button class="motion-btn kling ${f.motion==='kling'?'active kling':''}" onclick="setMotion(${f.id}, 'kling')">AI Motion (Kling)</button>
+        </div>
+
+        ${f.motion === 'kenburns' ? `
+          <div class="preset-row">
+            <select class="preset-select" onchange="setKenBurnsPreset(${f.id}, this.value)">
+              ${kenBurnsOptions}
+            </select>
+            <button class="preview-btn" onclick="openMotionPreview('${f.kenBurnsPreset || 'auto'}', 'kenburns')">&#9654; Preview</button>
+          </div>
+          <div class="preset-desc">${selectedKenBurnsPreset.desc}</div>
+        ` : ""}
+
+        ${f.motion === 'kling' ? (eligible.length > 0 ? `
+            <div class="preset-row">
+              <select class="preset-select" onchange="setPreset(${f.id}, this.value)">
+                <option value="">Choose a movement...</option>
+                ${presetOptions}
+              </select>
+              ${selectedKlingPreset ? `<button class="preview-btn" onclick="openMotionPreview('${f.preset}', 'kling')">&#9654; Preview</button>` : ""}
+            </div>
+            ${selectedKlingPreset ? `<div class="preset-desc">${selectedKlingPreset.desc}</div>` : `<div class="preset-desc">Pick a camera movement to see what it does.</div>`}
+          ` : `<div class="preset-disabled-note">No AI Motion presets available for this room yet — check "before/after pair" above if you have a vacant + staged set, or use Ken Burns instead.</div>`
+        ) : ""}
+      </div>
+    </div>`;
+  }).join("");
+  updateKlingCountBar();
+}
+
+// NOTE: room tagging now happens exclusively in Step 1 (updatePhotoRoom)
+// — there is deliberately no room editor here in Step 2 anymore. Step 2
+// only edits motion-related fields (before/after, Kling vs Ken Burns,
+// preset). This avoids two different places in the flow being able to
+// silently change the same field.
+
+function toggleBeforeAfter(id, checked) {
+  const f = frames.find(x => x.id === id);
+  f.isBeforeAfter = checked;
+  if (!checked && f.preset && KLING_PRESETS[f.preset].eligibility.startsWith("pair_required")) f.preset = null;
+  renderMotionStep();
+}
+
+function setMotion(id, motion) {
+  const f = frames.find(x => x.id === id);
+  f.motion = motion;
+  if (motion === "kenburns" && !f.kenBurnsPreset) f.kenBurnsPreset = "auto";
+  if (motion === "kling") f.preset = f.preset || null;
+  renderMotionStep();
+}
+
+function setPreset(id, preset) {
+  const f = frames.find(x => x.id === id);
+  f.preset = preset || null;
+  renderMotionStep();
+}
+
+function setKenBurnsPreset(id, preset) {
+  const f = frames.find(x => x.id === id);
+  f.kenBurnsPreset = preset;
+  renderMotionStep();
+  if (!document.getElementById("lightboxOverlay").classList.contains("hidden")) renderLightboxControls(id);
+}
+
+// ── LIGHTBOX — full-size photo, with the same room/motion controls as the
+// card itself, reachable inline. Built so it can be opened from Step 1
+// (room/exterior controls) or Step 2 (motion/preset controls) — it shows
+// whichever set of controls makes sense for where the user is.
+let lightboxFrameId = null;
+
+function openLightbox(id) {
+  lightboxFrameId = id;
+  const f = frames.find(x => x.id === id);
+  document.getElementById("lightboxImg").src = f.dataUrl;
+  renderLightboxControls(id);
+  document.getElementById("lightboxOverlay").classList.remove("hidden");
+}
+
+function closeLightbox() {
+  document.getElementById("lightboxOverlay").classList.add("hidden");
+  lightboxFrameId = null;
+  // Controls inside the lightbox can change room/motion state — refresh
+  // whichever step is currently behind it so nothing looks stale.
+  if (!document.getElementById("stepUpload").classList.contains("hidden")) renderUpload();
+  if (!document.getElementById("stepMotion").classList.contains("hidden")) renderMotionStep();
+}
+
+function renderLightboxControls(id) {
+  const f = frames.find(x => x.id === id);
+  const onMotionStep = !document.getElementById("stepMotion").classList.contains("hidden");
+
+  if (!onMotionStep) {
+    // Opened from Step 1 — show room + interior/exterior controls, same
+    // fields as the upload card.
+    document.getElementById("lightboxControls").innerHTML = `
+      <select class="thumb-room-select" onchange="updatePhotoRoom(${f.id}, this.value); renderLightboxControls(${f.id});">
+        <option value="" ${!f.room ? "selected" : ""} disabled>Choose room...</option>
+        ${ROOM_TYPES.map(r => `<option value="${r}" ${f.room === r ? "selected" : ""}>${r}</option>`).join("")}
+      </select>
+      ${f.room === "Other" ? `<input class="thumb-other-input" type="text" placeholder="Name this room..." value="${f.roomOther}" oninput="updatePhotoRoomOther(${f.id}, this.value)">` : ""}
+      <div class="thumb-io-toggle">
+        <button class="thumb-io-btn ${!f.isExterior ? 'active' : ''}" onclick="updatePhotoExterior(${f.id}, false); renderLightboxControls(${f.id});">Interior</button>
+        <button class="thumb-io-btn ${f.isExterior ? 'active' : ''}" onclick="updatePhotoExterior(${f.id}, true); renderLightboxControls(${f.id});">Exterior</button>
+      </div>
+    `;
+  } else {
+    // Opened from Step 2 — show the same motion toggle + preset picker as
+    // the card, so the user can decide while looking at the full photo.
+    const eligible = eligiblePresetsFor(f);
+    const presetOptions = eligible.map(([key, p]) => `<option value="${key}" ${f.preset === key ? "selected" : ""}>${p.label}</option>`).join("");
+    document.getElementById("lightboxControls").innerHTML = `
+      <div class="panel-sub" style="margin-bottom:10px;">${displayRoomName(f)} — ${f.isExterior ? "Exterior" : "Interior"}</div>
+      <div class="motion-toggle">
+        <button class="motion-btn kenburns ${f.motion==='kenburns'?'active kenburns':''}" onclick="setMotion(${f.id}, 'kenburns'); renderLightboxControls(${f.id});">Ken Burns</button>
+        <button class="motion-btn kling ${f.motion==='kling'?'active kling':''}" onclick="setMotion(${f.id}, 'kling'); renderLightboxControls(${f.id});">AI Motion (Kling)</button>
+      </div>
+      ${f.motion === 'kenburns' ? `
+        <select class="preset-select" onchange="setKenBurnsPreset(${f.id}, this.value)">
+          ${Object.entries(KEN_BURNS_PRESETS).map(([key, p]) => `<option value="${key}" ${(f.kenBurnsPreset||'auto')===key?'selected':''}>${p.label}</option>`).join("")}
+        </select>
+        <div class="preset-desc">${KEN_BURNS_PRESETS[f.kenBurnsPreset || 'auto'].desc}</div>
+      ` : (eligible.length > 0 ? `
+        <select class="preset-select" onchange="setPreset(${f.id}, this.value); renderLightboxControls(${f.id});">
+          <option value="">Choose a movement...</option>
+          ${presetOptions}
+        </select>
+        ${KLING_PRESETS[f.preset] ? `<div class="preset-desc">${KLING_PRESETS[f.preset].desc}</div>` : `<div class="preset-desc">Pick a camera movement to see what it does.</div>`}
+      ` : `<div class="preset-disabled-note">No AI Motion presets available for this room yet.</div>`)}
+    `;
+  }
+}
+
+// ── MOTION PREVIEW — placeholder modal until real stock clips exist.
+// Deliberately does not fake a video; says so plainly per the locked
+// decision rather than showing a static image dressed up as a preview.
+function openMotionPreview(presetKey, type) {
+  const preset = type === "kling" ? KLING_PRESETS[presetKey] : KEN_BURNS_PRESETS[presetKey];
+  if (!preset) return;
+  document.getElementById("previewInfo").innerHTML = `
+    <div class="panel-title">${preset.label}</div>
+    <div class="panel-sub">${preset.desc}</div>
+  `;
+  document.getElementById("previewOverlay").classList.remove("hidden");
+}
+
+function closePreview() {
+  document.getElementById("previewOverlay").classList.add("hidden");
+}
+
+function updateKlingCountBar() {
+  const klingCount = frames.filter(f => f.motion === "kling").length;
+  const bar = document.getElementById("klingCountBar");
+  const billable = Math.max(0, klingCount - KLING_INCLUDED_FRAMES_FIRST_GEN);
+  bar.innerHTML = `
+    <span>${klingCount} AI Motion frame${klingCount===1?"":"s"} selected${billable > 0 ? ` — <b>${billable} beyond the included 3</b>` : ` (within the included 3)`}</span>
+    <span>${billable > 0 ? `+${billable * KLING_IMAGE_COST_PER_FRAME} Images on Generate` : "0 Images on Generate"}</span>
+  `;
+}
+
+function renderOrderStep() {
+  const list = document.getElementById("orderList");
+  list.innerHTML = frames.map((f, i) => `
+    <div class="order-card" draggable="true" data-frame-id="${f.id}"
+         ondragstart="draggedId=${f.id}; this.classList.add('drag-ghost')"
+         ondragend="this.classList.remove('drag-ghost')"
+         ondragover="event.preventDefault()"
+         ondrop="handleDrop(event, ${f.id})">
+      <div class="order-thumb">
+        <img src="${f.dataUrl}" alt="">
+        <div class="order-num-badge">${i+1}</div>
+      </div>
+      <div class="order-info">
+        <div class="order-room">${displayRoomName(f)}</div>
+        <div class="order-motion">${f.motion === 'kling' ? (KLING_PRESETS[f.preset]?.label || 'AI Motion — no preset') : (KEN_BURNS_PRESETS[f.kenBurnsPreset || 'auto'].label)}</div>
+      </div>
+    </div>
+  `).join("");
+
+  const hasKling = frames.some(f => f.motion === "kling");
+  const formatRow = document.getElementById("formatRow");
+  const note = document.getElementById("formatNote");
+  let selectedFormats = window._selectedFormats || (hasKling ? ["16x9"] : ["16x9","9x16"]);
+  window._selectedFormats = selectedFormats;
+
+  formatRow.innerHTML = `
+    <button class="format-btn ${selectedFormats.includes('16x9')?'active':''}" onclick="toggleFormat('16x9', ${hasKling})">16:9</button>
+    <button class="format-btn ${selectedFormats.includes('9x16')?'active':''}" ${hasKling ? 'disabled' : ''} onclick="toggleFormat('9x16', ${hasKling})">9:16</button>
+  `;
+  note.textContent = hasKling
+    ? "AI Motion videos deliver in a single format — Kling's camera composition can't be safely auto-cropped to a second aspect ratio."
+    : "Ken Burns videos can deliver both formats at no extra cost — 9:16 is a clean crop of the same render.";
+}
+
+function toggleFormat(fmt, hasKling) {
+  if (hasKling) { window._selectedFormats = [fmt]; renderOrderStep(); return; }
+  let sel = window._selectedFormats || [];
+  sel = sel.includes(fmt) ? sel.filter(x => x !== fmt) : [...sel, fmt];
+  if (sel.length === 0) sel = [fmt];
+  window._selectedFormats = sel;
+  renderOrderStep();
+}
+
+function handleDrop(e, targetId) {
+  e.preventDefault();
+  if (draggedId === null || draggedId === targetId) return;
+  const fromIdx = frames.findIndex(f => f.id === draggedId);
+  const toIdx = frames.findIndex(f => f.id === targetId);
+  const [moved] = frames.splice(fromIdx, 1);
+  frames.splice(toIdx, 0, moved);
+  draggedId = null;
+  renderOrderStep();
+}
+
+async function renderConfirmStep() {
+  document.getElementById("frameList").innerHTML = `<div class="gallery-loading">Getting a real quote\u2026</div>`;
+  document.getElementById("costTable").innerHTML = "";
+  document.getElementById("warnSlot").innerHTML = "";
+  document.getElementById("consentSlot").innerHTML = "";
+  document.getElementById("actionRow").innerHTML = "";
+
+  const realFrames = frames.map(buildRealFrame);
+  let quote;
+  try {
+    const res = await fetch(`${API_BASE}?action=quote`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jobId: window._currentJobId || undefined, userId: REAL_USER_ID, frames: realFrames }),
+    });
+    quote = await res.json();
+    if (!res.ok || quote.error) throw new Error(quote.error || "Quote failed");
+  } catch (err) {
+    document.getElementById("frameList").innerHTML = `<div class="warn-box"><strong>Couldn't get a quote</strong>${err.message}</div>`;
+    return;
+  }
+
+  const wouldExceed = !!quote.wouldExceedBalance;
+  const isIteration = quote.isIteration;
+  let klingSeen = 0;
+
+  document.getElementById("genLabel").textContent = isIteration ? `Iteration \u00b7 generation #${quote.generationCount}` : "First generation";
+  document.getElementById("panelSub").textContent = `${frames.length} rooms, ${(window._selectedFormats||["16x9"]).join(" + ")}`;
+
+  document.getElementById("frameList").innerHTML = frames.map(f => {
+    let badge;
+    if (f.motion === "kling") {
+      klingSeen++;
+      const isIncluded = !isIteration && klingSeen <= quote.includedFrames;
+      badge = isIncluded ? `<span class="frame-badge badge-included">Included</span>` : `<span class="frame-badge badge-billable">${KLING_IMAGE_COST_PER_FRAME} Images</span>`;
+    } else {
+      badge = `<span class="frame-badge badge-kenburns">Ken Burns</span>`;
+    }
+    return `<div class="frame-row">
+      <div class="frame-thumb-sm"><img src="${f.dataUrl}" alt=""></div>
+      <div class="frame-main" style="padding:0;">
+        <div class="frame-name">${displayRoomName(f)}</div>
+        <div class="frame-tag">${f.motion === 'kling' ? (KLING_PRESETS[f.preset]?.label || 'AI Motion') : (KEN_BURNS_PRESETS[f.kenBurnsPreset || 'auto'].label + ' (Ken Burns)')}</div>
+      </div>
+      ${badge}
+    </div>`;
+  }).join("");
+
+  let rows = "";
+  if (quote.klingFrameCount > 0) {
+    if (!isIteration) {
+      rows += `<div class="cost-line muted"><span>Kling frames included (first ${KLING_INCLUDED_FRAMES_FIRST_GEN}, generation #1)</span><span class="val">${quote.includedFrames} free</span></div>`;
+    } else {
+      rows += `<div class="cost-line muted"><span>Included allowance — does not apply to iterations</span><span class="val">0 free</span></div>`;
+    }
+    rows += `<div class="cost-line"><span>Billable Kling frames (${quote.billableKlingFrames} \u00d7 ${KLING_IMAGE_COST_PER_FRAME} Images)</span><span class="val">${quote.klingImageCost} Images</span></div>`;
+  } else {
+    rows += `<div class="cost-line muted"><span>No AI Motion frames in this video</span><span class="val">0 Images</span></div>`;
+  }
+  document.getElementById("costTable").innerHTML = rows + `
+    <div class="cost-total"><span class="label">Charged now, on Generate</span><span class="val">${quote.klingImageCost}</span></div>
+    <div class="balance-line"><span>Current balance: ${quote.currentBalance ?? '\u2014'} Images</span><span class="after ${wouldExceed?'negative':''}">After: ${wouldExceed?'\u2014':quote.balanceAfter} Images</span></div>
+  `;
+
+  const warnSlot = document.getElementById("warnSlot");
+  const consentSlot = document.getElementById("consentSlot");
+  const actionRow = document.getElementById("actionRow");
+
+  if (wouldExceed) {
+    warnSlot.innerHTML = `<div class="warn-box"><strong>Not enough Images</strong>This generation needs ${quote.klingImageCost} Images, but the account only has ${quote.currentBalance}. Nothing will be charged or generated.</div>`;
+    consentSlot.innerHTML = "";
+    actionRow.innerHTML = `<button class="btn btn-ghost" onclick="goToStep(3)">Back</button><button class="btn btn-primary" disabled>${isIteration ? "Regenerate" : "Generate"} Video</button>`;
+    return;
+  }
+
+  if (isIteration) {
+    warnSlot.innerHTML = `<div class="warn-box"><strong>This charges every Kling frame again</strong>Regenerating means the ${KLING_INCLUDED_FRAMES_FIRST_GEN}-frame included allowance no longer applies — all ${quote.klingFrameCount} Kling frames above are billed, even ones that were free the first time.</div>`;
+  } else {
+    warnSlot.innerHTML = quote.klingImageCost > 0 ? `<div class="warn-box"><strong>Non-refundable on generation</strong>The ${quote.klingImageCost} Images above are charged the instant you click Generate Video — even if you don't like the result or never download it.</div>` : "";
+  }
+  consentSlot.innerHTML = quote.klingImageCost > 0 ? `<div class="consent-row"><input type="checkbox" id="consentCheck" onchange="document.getElementById('generateBtn').disabled = !this.checked;"><label for="consentCheck">I understand this charges <b>${quote.klingImageCost} Images now</b>, non-refundable.</label></div>` : "";
+  actionRow.innerHTML = `
+    <button class="btn btn-ghost" onclick="goToStep(3)">Back</button>
+    <button class="btn btn-primary" id="generateBtn" ${quote.klingImageCost>0?"disabled":""} onclick="handleGenerate()">${isIteration ? "Regenerate" : "Generate"} Video</button>
+  `;
+}
+
+async function handleGenerate() {
+  const generateBtn = document.getElementById("generateBtn");
+  if (generateBtn) generateBtn.disabled = true;
+  document.getElementById("stepConfirm").classList.add("hidden");
+  const rp = document.getElementById("resultPanel");
+  rp.classList.remove("hidden");
+  document.getElementById("resultContent").innerHTML = `
+    <div class="result-icon">&#9203;</div>
+    <div class="result-title">Sending to the render queue\u2026</div>
+    <div class="result-body">Charging Images and creating the job.</div>
+  `;
+
+  const realFrames = frames.map(buildRealFrame);
+  const isIteration = !!window._currentJobId;
+
+  try {
+    const res = await fetch(`${API_BASE}?action=${isIteration ? "regenerate" : "create"}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(isIteration
+        ? { jobId: window._currentJobId, userId: REAL_USER_ID, frames: realFrames, formats: window._selectedFormats || ["16x9"] }
+        : { listingId: REAL_LISTING_ID, projectId: REAL_PROJECT_ID || undefined, userId: REAL_USER_ID, frames: realFrames, formats: window._selectedFormats || ["16x9"] }
+      ),
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || "Failed to start render");
+
+    window._currentJobId = data.jobId;
+    generationCount = data.generationCount || generationCount;
+    if (typeof data.klingImagesCharged === "number") await refreshBalanceDisplay();
+
+    document.getElementById("resultContent").innerHTML = `
+      <div class="result-icon">&#9203;</div>
+      <div class="result-title">Rendering your video \u2014 generation #${generationCount}</div>
+      <div class="result-body">${data.klingImagesCharged>0?`${data.klingImagesCharged} Images charged.<br>`:""}Real renders typically take a few minutes depending on frame count and how many are Kling. Nothing else is charged until Download.</div>
+    `;
+    pollJobStatus(data.jobId);
+  } catch (err) {
+    document.getElementById("resultContent").innerHTML = `
+      <div class="result-icon">&#9888;</div>
+      <div class="result-title">Couldn't start the render</div>
+      <div class="result-body">${err.message}</div>
+      <div style="margin-top:18px;"><button class="btn btn-ghost" style="flex:none;" onclick="resetDemo()">Start over</button></div>
+    `;
+  }
+}
+
+// Polls action=status every 5s. There is no way to shorten this to a
+// webhook-driven push from this static page, so polling is the correct
+// approach here — video-notify.js's webhook updates the SAME video_jobs
+// row this reads, so polling just needs to notice status flip to
+// complete/failed, not do anything Railway-side itself.
+function pollJobStatus(jobId) {
+  const poll = setInterval(async () => {
+    try {
+      const res = await fetch(`${API_BASE}?action=status&jobId=${encodeURIComponent(jobId)}`);
+      const job = await res.json();
+      if (!job) return; // transient — try again next tick rather than failing hard
+      if (job.status === "complete") {
+        clearInterval(poll);
+        showRenderComplete(job);
+      } else if (job.status === "failed") {
+        clearInterval(poll);
+        document.getElementById("resultContent").innerHTML = `
+          <div class="result-icon">&#9888;</div>
+          <div class="result-title">Render failed</div>
+          <div class="result-body">${job.error_message || "Something went wrong on the render side."}${job.credits_used ? " Any Images charged for this attempt have been refunded automatically." : ""}</div>
+          <div style="margin-top:18px;"><button class="btn btn-ghost" style="flex:none;" onclick="resetDemo()">Start over</button></div>
+        `;
+      }
+      // else: still pending/processing — keep polling, no UI change needed
+    } catch (err) {
+      // Network hiccup on one poll tick — don't kill the whole flow over it,
+      // just wait for the next tick.
+    }
+  }, 5000);
+}
+
+// NOTE: action=status deliberately never returns the finished video URLs
+// (output_16x9_url/output_9x16_url) — those only ever come back from
+// action=download, the one place that charges the download fee (see the
+// comment on getJobStatus() in video-job.js). thumbnail_url is the one
+// preview asset available for free before that charge — a static
+// watermarked image, not a playable video. That's a real, current product
+// gap worth knowing about: there is no free video preview before Download
+// today. The copy below is written to be honest about that rather than
+// implying a preview video exists.
+function showRenderComplete(job) {
+  document.getElementById("resultContent").innerHTML = `
+    <div class="result-icon">&#9989;</div>
+    <div class="result-title">Ready \u2014 generation #${job.generation_count || generationCount}</div>
+    ${job.thumbnail_url ? `<img src="${job.thumbnail_url}" alt="Preview thumbnail" style="max-width:100%;border-radius:4px;margin:12px 0;">` : ""}
+    <div class="result-body">The full video isn't downloadable-quality-visible until Download \u2014 that's also when the flat download fee is charged and this hits your AB 723 compliance page. If you want changes, Iterate \u2014 every Kling frame in the video gets billed again on the next generation, including ones that were free this time.</div>
+    <div style="margin-top:18px;display:flex;gap:10px;justify-content:center;">
+      <button class="btn btn-ghost" style="flex:none;" onclick="resetDemo()">Start over</button>
+      <button class="btn btn-ghost" style="flex:none;" onclick="handleIterate()">Iterate this video</button>
+      <button class="btn btn-primary" style="flex:none;" onclick="handleDownload()">Download</button>
+    </div>
+  `;
+}
+
+function handleIterate() {
+  document.getElementById("resultPanel").classList.add("hidden");
+  goToStep(2);
+}
+
+async function handleDownload() {
+  document.getElementById("resultContent").innerHTML = `<div class="result-icon">&#8987;</div><div class="result-title">Processing download\u2026</div>`;
+  try {
+    const res = await fetch(`${API_BASE}?action=download`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jobId: window._currentJobId, userId: REAL_USER_ID }),
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) {
+      const MESSAGES = {
+        not_ready: "This job isn't finished rendering yet — wait a moment and try again.",
+        insufficient_credits: "Not enough Images to cover the download fee.",
+        no_active_subscription: "This account doesn't have an active subscription.",
+        video_quota_exceeded: "This account has used all its video downloads for this billing period.",
+      };
+      throw new Error(MESSAGES[data.error] || data.error || "Download failed");
+    }
+    await refreshBalanceDisplay();
+    const links = [
+      data.output16x9Url ? `<a href="${data.output16x9Url}" target="_blank" rel="noopener">16:9 video</a>` : "",
+      data.output9x16Url ? `<a href="${data.output9x16Url}" target="_blank" rel="noopener">9:16 video</a>` : "",
+    ].filter(Boolean).join(" &nbsp;\u00b7&nbsp; ");
+    document.getElementById("resultContent").innerHTML = `
+      <div class="result-icon">&#11015;</div>
+      <div class="result-title">Downloaded</div>
+      <div class="result-body">This also used 1 of your monthly video downloads, and is now on your AB 723 compliance page.<br><br>${links}</div>
+      <div style="margin-top:18px;"><button class="btn btn-ghost" style="flex:none;" onclick="resetDemo()">Start over</button></div>
+    `;
+  } catch (err) {
+    document.getElementById("resultContent").innerHTML = `
+      <div class="result-icon">&#9888;</div>
+      <div class="result-title">Download failed</div>
+      <div class="result-body">${err.message}</div>
+      <div style="margin-top:18px;"><button class="btn btn-ghost" style="flex:none;" onclick="handleDownload()">Try again</button></div>
+    `;
+  }
+}
+
+async function refreshBalanceDisplay() {
+  if (!REAL_USER_ID) return;
+  try {
+    const res = await fetch(`${API_BASE}?action=balance&userId=${encodeURIComponent(REAL_USER_ID)}`);
+    const data = await res.json();
+    balance = data.balance;
+    document.getElementById("balanceDisplay").textContent = balance ?? "\u2014";
+  } catch (err) {
+    // Leave the last-known balance showing rather than blanking it on a
+    // transient network error.
+  }
+}
+
+function resetDemo() {
+  frames = [];
+  gallerySelectedIds.clear();
+  window._selectedFormats = null;
+  window._currentJobId = null;
+  generationCount = 1;
+  renderUpload();
+  renderGallery();
+  refreshBalanceDisplay();
+  goToStep(1);
+}
+
+// ── REAL UPLOAD WIRING — same event pattern as index.html's upload-zone ──
+const uploadZone = document.getElementById("uploadZone");
+const fileInput = document.getElementById("fileInput");
+
+fileInput.addEventListener("change", () => {
+  handleFiles(fileInput.files);
+  fileInput.value = ""; // allow re-selecting the same file again later
+});
+
+uploadZone.addEventListener("dragover", (e) => { e.preventDefault(); uploadZone.classList.add("drag-over"); });
+uploadZone.addEventListener("dragleave", () => uploadZone.classList.remove("drag-over"));
+uploadZone.addEventListener("drop", (e) => {
+  e.preventDefault();
+  uploadZone.classList.remove("drag-over");
+  handleFiles(e.dataTransfer.files);
+});
+
+renderUpload();
+loadGallery();
+refreshBalanceDisplay();
+goToStep(1);
+
+if (!REAL_LISTING_ID || !REAL_USER_ID) {
+  document.querySelector(".stage").insertAdjacentHTML("afterbegin",
+    `<div class="warn-box" style="margin:16px 0;"><strong>Missing listing or user</strong>This page needs real ?listingId= and ?userId= values in the URL to do anything real — it has neither right now, so photo loading and balance will show errors above.</div>`
+  );
+}
+</script>
+
+</body>
+</html>

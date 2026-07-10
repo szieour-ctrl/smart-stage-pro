@@ -420,6 +420,12 @@ const SINGLE_IMAGE_INTERIOR_ALLOWED_PRESETS = new Set([
   "pan_zoom_reveal",
 ]);
 
+// Presets restricted to open-concept/great-room spaces when used without a
+// known pair — mirrors OPEN_PLAN_ONLY_PRESETS in klingMotion.js. See that
+// file for the full reasoning (room_reveal observed inventing a doorway on
+// a small enclosed room, July 9, 2026).
+const OPEN_PLAN_ONLY_PRESETS = new Set(["room_reveal"]);
+
 function validateAiMotionEligibility(frames) {
   for (const frame of frames) {
     if (!frame.useAiMotion) continue;
@@ -432,6 +438,17 @@ function validateAiMotionEligibility(frames) {
     if (!hasKnownPair && !isExterior && !isAllowedSingleImageInteriorPreset) {
       throw new Error(
         `AI motion requested for a frame with no paired image and no allowed single-image preset (room type "${frame.roomType}", preset "${frame.motionPreset || "(none)"}"). AI motion requires a real vacant+staged pair for interior rooms, an exterior frame, or one of the allowed single-image presets (orbit_arc, rack_focus, fireplace_flicker, cinematic_push, luxury_drift, floating_camera_drift, parallax_push, architectural_glide, crane_up, crane_down, room_reveal, living_room_ambient, corner_to_corner_drift, pan_zoom_reveal) — otherwise only standard motion is available.`
+      );
+    }
+
+    if (
+      !hasKnownPair &&
+      !isExterior &&
+      OPEN_PLAN_ONLY_PRESETS.has(frame.motionPreset) &&
+      !frame.isOpenPlan
+    ) {
+      throw new Error(
+        `AI motion rejected: preset "${frame.motionPreset}" is restricted to open-concept/great-room spaces (frame.isOpenPlan must be true) when used single-image without a known pair — on a small enclosed room this preset has invented a doorway that doesn't exist in the source photo. Mark the room as Open Plan, provide a real vacant+staged pair, or choose a different preset.`
       );
     }
   }
@@ -608,6 +625,9 @@ async function createVideoJob({ listingId, projectId, userId, frames, formats, m
       add_continuation_motion:       !!f.addContinuationMotion,
       continuation_preset:           f.continuationPreset || null,
       continuation_duration_seconds: f.continuationDurationSeconds || null,
+      // NEW (July 9, 2026) — gates room_reveal to open-concept rooms only.
+      // See is_open_plan_migration.sql for the full reasoning.
+      is_open_plan:                  !!f.isOpenPlan,
     }));
 
     await supabase("POST", "video_job_frames", frameRows);
@@ -645,6 +665,14 @@ async function createVideoJob({ listingId, projectId, userId, frames, formats, m
         addContinuationMotion:       f.add_continuation_motion,
         continuationPreset:          f.continuation_preset,
         continuationDurationSeconds: f.continuation_duration_seconds,
+        // NEW (July 9, 2026) — same root cause again: klingMotion.js's
+        // enforceScopeRules() checks frame.isOpenPlan directly for the
+        // room_reveal gate. Without forwarding it here, EVERY room_reveal
+        // request would be wrongly rejected by Railway even after passing
+        // this file's own validateAiMotionEligibility() check above —
+        // the flag would be silently true at the Netlify layer and
+        // silently undefined by the time Railway sees it.
+        isOpenPlan:                  f.is_open_plan,
       })),
     });
 
@@ -785,6 +813,9 @@ async function regenerateVideoJob({ jobId, userId, frames, formats, musicStyle }
       add_continuation_motion:       !!f.addContinuationMotion,
       continuation_preset:           f.continuationPreset || null,
       continuation_duration_seconds: f.continuationDurationSeconds || null,
+      // NEW (July 9, 2026) — gates room_reveal to open-concept rooms only.
+      // See is_open_plan_migration.sql for the full reasoning.
+      is_open_plan:                  !!f.isOpenPlan,
     }));
 
     await supabase("POST", "video_job_frames", frameRows);
@@ -808,6 +839,8 @@ async function regenerateVideoJob({ jobId, userId, frames, formats, musicStyle }
         addContinuationMotion:       f.add_continuation_motion,
         continuationPreset:          f.continuation_preset,
         continuationDurationSeconds: f.continuation_duration_seconds,
+        // NEW (July 9, 2026) — see matching comment in createVideoJob above.
+        isOpenPlan:                  f.is_open_plan,
       })),
     });
 
@@ -1095,6 +1128,23 @@ exports.handler = async (event) => {
   const action = event.queryStringParameters?.action;
 
   try {
+    if (action === "balance") {
+      // NEW (July 10, 2026) — the video-builder UI needs to show a real
+      // Image balance on load, before any frames exist to quote against.
+      // debit-credit.js can't answer this: it's POST-only and requires a
+      // cost argument, built to debit on success, not to peek. quoteGeneration
+      // below has the exact same problem in reverse — it requires frames.
+      // Reusing the identical side-effect-free ledger read already proven
+      // there, just without the Kling cost math attached to it.
+      const userId = event.queryStringParameters?.userId;
+      if (!userId) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing userId" }) };
+      const ledgerRes = await supabase("GET", "credit_ledger", null,
+        `?user_id=eq.${userId}&order=created_at.desc&limit=1&select=balance_after`
+      );
+      const currentBalance = ledgerRes.data?.[0]?.balance_after ?? null;
+      return { statusCode: 200, headers, body: JSON.stringify({ balance: currentBalance }) };
+    }
+
     if (action === "frames") {
       const listingId = event.queryStringParameters?.listingId;
       if (!listingId) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing listingId" }) };

@@ -116,9 +116,11 @@ exports.handler = async (event) => {
     }
 
     // Fetch the current job row FIRST — needed both for the idempotency
-    // check below and for the refund logic (user_id, kling_images_charged).
+    // check below and for the refund logic (user_id, kling_images_charged),
+    // and now also for the Pabbly delivery email (listing_id, to look up
+    // the property address).
     const jobRes = await supabase("GET", "video_jobs", null,
-      `?id=eq.${jobId}&select=id,user_id,status,kling_images_charged`);
+      `?id=eq.${jobId}&select=id,user_id,status,kling_images_charged,listing_id`);
     const existingJob = jobRes.data?.[0];
     if (!existingJob) {
       return { statusCode: 404, headers, body: JSON.stringify({ error: `video_jobs row ${jobId} not found` }) };
@@ -150,6 +152,64 @@ exports.handler = async (event) => {
     }
 
     await supabase("PATCH", "video_jobs", updateFields, `?id=eq.${jobId}`);
+
+    // ── PABBLY VIDEO DELIVERY EMAIL (new) ──────────────────────────────────
+    // Fires once, only on a genuine "complete" transition — not on retried/
+    // duplicate webhook deliveries (isDuplicateDelivery guard below), and
+    // deliberately NOT on "failed" — a failed job already refunds
+    // automatically and the user is still sitting in the tool watching it
+    // fail live; a failure email would be redundant, not helpful. This is
+    // fire-and-forget: a Pabbly outage should never cause this webhook to
+    // return non-200 to Railway, since Railway would just retry the whole
+    // thing (including the refund logic above, which is already guarded
+    // against double-firing, but there's no reason to risk it over an email).
+    if (status === "complete" && !isDuplicateDelivery) {
+      try {
+        const [userRes, listingRes] = await Promise.all([
+          supabase("GET", "users", null, `?id=eq.${existingJob.user_id}&select=email,full_name`),
+          existingJob.listing_id
+            ? supabase("GET", "listings", null, `?id=eq.${existingJob.listing_id}&select=address`)
+            : Promise.resolve({ data: [] }),
+        ]);
+        const recipientEmail = userRes.data?.[0]?.email;
+        const recipientName  = userRes.data?.[0]?.full_name || "";
+        const address         = listingRes.data?.[0]?.address || "";
+
+        if (recipientEmail && process.env.PABBLY_VIDEO_DELIVERY_WEBHOOK_URL) {
+          const pabblyUrl = new URL(process.env.PABBLY_VIDEO_DELIVERY_WEBHOOK_URL);
+          const pabblyBody = JSON.stringify({
+            jobId,
+            recipientEmail,
+            recipientName,
+            propertyAddress: address,
+            output16x9Url: updateFields.output_16x9_url,
+            output9x16Url: updateFields.output_9x16_url,
+            deliveredAt: new Date().toISOString(),
+          });
+          await new Promise((resolve) => {
+            const req = https.request({
+              hostname: pabblyUrl.hostname,
+              path:     pabblyUrl.pathname + pabblyUrl.search,
+              method:   "POST",
+              headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(pabblyBody) },
+            }, (res) => { res.on("data", () => {}); res.on("end", resolve); });
+            req.on("error", (err) => {
+              console.error(`Video job ${jobId}: Pabbly delivery webhook failed (non-fatal): ${err.message}`);
+              resolve();
+            });
+            req.write(pabblyBody);
+            req.end();
+          });
+          console.log(`Video job ${jobId}: Pabbly delivery email triggered for ${recipientEmail}.`);
+        } else if (!recipientEmail) {
+          console.warn(`Video job ${jobId}: no email on file for user ${existingJob.user_id} — delivery email skipped.`);
+        }
+      } catch (err) {
+        // Non-fatal — the job is genuinely complete and the user can still
+        // see/download it in the tool even if this notification fails.
+        console.error(`Video job ${jobId}: Pabbly delivery lookup/send error (non-fatal): ${err.message}`);
+      }
+    }
 
     // ── REFUND LOGIC (bug 2g) — only runs on a genuine status transition ──
     if (!isDuplicateDelivery) {

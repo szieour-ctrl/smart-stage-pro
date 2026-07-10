@@ -123,6 +123,21 @@ async function lookupProject(address, env) {
     const raw = await store.get(key);
     if (!raw) return { exists: false };
     const project = JSON.parse(raw);
+    // NEW: resolve the real Supabase listings.id here too — the lookup path
+    // is how a returning session finds an already-created project, and it
+    // needs SESSION.listingId exactly as much as a fresh create does (see
+    // the matching fix in createProject's existing-project branch above).
+    let listingId = null;
+    if (process.env.SUPABASE_URL) {
+      try {
+        const listingLookup = await supabase("GET", "listings", null,
+          `?project_id=eq.${project.projectId}&select=id&limit=1`
+        );
+        listingId = listingLookup.data?.[0]?.id || null;
+      } catch (err) {
+        console.error("Listing id lookup error (non-fatal):", err.message);
+      }
+    }
     return {
       exists:        true,
       projectId:     project.projectId,
@@ -132,6 +147,7 @@ async function lookupProject(address, env) {
       qrCodeTarget:  project.complianceUrl,
       createdAt:     project.createdAt,
       status:        project.status,
+      listingId,
     };
   } catch (err) {
     console.error("lookup error:", err.message);
@@ -150,7 +166,24 @@ async function createProject(address, agentInfo, siteUrl, userId, env) {
   const existing = await store.get(addrKey);
   if (existing) {
     const proj = JSON.parse(existing);
-    return { created: false, existing: true, projectId: proj.projectId, complianceUrl: proj.complianceUrl };
+    // NEW: also resolve the real Supabase listings.id here, not just on the
+    // fresh-creation path below — a returning session (very common, since
+    // most listings get revisited across multiple staging sessions) needs
+    // SESSION.listingId just as much as a brand-new one does. video-job.js
+    // needs this literal Supabase primary key, NOT proj.projectId (that's a
+    // separate text column — see the write below for why these differ).
+    let listingId = null;
+    if (process.env.SUPABASE_URL) {
+      try {
+        const listingLookup = await supabase("GET", "listings", null,
+          `?project_id=eq.${proj.projectId}&select=id&limit=1`
+        );
+        listingId = listingLookup.data?.[0]?.id || null;
+      } catch (err) {
+        console.error("Listing id lookup error (non-fatal):", err.message);
+      }
+    }
+    return { created: false, existing: true, projectId: proj.projectId, complianceUrl: proj.complianceUrl, listingId };
   }
 
   // Determine tier from Supabase user context if userId provided
@@ -185,9 +218,10 @@ async function createProject(address, agentInfo, siteUrl, userId, env) {
   console.log("Project created:", projectId, "tier:", tier, "address:", address);
 
   // ── Write to Supabase listings table (new) ────────────────────────────────
+  let listingId = null;
   if (userId && process.env.SUPABASE_URL) {
     try {
-      await supabase("POST", "listings", {
+      const listingWrite = await supabase("POST", "listings", {
         address,
         project_id:          projectId,
         compliance_page_url: cUrl,
@@ -197,13 +231,21 @@ async function createProject(address, agentInfo, siteUrl, userId, env) {
         brokerage_id:        userContext?.brokerage_id || null,
         status:              "active",
       });
+      // NEW: capture the real Supabase id — this is what video-job.js's
+      // action=frames/action=create actually need as "listingId". Distinct
+      // from projectId (the human-readable compliance slug above) — the two
+      // are different columns on this same row, confirmed against
+      // get-user-listings.js's explicit `select=id,...,project_id,...`.
+      // Never returned to the frontend before this change, even though the
+      // row itself has always existed the moment a project is created.
+      listingId = listingWrite.data?.[0]?.id || null;
     } catch (err) {
       // Non-fatal — Blobs write already succeeded
       console.error("Supabase listing write error (non-fatal):", err.message);
     }
   }
 
-  return { created: true, projectId, complianceUrl: cUrl };
+  return { created: true, projectId, complianceUrl: cUrl, listingId };
 }
 
 // ── ACTION: ADD IMAGE ─────────────────────────────────────────────────────────

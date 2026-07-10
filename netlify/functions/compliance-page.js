@@ -114,6 +114,10 @@ function renderPage(project, projectId, videoJobs) {
         <source src="${videoUrl}" type="video/mp4">
         Your browser does not support embedded video. <a href="${videoUrl}">Download the video directly</a>.
       </video>
+      <div style="padding:10px 12px;background:#f7f4ef;border-top:1px solid #e0d8ce;font-size:11px;display:flex;gap:16px;flex-wrap:wrap;">
+        ${job.output_16x9_url ? `<a href="${job.output_16x9_url}" download class="dl-link">↓ Download Video (16:9)</a>` : ""}
+        ${job.output_9x16_url ? `<a href="${job.output_9x16_url}" download class="dl-link">↓ Download Video (9:16)</a>` : ""}
+      </div>
       <div class="video-tour-sources-label">Original, unaltered photographs used to generate this video (${job.frames.length})</div>
       <div class="video-tour-sources-grid">
         ${sourceThumbs}

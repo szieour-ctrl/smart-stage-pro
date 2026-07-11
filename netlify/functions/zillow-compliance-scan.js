@@ -43,6 +43,17 @@ const https = require("https");
 
 const BRIGHTDATA_DATASET_ID = "gd_m794g571225l6vm7gh"; // "Zillow Full Properties Information" — confirmed against a real successful run to include description + photos
 
+// Vision layer targets specifically the case text-scanning can't see at
+// all: zero disclosure language, zero URL/QR, so the ONLY possible
+// evidence is in the photos themselves. Deliberately scoped to a capped
+// number of photos, not the full gallery (can run 70-90+ photos per
+// listing) — cost and Netlify's 30s function timeout both matter here.
+// Zillow galleries commonly front-load hero rooms (exterior, living,
+// kitchen, primary) early in photo order — not guaranteed, but a strong
+// enough convention to cap here rather than analyze every photo.
+const MAX_PHOTOS_FOR_VISUAL_CHECK = 24;
+const VISION_MODEL = "claude-haiku-4-5-20251001"; // matches the established pattern already used elsewhere in this codebase (detect-hero-shots.js) for photographic vision analysis
+
 // Strong, multi-word phrases only — avoids false positives from a bare
 // word like "staged" (e.g. "staged for showing," a completely unrelated,
 // common real-estate phrase that has nothing to do with virtual/digital
@@ -77,7 +88,96 @@ function brightDataRequest(path, method, apiKey, bodyObj) {
   });
 }
 
-// The actual compliance logic — pure function, no I/O, so it's directly
+// Pulls a moderate-resolution URL for each photo — large enough to read
+// structural detail (window shape/placement, flooring pattern, ceiling
+// features) needed to confidently match the SAME room across two photos,
+// small enough to keep download time and vision-call payload size
+// reasonable across up to MAX_PHOTOS_FOR_VISUAL_CHECK images in one call.
+function extractPhotoUrls(listing) {
+  const photos = listing.original_photos || listing.responsive_photos || [];
+  return photos.slice(0, MAX_PHOTOS_FOR_VISUAL_CHECK).map(p => {
+    const jpegSources = p.mixed_sources?.jpeg || [];
+    // Prefer something in the 700-1000px range if available; fall back to
+    // whatever's there rather than skip a photo entirely.
+    const preferred = jpegSources.find(s => Number(s.width) >= 700 && Number(s.width) <= 1000);
+    return (preferred || jpegSources[jpegSources.length - 1] || jpegSources[0])?.url;
+  }).filter(Boolean);
+}
+
+function fetchImageAsBase64(url) {
+  return new Promise((resolve, reject) => {
+    const req = https.get(url, { timeout: 10000 }, (res) => {
+      if (res.statusCode !== 200) { reject(new Error(`Photo fetch failed: ${res.statusCode}`)); return; }
+      const chunks = [];
+      res.on("data", (c) => chunks.push(c));
+      res.on("end", () => resolve(Buffer.concat(chunks).toString("base64")));
+    });
+    req.on("error", reject);
+    req.on("timeout", () => { req.destroy(); reject(new Error("Photo fetch timed out")); });
+  });
+}
+
+function callClaudeVisionForStagingPair(imageBase64List, apiKey) {
+  const imageBlocks = imageBase64List.flatMap((b64, i) => ([
+    { type: "text", text: `Photo ${i + 1}:` },
+    { type: "image", source: { type: "base64", media_type: "image/jpeg", data: b64 } },
+  ]));
+
+  const body = JSON.stringify({
+    model: VISION_MODEL,
+    max_tokens: 1024,
+    messages: [{
+      role: "user",
+      content: [
+        ...imageBlocks,
+        { type: "text", text:
+          "You are looking at numbered photos from a real estate listing. This listing's public description contains NO virtual-staging disclosure language and NO link/QR code — so the only possible evidence of undisclosed virtual staging is in the photos themselves.\n\n" +
+          "TASK: Look specifically for a LIVING ROOM, KITCHEN, or PRIMARY BEDROOM that appears TWICE among these photos — once VACANT (empty, no furniture) and once FURNISHED (staged with furniture/decor) — where both photos show the SAME physical room.\n\n" +
+          "To confirm it's the same room, match STRUCTURAL features that furniture can't change: window shape/position, ceiling features (beams, fans, light fixture location), flooring pattern, wall layout, door/opening positions, outlet/switch locations. Do NOT match rooms just because they're a similar style or size — many rooms in a listing look generically similar. Only report a match if you can point to specific structural details that are identical between the two photos.\n\n" +
+          "If you are not genuinely confident two specific photos show the exact same room, report no match — a false positive is worse than a missed one here, since this flags a listing as a possible real violation.\n\n" +
+          "Return ONLY valid JSON, no other text, no markdown fences. Exact shape:\n" +
+          "{\n" +
+          '  "pairFound": <true or false>,\n' +
+          '  "roomType": "<living room | kitchen | primary bedroom>" or null,\n' +
+          '  "vacantPhotoNumber": <integer or null>,\n' +
+          '  "furnishedPhotoNumber": <integer or null>,\n' +
+          '  "confidence": "high" | "medium" | "low",\n' +
+          '  "reasoning": "<one or two sentences citing the SPECIFIC structural features that matched>"\n' +
+          "}"
+        }
+      ]
+    }]
+  });
+
+  return new Promise((resolve, reject) => {
+    const req = https.request({
+      hostname: "api.anthropic.com",
+      path: "/v1/messages",
+      method: "POST",
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(body),
+      },
+      timeout: 25000, // leaves headroom under Netlify's 30s cap for the surrounding fetch/parse work — real risk this whole action exceeds 30s combined with image downloads; see comment on the visual-check handler below
+    }, (res) => {
+      const chunks = [];
+      res.on("data", (c) => chunks.push(c));
+      res.on("end", () => {
+        try {
+          const parsed = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+          if (res.statusCode !== 200) reject(new Error(`Claude API error ${res.statusCode}: ${JSON.stringify(parsed).slice(0, 300)}`));
+          else resolve(parsed);
+        } catch (e) { reject(new Error("Claude API response parse error")); }
+      });
+    });
+    req.on("error", reject);
+    req.on("timeout", () => { req.destroy(); reject(new Error("Claude Vision call timed out after 25s")); });
+    req.write(body);
+    req.end();
+  });
+}
 // testable against known text without needing a real Bright Data call.
 function evaluateCompliance(listing) {
   const description = listing.description || "";
@@ -164,6 +264,97 @@ exports.handler = async (event) => {
         statusCode: 200,
         headers,
         body: JSON.stringify({ snapshotId, status: "ready", listingUrl: listing.url, ...compliance }, null, 2),
+      };
+    } catch (err) {
+      return { statusCode: 200, headers, body: JSON.stringify({ snapshotId, status: "error", error: err.message }) };
+    }
+  }
+
+  // ── ACTION: VISUAL-CHECK ─────────────────────────────────────────────
+  // On-demand deeper check, per Sam's direction — NOT run automatically
+  // as part of every scan. Meant to be called specifically for listings
+  // that already came back inconclusive_no_staging_detected from the text
+  // check (action=check), where the only possible evidence is in the
+  // photos. Re-fetches the same snapshot's data (Bright Data snapshots
+  // are downloadable repeatedly, confirmed in their own docs) rather than
+  // requiring the caller to pass photo data through separately.
+  //
+  // REAL RISK, stated plainly rather than hidden: downloading up to
+  // MAX_PHOTOS_FOR_VISUAL_CHECK (24) images AND running one large vision
+  // call, all inside Netlify's 30-second standard function timeout, is
+  // genuinely tight — images are fetched in parallel to minimize this,
+  // but if this proves too slow in real testing, the fix is converting
+  // this action to the same trigger/poll pattern already used for the
+  // Bright Data calls, not raising a timeout number and hoping.
+  if (action === "visual-check") {
+    const snapshotId = event.queryStringParameters?.snapshotId;
+    if (!snapshotId) {
+      return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing snapshotId." }) };
+    }
+    const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
+    if (!anthropicApiKey) {
+      return { statusCode: 500, headers, body: JSON.stringify({ error: "ANTHROPIC_API_KEY is not set in Netlify environment variables." }) };
+    }
+
+    try {
+      const { statusCode, body } = await brightDataRequest(
+        `/datasets/v3/snapshot/${snapshotId}?format=json`, "GET", apiKey, null
+      );
+      let parsed;
+      try { parsed = JSON.parse(body); } catch { parsed = null; }
+      const stillRunning = statusCode === 202 || (parsed && parsed.status && /running|building|pending/i.test(parsed.status));
+      if (stillRunning) {
+        return { statusCode: 200, headers, body: JSON.stringify({ snapshotId, status: "running" }) };
+      }
+      const results = Array.isArray(parsed) ? parsed : (parsed ? [parsed] : []);
+      const listing = results[0];
+      if (!listing || !listing.zpid) {
+        return { statusCode: 200, headers, body: JSON.stringify({ snapshotId, status: "error", error: "No usable listing data in Bright Data's response." }) };
+      }
+
+      const photoUrls = extractPhotoUrls(listing);
+      if (photoUrls.length === 0) {
+        return { statusCode: 200, headers, body: JSON.stringify({ snapshotId, status: "ready", pairFound: false, note: "No usable photos found for this listing." }) };
+      }
+
+      const imageBase64List = await Promise.all(photoUrls.map(u => fetchImageAsBase64(u)));
+      const visionResponse = await callClaudeVisionForStagingPair(imageBase64List, anthropicApiKey);
+
+      const textBlock = visionResponse.content?.find(b => b.type === "text");
+      if (!textBlock) {
+        return { statusCode: 200, headers, body: JSON.stringify({ snapshotId, status: "error", error: "No text content in Claude's response.", raw: visionResponse }) };
+      }
+
+      let visionResult;
+      try {
+        visionResult = JSON.parse(textBlock.text.trim().replace(/^```json\s*|\s*```$/g, ""));
+      } catch (err) {
+        return { statusCode: 200, headers, body: JSON.stringify({ snapshotId, status: "error", error: "Could not parse Claude's response as JSON.", rawText: textBlock.text }) };
+      }
+
+      // Map Claude's 1-indexed photo NUMBERS back to the real Bright
+      // Data/Zillow photo URLs — this is the whole point: a flagged
+      // listing needs to point at actual evidence, not just assert a
+      // finding.
+      const vacantUrl = visionResult.vacantPhotoNumber ? photoUrls[visionResult.vacantPhotoNumber - 1] || null : null;
+      const furnishedUrl = visionResult.furnishedPhotoNumber ? photoUrls[visionResult.furnishedPhotoNumber - 1] || null : null;
+
+      return {
+        statusCode: 200,
+        headers,
+        body: JSON.stringify({
+          snapshotId,
+          status: "ready",
+          listingUrl: listing.url,
+          photosAnalyzed: photoUrls.length,
+          pairFound: !!visionResult.pairFound,
+          roomType: visionResult.roomType || null,
+          confidence: visionResult.confidence || null,
+          reasoning: visionResult.reasoning || null,
+          vacantPhotoUrl: vacantUrl,
+          furnishedPhotoUrl: furnishedUrl,
+          limitation: `Analyzed the first ${photoUrls.length} photos only (Zillow galleries commonly front-load hero rooms, but this isn't guaranteed for every listing). This is a probabilistic visual signal, not a verdict — it can miss well-executed staging entirely, and a "pairFound: true" result should be manually confirmed by looking at the two linked photos, not treated as conclusive on its own.`,
+        }, null, 2),
       };
     } catch (err) {
       return { statusCode: 200, headers, body: JSON.stringify({ snapshotId, status: "error", error: err.message }) };

@@ -444,6 +444,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
           <button class="btn btn-outline btn-sm" onclick="startNewSession()">+ New Session</button>
           <button class="btn btn-outline btn-sm" onclick="continueProject()" id="continue-project-btn" style="display:none;">+ Add More Rooms</button>
+          <button class="btn btn-outline btn-sm" onclick="openVideoBuilder()" id="create-video-btn" style="display:none;" title="Needs at least one room with a Generate Final image">+ Create Video</button>
           <span id="current-project-label" style="font-size:11px;color:var(--muted);display:none;"></span>
         </div>
       </div>
@@ -1067,6 +1068,7 @@ async function lookupOrCreateProject(address) {
     if (data.exists) {
       // Project found
       SESSION.projectId = data.projectId;
+      SESSION.listingId = data.listingId;
       SESSION.projectAddress = address;
       SESSION.complianceUrl = data.complianceUrl;
       SESSION.projectStatus = 'existing';
@@ -1142,6 +1144,7 @@ async function createNewProject(address) {
     const data = await res.json();
 
     SESSION.projectId = data.projectId;
+    SESSION.listingId = data.listingId;
     SESSION.projectAddress = address;
     SESSION.complianceUrl = data.complianceUrl;
     SESSION.projectStatus = 'new';
@@ -1203,6 +1206,24 @@ function continueProject() {
     showToast('No active project — please search for a property first.', 'error');
     showStep('step-property');
     return;
+  }
+  // Self-healing backfill: SESSION.listingId is only ever set by an actual
+  // lookup/create API call — continueProject() itself never calls one, it
+  // just reuses whatever's already in memory. A session that started before
+  // listingId capture was deployed (or any other reason it never got set)
+  // would otherwise carry that gap forward silently for the rest of the
+  // browser tab's lifetime, with "+ Create Video" just never appearing and
+  // no clue why. Fire-and-forget on purpose — this must never block adding
+  // more rooms, which is the actual thing the user asked to do.
+  if (!SESSION.listingId && SESSION.projectAddress) {
+    fetch('/.netlify/functions/project-manage?action=lookup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ address: SESSION.projectAddress }),
+    })
+      .then(res => res.json())
+      .then(data => { if (data.listingId) { SESSION.listingId = data.listingId; updateCreateVideoButton(); } })
+      .catch(() => {}); // non-fatal — worst case, listingId stays unset and the button stays hidden, same as before this fix
   }
   // Clear per-batch state, but deliberately KEEP SESSION.stagingDNA — once captured,
   // it should carry across every batch of rooms added to this project, not just the
@@ -2441,6 +2462,35 @@ function renderRoomQueue(){
       <div class="room-card-actions">${actions}${modeToggle}</div></div>
       ${strategyToggle}${resultHtml}${dnaPanel}${iterHtml}${finalHtml}${cinematicAssetPanel}</div>`;
   }).join('');
+  updateCreateVideoButton();
+}
+
+// Keeps the "+ Create Video" button's visibility in sync with real state —
+// called at the end of every renderRoomQueue() so it never goes stale as
+// rooms are added, finalized, or removed. Needs SESSION.listingId (only
+// present once a compliance project exists — see the project-manage.js
+// create/lookup fixes) AND at least one room with a real Generate Final
+// image; a video built from nothing but drafts isn't a real deliverable.
+function updateCreateVideoButton(){
+  const btn = document.getElementById('create-video-btn');
+  if (!btn) return;
+  const hasFinal = SESSION.rooms.some(r => r.finalBase64);
+  btn.style.display = (SESSION.listingId && hasFinal) ? '' : 'none';
+}
+
+// Hands off to the PRO Plus video builder with the current project's real
+// identifiers — SESSION.listingId is the Supabase listings.id (NOT
+// SESSION.projectId, a different column entirely — see the project-manage.js
+// fix this session), _sbUser.id is the same user id every credit charge in
+// this file already uses.
+function openVideoBuilder(){
+  if (!SESSION.listingId) { showToast('This project has no listing on file yet — stage at least one room first.', 'error'); return; }
+  const params = new URLSearchParams({
+    listingId: SESSION.listingId,
+    userId: _sbUser?.id || '',
+    projectId: SESSION.projectId || '',
+  });
+  window.open(`/build-video-demo.html?${params.toString()}`, '_blank');
 }
 
 // ── DECLUTTER FINAL PANEL ────────────────────────────────────────────────────

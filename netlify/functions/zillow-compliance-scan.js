@@ -312,6 +312,33 @@ exports.handler = async (event) => {
         return { statusCode: 200, headers, body: JSON.stringify({ snapshotId, status: "error", error: "No usable listing data in Bright Data's response." }) };
       }
 
+      // BUILDER/NEW-CONSTRUCTION GATE — skip the visual check entirely for
+      // these, don't just let a low confidence score quietly absorb it.
+      // New-construction listings routinely use model-home photos or
+      // renderings instead of photos of the actual unit being sold — a
+      // standard industry practice, often with its own "photos may not
+      // represent actual home" disclaimer. The vacant/furnished
+      // pair-matching logic below assumes both photos show the SAME
+      // physical room; for a builder listing that assumption can be
+      // false by design, which would turn a real model-home photo into a
+      // false "possible violation" flag. Gated on confirmed real fields
+      // (listing_sub_type.is_new_home, is_premier_builder) rather than
+      // guessed at.
+      const isBuilderListing = !!listing.listing_sub_type?.is_new_home || !!listing.is_premier_builder;
+      if (isBuilderListing) {
+        return {
+          statusCode: 200,
+          headers,
+          body: JSON.stringify({
+            snapshotId,
+            status: "ready",
+            pairFound: false,
+            skipped: true,
+            skipReason: "This is flagged as a new-construction/builder listing (listing_sub_type.is_new_home or is_premier_builder is true). Builder listings commonly use model-home photos or renderings that legitimately depict a different physical space than the actual unit for sale — the vacant/furnished same-room matching this check relies on isn't reliable here, so it was skipped rather than risk a false positive.",
+          }, null, 2),
+        };
+      }
+
       const photoUrls = extractPhotoUrls(listing);
       if (photoUrls.length === 0) {
         return { statusCode: 200, headers, body: JSON.stringify({ snapshotId, status: "ready", pairFound: false, note: "No usable photos found for this listing." }) };

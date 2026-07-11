@@ -296,16 +296,53 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
 <!-- MOTION PREVIEW: placeholder until real stock clips are produced -->
 <div class="overlay hidden" id="previewOverlay" onclick="if(event.target===this) closePreview()">
   <div class="preview-box">
-    <div class="preview-stage">
+    <div class="preview-stage" id="previewStage">
       <button class="lightbox-close" onclick="closePreview()">&times;</button>
-      <div class="play-icon">&#9654;</div>
-      <div class="coming-soon">Video coming soon</div>
     </div>
     <div class="preview-info" id="previewInfo"></div>
   </div>
 </div>
 
 <script>
+// Real sample clips captured against 234 Bent Tree Ct during Playground/
+// verification testing this session — see Notion for the source doc. Two
+// gaps, both real, not oversights to silently patch over:
+//   - "static" and "auto" have no clip (nothing to preview — no motion).
+//   - pan_zoom / pan_zoom_reveal were built AFTER these clips were
+//     captured, so no sample exists yet for either.
+const PREVIEW_CLIP_URLS = {
+  // Kling AI Motion
+  orbit_arc:                    "https://res.cloudinary.com/de18zsi7o/video/upload/v1783606652/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783606651845.mp4",
+  rack_focus:                   "https://res.cloudinary.com/de18zsi7o/video/upload/v1783607175/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783607174918.mp4",
+  fireplace_flicker:            "https://res.cloudinary.com/de18zsi7o/video/upload/v1783610650/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783610649971.mp4",
+  luxury_drift:                 "https://res.cloudinary.com/de18zsi7o/video/upload/v1783613183/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783613182449.mp4",
+  floating_camera_drift:        "https://res.cloudinary.com/de18zsi7o/video/upload/v1783613489/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783613488284.mp4",
+  parallax_push:                "https://res.cloudinary.com/de18zsi7o/video/upload/v1783613786/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783613785931.mp4",
+  cinematic_push:                "https://res.cloudinary.com/de18zsi7o/video/upload/v1783612867/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783612866758.mp4",
+  architectural_glide:          "https://res.cloudinary.com/de18zsi7o/video/upload/v1783614144/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783614143813.mp4",
+  crane_up:                     "https://res.cloudinary.com/de18zsi7o/video/upload/v1783614271/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783614270867.mp4",
+  crane_down:                   "https://res.cloudinary.com/de18zsi7o/video/upload/v1783614849/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783614848626.mp4",
+  room_reveal:                  "https://res.cloudinary.com/de18zsi7o/video/upload/v1783616466/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783616465784.mp4",
+  living_room_ambient:          "https://res.cloudinary.com/de18zsi7o/video/upload/v1783616831/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783616830827.mp4",
+  corner_to_corner_drift:       "https://res.cloudinary.com/de18zsi7o/video/upload/v1783617208/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783617208183.mp4",
+  drone_boom_up:                "https://res.cloudinary.com/de18zsi7o/video/upload/v1783621076/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783621075653.mp4",
+  water_motion:                 "https://res.cloudinary.com/de18zsi7o/video/upload/v1783620786/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783620785616.mp4",
+  outdoor_breeze:                "https://res.cloudinary.com/de18zsi7o/video/upload/v1783644529/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783644528842.mp4",
+  day_to_twilight:               "https://res.cloudinary.com/de18zsi7o/video/upload/v1783643163/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783643162928.mp4",
+  twilight_to_day:               "https://res.cloudinary.com/de18zsi7o/video/upload/v1783643494/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783643494003.mp4",
+  twilight_night_day_timelapse: "https://res.cloudinary.com/de18zsi7o/video/upload/v1783644047/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783644046286.mp4",
+  // Ken Burns
+  push_in:      "https://res.cloudinary.com/de18zsi7o/video/upload/v1783649991/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783649990707.mp4",
+  pull_back:    "https://res.cloudinary.com/de18zsi7o/video/upload/v1783650218/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783650217589.mp4",
+  pan_left:     "https://res.cloudinary.com/de18zsi7o/video/upload/v1783650457/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783650456977.mp4",
+  pan_right:    "https://res.cloudinary.com/de18zsi7o/video/upload/v1783650649/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783650648454.mp4",
+  tilt_up:      "https://res.cloudinary.com/de18zsi7o/video/upload/v1783651131/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783651131078.mp4",
+  tilt_down:    "https://res.cloudinary.com/de18zsi7o/video/upload/v1783653131/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783653130455.mp4",
+  drift:        "https://res.cloudinary.com/de18zsi7o/video/upload/v1783653522/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783653521881.mp4",
+  float:        "https://res.cloudinary.com/de18zsi7o/video/upload/v1783653892/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783653892131.mp4",
+  luxury_parallax: "https://res.cloudinary.com/de18zsi7o/video/upload/v1783654111/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783654110706.mp4",
+};
+
 const KEN_BURNS_PRESETS = {
   auto: { label: "Auto", desc: "We pick a sensible movement based on the room type." },
   push_in: { label: "Push In", desc: "Slow dolly toward a feature wall, front door, or bed." },
@@ -384,6 +421,7 @@ const UNTAGGED_ICON = "&#128247;"; // generic camera — shown until a room is p
 const MAX_FRAMES = 20;
 const KLING_INCLUDED_FRAMES_FIRST_GEN = 3;
 const KLING_IMAGE_COST_PER_FRAME = 5;
+const FLAT_MIN_KLING_CHARGE = 1; // mirrors the same constant in video-job.js
 
 // ── REAL BACKEND WIRING (July 10, 2026) ──────────────────────────────────
 // This page is launched with real identifiers in the URL — from the main
@@ -929,6 +967,13 @@ function renderLightboxControls(id) {
 function openMotionPreview(presetKey, type) {
   const preset = type === "kling" ? KLING_PRESETS[presetKey] : KEN_BURNS_PRESETS[presetKey];
   if (!preset) return;
+  const clipUrl = PREVIEW_CLIP_URLS[presetKey];
+  document.getElementById("previewStage").innerHTML = clipUrl
+    ? `<button class="lightbox-close" onclick="closePreview()">&times;</button>
+       <video src="${clipUrl}" controls autoplay muted loop playsinline style="width:100%;height:100%;object-fit:contain;background:#000;"></video>`
+    : `<button class="lightbox-close" onclick="closePreview()">&times;</button>
+       <div class="play-icon">&#9654;</div>
+       <div class="coming-soon">Video coming soon</div>`;
   document.getElementById("previewInfo").innerHTML = `
     <div class="panel-title">${preset.label}</div>
     <div class="panel-sub">${preset.desc}</div>
@@ -938,15 +983,26 @@ function openMotionPreview(presetKey, type) {
 
 function closePreview() {
   document.getElementById("previewOverlay").classList.add("hidden");
+  // Stop playback rather than leaving a hidden video looping/downloading
+  // in the background — matters more here than usual since these are real
+  // Cloudinary-hosted clips, not free local assets.
+  const video = document.querySelector("#previewStage video");
+  if (video) { video.pause(); video.currentTime = 0; }
 }
 
 function updateKlingCountBar() {
   const klingCount = frames.filter(f => f.motion === "kling").length;
   const bar = document.getElementById("klingCountBar");
   const billable = Math.max(0, klingCount - KLING_INCLUDED_FRAMES_FIRST_GEN);
+  // Matches calculateKlingChargeForGeneration's real logic (video-job.js):
+  // any Kling usage at all charges at least 1 Image, even fully within the
+  // included-3 allowance — this is just an early estimate shown before the
+  // real action=quote call at Step 4, kept consistent with it so nothing
+  // here says "0 Images" only for the real quote to then charge 1.
+  const estimatedImages = klingCount === 0 ? 0 : Math.max(FLAT_MIN_KLING_CHARGE, billable * KLING_IMAGE_COST_PER_FRAME);
   bar.innerHTML = `
-    <span>${klingCount} AI Motion frame${klingCount===1?"":"s"} selected${billable > 0 ? ` — <b>${billable} beyond the included 3</b>` : ` (within the included 3)`}</span>
-    <span>${billable > 0 ? `+${billable * KLING_IMAGE_COST_PER_FRAME} Images on Generate` : "0 Images on Generate"}</span>
+    <span>${klingCount} AI Motion frame${klingCount===1?"":"s"} selected${billable > 0 ? ` — <b>${billable} beyond the included 3</b>` : (klingCount > 0 ? ` (within the included 3)` : "")}</span>
+    <span>${estimatedImages > 0 ? `~${estimatedImages} Images on Generate` : "0 Images on Generate"}</span>
   `;
 }
 
@@ -1170,20 +1226,24 @@ function pollJobStatus(jobId) {
 }
 
 // NOTE: action=status deliberately never returns the finished video URLs
-// (output_16x9_url/output_9x16_url) — those only ever come back from
-// action=download, the one place that charges the download fee (see the
-// comment on getJobStatus() in video-job.js). thumbnail_url is the one
-// preview asset available for free before that charge — a static
-// watermarked image, not a playable video. That's a real, current product
-// gap worth knowing about: there is no free video preview before Download
-// today. The copy below is written to be honest about that rather than
-// implying a preview video exists.
+// CHANGE (July 10, 2026): now shows the REAL, full-quality video — see the
+// matching change in getJobStatus() (video-job.js). No watermark, per
+// explicit direction: there's no separate "free draft" tier to protect for
+// video the way there is for staged images, since Kling's real cost is
+// already paid the moment Generate is clicked, not at Download. The whole
+// point of showing the real result here is letting the user genuinely
+// decide whether to Iterate or Download BEFORE committing — iterating
+// loses the frame selection/ordering/motion assignments entirely, so that
+// decision needs to be made with real information, not a static thumbnail.
 function showRenderComplete(job) {
+  const videoUrl = job.output_16x9_url || job.output_9x16_url;
   document.getElementById("resultContent").innerHTML = `
     <div class="result-icon">&#9989;</div>
     <div class="result-title">Ready \u2014 generation #${job.generation_count || generationCount}</div>
-    ${job.thumbnail_url ? `<img src="${job.thumbnail_url}" alt="Preview thumbnail" style="max-width:100%;border-radius:4px;margin:12px 0;">` : ""}
-    <div class="result-body">The full video isn't downloadable-quality-visible until Download \u2014 that's also when the flat download fee is charged and this hits your AB 723 compliance page. If you want changes, Iterate \u2014 every Kling frame in the video gets billed again on the next generation, including ones that were free this time.</div>
+    ${videoUrl
+      ? `<video src="${videoUrl}" controls autoplay muted loop playsinline style="width:100%;max-width:480px;border-radius:4px;margin:12px 0;background:#000;"></video>`
+      : (job.thumbnail_url ? `<img src="${job.thumbnail_url}" alt="Preview thumbnail" style="max-width:100%;border-radius:4px;margin:12px 0;">` : "")}
+    <div class="result-body">Watch it back \u2014 the Kling cost above is already spent either way, so take your time deciding. Download is a separate flat fee for the formal export: it locks this in, adds it to your AB 723 compliance page, and uses one of your monthly video downloads. If you Iterate instead, every Kling frame in the video gets billed again on the next generation, including ones that were free this time, and the current result is replaced, not kept alongside the new one.</div>
     <div style="margin-top:18px;display:flex;gap:10px;justify-content:center;">
       <button class="btn btn-ghost" style="flex:none;" onclick="resetDemo()">Start over</button>
       <button class="btn btn-ghost" style="flex:none;" onclick="handleIterate()">Iterate this video</button>

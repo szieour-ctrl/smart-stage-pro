@@ -210,8 +210,9 @@ const MAX_FRAMES_PER_JOB = 20;
 // Ken Burns frames are unaffected by any of this — they stay folded into
 // the flat BASE_VIDEO_COST charged at download (see calculateDownloadCost).
 
-const KLING_INCLUDED_FRAMES_FIRST_GEN = 3; // free, but ONLY on generation_count === 1
+const KLING_INCLUDED_FRAMES_FIRST_GEN = 3; // included in the flat minimum below, but ONLY on generation_count === 1
 const KLING_IMAGE_COST_PER_FRAME = 5;      // every billable Kling frame, no exceptions
+const FLAT_MIN_KLING_CHARGE = 1;           // NEW (July 10, 2026) — minimum charge for ANY generation that uses Kling at all, even when fully within the included-3 allowance
 
 // Per-frame cost for the DOWNLOAD-TIME charge only. Kling frames are
 // deliberately absent from this map now — they're charged at generation,
@@ -239,16 +240,29 @@ const PER_FRAME_COST = {
 // (generationCount will be 2+). This is THE function that protects against
 // runaway Kling spend — see the header comment and
 // SmartStagePRO_Plus_Image_Economy_v2.md §3 for the full worked examples.
+//
+// CHANGE (July 10, 2026, cost-model session): a generation that uses Kling
+// at all now ALWAYS charges at least FLAT_MIN_KLING_CHARGE Images, even
+// when every Kling frame falls inside the free-3 allowance. Previously
+// that case charged exactly 0 — a real gap: Kling still costs real money
+// per frame (confirmed $0.42/frame against fal.ai's actual pricing) even
+// for the "included" ones, and charging nothing meant nothing was
+// recovered and, just as importantly, nothing signaled that a real,
+// billable event had happened at all. Videos with ZERO Kling frames
+// (pure Ken Burns) are unaffected — there's no real Kling cost to
+// recover there at all, so they still correctly charge 0 here (Ken Burns
+// itself is priced separately, as a flat fee at Download).
 function calculateKlingChargeForGeneration(frames, generationCount) {
   const klingFrameCount = frames.filter(f => f.useAiMotion).length;
+  if (klingFrameCount === 0) return 0; // no Kling used at all — nothing to charge here
 
   if (generationCount === 1) {
     // First generation ever for this video — first 3 Kling frames are
-    // free (they count against the monthly VIDEO quota at download
-    // instead — see consumeVideoQuotaSlot). Only frames beyond 3 cost
-    // Images here.
+    // included in the flat minimum charge below (previously "free" outright
+    // — see the CHANGE note above for why that changed). Only frames beyond
+    // 3 add real per-frame cost on top of the flat minimum.
     const billableFrames = Math.max(0, klingFrameCount - KLING_INCLUDED_FRAMES_FIRST_GEN);
-    return billableFrames * KLING_IMAGE_COST_PER_FRAME;
+    return Math.max(FLAT_MIN_KLING_CHARGE, billableFrames * KLING_IMAGE_COST_PER_FRAME);
   }
 
   // Any regeneration: the included allowance is gone entirely. EVERY
@@ -257,7 +271,10 @@ function calculateKlingChargeForGeneration(frames, generationCount) {
   // counterintuitive part of the model — the frontend confirmation screen
   // (Image Economy v2 §6) must make this explicit before the user clicks,
   // since it's exactly the kind of "surprise charge on a minor fix"
-  // VideoTour.ai users complained about.
+  // VideoTour.ai users complained about. Already guaranteed to exceed
+  // FLAT_MIN_KLING_CHARGE the moment klingFrameCount >= 1 (1 frame × 5
+  // Images = 5, already above the flat minimum of 1), so no separate
+  // Math.max needed here — the existing math already dominates.
   return klingFrameCount * KLING_IMAGE_COST_PER_FRAME;
 }
 
@@ -532,6 +549,30 @@ async function createVideoJob({ listingId, projectId, userId, frames, formats, m
   // validateFormatChoiceForAiMotion for why (composition risk, not cost).
   validateFormatChoiceForAiMotion(frames, formats);
 
+  // CHANGE (July 10, 2026, cost-model session): video quota check MOVED
+  // here from downloadVideoJob — "this generation counts toward the
+  // monthly video allowance" now happens at Generate, not Download,
+  // matching the Kling charge itself moving to Generate-time. Checked
+  // before the Kling debit below, same "cheapest possible rejection
+  // point" reasoning already used for MAX_FRAMES_PER_JOB above — no
+  // reason to touch Images at all if there's no quota slot available.
+  //
+  // Scope note: this only fires here, in createVideoJob (generation #1).
+  // regenerateVideoJob does NOT consume an additional quota slot — a
+  // monthly "5/12/40 videos" allowance reads most naturally as "how many
+  // distinct videos can you make," not "how many times can you touch any
+  // video," and iterating on one video isn't creating a second one. This
+  // is a reasonable-default judgment call, not an explicitly confirmed
+  // decision — flag if regenerations should also consume a slot.
+  const quota = await checkVideoQuota(userId);
+  if (!quota.allowed) {
+    return {
+      error: "video_quota_exceeded",
+      used:  quota.used,
+      limit: quota.limit,
+    };
+  }
+
   // generation_count is 1 here, always — action=create is BY DEFINITION
   // the first generation. Any later generation goes through
   // regenerateVideoJob() instead, which is the only place generation_count
@@ -597,6 +638,12 @@ async function createVideoJob({ listingId, projectId, userId, frames, formats, m
       );
       throw new Error(`Failed to create video_jobs row (status ${jobResult.status}): ${JSON.stringify(jobResult.data)}`);
     }
+
+    // Job row confirmed created — consume the video quota slot now. Same
+    // "only after everything else has actually succeeded" ordering already
+    // used in downloadVideoJob: if the INSERT above had failed, we would
+    // not have wrongly burned a slot for a video that was never created.
+    await consumeVideoQuotaSlot(userId);
 
     // Create frame rows, preserving sequence order
     const klingBilledFlags = computeKlingBilledFlags(frames, 1);
@@ -988,23 +1035,9 @@ async function downloadVideoJob({ jobId, userId }) {
     };
   }
 
-  // First download for this job. Check video quota FIRST, before touching
-  // Images at all — if the user is out of video downloads for the month,
-  // there's no reason to even attempt an Image debit.
-  const quota = await checkVideoQuota(userId);
-  if (!quota.allowed) {
-    return {
-      error: "video_quota_exceeded",
-      used:  quota.used,
-      limit: quota.limit,
-    };
-  }
-
-  // Quota has a slot available — now check/charge Images via debit-credit.js,
-  // the exact same balance + active-subscription/trial check image staging
-  // uses. job.credits_used here is ONLY the flat download-time fee
-  // (calculateDownloadCost's output, stored at create/regenerate time) —
-  // Kling is never part of this number anymore.
+  // Video quota was already checked and consumed at Generate time (see
+  // createVideoJob) — Download no longer touches it at all. Only Images
+  // (the flat download-time fee) get checked/charged here now.
   const debitResult = await callDebitCredit(userId, job.credits_used, "video_download");
 
   if (debitResult.status === 402) {
@@ -1017,12 +1050,6 @@ async function downloadVideoJob({ jobId, userId }) {
   if (debitResult.status !== 200) {
     throw new Error(`Credit debit failed (status ${debitResult.status}): ${JSON.stringify(debitResult.data)}`);
   }
-
-  // Both checks passed and the Image debit succeeded — NOW consume the
-  // quota slot. Doing this after the debit (not before) means if the debit
-  // had failed, we would not have wrongly burned a video quota slot for a
-  // download that didn't actually go through.
-  await consumeVideoQuotaSlot(userId);
 
   await supabase("PATCH", "video_jobs",
     { credits_charged_at: new Date().toISOString() },
@@ -1097,19 +1124,26 @@ async function quoteGeneration({ jobId, userId, frames }) {
 // ── ACTION: STATUS ───────────────────────────────────────────────────────
 
 async function getJobStatus(jobId) {
-  // CHANGE: output_16x9_url/output_9x16_url removed from this select.
-  // Those now only ever come back from downloadVideoJob() — the one place
-  // that charges. If status polling could hand them over directly, a user
-  // could grab the finished file the moment it's ready, before any charge
-  // happens, making the whole download-time-charging model pointless.
-  // thumbnail_url stays — that's the watermarked preview, fine to show
-  // freely regardless of charge state, same pattern as image staging drafts.
+  // CHANGE (July 10, 2026): output_16x9_url/output_9x16_url ARE now
+  // included here, reversing the earlier design. That earlier version's
+  // reasoning doesn't hold anymore: the Kling charge now happens at
+  // Generate (see calculateKlingChargeForGeneration + its call site in
+  // createVideoJob/regenerateVideoJob), not at Download — so by the time a
+  // job reaches "complete," the real cost has already been paid. Gating
+  // the video itself behind Download no longer protects any actual
+  // revenue; Download is a separate, smaller flat fee for formal
+  // export/delivery/compliance-page-attachment, not for "unlocking"
+  // content that's already been paid for.
   //
-  // generation_count and kling_images_charged now also included so the
-  // frontend can show "you've spent N Images on Kling so far across M
-  // generations" running context, even while the job is still rendering.
+  // The actual purpose of showing the real video here: let the user
+  // genuinely watch what they got and decide whether to Download or
+  // Iterate BEFORE committing — iterating from scratch loses the frame
+  // selection/ordering/motion assignments, so that decision needs the
+  // real result, not a thumbnail, to be meaningful. No watermark — Sam's
+  // explicit call, since there's no separate "free draft" to protect
+  // here the way there is for staged images.
   const r = await supabase("GET", "video_jobs", null,
-    `?id=eq.${jobId}&select=id,status,thumbnail_url,credits_used,credits_charged_at,generation_count,kling_images_charged,error_message,created_at,completed_at`
+    `?id=eq.${jobId}&select=id,status,thumbnail_url,output_16x9_url,output_9x16_url,credits_used,credits_charged_at,generation_count,kling_images_charged,error_message,created_at,completed_at`
   );
   return r.data?.[0] || null;
 }

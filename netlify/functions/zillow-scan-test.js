@@ -15,6 +15,19 @@
 //
 // USAGE: GET /.netlify/functions/zillow-scan-test?url=<zillow listing URL>
 
+// POLYFILL (required on Node 18): cheerio's dependency chain pulls in
+// undici, whose module-load-time code references the bare global `File` —
+// that's only automatically global starting in Node 20. On Node 18 (which
+// is what this site's Netlify build actually runs — confirmed in the
+// build log: v18.20.8), `File` exists but only as an explicit export of
+// the `buffer` module, not on globalThis. Without this, simply requiring
+// cheerio crashes at import time with "ReferenceError: File is not
+// defined" — confirmed live, this isn't hypothetical. Must run before the
+// cheerio require() below.
+if (typeof globalThis.File === "undefined") {
+  globalThis.File = require("buffer").File;
+}
+
 const https = require("https");
 const cheerio = require("cheerio");
 

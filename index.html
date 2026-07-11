@@ -375,6 +375,10 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
   <div id="step-upload" class="panel hidden">
     <div class="panel-title">Upload Listing Photos</div>
     <div class="panel-sub">Upload all listing photos. Tag your floor plan using the "Set as Floor Plan" button on any thumbnail, or select "Floor Plan" in the room dropdown. Click any photo thumbnail to set Shot Focus instructions.</div>
+    <div id="step-upload-video-shortcut" class="hidden" style="margin-bottom:16px;padding:10px 14px;background:var(--panel-bg,#f7f4ef);border:1px solid #e0d8ce;border-radius:4px;display:flex;align-items:center;justify-content:space-between;gap:12px;">
+      <span style="font-size:0.8rem;color:var(--muted);">Already have staged photos for this listing, or just want to make a video from photos as-is?</span>
+      <button class="btn btn-outline btn-sm" onclick="openVideoBuilder()">+ Create Video</button>
+    </div>
     <div class="upload-zone" id="upload-zone">
       <input type="file" id="file-input" accept="image/*" multiple />
       <div class="upload-icon">📁</div>
@@ -2478,23 +2482,29 @@ function updateCreateVideoButton(){
   btn.style.display = (SESSION.listingId && hasFinal) ? '' : 'none';
 }
 
-// Hands off to the PRO Plus video builder with the current project's real
-// identifiers — SESSION.listingId is the Supabase listings.id (NOT
-// SESSION.projectId, a different column entirely — see the project-manage.js
-// fix this session). Fetches the current user the same way every other
-// function in this file does (await getSupabase().auth.getUser()) — _sbUser
-// is NOT a global anywhere in this file, it's a local const every other
-// caller declares fresh; referencing it here as if it were global was a
-// real bug (ReferenceError on click, confirmed live).
-async function openVideoBuilder(){
-  if (!SESSION.listingId) { showToast('This project has no listing on file yet — stage at least one room first.', 'error'); return; }
+// Hands off to the PRO Plus video builder with real identifiers. Two entry
+// points share this core: openVideoBuilder() (Room Staging Queue button,
+// uses the active in-session SESSION.listingId/projectId) and
+// openVideoBuilderFor() (My Listings dashboard card, uses that card's own
+// l.id/l.projectId directly — this is what makes it possible to jump
+// straight into PRO Plus for a listing without ever touching the staging
+// flow, addressing "no way to go straight to PRO Plus" directly).
+async function openVideoBuilderCore(listingId, projectId){
+  if (!listingId) { showToast('This listing has no ID on file yet.', 'error'); return; }
   const user = (await getSupabase().auth.getUser()).data?.user;
   const params = new URLSearchParams({
-    listingId: SESSION.listingId,
+    listingId,
     userId: user?.id || '',
-    projectId: SESSION.projectId || '',
+    projectId: projectId || '',
   });
   window.open(`/build-video-demo.html?${params.toString()}`, '_blank');
+}
+function openVideoBuilder(){
+  if (!SESSION.listingId) { showToast('This project has no listing on file yet — stage at least one room first.', 'error'); return; }
+  openVideoBuilderCore(SESSION.listingId, SESSION.projectId);
+}
+function openVideoBuilderFor(listingId, projectId){
+  openVideoBuilderCore(listingId, projectId);
 }
 
 // ── DECLUTTER FINAL PANEL ────────────────────────────────────────────────────
@@ -5446,7 +5456,13 @@ function cancelPromptModal() {
 // ══════════════════════════════════════════
 // UTILS
 // ══════════════════════════════════════════
-function showStep(id){['step-property','step-upload','step-intake','step-mapping','step-staging'].forEach(s=>document.getElementById(s)?.classList.add('hidden'));document.getElementById(id)?.classList.remove('hidden');}
+function showStep(id){['step-property','step-upload','step-intake','step-mapping','step-staging'].forEach(s=>document.getElementById(s)?.classList.add('hidden'));document.getElementById(id)?.classList.remove('hidden');
+  // Keep the step-upload "+ Create Video" shortcut in sync every time it
+  // might become visible — cheap check, and avoids needing to remember to
+  // call this from every single place SESSION.listingId can get set
+  // (property create, property lookup, continueProject's backfill, ...).
+  if(id==='step-upload'){document.getElementById('step-upload-video-shortcut')?.classList.toggle('hidden', !SESSION.listingId);}
+}
 function resetSession(){
   SESSION.originals=[];
   SESSION.intake={};
@@ -7085,6 +7101,7 @@ function renderDashboard(data, filter, search) {
       <div class="db-card-actions">
         ${l.complianceUrl ? `<button class="db-action-btn" onclick="window.open('${l.complianceUrl}','_blank')">View Compliance Page</button>` : ''}
         ${l.projectId ? `<button class="db-action-btn" onclick="downloadQR('${l.projectId}','${l.address.replace(/'/g,'')}')">↓ Download QR</button>` : ''}
+        <button class="db-action-btn" onclick="openVideoBuilderFor('${l.id}','${l.projectId || ''}')">+ Create Video</button>
         <button class="db-action-btn primary" onclick="hideDashboard()">Continue Staging →</button>
         <button class="db-action-btn danger" onclick="archiveListing('${l.id}','${l.address.replace(/'/g,'').replace(/"/g,'')}')" title="Hide from dashboard — compliance page stays active">Archive</button>
       </div>

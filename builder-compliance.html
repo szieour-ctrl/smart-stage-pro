@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Model Home Photo Compliance Review — Smart Stage PRO for Builders</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --navy:#1B3556;
+    --navy-deep:#132A45;
+    --paper:#F7F5F0;
+    --paper-dim:#EDEAE1;
+    --redline:#C1432E;
+    --graphite:#2B2B28;
+    --grid:#C8CDD3;
+    --brass:#B8934A;
+    --brass-dim:#9C7C3D;
+    --display:'Space Grotesk',sans-serif;
+    --body:'Inter',sans-serif;
+    --mono:'JetBrains Mono',monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{
+    font-family:var(--body);
+    background:var(--paper);
+    color:var(--graphite);
+    line-height:1.55;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:inherit;}
+  .wrap{max-width:1040px;margin:0 auto;padding:0 24px;}
+
+  /* ── Blueprint grid backdrop ─────────────────────────────────────── */
+  .blueprint{
+    background-color:var(--navy);
+    background-image:
+      linear-gradient(rgba(255,255,255,0.055) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.055) 1px, transparent 1px);
+    background-size:36px 36px;
+    color:#fff;
+    position:relative;
+  }
+  .blueprint::after{
+    content:"";
+    position:absolute; inset:0;
+    background:radial-gradient(ellipse at 50% 0%, rgba(255,255,255,0.05), transparent 65%);
+    pointer-events:none;
+  }
+
+  /* ── Header ───────────────────────────────────────────────────────── */
+  header{padding:22px 0;position:relative;z-index:2;}
+  .header-row{display:flex;align-items:center;justify-content:space-between;}
+  .brand{font-family:var(--display);font-weight:700;font-size:18px;letter-spacing:0.2px;}
+  .brand em{font-style:normal;color:var(--brass);}
+  .brand-sub{font-family:var(--mono);font-size:10.5px;letter-spacing:1.5px;text-transform:uppercase;color:rgba(255,255,255,0.55);margin-top:2px;}
+
+  /* ── Hero ─────────────────────────────────────────────────────────── */
+  .hero{padding:64px 0 88px;position:relative;z-index:2;}
+  .stamp-tag{
+    display:inline-flex;align-items:center;gap:8px;
+    font-family:var(--mono);font-size:11.5px;letter-spacing:1.5px;text-transform:uppercase;
+    color:var(--brass);border:1px solid rgba(184,147,74,0.5);
+    padding:6px 14px;border-radius:2px;margin-bottom:28px;
+  }
+  .stamp-tag::before{content:"";width:6px;height:6px;background:var(--brass);border-radius:50%;}
+  h1{
+    font-family:var(--display);font-weight:700;
+    font-size:clamp(34px,5vw,54px);
+    line-height:1.08;letter-spacing:-0.5px;
+    max-width:780px;margin-bottom:22px;
+  }
+  h1 .redline-word{color:var(--redline);}
+  .hero-sub{font-size:17px;color:rgba(255,255,255,0.78);max-width:600px;margin-bottom:40px;}
+  .hero-sub strong{color:#fff;font-weight:600;}
+
+  .intake{
+    background:var(--paper);border-radius:4px;padding:28px;
+    max-width:640px;box-shadow:0 24px 60px rgba(0,0,0,0.35);
+  }
+  .intake-label{
+    font-family:var(--mono);font-size:11px;letter-spacing:1.2px;text-transform:uppercase;
+    color:var(--navy);opacity:0.65;margin-bottom:10px;
+  }
+  .intake-row{display:flex;gap:10px;}
+  .intake input[type=text]{
+    flex:1;font-family:var(--body);font-size:15px;color:var(--graphite);
+    background:#fff;border:1.5px solid var(--grid);border-radius:3px;
+    padding:14px 16px;outline:none;transition:border-color 0.15s;
+  }
+  .intake input[type=text]:focus{border-color:var(--navy);}
+  .btn{
+    font-family:var(--display);font-weight:600;font-size:14.5px;
+    border:none;border-radius:3px;cursor:pointer;
+    padding:14px 26px;transition:transform 0.1s, box-shadow 0.15s;
+    white-space:nowrap;
+  }
+  .btn:active{transform:translateY(1px);}
+  .btn-primary{background:var(--navy);color:#fff;}
+  .btn-primary:hover{box-shadow:0 6px 18px rgba(27,53,86,0.35);}
+  .btn-primary:disabled{opacity:0.5;cursor:not-allowed;box-shadow:none;}
+  .btn-brass{background:var(--brass);color:var(--navy-deep);}
+  .btn-brass:hover{box-shadow:0 6px 18px rgba(184,147,74,0.4);}
+  .intake-note{font-size:12.5px;color:var(--navy);opacity:0.55;margin-top:12px;}
+  .intake-error{font-size:13px;color:var(--redline);margin-top:12px;display:none;}
+
+  /* ── Education section ────────────────────────────────────────────── */
+  .edu{padding:80px 0;background:var(--paper);}
+  .edu-grid{display:grid;grid-template-columns:1fr 1fr;gap:56px;align-items:start;}
+  @media (max-width:760px){.edu-grid{grid-template-columns:1fr;gap:36px;}}
+  .eyebrow{
+    font-family:var(--mono);font-size:11px;letter-spacing:1.5px;text-transform:uppercase;
+    color:var(--redline);margin-bottom:14px;
+  }
+  h2{font-family:var(--display);font-weight:700;font-size:28px;letter-spacing:-0.3px;margin-bottom:18px;}
+  .edu-body p{margin-bottom:14px;color:#4a4640;}
+  .rule-card{
+    background:#fff;border:1px solid var(--paper-dim);border-left:3px solid var(--navy);
+    border-radius:2px;padding:20px 22px;margin-bottom:16px;
+  }
+  .rule-card .rule-num{font-family:var(--mono);font-size:12px;color:var(--navy);font-weight:600;margin-bottom:8px;letter-spacing:0.5px;}
+  .rule-card blockquote{font-size:14.5px;color:#4a4640;font-style:italic;line-height:1.6;}
+  .rule-card cite{display:block;font-family:var(--mono);font-size:11px;color:#8a8578;margin-top:10px;font-style:normal;}
+
+  /* ── Scan / lead-gate / report states ────────────────────────────── */
+  .flow-section{padding:80px 0;background:var(--navy);color:#fff;position:relative;overflow:hidden;}
+  .flow-section .wrap{position:relative;z-index:2;}
+  .state{display:none;}
+  .state.active{display:block;}
+
+  .scan-card{background:var(--paper);color:var(--graphite);border-radius:4px;padding:44px;max-width:560px;margin:0 auto;text-align:center;}
+  .scan-title{font-family:var(--display);font-weight:700;font-size:22px;margin-bottom:8px;}
+  .scan-address{font-family:var(--mono);font-size:13px;color:var(--navy);margin-bottom:28px;word-break:break-word;}
+  .scan-steps{text-align:left;display:flex;flex-direction:column;gap:12px;margin-bottom:8px;}
+  .scan-step{display:flex;align-items:center;gap:12px;font-size:14px;color:#6a6559;}
+  .scan-step.done{color:var(--graphite);}
+  .scan-step.active{color:var(--navy);font-weight:600;}
+  .scan-dot{width:16px;height:16px;border-radius:50%;border:2px solid var(--grid);flex-shrink:0;position:relative;}
+  .scan-step.done .scan-dot{background:var(--brass);border-color:var(--brass);}
+  .scan-step.done .scan-dot::after{content:"✓";position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:10px;color:#fff;}
+  .scan-step.active .scan-dot{border-color:var(--navy);}
+  .scan-step.active .scan-dot::after{content:"";position:absolute;inset:3px;background:var(--navy);border-radius:50%;animation:pulse 1.1s ease-in-out infinite;}
+  @keyframes pulse{0%,100%{opacity:1;}50%{opacity:0.3;}}
+
+  .lead-card{background:var(--paper);color:var(--graphite);border-radius:4px;padding:44px;max-width:560px;margin:0 auto;}
+  .lead-flag{
+    display:flex;align-items:center;gap:12px;background:#FDEDEA;border:1px solid rgba(193,67,46,0.3);
+    border-radius:3px;padding:16px 18px;margin-bottom:24px;
+  }
+  .lead-flag-icon{font-size:20px;flex-shrink:0;}
+  .lead-flag-text{font-size:14px;color:var(--redline);font-weight:600;}
+  .lead-card h3{font-family:var(--display);font-weight:700;font-size:21px;margin-bottom:10px;}
+  .lead-card p.desc{font-size:14.5px;color:#4a4640;margin-bottom:24px;}
+  .field{margin-bottom:14px;}
+  .field label{display:block;font-family:var(--mono);font-size:11px;letter-spacing:0.8px;text-transform:uppercase;color:#6a6559;margin-bottom:6px;}
+  .field input{
+    width:100%;font-family:var(--body);font-size:15px;padding:13px 15px;
+    border:1.5px solid var(--grid);border-radius:3px;outline:none;
+  }
+  .field input:focus{border-color:var(--navy);}
+  .lead-card .btn{width:100%;margin-top:8px;padding:15px;}
+  .lead-fine{font-size:11.5px;color:#8a8578;text-align:center;margin-top:14px;}
+
+  .report-card{background:var(--paper);color:var(--graphite);border-radius:4px;padding:0;max-width:640px;margin:0 auto;overflow:hidden;}
+  .report-header{padding:36px 40px 28px;text-align:center;border-bottom:1px solid var(--paper-dim);}
+  .report-address{font-family:var(--mono);font-size:12.5px;color:#6a6559;margin-bottom:18px;}
+  .stamp{
+    display:inline-block;font-family:var(--display);font-weight:700;font-size:26px;letter-spacing:1px;
+    border:3px solid; border-radius:4px; padding:10px 26px;
+    transform:rotate(-3deg);
+  }
+  .stamp.flag{color:var(--redline);border-color:var(--redline);}
+  .stamp.clear{color:var(--brass-dim);border-color:var(--brass-dim);}
+  .rule-result{padding:26px 40px;border-bottom:1px solid var(--paper-dim);}
+  .rule-result:last-of-type{border-bottom:none;}
+  .rule-result-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;}
+  .rule-result-name{font-family:var(--display);font-weight:600;font-size:15.5px;}
+  .rule-badge{font-family:var(--mono);font-size:11px;letter-spacing:0.5px;text-transform:uppercase;padding:4px 10px;border-radius:2px;font-weight:600;}
+  .rule-badge.gap{background:#FDEDEA;color:var(--redline);}
+  .rule-badge.clear{background:#F3EEE1;color:var(--brass-dim);}
+  .rule-badge.na{background:var(--paper-dim);color:#8a8578;}
+  .rule-result-summary{font-size:13.5px;color:#4a4640;line-height:1.6;}
+  .report-cta{padding:30px 40px 36px;background:var(--paper-dim);text-align:center;}
+  .report-cta p{font-size:14px;color:#4a4640;margin-bottom:16px;}
+  .report-cta .btn{padding:15px 32px;}
+  .report-limitation{font-size:11px;color:#8a8578;padding:20px 40px;background:#fff;line-height:1.6;}
+
+  footer{padding:32px 0;text-align:center;font-size:12px;color:#8a8578;}
+</style>
+</head>
+<body>
+
+<div class="blueprint">
+  <div class="wrap">
+    <header>
+      <div class="header-row">
+        <div>
+          <div class="brand">Smart Stage <em>PRO</em> — Builder Compliance</div>
+          <div class="brand-sub">Model Home Photo Review</div>
+        </div>
+      </div>
+    </header>
+
+    <div class="hero">
+      <div class="stamp-tag">Free · No account required</div>
+      <h1>Every model home photo gets reviewed.<br><span class="redline-word">Is yours on file?</span></h1>
+      <p class="hero-sub">Paste any active Zillow listing for your inventory home. We check it against <strong>MetroList Rule 12.10(f)</strong> and <strong>AB 723</strong> — the two disclosure rules almost nothing else is built to catch on model home and rendering photos.</p>
+
+      <div class="intake">
+        <div class="intake-label">Zillow listing URL</div>
+        <div class="intake-row">
+          <input type="text" id="urlInput" placeholder="https://www.zillow.com/homedetails/...">
+          <button class="btn btn-primary" id="scanBtn" onclick="startScan()">Review Listing</button>
+        </div>
+        <div class="intake-note">Works on any active listing — yours, a competitor's, or a specific inventory home you're checking.</div>
+        <div class="intake-error" id="intakeError"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="edu">
+  <div class="wrap">
+    <div class="edu-grid">
+      <div>
+        <div class="eyebrow">Why this matters for builders</div>
+        <h2>Model home photos are real. That's exactly the problem.</h2>
+        <div class="edu-body">
+          <p>Using real, unaltered photos of your model home to market an inventory unit is completely standard practice — and it's not what AB 723 is about. AB 723 covers <em>digitally altered</em> images: virtual staging, added furniture, edited finishes.</p>
+          <p>But MetroList has a separate, broader rule that catches model home photos specifically — and it's easy to miss because it isn't the same statute agents are used to hearing about.</p>
+        </div>
+      </div>
+      <div>
+        <div class="rule-card">
+          <div class="rule-num">MetroList Rule 12.10(f)</div>
+          <blockquote>"Any image (including architectural renderings) that illustrates any condition other than the 'as-is' condition of the property shall be identified as such in the Public Remarks."</blockquote>
+          <cite>MetroList MLS Rules — True Picture Standard of Conduct</cite>
+        </div>
+        <div class="rule-card">
+          <div class="rule-num">AB 723 · B&amp;P Code §10140.8(a)(1)</div>
+          <blockquote>Requires a disclosure statement and a link or QR code to the original, unaltered image — specifically for digitally altered photos.</blockquote>
+          <cite>California Business &amp; Professions Code</cite>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="flow-section">
+  <div class="wrap">
+
+    <div class="state" id="stateScan">
+      <div class="scan-card">
+        <div class="scan-title">Reviewing submission…</div>
+        <div class="scan-address" id="scanAddressLabel"></div>
+        <div class="scan-steps">
+          <div class="scan-step" id="step1"><div class="scan-dot"></div><span>Submitting listing for review</span></div>
+          <div class="scan-step" id="step2"><div class="scan-dot"></div><span>Pulling public listing data</span></div>
+          <div class="scan-step" id="step3"><div class="scan-dot"></div><span>Checking against Rule 12.10(f) and AB 723</span></div>
+          <div class="scan-step" id="step4"><div class="scan-dot"></div><span>Preparing review</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="state" id="stateLead">
+      <div class="lead-card">
+        <div class="lead-flag">
+          <div class="lead-flag-icon">⚑</div>
+          <div class="lead-flag-text" id="leadFlagText">This listing has a potential compliance gap.</div>
+        </div>
+        <h3>Get the full review</h3>
+        <p class="desc">Enter your email to see the complete results and receive a copy of this review.</p>
+        <div class="field">
+          <label>Email address</label>
+          <input type="text" id="leadEmail" placeholder="you@builder.com">
+        </div>
+        <div class="field">
+          <label>Phone (optional)</label>
+          <input type="text" id="leadPhone" placeholder="(555) 123-4567">
+        </div>
+        <button class="btn btn-brass" onclick="submitLead()" id="leadSubmitBtn">See Full Review</button>
+        <div class="lead-fine">One review. No spam. Unsubscribe anytime.</div>
+      </div>
+    </div>
+
+    <div class="state" id="stateReport">
+      <div class="report-card">
+        <div class="report-header">
+          <div class="report-address" id="reportAddress"></div>
+          <div class="stamp" id="reportStamp">REVIEWED</div>
+        </div>
+        <div class="rule-result" id="ab723Result">
+          <div class="rule-result-head">
+            <div class="rule-result-name">AB 723 — Digital Alteration Disclosure</div>
+            <div class="rule-badge" id="ab723Badge">—</div>
+          </div>
+          <div class="rule-result-summary" id="ab723Summary"></div>
+        </div>
+        <div class="rule-result" id="rule1210fResult">
+          <div class="rule-result-head">
+            <div class="rule-result-name">Rule 12.10(f) — Model Home / Rendering Disclosure</div>
+            <div class="rule-badge" id="rule1210fBadge">—</div>
+          </div>
+          <div class="rule-result-summary" id="rule1210fSummary"></div>
+        </div>
+        <div class="report-cta">
+          <p>Smart Stage PRO builds and files the exact disclosure language both rules require — for every model home photo, automatically.</p>
+          <button class="btn btn-primary" onclick="window.open('https://smartstagepro.com','_blank')">See How It Works</button>
+        </div>
+        <div class="report-limitation" id="reportLimitation"></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<footer>
+  <div class="wrap">Smart Stage PRO™ — this review reads public listing data only and is not legal advice.</div>
+</footer>
+
+<script>
+const API_BASE = "/.netlify/functions/zillow-compliance-scan";
+const LEAD_API = "/.netlify/functions/builder-lead-capture";
+let currentSnapshotId = null;
+let currentListingUrl = null;
+let pendingReportData = null;
+let pollTimer = null;
+
+function showState(id) {
+  document.querySelectorAll('.state').forEach(el => el.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  document.getElementById(id).scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function setStep(stepId, mode) {
+  const el = document.getElementById(stepId);
+  el.classList.remove('done', 'active');
+  if (mode) el.classList.add(mode);
+}
+
+async function startScan() {
+  const url = document.getElementById('urlInput').value.trim();
+  const errorEl = document.getElementById('intakeError');
+  errorEl.style.display = 'none';
+
+  if (!/^https:\/\/(www\.)?zillow\.com\/homedetails\//.test(url)) {
+    errorEl.textContent = 'That doesn\'t look like a Zillow listing URL — it should start with https://www.zillow.com/homedetails/...';
+    errorEl.style.display = 'block';
+    return;
+  }
+
+  currentListingUrl = url;
+  document.getElementById('scanBtn').disabled = true;
+  document.getElementById('scanAddressLabel').textContent = url;
+  showState('stateScan');
+  setStep('step1', 'active');
+
+  try {
+    const res = await fetch(`${API_BASE}?action=trigger&url=${encodeURIComponent(url)}`);
+    const data = await res.json();
+    if (!data.snapshotId) {
+      throw new Error(data.error || 'Could not start review — try again in a moment.');
+    }
+    currentSnapshotId = data.snapshotId;
+    setStep('step1', 'done');
+    setStep('step2', 'active');
+    pollForResult();
+  } catch (err) {
+    resetToIntakeWithError(err.message);
+  }
+}
+
+function pollForResult() {
+  let attempts = 0;
+  pollTimer = setInterval(async () => {
+    attempts++;
+    // Advance the visual steps independent of the real poll cadence, purely
+    // to keep the "reviewing" state feeling alive during what's genuinely a
+    // 30-90 second real scrape — matching the honest wait time confirmed
+    // earlier this build, not faked to look instant.
+    if (attempts === 2) { setStep('step2', 'done'); setStep('step3', 'active'); }
+    if (attempts === 5) { setStep('step3', 'done'); setStep('step4', 'active'); }
+
+    try {
+      const res = await fetch(`${API_BASE}?action=check&snapshotId=${currentSnapshotId}`);
+      const data = await res.json();
+
+      if (data.status === 'running') return; // keep polling
+
+      clearInterval(pollTimer);
+      setStep('step2', 'done'); setStep('step3', 'done'); setStep('step4', 'done');
+
+      if (data.status === 'error' || !data.ab723) {
+        resetToIntakeWithError(data.error || 'Something went wrong pulling this listing — try again.');
+        return;
+      }
+
+      pendingReportData = data;
+      const hasGap = data.ab723.verdict === 'likely_non_compliant' || data.rule1210f.verdict === 'likely_non_compliant';
+      document.getElementById('leadFlagText').textContent = hasGap
+        ? 'This listing has a potential compliance gap.'
+        : 'Review complete — no gaps flagged, but a few things are worth a look.';
+      showState('stateLead');
+    } catch (err) {
+      // transient network hiccup mid-poll — don't abandon the wait over one
+      // failed check, just let the interval try again on the next tick
+    }
+
+    if (attempts > 40) { // ~200s ceiling — a real scrape shouldn't take this long; if it does, something's actually wrong
+      clearInterval(pollTimer);
+      resetToIntakeWithError('This review is taking longer than expected — please try again in a minute.');
+    }
+  }, 5000);
+}
+
+function resetToIntakeWithError(message) {
+  document.getElementById('scanBtn').disabled = false;
+  const errorEl = document.getElementById('intakeError');
+  errorEl.textContent = message;
+  errorEl.style.display = 'block';
+  document.querySelector('.hero').scrollIntoView({ behavior: 'smooth' });
+  showState('stateScan');
+  document.getElementById('stateScan').classList.remove('active');
+}
+
+async function submitLead() {
+  const email = document.getElementById('leadEmail').value.trim();
+  const phone = document.getElementById('leadPhone').value.trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    alert('Enter a valid email address.');
+    return;
+  }
+  const btn = document.getElementById('leadSubmitBtn');
+  btn.disabled = true;
+  btn.textContent = 'Loading…';
+
+  try {
+    await fetch(LEAD_API, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email, phone,
+        listingUrl: currentListingUrl,
+        ab723Verdict: pendingReportData.ab723.verdict,
+        rule1210fVerdict: pendingReportData.rule1210f.verdict,
+        source: 'builder-compliance-landing',
+      }),
+    });
+  } catch (err) {
+    // Non-fatal for the user's experience — they've already done the work
+    // of entering their info; don't block seeing their report over a
+    // logging failure on our end.
+  }
+
+  renderReport(pendingReportData);
+  showState('stateReport');
+}
+
+function renderReport(data) {
+  document.getElementById('reportAddress').textContent = data.address || currentListingUrl;
+
+  const hasGap = data.ab723.verdict === 'likely_non_compliant' || data.rule1210f.verdict === 'likely_non_compliant';
+  const stampEl = document.getElementById('reportStamp');
+  stampEl.textContent = hasGap ? 'REVISION SUGGESTED' : 'NO GAPS FOUND';
+  stampEl.className = 'stamp ' + (hasGap ? 'flag' : 'clear');
+
+  renderRuleBlock('ab723', data.ab723);
+  renderRuleBlock('rule1210f', data.rule1210f);
+
+  document.getElementById('reportLimitation').textContent = data.limitation || '';
+}
+
+function renderRuleBlock(prefix, ruleData) {
+  const badge = document.getElementById(prefix + 'Badge');
+  const summary = document.getElementById(prefix + 'Summary');
+  summary.textContent = ruleData.summary;
+
+  if (ruleData.verdict === 'likely_non_compliant') {
+    badge.textContent = 'Gap found';
+    badge.className = 'rule-badge gap';
+  } else if (ruleData.verdict === 'likely_compliant') {
+    badge.textContent = 'Looks good';
+    badge.className = 'rule-badge clear';
+  } else if (ruleData.verdict === 'not_applicable') {
+    badge.textContent = 'Not applicable';
+    badge.className = 'rule-badge na';
+  } else {
+    badge.textContent = 'Inconclusive';
+    badge.className = 'rule-badge na';
+  }
+}
+</script>
+</body>
+</html>

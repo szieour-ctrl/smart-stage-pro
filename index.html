@@ -2481,13 +2481,17 @@ function updateCreateVideoButton(){
 // Hands off to the PRO Plus video builder with the current project's real
 // identifiers — SESSION.listingId is the Supabase listings.id (NOT
 // SESSION.projectId, a different column entirely — see the project-manage.js
-// fix this session), _sbUser.id is the same user id every credit charge in
-// this file already uses.
-function openVideoBuilder(){
+// fix this session). Fetches the current user the same way every other
+// function in this file does (await getSupabase().auth.getUser()) — _sbUser
+// is NOT a global anywhere in this file, it's a local const every other
+// caller declares fresh; referencing it here as if it were global was a
+// real bug (ReferenceError on click, confirmed live).
+async function openVideoBuilder(){
   if (!SESSION.listingId) { showToast('This project has no listing on file yet — stage at least one room first.', 'error'); return; }
+  const user = (await getSupabase().auth.getUser()).data?.user;
   const params = new URLSearchParams({
     listingId: SESSION.listingId,
-    userId: _sbUser?.id || '',
+    userId: user?.id || '',
     projectId: SESSION.projectId || '',
   });
   window.open(`/build-video-demo.html?${params.toString()}`, '_blank');

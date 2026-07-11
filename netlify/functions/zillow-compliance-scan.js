@@ -179,33 +179,62 @@ function callClaudeVisionForStagingPair(imageBase64List, apiKey) {
   });
 }
 // testable against known text without needing a real Bright Data call.
+// MetroList Rule 12.10(f) — "True Picture Standard of Conduct" — is
+// SEPARATE from AB 723 / Rule 11.6.1. It covers ANY image showing
+// something other than the as-is condition (explicitly naming
+// "architectural renderings" as an example), not just digitally altered
+// ones — and requires disclosure specifically in Public Remarks, not
+// just anywhere. Model home photos on a builder/inventory-home listing
+// are exactly what this rule is written for: real, unaltered photos,
+// but not of the actual unit's as-is condition. Confirmed against the
+// actual current MetroList MLS Rules PDF (effective June 01, 2026),
+// Section 12.10(f) — not inferred or guessed at.
+const MODEL_HOME_DISCLOSURE_PATTERN = /model home|artist.?s? rendering|architectural rendering|renderings? (?:shown|depicted|represent)|may not (?:represent|reflect) (?:the )?actual home|photos? (?:are|is) of the model|representative (?:photo|image)|not (?:actual|the actual) home|to be built|actual home may vary/i;
+
 function evaluateCompliance(listing) {
   const description = listing.description || "";
   const hasStagingLanguage = STAGING_LANGUAGE_PATTERN.test(description);
   const urlOrQrMatch = description.match(URL_OR_QR_PATTERN);
   const hasUrlOrQr = !!urlOrQrMatch;
 
-  let verdict, summary;
+  let ab723Verdict, ab723Summary;
   if (hasStagingLanguage && hasUrlOrQr) {
-    verdict = "likely_compliant";
-    summary = "Description mentions virtual staging/digital alteration AND includes a link or QR code reference — the two required elements are both present in the public description.";
+    ab723Verdict = "likely_compliant";
+    ab723Summary = "Description mentions virtual staging/digital alteration AND includes a link or QR code reference — the two required elements are both present in the public description.";
   } else if (hasStagingLanguage && !hasUrlOrQr) {
-    verdict = "likely_non_compliant";
-    summary = "Description mentions virtual staging/digital alteration, but no URL or QR code reference was found anywhere in the description text. AB 723 (B&P Code §10140.8(a)(1)) requires a disclosure statement AND a link or QR code to the original, unaltered image.";
+    ab723Verdict = "likely_non_compliant";
+    ab723Summary = "Description mentions virtual staging/digital alteration, but no URL or QR code reference was found anywhere in the description text. AB 723 (B&P Code §10140.8(a)(1)) requires a disclosure statement AND a link or QR code to the original, unaltered image.";
   } else if (!hasStagingLanguage && hasUrlOrQr) {
-    verdict = "inconclusive_link_present";
-    summary = "A URL or QR code reference was found in the description, but no virtual staging/digital alteration language was detected. Could mean the link is unrelated to AB 723 disclosure (e.g. a virtual tour or the agent's own site) — worth a manual check.";
+    ab723Verdict = "inconclusive_link_present";
+    ab723Summary = "A URL or QR code reference was found in the description, but no virtual staging/digital alteration language was detected. Could mean the link is unrelated to AB 723 disclosure (e.g. a virtual tour or the agent's own site) — worth a manual check.";
   } else {
-    verdict = "inconclusive_no_staging_detected";
-    summary = "No virtual staging/digital alteration language and no URL/QR reference found in the description. This may genuinely mean no digitally altered images were used, in which case there is nothing to disclose — or a disclosure could exist only as a visual overlay on a photo itself, which this check cannot see.";
+    ab723Verdict = "inconclusive_no_staging_detected";
+    ab723Summary = "No virtual staging/digital alteration language and no URL/QR reference found in the description. This may genuinely mean no digitally altered images were used, in which case there is nothing to disclose — or a disclosure could exist only as a visual overlay on a photo itself, which this check cannot see.";
+  }
+
+  // Rule 12.10(f) check — only meaningfully applicable to builder/
+  // new-construction listings, since that's the real-world scenario this
+  // rule is written for (model home photos representing an inventory
+  // unit). Checked using the same confirmed real fields as the
+  // visual-check gate (listing_sub_type.is_new_home, is_premier_builder).
+  const isBuilderListing = !!listing.listing_sub_type?.is_new_home || !!listing.is_premier_builder;
+  const hasModelHomeDisclosure = MODEL_HOME_DISCLOSURE_PATTERN.test(description);
+
+  let rule1210fVerdict, rule1210fSummary;
+  if (!isBuilderListing) {
+    rule1210fVerdict = "not_applicable";
+    rule1210fSummary = "Not flagged as a builder/new-construction listing (listing_sub_type.is_new_home and is_premier_builder are both false) — Rule 12.10(f)'s model-home/rendering disclosure requirement is specifically about that scenario, so it isn't meaningfully checked here.";
+  } else if (hasModelHomeDisclosure) {
+    rule1210fVerdict = "likely_compliant";
+    rule1210fSummary = "Flagged as a builder/new-construction listing, and the description contains language identifying photos as a model home, rendering, or otherwise not the as-is condition — matching MetroList Rule 12.10(f)'s Public Remarks disclosure requirement.";
+  } else {
+    rule1210fVerdict = "likely_non_compliant";
+    rule1210fSummary = "Flagged as a builder/new-construction listing, but no model-home/rendering disclosure language was found in the description. MetroList Rule 12.10(f) requires any image showing something other than the as-is condition — explicitly including architectural renderings — to be identified as such in Public Remarks specifically, not just disclosed elsewhere (e.g. a generic disclaimer on a separate website).";
   }
 
   return {
-    verdict,
-    summary,
-    hasStagingLanguage,
-    hasUrlOrQr,
-    urlOrQrFound: urlOrQrMatch ? urlOrQrMatch[0] : null,
+    ab723: { verdict: ab723Verdict, summary: ab723Summary, hasStagingLanguage, hasUrlOrQr, urlOrQrFound: urlOrQrMatch ? urlOrQrMatch[0] : null },
+    rule1210f: { verdict: rule1210fVerdict, summary: rule1210fSummary, isBuilderListing, hasModelHomeDisclosure },
     photoCount: listing.photo_count ?? null,
     mlsName: listing.attribution_info?.mls_name || null,
     mlsNumber: listing.attribution_info?.mls_id || null,
@@ -214,7 +243,7 @@ function evaluateCompliance(listing) {
     // Honest, explicit limitation — always included, not just when relevant.
     // A compliance checker that doesn't say what it can't see is more
     // dangerous than one that does.
-    limitation: "This check only reads the public listing description text. It cannot detect a disclosure that exists solely as a visual overlay/watermark on a photo, and cannot verify that a found link actually leads to a real unaltered original image (only that a URL/QR reference exists in the text).",
+    limitation: "Both checks only read the public listing description text. Neither can detect a disclosure that exists solely as a visual overlay/watermark on a photo, and the AB 723 check cannot verify that a found link actually leads to a real unaltered original image (only that a URL/QR reference exists in the text). The Rule 12.10(f) check cannot verify the disclosure appears specifically in the Public Remarks field versus elsewhere in the description text Bright Data returned as one combined block.",
   };
 }
 
@@ -312,32 +341,20 @@ exports.handler = async (event) => {
         return { statusCode: 200, headers, body: JSON.stringify({ snapshotId, status: "error", error: "No usable listing data in Bright Data's response." }) };
       }
 
-      // BUILDER/NEW-CONSTRUCTION GATE — skip the visual check entirely for
-      // these, don't just let a low confidence score quietly absorb it.
-      // New-construction listings routinely use model-home photos or
-      // renderings instead of photos of the actual unit being sold — a
-      // standard industry practice, often with its own "photos may not
-      // represent actual home" disclaimer. The vacant/furnished
-      // pair-matching logic below assumes both photos show the SAME
-      // physical room; for a builder listing that assumption can be
-      // false by design, which would turn a real model-home photo into a
-      // false "possible violation" flag. Gated on confirmed real fields
-      // (listing_sub_type.is_new_home, is_premier_builder) rather than
-      // guessed at.
+      // BUILDER/NEW-CONSTRUCTION FLAG — CHANGE from the original version of
+      // this gate, which fully skipped the visual check for these
+      // listings. That was too blunt: AB 723's disclosure requirement
+      // attaches to whether a PHOTO was digitally altered, not to which
+      // physical unit it depicts — so a staged MODEL HOME photo is still
+      // a real, undisclosed-alteration question in its own right, even
+      // though it may not represent the specific unit being sold. Fully
+      // skipping would have missed that category of real violation, not
+      // just avoided a false positive. Still worth flagging, though: a
+      // detected pair here needs different interpretation than a normal
+      // resale listing (see the caveat added to the response below),
+      // since it can't be assumed the photos even depict the actual unit
+      // for sale in the first place.
       const isBuilderListing = !!listing.listing_sub_type?.is_new_home || !!listing.is_premier_builder;
-      if (isBuilderListing) {
-        return {
-          statusCode: 200,
-          headers,
-          body: JSON.stringify({
-            snapshotId,
-            status: "ready",
-            pairFound: false,
-            skipped: true,
-            skipReason: "This is flagged as a new-construction/builder listing (listing_sub_type.is_new_home or is_premier_builder is true). Builder listings commonly use model-home photos or renderings that legitimately depict a different physical space than the actual unit for sale — the vacant/furnished same-room matching this check relies on isn't reliable here, so it was skipped rather than risk a false positive.",
-          }, null, 2),
-        };
-      }
 
       const photoUrls = extractPhotoUrls(listing);
       if (photoUrls.length === 0) {
@@ -373,6 +390,7 @@ exports.handler = async (event) => {
           snapshotId,
           status: "ready",
           listingUrl: listing.url,
+          isBuilderListing,
           photosAnalyzed: photoUrls.length,
           pairFound: !!visionResult.pairFound,
           roomType: visionResult.roomType || null,
@@ -380,7 +398,8 @@ exports.handler = async (event) => {
           reasoning: visionResult.reasoning || null,
           vacantPhotoUrl: vacantUrl,
           furnishedPhotoUrl: furnishedUrl,
-          limitation: `Analyzed the first ${photoUrls.length} photos only (Zillow galleries commonly front-load hero rooms, but this isn't guaranteed for every listing). This is a probabilistic visual signal, not a verdict — it can miss well-executed staging entirely, and a "pairFound: true" result should be manually confirmed by looking at the two linked photos, not treated as conclusive on its own.`,
+          limitation: `Analyzed the first ${photoUrls.length} photos only (Zillow galleries commonly front-load hero rooms, but this isn't guaranteed for every listing). This is a probabilistic visual signal, not a verdict — it can miss well-executed staging entirely, and a "pairFound: true" result should be manually confirmed by looking at the two linked photos, not treated as conclusive on its own.` +
+            (isBuilderListing ? ` BUILDER LISTING: this is flagged as new-construction (listing_sub_type.is_new_home or is_premier_builder). AB 723's disclosure requirement attaches to whether a photo was digitally altered, not to which physical unit it depicts — so a detected pair here may indicate the MODEL HOME's own photos were staged without disclosure, which is still a real compliance question. It does NOT tell you whether these photos represent the specific unit for sale; a generic "photos may not represent actual home" disclaimer addresses that separate question and does not, on its own, satisfy AB 723's specific disclosure requirement if the underlying photo was in fact digitally altered.` : ""),
         }, null, 2),
       };
     } catch (err) {

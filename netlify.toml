@@ -118,6 +118,24 @@
   status = 200
   force = true
 
+# ── Lead-gen landing pages (added July 11, 2026) ─────────
+# Clean subpaths for print/social/email campaigns — actual files are
+# agent-compliance.html and builder-compliance.html at the repo root.
+# Both already call the backend via relative /.netlify/functions/... paths,
+# so no code changes were needed for this to work at these subpaths —
+# only needed if these ever move to a fully separate domain instead.
+[[redirects]]
+  from = "/ab723-check"
+  to = "/agent-compliance.html"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/builders"
+  to = "/builder-compliance.html"
+  status = 200
+  force = true
+
 [[headers]]
   for = "/*"
   [headers.values]

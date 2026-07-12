@@ -104,6 +104,63 @@ function extractPhotoUrls(listing) {
   }).filter(Boolean);
 }
 
+// Q5 of Sam's 10-question framework, and the one CONFIRMED bug from the
+// July 11 session: the old check only verified a URL/QR-shaped STRING
+// existed in the text, never that it actually resolves. A real listing's
+// disclosure link (a Smash.com file-transfer link) had EXPIRED and the
+// old check still reported likely_compliant. This is a real HTTP check,
+// not a vision task — cheap and high-confidence, so it runs synchronously
+// inside action=check rather than needing its own trigger/poll cycle.
+function checkUrlIsLive(urlStr) {
+  return new Promise((resolve) => {
+    let target;
+    try { target = new URL(urlStr); }
+    catch { resolve({ checked: false, live: false, reason: "Not a well-formed URL." }); return; }
+
+    const lib = target.protocol === "http:" ? require("http") : https;
+    const req = lib.request({
+      hostname: target.hostname,
+      path: target.pathname + target.search,
+      method: "HEAD",
+      timeout: 8000,
+    }, (res) => {
+      // Some servers (Smash.com among them) reject HEAD but are fine with
+      // GET — a HEAD-based 403/405 alone isn't proof the resource is
+      // actually gone, so treat those as "retry with GET" rather than dead.
+      if (res.statusCode === 403 || res.statusCode === 405) {
+        const getReq = lib.request({ hostname: target.hostname, path: target.pathname + target.search, method: "GET", timeout: 8000 }, (getRes) => {
+          getRes.destroy();
+          resolve({ checked: true, live: getRes.statusCode >= 200 && getRes.statusCode < 400, statusCode: getRes.statusCode, checkedAt: new Date().toISOString() });
+        });
+        getReq.on("error", () => resolve({ checked: true, live: false, statusCode: null, checkedAt: new Date().toISOString(), reason: "Connection failed on retry." }));
+        getReq.on("timeout", () => { getReq.destroy(); resolve({ checked: true, live: false, statusCode: null, checkedAt: new Date().toISOString(), reason: "Timed out." }); });
+        getReq.end();
+        return;
+      }
+      resolve({ checked: true, live: res.statusCode >= 200 && res.statusCode < 400, statusCode: res.statusCode, checkedAt: new Date().toISOString() });
+    });
+    req.on("error", (err) => resolve({ checked: true, live: false, statusCode: null, checkedAt: new Date().toISOString(), reason: err.message }));
+    req.on("timeout", () => { req.destroy(); resolve({ checked: true, live: false, statusCode: null, checkedAt: new Date().toISOString(), reason: "Timed out after 8s." }); });
+    req.end();
+  });
+}
+
+// Pulls one good-sized hero photo URL for the landing page's live-scan
+// display — the real listing photo only becomes available once Bright
+// Data's scrape resolves (Zillow itself blocks a faster direct fetch, see
+// header comment), so the frontend shows a generic scanning state until
+// this arrives, then swaps in the real photo. Prefers a larger size than
+// extractPhotoUrls' vision-call target since this one is for display, not
+// analysis.
+function extractHeroPhotoUrl(listing) {
+  const photos = listing.original_photos || listing.responsive_photos || [];
+  const first = photos[0];
+  if (!first) return null;
+  const jpegSources = first.mixed_sources?.jpeg || [];
+  const preferred = jpegSources.find(s => Number(s.width) >= 1000) || jpegSources[jpegSources.length - 1] || jpegSources[0];
+  return preferred?.url || null;
+}
+
 function fetchImageAsBase64(url) {
   return new Promise((resolve, reject) => {
     const req = https.get(url, { timeout: 10000 }, (res) => {
@@ -236,6 +293,8 @@ function evaluateCompliance(listing) {
     ab723: { verdict: ab723Verdict, summary: ab723Summary, hasStagingLanguage, hasUrlOrQr, urlOrQrFound: urlOrQrMatch ? urlOrQrMatch[0] : null },
     rule1210f: { verdict: rule1210fVerdict, summary: rule1210fSummary, isBuilderListing, hasModelHomeDisclosure },
     photoCount: listing.photo_count ?? null,
+    price: listing.price ?? null,
+    heroPhotoUrl: extractHeroPhotoUrl(listing),
     mlsName: listing.attribution_info?.mls_name || null,
     mlsNumber: listing.attribution_info?.mls_id || null,
     listingAgent: listing.attribution_info?.agent_name || null,
@@ -289,6 +348,35 @@ exports.handler = async (event) => {
       }
 
       const compliance = evaluateCompliance(listing);
+
+      // Q5 — only worth checking when the found string is an actual URL,
+      // not a bare "QR code" text mention (nothing to send a request to
+      // in that case). Trailing punctuation the regex may have swept up
+      // (a period ending the sentence, a closing parenthesis) is stripped
+      // first so the request targets the real link, not link+".".
+      let q5 = { checked: false, live: null, reason: "No URL found to check — only a QR code mention, or nothing at all." };
+      const rawFound = compliance.ab723.urlOrQrFound;
+      if (rawFound && /^https?:\/\//i.test(rawFound)) {
+        const cleaned = rawFound.replace(/[.,)\]]+$/, "");
+        q5 = await checkUrlIsLive(cleaned);
+        q5.urlChecked = cleaned;
+      } else if (rawFound && /^www\./i.test(rawFound)) {
+        const cleaned = "https://" + rawFound.replace(/[.,)\]]+$/, "");
+        q5 = await checkUrlIsLive(cleaned);
+        q5.urlChecked = cleaned;
+      }
+      compliance.q5UrlLiveCheck = q5;
+
+      // If the link is dead, that's a real statutory deficiency even if
+      // the text-only check above said likely_compliant — surface it by
+      // downgrading the verdict rather than leaving a passing verdict
+      // sitting next to a "live: false" flag the UI would have to know to
+      // cross-reference itself.
+      if (compliance.ab723.verdict === "likely_compliant" && q5.checked && q5.live === false) {
+        compliance.ab723.verdict = "likely_non_compliant";
+        compliance.ab723.summary += " However, the link found in the description did not resolve when checked (" + (q5.reason || `HTTP ${q5.statusCode}`) + ") — a broken or expired link does not satisfy the requirement.";
+      }
+
       return {
         statusCode: 200,
         headers,
@@ -404,6 +492,176 @@ exports.handler = async (event) => {
       };
     } catch (err) {
       return { statusCode: 200, headers, body: JSON.stringify({ snapshotId, status: "error", error: err.message }) };
+    }
+  }
+
+  // ── ACTION: PHOTO-SCAN ───────────────────────────────────────────────
+  // Q1 of the 10-question framework: "identify EACH photo explicitly
+  // disclosed or visually suspected." Extends the older visual-check
+  // action (which only ever looked for one vacant/furnished PAIR, and
+  // only ran on-demand for inconclusive text results) into a general
+  // multi-photo pass that runs on every scan now that the full report
+  // needs a real Q1 answer regardless of what the text check found.
+  // visual-check itself is left in place unchanged — nothing else in the
+  // codebase that calls it needs to change.
+  if (action === "photo-scan") {
+    const snapshotId = event.queryStringParameters?.snapshotId;
+    if (!snapshotId) {
+      return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing snapshotId." }) };
+    }
+    const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
+    if (!anthropicApiKey) {
+      return { statusCode: 500, headers, body: JSON.stringify({ error: "ANTHROPIC_API_KEY is not set in Netlify environment variables." }) };
+    }
+
+    try {
+      const { statusCode, body } = await brightDataRequest(`/datasets/v3/snapshot/${snapshotId}?format=json`, "GET", apiKey, null);
+      let parsed;
+      try { parsed = JSON.parse(body); } catch { parsed = null; }
+      const stillRunning = statusCode === 202 || (parsed && parsed.status && /running|building|pending/i.test(parsed.status));
+      if (stillRunning) return { statusCode: 200, headers, body: JSON.stringify({ snapshotId, status: "running" }) };
+
+      const results = Array.isArray(parsed) ? parsed : (parsed ? [parsed] : []);
+      const listing = results[0];
+      if (!listing || !listing.zpid) {
+        return { statusCode: 200, headers, body: JSON.stringify({ snapshotId, status: "error", error: "No usable listing data in Bright Data's response." }) };
+      }
+
+      const photoUrls = extractPhotoUrls(listing);
+      if (photoUrls.length === 0) {
+        return { statusCode: 200, headers, body: JSON.stringify({ snapshotId, status: "ready", photos: [], note: "No usable photos found for this listing." }) };
+      }
+
+      const imageBase64List = await Promise.all(photoUrls.map(u => fetchImageAsBase64(u).catch(() => null)));
+      const validPairs = imageBase64List.map((b64, i) => ({ b64, i })).filter(p => p.b64);
+
+      const imageBlocks = validPairs.flatMap(({ b64, i }) => ([
+        { type: "text", text: `Photo ${i + 1}:` },
+        { type: "image", source: { type: "base64", media_type: "image/jpeg", data: b64 } },
+      ]));
+
+      const body2 = JSON.stringify({
+        model: VISION_MODEL,
+        max_tokens: 2048,
+        messages: [{
+          role: "user",
+          content: [
+            ...imageBlocks,
+            { type: "text", text:
+              "You are looking at numbered photos from a real estate listing (Photo 1 through Photo " + validPairs.length + "). " +
+              "For EACH photo, judge whether it shows signs of digital alteration — virtual staging (furniture/decor added to an empty room), decluttering (personal items/furniture removed), changed fixtures, flooring, wall color, landscaping, sky/lighting replacement, or added architectural elements. " +
+              "Only flag a photo if you see genuine visual evidence — inconsistent shadows, furniture that looks rendered rather than photographed, unnaturally perfect staging, mismatched perspective/lighting between an object and the room, or a room that looks suspiciously bare/generic in a way real listing photos rarely are. A well-furnished, ordinary-looking room is NOT enough on its own — most listing photos are of real, normally-furnished homes. Prefer no-flag over a false positive.\n\n" +
+              "Return ONLY valid JSON, no markdown fences. Exact shape:\n" +
+              "{\n" +
+              '  "photos": [\n' +
+              '    {"photoNumber": <int>, "status": "confirmed_altered" | "suspected_altered" | "no_signal", "confidence": "high"|"medium"|"low", "reasoning": "<one sentence>"}\n' +
+              "  ]\n" +
+              "}\n" +
+              "Include an entry for every photo number, even ones with status \"no_signal\"." }
+          ]
+        }]
+      });
+
+      const visionResponse = await new Promise((resolve, reject) => {
+        const req = https.request({
+          hostname: "api.anthropic.com", path: "/v1/messages", method: "POST",
+          headers: { "x-api-key": anthropicApiKey, "anthropic-version": "2023-06-01", "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body2) },
+          timeout: 25000,
+        }, (res) => {
+          const chunks = [];
+          res.on("data", (c) => chunks.push(c));
+          res.on("end", () => {
+            try {
+              const p = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+              if (res.statusCode !== 200) reject(new Error(`Claude API error ${res.statusCode}: ${JSON.stringify(p).slice(0, 300)}`));
+              else resolve(p);
+            } catch (e) { reject(new Error("Claude API response parse error")); }
+          });
+        });
+        req.on("error", reject);
+        req.on("timeout", () => { req.destroy(); reject(new Error("Claude Vision call timed out after 25s")); });
+        req.write(body2);
+        req.end();
+      });
+
+      const textBlock = visionResponse.content?.find(b => b.type === "text");
+      let visionResult;
+      try { visionResult = JSON.parse(textBlock.text.trim().replace(/^```json\s*|\s*```$/g, "")); }
+      catch { return { statusCode: 200, headers, body: JSON.stringify({ snapshotId, status: "error", error: "Could not parse Claude's response as JSON.", rawText: textBlock?.text }) }; }
+
+      const photosOut = (visionResult.photos || []).map(p => ({
+        ...p,
+        photoUrl: photoUrls[p.photoNumber - 1] || null,
+      }));
+
+      return {
+        statusCode: 200,
+        headers,
+        body: JSON.stringify({
+          snapshotId,
+          status: "ready",
+          photosAnalyzed: validPairs.length,
+          photos: photosOut,
+          limitation: `Analyzed the first ${validPairs.length} of ${listing.photo_count ?? "?"} listing photos (a vision-based visual read, capped for cost and response time — Zillow galleries commonly front-load hero rooms but this isn't guaranteed). This is a probabilistic signal, not a verdict: it can miss well-executed staging and can flag a photo that was never altered. Treat "confirmed_altered"/"suspected_altered" results as evidence to manually confirm, not proof.`,
+        }, null, 2),
+      };
+    } catch (err) {
+      return { statusCode: 200, headers, body: JSON.stringify({ snapshotId, status: "error", error: err.message }) };
+    }
+  }
+
+  // ── ACTION: DESTINATION-CHECK ────────────────────────────────────────
+  // Q6/Q7/Q8: does the compliance URL's destination actually contain
+  // original images, are they identified, and how many? This is a
+  // heuristic content read (page fetch + counting/keyword pattern-
+  // matching), NOT a vision comparison against the altered photos — that
+  // would need reliably matching a specific original to a specific
+  // altered photo, which the available data doesn't support yet (see
+  // Q8 in the report itself, which says so honestly rather than guessing).
+  if (action === "destination-check") {
+    const targetUrl = event.queryStringParameters?.url;
+    if (!targetUrl) {
+      return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing url." }) };
+    }
+    try {
+      const result = await new Promise((resolve) => {
+        let target;
+        try { target = new URL(targetUrl); } catch { resolve({ reachable: false, reason: "Not a well-formed URL." }); return; }
+        const lib = target.protocol === "http:" ? require("http") : https;
+        const req = lib.request({ hostname: target.hostname, path: target.pathname + target.search, method: "GET", timeout: 9000 }, (res) => {
+          if (res.statusCode >= 400) { res.destroy(); resolve({ reachable: false, statusCode: res.statusCode }); return; }
+          let data = "";
+          let byteCount = 0;
+          res.on("data", (c) => { byteCount += c.length; if (byteCount < 400000) data += c.toString("utf8"); });
+          res.on("end", () => {
+            const imageCount = (data.match(/<img\b/gi) || []).length;
+            const hasOriginalLanguage = /\boriginal\b|\bunaltered\b|\bunedited\b|\bbefore\b/i.test(data);
+            const hasBeforeAfterLanguage = /before\s*(&|and|\/)\s*after|before-after/i.test(data);
+            resolve({
+              reachable: true,
+              statusCode: res.statusCode,
+              imageCount,
+              hasOriginalLanguage,
+              hasBeforeAfterLanguage,
+              looksLikeOriginalsPage: imageCount > 0 && (hasOriginalLanguage || hasBeforeAfterLanguage),
+            });
+          });
+        });
+        req.on("error", (err) => resolve({ reachable: false, reason: err.message }));
+        req.on("timeout", () => { req.destroy(); resolve({ reachable: false, reason: "Timed out after 9s." }); });
+        req.end();
+      });
+      return {
+        statusCode: 200,
+        headers,
+        body: JSON.stringify({
+          status: "ready",
+          ...result,
+          limitation: "Heuristic content read only — counts <img> tags and looks for words like \"original\"/\"unaltered\"/\"before\" on the destination page. It does not verify that a specific original image actually matches a specific altered listing photo (Q8), only whether the destination looks like it contains original images at all.",
+        }, null, 2),
+      };
+    } catch (err) {
+      return { statusCode: 200, headers, body: JSON.stringify({ status: "error", error: err.message }) };
     }
   }
 

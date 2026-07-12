@@ -1,283 +1,717 @@
-// netlify/functions/generate-compliance-pdf.js
+// netlify/functions/zillow-compliance-scan.js
 //
-// Renders the AB 723 Compliance Scan Report as a downloadable PDF, from
-// the report_json a lead already saved via builder-lead-capture.js
-// (?action reportId). Deliberately re-fetches from Supabase every time
-// rather than accepting report data directly in the request — this is
-// the one stable URL that both a "Download PDF" button on the landing
-// page AND a Pabbly email step can point at, and neither of those
-// callers should need to carry the full report payload around with them.
+// The real AB 723 compliance checker — supersedes zillow-scan-test.js for
+// actual use (that file stays in place as a raw diagnostic tool for
+// troubleshooting the Bright Data connection itself, separate from the
+// compliance logic here).
 //
-// USAGE: GET /.netlify/functions/generate-compliance-pdf?reportId=<uuid>
+// Same trigger+poll architecture as zillow-scan-test.js, for the same
+// reason: Netlify's standard function timeout defaults to 30 seconds, and
+// a real PerimeterX-protected Zillow scrape genuinely takes longer than
+// that — confirmed directly, not assumed (zillow-scan-test.js's first
+// real run timed out at exactly that mark). Bright Data's own snapshot_id
+// + progress/snapshot pattern is the correct way to work within that,
+// not a fallback.
 //
-// REQUIRES pdfkit — not yet in package.json, add:
-//   "pdfkit": "^0.15.0"
-// AND requires this in netlify.toml (pdfkit ships .afm font-metric files
-// it reads via a relative fs path at runtime — esbuild's default bundling
-// breaks that relative path, so it must ship un-bundled):
-//   [functions."generate-compliance-pdf"]
-//     timeout = 15
-//     external_node_modules = ["pdfkit"]
+// WHAT THE CHECK ACTUALLY LOOKS FOR, per Sam's own framing of how the
+// comparable competitor tool works: "reads the listing looking for the
+// presence of a QR code or a URL published in the consumer property
+// description." That's the primary signal here too — the actual statute
+// (B&P Code §10140.8(a)(1)) requires a disclosure statement AND a link/QR
+// to the original image, "reasonably conspicuous and located on or
+// adjacent to the image." For a Zillow-syndicated listing, the public
+// description is the one place such a link would realistically appear in
+// a way this kind of check can read at all — a disclosure that exists
+// only as a watermark burned into a photo isn't something this function
+// can see; that's a real, honest limitation, not a gap to paper over.
+//
+// A SECOND, weaker signal is also checked: whether the description
+// mentions virtual staging/digital alteration at all. This is NOT a
+// stand-in for the real disclosure requirement — it just gives a fuller
+// picture (e.g., "staging language present, no link found" is a much
+// stronger red flag than "no staging language, no link" which may
+// legitimately mean nothing needed disclosing in the first place).
+//
+// USAGE:
+//   Trigger: GET ?action=trigger&url=<zillow listing URL>
+//     → returns {snapshotId} immediately
+//   Check:   GET ?action=check&snapshotId=<id>
+//     → returns {status:"running"} while processing, or the real verdict
+//       once Bright Data's scrape completes
 
 const https = require("https");
-const PDFDocument = require("pdfkit");
 
-function supabaseGet(table, queryParams) {
+const BRIGHTDATA_DATASET_ID = "gd_m794g571225l6vm7gh"; // "Zillow Full Properties Information" — confirmed against a real successful run to include description + photos
+
+// Vision layer targets specifically the case text-scanning can't see at
+// all: zero disclosure language, zero URL/QR, so the ONLY possible
+// evidence is in the photos themselves. Deliberately scoped to a capped
+// number of photos, not the full gallery (can run 70-90+ photos per
+// listing) — cost and Netlify's 30s function timeout both matter here.
+// Zillow galleries commonly front-load hero rooms (exterior, living,
+// kitchen, primary) early in photo order — not guaranteed, but a strong
+// enough convention to cap here rather than analyze every photo.
+const MAX_PHOTOS_FOR_VISUAL_CHECK = 24;
+const VISION_MODEL = "claude-haiku-4-5-20251001"; // matches the established pattern already used elsewhere in this codebase (detect-hero-shots.js) for photographic vision analysis
+
+// Strong, multi-word phrases only — avoids false positives from a bare
+// word like "staged" (e.g. "staged for showing," a completely unrelated,
+// common real-estate phrase that has nothing to do with virtual/digital
+// staging).
+const STAGING_LANGUAGE_PATTERN = /virtually staged|virtual staging|digitally altered|digitally enhanced|ai[\s-]?staged|ai[\s-]?generated|ai[\s-]?enhanced|virtually enhanced|virtually furnished|computer[\s-]?generated imagery|\bcgi\b|rendered image|digital rendering/i;
+
+// A real URL, OR an explicit mention of a QR code — either satisfies the
+// statute's "link... or QR code" language.
+const URL_OR_QR_PATTERN = /https?:\/\/[^\s)]+|www\.[a-z0-9-]+\.[a-z]{2,}(?:\/[^\s)]*)?|\bqr\s?code\b/i;
+
+function brightDataRequest(path, method, apiKey, bodyObj) {
   return new Promise((resolve, reject) => {
-    const url = new URL(`${process.env.SUPABASE_URL}/rest/v1/${table}${queryParams}`);
+    const bodyStr = bodyObj ? JSON.stringify(bodyObj) : null;
     const req = https.request({
-      hostname: url.hostname,
-      path: url.pathname + url.search,
-      method: "GET",
+      hostname: "api.brightdata.com",
+      path,
+      method,
       headers: {
-        apikey: process.env.SUPABASE_SERVICE_ROLE_KEY,
-        Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
+        "Authorization": `Bearer ${apiKey}`,
+        ...(bodyStr ? { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(bodyStr) } : {}),
       },
+      timeout: 20000,
     }, (res) => {
       let data = "";
-      res.on("data", (c) => (data += c));
+      res.on("data", (chunk) => { data += chunk; });
+      res.on("end", () => resolve({ statusCode: res.statusCode, body: data }));
+    });
+    req.on("error", reject);
+    req.on("timeout", () => { req.destroy(); reject(new Error(`Request to ${path} timed out after 20s`)); });
+    if (bodyStr) req.write(bodyStr);
+    req.end();
+  });
+}
+
+// Pulls a moderate-resolution URL for each photo — large enough to read
+// structural detail (window shape/placement, flooring pattern, ceiling
+// features) needed to confidently match the SAME room across two photos,
+// small enough to keep download time and vision-call payload size
+// reasonable across up to MAX_PHOTOS_FOR_VISUAL_CHECK images in one call.
+function extractPhotoUrls(listing) {
+  const photos = listing.original_photos || listing.responsive_photos || [];
+  return photos.slice(0, MAX_PHOTOS_FOR_VISUAL_CHECK).map(p => {
+    const jpegSources = p.mixed_sources?.jpeg || [];
+    // Prefer something in the 700-1000px range if available; fall back to
+    // whatever's there rather than skip a photo entirely.
+    const preferred = jpegSources.find(s => Number(s.width) >= 700 && Number(s.width) <= 1000);
+    return (preferred || jpegSources[jpegSources.length - 1] || jpegSources[0])?.url;
+  }).filter(Boolean);
+}
+
+// Q5 of Sam's 10-question framework, and the one CONFIRMED bug from the
+// July 11 session: the old check only verified a URL/QR-shaped STRING
+// existed in the text, never that it actually resolves. A real listing's
+// disclosure link (a Smash.com file-transfer link) had EXPIRED and the
+// old check still reported likely_compliant. This is a real HTTP check,
+// not a vision task — cheap and high-confidence, so it runs synchronously
+// inside action=check rather than needing its own trigger/poll cycle.
+function checkUrlIsLive(urlStr) {
+  return new Promise((resolve) => {
+    let target;
+    try { target = new URL(urlStr); }
+    catch { resolve({ checked: false, live: false, reason: "Not a well-formed URL." }); return; }
+
+    const lib = target.protocol === "http:" ? require("http") : https;
+    const req = lib.request({
+      hostname: target.hostname,
+      path: target.pathname + target.search,
+      method: "HEAD",
+      timeout: 8000,
+    }, (res) => {
+      // Some servers (Smash.com among them) reject HEAD but are fine with
+      // GET — a HEAD-based 403/405 alone isn't proof the resource is
+      // actually gone, so treat those as "retry with GET" rather than dead.
+      if (res.statusCode === 403 || res.statusCode === 405) {
+        const getReq = lib.request({ hostname: target.hostname, path: target.pathname + target.search, method: "GET", timeout: 8000 }, (getRes) => {
+          getRes.destroy();
+          resolve({ checked: true, live: getRes.statusCode >= 200 && getRes.statusCode < 400, statusCode: getRes.statusCode, checkedAt: new Date().toISOString() });
+        });
+        getReq.on("error", () => resolve({ checked: true, live: false, statusCode: null, checkedAt: new Date().toISOString(), reason: "Connection failed on retry." }));
+        getReq.on("timeout", () => { getReq.destroy(); resolve({ checked: true, live: false, statusCode: null, checkedAt: new Date().toISOString(), reason: "Timed out." }); });
+        getReq.end();
+        return;
+      }
+      resolve({ checked: true, live: res.statusCode >= 200 && res.statusCode < 400, statusCode: res.statusCode, checkedAt: new Date().toISOString() });
+    });
+    req.on("error", (err) => resolve({ checked: true, live: false, statusCode: null, checkedAt: new Date().toISOString(), reason: err.message }));
+    req.on("timeout", () => { req.destroy(); resolve({ checked: true, live: false, statusCode: null, checkedAt: new Date().toISOString(), reason: "Timed out after 8s." }); });
+    req.end();
+  });
+}
+
+// Pulls one good-sized hero photo URL for the landing page's live-scan
+// display — the real listing photo only becomes available once Bright
+// Data's scrape resolves (Zillow itself blocks a faster direct fetch, see
+// header comment), so the frontend shows a generic scanning state until
+// this arrives, then swaps in the real photo. Prefers a larger size than
+// extractPhotoUrls' vision-call target since this one is for display, not
+// analysis.
+function extractHeroPhotoUrl(listing) {
+  const photos = listing.original_photos || listing.responsive_photos || [];
+  const first = photos[0];
+  if (!first) return null;
+  const jpegSources = first.mixed_sources?.jpeg || [];
+  const preferred = jpegSources.find(s => Number(s.width) >= 1000) || jpegSources[jpegSources.length - 1] || jpegSources[0];
+  return preferred?.url || null;
+}
+
+function fetchImageAsBase64(url) {
+  return new Promise((resolve, reject) => {
+    const req = https.get(url, { timeout: 10000 }, (res) => {
+      if (res.statusCode !== 200) { reject(new Error(`Photo fetch failed: ${res.statusCode}`)); return; }
+      const chunks = [];
+      res.on("data", (c) => chunks.push(c));
+      res.on("end", () => resolve(Buffer.concat(chunks).toString("base64")));
+    });
+    req.on("error", reject);
+    req.on("timeout", () => { req.destroy(); reject(new Error("Photo fetch timed out")); });
+  });
+}
+
+function callClaudeVisionForStagingPair(imageBase64List, apiKey) {
+  const imageBlocks = imageBase64List.flatMap((b64, i) => ([
+    { type: "text", text: `Photo ${i + 1}:` },
+    { type: "image", source: { type: "base64", media_type: "image/jpeg", data: b64 } },
+  ]));
+
+  const body = JSON.stringify({
+    model: VISION_MODEL,
+    max_tokens: 1024,
+    messages: [{
+      role: "user",
+      content: [
+        ...imageBlocks,
+        { type: "text", text:
+          "You are looking at numbered photos from a real estate listing. This listing's public description contains NO virtual-staging disclosure language and NO link/QR code — so the only possible evidence of undisclosed virtual staging is in the photos themselves.\n\n" +
+          "TASK: Look specifically for a LIVING ROOM, KITCHEN, or PRIMARY BEDROOM that appears TWICE among these photos — once VACANT (empty, no furniture) and once FURNISHED (staged with furniture/decor) — where both photos show the SAME physical room.\n\n" +
+          "To confirm it's the same room, match STRUCTURAL features that furniture can't change: window shape/position, ceiling features (beams, fans, light fixture location), flooring pattern, wall layout, door/opening positions, outlet/switch locations. Do NOT match rooms just because they're a similar style or size — many rooms in a listing look generically similar. Only report a match if you can point to specific structural details that are identical between the two photos.\n\n" +
+          "If you are not genuinely confident two specific photos show the exact same room, report no match — a false positive is worse than a missed one here, since this flags a listing as a possible real violation.\n\n" +
+          "Return ONLY valid JSON, no other text, no markdown fences. Exact shape:\n" +
+          "{\n" +
+          '  "pairFound": <true or false>,\n' +
+          '  "roomType": "<living room | kitchen | primary bedroom>" or null,\n' +
+          '  "vacantPhotoNumber": <integer or null>,\n' +
+          '  "furnishedPhotoNumber": <integer or null>,\n' +
+          '  "confidence": "high" | "medium" | "low",\n' +
+          '  "reasoning": "<one or two sentences citing the SPECIFIC structural features that matched>"\n' +
+          "}"
+        }
+      ]
+    }]
+  });
+
+  return new Promise((resolve, reject) => {
+    const req = https.request({
+      hostname: "api.anthropic.com",
+      path: "/v1/messages",
+      method: "POST",
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(body),
+      },
+      timeout: 25000, // leaves headroom under Netlify's 30s cap for the surrounding fetch/parse work — real risk this whole action exceeds 30s combined with image downloads; see comment on the visual-check handler below
+    }, (res) => {
+      const chunks = [];
+      res.on("data", (c) => chunks.push(c));
       res.on("end", () => {
-        try { resolve({ status: res.statusCode, data: JSON.parse(data || "[]") }); }
-        catch { resolve({ status: res.statusCode, data: [] }); }
+        try {
+          const parsed = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+          if (res.statusCode !== 200) reject(new Error(`Claude API error ${res.statusCode}: ${JSON.stringify(parsed).slice(0, 300)}`));
+          else resolve(parsed);
+        } catch (e) { reject(new Error("Claude API response parse error")); }
       });
     });
     req.on("error", reject);
+    req.on("timeout", () => { req.destroy(); reject(new Error("Claude Vision call timed out after 25s")); });
+    req.write(body);
     req.end();
   });
 }
+// testable against known text without needing a real Bright Data call.
+// MetroList Rule 12.10(f) — "True Picture Standard of Conduct" — is
+// SEPARATE from AB 723 / Rule 11.6.1. It covers ANY image showing
+// something other than the as-is condition (explicitly naming
+// "architectural renderings" as an example), not just digitally altered
+// ones — and requires disclosure specifically in Public Remarks, not
+// just anywhere. Model home photos on a builder/inventory-home listing
+// are exactly what this rule is written for: real, unaltered photos,
+// but not of the actual unit's as-is condition. Confirmed against the
+// actual current MetroList MLS Rules PDF (effective June 01, 2026),
+// Section 12.10(f) — not inferred or guessed at.
+const MODEL_HOME_DISCLOSURE_PATTERN = /model home|artist.?s? rendering|architectural rendering|renderings? (?:shown|depicted|represent)|may not (?:represent|reflect) (?:the )?actual home|photos? (?:are|is) of the model|representative (?:photo|image)|not (?:actual|the actual) home|to be built|actual home may vary/i;
 
-const COLORS = {
-  ink: "#23201B",
-  dim: "#6a655c",
-  flag: "#C43A1B",
-  flagBg: "#FCEBE3",
-  verified: "#2E5F47",
-  verifiedBg: "#E6EFE9",
-  amber: "#A9660B",
-  amberBg: "#FBF0DD",
-  line: "#E4DFD5",
-};
+function evaluateCompliance(listing) {
+  const description = listing.description || "";
+  const hasStagingLanguage = STAGING_LANGUAGE_PATTERN.test(description);
+  const urlOrQrMatch = description.match(URL_OR_QR_PATTERN);
+  const hasUrlOrQr = !!urlOrQrMatch;
 
-function resultColor(result) {
-  const r = (result || "").toLowerCase();
-  if (r.includes("fail") || r === "red" || r === "deficiency") return COLORS.flag;
-  if (r.includes("review") || r === "amber" || r === "partial") return COLORS.amber;
-  return COLORS.verified;
-}
+  let ab723Verdict, ab723Summary;
+  if (hasStagingLanguage && hasUrlOrQr) {
+    ab723Verdict = "likely_compliant";
+    ab723Summary = "Description mentions virtual staging/digital alteration AND includes a link or QR code reference — the two required elements are both present in the public description.";
+  } else if (hasStagingLanguage && !hasUrlOrQr) {
+    ab723Verdict = "likely_non_compliant";
+    ab723Summary = "Description mentions virtual staging/digital alteration, but no URL or QR code reference was found anywhere in the description text. AB 723 (B&P Code §10140.8(a)(1)) requires a disclosure statement AND a link or QR code to the original, unaltered image.";
+  } else if (!hasStagingLanguage && hasUrlOrQr) {
+    ab723Verdict = "inconclusive_link_present";
+    ab723Summary = "A URL or QR code reference was found in the description, but no virtual staging/digital alteration language was detected. Could mean the link is unrelated to AB 723 disclosure (e.g. a virtual tour or the agent's own site) — worth a manual check.";
+  } else {
+    ab723Verdict = "inconclusive_no_staging_detected";
+    ab723Summary = "No virtual staging/digital alteration language and no URL/QR reference found in the description. This may genuinely mean no digitally altered images were used, in which case there is nothing to disclose — or a disclosure could exist only as a visual overlay on a photo itself, which this check cannot see.";
+  }
 
-function fetchImageBuffer(url) {
-  return new Promise((resolve) => {
-    if (!url) { resolve(null); return; }
-    let target;
-    try { target = new URL(url); } catch { resolve(null); return; }
-    const req = https.request({ hostname: target.hostname, path: target.pathname + target.search, method: "GET", timeout: 8000 }, (res) => {
-      if (res.statusCode >= 400) { res.destroy(); resolve(null); return; }
-      const chunks = [];
-      res.on("data", (c) => chunks.push(c));
-      res.on("end", () => resolve(Buffer.concat(chunks)));
-    });
-    req.on("error", () => resolve(null));
-    req.on("timeout", () => { req.destroy(); resolve(null); });
-    req.end();
-  });
+  // Rule 12.10(f) check — only meaningfully applicable to builder/
+  // new-construction listings, since that's the real-world scenario this
+  // rule is written for (model home photos representing an inventory
+  // unit). Checked using the same confirmed real fields as the
+  // visual-check gate (listing_sub_type.is_new_home, is_premier_builder).
+  const isBuilderListing = !!listing.listing_sub_type?.is_new_home || !!listing.is_premier_builder;
+  const hasModelHomeDisclosure = MODEL_HOME_DISCLOSURE_PATTERN.test(description);
+
+  let rule1210fVerdict, rule1210fSummary;
+  if (!isBuilderListing) {
+    rule1210fVerdict = "not_applicable";
+    rule1210fSummary = "Not flagged as a builder/new-construction listing (listing_sub_type.is_new_home and is_premier_builder are both false) — Rule 12.10(f)'s model-home/rendering disclosure requirement is specifically about that scenario, so it isn't meaningfully checked here.";
+  } else if (hasModelHomeDisclosure) {
+    rule1210fVerdict = "likely_compliant";
+    rule1210fSummary = "Flagged as a builder/new-construction listing, and the description contains language identifying photos as a model home, rendering, or otherwise not the as-is condition — matching MetroList Rule 12.10(f)'s Public Remarks disclosure requirement.";
+  } else {
+    rule1210fVerdict = "likely_non_compliant";
+    rule1210fSummary = "Flagged as a builder/new-construction listing, but no model-home/rendering disclosure language was found in the description. MetroList Rule 12.10(f) requires any image showing something other than the as-is condition — explicitly including architectural renderings — to be identified as such in Public Remarks specifically, not just disclosed elsewhere (e.g. a generic disclaimer on a separate website).";
+  }
+
+  return {
+    ab723: { verdict: ab723Verdict, summary: ab723Summary, hasStagingLanguage, hasUrlOrQr, urlOrQrFound: urlOrQrMatch ? urlOrQrMatch[0] : null },
+    rule1210f: { verdict: rule1210fVerdict, summary: rule1210fSummary, isBuilderListing, hasModelHomeDisclosure },
+    photoCount: listing.photo_count ?? null,
+    price: listing.price ?? null,
+    heroPhotoUrl: extractHeroPhotoUrl(listing),
+    mlsName: listing.attribution_info?.mls_name || null,
+    mlsNumber: listing.attribution_info?.mls_id || null,
+    listingAgent: listing.attribution_info?.agent_name || null,
+    address: listing.address ? `${listing.address.street_address}, ${listing.address.city}, ${listing.address.state} ${listing.address.zipcode}` : null,
+    // Honest, explicit limitation — always included, not just when relevant.
+    // A compliance checker that doesn't say what it can't see is more
+    // dangerous than one that does.
+    limitation: "Both checks only read the public listing description text. Neither can detect a disclosure that exists solely as a visual overlay/watermark on a photo, and the AB 723 check cannot verify that a found link actually leads to a real unaltered original image (only that a URL/QR reference exists in the text). The Rule 12.10(f) check cannot verify the disclosure appears specifically in the Public Remarks field versus elsewhere in the description text Bright Data returned as one combined block.",
+  };
 }
 
 exports.handler = async (event) => {
-  const reportId = event.queryStringParameters?.reportId;
-  if (!reportId) {
-    return { statusCode: 400, headers: { "Content-Type": "text/plain" }, body: "Missing reportId." };
-  }
-  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    return { statusCode: 500, headers: { "Content-Type": "text/plain" }, body: "Supabase is not configured." };
-  }
-
-  const result = await supabaseGet("builder_leads", `?id=eq.${reportId}&select=address,listing_url,report_json,created_at`);
-  const row = Array.isArray(result.data) ? result.data[0] : null;
-  if (!row || !row.report_json) {
-    return { statusCode: 404, headers: { "Content-Type": "text/plain" }, body: "Report not found." };
-  }
-
-  const r = row.report_json;
-
-  const doc = new PDFDocument({ size: "LETTER", margin: 50, bufferPages: true });
-  const chunks = [];
-  doc.on("data", (c) => chunks.push(c));
-
-  const pdfDone = new Promise((resolve) => doc.on("end", resolve));
-
-  // ── Header ────────────────────────────────────────────────────────
-  doc.fontSize(9).fillColor(COLORS.dim).font("Helvetica")
-    .text("SMART STAGE PRO — AB 723 COMPLIANCE SCAN REPORT", { characterSpacing: 0.5 });
-  doc.moveDown(0.6);
-  doc.fontSize(18).fillColor(COLORS.ink).font("Helvetica-Bold")
-    .text(row.address || r.address || "Property address unavailable");
-  doc.fontSize(10).fillColor(COLORS.dim).font("Helvetica")
-    .text(`Scan Date: ${r.scanDate || new Date(row.created_at).toLocaleDateString("en-US")}    |    Photos Reviewed: ${r.photosReviewedCount ?? "?"} of ${r.photosTotalCount ?? "?"}    |    Listing Description Reviewed: ${r.listingDescriptionReviewed ? "Yes" : "No"}`);
-  doc.moveDown(1);
-
-  // ── Hero photo ───────────────────────────────────────────────────
-  // Same photo shown in the live-scan card and report header on the
-  // landing page — Sam's ask was to make the PDF visually match the
-  // property being scanned, not just list facts about it.
-  const heroBuffer = await fetchImageBuffer(r.heroPhotoUrl);
-  if (heroBuffer) {
-    try {
-      const imgY = doc.y;
-      doc.image(heroBuffer, 50, imgY, { width: 512, height: 200, fit: [512, 200], align: "center" });
-      doc.y = imgY + 200 + 14;
-    } catch {
-      // Malformed/unsupported image data — skip the photo rather than
-      // crash the whole report over a cosmetic addition.
-    }
-  }
-
-  // ── Overall result banner ────────────────────────────────────────
-  const bannerColor = r.overallVerdict === "clean" ? COLORS.verified : (r.overallVerdict === "review" ? COLORS.amber : COLORS.flag);
-  const bannerBg = r.overallVerdict === "clean" ? COLORS.verifiedBg : (r.overallVerdict === "review" ? COLORS.amberBg : COLORS.flagBg);
-  const bannerIcon = r.overallVerdict === "clean" ? "\u2022 NO GAPS FOUND" : (r.overallVerdict === "review" ? "\u2022 REVIEW RECOMMENDED" : "\u2022 COMPLIANCE GAPS DETECTED");
-
-  const bannerY = doc.y;
-  doc.rect(50, bannerY, 512, 46).fill(bannerBg);
-  doc.fillColor(bannerColor).font("Helvetica-Bold").fontSize(13).text(bannerIcon, 62, bannerY + 15);
-  doc.y = bannerY + 46 + 12;
-
-  doc.fillColor(COLORS.ink).font("Helvetica").fontSize(10.5)
-    .text(r.overallSummary || "", { width: 512, lineGap: 3 });
-  doc.moveDown(0.8);
-
-  if (r.stats) {
-    doc.fontSize(9.5).fillColor(COLORS.dim).font("Helvetica")
-      .text(`Verified statutory deficiencies: ${r.stats.deficiencies ?? 0}    Potential issues requiring review: ${r.stats.potentialIssues ?? 0}    Verified requirements satisfied: ${r.stats.satisfied ?? 0}    Overall evidence confidence: ${r.stats.confidencePct ?? "?"}%`);
-  }
-  doc.moveDown(1);
-
-  // ── Critical findings ─────────────────────────────────────────────
-  if (Array.isArray(r.criticalFindings) && r.criticalFindings.length) {
-    doc.fontSize(13).fillColor(COLORS.ink).font("Helvetica-Bold").text("Critical Findings");
-    doc.moveDown(0.4);
-    r.criticalFindings.forEach((f) => {
-      const c = f.severity === "amber" ? COLORS.amber : COLORS.flag;
-      if (doc.y > 680) doc.addPage();
-      doc.fontSize(11).fillColor(c).font("Helvetica-Bold").text((f.severity === "amber" ? "! " : "\u2022 ") + (f.title || ""));
-      doc.fontSize(9.5).fillColor(COLORS.ink).font("Helvetica").text(f.detail || "", { lineGap: 2 });
-      doc.fontSize(8.5).fillColor(COLORS.dim).font("Helvetica-Oblique")
-        .text(`Finding: ${f.finding || ""}    Confidence: ${f.confidence || "?"}    Severity: ${f.severityLabel || (f.severity === "amber" ? "Manual review required" : "Verified statutory deficiency")}`);
-      doc.moveDown(0.7);
-    });
-    doc.moveDown(0.3);
-  }
-
-  // ── Compliance scorecard ─────────────────────────────────────────
-  if (Array.isArray(r.scorecard) && r.scorecard.length) {
-    if (doc.y > 620) doc.addPage();
-    doc.fontSize(13).fillColor(COLORS.ink).font("Helvetica-Bold").text("Compliance Scorecard");
-    doc.moveDown(0.4);
-    const colX = [50, 320, 400];
-    const colW = [270, 80, 162];
-    doc.fontSize(8.5).fillColor(COLORS.dim).font("Helvetica-Bold");
-    doc.text("AB 723 REQUIREMENT", colX[0], doc.y, { width: colW[0], continued: false });
-    let headerY = doc.y - 10;
-    doc.text("RESULT", colX[1], headerY, { width: colW[1] });
-    doc.text("EVIDENCE", colX[2], headerY, { width: colW[2] });
-    doc.moveDown(0.3);
-    doc.moveTo(50, doc.y).lineTo(562, doc.y).strokeColor(COLORS.line).stroke();
-    doc.moveDown(0.3);
-
-    r.scorecard.forEach((row2) => {
-      if (doc.y > 700) { doc.addPage(); }
-      const rowY = doc.y;
-      doc.fontSize(9).fillColor(COLORS.ink).font("Helvetica").text(row2.requirement || "", colX[0], rowY, { width: colW[0] });
-      const afterReq = doc.y;
-      doc.fillColor(resultColor(row2.result)).font("Helvetica-Bold").text(row2.result || "", colX[1], rowY, { width: colW[1] });
-      doc.fillColor(COLORS.dim).font("Helvetica").fontSize(8.5).text(row2.evidence || "", colX[2], rowY, { width: colW[2] });
-      doc.y = Math.max(doc.y, afterReq) + 6;
-    });
-    doc.moveDown(0.6);
-  }
-
-  // ── Per-photo findings ────────────────────────────────────────────
-  if (Array.isArray(r.perPhoto) && r.perPhoto.length) {
-    if (doc.y > 600) doc.addPage();
-    doc.fontSize(13).fillColor(COLORS.ink).font("Helvetica-Bold").text("Per-Photo Findings");
-    doc.moveDown(0.4);
-    doc.fontSize(8.5).fillColor(COLORS.dim).font("Helvetica-Bold")
-      .text("PHOTO", 50, doc.y, { width: 50, continued: true })
-      .text("ALTERATION STATUS", 100, doc.y, { width: 180, continued: true })
-      .text("DISCLOSURE", 280, doc.y, { width: 90, continued: true })
-      .text("ORIGINAL", 370, doc.y, { width: 80, continued: true })
-      .text("RESULT", 450, doc.y, { width: 100 });
-    doc.moveDown(0.3);
-    doc.moveTo(50, doc.y).lineTo(562, doc.y).strokeColor(COLORS.line).stroke();
-    doc.moveDown(0.3);
-    r.perPhoto.forEach((p) => {
-      if (doc.y > 730) doc.addPage();
-      const rowY = doc.y;
-      doc.fontSize(9).fillColor(COLORS.ink).font("Helvetica").text(String(p.photoNumber ?? "?"), 50, rowY, { width: 50 });
-      doc.text(p.alterationStatus || "", 100, rowY, { width: 180 });
-      doc.text(p.disclosureVisible ? "Yes" : "No", 280, rowY, { width: 90 });
-      doc.text(p.originalAvailable ? "Yes" : "No", 370, rowY, { width: 80 });
-      doc.fillColor(resultColor(p.result)).font("Helvetica-Bold").text(p.result || "", 450, rowY, { width: 100 });
-      doc.moveDown(0.5);
-    });
-    doc.moveDown(0.6);
-  }
-
-  // ── Final finding ─────────────────────────────────────────────────
-  if (r.finalFinding) {
-    if (doc.y > 650) doc.addPage();
-    doc.fontSize(13).fillColor(COLORS.ink).font("Helvetica-Bold").text("Final Finding");
-    doc.moveDown(0.3);
-    doc.fontSize(11).fillColor(bannerColor).font("Helvetica-Bold").text(r.finalFinding.headline || "");
-    doc.fontSize(9.5).fillColor(COLORS.ink).font("Helvetica").text(r.finalFinding.body || "", { lineGap: 2 });
-    doc.moveDown(0.8);
-  }
-
-  // ── Recommended corrective action ────────────────────────────────
-  if (r.recommendedActions && ((r.recommendedActions.immediate || []).length || (r.recommendedActions.manualReview || []).length)) {
-    if (doc.y > 620) doc.addPage();
-    doc.fontSize(13).fillColor(COLORS.ink).font("Helvetica-Bold").text("Recommended Corrective Action");
-    doc.moveDown(0.3);
-    if ((r.recommendedActions.immediate || []).length) {
-      doc.fontSize(10).fillColor(COLORS.flag).font("Helvetica-Bold").text("Immediate correction required");
-      r.recommendedActions.immediate.forEach((a) => {
-        doc.fontSize(9.5).fillColor(COLORS.ink).font("Helvetica").text("\u2022 " + a, { indent: 10, lineGap: 2 });
-      });
-      doc.moveDown(0.4);
-    }
-    if ((r.recommendedActions.manualReview || []).length) {
-      doc.fontSize(10).fillColor(COLORS.amber).font("Helvetica-Bold").text("Manual review required");
-      r.recommendedActions.manualReview.forEach((a) => {
-        doc.fontSize(9.5).fillColor(COLORS.ink).font("Helvetica").text("\u2022 " + a, { indent: 10, lineGap: 2 });
-      });
-    }
-    doc.moveDown(0.8);
-  }
-
-  // ── CTA ───────────────────────────────────────────────────────────
-  if (doc.y > 680) doc.addPage();
-  const ctaY = doc.y;
-  doc.rect(50, ctaY, 512, 54).fill(COLORS.verifiedBg);
-  doc.fillColor(COLORS.ink).font("Helvetica-Bold").fontSize(10.5)
-    .text("Smart Stage PRO builds the disclosure and original-image link automatically for every photo it stages.", 62, ctaY + 12, { width: 488 });
-  doc.fillColor(COLORS.verified).font("Helvetica").fontSize(9.5)
-    .text("See how it works: smartstagepro.com", 62, ctaY + 32, { link: "https://smartstagepro.com", underline: true });
-  doc.y = ctaY + 54 + 16;
-
-  // ── Footer / limitation ──────────────────────────────────────────
-  doc.fontSize(8).fillColor(COLORS.dim).font("Helvetica")
-    .text((r.limitation || "") + "\n\nThis report documents observable AB 723 disclosure evidence on the Zillow advertisement as scanned. It is a scan, not a legal audit or finding, and does not constitute legal advice or a court determination.", { lineGap: 2 });
-
-  doc.end();
-  const pdfBuffer = await pdfDone.then(() => Buffer.concat(chunks));
-
-  return {
-    statusCode: 200,
-    headers: {
-      "Content-Type": "application/pdf",
-      "Content-Disposition": `inline; filename="AB723-Compliance-Report-${reportId}.pdf"`,
-      "Access-Control-Allow-Origin": "*",
-    },
-    body: pdfBuffer.toString("base64"),
-    isBase64Encoded: true,
+  const headers = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Headers": "Content-Type",
+    "Content-Type": "application/json",
   };
+  if (event.httpMethod === "OPTIONS") return { statusCode: 200, headers, body: "" };
+
+  const apiKey = process.env.BRIGHTDATA_API_KEY;
+  if (!apiKey) {
+    return { statusCode: 500, headers, body: JSON.stringify({ error: "BRIGHTDATA_API_KEY is not set in Netlify environment variables." }) };
+  }
+
+  const action = event.queryStringParameters?.action;
+
+  // ── ACTION: CHECK ────────────────────────────────────────────────────
+  if (action === "check") {
+    const snapshotId = event.queryStringParameters?.snapshotId;
+    if (!snapshotId) {
+      return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing snapshotId." }) };
+    }
+    try {
+      const { statusCode, body } = await brightDataRequest(
+        `/datasets/v3/snapshot/${snapshotId}?format=json`, "GET", apiKey, null
+      );
+
+      let parsed;
+      try { parsed = JSON.parse(body); } catch { parsed = null; }
+
+      const stillRunning = statusCode === 202 ||
+        (parsed && parsed.status && /running|building|pending/i.test(parsed.status));
+      if (stillRunning) {
+        return { statusCode: 200, headers, body: JSON.stringify({ snapshotId, status: "running" }) };
+      }
+
+      const results = Array.isArray(parsed) ? parsed : (parsed ? [parsed] : []);
+      const listing = results[0];
+      if (!listing || !listing.zpid) {
+        return { statusCode: 200, headers, body: JSON.stringify({ snapshotId, status: "error", error: "No usable listing data in Bright Data's response.", raw: parsed }) };
+      }
+
+      const compliance = evaluateCompliance(listing);
+
+      // Q5 — only worth checking when the found string is an actual URL,
+      // not a bare "QR code" text mention (nothing to send a request to
+      // in that case). Trailing punctuation the regex may have swept up
+      // (a period ending the sentence, a closing parenthesis) is stripped
+      // first so the request targets the real link, not link+".".
+      let q5 = { checked: false, live: null, reason: "No URL found to check — only a QR code mention, or nothing at all." };
+      const rawFound = compliance.ab723.urlOrQrFound;
+      if (rawFound && /^https?:\/\//i.test(rawFound)) {
+        const cleaned = rawFound.replace(/[.,)\]]+$/, "");
+        q5 = await checkUrlIsLive(cleaned);
+        q5.urlChecked = cleaned;
+      } else if (rawFound && /^www\./i.test(rawFound)) {
+        const cleaned = "https://" + rawFound.replace(/[.,)\]]+$/, "");
+        q5 = await checkUrlIsLive(cleaned);
+        q5.urlChecked = cleaned;
+      }
+      compliance.q5UrlLiveCheck = q5;
+
+      // If the link is dead, that's a real statutory deficiency even if
+      // the text-only check above said likely_compliant — surface it by
+      // downgrading the verdict rather than leaving a passing verdict
+      // sitting next to a "live: false" flag the UI would have to know to
+      // cross-reference itself.
+      if (compliance.ab723.verdict === "likely_compliant" && q5.checked && q5.live === false) {
+        compliance.ab723.verdict = "likely_non_compliant";
+        compliance.ab723.summary += " However, the link found in the description did not resolve when checked (" + (q5.reason || `HTTP ${q5.statusCode}`) + ") — a broken or expired link does not satisfy the requirement.";
+      }
+
+      return {
+        statusCode: 200,
+        headers,
+        body: JSON.stringify({ snapshotId, status: "ready", listingUrl: listing.url, ...compliance }, null, 2),
+      };
+    } catch (err) {
+      return { statusCode: 200, headers, body: JSON.stringify({ snapshotId, status: "error", error: err.message }) };
+    }
+  }
+
+  // ── ACTION: VISUAL-CHECK ─────────────────────────────────────────────
+  // On-demand deeper check, per Sam's direction — NOT run automatically
+  // as part of every scan. Meant to be called specifically for listings
+  // that already came back inconclusive_no_staging_detected from the text
+  // check (action=check), where the only possible evidence is in the
+  // photos. Re-fetches the same snapshot's data (Bright Data snapshots
+  // are downloadable repeatedly, confirmed in their own docs) rather than
+  // requiring the caller to pass photo data through separately.
+  //
+  // REAL RISK, stated plainly rather than hidden: downloading up to
+  // MAX_PHOTOS_FOR_VISUAL_CHECK (24) images AND running one large vision
+  // call, all inside Netlify's 30-second standard function timeout, is
+  // genuinely tight — images are fetched in parallel to minimize this,
+  // but if this proves too slow in real testing, the fix is converting
+  // this action to the same trigger/poll pattern already used for the
+  // Bright Data calls, not raising a timeout number and hoping.
+  if (action === "visual-check") {
+    const snapshotId = event.queryStringParameters?.snapshotId;
+    if (!snapshotId) {
+      return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing snapshotId." }) };
+    }
+    const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
+    if (!anthropicApiKey) {
+      return { statusCode: 500, headers, body: JSON.stringify({ error: "ANTHROPIC_API_KEY is not set in Netlify environment variables." }) };
+    }
+
+    try {
+      const { statusCode, body } = await brightDataRequest(
+        `/datasets/v3/snapshot/${snapshotId}?format=json`, "GET", apiKey, null
+      );
+      let parsed;
+      try { parsed = JSON.parse(body); } catch { parsed = null; }
+      const stillRunning = statusCode === 202 || (parsed && parsed.status && /running|building|pending/i.test(parsed.status));
+      if (stillRunning) {
+        return { statusCode: 200, headers, body: JSON.stringify({ snapshotId, status: "running" }) };
+      }
+      const results = Array.isArray(parsed) ? parsed : (parsed ? [parsed] : []);
+      const listing = results[0];
+      if (!listing || !listing.zpid) {
+        return { statusCode: 200, headers, body: JSON.stringify({ snapshotId, status: "error", error: "No usable listing data in Bright Data's response." }) };
+      }
+
+      // BUILDER/NEW-CONSTRUCTION FLAG — CHANGE from the original version of
+      // this gate, which fully skipped the visual check for these
+      // listings. That was too blunt: AB 723's disclosure requirement
+      // attaches to whether a PHOTO was digitally altered, not to which
+      // physical unit it depicts — so a staged MODEL HOME photo is still
+      // a real, undisclosed-alteration question in its own right, even
+      // though it may not represent the specific unit being sold. Fully
+      // skipping would have missed that category of real violation, not
+      // just avoided a false positive. Still worth flagging, though: a
+      // detected pair here needs different interpretation than a normal
+      // resale listing (see the caveat added to the response below),
+      // since it can't be assumed the photos even depict the actual unit
+      // for sale in the first place.
+      const isBuilderListing = !!listing.listing_sub_type?.is_new_home || !!listing.is_premier_builder;
+
+      const photoUrls = extractPhotoUrls(listing);
+      if (photoUrls.length === 0) {
+        return { statusCode: 200, headers, body: JSON.stringify({ snapshotId, status: "ready", pairFound: false, note: "No usable photos found for this listing." }) };
+      }
+
+      const imageBase64List = await Promise.all(photoUrls.map(u => fetchImageAsBase64(u)));
+      const visionResponse = await callClaudeVisionForStagingPair(imageBase64List, anthropicApiKey);
+
+      const textBlock = visionResponse.content?.find(b => b.type === "text");
+      if (!textBlock) {
+        return { statusCode: 200, headers, body: JSON.stringify({ snapshotId, status: "error", error: "No text content in Claude's response.", raw: visionResponse }) };
+      }
+
+      let visionResult;
+      try {
+        visionResult = JSON.parse(textBlock.text.trim().replace(/^```json\s*|\s*```$/g, ""));
+      } catch (err) {
+        return { statusCode: 200, headers, body: JSON.stringify({ snapshotId, status: "error", error: "Could not parse Claude's response as JSON.", rawText: textBlock.text }) };
+      }
+
+      // Map Claude's 1-indexed photo NUMBERS back to the real Bright
+      // Data/Zillow photo URLs — this is the whole point: a flagged
+      // listing needs to point at actual evidence, not just assert a
+      // finding.
+      const vacantUrl = visionResult.vacantPhotoNumber ? photoUrls[visionResult.vacantPhotoNumber - 1] || null : null;
+      const furnishedUrl = visionResult.furnishedPhotoNumber ? photoUrls[visionResult.furnishedPhotoNumber - 1] || null : null;
+
+      return {
+        statusCode: 200,
+        headers,
+        body: JSON.stringify({
+          snapshotId,
+          status: "ready",
+          listingUrl: listing.url,
+          isBuilderListing,
+          photosAnalyzed: photoUrls.length,
+          pairFound: !!visionResult.pairFound,
+          roomType: visionResult.roomType || null,
+          confidence: visionResult.confidence || null,
+          reasoning: visionResult.reasoning || null,
+          vacantPhotoUrl: vacantUrl,
+          furnishedPhotoUrl: furnishedUrl,
+          limitation: `Analyzed the first ${photoUrls.length} photos only (Zillow galleries commonly front-load hero rooms, but this isn't guaranteed for every listing). This is a probabilistic visual signal, not a verdict — it can miss well-executed staging entirely, and a "pairFound: true" result should be manually confirmed by looking at the two linked photos, not treated as conclusive on its own.` +
+            (isBuilderListing ? ` BUILDER LISTING: this is flagged as new-construction (listing_sub_type.is_new_home or is_premier_builder). AB 723's disclosure requirement attaches to whether a photo was digitally altered, not to which physical unit it depicts — so a detected pair here may indicate the MODEL HOME's own photos were staged without disclosure, which is still a real compliance question. It does NOT tell you whether these photos represent the specific unit for sale; a generic "photos may not represent actual home" disclaimer addresses that separate question and does not, on its own, satisfy AB 723's specific disclosure requirement if the underlying photo was in fact digitally altered.` : ""),
+        }, null, 2),
+      };
+    } catch (err) {
+      return { statusCode: 200, headers, body: JSON.stringify({ snapshotId, status: "error", error: err.message }) };
+    }
+  }
+
+  // ── ACTION: PHOTO-SCAN ───────────────────────────────────────────────
+  // Q1 of the 10-question framework: "identify EACH photo explicitly
+  // disclosed or visually suspected." Extends the older visual-check
+  // action (which only ever looked for one vacant/furnished PAIR, and
+  // only ran on-demand for inconclusive text results) into a general
+  // multi-photo pass that runs on every scan now that the full report
+  // needs a real Q1 answer regardless of what the text check found.
+  // visual-check itself is left in place unchanged — nothing else in the
+  // codebase that calls it needs to change.
+  if (action === "photo-scan") {
+    const snapshotId = event.queryStringParameters?.snapshotId;
+    if (!snapshotId) {
+      return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing snapshotId." }) };
+    }
+    const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
+    if (!anthropicApiKey) {
+      return { statusCode: 500, headers, body: JSON.stringify({ error: "ANTHROPIC_API_KEY is not set in Netlify environment variables." }) };
+    }
+
+    try {
+      const { statusCode, body } = await brightDataRequest(`/datasets/v3/snapshot/${snapshotId}?format=json`, "GET", apiKey, null);
+      let parsed;
+      try { parsed = JSON.parse(body); } catch { parsed = null; }
+      const stillRunning = statusCode === 202 || (parsed && parsed.status && /running|building|pending/i.test(parsed.status));
+      if (stillRunning) return { statusCode: 200, headers, body: JSON.stringify({ snapshotId, status: "running" }) };
+
+      const results = Array.isArray(parsed) ? parsed : (parsed ? [parsed] : []);
+      const listing = results[0];
+      if (!listing || !listing.zpid) {
+        return { statusCode: 200, headers, body: JSON.stringify({ snapshotId, status: "error", error: "No usable listing data in Bright Data's response." }) };
+      }
+
+      const photoUrls = extractPhotoUrls(listing);
+      if (photoUrls.length === 0) {
+        return { statusCode: 200, headers, body: JSON.stringify({ snapshotId, status: "ready", photos: [], note: "No usable photos found for this listing." }) };
+      }
+
+      const imageBase64List = await Promise.all(photoUrls.map(u => fetchImageAsBase64(u).catch(() => null)));
+      const validPairs = imageBase64List.map((b64, i) => ({ b64, i })).filter(p => p.b64);
+
+      const imageBlocks = validPairs.flatMap(({ b64, i }) => ([
+        { type: "text", text: `Photo ${i + 1}:` },
+        { type: "image", source: { type: "base64", media_type: "image/jpeg", data: b64 } },
+      ]));
+
+      const body2 = JSON.stringify({
+        model: VISION_MODEL,
+        max_tokens: 2048,
+        messages: [{
+          role: "user",
+          content: [
+            ...imageBlocks,
+            { type: "text", text:
+              "You are looking at numbered photos from a real estate listing (Photo 1 through Photo " + validPairs.length + "). For EACH photo, make TWO separate, independent judgments:\n\n" +
+              "JUDGMENT 1 — STAGING/ALTERATION: does the photo show signs of digital alteration — virtual staging (furniture/decor added to an empty room), decluttering (personal items/furniture removed), changed fixtures, flooring, wall color, landscaping, or added architectural elements. " +
+              "Only flag a photo if you see genuine visual evidence — inconsistent shadows, furniture that looks rendered rather than photographed, unnaturally perfect staging, mismatched perspective/lighting between an object and the room, or a room that looks suspiciously bare/generic in a way real listing photos rarely are. A well-furnished, ordinary-looking room is NOT enough on its own — most listing photos are of real, normally-furnished homes. Prefer no-flag over a false positive.\n\n" +
+              "JUDGMENT 2 — LIGHTING REPRESENTATION: this is a SEPARATE axis from staging, and it has its own statutory nuance — AB 723 expressly EXCLUDES ordinary lighting, exposure, white balance, and color correction from disclosure requirements UNLESS the edit alters the represented property or environment itself (not just how it's lit). So: ordinary HDR/exposure blending/shadow recovery is NOT a deficiency on its own, even if the room looks unusually bright. Only flag lighting as a concern when brightness/light appears physically inconsistent with the room's actual visible light sources — e.g. sunbeams or window glow with no matching window, fixture glow from lights that appear off, a bright clear view through a window that logically should be obstructed or dark, or landscape lighting effects with no visible fixture. Classify each photo into exactly one of three lighting tiers:\n" +
+              "  - \"ordinary_correction\": brightness/shadow/window balancing looks like normal exposure blending. No invented light source or changed property element visible.\n" +
+              "  - \"requires_review\": ambient/natural light seems like more than the visible windows and fixtures can explain, but you can't be sure without comparing to a source image. Flag for manual comparison, not as a confirmed deficiency.\n" +
+              "  - \"confirmed_alteration\": only use this if you can articulate a SPECIFIC physical inconsistency (not just \"looks bright\") — e.g. a light source glowing that has no corresponding fixture, a window view that contradicts what's structurally visible, or daylight direction that doesn't match the room's actual windows. This is rare — most bright photos are ordinary HDR.\n\n" +
+              "Return ONLY valid JSON, no markdown fences. Exact shape:\n" +
+              "{\n" +
+              '  "photos": [\n' +
+              '    {\n' +
+              '      "photoNumber": <int>,\n' +
+              '      "status": "confirmed_altered" | "suspected_altered" | "no_signal",\n' +
+              '      "confidence": "high"|"medium"|"low",\n' +
+              '      "reasoning": "<one sentence>",\n' +
+              '      "lightingStatus": "ordinary_correction" | "requires_review" | "confirmed_alteration",\n' +
+              '      "lightingConfidencePct": <int 0-100>,\n' +
+              '      "lightingReasoning": "<one sentence>"\n' +
+              '    }\n' +
+              "  ]\n" +
+              "}\n" +
+              "Include an entry for every photo number, even ones with no signal on either axis. Default lightingStatus to \"ordinary_correction\" unless you have a specific reason to flag it — most photos should land there." }
+          ]
+        }]
+      });
+
+      const visionResponse = await new Promise((resolve, reject) => {
+        const req = https.request({
+          hostname: "api.anthropic.com", path: "/v1/messages", method: "POST",
+          headers: { "x-api-key": anthropicApiKey, "anthropic-version": "2023-06-01", "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body2) },
+          timeout: 25000,
+        }, (res) => {
+          const chunks = [];
+          res.on("data", (c) => chunks.push(c));
+          res.on("end", () => {
+            try {
+              const p = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+              if (res.statusCode !== 200) reject(new Error(`Claude API error ${res.statusCode}: ${JSON.stringify(p).slice(0, 300)}`));
+              else resolve(p);
+            } catch (e) { reject(new Error("Claude API response parse error")); }
+          });
+        });
+        req.on("error", reject);
+        req.on("timeout", () => { req.destroy(); reject(new Error("Claude Vision call timed out after 25s")); });
+        req.write(body2);
+        req.end();
+      });
+
+      const textBlock = visionResponse.content?.find(b => b.type === "text");
+      let visionResult;
+      try { visionResult = JSON.parse(textBlock.text.trim().replace(/^```json\s*|\s*```$/g, "")); }
+      catch { return { statusCode: 200, headers, body: JSON.stringify({ snapshotId, status: "error", error: "Could not parse Claude's response as JSON.", rawText: textBlock?.text }) }; }
+
+      const photosOut = (visionResult.photos || []).map(p => ({
+        ...p,
+        photoUrl: photoUrls[p.photoNumber - 1] || null,
+      }));
+
+      return {
+        statusCode: 200,
+        headers,
+        body: JSON.stringify({
+          snapshotId,
+          status: "ready",
+          photosAnalyzed: validPairs.length,
+          photos: photosOut,
+          limitation: `Analyzed the first ${validPairs.length} of ${listing.photo_count ?? "?"} listing photos (a vision-based visual read, capped for cost and response time — Zillow galleries commonly front-load hero rooms but this isn't guaranteed). This is a probabilistic signal, not a verdict: it can miss well-executed staging and can flag a photo that was never altered. Treat "confirmed_altered"/"suspected_altered" results as evidence to manually confirm, not proof.`,
+        }, null, 2),
+      };
+    } catch (err) {
+      return { statusCode: 200, headers, body: JSON.stringify({ snapshotId, status: "error", error: err.message }) };
+    }
+  }
+
+  // ── ACTION: DESTINATION-CHECK ────────────────────────────────────────
+  // Q6/Q7/Q8: does the compliance URL's destination actually contain
+  // original images, are they identified, and how many? This is a
+  // heuristic content read (page fetch + counting/keyword pattern-
+  // matching), NOT a vision comparison against the altered photos — that
+  // would need reliably matching a specific original to a specific
+  // altered photo, which the available data doesn't support yet (see
+  // Q8 in the report itself, which says so honestly rather than guessing).
+  if (action === "destination-check") {
+    const targetUrl = event.queryStringParameters?.url;
+    if (!targetUrl) {
+      return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing url." }) };
+    }
+    try {
+      const result = await new Promise((resolve) => {
+        let target;
+        try { target = new URL(targetUrl); } catch { resolve({ reachable: false, reason: "Not a well-formed URL." }); return; }
+        const lib = target.protocol === "http:" ? require("http") : https;
+        const req = lib.request({ hostname: target.hostname, path: target.pathname + target.search, method: "GET", timeout: 9000 }, (res) => {
+          if (res.statusCode >= 400) { res.destroy(); resolve({ reachable: false, statusCode: res.statusCode }); return; }
+          let data = "";
+          let byteCount = 0;
+          res.on("data", (c) => { byteCount += c.length; if (byteCount < 400000) data += c.toString("utf8"); });
+          res.on("end", () => {
+            const imageCount = (data.match(/<img\b/gi) || []).length;
+            const hasOriginalLanguage = /\boriginal\b|\bunaltered\b|\bunedited\b|\bbefore\b/i.test(data);
+            const hasBeforeAfterLanguage = /before\s*(&|and|\/)\s*after|before-after/i.test(data);
+            resolve({
+              reachable: true,
+              statusCode: res.statusCode,
+              imageCount,
+              hasOriginalLanguage,
+              hasBeforeAfterLanguage,
+              looksLikeOriginalsPage: imageCount > 0 && (hasOriginalLanguage || hasBeforeAfterLanguage),
+            });
+          });
+        });
+        req.on("error", (err) => resolve({ reachable: false, reason: err.message }));
+        req.on("timeout", () => { req.destroy(); resolve({ reachable: false, reason: "Timed out after 9s." }); });
+        req.end();
+      });
+      return {
+        statusCode: 200,
+        headers,
+        body: JSON.stringify({
+          status: "ready",
+          ...result,
+          limitation: "Heuristic content read only — counts <img> tags and looks for words like \"original\"/\"unaltered\"/\"before\" on the destination page. It does not verify that a specific original image actually matches a specific altered listing photo (Q8), only whether the destination looks like it contains original images at all.",
+        }, null, 2),
+      };
+    } catch (err) {
+      return { statusCode: 200, headers, body: JSON.stringify({ status: "error", error: err.message }) };
+    }
+  }
+
+  // ── ACTION: TRIGGER ──────────────────────────────────────────────────
+  const url = event.queryStringParameters?.url;
+  if (!url) {
+    return { statusCode: 400, headers, body: JSON.stringify({ error: "Pass ?action=trigger&url=<zillow listing URL>, or ?action=check&snapshotId=<id>." }) };
+  }
+  if (!/^https:\/\/(www\.)?zillow\.com\/homedetails\//.test(url)) {
+    return { statusCode: 400, headers, body: JSON.stringify({ error: "URL doesn't look like a Zillow listing detail page (expected https://www.zillow.com/homedetails/...)." }) };
+  }
+
+  try {
+    const { statusCode, body } = await brightDataRequest(
+      `/datasets/v3/trigger?dataset_id=${BRIGHTDATA_DATASET_ID}&notify=false&include_errors=true`,
+      "POST", apiKey, { input: [{ url }], limit_per_input: null }
+    );
+
+    let parsed;
+    try { parsed = JSON.parse(body); }
+    catch {
+      return { statusCode: 200, headers, body: JSON.stringify({ requestedUrl: url, brightDataHttpStatus: statusCode, error: "Trigger response wasn't valid JSON", rawBodySample: body.slice(0, 500) }) };
+    }
+    if (!parsed.snapshot_id) {
+      return { statusCode: 200, headers, body: JSON.stringify({ requestedUrl: url, brightDataHttpStatus: statusCode, error: "No snapshot_id in trigger response", raw: parsed }) };
+    }
+
+    return {
+      statusCode: 200,
+      headers,
+      body: JSON.stringify({ requestedUrl: url, snapshotId: parsed.snapshot_id, status: "triggered" }, null, 2),
+    };
+  } catch (err) {
+    return { statusCode: 200, headers, body: JSON.stringify({ requestedUrl: url, error: "Trigger request failed", errorMessage: err.message }) };
+  }
 };
+
+// Exported separately so evaluateCompliance() can be exercised directly in
+// a quick local test without needing a real Bright Data call — see the
+// verification run in this session's build notes.
+exports._evaluateCompliance = evaluateCompliance;

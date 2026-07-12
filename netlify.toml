@@ -89,6 +89,14 @@
 
 [functions."debit-credit"]
   timeout = 10
+
+# Renders the 10-question AB 723 report as a PDF (July 12, 2026 build).
+# external_node_modules is required — pdfkit reads its .afm font-metric
+# files via a relative fs path at runtime, and esbuild's default bundling
+# breaks that path, so pdfkit must ship un-bundled rather than inlined.
+[functions."generate-compliance-pdf"]
+  timeout = 15
+  external_node_modules = ["pdfkit"]
 # ── Domain redirects ─────────────────────────────────────
 # Redirect Netlify subdomain to custom domain (301 permanent)
 # Must be BEFORE path-based redirects so Netlify processes first

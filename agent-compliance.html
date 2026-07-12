@@ -101,7 +101,9 @@
   .scan-title{font-family:var(--display);font-weight:800;font-size:18px;margin-bottom:20px;color:var(--navy);}
   .photo-frame{position:relative;border-radius:8px;overflow:hidden;background:var(--paper);aspect-ratio:16/10;margin-bottom:16px;display:flex;align-items:center;justify-content:center;}
   .photo-frame img{width:100%;height:100%;object-fit:cover;}
-  .photo-placeholder{color:var(--dim);font-size:13px;font-family:var(--mono);}
+  .photo-placeholder{color:var(--dim);font-size:13px;font-family:var(--mono);position:relative;z-index:1;}
+  .photo-frame.loading{background:linear-gradient(100deg, var(--paper) 30%, #EDEFF3 50%, var(--paper) 70%);background-size:220% 100%;animation:shimmer 1.6s ease-in-out infinite;}
+  @keyframes shimmer{0%{background-position:120% 0;}100%{background-position:-20% 0;}}
   .corner{position:absolute;width:22px;height:22px;border-color:#fff;opacity:0.9;}
   .corner.tl{top:8px;left:8px;border-top:2.5px solid;border-left:2.5px solid;}
   .corner.tr{top:8px;right:8px;border-top:2.5px solid;border-right:2.5px solid;}
@@ -419,6 +421,7 @@ async function startScan() {
   const guessedAddress = parseAddressFromUrl(url);
   document.getElementById('scanAddressLabel').textContent = guessedAddress || url;
   document.getElementById('scanPriceLabel').textContent = '';
+  document.getElementById('photoFrame').classList.add('loading');
   document.getElementById('photoFrame').querySelector('img')?.remove();
   document.getElementById('photoPlaceholder').style.display = 'block';
   document.getElementById('photoPlaceholder').textContent = 'Fetching listing photo\u2026';
@@ -459,6 +462,7 @@ function pollForCheckResult() {
 
       // Real photo + address now available — swap the placeholder out.
       if (data.heroPhotoUrl) {
+        document.getElementById('photoFrame').classList.remove('loading');
         document.getElementById('photoPlaceholder').style.display = 'none';
         const img = document.createElement('img');
         img.src = data.heroPhotoUrl;
@@ -473,11 +477,11 @@ function pollForCheckResult() {
     } catch (err) {
       // transient hiccup mid-poll, let the interval retry
     }
-    if (attempts > 40) {
+    if (attempts > 80) {
       clearInterval(pollTimer);
       resetToIntakeWithError('This compliance scan is taking longer than expected — please try again in a minute.');
     }
-  }, 5000);
+  }, 2500);
 }
 
 async function runDeepChecks() {
@@ -568,12 +572,33 @@ function synthesizeReport() {
   // Q8
   row('Every altered photo matched to an original', 'Review', 'Requires manual cross-check — not verifiable from available data');
 
-  // Q9 — explicitly blocked, matches the framework
-  row('Disclosure survived syndication to Zillow', 'Review', 'Blocked: requires source-MLS listing data (MetroList vendor API access pending)');
+  // Q9 — this scan reads the LIVE, SYNDICATED Zillow listing directly (via
+  // Bright Data), not the source MLS. That means Q4's result already IS
+  // the syndication-survival answer: if a URL/QR was found on the Zillow
+  // page itself, it demonstrably survived IDX syndication — no separate
+  // MLS-side check is needed, and the earlier "blocked, needs MetroList
+  // API access" framing was simply the wrong dependency. This also isn't
+  // MLS-specific in the first place — the disclosure obligation applies
+  // to every advertising platform the listing appears on, which is
+  // exactly the gap Smart Stage PRO's own photo-gallery-embedded QR code
+  // is built to close (a text-only MLS compliance badge is known to get
+  // stripped by IDX feeds; an image-embedded one ships with the photo).
+  const hadAnyAlteration = alteredPhotos.length > 0 || ab723.hasStagingLanguage;
+  if (!hadAnyAlteration) {
+    row('Disclosure survives IDX syndication to Zillow', 'Pass',
+      'No alteration was detected, so there is nothing that required a disclosure to survive syndication.');
+  } else if (ab723.hasUrlOrQr) {
+    row('Disclosure survives IDX syndication to Zillow', 'Pass',
+      'This scan reads the live, syndicated Zillow listing directly — the disclosure was found on Zillow itself, which confirms it survived syndication.');
+  } else {
+    row('Disclosure survives IDX syndication to Zillow', 'Fail',
+      'No disclosure is visible on the syndicated Zillow listing, regardless of what may or may not exist at the source MLS. A photo-embedded QR code (rather than a text-only MLS badge) is built to survive this.');
+  }
 
   const anyFail = scorecard.some(r => r.result === 'Fail');
+  const anyConfirmedLighting = photos.some(p => p.lightingStatus === 'confirmed_alteration');
   const anyAlteration = alteredPhotos.length > 0 || ab723.hasStagingLanguage;
-  const overallVerdict = (!anyAlteration && !anyFail) ? 'clean' : (anyFail ? 'gap' : 'review');
+  const overallVerdict = (!anyAlteration && !anyFail && !anyConfirmedLighting) ? 'clean' : ((anyFail || anyConfirmedLighting) ? 'gap' : 'review');
 
   const criticalFindings = [];
   scorecard.forEach(r => {
@@ -584,6 +609,28 @@ function synthesizeReport() {
   alteredPhotos.filter(p => p.status === 'suspected_altered').forEach(p => {
     criticalFindings.push({ severity: 'amber', title: `Photo ${p.photoNumber} may have been digitally altered`, detail: p.reasoning || '', finding: 'Potential covered digital alteration', confidence: p.confidence || 'medium', severityLabel: 'Manual review required' });
   });
+
+  // Lighting representation — a SEPARATE axis from staging/furniture
+  // alteration. AB 723 explicitly excludes ordinary lighting/exposure/
+  // white-balance correction from disclosure unless the edit changes the
+  // represented property or environment itself, so this only escalates
+  // to red when the vision pass can point to a specific physical
+  // inconsistency (an invented light source, a contradicted window view),
+  // never just "the room looks unusually bright."
+  const lightingFlags = photos.filter(p => p.lightingStatus === 'requires_review' || p.lightingStatus === 'confirmed_alteration');
+  lightingFlags.forEach(p => {
+    const isConfirmed = p.lightingStatus === 'confirmed_alteration';
+    criticalFindings.push({
+      severity: isConfirmed ? 'red' : 'amber',
+      title: `Photo ${p.photoNumber} — ${isConfirmed ? 'Possible generated or invented lighting' : 'Lighting representation requires review'}`,
+      detail: p.lightingReasoning || '',
+      finding: 'Lighting/environmental representation',
+      confidence: (p.lightingConfidencePct != null ? p.lightingConfidencePct + '%' : (p.confidence || 'medium')),
+      severityLabel: isConfirmed ? 'Verified statutory deficiency — compare with original image' : 'Compare with original image to confirm',
+    });
+  });
+  if (lightingFlags.some(p => p.lightingStatus === 'confirmed_alteration')) deficiencies++;
+  else if (lightingFlags.length) potentialIssues++;
 
   const perPhoto = alteredPhotos.map(p => ({
     photoNumber: p.photoNumber,
@@ -618,6 +665,7 @@ function synthesizeReport() {
     },
     limitation: (ab723.limitation || '') + (photoScanData ? ' ' + photoScanData.limitation : '') + (destinationData ? ' ' + destinationData.limitation : ''),
     address: checkData.address,
+    heroPhotoUrl: checkData.heroPhotoUrl || null,
     rule1210f: checkData.rule1210f,
   };
 }

@@ -21,9 +21,32 @@
 //     created_at       timestamptz default now()
 //   );
 //
+// NEW COLUMNS — SAM NEEDS TO RUN THIS ALTER before deploying (July 12
+// session, full 10-question report + PDF/email build):
+//
+//   alter table builder_leads add column if not exists address text;
+//   alter table builder_leads add column if not exists report_json jsonb;
+//
+// report_json stores the full composed 10-question report (built
+// client-side in agent-compliance.html/builder-compliance.html) so a
+// PDF can be regenerated later from a stable reportId — the report data
+// itself never touches the browser again after this save, and generate-
+// compliance-pdf.js re-fetches it fresh each time a PDF is requested.
+//
 // Matches the exact supabase() request pattern already used throughout
 // this codebase (see video-job.js) — same headers, same error handling
 // shape — rather than inventing a new one.
+//
+// EMAIL DELIVERY — fires the same fire-and-forget Pabbly webhook pattern
+// already established in video-notify.js (PABBLY_VIDEO_DELIVERY_WEBHOOK_URL).
+// New env var PABBLY_COMPLIANCE_REPORT_WEBHOOK_URL needs a Pabbly scenario
+// built on Sam's side: trigger receives {email, phone, address, verdict,
+// pdfUrl}, scenario fetches pdfUrl (a generate-compliance-pdf.js link,
+// works standalone in a browser too) and emails it. Texting the PDF is
+// explicitly NOT wired up yet — phone is captured and stored now so
+// nothing needs to change here once Sam sets up Twilio; the SMS step
+// would be a second action inside the same Pabbly scenario or a second
+// scenario watching the same trigger.
 
 const https = require("https");
 
@@ -71,7 +94,7 @@ exports.handler = async (event) => {
   try { body = JSON.parse(event.body || "{}"); }
   catch { return { statusCode: 400, headers, body: JSON.stringify({ error: "Invalid JSON body." }) }; }
 
-  const { email, phone, listingUrl, ab723Verdict, rule1210fVerdict, source } = body;
+  const { email, phone, listingUrl, address, ab723Verdict, rule1210fVerdict, source, reportJson } = body;
 
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return { statusCode: 400, headers, body: JSON.stringify({ error: "A valid email is required." }) };
@@ -86,9 +109,11 @@ exports.handler = async (event) => {
       email,
       phone: phone || null,
       listing_url: listingUrl || null,
+      address: address || null,
       ab723_verdict: ab723Verdict || null,
       rule_1210f_verdict: rule1210fVerdict || null,
       source: source || null,
+      report_json: reportJson || null,
     });
 
     if (result.status >= 400) {
@@ -100,7 +125,39 @@ exports.handler = async (event) => {
       return { statusCode: 500, headers, body: JSON.stringify({ error: "Could not save lead.", detail: result.data }) };
     }
 
-    return { statusCode: 200, headers, body: JSON.stringify({ saved: true }) };
+    const savedRow = Array.isArray(result.data) ? result.data[0] : null;
+    const reportId = savedRow?.id || null;
+
+    // Fire-and-forget email delivery, same non-blocking pattern as
+    // video-notify.js's Pabbly hand-off — a Pabbly outage or missing env
+    // var should never fail the lead save itself, since the lead is
+    // already safely stored by this point.
+    if (reportId && process.env.PABBLY_COMPLIANCE_REPORT_WEBHOOK_URL) {
+      try {
+        const pabblyUrl = new URL(process.env.PABBLY_COMPLIANCE_REPORT_WEBHOOK_URL);
+        const siteBase = process.env.URL || `https://${event.headers.host}`;
+        const pdfUrl = `${siteBase}/.netlify/functions/generate-compliance-pdf?reportId=${reportId}`;
+        const pabblyBody = JSON.stringify({
+          reportId, email, phone: phone || null, address: address || null,
+          listingUrl: listingUrl || null,
+          ab723Verdict: ab723Verdict || null,
+          pdfUrl,
+        });
+        const req = require("https").request({
+          hostname: pabblyUrl.hostname, path: pabblyUrl.pathname + pabblyUrl.search, method: "POST",
+          headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(pabblyBody) },
+        }, () => {});
+        req.on("error", (err) => console.error("Compliance report Pabbly webhook failed (non-fatal):", err.message));
+        req.write(pabblyBody);
+        req.end();
+      } catch (err) {
+        console.error("Compliance report Pabbly webhook setup error (non-fatal):", err.message);
+      }
+    } else if (reportId && !process.env.PABBLY_COMPLIANCE_REPORT_WEBHOOK_URL) {
+      console.warn("PABBLY_COMPLIANCE_REPORT_WEBHOOK_URL not set — lead saved but no email will be sent.");
+    }
+
+    return { statusCode: 200, headers, body: JSON.stringify({ saved: true, reportId }) };
   } catch (err) {
     console.error("builder-lead-capture error:", err.message);
     return { statusCode: 500, headers, body: JSON.stringify({ error: err.message }) };

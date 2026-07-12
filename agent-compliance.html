@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AB 723 Compliance Audit — Smart Stage PRO</title>
+<title>AB 723 Compliance Scan — Smart Stage PRO</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700;800&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
 <style>
@@ -201,7 +201,7 @@
       <div class="badge">
         <div class="badge-shield">AB<br>723</div>
         <div>
-          <div class="badge-text">AB 723 Compliance Audit</div>
+          <div class="badge-text">AB 723 Compliance Scan</div>
           <div class="badge-sub">For California Real Estate Professionals</div>
         </div>
       </div>
@@ -214,7 +214,7 @@
     <div class="hero-grid">
       <div>
         <h1>Is Your Listing <span class="accent">AB 723</span> Compliant?</h1>
-        <p class="hero-sub">Run a free AB 723 audit on any Zillow listing. We'll check your photos, disclosures, links, and original images so you can market with confidence and stay compliant.</p>
+        <p class="hero-sub">Run a free AB 723 compliance scan on any Zillow listing. We'll check your photos, disclosures, links, and original images so you can market with confidence and stay compliant.</p>
         <ul class="feature-list">
           <li><span class="ico">&#128247;</span>Scans listing photos for signs of virtual staging or digital alteration</li>
           <li><span class="ico">&#128279;</span>Verifies disclosures, links, QR codes &amp; original images</li>
@@ -223,14 +223,14 @@
       </div>
 
       <div class="intake-card">
-        <h3>Run Your FREE AB 723 Audit</h3>
+        <h3>Run Your FREE AB 723 Compliance Scan</h3>
         <div class="sub">Enter a Zillow listing URL to get started.</div>
         <div class="intake-row">
           <span class="link-ico">&#128279;</span>
           <input type="text" id="urlInput" placeholder="Paste Zillow Property URL Here*">
         </div>
         <div class="intake-example">Example: https://www.zillow.com/homedetails/1234-Main-St...</div>
-        <button class="btn btn-orange" id="scanBtn" onclick="startScan()">&#128269; Run Audit Now</button>
+        <button class="btn btn-orange" id="scanBtn" onclick="startScan()">&#128269; Run Compliance Scan</button>
         <div class="lock-note">&#128274; No sign up required. No email until your results are ready.</div>
         <div class="trust-row">
           <div class="trust-item"><div class="t-label">Fast</div><div class="t-desc">Results in ~60&nbsp;sec</div></div>
@@ -247,7 +247,7 @@
   <div class="wrap">
     <div class="checks-card">
       <div class="checks-head">
-        <h2>Our AB 723 Audit Checks — 10 Key Compliance Items</h2>
+        <h2>Our AB 723 Compliance Scan Checks — 10 Key Compliance Items</h2>
         <p>Every scan works through Sam's full compliance framework, not just a single pass/fail guess.</p>
       </div>
       <div class="checks-grid">
@@ -301,7 +301,7 @@
         </div>
         <div class="lead-card">
           <h3>Get Your Full Report</h3>
-          <p class="desc">Enter your email to unlock the complete 10-point audit. We'll also email you a PDF copy.</p>
+          <p class="desc">Enter your email to unlock the complete 10-point compliance scan. We'll also email you a PDF copy.</p>
           <div class="field">
             <label>Email address</label>
             <input type="text" id="leadEmail" placeholder="you@brokerage.com">
@@ -352,7 +352,8 @@
 
 <footer>
   <div class="wrap">
-    Smart Stage PRO&trade; — this is an automated scan of public listing data, not a legal audit. <span class="link">Talk to your broker or attorney</span> before relying on it for compliance decisions.
+    Smart Stage PRO&trade; — this is an automated scan of public listing data, not a legal compliance scan. <span class="link">Talk to your broker or attorney</span> before relying on it for compliance decisions.
+    <div style="margin-top:10px;"><a class="link" href="https://smartstagepro.com/privacy-policy" target="_blank" rel="noopener">Privacy Policy</a></div>
   </div>
 </footer>
 
@@ -429,7 +430,7 @@ async function startScan() {
   try {
     const res = await fetch(`${API_BASE}?action=trigger&url=${encodeURIComponent(url)}`);
     const data = await res.json();
-    if (!data.snapshotId) throw new Error(data.error || 'Could not start the audit — try again in a moment.');
+    if (!data.snapshotId) throw new Error(data.error || 'Could not start the compliance scan — try again in a moment.');
     currentSnapshotId = data.snapshotId;
     pollForCheckResult();
   } catch (err) {
@@ -474,7 +475,7 @@ function pollForCheckResult() {
     }
     if (attempts > 40) {
       clearInterval(pollTimer);
-      resetToIntakeWithError('This audit is taking longer than expected — please try again in a minute.');
+      resetToIntakeWithError('This compliance scan is taking longer than expected — please try again in a minute.');
     }
   }, 5000);
 }
@@ -714,7 +715,7 @@ function renderReport() {
     </div>
   `).join('');
 
-  document.getElementById('reportLimitation').textContent = r.limitation + ' This report documents observable AB 723 disclosure evidence only — it is a scan, not a legal audit or finding, and is not legal advice.';
+  document.getElementById('reportLimitation').textContent = r.limitation + ' This report documents observable AB 723 disclosure evidence only — it is a scan, not a legal audit, compliance certification, or finding, and is not legal advice.';
 }
 
 function downloadPdf() {

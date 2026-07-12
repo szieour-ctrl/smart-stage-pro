@@ -65,6 +65,23 @@ function resultColor(result) {
   return COLORS.verified;
 }
 
+function fetchImageBuffer(url) {
+  return new Promise((resolve) => {
+    if (!url) { resolve(null); return; }
+    let target;
+    try { target = new URL(url); } catch { resolve(null); return; }
+    const req = https.request({ hostname: target.hostname, path: target.pathname + target.search, method: "GET", timeout: 8000 }, (res) => {
+      if (res.statusCode >= 400) { res.destroy(); resolve(null); return; }
+      const chunks = [];
+      res.on("data", (c) => chunks.push(c));
+      res.on("end", () => resolve(Buffer.concat(chunks)));
+    });
+    req.on("error", () => resolve(null));
+    req.on("timeout", () => { req.destroy(); resolve(null); });
+    req.end();
+  });
+}
+
 exports.handler = async (event) => {
   const reportId = event.queryStringParameters?.reportId;
   if (!reportId) {
@@ -98,10 +115,26 @@ exports.handler = async (event) => {
     .text(`Scan Date: ${r.scanDate || new Date(row.created_at).toLocaleDateString("en-US")}    |    Photos Reviewed: ${r.photosReviewedCount ?? "?"} of ${r.photosTotalCount ?? "?"}    |    Listing Description Reviewed: ${r.listingDescriptionReviewed ? "Yes" : "No"}`);
   doc.moveDown(1);
 
+  // ── Hero photo ───────────────────────────────────────────────────
+  // Same photo shown in the live-scan card and report header on the
+  // landing page — Sam's ask was to make the PDF visually match the
+  // property being scanned, not just list facts about it.
+  const heroBuffer = await fetchImageBuffer(r.heroPhotoUrl);
+  if (heroBuffer) {
+    try {
+      const imgY = doc.y;
+      doc.image(heroBuffer, 50, imgY, { width: 512, height: 200, fit: [512, 200], align: "center" });
+      doc.y = imgY + 200 + 14;
+    } catch {
+      // Malformed/unsupported image data — skip the photo rather than
+      // crash the whole report over a cosmetic addition.
+    }
+  }
+
   // ── Overall result banner ────────────────────────────────────────
   const bannerColor = r.overallVerdict === "clean" ? COLORS.verified : (r.overallVerdict === "review" ? COLORS.amber : COLORS.flag);
   const bannerBg = r.overallVerdict === "clean" ? COLORS.verifiedBg : (r.overallVerdict === "review" ? COLORS.amberBg : COLORS.flagBg);
-  const bannerIcon = r.overallVerdict === "clean" ? "\u25CF NO GAPS FOUND" : (r.overallVerdict === "review" ? "\u25CF REVIEW RECOMMENDED" : "\u25CF COMPLIANCE GAPS DETECTED");
+  const bannerIcon = r.overallVerdict === "clean" ? "\u2022 NO GAPS FOUND" : (r.overallVerdict === "review" ? "\u2022 REVIEW RECOMMENDED" : "\u2022 COMPLIANCE GAPS DETECTED");
 
   const bannerY = doc.y;
   doc.rect(50, bannerY, 512, 46).fill(bannerBg);
@@ -125,7 +158,7 @@ exports.handler = async (event) => {
     r.criticalFindings.forEach((f) => {
       const c = f.severity === "amber" ? COLORS.amber : COLORS.flag;
       if (doc.y > 680) doc.addPage();
-      doc.fontSize(11).fillColor(c).font("Helvetica-Bold").text((f.severity === "amber" ? "\u25B2 " : "\u25CF ") + (f.title || ""));
+      doc.fontSize(11).fillColor(c).font("Helvetica-Bold").text((f.severity === "amber" ? "! " : "\u2022 ") + (f.title || ""));
       doc.fontSize(9.5).fillColor(COLORS.ink).font("Helvetica").text(f.detail || "", { lineGap: 2 });
       doc.fontSize(8.5).fillColor(COLORS.dim).font("Helvetica-Oblique")
         .text(`Finding: ${f.finding || ""}    Confidence: ${f.confidence || "?"}    Severity: ${f.severityLabel || (f.severity === "amber" ? "Manual review required" : "Verified statutory deficiency")}`);
@@ -227,7 +260,7 @@ exports.handler = async (event) => {
   doc.fillColor(COLORS.ink).font("Helvetica-Bold").fontSize(10.5)
     .text("Smart Stage PRO builds the disclosure and original-image link automatically for every photo it stages.", 62, ctaY + 12, { width: 488 });
   doc.fillColor(COLORS.verified).font("Helvetica").fontSize(9.5)
-    .text("See how it works: smartstagepro.com", 62, ctaY + 32);
+    .text("See how it works: smartstagepro.com", 62, ctaY + 32, { link: "https://smartstagepro.com", underline: true });
   doc.y = ctaY + 54 + 16;
 
   // ── Footer / limitation ──────────────────────────────────────────

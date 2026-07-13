@@ -420,9 +420,7 @@ const ROOM_ICONS = {
 const UNTAGGED_ICON = "&#128247;"; // generic camera — shown until a room is picked
 
 const MAX_FRAMES = 20;
-const KLING_INCLUDED_FRAMES_FIRST_GEN = 3;
-const KLING_IMAGE_COST_PER_FRAME = 5;
-const FLAT_MIN_KLING_CHARGE = 1; // mirrors the same constant in video-job.js
+const KLING_IMAGE_COST_PER_FRAME = 5; // mirrors the same constant in video-job.js — every Kling frame once the monthly pool is exhausted
 
 // ── REAL BACKEND WIRING (July 10, 2026) ──────────────────────────────────
 // This page is launched with real identifiers in the URL — from the main
@@ -994,16 +992,15 @@ function closePreview() {
 function updateKlingCountBar() {
   const klingCount = frames.filter(f => f.motion === "kling").length;
   const bar = document.getElementById("klingCountBar");
-  const billable = Math.max(0, klingCount - KLING_INCLUDED_FRAMES_FIRST_GEN);
-  // Matches calculateKlingChargeForGeneration's real logic (video-job.js):
-  // any Kling usage at all charges at least 1 Image, even fully within the
-  // included-3 allowance — this is just an early estimate shown before the
-  // real action=quote call at Step 4, kept consistent with it so nothing
-  // here says "0 Images" only for the real quote to then charge 1.
-  const estimatedImages = klingCount === 0 ? 0 : Math.max(FLAT_MIN_KLING_CHARGE, billable * KLING_IMAGE_COST_PER_FRAME);
+  // CHANGE (July 13, 2026): can no longer estimate an Images number here
+  // without a network call — whether these frames are free depends on the
+  // subscriber's live Kling Motion Pool balance (kling_motion_usage),
+  // which this step has no reason to fetch just for an early hint. Real
+  // pricing comes from the actual action=quote call at Step 4 (Confirm),
+  // which does have the real pool balance. This bar just shows the count.
   bar.innerHTML = `
-    <span>${klingCount} AI Motion frame${klingCount===1?"":"s"} selected${billable > 0 ? ` — <b>${billable} beyond the included 3</b>` : (klingCount > 0 ? ` (within the included 3)` : "")}</span>
-    <span>${estimatedImages > 0 ? `~${estimatedImages} Images on Generate` : "0 Images on Generate"}</span>
+    <span>${klingCount} AI Motion frame${klingCount===1?"":"s"} selected</span>
+    <span>${klingCount > 0 ? "Exact price shown at Confirm" : "0 Images on Generate"}</span>
   `;
 }
 
@@ -1090,12 +1087,16 @@ async function renderConfirmStep() {
   document.getElementById("genLabel").textContent = isIteration ? `Iteration \u00b7 generation #${quote.generationCount}` : "First generation";
   document.getElementById("panelSub").textContent = `${frames.length} rooms, ${(window._selectedFormats||["16x9"]).join(" + ")}`;
 
+  // CHANGE (July 13, 2026): badge is now purely about the SHARED monthly
+  // Kling Motion Pool, not about generation count — the first
+  // quote.framesFromPool Kling frames in sequence are pool-covered
+  // regardless of whether this is a first generation or an iteration.
   document.getElementById("frameList").innerHTML = frames.map(f => {
     let badge;
     if (f.motion === "kling") {
       klingSeen++;
-      const isIncluded = !isIteration && klingSeen <= quote.includedFrames;
-      badge = isIncluded ? `<span class="frame-badge badge-included">Included</span>` : `<span class="frame-badge badge-billable">${KLING_IMAGE_COST_PER_FRAME} Images</span>`;
+      const isFromPool = klingSeen <= quote.framesFromPool;
+      badge = isFromPool ? `<span class="frame-badge badge-included">Free (pool)</span>` : `<span class="frame-badge badge-billable">${KLING_IMAGE_COST_PER_FRAME} Images</span>`;
     } else {
       badge = `<span class="frame-badge badge-kenburns">Ken Burns</span>`;
     }
@@ -1111,17 +1112,14 @@ async function renderConfirmStep() {
 
   let rows = "";
   if (quote.klingFrameCount > 0) {
-    if (!isIteration) {
-      rows += `<div class="cost-line muted"><span>Kling frames included (first ${KLING_INCLUDED_FRAMES_FIRST_GEN}, generation #1)</span><span class="val">${quote.includedFrames} free</span></div>`;
-    } else {
-      rows += `<div class="cost-line muted"><span>Included allowance — does not apply to iterations</span><span class="val">0 free</span></div>`;
-    }
+    rows += `<div class="cost-line muted"><span>Monthly Kling Motion Pool remaining (before this)</span><span class="val">${quote.poolRemainingBefore} of ${quote.poolLimit}</span></div>`;
+    rows += `<div class="cost-line muted"><span>Frames covered by pool</span><span class="val">${quote.framesFromPool} free</span></div>`;
     rows += `<div class="cost-line"><span>Billable Kling frames (${quote.billableKlingFrames} \u00d7 ${KLING_IMAGE_COST_PER_FRAME} Images)</span><span class="val">${quote.klingImageCost} Images</span></div>`;
   } else {
     rows += `<div class="cost-line muted"><span>No AI Motion frames in this video</span><span class="val">0 Images</span></div>`;
   }
   document.getElementById("costTable").innerHTML = rows + `
-    <div class="cost-total"><span class="label">Charged now, on Generate</span><span class="val">${quote.klingImageCost}</span></div>
+    <div class="cost-total"><span class="label">Charged now, on ${isIteration ? "Regenerate" : "Generate"}</span><span class="val">${quote.klingImageCost}</span></div>
     <div class="balance-line"><span>Current balance: ${quote.currentBalance ?? '\u2014'} Images</span><span class="after ${wouldExceed?'negative':''}">After: ${wouldExceed?'\u2014':quote.balanceAfter} Images</span></div>
   `;
 
@@ -1136,11 +1134,12 @@ async function renderConfirmStep() {
     return;
   }
 
-  if (isIteration) {
-    warnSlot.innerHTML = `<div class="warn-box"><strong>This charges every Kling frame again</strong>Regenerating means the ${KLING_INCLUDED_FRAMES_FIRST_GEN}-frame included allowance no longer applies — all ${quote.klingFrameCount} Kling frames above are billed, even ones that were free the first time.</div>`;
-  } else {
-    warnSlot.innerHTML = quote.klingImageCost > 0 ? `<div class="warn-box"><strong>Non-refundable on generation</strong>The ${quote.klingImageCost} Images above are charged the instant you click Generate Video — even if you don't like the result or never download it.</div>` : "";
-  }
+  // CHANGE (July 13, 2026): removed the old "iterating forfeits the
+  // included allowance" warning — that's no longer true. The Kling Motion
+  // Pool is shared across every generation and iteration this billing
+  // period, so an iteration is billed exactly the same way a first
+  // generation would be, based only on how much pool balance is left.
+  warnSlot.innerHTML = quote.klingImageCost > 0 ? `<div class="warn-box"><strong>Non-refundable on generation</strong>The ${quote.klingImageCost} Images above are charged the instant you click ${isIteration ? "Regenerate" : "Generate"} Video — even if you don't like the result or never download it. (Pool-covered frames aren't Image-billed, but they still permanently use up pool balance for this billing period.)</div>` : "";
   consentSlot.innerHTML = quote.klingImageCost > 0 ? `<div class="consent-row"><input type="checkbox" id="consentCheck" onchange="document.getElementById('generateBtn').disabled = !this.checked;"><label for="consentCheck">I understand this charges <b>${quote.klingImageCost} Images now</b>, non-refundable.</label></div>` : "";
   actionRow.innerHTML = `
     <button class="btn btn-ghost" onclick="goToStep(3)">Back</button>
@@ -1173,16 +1172,42 @@ async function handleGenerate() {
       ),
     });
     const data = await res.json();
-    if (!res.ok || data.error) throw new Error(data.error || "Failed to start render");
+    if (!res.ok || data.error) {
+      // FIX (July 13): video_quota_exceeded removed — createVideoJob no
+      // longer returns this error at all. The video-creation quota is
+      // purely informational now (see video-job.js's checkVideoQuota
+      // comment); it never blocks action=create/regenerate. Only real
+      // Image-balance/subscription errors can come back here now.
+      const MESSAGES = {
+        insufficient_credits: `Not enough Images to cover this generation (needs ${data.required ?? "?"}, balance is ${data.balance ?? "?"}).`,
+        no_active_subscription: "This account doesn't have an active subscription.",
+        dispatch_failed: "Couldn't start the render job — Images were not charged.",
+      };
+      throw new Error(MESSAGES[data.error] || data.error || "Failed to start render");
+    }
 
     window._currentJobId = data.jobId;
     generationCount = data.generationCount || generationCount;
     if (typeof data.klingImagesCharged === "number") await refreshBalanceDisplay();
 
+    // CHANGE (July 13, 2026): reworded for the shared monthly Kling pool —
+    // shows how many frames this generation drew from the pool (free) vs
+    // how many were billed in Images, plus the video-creation count only
+    // on a first generation (regenerate never touches that counter).
+    const poolLine = data.klingFramesFromPool > 0
+      ? `${data.klingFramesFromPool} Kling frame${data.klingFramesFromPool===1?"":"s"} covered by this month's free pool.<br>`
+      : "";
+    const billedLine = data.klingImagesCharged > 0
+      ? `${data.klingImagesCharged} Images charged.<br>`
+      : "";
+    const quotaLine = (!isIteration && typeof data.videoQuotaUsed === "number")
+      ? `This is video ${data.videoQuotaUsed} of ${data.videoQuotaLimit} included this month${data.videoQuotaUsed > data.videoQuotaLimit ? " (over your included allowance — still fine, just past the bundled count)" : ""}.<br>`
+      : "";
+
     document.getElementById("resultContent").innerHTML = `
       <div class="result-icon">&#9203;</div>
       <div class="result-title">Rendering your video \u2014 generation #${generationCount}</div>
-      <div class="result-body">${data.klingImagesCharged>0?`${data.klingImagesCharged} Images charged.<br>`:""}Real renders typically take a few minutes depending on frame count and how many are Kling. Nothing else is charged until Download.</div>
+      <div class="result-body">${poolLine}${billedLine}${quotaLine}Real renders typically take a few minutes depending on frame count and how many are Kling. No more Images are charged until Download.</div>
     `;
     pollJobStatus(data.jobId);
   } catch (err) {
@@ -1238,13 +1263,21 @@ function pollJobStatus(jobId) {
 // decision needs to be made with real information, not a static thumbnail.
 function showRenderComplete(job) {
   const videoUrl = job.output_16x9_url || job.output_9x16_url;
+  const genCount = job.generation_count || generationCount;
+  // FIX (July 13): the "used one of your monthly videos" line only applies
+  // to generation #1 — consumeVideoQuotaSlot only runs in createVideoJob,
+  // never in regenerateVideoJob. This is now purely a reporting number,
+  // not a gate (see video-job.js's checkVideoQuota comment).
+  const quotaLine = genCount === 1
+    ? "this generation already counted toward your monthly video count, so "
+    : "";
   document.getElementById("resultContent").innerHTML = `
     <div class="result-icon">&#9989;</div>
-    <div class="result-title">Ready \u2014 generation #${job.generation_count || generationCount}</div>
+    <div class="result-title">Ready \u2014 generation #${genCount}</div>
     ${videoUrl
       ? `<video src="${videoUrl}" controls autoplay muted loop playsinline style="width:100%;max-width:480px;border-radius:4px;margin:12px 0;background:#000;"></video>`
       : (job.thumbnail_url ? `<img src="${job.thumbnail_url}" alt="Preview thumbnail" style="max-width:100%;border-radius:4px;margin:12px 0;">` : "")}
-    <div class="result-body">Watch it back \u2014 the Kling cost above is already spent either way, so take your time deciding. Download is a separate flat fee for the formal export: it locks this in, adds it to your AB 723 compliance page, and uses one of your monthly video downloads. If you Iterate instead, every Kling frame in the video gets billed again on the next generation, including ones that were free this time, and the current result is replaced, not kept alongside the new one.</div>
+    <div class="result-body">Watch it back \u2014 the Kling cost above is already spent (or drawn from this month's free pool), and ${quotaLine}take your time deciding. Download is a separate flat fee for the formal export: it locks this in and adds it to your AB 723 compliance page, but never touches your monthly video count. If you Iterate instead, this same shared monthly Kling pool applies again \u2014 frames are free if you still have pool balance left, billed in Images once it's gone, exactly like a first generation. Iterating does NOT add to your monthly video count, since it's a redo of this same video, not a new one. The current result is replaced, not kept alongside the new one.</div>
     <div style="margin-top:18px;display:flex;gap:10px;justify-content:center;">
       <button class="btn btn-ghost" style="flex:none;" onclick="resetDemo()">Start over</button>
       <button class="btn btn-ghost" style="flex:none;" onclick="handleIterate()">Iterate this video</button>
@@ -1268,11 +1301,16 @@ async function handleDownload() {
     });
     const data = await res.json();
     if (!res.ok || data.error) {
+      // FIX (July 13): removed video_quota_exceeded from this map — it can
+      // never actually happen at Download. The quota check/consumption
+      // happens in createVideoJob (action=create), before this job even
+      // existed, so by the time a job reaches Download it's already past
+      // that gate. Leaving it here implied the opposite (that quota gets
+      // checked again at Download), which isn't how the backend works.
       const MESSAGES = {
         not_ready: "This job isn't finished rendering yet — wait a moment and try again.",
         insufficient_credits: "Not enough Images to cover the download fee.",
         no_active_subscription: "This account doesn't have an active subscription.",
-        video_quota_exceeded: "This account has used all its video downloads for this billing period.",
       };
       throw new Error(MESSAGES[data.error] || data.error || "Download failed");
     }
@@ -1284,7 +1322,7 @@ async function handleDownload() {
     document.getElementById("resultContent").innerHTML = `
       <div class="result-icon">&#11015;</div>
       <div class="result-title">Downloaded</div>
-      <div class="result-body">This also used 1 of your monthly video downloads, and is now on your AB 723 compliance page.<br><br>${links}</div>
+      <div class="result-body">This is now locked in and on your AB 723 compliance page. (Your monthly video slot for this one was already used back when you clicked Generate.)<br><br>${links}</div>
       <div style="margin-top:18px;"><button class="btn btn-ghost" style="flex:none;" onclick="resetDemo()">Start over</button></div>
     `;
   } catch (err) {
@@ -1304,6 +1342,21 @@ async function refreshBalanceDisplay() {
     const data = await res.json();
     balance = data.balance;
     document.getElementById("balanceDisplay").textContent = balance ?? "\u2014";
+    // FIX (July 13): quotaPill existed in the markup but was never wired to
+    // anything. Populated from the same balance call, now that action=balance
+    // also returns videoQuotaUsed/videoQuotaLimit and klingPoolUsed/
+    // klingPoolLimit. Video count is phrased as "used generating videos"
+    // rather than "downloaded" — the count is incremented at Generate
+    // (action=create), not at Download. Kling pool is a separate resource,
+    // shown alongside it, not merged into it.
+    const parts = [];
+    if (typeof data.videoQuotaUsed === "number" && typeof data.videoQuotaLimit === "number") {
+      parts.push(`${data.videoQuotaUsed} of ${data.videoQuotaLimit} monthly videos`);
+    }
+    if (typeof data.klingPoolUsed === "number" && typeof data.klingPoolLimit === "number") {
+      parts.push(`${Math.max(0, data.klingPoolLimit - data.klingPoolUsed)} of ${data.klingPoolLimit} free Kling frames left`);
+    }
+    if (parts.length) document.getElementById("quotaPill").textContent = parts.join(" \u00b7 ");
   } catch (err) {
     // Leave the last-known balance showing rather than blanking it on a
     // transient network error.

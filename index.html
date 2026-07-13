@@ -82,7 +82,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
    narrow column and balloon the card's height. */
 .room-card-header.room-card-header-split{flex-direction:column;align-items:stretch;gap:10px;}
 .room-card-toprow{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
-.room-card-thumb{width:60px;height:45px;object-fit:cover;border-radius:2px;border:1px solid var(--border);flex-shrink:0;cursor:pointer;transition:transform 0.15s,box-shadow 0.15s;}
+.room-card-thumb{width:96px;height:72px;object-fit:cover;border-radius:3px;border:1px solid var(--border);flex-shrink:0;cursor:pointer;transition:transform 0.15s,box-shadow 0.15s;}
 .room-card-thumb:hover{transform:scale(1.04);box-shadow:0 2px 10px rgba(0,0,0,0.18);}
 .room-card-info{flex:1;min-width:0;}
 .room-card-name{font-weight:500;font-size:0.9rem;}
@@ -92,6 +92,40 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
 .room-card-status.processing{color:var(--gold);}
 .room-card-status.done{color:var(--success);}
 .room-card-status.error{color:var(--danger);}
+/* Progress-stage badge (July 12, 2026) — separate from room-card-status,
+   which carries mode-specific copy ("Ready to stage...", "⚠ Error", etc).
+   This is the single always-present at-a-glance indicator Sam asked for:
+   exactly one of Pending / Generating / Staged / Finalized, shown on every
+   card regardless of mode, so a batch of 15 rooms can be scanned without
+   opening any of them. */
+.stage-badge{display:inline-flex;align-items:center;gap:4px;font-size:0.62rem;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;padding:2px 8px;border-radius:10px;white-space:nowrap;}
+.stage-badge.pending{background:#eee;color:#888;}
+.stage-badge.generating{background:#fdf3d8;color:#8a6d1d;}
+.stage-badge.staged{background:#e8f4f0;color:var(--success);}
+.stage-badge.finalized{background:var(--ink);color:#fff;}
+.stage-badge .dot{width:6px;height:6px;border-radius:50%;background:currentColor;}
+.stage-badge.generating .dot{animation:pulse-dot 1.1s ease-in-out infinite;}
+@keyframes pulse-dot{0%,100%{opacity:1;}50%{opacity:0.35;}}
+
+/* Room workspace modal — wraps the SAME per-mode content the card branches
+   already generate (result panels, iterate box, Generate Final, Cinematic
+   Asset Generator, DNA panel, etc). Hidden by default so every card is
+   collapsed to just its header until explicitly opened; nothing about
+   when this shows depends on room.status, so a room auto-collapses the
+   moment you're not looking at it rather than needing special-cased
+   "close when done" logic. */
+.room-card-modal-backdrop{display:none;position:fixed;inset:0;background:rgba(20,16,10,0.55);z-index:900;overflow-y:auto;padding:40px 16px;}
+.room-card-modal-backdrop.open{display:block;}
+.room-card-modal{background:#fff;max-width:900px;margin:0 auto;border-radius:6px;box-shadow:0 30px 80px rgba(0,0,0,0.35);overflow:hidden;}
+.room-card-modal-topbar{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 16px;background:var(--ink);color:#fff;position:sticky;top:0;z-index:2;}
+.room-card-modal-topbar .rcm-title{font-weight:600;font-size:0.92rem;display:flex;align-items:center;gap:10px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.room-card-modal-nav{display:flex;align-items:center;gap:6px;flex-shrink:0;}
+.rcm-nav-btn{background:rgba(255,255,255,0.12);color:#fff;border:none;border-radius:3px;padding:6px 12px;font-size:0.78rem;cursor:pointer;font-family:inherit;}
+.rcm-nav-btn:hover{background:rgba(255,255,255,0.22);}
+.rcm-nav-btn:disabled{opacity:0.35;cursor:not-allowed;}
+.rcm-close-btn{background:transparent;color:#fff;border:none;font-size:1.3rem;line-height:1;cursor:pointer;padding:2px 6px;}
+.rcm-close-btn:hover{opacity:0.7;}
+.room-card-modal-body{max-height:calc(100vh - 140px);overflow-y:auto;}
 .shot-focus-badge{font-size:0.68rem;color:var(--sky);margin-top:2px;font-style:italic;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:340px;}
 .anchor-badge{background:var(--gold);color:var(--ink);font-size:0.58rem;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;padding:2px 7px;border-radius:2px;}
 .ext-badge{background:var(--sky);color:#fff;font-size:0.58rem;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;padding:2px 7px;border-radius:2px;}
@@ -996,6 +1030,7 @@ async function applyVirtuallyStagedBadge(base64Jpeg) {
 const SESSION = {
   originals:[],floorplanRoomMap:null,photoRoomMap:{},
   intake:{},rooms:[],anchorRoomId:null,
+  openRoomId:null,
   stagingDNA: null,
   anchorImageUrl: null,
   openPlanRoomId: null,
@@ -2231,6 +2266,88 @@ function toggleExtSelection(roomId,enhId){
   renderRoomQueue();
 }
 
+// ══════════════════════════════════════════
+// ROOM WORKSPACE MODAL (July 12, 2026)
+// ══════════════════════════════════════════
+// Cards default to collapsed (header only); clicking a card's info area
+// opens its full workspace — result panels, revision box, Generate Final,
+// Cinematic Asset Generator — in a modal instead of inline. Nothing here
+// changes WHAT each mode branch generates, only WHERE it's shown: same
+// per-branch template strings as before, now wrapped by roomWorkspaceModal()
+// instead of appended directly to the card. SESSION.openRoomId is the only
+// new piece of state — re-rendering during any async operation naturally
+// keeps the right modal open (or closed) since it's read fresh every call.
+
+// Exactly one of Pending / Generating / Staged / Finalized, shown on every
+// collapsed card regardless of mode — the batch-scan indicator Sam asked
+// for. Deliberately separate from room-card-status (which carries mode-
+// specific copy like "⚠ Error — retry available") since that copy varies
+// too much per-branch to double as a consistent at-a-glance signal.
+function getStageBadgeInfo(room) {
+  if (room.isReference) return null;
+  if (room.isExterior) {
+    const sels = Object.values(room.extSelections || {});
+    if (sels.some(s => s.status === 'processing')) return { cls: 'generating', label: 'Generating' };
+    if (sels.some(s => s.finalStatus === 'done')) return { cls: 'finalized', label: 'Finalized' };
+    if (sels.some(s => s.status === 'done')) return { cls: 'staged', label: 'Staged' };
+    return { cls: 'pending', label: 'Pending' };
+  }
+  if (room.status === 'processing') return { cls: 'generating', label: 'Generating' };
+  if (room.status === 'prompt-review') return { cls: 'generating', label: 'Review Prompt' };
+  if (room.finalStatus === 'done' || room.finalBase64) return { cls: 'finalized', label: 'Finalized' };
+  if (room.status === 'done') return { cls: 'staged', label: 'Staged' };
+  return { cls: 'pending', label: 'Pending' };
+}
+function stageBadgeHtml(room) {
+  const info = getStageBadgeInfo(room);
+  if (!info) return '';
+  return `<span class="stage-badge ${info.cls}"><span class="dot"></span>${info.label}</span>`;
+}
+
+// Collapsed-card thumbnail swaps to the staged/final result once one
+// exists (finalBase64 wins over draft stagedBase64/declutteredBase64) so
+// progress across a batch is visible without opening anything. Scoped to
+// the main stage/declutter/cns branches only — exterior rooms can carry
+// several independent enhancement results at once with no single "the"
+// result to promote, so their thumbnail stays the original photo.
+function roomThumbSrc(room, orig) {
+  const b64 = room.finalBase64 || room.stagedBase64 || room.declutteredBase64;
+  return b64 ? `data:image/jpeg;base64,${b64}` : orig.dataUrl;
+}
+
+function navDisabled(direction) {
+  const ids = SESSION.rooms.filter(r => !r.isReference).map(r => r.id);
+  const idx = ids.indexOf(SESSION.openRoomId);
+  if (idx === -1) return true;
+  return direction < 0 ? idx <= 0 : idx >= ids.length - 1;
+}
+function openRoomWorkspace(roomId) { SESSION.openRoomId = roomId; renderRoomQueue(); }
+function closeRoomWorkspace() { SESSION.openRoomId = null; renderRoomQueue(); }
+function navigateRoomWorkspace(delta) {
+  const ids = SESSION.rooms.filter(r => !r.isReference).map(r => r.id);
+  const idx = ids.indexOf(SESSION.openRoomId);
+  const newIdx = idx + delta;
+  if (newIdx >= 0 && newIdx < ids.length) { SESSION.openRoomId = ids[newIdx]; renderRoomQueue(); }
+}
+// innerHtml is whatever a branch already builds (resultHtml+iterHtml+
+// finalHtml+... concatenated) — unchanged content, just relocated here.
+function roomWorkspaceModal(room, innerHtml) {
+  const isOpen = SESSION.openRoomId === room.id;
+  return `<div class="room-card-modal-backdrop ${isOpen ? 'open' : ''}" id="modal-${room.id}" onclick="if(event.target===this)closeRoomWorkspace()">
+    <div class="room-card-modal">
+      <div class="room-card-modal-topbar">
+        <div class="rcm-title">${room.roomName}</div>
+        <div class="room-card-modal-nav">
+          <button class="rcm-nav-btn" ${navDisabled(-1) ? 'disabled' : ''} onclick="navigateRoomWorkspace(-1)">← Prev</button>
+          <button class="rcm-nav-btn" ${navDisabled(1) ? 'disabled' : ''} onclick="navigateRoomWorkspace(1)">Next →</button>
+          <button class="rcm-close-btn" onclick="closeRoomWorkspace()" title="Close">&times;</button>
+        </div>
+      </div>
+      <div class="room-card-modal-body">${innerHtml || '<div style="padding:50px 20px;text-align:center;color:var(--muted);">Nothing generated yet for this room.</div>'}</div>
+    </div>
+  </div>`;
+}
+
 function renderRoomQueue(){
   document.getElementById('room-queue').innerHTML=SESSION.rooms.map(room=>{
     const orig=SESSION.originals.find(o=>o.id===room.originalId);
@@ -2296,11 +2413,12 @@ function renderRoomQueue(){
       }).join('');
       return `<div class="room-card is-exterior" id="card-${room.id}">
         <div class="room-card-header"><img class="room-card-thumb" src="${orig.dataUrl}" onclick="openLightbox('${room.id}')" title="Click to set Shot Focus" />
-        <div class="room-card-info"><div class="room-card-name">${room.roomName} <span class="ext-badge">Exterior</span>${zoneBadgeHtml(room)}</div>${sfBadge}
-        <div class="room-card-status" style="color:var(--sky);">Select enhancements · Click photo to set Shot Focus</div></div>
+        <div class="room-card-info" style="cursor:pointer;" onclick="openRoomWorkspace('${room.id}')"><div class="room-card-name">${room.roomName} <span class="ext-badge">Exterior</span>${zoneBadgeHtml(room)} ${stageBadgeHtml(room)}</div>${sfBadge}
+        <div class="room-card-status" style="color:var(--sky);">Select enhancements · Click photo to set Shot Focus · Click here for results</div></div>
         <div class="room-card-actions">${runBtn}${modeToggle}</div></div>
         <div class="ext-panel"><div class="ext-panel-title">Choose Exterior Enhancements — Multiple Allowed</div>
-        <div class="ext-options">${opts}</div>${enhResults}</div></div>`;
+        <div class="ext-options">${opts}</div></div></div>
+        ${roomWorkspaceModal(room, enhResults)}`;
     }
 
     // ── DECLUTTER ONLY ──
@@ -2332,16 +2450,16 @@ function renderRoomQueue(){
       const declutterFinalHtml = isDone && room.declutteredBase64 ? renderFinalPanelForDeclutter(room.id) : '';
       return `<div class="room-card" id="card-${room.id}" style="border-left:3px solid #7c5c3e;">
         <div class="room-card-header">
-          <img class="room-card-thumb" src="${orig.dataUrl}" onclick="openLightbox('${room.id}')" />
-          <div class="room-card-info">
-            <div class="room-card-name">${room.roomName} <span style="font-size:0.65rem;background:#f4ede6;color:#7c5c3e;border:1px solid #d4b99a;padding:1px 6px;border-radius:2px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;">Declutter Only</span>${zoneBadgeHtml(room)}</div>
+          <img class="room-card-thumb" src="${roomThumbSrc(room, orig)}" onclick="openLightbox('${room.id}')" />
+          <div class="room-card-info" style="cursor:pointer;" onclick="openRoomWorkspace('${room.id}')">
+            <div class="room-card-name">${room.roomName} <span style="font-size:0.65rem;background:#f4ede6;color:#7c5c3e;border:1px solid #d4b99a;padding:1px 6px;border-radius:2px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;">Declutter Only</span>${zoneBadgeHtml(room)} ${stageBadgeHtml(room)}</div>
             ${sfBadge}
-            <div class="room-card-status" style="color:#7c5c3e;">${isProcessing?(room.promptStatus||'Removing objects...'):'Remove clutter · 1 Credit'}</div>
+            <div class="room-card-status" style="color:#7c5c3e;">${isProcessing?(room.promptStatus||'Removing objects...'):'Remove clutter · 1 Credit · Click for results'}</div>
           </div>
           <div class="room-card-actions">${actionBtn}${downloads}${modeToggle}</div>
         </div>
-        ${resultHtml}${declutterIterHtml}${declutterFinalHtml}
-      </div>`;
+      </div>
+      ${roomWorkspaceModal(room, resultHtml + declutterIterHtml + declutterFinalHtml)}`;
     }
 
     // ── CLEAN + STAGE ──
@@ -2400,16 +2518,16 @@ function renderRoomQueue(){
       const cinematicAssetPanel=isDone&&room.stagedBase64?renderCinematicAssetPanel(room.id):'';
       return `<div class="room-card" id="card-${room.id}" style="border-left:3px solid #4a6741;">
         <div class="room-card-header">
-          <img class="room-card-thumb" src="${orig.dataUrl}" onclick="openLightbox('${room.id}')" />
-          <div class="room-card-info">
-            <div class="room-card-name">${room.roomName} <span style="font-size:0.65rem;background:#edf4ec;color:#4a6741;border:1px solid #b0ccab;padding:1px 6px;border-radius:2px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;">Clean + Stage</span>${zoneBadgeHtml(room)}</div>
+          <img class="room-card-thumb" src="${roomThumbSrc(room, orig)}" onclick="openLightbox('${room.id}')" />
+          <div class="room-card-info" style="cursor:pointer;" onclick="openRoomWorkspace('${room.id}')">
+            <div class="room-card-name">${room.roomName} <span style="font-size:0.65rem;background:#edf4ec;color:#4a6741;border:1px solid #b0ccab;padding:1px 6px;border-radius:2px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;">Clean + Stage</span>${zoneBadgeHtml(room)} ${stageBadgeHtml(room)}</div>
             ${sfBadge}
-            <div class="room-card-status" style="color:#4a6741;">${isProcessing?(room.promptStatus||'Processing...'):'Remove clutter then restage · 2 Credits'}</div>
+            <div class="room-card-status" style="color:#4a6741;">${isProcessing?(room.promptStatus||'Processing...'):'Remove clutter then restage · 2 Credits · Click for results'}</div>
           </div>
           <div class="room-card-actions">${actionBtn}${downloads}${modeToggle}</div>
         </div>
-        ${resultHtml}${iterHtml}${finalHtml}${cinematicAssetPanel}
-      </div>`;
+      </div>
+      ${roomWorkspaceModal(room, resultHtml + iterHtml + finalHtml + cinematicAssetPanel)}`;
     }
 
     // ── STAGE VACANT / INTERIOR ──
@@ -2529,12 +2647,13 @@ function renderRoomQueue(){
     })();
     return `<div class="room-card ${isAnchor?'is-anchor':''}" id="card-${room.id}">
       <div class="room-card-header room-card-header-split">
-      <div class="room-card-toprow"><img class="room-card-thumb" src="${orig.dataUrl}" onclick="openLightbox('${room.id}')" title="Click to set Shot Focus" />
-      <div class="room-card-info"><div class="room-card-name">${room.roomName} ${isAnchor?'<span class="anchor-badge">Design Anchor</span>':''}${zoneBadgeHtml(room)}</div>
+      <div class="room-card-toprow"><img class="room-card-thumb" src="${roomThumbSrc(room, orig)}" onclick="openLightbox('${room.id}')" title="Click to set Shot Focus" />
+      <div class="room-card-info" style="cursor:pointer;" onclick="openRoomWorkspace('${room.id}')"><div class="room-card-name">${room.roomName} ${isAnchor?'<span class="anchor-badge">Design Anchor</span>':''}${zoneBadgeHtml(room)} ${stageBadgeHtml(room)}</div>
       ${room.adjacentRooms.length?`<div class="room-card-adj">Adjacent: ${room.adjacentRooms.join(', ')}</div>`:''}${sfBadge}${spatialBadge}
-      <div class="room-card-status ${room.status}">${statusLabel}</div></div></div>
+      <div class="room-card-status ${room.status}">${statusLabel}${room.status==='done'?' · Click for results':''}</div></div></div>
       <div class="room-card-actions">${actions}${modeToggle}</div></div>
-      ${strategyToggle}${resultHtml}${dnaPanel}${iterHtml}${finalHtml}${cinematicAssetPanel}</div>`;
+      ${strategyToggle}</div>
+      ${roomWorkspaceModal(room, resultHtml + dnaPanel + iterHtml + finalHtml + cinematicAssetPanel)}`;
   }).join('');
   updateCreateVideoButton();
 }

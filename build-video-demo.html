@@ -257,11 +257,27 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
     <div class="divider-label">Output format</div>
     <div class="format-row" id="formatRow"></div>
     <div class="format-note" id="formatNote"></div>
+    <div class="divider-label">Audio</div>
+    <div class="panel-pad" style="padding-top:0;">
+      <div class="eyebrow" style="margin-top:0;">Background music</div>
+      <select class="btn btn-ghost" id="musicSelect" style="width:100%;text-align:left;margin-bottom:14px;" onchange="updateAudioSelection()"></select>
+      <div class="eyebrow">Voice narration</div>
+      <select class="btn btn-ghost" id="narrationSelect" style="width:100%;text-align:left;" onchange="updateAudioSelection()"></select>
+      <div class="panel-sub" id="narrationNote" style="margin-top:6px;"></div>
+    </div>
     <div class="action-row">
       <button class="btn btn-ghost" onclick="goToStep(2)">Back</button>
       <button class="btn btn-primary" onclick="goToStep(4)">Review Cost</button>
     </div>
   </div>
+
+  <!--
+    MUSIC_LIBRARY / NARRATION_VOICES below MUST stay in sync with
+    SUNO_TRACK_LIBRARY (Railway musicGen.js) and NARRATION_VOICE_LIBRARY
+    (Netlify video-job.js) — the keys sent here are looked up server-side
+    against those exact same maps. Adding/renaming a track or voice means
+    updating both this list AND the matching backend map together.
+  -->
 
   <div class="panel hidden" id="stepConfirm">
     <div class="panel-pad">
@@ -422,6 +438,24 @@ const UNTAGGED_ICON = "&#128247;"; // generic camera — shown until a room is p
 
 const MAX_FRAMES = 20;
 const KLING_IMAGE_COST_PER_FRAME = 5; // mirrors the same constant in video-job.js — every Kling frame once the monthly pool is exhausted
+const NARRATION_IMAGE_COST = 3; // mirrors NARRATION_IMAGE_COST in video-job.js
+
+// Keys here MUST match SUNO_TRACK_LIBRARY (Railway musicGen.js) exactly.
+const MUSIC_LIBRARY = [
+  { key: "default",            label: "Default — Neutral Ambient" },
+  { key: "japandi_calm",       label: "Japandi — Calm Piano" },
+  { key: "luxury_cinematic",   label: "Luxury — Cinematic Strings" },
+  { key: "modern_uplifting",   label: "Modern — Warm & Uplifting" },
+  { key: "farmhouse_acoustic", label: "Farmhouse — Light Acoustic" },
+  { key: "none",               label: "No music (silent)" },
+];
+
+// Keys here MUST match NARRATION_VOICE_LIBRARY (Netlify video-job.js) exactly.
+const NARRATION_VOICES = [
+  { key: "",                "label": "No narration" },
+  { key: "voice_male_1",    "label": "Male — Warm & Professional" },
+  { key: "voice_female_1",  "label": "Female — Warm & Professional" },
+];
 
 // ── REAL BACKEND WIRING (July 10, 2026) ──────────────────────────────────
 // This page is launched with real identifiers in the URL — from the main
@@ -1037,6 +1071,44 @@ function renderOrderStep() {
   note.textContent = hasKling
     ? "AI Motion videos deliver in a single format — Kling's camera composition can't be safely auto-cropped to a second aspect ratio."
     : "Ken Burns videos can deliver both formats at no extra cost — 9:16 is a clean crop of the same render.";
+
+  // NEW (audio build) — populate the music/narration pickers ONCE. This
+  // function re-runs every time Step 3 is (re)entered (goToStep(3) calls
+  // it), and rebuilding <select> options unconditionally would silently
+  // reset whatever the user already picked. Guarding on childElementCount
+  // means the dropdowns are built the first time only; onchange updates
+  // window._musicStyle/_voiceKey directly from then on (see
+  // updateAudioSelection), never by re-running this function.
+  const musicSelect = document.getElementById("musicSelect");
+  if (musicSelect && musicSelect.childElementCount === 0) {
+    musicSelect.innerHTML = MUSIC_LIBRARY.map(m => `<option value="${m.key}">${m.label}</option>`).join("");
+    window._musicStyle = MUSIC_LIBRARY[0].key;
+  }
+  const narrationSelect = document.getElementById("narrationSelect");
+  if (narrationSelect && narrationSelect.childElementCount === 0) {
+    narrationSelect.innerHTML = NARRATION_VOICES.map(v => `<option value="${v.key}">${v.label}</option>`).join("");
+    window._voiceKey = "";
+    updateAudioSelection();
+  }
+}
+
+// Reads the current dropdown values into window state and updates the
+// helper note — deliberately does NOT touch the dropdown's own options or
+// call renderOrderStep(), so selecting music/narration never resets the
+// other picker or the room order above it.
+function updateAudioSelection() {
+  const musicSelect = document.getElementById("musicSelect");
+  const narrationSelect = document.getElementById("narrationSelect");
+  window._musicStyle = musicSelect ? musicSelect.value : "default";
+  window._voiceKey = narrationSelect ? narrationSelect.value : "";
+
+  const note = document.getElementById("narrationNote");
+  if (!note) return;
+  if (!window._voiceKey) {
+    note.textContent = "";
+  } else {
+    note.textContent = `Narration is billed per video: free the first time on this video, ${NARRATION_IMAGE_COST} Images each time after that — including a fresh script on a re-generate.`;
+  }
 }
 
 function toggleFormat(fmt, hasKling) {
@@ -1072,7 +1144,13 @@ async function renderConfirmStep() {
     const res = await fetch(`${API_BASE}?action=quote`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ jobId: window._currentJobId || undefined, userId: REAL_USER_ID, frames: realFrames }),
+      body: JSON.stringify({
+        jobId: window._currentJobId || undefined,
+        userId: REAL_USER_ID,
+        frames: realFrames,
+        wantsNarration: !!window._voiceKey,
+        voiceKey: window._voiceKey || undefined,
+      }),
     });
     quote = await res.json();
     if (!res.ok || quote.error) throw new Error(quote.error || "Quote failed");
@@ -1119,8 +1197,13 @@ async function renderConfirmStep() {
   } else {
     rows += `<div class="cost-line muted"><span>No AI Motion frames in this video</span><span class="val">0 Images</span></div>`;
   }
+  if (quote.narrationRequested) {
+    rows += quote.narrationFreeUsed
+      ? `<div class="cost-line"><span>Narration (already used this video's free one)</span><span class="val">${quote.narrationImageCost} Images</span></div>`
+      : `<div class="cost-line muted"><span>Narration (first time on this video)</span><span class="val">Free</span></div>`;
+  }
   document.getElementById("costTable").innerHTML = rows + `
-    <div class="cost-total"><span class="label">Charged now, on ${isIteration ? "Regenerate" : "Generate"}</span><span class="val">${quote.klingImageCost}</span></div>
+    <div class="cost-total"><span class="label">Charged now, on ${isIteration ? "Regenerate" : "Generate"}</span><span class="val">${quote.totalImageCost}</span></div>
     <div class="balance-line"><span>Current balance: ${quote.currentBalance ?? '\u2014'} Images</span><span class="after ${wouldExceed?'negative':''}">After: ${wouldExceed?'\u2014':quote.balanceAfter} Images</span></div>
   `;
 
@@ -1129,7 +1212,7 @@ async function renderConfirmStep() {
   const actionRow = document.getElementById("actionRow");
 
   if (wouldExceed) {
-    warnSlot.innerHTML = `<div class="warn-box"><strong>Not enough Images</strong>This generation needs ${quote.klingImageCost} Images, but the account only has ${quote.currentBalance}. Nothing will be charged or generated.</div>`;
+    warnSlot.innerHTML = `<div class="warn-box"><strong>Not enough Images</strong>This generation needs ${quote.totalImageCost} Images, but the account only has ${quote.currentBalance}. Nothing will be charged or generated.</div>`;
     consentSlot.innerHTML = "";
     actionRow.innerHTML = `<button class="btn btn-ghost" onclick="goToStep(3)">Back</button><button class="btn btn-primary" disabled>${isIteration ? "Regenerate" : "Generate"} Video</button>`;
     return;
@@ -1140,11 +1223,11 @@ async function renderConfirmStep() {
   // Pool is shared across every generation and iteration this billing
   // period, so an iteration is billed exactly the same way a first
   // generation would be, based only on how much pool balance is left.
-  warnSlot.innerHTML = quote.klingImageCost > 0 ? `<div class="warn-box"><strong>Non-refundable on generation</strong>The ${quote.klingImageCost} Images above are charged the instant you click ${isIteration ? "Regenerate" : "Generate"} Video — even if you don't like the result or never download it. (Pool-covered frames aren't Image-billed, but they still permanently use up pool balance for this billing period.)</div>` : "";
-  consentSlot.innerHTML = quote.klingImageCost > 0 ? `<div class="consent-row"><input type="checkbox" id="consentCheck" onchange="document.getElementById('generateBtn').disabled = !this.checked;"><label for="consentCheck">I understand this charges <b>${quote.klingImageCost} Images now</b>, non-refundable.</label></div>` : "";
+  warnSlot.innerHTML = quote.totalImageCost > 0 ? `<div class="warn-box"><strong>Non-refundable on generation</strong>The ${quote.totalImageCost} Images above are charged the instant you click ${isIteration ? "Regenerate" : "Generate"} Video — even if you don't like the result or never download it. (Pool-covered frames and free narration aren't Image-billed, but they still permanently use up their allowance for this billing period.)</div>` : "";
+  consentSlot.innerHTML = quote.totalImageCost > 0 ? `<div class="consent-row"><input type="checkbox" id="consentCheck" onchange="document.getElementById('generateBtn').disabled = !this.checked;"><label for="consentCheck">I understand this charges <b>${quote.totalImageCost} Images now</b>, non-refundable.</label></div>` : "";
   actionRow.innerHTML = `
     <button class="btn btn-ghost" onclick="goToStep(3)">Back</button>
-    <button class="btn btn-primary" id="generateBtn" ${quote.klingImageCost>0?"disabled":""} onclick="handleGenerate()">${isIteration ? "Regenerate" : "Generate"} Video</button>
+    <button class="btn btn-primary" id="generateBtn" ${quote.totalImageCost>0?"disabled":""} onclick="handleGenerate()">${isIteration ? "Regenerate" : "Generate"} Video</button>
   `;
 }
 
@@ -1168,8 +1251,8 @@ async function handleGenerate() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(isIteration
-        ? { jobId: window._currentJobId, userId: REAL_USER_ID, frames: realFrames, formats: window._selectedFormats || ["16x9"] }
-        : { listingId: REAL_LISTING_ID, projectId: REAL_PROJECT_ID || undefined, userId: REAL_USER_ID, frames: realFrames, formats: window._selectedFormats || ["16x9"] }
+        ? { jobId: window._currentJobId, userId: REAL_USER_ID, frames: realFrames, formats: window._selectedFormats || ["16x9"], musicStyle: window._musicStyle || "default", wantsNarration: !!window._voiceKey, voiceKey: window._voiceKey || undefined }
+        : { listingId: REAL_LISTING_ID, projectId: REAL_PROJECT_ID || undefined, userId: REAL_USER_ID, frames: realFrames, formats: window._selectedFormats || ["16x9"], musicStyle: window._musicStyle || "default", wantsNarration: !!window._voiceKey, voiceKey: window._voiceKey || undefined }
       ),
     });
     const data = await res.json();
@@ -1204,11 +1287,19 @@ async function handleGenerate() {
     const quotaLine = (!isIteration && typeof data.videoQuotaUsed === "number")
       ? `This is video ${data.videoQuotaUsed} of ${data.videoQuotaLimit} included this month${data.videoQuotaUsed > data.videoQuotaLimit ? " (over your included allowance — still fine, just past the bundled count)" : ""}.<br>`
       : "";
+    // NEW (audio build)
+    const narrationLine = data.narrationRequested
+      ? (data.narrationFailed
+          ? `Narration couldn't be generated this time — video will render without it.<br>`
+          : (data.narrationGenerated
+              ? `Narration script generated${data.narrationImagesCharged > 0 ? ` (${data.narrationImagesCharged} Images charged)` : " (free)"}.<br>`
+              : ""))
+      : "";
 
     document.getElementById("resultContent").innerHTML = `
       <div class="result-icon">&#9203;</div>
       <div class="result-title">Rendering your video \u2014 generation #${generationCount}</div>
-      <div class="result-body">${poolLine}${billedLine}${quotaLine}Real renders typically take a few minutes depending on frame count and how many are Kling. No more Images are charged until Download.</div>
+      <div class="result-body">${poolLine}${billedLine}${narrationLine}${quotaLine}Real renders typically take a few minutes depending on frame count and how many are Kling. No more Images are charged until Download.</div>
     `;
     pollJobStatus(data.jobId);
   } catch (err) {
@@ -1377,7 +1468,17 @@ function resetDemo() {
   gallerySelectedIds.clear();
   window._selectedFormats = null;
   window._currentJobId = null;
+  window._musicStyle = null;
+  window._voiceKey = null;
   generationCount = 1;
+  // NEW (audio build) — clear the dropdowns' DOM so renderOrderStep's
+  // childElementCount guard repopulates them fresh (and re-defaults
+  // window._musicStyle/_voiceKey) the next time Step 3 is reached, rather
+  // than silently carrying over the previous listing's audio picks.
+  const musicSelect = document.getElementById("musicSelect");
+  const narrationSelect = document.getElementById("narrationSelect");
+  if (musicSelect) musicSelect.innerHTML = "";
+  if (narrationSelect) narrationSelect.innerHTML = "";
   renderUpload();
   renderGallery();
   refreshBalanceDisplay();

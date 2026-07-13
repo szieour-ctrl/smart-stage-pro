@@ -921,6 +921,76 @@ const SHOT_FOCUS_HINTS = {
 const DEFAULT_HINTS = ["Specify which room is the main focus","Describe what the buyer should notice first","Note any background spaces that should remain understaged"];
 
 // ══════════════════════════════════════════
+// VIRTUALLY STAGED BADGE (July 12, 2026)
+// ══════════════════════════════════════════
+// Pre-rendered transparent PNG (Cormorant Garamond "Virtually Staged",
+// bottom-left placement) — same design approved via mockup, embedded
+// directly as a data URI rather than loaded from a server asset so there's
+// no extra network round-trip or failure mode at Generate Final time.
+//
+// Applied CLIENT-SIDE via canvas at every point a final image is actually
+// produced, NOT server-side in upload-staged.js. That's a deliberate
+// correction: the direct "Download" button reads room.finalBase64 straight
+// from browser state via a data: URL — it never touches the Cloudinary
+// URL upload-staged.js returns. Badging only at upload time left the
+// single most common path (the Download button itself) completely
+// unbadged. Badging here, at the moment finalBase64 is first set, means
+// every consumer — Download button, Cloudinary upload, compliance page —
+// inherits the same already-badged bytes, with one implementation instead
+// of two that could drift out of sync.
+const VIRTUALLY_STAGED_BADGE_DATA_URI = "data:image/png;base64,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";
+let _badgeImagePromise = null;
+function loadVirtuallyStagedBadgeImage() {
+  if (!_badgeImagePromise) {
+    _badgeImagePromise = new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error('Virtually Staged badge image failed to load'));
+      img.src = VIRTUALLY_STAGED_BADGE_DATA_URI;
+    });
+  }
+  return _badgeImagePromise;
+}
+
+// Composites the badge onto a base64 JPEG, bottom-left, sized
+// proportionally to the image's own width (16% of width, clamped
+// 160–420px) — same proportions used in the original server-side
+// version, kept here so the look doesn't change between designs.
+// Returns a new base64 string; never mutates the input. On any failure
+// (corrupt image data, canvas error), logs and returns the ORIGINAL
+// unbadged base64 rather than throwing — a badge failure should never
+// block an agent from getting their staged photo.
+async function applyVirtuallyStagedBadge(base64Jpeg) {
+  try {
+    const [sourceImg, badgeImg] = await Promise.all([
+      new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = () => reject(new Error('Source image failed to load for badging'));
+        img.src = 'data:image/jpeg;base64,' + base64Jpeg;
+      }),
+      loadVirtuallyStagedBadgeImage(),
+    ]);
+
+    const canvas = document.createElement('canvas');
+    canvas.width = sourceImg.naturalWidth;
+    canvas.height = sourceImg.naturalHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(sourceImg, 0, 0);
+
+    const targetWidth = Math.max(160, Math.min(420, Math.round(canvas.width * 0.16)));
+    const targetHeight = Math.round(badgeImg.naturalHeight * (targetWidth / badgeImg.naturalWidth));
+    const margin = Math.round(canvas.width * 0.02);
+    ctx.drawImage(badgeImg, margin, canvas.height - targetHeight - margin, targetWidth, targetHeight);
+
+    return canvas.toDataURL('image/jpeg', 0.95).split(',')[1];
+  } catch (err) {
+    console.error('Virtually Staged badge compositing failed (non-fatal, using unbadged image):', err.message);
+    return base64Jpeg;
+  }
+}
+
+// ══════════════════════════════════════════
 // SESSION
 // ══════════════════════════════════════════
 const SESSION = {
@@ -3730,10 +3800,17 @@ async function generateHeroShotFinal(roomId, shotId, qualityChoice) {
     const upData = await upRes.json();
     if (!upRes.ok || !upData.upscaledBase64) throw new Error(upData.error || 'Upscale failed');
 
+    // Same Virtually Staged badge as the main Generate Final flow — hero
+    // shots are their own AI-generated final deliverable (see compliance
+    // fix note below) and go through the same Download-button path, so
+    // they need the same badge applied at the same point for the same
+    // reason.
+    const badgedHeroBase64 = await applyVirtuallyStagedBadge(upData.upscaledBase64);
+
     room.heroDetailShots[shotId] = {
       ...shot,
       status: 'final',
-      finalBase64: upData.upscaledBase64,
+      finalBase64: badgedHeroBase64,
       qualityChoice: quality,
       creditCost,
     };
@@ -3747,7 +3824,7 @@ async function generateHeroShotFinal(roomId, shotId, qualityChoice) {
     // delivered the final shot but never wrote an original/altered pair to
     // the compliance page. Fire-and-forget, same as attachFinalToProject —
     // must never block the shot from reaching the user if this fails.
-    attachHeroShotToProject(upData.upscaledBase64, room, shot).catch(err => {
+    attachHeroShotToProject(badgedHeroBase64, room, shot).catch(err => {
       console.warn('attachHeroShotToProject error:', err.message);
     });
   } catch (err) {
@@ -4205,11 +4282,15 @@ async function generateFinal(roomId,enhId){
       showToast('⚠ No property project active — Finals will not attach to a compliance page. Search for a property first.', 'error');
     }
 
-    // ── AB 723 — clean image, no overlays (MLS rules) ───────────────────────
-    // Compliance is provided via: compliance page URL, Marketing QR, and Final SBS
-    // The Final image itself is clean — no badge, no QR overlay
+    // ── AB 723 — small transparent "Virtually Staged" badge, bottom-left ──
+    // Real-world precedent from Sam's own MetroList portal (two live
+    // listings there carry disclosure text baked directly into the image
+    // itself). Applied HERE, at the moment finalBase64 is first produced,
+    // so the Download button, Cloudinary upload, and compliance page all
+    // inherit the same badged bytes — see the utility's own comment block
+    // near SESSION for why this replaced badging inside upload-staged.js.
     const orig = SESSION.originals.find(o => o.id === room.originalId);
-    let finalBase64 = upscaleData.upscaledBase64;
+    let finalBase64 = await applyVirtuallyStagedBadge(upscaleData.upscaledBase64);
 
     // Upload original to Cloudinary if not already done (needed for compliance page)
     if (orig && !orig.originalUrl && SESSION.projectId) {
@@ -4234,7 +4315,7 @@ async function generateFinal(roomId,enhId){
       }
     }
 
-    console.log(`Generate Final: clean image ${Math.round(finalBase64.length/1024)}KB — no overlays per MLS rules`);
+    console.log(`Generate Final: badged image ${Math.round(finalBase64.length/1024)}KB — Virtually Staged disclosure applied`);
 
     // Store final — clean image
     if(enhId){
@@ -4245,7 +4326,7 @@ async function generateFinal(roomId,enhId){
       room.finalStatus='done';
     }
 
-    showToast(`✓ Final generated at ${scaleFactor}x · Clean image ready for MLS publication.`,'success');
+    showToast(`✓ Final generated at ${scaleFactor}x · MLS-ready with Virtually Staged disclosure.`,'success');
     renderRoomQueue();
 
     // ── UPLOAD STAGED FINAL TO CLOUDINARY + ATTACH TO COMPLIANCE PAGE ────────
@@ -4707,7 +4788,18 @@ function resizeToMatch(room,orig,enhId,storeKey,incomingB64){
       const offsetY=Math.round((oH-scaledH)/2);
       ctx.drawImage(sI,offsetX,offsetY,scaledW,scaledH);
       const newB64=canvas.toDataURL('image/jpeg',0.93).split(',')[1];
-      if(storeKey==='__final__'){if(enhId){room.extSelections[enhId].finalBase64=newB64;room.extSelections[enhId].finalStatus='done';}else{room.finalBase64=newB64;room.finalStatus='done';}}
+      if(storeKey==='__final__'){
+        // This branch produces a genuine final deliverable (exterior
+        // restage path), same as the main Generate Final flow — needs
+        // the same badge, applied before storing. Async, unlike the
+        // other branches below, since badge compositing is a Promise.
+        applyVirtuallyStagedBadge(newB64).then(badgedB64 => {
+          if(enhId){room.extSelections[enhId].finalBase64=badgedB64;room.extSelections[enhId].finalStatus='done';}
+          else{room.finalBase64=badgedB64;room.finalStatus='done';}
+          resolve();
+        });
+        return;
+      }
       else if(storeKey==='__extdraft__'){if(enhId)room.extSelections[enhId].base64=newB64;}
       else{room[storeKey]=newB64;}
       resolve();

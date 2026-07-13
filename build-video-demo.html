@@ -195,6 +195,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
     <a href="/" class="btn btn-ghost" style="text-decoration:none;flex:none;padding:6px 12px;font-size:0.78rem;" title="Back to Smart Stage PRO">&larr; Back to PRO</a>
     <div class="app-title">Smart Stage <em>PRO Plus</em></div>
     <div class="balance-chip">Balance: <b id="balanceDisplay">&hellip;</b> Images</div>
+    <div class="balance-chip" id="klingPoolChip">Kling Pool: <b id="klingPoolDisplay">&hellip;</b></div>
   </div>
 
   <div class="steps">
@@ -236,7 +237,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
     <div class="panel-pad" style="padding-bottom:0;">
       <div class="eyebrow">Step 2</div>
       <div class="panel-title">Assign room &amp; motion</div>
-      <div class="panel-sub">Tag each photo's room, then choose Ken Burns or AI Motion (Kling). First 3 Kling frames per video are included on the first generation.</div>
+      <div class="panel-sub">Tag each photo's room, then choose Ken Burns or AI Motion (Kling). Kling frames are free while your monthly pool lasts, then billed in Images — see the pool count in the header.</div>
     </div>
     <div id="motionList"></div>
     <div class="count-bar" id="klingCountBar"></div>
@@ -1342,13 +1343,20 @@ async function refreshBalanceDisplay() {
     const data = await res.json();
     balance = data.balance;
     document.getElementById("balanceDisplay").textContent = balance ?? "\u2014";
-    // FIX (July 13): quotaPill existed in the markup but was never wired to
-    // anything. Populated from the same balance call, now that action=balance
-    // also returns videoQuotaUsed/videoQuotaLimit and klingPoolUsed/
-    // klingPoolLimit. Video count is phrased as "used generating videos"
-    // rather than "downloaded" — the count is incremented at Generate
-    // (action=create), not at Download. Kling pool is a separate resource,
-    // shown alongside it, not merged into it.
+
+    // FIX (July 13): the pool count previously only lived inside the
+    // Confirm-step markup (quotaPill), so it was invisible on every other
+    // step and never showed at all until a user reached Step 4. Now also
+    // populates a persistent header chip, visible on every step, same as
+    // the Image balance always is.
+    if (typeof data.klingPoolUsed === "number" && typeof data.klingPoolLimit === "number") {
+      const remaining = Math.max(0, data.klingPoolLimit - data.klingPoolUsed);
+      document.getElementById("klingPoolDisplay").textContent = `${remaining} of ${data.klingPoolLimit} free`;
+    }
+
+    // quotaPill (Confirm step only) keeps the fuller detail — both the
+    // video count AND the pool — since that's the moment someone's
+    // actually deciding whether to spend one.
     const parts = [];
     if (typeof data.videoQuotaUsed === "number" && typeof data.videoQuotaLimit === "number") {
       parts.push(`${data.videoQuotaUsed} of ${data.videoQuotaLimit} monthly videos`);
@@ -1356,7 +1364,8 @@ async function refreshBalanceDisplay() {
     if (typeof data.klingPoolUsed === "number" && typeof data.klingPoolLimit === "number") {
       parts.push(`${Math.max(0, data.klingPoolLimit - data.klingPoolUsed)} of ${data.klingPoolLimit} free Kling frames left`);
     }
-    if (parts.length) document.getElementById("quotaPill").textContent = parts.join(" \u00b7 ");
+    const quotaPillEl = document.getElementById("quotaPill");
+    if (parts.length && quotaPillEl) quotaPillEl.textContent = parts.join(" \u00b7 ");
   } catch (err) {
     // Leave the last-known balance showing rather than blanking it on a
     // transient network error.

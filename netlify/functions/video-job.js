@@ -72,6 +72,7 @@
 // comment for the exact shape.
 
 const https = require("https");
+const crypto = require("crypto");
 
 // ── SUPABASE HELPER (same pattern as project-manage.js) ──────────────────
 
@@ -397,6 +398,296 @@ function calculateDownloadCost(frames) {
   return cost;
 }
 
+// ── NARRATION (July 2026, audio build) ───────────────────────────────────
+//
+// Per-video billing, NOT a monthly pool like Kling — the FIRST narration
+// generation on any given video_jobs row is free (narration_free_used
+// starts false on every job); every narration generation after that, on
+// that SAME video, costs NARRATION_IMAGE_COST Images. This is deliberately
+// simpler than the Kling Motion Pool: no separate usage table, no period
+// tracking — just one boolean + one counter column directly on video_jobs,
+// checked and flipped at generation time, same file this job's other
+// billing already lives in.
+//
+// Real-cost basis (see July 13 pricing conversation): a single narration
+// generation costs Sam roughly $0.13–$0.40 in real ElevenLabs character
+// spend (~1,200–1,600 characters for a 90-second script) — meaningfully
+// LESS than a single Kling frame (~$0.42). NARRATION_IMAGE_COST is priced
+// accordingly: cheaper than the 5-Images Kling rate, not more expensive,
+// unlike VideoTour.ai's narration/motion ratio (their cost structure runs
+// the opposite direction from Sam's).
+const NARRATION_IMAGE_COST = 3;
+
+// Target script length — keeps narration at or under Sam's stated 90-
+// second ceiling. ~150 words/min spoken pace * 1.5 min ≈ 225 words ≈
+// ~1,300 characters at ~5.7 chars/word (English average, incl. spaces).
+// Padded slightly for safety since Claude doesn't count characters
+// perfectly on request.
+const NARRATION_MAX_WORDS = 225;
+
+// ── VOICE LIBRARY — PLACEHOLDER DATA ─────────────────────────────────────
+// Every voice_id below is a dummy. Sam needs to pick 1–2 voices from
+// ElevenLabs' Voice Library (NOT the "Default" category — those expire
+// Dec 31, 2026, see the earlier conversation), add them permanently to
+// his account ("My Voices"), and replace the placeholders with the real
+// voice_ids. His own Professional Voice Clone can be added as a third
+// option, but is deliberately excluded from other subscribers' listings
+// (see the gender-selection conversation) — gated by role/user check at
+// the call site, not hardcoded here.
+const NARRATION_VOICE_LIBRARY = {
+  "voice_male_1":   { label: "Male — Warm & Professional",   voiceId: "pVYHFs8oaIDPWJxvmXWW" },
+  "voice_female_1": { label: "Female — Warm & Professional", voiceId: "5l5f8iK3YPeGga21rQIX" },
+  // "sams_voice":  { label: "Sam's Voice (PVC)", voiceId: "32k6j8e9sZJuuBXxDcVP" }, // Sam-only — gate at call site before uncommenting
+};
+
+function resolveVoice(voiceKey) {
+  return NARRATION_VOICE_LIBRARY[voiceKey] || null;
+}
+
+// ── SCRIPT GENERATION (Claude) ────────────────────────────────────────────
+// Reuses the exact native-https Claude call pattern already established in
+// zillow-compliance-scan.js — no SDK, same ANTHROPIC_API_KEY env var
+// already configured in this Netlify site.
+//
+// Input data is deliberately thin, matching what this schema actually has
+// (per the July 13 conversation): the listing's address (confirmed the
+// only reliable field on `listings`) and the room-type list already on
+// staged_images. No bedrooms/bathrooms/community-amenities data exists in
+// this app's schema — that lives in RentCast/SSST, a separate tool not
+// wired to this one. If Sam wants richer scripts later, that's a real,
+// separate integration, not something this function can fabricate.
+function generateNarrationScript(address, roomTypes) {
+  return new Promise((resolve, reject) => {
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) return reject(new Error("ANTHROPIC_API_KEY is not set in Netlify environment variables."));
+
+    const roomList = roomTypes.length ? roomTypes.join(", ") : "the property";
+    const prompt = `Write a warm, professional real estate video narration script for a listing tour.
+Address: ${address || "this property"}
+Rooms featured, in order: ${roomList}
+
+Requirements:
+- Maximum ${NARRATION_MAX_WORDS} words (hard limit — this will be read aloud in under 90 seconds).
+- Conversational, inviting tone, third person (never "I" or "my listing").
+- Reference the rooms in the order given, briefly, without inventing specific features you weren't told about (no fabricated square footage, bedroom/bathroom counts, or amenities).
+- End with a simple, natural closing line inviting the viewer to schedule a showing.
+- This will be read by ElevenLabs' eleven_v3 model, which supports inline delivery tags like [warmly] or [pause]. Use AT MOST ONE such tag, at the very start of the script, to set a warm tone — do not use tags anywhere else. This is a real estate walkthrough, not a dramatic reading; restraint matters more than expressiveness here.
+- Return ONLY the script text — no headers, no stage directions beyond the one optional opening tag, no markdown.`;
+
+    const bodyStr = JSON.stringify({
+      model: "claude-sonnet-4-6",
+      max_tokens: 500,
+      messages: [{ role: "user", content: prompt }],
+    });
+
+    const req = https.request({
+      hostname: "api.anthropic.com",
+      path: "/v1/messages",
+      method: "POST",
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(bodyStr),
+      },
+    }, (res) => {
+      let data = "";
+      res.on("data", (c) => (data += c));
+      res.on("end", () => {
+        try {
+          const parsed = JSON.parse(data);
+          const text = parsed?.content?.find((b) => b.type === "text")?.text;
+          if (!text) return reject(new Error(`Claude returned no script text: ${data.slice(0, 300)}`));
+          resolve(text.trim());
+        } catch (e) {
+          reject(new Error(`Claude script response parse error: ${e.message}`));
+        }
+      });
+    });
+    req.on("error", reject);
+    req.write(bodyStr);
+    req.end();
+  });
+}
+
+// ── TEXT-TO-SPEECH (ElevenLabs) ───────────────────────────────────────────
+// Single call, single endpoint permission (Text to Speech only — see the
+// API key scoping conversation). Returns raw mp3 bytes as a Buffer.
+//
+// CHANGE (July 2026): model_id switched from eleven_multilingual_v2 to
+// eleven_v3 — confirmed same price ($0.10/1,000 characters via API, both
+// models), and v3 is ElevenLabs' current flagship, explicitly positioned
+// for narration/audiobook-style content. No cost tradeoff, straight
+// upgrade. v3 also supports inline delivery tags (e.g. "[warmly]") in the
+// input text — generateNarrationScript's prompt uses at most one, at the
+// very start, deliberately restrained for a real estate walkthrough.
+function generateNarrationAudio(script, voiceId) {
+  return new Promise((resolve, reject) => {
+    const apiKey = process.env.ELEVENLABS_API_KEY;
+    if (!apiKey) return reject(new Error("ELEVENLABS_API_KEY is not set in Netlify environment variables."));
+
+    const bodyStr = JSON.stringify({
+      text: script,
+      model_id: "eleven_v3",
+    });
+
+    const req = https.request({
+      hostname: "api.elevenlabs.io",
+      path: `/v1/text-to-speech/${voiceId}`,
+      method: "POST",
+      headers: {
+        "xi-api-key": apiKey,
+        "Content-Type": "application/json",
+        "Accept": "audio/mpeg",
+        "Content-Length": Buffer.byteLength(bodyStr),
+      },
+    }, (res) => {
+      const chunks = [];
+      res.on("data", (c) => chunks.push(c));
+      res.on("end", () => {
+        if (res.statusCode !== 200) {
+          return reject(new Error(`ElevenLabs error (status ${res.statusCode}): ${Buffer.concat(chunks).toString("utf8").slice(0, 300)}`));
+        }
+        resolve(Buffer.concat(chunks));
+      });
+    });
+    req.on("error", reject);
+    req.write(bodyStr);
+    req.end();
+  });
+}
+
+// ── UPLOAD NARRATION AUDIO TO CLOUDINARY ──────────────────────────────────
+// Same signed-upload pattern already established in upload-staged.js —
+// reused here rather than inventing a second Cloudinary auth flow.
+// resource_type=raw since this is just storage for a stable URL Railway
+// downloads later, not something Cloudinary needs to transform.
+function uploadNarrationToCloudinary(audioBuffer) {
+  return new Promise((resolve, reject) => {
+    const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
+    const apiKey = process.env.CLOUDINARY_API_KEY;
+    const apiSecret = process.env.CLOUDINARY_API_SECRET;
+    if (!cloudName || !apiKey || !apiSecret) {
+      return reject(new Error("Cloudinary env vars not fully configured."));
+    }
+
+    const dataUrl = `data:audio/mpeg;base64,${audioBuffer.toString("base64")}`;
+    const timestamp = Math.floor(Date.now() / 1000).toString();
+    const folder = "smart-stage-narration";
+    const paramsToSign = `folder=${folder}&timestamp=${timestamp}`;
+    const signature = crypto.createHash("sha1").update(paramsToSign + apiSecret).digest("hex");
+
+    const bodyObj = { file: dataUrl, folder, timestamp, api_key: apiKey, signature };
+    const bodyStr = Object.entries(bodyObj)
+      .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+      .join("&");
+    const bodyBuf = Buffer.from(bodyStr, "utf8");
+
+    const req = https.request({
+      hostname: "api.cloudinary.com",
+      path: `/v1_1/${cloudName}/raw/upload`,
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Content-Length": bodyBuf.length,
+      },
+    }, (res) => {
+      const chunks = [];
+      res.on("data", (c) => chunks.push(c));
+      res.on("end", () => {
+        try {
+          const parsed = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+          if (res.statusCode !== 200) reject(new Error(`Cloudinary error: ${parsed?.error?.message}`));
+          else resolve(parsed.secure_url);
+        } catch (e) { reject(new Error("Cloudinary parse error")); }
+      });
+    });
+    req.on("error", reject);
+    req.write(bodyBuf);
+    req.end();
+  });
+}
+
+// ── NARRATION ORCHESTRATOR ─────────────────────────────────────────────
+// Ties script generation + TTS + upload together. Billing (free vs
+// NARRATION_IMAGE_COST) is decided by the CALLER (createVideoJob /
+// regenerateVideoJob), not here — this function only produces the asset.
+// Throws on any failure; callers must catch and treat a narration failure
+// as non-fatal to the video itself (dispatch the job without narration
+// rather than blocking the whole video on a script/TTS/upload hiccup).
+async function generateNarration({ address, roomTypes, voiceKey }) {
+  const voice = resolveVoice(voiceKey);
+  if (!voice || voice.voiceId.startsWith("REPLACE_WITH_REAL_")) {
+    throw new Error(`Voice "${voiceKey}" is not configured with a real ElevenLabs voice_id yet.`);
+  }
+  const script = await generateNarrationScript(address, roomTypes);
+  const audioBuffer = await generateNarrationAudio(script, voice.voiceId);
+  const audioUrl = await uploadNarrationToCloudinary(audioBuffer);
+  return { script, audioUrl };
+}
+
+// ── NARRATION BILLING + GENERATION, SHARED BY CREATE AND REGENERATE ─────
+// existingFreeUsed: whatever narration_free_used currently is for this
+// video_jobs row (always false/absent for a brand-new create). Debits
+// BEFORE attempting generation (same "cheapest possible rejection point"
+// pattern as Kling) and refunds if generation fails after a paid debit —
+// a platform failure should never cost the user Images for nothing, same
+// reasoning as the Kling refund paths. A failed FREE attempt costs
+// nothing and does NOT burn the free slot — narrationFreeUsedAfter only
+// flips to true on an actual successful generation.
+async function resolveAndGenerateNarration({ userId, existingFreeUsed, address, roomTypes, voiceKey }) {
+  if (!voiceKey) {
+    return { requested: false, narrationAudioUrl: null, narrationScript: null, narrationImagesCharged: 0, narrationFreeUsedAfter: existingFreeUsed };
+  }
+
+  const cost = existingFreeUsed ? NARRATION_IMAGE_COST : 0;
+
+  if (cost > 0) {
+    const debitResult = await callDebitCredit(userId, cost, "narration_generation");
+    if (debitResult.status === 402) {
+      return {
+        requested: true,
+        error: debitResult.data?.code === "NO_SUB" ? "no_active_subscription" : "insufficient_credits",
+        required: cost,
+        balance: debitResult.data?.balance,
+      };
+    }
+    if (debitResult.status !== 200) {
+      throw new Error(`Narration debit failed (status ${debitResult.status}): ${JSON.stringify(debitResult.data)}`);
+    }
+  }
+
+  try {
+    const { script, audioUrl } = await generateNarration({ address, roomTypes, voiceKey });
+    return {
+      requested: true,
+      narrationAudioUrl: audioUrl,
+      narrationScript: script,
+      narrationImagesCharged: cost,
+      narrationFreeUsedAfter: true,
+    };
+  } catch (err) {
+    console.error("Narration generation failed (non-fatal to the video itself):", err.message);
+    // Refund a paid attempt that failed — genuine platform/API failure,
+    // not a user decision. A failed FREE attempt has nothing to refund.
+    if (cost > 0) {
+      try {
+        await callDebitCredit(userId, cost, "narration_generation_refund_failed", true);
+      } catch (refundErr) {
+        console.error("CRITICAL: Narration debit refund failed — manual correction needed.", { userId, cost, refundErr: refundErr.message });
+      }
+    }
+    return {
+      requested: true,
+      narrationAudioUrl: null,
+      narrationScript: null,
+      narrationImagesCharged: 0,
+      narrationFreeUsedAfter: existingFreeUsed, // unchanged — failure doesn't burn the free slot
+      generationFailed: true,
+    };
+  }
+}
+
 // ── ACTION: FRAMES ───────────────────────────────────────────────────────
 // Returns ALL images available for a listing's video tour — both staged
 // rooms (from Smart Stage PRO's staging engine) and externally-referenced
@@ -583,7 +874,7 @@ function validateFormatChoiceForAiMotion(frames, formats) {
 //
 // Order of operations matters a lot in this function — see inline comments.
 
-async function createVideoJob({ listingId, projectId, userId, frames, formats, musicStyle }) {
+async function createVideoJob({ listingId, projectId, userId, frames, formats, musicStyle, wantsNarration, voiceKey }) {
   if (!frames || frames.length === 0) throw new Error("No frames provided");
 
   // CHANGE: resolve projectId from the listing record if the caller didn't
@@ -669,6 +960,34 @@ async function createVideoJob({ listingId, projectId, userId, frames, formats, m
     }
   }
 
+  // NEW (audio build) — narration, if requested. Always free on create
+  // (existingFreeUsed is inherently false — this video_jobs row doesn't
+  // exist yet, so it's by definition this video's first narration
+  // attempt). Runs AFTER the Kling debit but BEFORE the job row is
+  // created, matching the "cheapest possible rejection point" pattern —
+  // though narration never actually blocks create (cost is always 0
+  // here), a failure just means no narration audio, not a failed video.
+  const listingForNarration = wantsNarration
+    ? (await supabase("GET", "listings", null, `?id=eq.${listingId}&select=address`)).data?.[0]
+    : null;
+  const narrationResult = wantsNarration
+    ? await resolveAndGenerateNarration({
+        userId,
+        existingFreeUsed: false,
+        address: listingForNarration?.address || null,
+        roomTypes: frames.map((f) => f.roomType).filter(Boolean),
+        voiceKey,
+      })
+    : { requested: false, narrationAudioUrl: null, narrationScript: null, narrationImagesCharged: 0, narrationFreeUsedAfter: false };
+
+  if (narrationResult.error) {
+    return {
+      error: narrationResult.error,
+      required: narrationResult.required,
+      balance: narrationResult.balance,
+    };
+  }
+
   // From here on, if Images were charged above, they are SPENT — see the
   // header comment and Image Economy v2 §3: generation-time Kling charges
   // are never refundable for user-side reasons (didn't like the result,
@@ -683,15 +1002,19 @@ async function createVideoJob({ listingId, projectId, userId, frames, formats, m
     // future regenerations), kept separate from credits_used (the
     // still-deferred download-time flat fee) so the two never get confused.
     const jobResult = await supabase("POST", "video_jobs", {
-      listing_id:           listingId,
-      user_id:              userId,
-      project_id:           projectId,
-      status:               "queued",
+      listing_id:              listingId,
+      user_id:                 userId,
+      project_id:              projectId,
+      status:                  "queued",
       formats,
-      music_style:          musicStyle || null,
-      generation_count:     1,
-      kling_images_charged: klingCharge.imageCost,
-      credits_used:         calculateDownloadCost(frames), // deferred — see downloadVideoJob
+      music_style:             musicStyle || null,
+      generation_count:        1,
+      kling_images_charged:    klingCharge.imageCost,
+      credits_used:            calculateDownloadCost(frames), // deferred — see downloadVideoJob
+      narration_audio_url:     narrationResult.narrationAudioUrl,
+      narration_script:        narrationResult.narrationScript,
+      narration_free_used:     narrationResult.narrationFreeUsedAfter,
+      narration_images_charged: narrationResult.narrationImagesCharged,
     });
 
     // CHANGE: log the real Supabase response when this fails, instead of
@@ -758,6 +1081,11 @@ async function createVideoJob({ listingId, projectId, userId, frames, formats, m
       projectId,
       formats,
       musicStyle: musicStyle || "default",
+      // NEW (audio build) — Railway downloads this and mixes it in via
+      // assembleVideo's optional narrationUrl param. null if narration
+      // wasn't requested, or requested but failed (non-fatal to the video
+      // itself — see resolveAndGenerateNarration's header comment).
+      narrationAudioUrl: narrationResult.narrationAudioUrl || null,
       frames: frameRows.map(f => ({
         imageUrl:          f.image_url,
         beforeUrl:         f.before_url,
@@ -808,6 +1136,10 @@ async function createVideoJob({ listingId, projectId, userId, frames, formats, m
       // pushes used past limit.
       videoQuotaUsed:  quotaBefore.used + 1,
       videoQuotaLimit: quotaBefore.limit,
+      narrationRequested: narrationResult.requested,
+      narrationGenerated: !!narrationResult.narrationAudioUrl,
+      narrationImagesCharged: narrationResult.narrationImagesCharged,
+      narrationFailed: !!narrationResult.generationFailed,
     };
 
   } catch (err) {
@@ -878,7 +1210,7 @@ async function createVideoJob({ listingId, projectId, userId, frames, formats, m
 // times as their Kling pool + Image balance allow without using up
 // another one of their plan's monthly video-creation slots.
 
-async function regenerateVideoJob({ jobId, userId, frames, formats, musicStyle }) {
+async function regenerateVideoJob({ jobId, userId, frames, formats, musicStyle, wantsNarration, voiceKey }) {
   if (!jobId || !userId) throw new Error("Missing jobId or userId");
   if (!frames || frames.length === 0) throw new Error("No frames provided");
 
@@ -889,7 +1221,7 @@ async function regenerateVideoJob({ jobId, userId, frames, formats, musicStyle }
   }
 
   const existingRes = await supabase("GET", "video_jobs", null,
-    `?id=eq.${jobId}&select=id,user_id,generation_count,kling_images_charged`
+    `?id=eq.${jobId}&select=id,user_id,listing_id,generation_count,kling_images_charged,narration_free_used`
   );
   const existing = existingRes.data?.[0];
   if (!existing) return { error: "job_not_found" };
@@ -921,6 +1253,39 @@ async function regenerateVideoJob({ jobId, userId, frames, formats, musicStyle }
     }
   }
 
+  // NEW (audio build) — narration on regenerate. Cost depends on whether
+  // THIS video has ever generated narration before (existing.narration_free_used),
+  // not on generation_count — a video that never used its free narration
+  // on create can still get it free on the first regenerate that requests
+  // it. Note: narration is NOT carried over automatically between
+  // generations — if voiceKey isn't sent on this call, this render ships
+  // without narration even if a prior generation had one, same as
+  // formats/musicStyle already work (fully re-specified every call, never
+  // cached). Worth flagging to Sam as a real UX/cost tradeoff: keeping the
+  // same narration across an unrelated Kling-only fix currently means
+  // resending the same voiceKey, which bills again once the free slot is
+  // used — no "keep previous narration for free" path exists yet.
+  const listingForNarration = wantsNarration
+    ? (await supabase("GET", "listings", null, `?id=eq.${existing.listing_id}&select=address`)).data?.[0]
+    : null;
+  const narrationResult = wantsNarration
+    ? await resolveAndGenerateNarration({
+        userId,
+        existingFreeUsed: !!existing.narration_free_used,
+        address: listingForNarration?.address || null,
+        roomTypes: frames.map((f) => f.roomType).filter(Boolean),
+        voiceKey,
+      })
+    : { requested: false, narrationAudioUrl: null, narrationScript: null, narrationImagesCharged: 0, narrationFreeUsedAfter: !!existing.narration_free_used };
+
+  if (narrationResult.error) {
+    return {
+      error: narrationResult.error,
+      required: narrationResult.required,
+      balance: narrationResult.balance,
+    };
+  }
+
   try {
     // Update the job row: bump generation_count, accumulate the running
     // Kling spend total, refresh the deferred download-time quote (frame
@@ -932,6 +1297,10 @@ async function regenerateVideoJob({ jobId, userId, frames, formats, musicStyle }
       generation_count:     nextGenerationCount,
       kling_images_charged: (existing.kling_images_charged || 0) + klingCharge.imageCost,
       credits_used:         calculateDownloadCost(frames),
+      narration_audio_url:      narrationResult.narrationAudioUrl,
+      narration_script:         narrationResult.narrationScript,
+      narration_free_used:      narrationResult.narrationFreeUsedAfter,
+      narration_images_charged: narrationResult.narrationImagesCharged,
       // credits_charged_at and video_quota_charged_at are deliberately NOT
       // touched here — if this job was already downloaded once before
       // (re-edited after the fact), this regeneration does not re-charge
@@ -977,6 +1346,7 @@ async function regenerateVideoJob({ jobId, userId, frames, formats, musicStyle }
       jobId,
       formats,
       musicStyle: musicStyle || "default",
+      narrationAudioUrl: narrationResult.narrationAudioUrl || null,
       frames: frameRows.map(f => ({
         imageUrl:          f.image_url,
         beforeUrl:         f.before_url,
@@ -1003,6 +1373,10 @@ async function regenerateVideoJob({ jobId, userId, frames, formats, musicStyle }
       generationCount: nextGenerationCount,
       klingImagesCharged: klingCharge.imageCost,
       klingFramesFromPool: klingCharge.framesFromPool,
+      narrationRequested: narrationResult.requested,
+      narrationGenerated: !!narrationResult.narrationAudioUrl,
+      narrationImagesCharged: narrationResult.narrationImagesCharged,
+      narrationFailed: !!narrationResult.generationFailed,
     };
 
   } catch (err) {
@@ -1213,22 +1587,28 @@ async function downloadVideoJob({ jobId, userId }) {
 // applies identically to create and regenerate. Only the subscriber's
 // current pool balance determines the price.
 
-async function quoteGeneration({ jobId, userId, frames }) {
+async function quoteGeneration({ jobId, userId, frames, wantsNarration, voiceKey }) {
   if (!frames || frames.length === 0) throw new Error("No frames provided");
 
   let generationCount = 1;
+  let narrationFreeUsed = false;
   if (jobId) {
     const existingRes = await supabase("GET", "video_jobs", null,
-      `?id=eq.${jobId}&select=user_id,generation_count`
+      `?id=eq.${jobId}&select=user_id,generation_count,narration_free_used`
     );
     const existing = existingRes.data?.[0];
     if (!existing) return { error: "job_not_found" };
     if (existing.user_id !== userId) return { error: "forbidden" };
     generationCount = (existing.generation_count || 1) + 1;
+    narrationFreeUsed = !!existing.narration_free_used;
   }
 
   const klingCharge = await calculateKlingCharge(frames, userId);
   const klingFrameCount = frames.filter(f => f.useAiMotion).length;
+
+  // Narration quote — side-effect-free, mirrors resolveAndGenerateNarration's
+  // cost math without actually calling Claude/ElevenLabs or debiting.
+  const narrationImageCost = wantsNarration ? (narrationFreeUsed ? NARRATION_IMAGE_COST : 0) : 0;
 
   // Read current balance directly from the ledger — deliberately NOT
   // going through debit-credit.js for this, since that file's only
@@ -1239,6 +1619,7 @@ async function quoteGeneration({ jobId, userId, frames }) {
     `?user_id=eq.${userId}&order=created_at.desc&limit=1&select=balance_after`
   );
   const currentBalance = ledgerRes.data?.[0]?.balance_after ?? null;
+  const totalCost = klingCharge.imageCost + narrationImageCost;
 
   return {
     generationCount,
@@ -1249,9 +1630,13 @@ async function quoteGeneration({ jobId, userId, frames }) {
     klingImageCost:      klingCharge.imageCost,
     poolRemainingBefore: klingCharge.poolRemainingBefore,
     poolLimit:           klingCharge.poolLimit,
+    narrationRequested:   !!wantsNarration,
+    narrationFreeUsed:    narrationFreeUsed,
+    narrationImageCost:   narrationImageCost,
+    totalImageCost:       totalCost,
     currentBalance,
-    balanceAfter: currentBalance !== null ? currentBalance - klingCharge.imageCost : null,
-    wouldExceedBalance: currentBalance !== null ? klingCharge.imageCost > currentBalance : null,
+    balanceAfter: currentBalance !== null ? currentBalance - totalCost : null,
+    wouldExceedBalance: currentBalance !== null ? totalCost > currentBalance : null,
   };
 }
 
@@ -1352,11 +1737,11 @@ exports.handler = async (event) => {
 
     if (action === "quote") {
       const body = JSON.parse(event.body || "{}");
-      const { jobId, userId, frames } = body;
+      const { jobId, userId, frames, wantsNarration, voiceKey } = body;
       if (!userId || !frames) {
         return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing required fields" }) };
       }
-      const result = await quoteGeneration({ jobId, userId, frames });
+      const result = await quoteGeneration({ jobId, userId, frames, wantsNarration: !!wantsNarration, voiceKey });
       const QUOTE_STATUS_CODES = { job_not_found: 404, forbidden: 403 };
       const statusCode = result.error ? (QUOTE_STATUS_CODES[result.error] || 500) : 200;
       return { statusCode, headers, body: JSON.stringify(result) };
@@ -1364,7 +1749,7 @@ exports.handler = async (event) => {
 
     if (action === "create") {
       const body = JSON.parse(event.body || "{}");
-      const { listingId, projectId, userId, frames, formats, musicStyle } = body;
+      const { listingId, projectId, userId, frames, formats, musicStyle, wantsNarration, voiceKey } = body;
       if (!listingId || !userId || !frames) {
         return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing required fields" }) };
       }
@@ -1372,6 +1757,8 @@ exports.handler = async (event) => {
         listingId, projectId, userId, frames,
         formats: formats || ["16x9", "9x16"],
         musicStyle,
+        wantsNarration: !!wantsNarration,
+        voiceKey,
       });
       // CHANGE (Image Economy v2): create now CAN fail on payment — if
       // there are more than 3 Kling frames, Images are debited here before
@@ -1388,7 +1775,7 @@ exports.handler = async (event) => {
 
     if (action === "regenerate") {
       const body = JSON.parse(event.body || "{}");
-      const { jobId, userId, frames, formats, musicStyle } = body;
+      const { jobId, userId, frames, formats, musicStyle, wantsNarration, voiceKey } = body;
       if (!jobId || !userId || !frames) {
         return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing required fields" }) };
       }
@@ -1396,6 +1783,8 @@ exports.handler = async (event) => {
         jobId, userId, frames,
         formats: formats || ["16x9", "9x16"],
         musicStyle,
+        wantsNarration: !!wantsNarration,
+        voiceKey,
       });
       const REGENERATE_STATUS_CODES = {
         job_not_found:           404,

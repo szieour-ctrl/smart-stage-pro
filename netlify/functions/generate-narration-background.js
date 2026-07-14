@@ -72,8 +72,8 @@ function supabase(method, table, body, queryParams = "") {
 // this kind of logic (the only existing shared file, lib/virtually-
 // staged-badge.js, is a client-side canvas helper, not applicable here).
 const NARRATION_VOICE_LIBRARY = {
-  "voice_male_1":   { label: "Male — Warm & Professional",   voiceId: "REPLACE_WITH_REAL_ELEVENLABS_VOICE_ID_1" },
-  "voice_female_1": { label: "Female — Warm & Professional", voiceId: "REPLACE_WITH_REAL_ELEVENLABS_VOICE_ID_2" },
+  "voice_male_1":   { label: "Male — Audiobook Narrator",     voiceId: "pVYHFs8oaIDPWJxvmXWW" },
+  "voice_female_1": { label: "Female — Adeline, Conversational", voiceId: "5l5f8iK3YPeGga21rQIX" },
 };
 
 const NARRATION_MAX_WORDS = 225;

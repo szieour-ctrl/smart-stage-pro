@@ -267,7 +267,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
     </div>
     <div class="action-row">
       <button class="btn btn-ghost" onclick="goToStep(2)">Back</button>
-      <button class="btn btn-primary" onclick="goToStep(4)">Review Cost</button>
+      <button class="btn btn-primary" onclick="goToConfirmStep()">Review Cost</button>
     </div>
   </div>
 
@@ -828,6 +828,21 @@ function goToStep(n) {
   if (n === 4) { document.getElementById("stepConfirm").classList.remove("hidden"); renderConfirmStep(); }
 }
 
+// NEW (audio build) — narration now generates in the background as soon
+// as a voice is picked in Step 3 (see updateAudioSelection). If the user
+// clicks "Review Cost" before that finishes, the Confirm-step quote would
+// come back showing "no narration" even though one is still in flight —
+// technically not wrong (nothing's been charged), but confusing. This
+// just blocks the jump with a clear message rather than silently quoting
+// against a still-pending selection.
+function goToConfirmStep() {
+  if (window._narrationGenerating) {
+    alert("Narration is still generating — give it a few more seconds, or switch the narration dropdown back to \"No narration\" to proceed without it.");
+    return;
+  }
+  goToStep(4);
+}
+
 function eligiblePresetsFor(frame) {
   const isExterior = frame.isExterior; // explicit flag from Step 1 — never inferred from the room label
   return Object.entries(KLING_PRESETS).filter(([key, p]) => {
@@ -1100,14 +1115,91 @@ function updateAudioSelection() {
   const musicSelect = document.getElementById("musicSelect");
   const narrationSelect = document.getElementById("narrationSelect");
   window._musicStyle = musicSelect ? musicSelect.value : "default";
-  window._voiceKey = narrationSelect ? narrationSelect.value : "";
+  const newVoiceKey = narrationSelect ? narrationSelect.value : "";
+
+  // CHANGE (July 2026 postmortem): narration generation moved OUT of the
+  // Generate/Regenerate click entirely. Real logs showed the old inline
+  // version (Claude + ElevenLabs + Cloudinary, all inside action=create)
+  // taking 37+ seconds — Netlify hard-caps synchronous functions at 26
+  // seconds, no exceptions, no matter what netlify.toml says. So this now
+  // fires the moment a voice is picked, right here in Step 3, using the
+  // same background-function + polling pattern already proven for
+  // staging (stage-openai-background.js / check-openai.js) — see
+  // generate-narration-background.js's header comment for the full story.
+  if (newVoiceKey === window._voiceKey) return; // no actual change — don't restart
+  window._voiceKey = newVoiceKey;
+  window._narrationAudioUrl = null;
+  window._narrationScript = null;
+  window._narrationGenerating = false;
 
   const note = document.getElementById("narrationNote");
   if (!note) return;
-  if (!window._voiceKey) {
+
+  if (!newVoiceKey) {
     note.textContent = "";
-  } else {
-    note.textContent = `Narration is billed per video: free the first time on this video, ${NARRATION_IMAGE_COST} Images each time after that — including a fresh script on a re-generate.`;
+    return;
+  }
+
+  window._narrationGenerating = true;
+  note.textContent = "Generating narration\u2026 (usually 15\u201330 seconds)";
+  generateNarrationInBackground(newVoiceKey);
+}
+
+async function generateNarrationInBackground(voiceKey) {
+  const note = document.getElementById("narrationNote");
+  const narrationJobId = "narr_" + Date.now() + "_" + Math.random().toString(36).slice(2);
+  const thisRequestVoiceKey = voiceKey; // captured so a later voice change can't overwrite a stale result
+
+  try {
+    const startRes = await fetch(`/.netlify/functions/generate-narration-background`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        narrationJobId,
+        listingId: REAL_LISTING_ID || null,
+        roomTypes: frames.map(f => f.roomType).filter(Boolean),
+        voiceKey,
+      }),
+    });
+    if (!startRes.ok && startRes.status !== 202) {
+      throw new Error("Couldn't start narration generation.");
+    }
+
+    // Poll every 1.5s, same cadence as the existing staging poll
+    // (check-openai) — up to 90 seconds, comfortably above the typical
+    // 15-30s this actually takes.
+    const maxPolls = 60;
+    for (let poll = 0; poll < maxPolls; poll++) {
+      await new Promise(r => setTimeout(r, 1500));
+      // If the user picked a different voice while this was in flight,
+      // abandon this result — updateAudioSelection already started a new
+      // one for the current voiceKey.
+      if (window._voiceKey !== thisRequestVoiceKey) return;
+
+      const checkRes = await fetch(`/.netlify/functions/check-narration?jobId=${encodeURIComponent(narrationJobId)}`);
+      if (!checkRes.ok) continue;
+      const result = await checkRes.json();
+
+      if (result.status === "done") {
+        window._narrationAudioUrl = result.audioUrl;
+        window._narrationScript = result.script;
+        window._narrationGenerating = false;
+        if (note) note.textContent = `Narration ready. Billed per video: free the first time on this video, ${NARRATION_IMAGE_COST} Images each time after that.`;
+        return;
+      }
+      if (result.status === "error") {
+        throw new Error(result.error || "Narration generation failed.");
+      }
+      // status === "pending" — keep polling
+    }
+    throw new Error("Narration generation timed out — try again, or proceed without narration.");
+
+  } catch (err) {
+    if (window._voiceKey !== thisRequestVoiceKey) return; // superseded — don't show a stale error
+    window._narrationGenerating = false;
+    window._narrationAudioUrl = null;
+    window._narrationScript = null;
+    if (note) note.textContent = `Couldn't generate narration: ${err.message} You can still proceed without it.`;
   }
 }
 
@@ -1148,8 +1240,7 @@ async function renderConfirmStep() {
         jobId: window._currentJobId || undefined,
         userId: REAL_USER_ID,
         frames: realFrames,
-        wantsNarration: !!window._voiceKey,
-        voiceKey: window._voiceKey || undefined,
+        narrationAudioUrl: window._narrationAudioUrl || undefined,
       }),
     });
     quote = await res.json();
@@ -1251,8 +1342,8 @@ async function handleGenerate() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(isIteration
-        ? { jobId: window._currentJobId, userId: REAL_USER_ID, frames: realFrames, formats: window._selectedFormats || ["16x9"], musicStyle: window._musicStyle || "default", wantsNarration: !!window._voiceKey, voiceKey: window._voiceKey || undefined }
-        : { listingId: REAL_LISTING_ID, projectId: REAL_PROJECT_ID || undefined, userId: REAL_USER_ID, frames: realFrames, formats: window._selectedFormats || ["16x9"], musicStyle: window._musicStyle || "default", wantsNarration: !!window._voiceKey, voiceKey: window._voiceKey || undefined }
+        ? { jobId: window._currentJobId, userId: REAL_USER_ID, frames: realFrames, formats: window._selectedFormats || ["16x9"], musicStyle: window._musicStyle || "default", narrationAudioUrl: window._narrationAudioUrl || undefined, narrationScript: window._narrationScript || undefined }
+        : { listingId: REAL_LISTING_ID, projectId: REAL_PROJECT_ID || undefined, userId: REAL_USER_ID, frames: realFrames, formats: window._selectedFormats || ["16x9"], musicStyle: window._musicStyle || "default", narrationAudioUrl: window._narrationAudioUrl || undefined, narrationScript: window._narrationScript || undefined }
       ),
     });
     const data = await res.json();
@@ -1470,6 +1561,9 @@ function resetDemo() {
   window._currentJobId = null;
   window._musicStyle = null;
   window._voiceKey = null;
+  window._narrationAudioUrl = null;
+  window._narrationScript = null;
+  window._narrationGenerating = false;
   generationCount = 1;
   // NEW (audio build) — clear the dropdowns' DOM so renderOrderStep's
   // childElementCount guard repopulates them fresh (and re-defaults

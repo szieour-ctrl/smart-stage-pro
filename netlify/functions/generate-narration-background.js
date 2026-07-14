@@ -76,20 +76,52 @@ const NARRATION_VOICE_LIBRARY = {
   "voice_female_1": { label: "Female — Adeline, Conversational", voiceId: "5l5f8iK3YPeGga21rQIX" },
 };
 
-const NARRATION_MAX_WORDS = 225;
+// CHANGE (July 14, 2026 — real test failure): NARRATION_MAX_WORDS was a
+// FIXED cap regardless of how long the actual video was. Sam's videos are
+// typically 4-6 rooms × ~4.5s each ≈ 20-30 seconds — nowhere near the
+// ~90 seconds a 225-word script takes to read. The result: narration was
+// still talking when the video's own "-shortest" flag (assemble.js)
+// hard-cut the whole audio track at the video's visual end, chopping off
+// mid-sentence. Fixed properly now: script length is DERIVED from the
+// real estimated video duration for THIS job, not a fixed number.
+//
+// Mirrors DEFAULT_DURATIONS from motionPresets.js (Railway) — duplicated
+// here for the same reason as everything else in this file (no shared
+// server-side lib in this repo). If Sam ever changes the real per-room
+// defaults there, this estimate will drift out of sync — worth keeping
+// in mind, though a rough estimate here is fine since this only sizes
+// the script target, not the actual video render.
+const ROOM_DURATION_ESTIMATES = {
+  exterior: 5.5, living: 5.5, kitchen: 4.5, dining: 4.0,
+  bedroom: 4.5, bathroom: 3.0, flex: 4.0, default: 4.5,
+};
+const NARRATION_END_BUFFER_SECONDS = 2; // narration should finish this long before the video ends
+const SPEAKING_RATE_WORDS_PER_MINUTE = 150;
+const MIN_NARRATION_WORDS = 25; // floor — even a single short room shouldn't produce a 3-word script
 
-function generateNarrationScript(address, roomTypes, apiKey) {
+function estimateVideoDurationSeconds(roomTypeCodes) {
+  if (!roomTypeCodes || roomTypeCodes.length === 0) return 20; // reasonable fallback guess
+  return roomTypeCodes.reduce((sum, code) => sum + (ROOM_DURATION_ESTIMATES[code] || ROOM_DURATION_ESTIMATES.default), 0);
+}
+
+function wordBudgetForDuration(estimatedVideoSeconds) {
+  const availableSeconds = Math.max(5, estimatedVideoSeconds - NARRATION_END_BUFFER_SECONDS);
+  const words = Math.round((availableSeconds / 60) * SPEAKING_RATE_WORDS_PER_MINUTE);
+  return Math.max(MIN_NARRATION_WORDS, words);
+}
+
+function generateNarrationScript(address, roomLabels, maxWords, apiKey) {
   return new Promise((resolve, reject) => {
-    const roomList = roomTypes.length ? roomTypes.join(", ") : "the property";
+    const roomList = roomLabels.length ? roomLabels.join(", ") : "the property";
     const prompt = `Write a warm, professional real estate video narration script for a listing tour.
 Address: ${address || "this property"}
 Rooms featured, in order: ${roomList}
 
 Requirements:
-- Maximum ${NARRATION_MAX_WORDS} words (hard limit — this will be read aloud in under 90 seconds).
+- Maximum ${maxWords} words (hard limit — this script is timed to this specific video's length; going over means it will be cut off mid-sentence when the video ends).
 - Conversational, inviting tone, third person (never "I" or "my listing").
 - Reference the rooms in the order given, briefly, without inventing specific features you weren't told about (no fabricated square footage, bedroom/bathroom counts, or amenities).
-- End with a simple, natural closing line inviting the viewer to schedule a showing.
+- End with a simple, natural closing line inviting the viewer to schedule a showing — the closing line must fit fully within the word limit, not get cut off.
 - This will be read by ElevenLabs' eleven_v3 model, which supports inline delivery tags like [warmly] or [pause]. Use AT MOST ONE such tag, at the very start of the script, to set a warm tone — do not use tags anywhere else. This is a real estate walkthrough, not a dramatic reading; restraint matters more than expressiveness here.
 - Return ONLY the script text — no headers, no stage directions beyond the one optional opening tag, no markdown.`;
 
@@ -201,15 +233,74 @@ function uploadNarrationToCloudinary(audioBuffer) {
   });
 }
 
+// ── DURABLE AUDIT TRAIL (new — Netlify background-function logs are a
+// known, longstanding platform gap: multiple Netlify support threads
+// describe logs simply not being available for background/scheduled
+// functions, sometimes for days at a time, with no ETA. Rather than
+// depend on ever seeing those logs, every attempt now writes a real row
+// to a new `narration_attempts` Supabase table — the same place Sam
+// already looks at everything else in this app. This is the ONLY
+// reliable way to answer "was I charged for that failed attempt?" after
+// the fact, since ElevenLabs bills the instant generateNarrationAudio
+// succeeds, regardless of what happens afterward (a Cloudinary failure,
+// a dropped connection, anything) — elevenlabs_likely_charged is set to
+// true at exactly that moment, not inferred after the fact. ──────────
+//
+// SCHEMA NOTE — new table, not yet created:
+//   create table narration_attempts (
+//     id uuid primary key default gen_random_uuid(),
+//     narration_job_id text not null,
+//     listing_id uuid,
+//     voice_key text,
+//     stage_reached text not null,        -- see STAGE constants below
+//     elevenlabs_likely_charged boolean not null default false,
+//     script_char_count integer,
+//     error_message text,
+//     created_at timestamptz default now(),
+//     updated_at timestamptz default now()
+//   );
+const STAGE = {
+  STARTED:            "started",
+  SCRIPT_GENERATED:   "script_generated",
+  ELEVENLABS_CHARGED: "elevenlabs_charged",   // audio buffer received — billing already happened, no matter what comes next
+  UPLOADED_COMPLETE:  "uploaded_complete",
+  FAILED:             "failed",
+};
+
+async function logAttempt(rowId, fields) {
+  try {
+    if (!rowId) {
+      const res = await supabase("POST", "narration_attempts", { ...fields, updated_at: new Date().toISOString() });
+      return res.data?.[0]?.id || null;
+    }
+    await supabase("PATCH", "narration_attempts", { ...fields, updated_at: new Date().toISOString() }, `?id=eq.${rowId}`);
+    return rowId;
+  } catch (e) {
+    // Audit logging itself failing should never take down the real
+    // narration attempt — log to console as a last resort and move on.
+    console.error("narration_attempts logging failed (non-fatal):", e.message);
+    return rowId;
+  }
+}
+
 exports.handler = async (event) => {
   const siteID = process.env.SZREG_SITE_ID || process.env.NETLIFY_SITE_ID;
   const token  = process.env.NETLIFY_ACCESS_TOKEN;
   let narrationJobId;
+  let auditRowId = null;
 
   try {
-    const { narrationJobId: jId, listingId, roomTypes, voiceKey } = JSON.parse(event.body);
+    const { narrationJobId: jId, listingId, roomLabels, roomTypeCodes, voiceKey } = JSON.parse(event.body);
     narrationJobId = jId;
     console.log(`Narration job ${narrationJobId} starting — voiceKey=${voiceKey}`);
+
+    auditRowId = await logAttempt(null, {
+      narration_job_id: narrationJobId,
+      listing_id: listingId || null,
+      voice_key: voiceKey || null,
+      stage_reached: STAGE.STARTED,
+      elevenlabs_likely_charged: false,
+    });
 
     if (!siteID) throw new Error("NETLIFY_SITE_ID not configured");
     if (!token)  throw new Error("NETLIFY_ACCESS_TOKEN not configured");
@@ -240,19 +331,43 @@ exports.handler = async (event) => {
       address = listingRes.data?.[0]?.address || null;
     }
 
-    const script = await generateNarrationScript(address, roomTypes || [], anthropicKey);
+    // NEW (July 14, 2026) — size the script to THIS video's actual
+    // estimated length, not a fixed cap. See ROOM_DURATION_ESTIMATES'
+    // header comment for the full reasoning.
+    const estimatedVideoSeconds = estimateVideoDurationSeconds(roomTypeCodes || []);
+    const maxWords = wordBudgetForDuration(estimatedVideoSeconds);
+    console.log(`Narration job ${narrationJobId}: estimated video ${estimatedVideoSeconds.toFixed(1)}s → word budget ${maxWords}`);
+
+    const script = await generateNarrationScript(address, roomLabels || [], maxWords, anthropicKey);
     console.log(`Narration job ${narrationJobId}: script generated (${script.length} chars)`);
+    auditRowId = await logAttempt(auditRowId, {
+      stage_reached: STAGE.SCRIPT_GENERATED,
+      script_char_count: script.length,
+    });
 
     const audioBuffer = await generateNarrationAudio(script, voice.voiceId, elevenLabsKey);
     console.log(`Narration job ${narrationJobId}: audio generated (${Math.round(audioBuffer.length / 1024)}KB)`);
+    // CRITICAL: this is the exact moment ElevenLabs bills, regardless of
+    // whatever happens next. Logged immediately, not deferred until after
+    // the upload step, so a Cloudinary failure right after this point
+    // still leaves an accurate "yes, this one really did cost credits" record.
+    auditRowId = await logAttempt(auditRowId, {
+      stage_reached: STAGE.ELEVENLABS_CHARGED,
+      elevenlabs_likely_charged: true,
+    });
 
     const audioUrl = await uploadNarrationToCloudinary(audioBuffer);
     console.log(`Narration job ${narrationJobId}: uploaded to ${audioUrl}`);
+    auditRowId = await logAttempt(auditRowId, { stage_reached: STAGE.UPLOADED_COMPLETE });
 
     await store.setJSON(narrationJobId, { status: "done", script, audioUrl });
 
   } catch (err) {
     console.error(`Narration job ${narrationJobId} error:`, err.message);
+    await logAttempt(auditRowId, {
+      stage_reached: STAGE.FAILED,
+      error_message: err.message?.slice(0, 500),
+    });
     try {
       const store = getStore({ name: "narration-jobs", siteID, token });
       await store.setJSON(narrationJobId, { status: "error", error: err.message });

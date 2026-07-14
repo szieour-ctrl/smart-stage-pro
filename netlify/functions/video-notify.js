@@ -110,7 +110,7 @@ exports.handler = async (event) => {
   }
 
   try {
-    const { jobId, status, urls, error, klingFrameOutcomes } = JSON.parse(event.body || "{}");
+    const { jobId, status, urls, error, klingFrameOutcomes, narrationScript } = JSON.parse(event.body || "{}");
     if (!jobId || !status) {
       return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing jobId or status" }) };
     }
@@ -118,9 +118,10 @@ exports.handler = async (event) => {
     // Fetch the current job row FIRST — needed both for the idempotency
     // check below and for the refund logic (user_id, kling_images_charged),
     // and now also for the Pabbly delivery email (listing_id, to look up
-    // the property address).
+    // the property address). narration_images_charged added (July 14,
+    // 2026) for the new narration-refund-on-failure case below.
     const jobRes = await supabase("GET", "video_jobs", null,
-      `?id=eq.${jobId}&select=id,user_id,status,kling_images_charged,listing_id`);
+      `?id=eq.${jobId}&select=id,user_id,status,kling_images_charged,narration_images_charged,listing_id`);
     const existingJob = jobRes.data?.[0];
     if (!existingJob) {
       return { statusCode: 404, headers, body: JSON.stringify({ error: `video_jobs row ${jobId} not found` }) };
@@ -144,6 +145,12 @@ exports.handler = async (event) => {
       updateFields.output_16x9_url = urls?.["16x9"] || null;
       updateFields.output_9x16_url = urls?.["9x16"] || null;
       updateFields.completed_at = new Date().toISOString();
+      // NEW (July 14, 2026 — footage-grounded narration rebuild): the
+      // script is generated Railway-side now, during the render — this
+      // is the first point it's ever available to store. null if
+      // narration wasn't requested, or was requested but failed (see the
+      // refund logic below for that second case).
+      updateFields.narration_script = narrationScript || null;
     }
 
     if (status === "failed") {
@@ -214,7 +221,13 @@ exports.handler = async (event) => {
     // ── REFUND LOGIC (bug 2g) — only runs on a genuine status transition ──
     if (!isDuplicateDelivery) {
       if (status === "failed") {
-        const chargedAmount = existingJob.kling_images_charged || 0;
+        // FIX (July 14, 2026): this only ever refunded kling_images_charged
+        // — narration_images_charged (a real, separate upfront charge now
+        // that narration billing moved to Generate-time) was never
+        // included, meaning a fully failed job could leave a narration
+        // charge stranded, unrefunded, forever. Same "no usable video, no
+        // charge is defensible" principle already applied to Kling.
+        const chargedAmount = (existingJob.kling_images_charged || 0) + (existingJob.narration_images_charged || 0);
         if (chargedAmount > 0) {
           const refundResult = await callDebitCredit(
             existingJob.user_id,
@@ -232,6 +245,29 @@ exports.handler = async (event) => {
           } else {
             console.log(`Video job ${jobId}: refunded full ${chargedAmount} Images (generation failed, no usable video produced).`);
           }
+        }
+      }
+
+      // NEW (July 14, 2026) — narration is charged upfront at Generate
+      // time now, before Railway ever runs, but its own generation can
+      // still fail independently while the VIDEO itself succeeds (see
+      // renderPipeline.js's narration try/catch — a narration failure is
+      // deliberately non-fatal to the video). If that happens, the user
+      // paid for narration they never got — refund just that portion,
+      // same "correct the specific unearned charge" principle as the
+      // Kling-fallback refund below, not a full-job refund since the
+      // video itself is genuinely usable.
+      if (status === "complete" && !narrationScript && (existingJob.narration_images_charged || 0) > 0) {
+        const refundResult = await callDebitCredit(
+          existingJob.user_id,
+          existingJob.narration_images_charged,
+          "narration_generation_failed_refund",
+          true
+        );
+        if (refundResult.status !== 200) {
+          console.error(`Video job ${jobId}: narration refund of ${existingJob.narration_images_charged} Images FAILED (status ${refundResult.status}): ${JSON.stringify(refundResult.data)}`);
+        } else {
+          console.log(`Video job ${jobId}: refunded ${existingJob.narration_images_charged} Images (narration was charged but failed to generate; video itself succeeded).`);
         }
       }
 

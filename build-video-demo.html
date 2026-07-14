@@ -375,6 +375,21 @@ const KEN_BURNS_PRESETS = {
 };
 
 const KLING_PRESETS = {
+  // NEW (July 14, 2026) — this is the FULL "hero shot" Sam described: a
+  // real, working backend capability (the vacant→staged Kling morph,
+  // triggered automatically whenever isBeforeAfter is true, PLUS the
+  // Ken Burns parallax continuation) that had no single, findable way to
+  // turn on — it required knowing to check "before/after pair," THEN
+  // separately knowing the addContinuationMotion checkbox existed and
+  // what it did. Deliberately listed FIRST (object key order = dropdown
+  // order) and named for what it does, not how it's built. Selecting
+  // this ONE option does all three things automatically — see
+  // buildRealFrame() for where "hero_transformation" gets translated
+  // into the real underlying preset (cinematic_push) plus the forced
+  // continuation flag. Only eligible when a real pair exists — same
+  // "pair_required" gate already used for the other pair-only presets.
+  hero_transformation: { label: "Hero Transformation", desc: "The full before/after treatment: the vacant room holds, then transforms into the staged version as the camera pushes in, finishing with a soft parallax move. Requires a before/after pair.", eligibility: "pair_required" },
+
   orbit_arc: { label: "Orbit / Arc", desc: "Slow cinematic orbit around a central feature — a kitchen island, dining table, or pool.", eligibility: "single_or_pair" },
   rack_focus: { label: "Rack Focus", desc: "Foreground detail (hardware, a vignette) racks into sharp focus on the room behind it.", eligibility: "single_or_pair" },
   fireplace_flicker: { label: "Fireplace Flicker", desc: "Locked-off shot with the fireplace flame flickering naturally — real motion, not a still.", eligibility: "single_or_pair" },
@@ -497,13 +512,25 @@ const ROOM_TYPE_TO_BACKEND = {
 function buildRealFrame(f) {
   const roomType = f.isExterior ? "exterior" : (ROOM_TYPE_TO_BACKEND[f.room] || "default");
   const useAiMotion = f.motion === "kling";
+  const isHero = useAiMotion && f.preset === "hero_transformation";
+  // NEW (July 14, 2026) — "Hero Transformation" is a frontend-only
+  // convenience preset, never sent to the backend under that name. It
+  // stays "hero_transformation" everywhere in the UI (dropdown, order
+  // step, confirm step all display it correctly via KLING_PRESETS'
+  // label), but gets translated HERE, at the one point the payload
+  // actually leaves the browser, into a real backend preset
+  // (cinematic_push — a confident push-in that reads well during the
+  // vacant→staged morph) plus the forced continuation flag. No backend
+  // changes needed — klingMotion.js only ever sees a preset name it
+  // already recognizes.
+  const resolvedPreset = isHero ? "cinematic_push" : f.preset;
   return {
     imageUrl:      f.realUrl || f.dataUrl, // realUrl is the uploaded/Cloudinary URL once available — see uploadAsIsPhoto()
     beforeUrl:     f.isBeforeAfter ? f.beforeUrl : undefined,
     isBeforeAfter: !!f.isBeforeAfter,
     useAiMotion,
     roomType,
-    motionPreset:  useAiMotion ? f.preset : (f.kenBurnsPreset || "auto"),
+    motionPreset:  useAiMotion ? resolvedPreset : (f.kenBurnsPreset || "auto"),
     isOpenPlan:    f.room === "Open Plan",
     // durationSeconds intentionally omitted — motionPresets.js's
     // resolveDuration() already has real per-roomType defaults; there is
@@ -515,7 +542,10 @@ function buildRealFrame(f) {
     // never actually forwarded them from the frame's own UI state, so the
     // feature was unreachable end-to-end despite working correctly at
     // every other layer. Only meaningful when useAiMotion is true.
-    addContinuationMotion:       useAiMotion ? !!f.addContinuationMotion : false,
+    // isHero forces this on regardless of the (now-hidden, for this
+    // preset) manual checkbox — Hero Transformation always includes the
+    // parallax finish, that's the whole point of the name.
+    addContinuationMotion:       useAiMotion ? (isHero || !!f.addContinuationMotion) : false,
     continuationPreset:          useAiMotion ? (f.continuationPreset || undefined) : undefined,
     continuationDurationSeconds: useAiMotion ? (f.continuationDurationSeconds || undefined) : undefined,
     // NEW — the vacant-holds-then-wipes-to-staged Ken Burns reveal is now
@@ -931,14 +961,14 @@ function renderMotionStep() {
               ${selectedKlingPreset ? `<button class="preview-btn" onclick="openMotionPreview('${f.preset}', 'kling')">&#9654; Preview</button>` : ""}
             </div>
             ${selectedKlingPreset ? `<div class="preset-desc">${selectedKlingPreset.desc}</div>` : `<div class="preset-desc">Pick a camera movement to see what it does.</div>`}
-            ${selectedKlingPreset ? `
+            ${f.preset === 'hero_transformation' ? `
+              <div class="preset-desc" style="font-style:italic;">Includes the finishing move automatically \u2014 nothing else to choose.</div>
+            ` : (selectedKlingPreset ? `
               <label style="display:flex;align-items:center;gap:6px;font-size:0.76rem;color:var(--muted);margin-top:8px;cursor:pointer;">
                 <input type="checkbox" ${f.addContinuationMotion ? "checked" : ""} onchange="toggleContinuationMotion(${f.id}, this.checked)" style="accent-color:var(--gold);">
-                ${f.isBeforeAfter
-                  ? "Finish with a Ken Burns parallax beat after the vacant\u2192staged morph settles (no extra Kling cost)"
-                  : "Add a Ken Burns parallax beat after this motion settles (no extra Kling cost)"}
+                Add a soft finishing move at the end
               </label>
-            ` : ""}
+            ` : "")}
           ` : `<div class="preset-disabled-note">No AI Motion presets available for this room yet — check "before/after pair" above if you have a vacant + staged set, or use Ken Burns instead.</div>`
         ) : ""}
       </div>

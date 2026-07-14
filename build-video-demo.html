@@ -513,17 +513,20 @@ function buildRealFrame(f) {
   const roomType = f.isExterior ? "exterior" : (ROOM_TYPE_TO_BACKEND[f.room] || "default");
   const useAiMotion = f.motion === "kling";
   const isHero = useAiMotion && f.preset === "hero_transformation";
-  // NEW (July 14, 2026) — "Hero Transformation" is a frontend-only
-  // convenience preset, never sent to the backend under that name. It
-  // stays "hero_transformation" everywhere in the UI (dropdown, order
-  // step, confirm step all display it correctly via KLING_PRESETS'
-  // label), but gets translated HERE, at the one point the payload
-  // actually leaves the browser, into a real backend preset
-  // (cinematic_push — a confident push-in that reads well during the
-  // vacant→staged morph) plus the forced continuation flag. No backend
-  // changes needed — klingMotion.js only ever sees a preset name it
-  // already recognizes.
-  const resolvedPreset = isHero ? "cinematic_push" : f.preset;
+  // CHANGE (July 14, 2026 — corrected after Sam's real-world testing):
+  // originally mapped Hero Transformation to the "cinematic_push" NAMED
+  // preset. Checked klingMotion.js directly — that was actively wrong,
+  // not just a guess that missed: cinematic_push's actual prompt text
+  // says "all visible furniture, fixtures, walls, and windows remain
+  // fixed and unchanged throughout the movement" — the opposite of a
+  // vacant→staged morph. The CORRECT behavior is to send NO preset at
+  // all: buildPrompt() in klingMotion.js already falls through, when
+  // klingMotionPreset is unset and a real pair exists, to a generic
+  // prompt written for exactly this ("...as furniture and decor
+  // gradually appear, room becomes fully furnished and staged..."). That
+  // built-in fallback IS the real morph reveal — no named preset needed
+  // or wanted here.
+  const resolvedPreset = isHero ? null : f.preset;
   return {
     imageUrl:      f.realUrl || f.dataUrl, // realUrl is the uploaded/Cloudinary URL once available — see uploadAsIsPhoto()
     beforeUrl:     f.isBeforeAfter ? f.beforeUrl : undefined,

@@ -926,11 +926,27 @@ function renderMotionStep() {
           <div><span class="frame-order-num">${i+1}</span><span class="frame-name">${displayRoomName(f)}</span></div>
           <span class="frame-tag" style="text-transform:uppercase;letter-spacing:0.04em;font-size:0.66rem;">${f.isExterior ? "Exterior" : "Interior"}</span>
         </div>
-        <label style="display:flex;align-items:center;gap:6px;font-size:0.76rem;color:var(--muted);margin-bottom:8px;cursor:pointer;">
-          <input type="checkbox" ${f.isBeforeAfter ? "checked" : ""} onchange="toggleBeforeAfter(${f.id}, this.checked)" style="accent-color:var(--gold);">
-          I have a before/after pair for this room (vacant + staged)
-        </label>
-        ${f.isBeforeAfter ? `<div class="before-after-chip">&#10003; Known pair — eligible for hero transformation presets</div>` : ""}
+        <!--
+          CHANGE (July 14, 2026) — replaced the checkbox entirely. It was
+          showing an interactive control AND a green "known pair" badge
+          for the exact same fact, right next to each other — asking the
+          user to actively confirm something we already knew for certain
+          from real gallery data. Per the actual logic: it DOES have a
+          real effect (unchecking disables Kling's pair presets and the
+          reveal option), so per that same logic it should never have
+          been auto-decided FOR the user in the first place — but making
+          everyone confirm a known fact is worse than just stating it.
+          Resolution: state it as pure information for the normal case
+          (the badge, unchanged), and demote the actual decision to a
+          small override link that only the rare "this pairing is wrong"
+          case will ever need to notice or click.
+        -->
+        ${f.beforeUrl ? (
+          f.isBeforeAfter
+            ? `<div class="before-after-chip">&#10003; Known pair \u2014 eligible for hero transformation presets</div>
+               <div style="font-size:0.7rem;margin-top:4px;"><a href="javascript:void(0)" onclick="toggleBeforeAfter(${f.id}, false)" style="color:var(--muted);">Not a real match? Use single image only</a></div>`
+            : `<div class="preset-desc" style="margin-bottom:0;">Using single image only \u2014 <a href="javascript:void(0)" onclick="toggleBeforeAfter(${f.id}, true)" style="color:var(--gold);">actually, use the before/after pair</a></div>`
+        ) : ""}
         <div class="motion-toggle">
           <button class="motion-btn kenburns ${f.motion==='kenburns'?'active kenburns':''}" onclick="setMotion(${f.id}, 'kenburns')">Ken Burns</button>
           <button class="motion-btn kling ${f.motion==='kling'?'active kling':''}" onclick="setMotion(${f.id}, 'kling')">AI Motion (Kling)</button>
@@ -1026,6 +1042,18 @@ function setMotion(id, motion) {
 
 function setPreset(id, preset) {
   const f = frames.find(x => x.id === id);
+  // NEW (July 14, 2026) — defensive safety net, not a normally-reachable
+  // path: eligiblePresetsFor() already excludes pair_required presets
+  // (Hero Transformation included) from the dropdown entirely whenever
+  // isBeforeAfter is false, so this can't happen through normal use. If
+  // it ever does (a future state-management bug, not a user action),
+  // fail clearly instead of silently accepting a preset that has no
+  // before image to actually work from.
+  if (preset && KLING_PRESETS[preset]?.eligibility === "pair_required" && !f.isBeforeAfter) {
+    alert("This movement needs a before/after pair, and this room doesn't have one available. Choose a different movement, or use Ken Burns instead.");
+    renderMotionStep();
+    return;
+  }
   f.preset = preset || null;
   renderMotionStep();
 }

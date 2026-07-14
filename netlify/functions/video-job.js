@@ -1526,7 +1526,7 @@ async function getJobStatus(jobId) {
   // explicit call, since there's no separate "free draft" to protect
   // here the way there is for staged images.
   const r = await supabase("GET", "video_jobs", null,
-    `?id=eq.${jobId}&select=id,status,thumbnail_url,output_16x9_url,output_9x16_url,credits_used,credits_charged_at,generation_count,kling_images_charged,error_message,created_at,completed_at`
+    `?id=eq.${jobId}&select=id,status,thumbnail_url,output_16x9_url,output_9x16_url,credits_used,credits_charged_at,generation_count,kling_images_charged,narration_script,error_message,created_at,completed_at`
   );
   return r.data?.[0] || null;
 }

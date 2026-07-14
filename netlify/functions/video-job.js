@@ -822,7 +822,19 @@ async function createVideoJob({ listingId, projectId, userId, frames, formats, m
       is_before_after:  !!f.isBeforeAfter,
       use_ai_motion:    !!f.useAiMotion,
       room_type:        f.roomType || "default",
-      motion_preset:    f.motionPreset || "auto",
+      // FIX (July 14, 2026 — Hero Transformation correction): was
+      // "f.motionPreset || \"auto\"" unconditionally — collapsing a
+      // deliberate null (Hero Transformation's "let Kling's own generic
+      // transformation prompt handle it" signal) into the literal string
+      // "auto". "auto" has real meaning for Ken Burns (pick a preset by
+      // room type) but none for Kling — klingMotion.js has no "auto"
+      // entry in KLING_MOTION_TEMPLATES, so it would still reach the
+      // correct fallback prompt, just after a spurious "Unknown
+      // klingMotionPreset" warning. Now only defaults to "auto" for Ken
+      // Burns frames, where that default is actually meaningful; a Kling
+      // frame with no preset stays null, reaching the intended fallback
+      // cleanly.
+      motion_preset:    f.motionPreset || (f.useAiMotion ? null : "auto"),
       duration_seconds: f.durationSeconds || 4.5,
       sequence_order:   i,
       // NEW (bug 2g — refund logic) — records whether THIS specific frame
@@ -842,6 +854,11 @@ async function createVideoJob({ listingId, projectId, userId, frames, formats, m
       // NEW (July 9, 2026) — gates room_reveal to open-concept rooms only.
       // See is_open_plan_migration.sql for the full reasoning.
       is_open_plan:                  !!f.isOpenPlan,
+      // NEW (found during before/after-pair conversation) — separate,
+      // explicit opt-in for the vacant-holds-then-wipes-to-staged Ken
+      // Burns reveal. Previously this fired automatically off
+      // is_before_after alone, with no way for the user to decline it.
+      use_reveal_effect:             !!f.useRevealEffect,
     }));
 
     await supabase("POST", "video_job_frames", frameRows);
@@ -894,6 +911,7 @@ async function createVideoJob({ listingId, projectId, userId, frames, formats, m
         // the flag would be silently true at the Netlify layer and
         // silently undefined by the time Railway sees it.
         isOpenPlan:                  f.is_open_plan,
+        useRevealEffect:              f.use_reveal_effect,
       })),
     });
 
@@ -1112,7 +1130,19 @@ async function regenerateVideoJob({ jobId, userId, frames, formats, musicStyle, 
       is_before_after:  !!f.isBeforeAfter,
       use_ai_motion:    !!f.useAiMotion,
       room_type:        f.roomType || "default",
-      motion_preset:    f.motionPreset || "auto",
+      // FIX (July 14, 2026 — Hero Transformation correction): was
+      // "f.motionPreset || \"auto\"" unconditionally — collapsing a
+      // deliberate null (Hero Transformation's "let Kling's own generic
+      // transformation prompt handle it" signal) into the literal string
+      // "auto". "auto" has real meaning for Ken Burns (pick a preset by
+      // room type) but none for Kling — klingMotion.js has no "auto"
+      // entry in KLING_MOTION_TEMPLATES, so it would still reach the
+      // correct fallback prompt, just after a spurious "Unknown
+      // klingMotionPreset" warning. Now only defaults to "auto" for Ken
+      // Burns frames, where that default is actually meaningful; a Kling
+      // frame with no preset stays null, reaching the intended fallback
+      // cleanly.
+      motion_preset:    f.motionPreset || (f.useAiMotion ? null : "auto"),
       duration_seconds: f.durationSeconds || 4.5,
       sequence_order:   i,
       kling_billed:     klingBilledFlags[i],
@@ -1122,6 +1152,11 @@ async function regenerateVideoJob({ jobId, userId, frames, formats, musicStyle, 
       // NEW (July 9, 2026) — gates room_reveal to open-concept rooms only.
       // See is_open_plan_migration.sql for the full reasoning.
       is_open_plan:                  !!f.isOpenPlan,
+      // NEW (found during before/after-pair conversation) — separate,
+      // explicit opt-in for the vacant-holds-then-wipes-to-staged Ken
+      // Burns reveal. Previously this fired automatically off
+      // is_before_after alone, with no way for the user to decline it.
+      use_reveal_effect:             !!f.useRevealEffect,
     }));
 
     await supabase("POST", "video_job_frames", frameRows);
@@ -1148,6 +1183,7 @@ async function regenerateVideoJob({ jobId, userId, frames, formats, musicStyle, 
         continuationDurationSeconds: f.continuation_duration_seconds,
         // NEW (July 9, 2026) — see matching comment in createVideoJob above.
         isOpenPlan:                  f.is_open_plan,
+        useRevealEffect:              f.use_reveal_effect,
       })),
     });
 

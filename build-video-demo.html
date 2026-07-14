@@ -533,6 +533,14 @@ function buildRealFrame(f) {
     isBeforeAfter: !!f.isBeforeAfter,
     useAiMotion,
     roomType,
+    // NEW (July 14, 2026 — footage-grounded narration) — roomType is a
+    // small, backend-coded vocabulary (kitchen/living/bedroom/exterior/
+    // default) used for duration defaults and Kling eligibility; it was
+    // never meant to be descriptive enough for narration. roomLabel is
+    // the real display name (e.g. "Primary Bedroom", not just "bedroom")
+    // — narrationGen.js's Claude vision prompt uses this, roomType stays
+    // exactly as it already was for everything else.
+    roomLabel: displayRoomName(f),
     motionPreset:  useAiMotion ? resolvedPreset : (f.kenBurnsPreset || "auto"),
     isOpenPlan:    f.room === "Open Plan",
     // durationSeconds intentionally omitted — motionPresets.js's
@@ -886,18 +894,13 @@ function goToStep(n) {
   if (n === 4) { document.getElementById("stepConfirm").classList.remove("hidden"); renderConfirmStep(); }
 }
 
-// NEW (audio build) — narration now generates in the background as soon
-// as a voice is picked in Step 3 (see updateAudioSelection). If the user
-// clicks "Review Cost" before that finishes, the Confirm-step quote would
-// come back showing "no narration" even though one is still in flight —
-// technically not wrong (nothing's been charged), but confusing. This
-// just blocks the jump with a clear message rather than silently quoting
-// against a still-pending selection.
+// CHANGE (July 14, 2026 — footage-grounded narration rebuild): the
+// "narration still generating" guard is gone — narration no longer
+// generates before this point at all (see updateAudioSelection). Kept
+// as a named function rather than reverting the button back to
+// goToStep(4) directly, in case a future pre-Confirm check is ever
+// needed again.
 function goToConfirmStep() {
-  if (window._narrationGenerating) {
-    alert("Narration is still generating — give it a few more seconds, or switch the narration dropdown back to \"No narration\" to proceed without it.");
-    return;
-  }
   goToStep(4);
 }
 
@@ -1237,111 +1240,27 @@ function renderOrderStep() {
 // helper note — deliberately does NOT touch the dropdown's own options or
 // call renderOrderStep(), so selecting music/narration never resets the
 // other picker or the room order above it.
+// CHANGE (July 14, 2026 — footage-grounded narration rebuild): narration
+// no longer generates here at all. It moved to Railway, DURING the
+// render itself, grounded in the real rendered footage (see
+// narrationGen.js's header comment for why). This function is back to
+// being a plain picker — set the state, nothing more. No background
+// call, no polling, no "Generating narration..." status. The user won't
+// see the actual script until the finished video comes back (see
+// showRenderComplete) — this trades away the illusion of a pre-render
+// preview that never actually worked correctly anyway, for narration
+// that's genuinely grounded in the real footage.
 function updateAudioSelection() {
   const musicSelect = document.getElementById("musicSelect");
   const narrationSelect = document.getElementById("narrationSelect");
   window._musicStyle = musicSelect ? musicSelect.value : "default";
-  const newVoiceKey = narrationSelect ? narrationSelect.value : "";
-
-  // CHANGE (July 2026 postmortem): narration generation moved OUT of the
-  // Generate/Regenerate click entirely. Real logs showed the old inline
-  // version (Claude + ElevenLabs + Cloudinary, all inside action=create)
-  // taking 37+ seconds — Netlify hard-caps synchronous functions at 26
-  // seconds, no exceptions, no matter what netlify.toml says. So this now
-  // fires the moment a voice is picked, right here in Step 3, using the
-  // same background-function + polling pattern already proven for
-  // staging (stage-openai-background.js / check-openai.js) — see
-  // generate-narration-background.js's header comment for the full story.
-  if (newVoiceKey === window._voiceKey) return; // no actual change — don't restart
-  window._voiceKey = newVoiceKey;
-  window._narrationAudioUrl = null;
-  window._narrationScript = null;
-  window._narrationGenerating = false;
+  window._voiceKey = narrationSelect ? narrationSelect.value : "";
 
   const note = document.getElementById("narrationNote");
   if (!note) return;
-
-  if (!newVoiceKey) {
-    note.textContent = "";
-    return;
-  }
-
-  window._narrationGenerating = true;
-  note.textContent = "Generating narration\u2026 (usually 15\u201330 seconds)";
-  generateNarrationInBackground(newVoiceKey);
-}
-
-async function generateNarrationInBackground(voiceKey) {
-  const note = document.getElementById("narrationNote");
-  const narrationJobId = "narr_" + Date.now() + "_" + Math.random().toString(36).slice(2);
-  const thisRequestVoiceKey = voiceKey; // captured so a later voice change can't overwrite a stale result
-
-  try {
-    // FIX (July 14, 2026 — real test failure): frame.roomType never
-    // existed on these raw frame objects — it's only ever computed as a
-    // local variable inside buildRealFrame(), never stored back onto the
-    // frame. This meant every element mapped to undefined, .filter(Boolean)
-    // dropped all of them, and the background function always received an
-    // EMPTY room list — exactly why the script had nothing about the
-    // rooms shown, only generic curb-appeal/location content. Now sends
-    // BOTH: roomLabels (the real display names, e.g. "Primary Bedroom" —
-    // for natural script content) and roomTypeCodes (the backend-coded
-    // types, e.g. "bedroom" — matching DEFAULT_DURATIONS' keys, needed to
-    // estimate real video length so the script can be sized to fit it).
-    const roomLabels = frames.map(f => f.room).filter(Boolean);
-    const roomTypeCodes = frames.map(f => f.isExterior ? "exterior" : (ROOM_TYPE_TO_BACKEND[f.room] || "default"));
-
-    const startRes = await fetch(`/.netlify/functions/generate-narration-background`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        narrationJobId,
-        listingId: REAL_LISTING_ID || null,
-        roomLabels,
-        roomTypeCodes,
-        voiceKey,
-      }),
-    });
-    if (!startRes.ok && startRes.status !== 202) {
-      throw new Error("Couldn't start narration generation.");
-    }
-
-    // Poll every 1.5s, same cadence as the existing staging poll
-    // (check-openai) — up to 90 seconds, comfortably above the typical
-    // 15-30s this actually takes.
-    const maxPolls = 60;
-    for (let poll = 0; poll < maxPolls; poll++) {
-      await new Promise(r => setTimeout(r, 1500));
-      // If the user picked a different voice while this was in flight,
-      // abandon this result — updateAudioSelection already started a new
-      // one for the current voiceKey.
-      if (window._voiceKey !== thisRequestVoiceKey) return;
-
-      const checkRes = await fetch(`/.netlify/functions/check-narration?jobId=${encodeURIComponent(narrationJobId)}`);
-      if (!checkRes.ok) continue;
-      const result = await checkRes.json();
-
-      if (result.status === "done") {
-        window._narrationAudioUrl = result.audioUrl;
-        window._narrationScript = result.script;
-        window._narrationGenerating = false;
-        if (note) note.textContent = `Narration ready. Billed per video: free the first time on this video, ${NARRATION_IMAGE_COST} Images each time after that.`;
-        return;
-      }
-      if (result.status === "error") {
-        throw new Error(result.error || "Narration generation failed.");
-      }
-      // status === "pending" — keep polling
-    }
-    throw new Error("Narration generation timed out — try again, or proceed without narration.");
-
-  } catch (err) {
-    if (window._voiceKey !== thisRequestVoiceKey) return; // superseded — don't show a stale error
-    window._narrationGenerating = false;
-    window._narrationAudioUrl = null;
-    window._narrationScript = null;
-    if (note) note.textContent = `Couldn't generate narration: ${err.message} You can still proceed without it.`;
-  }
+  note.textContent = window._voiceKey
+    ? `Narration will be generated from the real footage once you click Generate. Billed per video: free the first time, ${NARRATION_IMAGE_COST} Images each time after that.`
+    : "";
 }
 
 function toggleFormat(fmt, hasKling) {
@@ -1362,6 +1281,13 @@ function handleDrop(e, targetId) {
   frames.splice(toIdx, 0, moved);
   draggedId = null;
   renderOrderStep();
+  // CHANGE (July 14, 2026 — footage-grounded narration rebuild): the
+  // reorder-triggered narration regeneration this used to need is gone
+  // — narration no longer pre-generates at all, so there's no stale
+  // in-flight script to keep in sync with a reorder anymore. The real
+  // room order is captured fresh, directly from `frames`, at the moment
+  // Generate is actually clicked (see renderPipeline.js's use of the
+  // dispatch payload's frame order).
 }
 
 async function renderConfirmStep() {
@@ -1381,7 +1307,7 @@ async function renderConfirmStep() {
         jobId: window._currentJobId || undefined,
         userId: REAL_USER_ID,
         frames: realFrames,
-        narrationAudioUrl: window._narrationAudioUrl || undefined,
+        wantsNarration: !!window._voiceKey,
       }),
     });
     quote = await res.json();
@@ -1483,8 +1409,8 @@ async function handleGenerate() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(isIteration
-        ? { jobId: window._currentJobId, userId: REAL_USER_ID, frames: realFrames, formats: window._selectedFormats || ["16x9"], musicStyle: window._musicStyle || "default", narrationAudioUrl: window._narrationAudioUrl || undefined, narrationScript: window._narrationScript || undefined }
-        : { listingId: REAL_LISTING_ID, projectId: REAL_PROJECT_ID || undefined, userId: REAL_USER_ID, frames: realFrames, formats: window._selectedFormats || ["16x9"], musicStyle: window._musicStyle || "default", narrationAudioUrl: window._narrationAudioUrl || undefined, narrationScript: window._narrationScript || undefined }
+        ? { jobId: window._currentJobId, userId: REAL_USER_ID, frames: realFrames, formats: window._selectedFormats || ["16x9"], musicStyle: window._musicStyle || "default", wantsNarration: !!window._voiceKey, voiceKey: window._voiceKey || undefined }
+        : { listingId: REAL_LISTING_ID, projectId: REAL_PROJECT_ID || undefined, userId: REAL_USER_ID, frames: realFrames, formats: window._selectedFormats || ["16x9"], musicStyle: window._musicStyle || "default", wantsNarration: !!window._voiceKey, voiceKey: window._voiceKey || undefined }
       ),
     });
     const data = await res.json();
@@ -1519,13 +1445,14 @@ async function handleGenerate() {
     const quotaLine = (!isIteration && typeof data.videoQuotaUsed === "number")
       ? `This is video ${data.videoQuotaUsed} of ${data.videoQuotaLimit} included this month${data.videoQuotaUsed > data.videoQuotaLimit ? " (over your included allowance — still fine, just past the bundled count)" : ""}.<br>`
       : "";
-    // NEW (audio build)
+    // CHANGE (July 14, 2026 — footage-grounded narration rebuild):
+    // narration isn't generated yet at this point at all — Railway does
+    // that during the render itself (see narrationGen.js). This just
+    // confirms it was requested and charged; whether it actually
+    // succeeded is only known once the video finishes (showRenderComplete
+    // shows the real script, or its absence, then).
     const narrationLine = data.narrationRequested
-      ? (data.narrationFailed
-          ? `Narration couldn't be generated this time — video will render without it.<br>`
-          : (data.narrationGenerated
-              ? `Narration script generated${data.narrationImagesCharged > 0 ? ` (${data.narrationImagesCharged} Images charged)` : " (free)"}.<br>`
-              : ""))
+      ? `Narration requested${data.narrationImagesCharged > 0 ? ` (${data.narrationImagesCharged} Images charged)` : " (free)"} — generated from the real footage during rendering.<br>`
       : "";
 
     document.getElementById("resultContent").innerHTML = `
@@ -1595,12 +1522,34 @@ function showRenderComplete(job) {
   const quotaLine = genCount === 1
     ? "this generation already counted toward your monthly video count, so "
     : "";
+
+  // NEW (July 14, 2026 — footage-grounded narration rebuild): the script
+  // was never shown anywhere before this rebuild, at any point in the
+  // flow — this is the first time it's ever visible, right alongside the
+  // finished video, exactly where Sam suggested it should live. If
+  // narration was requested (window._voiceKey was set this generation)
+  // but job.narration_script came back empty, that means generation
+  // failed during rendering — video-notify.js already refunds that
+  // charge automatically, so the note here just explains what happened,
+  // it's not asking the user to do anything about it.
+  let narrationBlock = "";
+  if (job.narration_script) {
+    narrationBlock = `
+      <div style="text-align:left;background:var(--cream);border:1px solid var(--border);border-radius:4px;padding:14px 16px;margin:14px 0;">
+        <div class="eyebrow" style="margin-bottom:6px;">Narration script</div>
+        <div style="font-size:0.85rem;color:var(--ink);line-height:1.6;">${job.narration_script}</div>
+      </div>`;
+  } else if (window._voiceKey) {
+    narrationBlock = `<div class="warn-box"><strong>Narration didn't generate this time</strong>The video rendered fine, but narration specifically failed — the Images charged for it were refunded automatically.</div>`;
+  }
+
   document.getElementById("resultContent").innerHTML = `
     <div class="result-icon">&#9989;</div>
     <div class="result-title">Ready \u2014 generation #${genCount}</div>
     ${videoUrl
       ? `<video src="${videoUrl}" controls autoplay muted loop playsinline style="width:100%;max-width:480px;border-radius:4px;margin:12px 0;background:#000;"></video>`
       : (job.thumbnail_url ? `<img src="${job.thumbnail_url}" alt="Preview thumbnail" style="max-width:100%;border-radius:4px;margin:12px 0;">` : "")}
+    ${narrationBlock}
     <div class="result-body">Watch it back \u2014 the Kling cost above is already spent (or drawn from this month's free pool), and ${quotaLine}take your time deciding. Download is a separate flat fee for the formal export: it locks this in and adds it to your AB 723 compliance page, but never touches your monthly video count. If you Iterate instead, this same shared monthly Kling pool applies again \u2014 frames are free if you still have pool balance left, billed in Images once it's gone, exactly like a first generation. Iterating does NOT add to your monthly video count, since it's a redo of this same video, not a new one. The current result is replaced, not kept alongside the new one.</div>
     <div style="margin-top:18px;display:flex;gap:10px;justify-content:center;">
       <button class="btn btn-ghost" style="flex:none;" onclick="resetDemo()">Start over</button>
@@ -1702,9 +1651,6 @@ function resetDemo() {
   window._currentJobId = null;
   window._musicStyle = null;
   window._voiceKey = null;
-  window._narrationAudioUrl = null;
-  window._narrationScript = null;
-  window._narrationGenerating = false;
   generationCount = 1;
   // NEW (audio build) — clear the dropdowns' DOM so renderOrderStep's
   // childElementCount guard repopulates them fresh (and re-defaults

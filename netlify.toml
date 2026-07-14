@@ -11,6 +11,9 @@
 [functions."stage-image"]
   timeout = 26
 
+[functions."video-job"]
+  timeout = 30
+
 [functions."stage-image-start"]
   timeout = 90
 

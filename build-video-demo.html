@@ -509,6 +509,20 @@ function buildRealFrame(f) {
     // resolveDuration() already has real per-roomType defaults; there is
     // no duration control in this UI, so let the backend's own sensible
     // default apply rather than hardcoding a guess here.
+    // FIX (found during audio-build session) — these three were already
+    // fully plumbed through video-job.js and renderPipeline.js (both
+    // read frame.addContinuationMotion etc. directly), but buildRealFrame
+    // never actually forwarded them from the frame's own UI state, so the
+    // feature was unreachable end-to-end despite working correctly at
+    // every other layer. Only meaningful when useAiMotion is true.
+    addContinuationMotion:       useAiMotion ? !!f.addContinuationMotion : false,
+    continuationPreset:          useAiMotion ? (f.continuationPreset || undefined) : undefined,
+    continuationDurationSeconds: useAiMotion ? (f.continuationDurationSeconds || undefined) : undefined,
+    // NEW — the vacant-holds-then-wipes-to-staged Ken Burns reveal is now
+    // a deliberate opt-in (see the before/after-pair conversation), never
+    // automatic just because isBeforeAfter happens to be true. Only
+    // meaningful when NOT using AI Motion (Ken Burns only).
+    useRevealEffect: !useAiMotion ? !!f.useRevealEffect : false,
   };
 }
 
@@ -619,8 +633,17 @@ function toggleGalleryItem(itemId) {
       motion: "kenburns",
       kenBurnsPreset: "auto",
       preset: null,
-      isBeforeAfter: isStaged && !!item.originalUrl, // set AUTOMATICALLY from real data — never a user checkbox
+      isBeforeAfter: isStaged && !!item.originalUrl, // set AUTOMATICALLY from real data — never a user choice
       beforeUrl: isStaged ? item.originalUrl : null,  // the actual pair URL, carried silently — never shown to the user
+      // NEW (audio-build-adjacent fix) — SEPARATE from isBeforeAfter on
+      // purpose. isBeforeAfter is a data fact (do we have a real pair on
+      // file) and drives Kling preset ELIGIBILITY only. Whether Ken Burns
+      // actually renders the vacant→staged wipe-reveal treatment for that
+      // room is a deliberate style choice, not something that should fire
+      // automatically just because the data happens to exist — defaults
+      // to false always, regardless of isBeforeAfter.
+      useRevealEffect: false,
+      addContinuationMotion: false,
     });
   }
   renderGallery();
@@ -663,6 +686,8 @@ function handleFiles(fileList) {
         kenBurnsPreset: "auto",
         preset: null,
         isBeforeAfter: false,
+        useRevealEffect: false,
+        addContinuationMotion: false,
       };
       frames.push(newFrame);
       renderUpload();
@@ -889,6 +914,12 @@ function renderMotionStep() {
             <button class="preview-btn" onclick="openMotionPreview('${f.kenBurnsPreset || 'auto'}', 'kenburns')">&#9654; Preview</button>
           </div>
           <div class="preset-desc">${selectedKenBurnsPreset.desc}</div>
+          ${f.isBeforeAfter ? `
+            <label style="display:flex;align-items:center;gap:6px;font-size:0.76rem;color:var(--muted);margin-top:8px;cursor:pointer;">
+              <input type="checkbox" ${f.useRevealEffect ? "checked" : ""} onchange="toggleRevealEffect(${f.id}, this.checked)" style="accent-color:var(--gold);">
+              Show as a before/after reveal (vacant holds, then wipes to staged) instead of standard motion
+            </label>
+          ` : ""}
         ` : ""}
 
         ${f.motion === 'kling' ? (eligible.length > 0 ? `
@@ -900,6 +931,14 @@ function renderMotionStep() {
               ${selectedKlingPreset ? `<button class="preview-btn" onclick="openMotionPreview('${f.preset}', 'kling')">&#9654; Preview</button>` : ""}
             </div>
             ${selectedKlingPreset ? `<div class="preset-desc">${selectedKlingPreset.desc}</div>` : `<div class="preset-desc">Pick a camera movement to see what it does.</div>`}
+            ${selectedKlingPreset ? `
+              <label style="display:flex;align-items:center;gap:6px;font-size:0.76rem;color:var(--muted);margin-top:8px;cursor:pointer;">
+                <input type="checkbox" ${f.addContinuationMotion ? "checked" : ""} onchange="toggleContinuationMotion(${f.id}, this.checked)" style="accent-color:var(--gold);">
+                ${f.isBeforeAfter
+                  ? "Finish with a Ken Burns parallax beat after the vacant\u2192staged morph settles (no extra Kling cost)"
+                  : "Add a Ken Burns parallax beat after this motion settles (no extra Kling cost)"}
+              </label>
+            ` : ""}
           ` : `<div class="preset-disabled-note">No AI Motion presets available for this room yet — check "before/after pair" above if you have a vacant + staged set, or use Ken Burns instead.</div>`
         ) : ""}
       </div>
@@ -918,6 +957,32 @@ function toggleBeforeAfter(id, checked) {
   const f = frames.find(x => x.id === id);
   f.isBeforeAfter = checked;
   if (!checked && f.preset && KLING_PRESETS[f.preset].eligibility.startsWith("pair_required")) f.preset = null;
+  // NEW — if the pair is unchecked, the reveal-effect opt-in no longer
+  // makes sense (it needs a real before image to wipe from), so clear it
+  // rather than leave a stale true value the backend would never see
+  // exposed in the UI again.
+  if (!checked) f.useRevealEffect = false;
+  renderMotionStep();
+}
+
+// NEW (found during before/after-pair conversation) — separate, explicit
+// opt-in for the vacant-holds-then-wipes-to-staged Ken Burns treatment.
+// Deliberately never auto-set — see isBeforeAfter's own comment for why.
+function toggleRevealEffect(id, checked) {
+  const f = frames.find(x => x.id === id);
+  f.useRevealEffect = checked;
+  renderMotionStep();
+}
+
+// NEW (found during audio-build session) — the backend/Railway side of
+// this (addContinuationMotion, continuationPreset, continuationDurationSeconds)
+// was already fully built and working; this UI control was the missing
+// piece making it unreachable. Defaults server-side to "luxury_parallax"
+// at 3 seconds when checked — no preset/duration picker here yet, kept
+// simple to start; can add finer control later if it's worth the UI space.
+function toggleContinuationMotion(id, checked) {
+  const f = frames.find(x => x.id === id);
+  f.addContinuationMotion = checked;
   renderMotionStep();
 }
 

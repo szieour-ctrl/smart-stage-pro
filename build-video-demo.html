@@ -1216,13 +1216,28 @@ async function generateNarrationInBackground(voiceKey) {
   const thisRequestVoiceKey = voiceKey; // captured so a later voice change can't overwrite a stale result
 
   try {
+    // FIX (July 14, 2026 — real test failure): frame.roomType never
+    // existed on these raw frame objects — it's only ever computed as a
+    // local variable inside buildRealFrame(), never stored back onto the
+    // frame. This meant every element mapped to undefined, .filter(Boolean)
+    // dropped all of them, and the background function always received an
+    // EMPTY room list — exactly why the script had nothing about the
+    // rooms shown, only generic curb-appeal/location content. Now sends
+    // BOTH: roomLabels (the real display names, e.g. "Primary Bedroom" —
+    // for natural script content) and roomTypeCodes (the backend-coded
+    // types, e.g. "bedroom" — matching DEFAULT_DURATIONS' keys, needed to
+    // estimate real video length so the script can be sized to fit it).
+    const roomLabels = frames.map(f => f.room).filter(Boolean);
+    const roomTypeCodes = frames.map(f => f.isExterior ? "exterior" : (ROOM_TYPE_TO_BACKEND[f.room] || "default"));
+
     const startRes = await fetch(`/.netlify/functions/generate-narration-background`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         narrationJobId,
         listingId: REAL_LISTING_ID || null,
-        roomTypes: frames.map(f => f.roomType).filter(Boolean),
+        roomLabels,
+        roomTypeCodes,
         voiceKey,
       }),
     });

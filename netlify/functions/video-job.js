@@ -868,7 +868,26 @@ async function createVideoJob({ listingId, projectId, userId, frames, formats, m
       use_reveal_effect:             !!f.useRevealEffect,
     }));
 
-    await supabase("POST", "video_job_frames", frameRows);
+    // FIX (July 14, 2026 — real diagnosis gap): this insert was never
+    // checked for success at all. If it failed for ANY reason (a bad
+    // value, a constraint violation, a transient Supabase error), the
+    // code just continued as if nothing happened — the video_jobs row
+    // already exists, Railway still gets dispatched, but with missing or
+    // incomplete frame data and no error message anywhere pointing back
+    // to what actually went wrong. Now verifies the insert actually
+    // returned one row per frame sent, and throws a clear, specific error
+    // if not — which the existing catch block already knows how to
+    // handle correctly (refund + mark the job failed), it just never got
+    // the chance to before now.
+    const frameInsertRes = await supabase("POST", "video_job_frames", frameRows);
+    if (!Array.isArray(frameInsertRes.data) || frameInsertRes.data.length !== frameRows.length) {
+      console.error(
+        "video_job_frames insert failed or returned an unexpected row count — status:", frameInsertRes.status,
+        "| expected:", frameRows.length, "| got:", Array.isArray(frameInsertRes.data) ? frameInsertRes.data.length : typeof frameInsertRes.data,
+        "| response:", JSON.stringify(frameInsertRes.data)
+      );
+      throw new Error(`Failed to create video_job_frames rows (status ${frameInsertRes.status}, expected ${frameRows.length} rows): ${JSON.stringify(frameInsertRes.data)}`);
+    }
 
     // NEW (July 14, 2026) — Railway needs the real address itself now,
     // to write footage-grounded narration during the render (see
@@ -1178,7 +1197,26 @@ async function regenerateVideoJob({ jobId, userId, frames, formats, musicStyle, 
       use_reveal_effect:             !!f.useRevealEffect,
     }));
 
-    await supabase("POST", "video_job_frames", frameRows);
+    // FIX (July 14, 2026 — real diagnosis gap): this insert was never
+    // checked for success at all. If it failed for ANY reason (a bad
+    // value, a constraint violation, a transient Supabase error), the
+    // code just continued as if nothing happened — the video_jobs row
+    // already exists, Railway still gets dispatched, but with missing or
+    // incomplete frame data and no error message anywhere pointing back
+    // to what actually went wrong. Now verifies the insert actually
+    // returned one row per frame sent, and throws a clear, specific error
+    // if not — which the existing catch block already knows how to
+    // handle correctly (refund + mark the job failed), it just never got
+    // the chance to before now.
+    const frameInsertRes = await supabase("POST", "video_job_frames", frameRows);
+    if (!Array.isArray(frameInsertRes.data) || frameInsertRes.data.length !== frameRows.length) {
+      console.error(
+        "video_job_frames insert failed or returned an unexpected row count — status:", frameInsertRes.status,
+        "| expected:", frameRows.length, "| got:", Array.isArray(frameInsertRes.data) ? frameInsertRes.data.length : typeof frameInsertRes.data,
+        "| response:", JSON.stringify(frameInsertRes.data)
+      );
+      throw new Error(`Failed to create video_job_frames rows (status ${frameInsertRes.status}, expected ${frameRows.length} rows): ${JSON.stringify(frameInsertRes.data)}`);
+    }
 
     // NEW (July 14, 2026) — same address lookup as createVideoJob, using
     // existing.listing_id (already selected above) since regenerate

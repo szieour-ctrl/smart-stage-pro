@@ -11,8 +11,17 @@
 [functions."stage-image"]
   timeout = 26
 
-[functions."video-job"]
-  timeout = 30
+# CHANGE (July 2026 postmortem): removed the timeout=30 override that was
+# here — Netlify hard-caps SYNCHRONOUS functions at 26s regardless of this
+# value, and video-job.js no longer does slow work (Claude/ElevenLabs/
+# Cloudinary) inline anyway now that narration moved to
+# generate-narration-background.js. Back to the platform default.
+
+[functions."generate-narration-background"]
+  timeout = 900
+
+[functions."check-narration"]
+  timeout = 10
 
 [functions."stage-image-start"]
   timeout = 90

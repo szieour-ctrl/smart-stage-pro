@@ -1525,7 +1525,10 @@ function pollJobStatus(jobId) {
           <div class="result-icon">&#9888;</div>
           <div class="result-title">Render failed</div>
           <div class="result-body">${job.error_message || "Something went wrong on the render side."}${job.credits_used ? " Any Images charged for this attempt have been refunded automatically." : ""}</div>
-          <div style="margin-top:18px;"><button class="btn btn-ghost" style="flex:none;" onclick="resetDemo()">Start over</button></div>
+          <div style="margin-top:18px;display:flex;gap:10px;justify-content:center;">
+            <button class="btn btn-ghost" style="flex:none;" onclick="resetDemo()">Start over</button>
+            <button class="btn btn-primary" style="flex:none;" onclick="handleRetryAfterFailure()">Retry — same photos &amp; tags</button>
+          </div>
         `;
       }
       // else: still pending/processing — keep polling, no UI change needed
@@ -1608,6 +1611,18 @@ function showRenderComplete(job) {
 function handleIterate() {
   document.getElementById("resultPanel").classList.add("hidden");
   goToStep(2);
+}
+
+// NEW — Retry after a render FAILURE (distinct from Iterate, which is
+// for a successful render someone wants to deliberately adjust before
+// trying again). A failure isn't the user's fault and needs no changes
+// at all — frames/tags/order/motion are all still intact in memory
+// exactly as they were (failure never clears them, same as success
+// doesn't). Jumping straight to Confirm skips two unnecessary clicks
+// through Order and Motion for a case where nothing needs revisiting.
+function handleRetryAfterFailure() {
+  document.getElementById("resultPanel").classList.add("hidden");
+  goToStep(4);
 }
 
 async function handleDownload() {

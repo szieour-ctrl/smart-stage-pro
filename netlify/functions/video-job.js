@@ -556,9 +556,25 @@ async function resolveNarrationBilling({ userId, existingFreeUsed, wantsNarratio
 // comment in the schema for the full reasoning.
 
 async function getFramesForListing(listingId) {
+  // FIX (Sam's feedback, real render — gallery labels showing "Clean &
+  // Staged Room" / "Staged Room" for nearly every photo): this query
+  // never selected room_type at all — only `mode` (the staging PROCESS:
+  // vacant_stage/clean_and_stage/etc.), which is why humanizeRoomType on
+  // the frontend always fell through to its mode-based fallback label,
+  // regardless of what room the photo actually shows. Adding room_type
+  // here, mapped the same way externalFrames already correctly does a
+  // few lines below.
+  //
+  // ASSUMPTION FLAGGED: room_type is the column name used here because
+  // it matches external_photos' own column exactly (see the query right
+  // below) — but I haven't verified staged_images actually has a column
+  // by this exact name. If it's named differently, this SELECT will
+  // fail loudly (Supabase errors on an unknown column) rather than
+  // silently misbehaving, so it'll be obvious immediately on first
+  // deploy if the name needs correcting.
   const [stagedResult, externalResult] = await Promise.all([
     supabase("GET", "staged_images", null,
-      `?listing_id=eq.${listingId}&select=id,mode,cloudinary_original_url,cloudinary_staged_url,created_at&order=created_at.asc`
+      `?listing_id=eq.${listingId}&select=id,mode,room_type,cloudinary_original_url,cloudinary_staged_url,created_at&order=created_at.asc`
     ),
     supabase("GET", "external_photos", null,
       `?listing_id=eq.${listingId}&select=id,image_url,room_type,source_label,created_at&order=created_at.asc`
@@ -569,6 +585,7 @@ async function getFramesForListing(listingId) {
     id:            row.id,
     source:        "staged",
     mode:           row.mode,
+    roomType:       row.room_type,
     originalUrl:    row.cloudinary_original_url,
     stagedUrl:      row.cloudinary_staged_url,
     sourceLabel:    "Virtually Staged",
@@ -914,7 +931,7 @@ async function createVideoJob({ listingId, projectId, userId, frames, formats, m
       // frame with no preset stays null, reaching the intended fallback
       // cleanly.
       motion_preset:    f.motionPreset || (f.useAiMotion ? null : "auto"),
-      duration_seconds: f.durationSeconds || 4.5,
+      duration_seconds: f.durationSeconds || null, // FIX (real render, duration fix had zero effect): was || 4.5, a hardcoded fallback that pre-empted Railway's resolveDuration()/DEFAULT_DURATIONS (real per-roomType defaults) before it ever ran, since resolveDuration only falls through when frame.durationSeconds is falsy. The frontend deliberately never sends durationSeconds (see build-video-demo.html's comment on that field) specifically so this backend default applies -- this fallback was silently overriding that intent. null now correctly reaches Railway as "no override," letting DEFAULT_DURATIONS actually take effect.
       sequence_order:   i,
       // NEW (bug 2g — refund logic) — records whether THIS specific frame
       // was actually charged, so video-notify.js can refund exactly the
@@ -1253,7 +1270,7 @@ async function regenerateVideoJob({ jobId, userId, frames, formats, musicStyle, 
       // frame with no preset stays null, reaching the intended fallback
       // cleanly.
       motion_preset:    f.motionPreset || (f.useAiMotion ? null : "auto"),
-      duration_seconds: f.durationSeconds || 4.5,
+      duration_seconds: f.durationSeconds || null, // FIX (real render, duration fix had zero effect): was || 4.5, a hardcoded fallback that pre-empted Railway's resolveDuration()/DEFAULT_DURATIONS (real per-roomType defaults) before it ever ran, since resolveDuration only falls through when frame.durationSeconds is falsy. The frontend deliberately never sends durationSeconds (see build-video-demo.html's comment on that field) specifically so this backend default applies -- this fallback was silently overriding that intent. null now correctly reaches Railway as "no override," letting DEFAULT_DURATIONS actually take effect.
       sequence_order:   i,
       kling_billed:     klingBilledFlags[i],
       add_continuation_motion:       !!f.addContinuationMotion,

@@ -622,6 +622,27 @@ function humanizeRoomType(mode, roomType) {
   return MODE_LABELS[mode] || "Room";
 }
 
+// FIX (Sam's feedback, real render — "Original Staged Room labels were
+// not carried over? Many were labeled 'Kitchen'"): toggleGalleryItem
+// below used to set room: item.roomLabel directly — a free-form
+// humanized string (just capitalize-first-letter on PRO's raw
+// roomType, e.g. "primary_bedroom" → "Primary_bedroom"). The room
+// dropdown/narration pipeline needs f.room to be an EXACT match against
+// ROOM_TYPES ("Primary Bedroom", with a space, proper case) to work —
+// snake_case or casing mismatches meant f.room held a value that
+// matched NONE of the dropdown options, so it silently showed as
+// unselected while narration/grouping saw an unmatched string it
+// couldn't use correctly. Normalizing underscores/case here and
+// matching against the real ROOM_TYPES list fixes the common case;
+// anything that still doesn't match falls back to "Other" with the
+// ORIGINAL label preserved as free text — same mechanism Sam confirmed
+// already works well for custom labels, so nothing gets silently lost.
+function matchToRoomType(rawRoomType) {
+  if (!rawRoomType) return null;
+  const normalized = rawRoomType.replace(/_/g, " ").trim().toLowerCase();
+  return ROOM_TYPES.find(r => r.toLowerCase() === normalized) || null;
+}
+
 function renderGallery() {
   const gallery = document.getElementById("photoGallery");
   const allGalleryItems = [
@@ -662,14 +683,15 @@ function toggleGalleryItem(itemId) {
     if (frames.length >= MAX_FRAMES) { alert("20 photo max per video reached."); return; }
     gallerySelectedIds.add(itemId);
     const isStaged = item.source === "staged";
+    const matchedRoom = matchToRoomType(item.roomType);
     frames.push({
       id: ++frameIdCounter,
       galleryId: itemId, // links back to the gallery item for deselect/toggle
       fileName: item.roomLabel,
       dataUrl: isStaged ? item.stagedUrl : item.imageUrl,
       realUrl: isStaged ? item.stagedUrl : item.imageUrl, // already a real, hosted Cloudinary URL — no upload step needed
-      room: item.roomLabel,      // already tagged — came from PRO's real room data, no re-tagging needed
-      roomOther: "",
+      room: matchedRoom || "Other",      // matched against ROOM_TYPES where possible — see matchToRoomType's header comment for why this replaced a direct item.roomLabel assignment
+      roomOther: matchedRoom ? "" : (item.roomLabel || ""),
       isExterior: (item.mode || "").startsWith("exterior") || /exterior|yard|landscap/i.test(item.roomLabel),
       motion: "kenburns",
       kenBurnsPreset: "auto",

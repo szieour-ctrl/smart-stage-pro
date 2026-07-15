@@ -1148,7 +1148,7 @@ function openMotionPreview(presetKey, type) {
   const clipUrl = PREVIEW_CLIP_URLS[presetKey];
   document.getElementById("previewStage").innerHTML = clipUrl
     ? `<button class="lightbox-close" onclick="closePreview()">&times;</button>
-       <video src="${clipUrl}" controls controlsList="nodownload noplaybackrate noremoteplayback" disablePictureInPicture disableRemotePlayback oncontextmenu="return false;" autoplay muted loop playsinline style="width:100%;height:100%;object-fit:contain;background:#000;"></video>`
+       <video id="previewStageVideo" src="${clipUrl}" controls controlsList="nodownload noplaybackrate noremoteplayback" disablePictureInPicture disableRemotePlayback oncontextmenu="return false;" autoplay muted playsinline style="width:100%;height:100%;object-fit:contain;background:#000;"></video>`
     : `<button class="lightbox-close" onclick="closePreview()">&times;</button>
        <div class="play-icon">&#9654;</div>
        <div class="coming-soon">Video coming soon</div>`;
@@ -1157,6 +1157,14 @@ function openMotionPreview(presetKey, type) {
     <div class="panel-sub">${preset.desc}</div>
   `;
   document.getElementById("previewOverlay").classList.remove("hidden");
+
+  // Same reasoning as showRenderComplete's renderCompleteVideo — native
+  // `loop` keeps a permanent "Loop" entry in Chrome's kebab menu that
+  // controlsList can't hide, so looping happens via JS instead.
+  const previewVideo = document.getElementById("previewStageVideo");
+  if (previewVideo) {
+    previewVideo.addEventListener("ended", () => { previewVideo.currentTime = 0; previewVideo.play(); });
+  }
 }
 
 function closePreview() {
@@ -1547,7 +1555,7 @@ function showRenderComplete(job) {
     <div class="result-icon">&#9989;</div>
     <div class="result-title">Ready \u2014 generation #${genCount}</div>
     ${videoUrl
-      ? `<video src="${videoUrl}" controls controlsList="nodownload noplaybackrate noremoteplayback" disablePictureInPicture disableRemotePlayback oncontextmenu="return false;" autoplay muted loop playsinline style="width:100%;max-width:480px;border-radius:4px;margin:12px 0;background:#000;"></video>`
+      ? `<video id="renderCompleteVideo" src="${videoUrl}" controls controlsList="nodownload noplaybackrate noremoteplayback" disablePictureInPicture disableRemotePlayback oncontextmenu="return false;" autoplay muted playsinline style="width:100%;max-width:480px;border-radius:4px;margin:12px 0;background:#000;"></video>`
       : (job.thumbnail_url ? `<img src="${job.thumbnail_url}" alt="Preview thumbnail" style="max-width:100%;border-radius:4px;margin:12px 0;">` : "")}
     ${narrationBlock}
     <div class="result-body">Watch it back \u2014 the Kling cost above is already spent (or drawn from this month's free pool), and ${quotaLine}take your time deciding. Download is a separate flat fee for the formal export: it locks this in and adds it to your AB 723 compliance page, but never touches your monthly video count. If you Iterate instead, this same shared monthly Kling pool applies again \u2014 frames are free if you still have pool balance left, billed in Images once it's gone, exactly like a first generation. Iterating does NOT add to your monthly video count, since it's a redo of this same video, not a new one. The current result is replaced, not kept alongside the new one.</div>
@@ -1557,6 +1565,18 @@ function showRenderComplete(job) {
       <button class="btn btn-primary" style="flex:none;" onclick="handleDownload()">Download</button>
     </div>
   `;
+
+  // Looping moved from the native `loop` attribute to JS. Chrome keeps a
+  // permanent "Loop" toggle in the controls overflow menu for any video
+  // with `loop` set, and there's no controlsList value that hides it —
+  // so as long as that attribute was present, the kebab menu could never
+  // fully collapse even with download/playback-speed/PiP all suppressed.
+  // Re-triggering playback manually on `ended` gets the same looping
+  // behavior with nothing left in the menu.
+  const rcVideo = document.getElementById("renderCompleteVideo");
+  if (rcVideo) {
+    rcVideo.addEventListener("ended", () => { rcVideo.currentTime = 0; rcVideo.play(); });
+  }
 }
 
 function handleIterate() {

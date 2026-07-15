@@ -26,7 +26,11 @@ cloudinary.config({
 function signVideoUrl(rawUrl) {
   if (!rawUrl) return null;
   try {
-    const match = rawUrl.match(/\/authenticated\/(?:v(\d+)\/)?(.+)\.(\w+)$/);
+    // BUG FIX (July 2026, same root cause as video-job.js's signVideoUrl —
+    // see that file for the full diagnosis): Cloudinary's authenticated
+    // uploads include a default signature segment (s--XXXXXXXX--) that
+    // this regex now explicitly skips before capturing the public_id.
+    const match = rawUrl.match(/\/authenticated\/(?:s--[^/]+--\/)?(?:v(\d+)\/)?(.+)\.(\w+)$/);
     if (!match) {
       console.error(`compliance-page signVideoUrl: could not parse public_id out of ${rawUrl}`);
       return null;

@@ -112,8 +112,20 @@ function signVideoUrl(rawUrl, expirySeconds) {
   if (!rawUrl) return null;
   try {
     // rawUrl looks like:
-    // https://res.cloudinary.com/<cloud>/video/authenticated/v<version>/<folder>/<public_id>.<ext>
-    const match = rawUrl.match(/\/authenticated\/(?:v(\d+)\/)?(.+)\.(\w+)$/);
+    // https://res.cloudinary.com/<cloud>/video/authenticated/[s--sig--/][v<version>/]<public_id>.<ext>
+    //
+    // BUG FIX (found via live test, July 2026): Cloudinary's own default
+    // upload response for type:"authenticated" already includes a
+    // signature segment (s--XXXXXXXX--) so the asset is immediately
+    // fetchable right after upload. The original regex only accounted
+    // for an optional version segment after /authenticated/ — it didn't
+    // know to skip a signature segment first, so that segment got
+    // swallowed into the public_id capture, producing a garbled,
+    // nonexistent resource name. Confirmed via a real test video: the
+    // player rendered (non-empty src) but nothing ever loaded, 0:00
+    // duration, no visible error. Fixed by explicitly skipping an
+    // optional s--...--/ segment before the optional version segment.
+    const match = rawUrl.match(/\/authenticated\/(?:s--[^/]+--\/)?(?:v(\d+)\/)?(.+)\.(\w+)$/);
     if (!match) {
       console.error(`signVideoUrl: could not parse public_id out of ${rawUrl}`);
       return null;

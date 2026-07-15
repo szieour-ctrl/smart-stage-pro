@@ -200,8 +200,8 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
 
   <div class="steps">
     <div class="step-pill" id="stepPill1">1. Photos</div>
-    <div class="step-pill" id="stepPill2">2. Motion</div>
-    <div class="step-pill" id="stepPill3">3. Order &amp; format</div>
+    <div class="step-pill" id="stepPill2">2. Order</div>
+    <div class="step-pill" id="stepPill3">3. Motion &amp; format</div>
     <div class="step-pill" id="stepPill4">4. Confirm</div>
   </div>
 
@@ -229,31 +229,31 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
     </div>
     <div class="action-row">
       <button class="btn btn-ghost" onclick="resetDemo()">Reset</button>
-      <button class="btn btn-primary" id="toStep2Btn" onclick="goToStep(2)" disabled>Next — Assign Motion</button>
-    </div>
-  </div>
-
-  <div class="panel hidden" id="stepMotion">
-    <div class="panel-pad" style="padding-bottom:0;">
-      <div class="eyebrow">Step 2</div>
-      <div class="panel-title">Assign room &amp; motion</div>
-      <div class="panel-sub">Tag each photo's room, then choose Ken Burns or AI Motion (Kling). Kling frames are free while your monthly pool lasts, then billed in Images — see the pool count in the header.</div>
-    </div>
-    <div id="motionList"></div>
-    <div class="count-bar" id="klingCountBar"></div>
-    <div class="action-row" style="padding-top:18px;">
-      <button class="btn btn-ghost" onclick="goToStep(1)">Back</button>
-      <button class="btn btn-primary" onclick="goToStep(3)">Next — Order &amp; Format</button>
+      <button class="btn btn-primary" id="toStep2Btn" onclick="goToStep(2)" disabled>Next — Put in Order</button>
     </div>
   </div>
 
   <div class="panel hidden" id="stepOrder">
     <div class="panel-pad" style="padding-bottom:0;">
-      <div class="eyebrow">Step 3</div>
+      <div class="eyebrow">Step 2</div>
       <div class="panel-title">Put them in order</div>
-      <div class="panel-sub">Drag rooms into the sequence you want them to appear.</div>
+      <div class="panel-sub">Drag rooms into the sequence you want them to appear. Motion — including format, which depends on it — comes next, once the order is locked in.</div>
     </div>
     <div class="order-grid" id="orderList"></div>
+    <div class="action-row">
+      <button class="btn btn-ghost" onclick="goToStep(1)">Back</button>
+      <button class="btn btn-primary" onclick="goToStep(3)">Next — Assign Motion</button>
+    </div>
+  </div>
+
+  <div class="panel hidden" id="stepMotion">
+    <div class="panel-pad" style="padding-bottom:0;">
+      <div class="eyebrow">Step 3</div>
+      <div class="panel-title">Assign room &amp; motion</div>
+      <div class="panel-sub">Tag each photo's room, then choose Ken Burns or AI Motion (Kling). Kling frames are free while your monthly pool lasts, then billed in Images — see the pool count in the header.</div>
+    </div>
+    <div id="motionList"></div>
+    <div class="count-bar" id="klingCountBar"></div>
     <div class="divider-label">Output format</div>
     <div class="format-row" id="formatRow"></div>
     <div class="format-note" id="formatNote"></div>
@@ -265,7 +265,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
       <select class="btn btn-ghost" id="narrationSelect" style="width:100%;text-align:left;" onchange="updateAudioSelection()"></select>
       <div class="panel-sub" id="narrationNote" style="margin-top:6px;"></div>
     </div>
-    <div class="action-row">
+    <div class="action-row" style="padding-top:18px;">
       <button class="btn btn-ghost" onclick="goToStep(2)">Back</button>
       <button class="btn btn-primary" onclick="goToConfirmStep()">Review Cost</button>
     </div>
@@ -889,8 +889,8 @@ function goToStep(n) {
     if (i === n) pill.classList.add("active");
   });
   if (n === 1) document.getElementById("stepUpload").classList.remove("hidden");
-  if (n === 2) { document.getElementById("stepMotion").classList.remove("hidden"); renderMotionStep(); }
-  if (n === 3) { document.getElementById("stepOrder").classList.remove("hidden"); renderOrderStep(); }
+  if (n === 2) { document.getElementById("stepOrder").classList.remove("hidden"); renderOrderStep(); }
+  if (n === 3) { document.getElementById("stepMotion").classList.remove("hidden"); renderMotionStep(); }
   if (n === 4) { document.getElementById("stepConfirm").classList.remove("hidden"); renderConfirmStep(); }
 }
 
@@ -997,6 +997,43 @@ function renderMotionStep() {
     </div>`;
   }).join("");
   updateKlingCountBar();
+
+  // MOVED here from the old Order step (flow reorder: Order now happens
+  // BEFORE Motion, so format — which depends on whether any frame uses
+  // Kling — can only be correctly decided once motion assignment for
+  // THIS render is actually done, not before it).
+  const hasKling = frames.some(f => f.motion === "kling");
+  const formatRow = document.getElementById("formatRow");
+  const note = document.getElementById("formatNote");
+  let selectedFormats = window._selectedFormats || (hasKling ? ["16x9"] : ["16x9","9x16"]);
+  window._selectedFormats = selectedFormats;
+
+  formatRow.innerHTML = `
+    <button class="format-btn ${selectedFormats.includes('16x9')?'active':''}" onclick="toggleFormat('16x9', ${hasKling})">16:9</button>
+    <button class="format-btn ${selectedFormats.includes('9x16')?'active':''}" ${hasKling ? 'disabled' : ''} onclick="toggleFormat('9x16', ${hasKling})">9:16</button>
+  `;
+  note.textContent = hasKling
+    ? "AI Motion videos deliver in a single format — Kling's camera composition can't be safely auto-cropped to a second aspect ratio."
+    : "Ken Burns videos can deliver both formats at no extra cost — 9:16 is a clean crop of the same render.";
+
+  // NEW (audio build) — populate the music/narration pickers ONCE. This
+  // function re-runs every time this step is (re)entered, and rebuilding
+  // <select> options unconditionally would silently reset whatever the
+  // user already picked. Guarding on childElementCount means the
+  // dropdowns are built the first time only; onchange updates
+  // window._musicStyle/_voiceKey directly from then on (see
+  // updateAudioSelection), never by re-running this function.
+  const musicSelect = document.getElementById("musicSelect");
+  if (musicSelect && musicSelect.childElementCount === 0) {
+    musicSelect.innerHTML = MUSIC_LIBRARY.map(m => `<option value="${m.key}">${m.label}</option>`).join("");
+    window._musicStyle = MUSIC_LIBRARY[0].key;
+  }
+  const narrationSelect = document.getElementById("narrationSelect");
+  if (narrationSelect && narrationSelect.childElementCount === 0) {
+    narrationSelect.innerHTML = NARRATION_VOICES.map(v => `<option value="${v.key}">${v.label}</option>`).join("");
+    window._voiceKey = "";
+    updateAudioSelection();
+  }
 }
 
 // NOTE: room tagging now happens exclusively in Step 1 (updatePhotoRoom)
@@ -1091,6 +1128,7 @@ function closeLightbox() {
   // Controls inside the lightbox can change room/motion state — refresh
   // whichever step is currently behind it so nothing looks stale.
   if (!document.getElementById("stepUpload").classList.contains("hidden")) renderUpload();
+  if (!document.getElementById("stepOrder").classList.contains("hidden")) renderOrderStep();
   if (!document.getElementById("stepMotion").classList.contains("hidden")) renderMotionStep();
 }
 
@@ -1199,49 +1237,15 @@ function renderOrderStep() {
          ondragend="this.classList.remove('drag-ghost')"
          ondragover="event.preventDefault()"
          ondrop="handleDrop(event, ${f.id})">
-      <div class="order-thumb">
+      <div class="order-thumb frame-thumb-clickable" onclick="openLightbox(${f.id})">
         <img src="${f.dataUrl}" alt="">
         <div class="order-num-badge">${i+1}</div>
       </div>
       <div class="order-info">
         <div class="order-room">${displayRoomName(f)}</div>
-        <div class="order-motion">${f.motion === 'kling' ? (KLING_PRESETS[f.preset]?.label || 'AI Motion — no preset') : (KEN_BURNS_PRESETS[f.kenBurnsPreset || 'auto'].label)}</div>
       </div>
     </div>
   `).join("");
-
-  const hasKling = frames.some(f => f.motion === "kling");
-  const formatRow = document.getElementById("formatRow");
-  const note = document.getElementById("formatNote");
-  let selectedFormats = window._selectedFormats || (hasKling ? ["16x9"] : ["16x9","9x16"]);
-  window._selectedFormats = selectedFormats;
-
-  formatRow.innerHTML = `
-    <button class="format-btn ${selectedFormats.includes('16x9')?'active':''}" onclick="toggleFormat('16x9', ${hasKling})">16:9</button>
-    <button class="format-btn ${selectedFormats.includes('9x16')?'active':''}" ${hasKling ? 'disabled' : ''} onclick="toggleFormat('9x16', ${hasKling})">9:16</button>
-  `;
-  note.textContent = hasKling
-    ? "AI Motion videos deliver in a single format — Kling's camera composition can't be safely auto-cropped to a second aspect ratio."
-    : "Ken Burns videos can deliver both formats at no extra cost — 9:16 is a clean crop of the same render.";
-
-  // NEW (audio build) — populate the music/narration pickers ONCE. This
-  // function re-runs every time Step 3 is (re)entered (goToStep(3) calls
-  // it), and rebuilding <select> options unconditionally would silently
-  // reset whatever the user already picked. Guarding on childElementCount
-  // means the dropdowns are built the first time only; onchange updates
-  // window._musicStyle/_voiceKey directly from then on (see
-  // updateAudioSelection), never by re-running this function.
-  const musicSelect = document.getElementById("musicSelect");
-  if (musicSelect && musicSelect.childElementCount === 0) {
-    musicSelect.innerHTML = MUSIC_LIBRARY.map(m => `<option value="${m.key}">${m.label}</option>`).join("");
-    window._musicStyle = MUSIC_LIBRARY[0].key;
-  }
-  const narrationSelect = document.getElementById("narrationSelect");
-  if (narrationSelect && narrationSelect.childElementCount === 0) {
-    narrationSelect.innerHTML = NARRATION_VOICES.map(v => `<option value="${v.key}">${v.label}</option>`).join("");
-    window._voiceKey = "";
-    updateAudioSelection();
-  }
 }
 
 // Reads the current dropdown values into window state and updates the
@@ -1272,12 +1276,12 @@ function updateAudioSelection() {
 }
 
 function toggleFormat(fmt, hasKling) {
-  if (hasKling) { window._selectedFormats = [fmt]; renderOrderStep(); return; }
+  if (hasKling) { window._selectedFormats = [fmt]; renderMotionStep(); return; }
   let sel = window._selectedFormats || [];
   sel = sel.includes(fmt) ? sel.filter(x => x !== fmt) : [...sel, fmt];
   if (sel.length === 0) sel = [fmt];
   window._selectedFormats = sel;
-  renderOrderStep();
+  renderMotionStep();
 }
 
 function handleDrop(e, targetId) {

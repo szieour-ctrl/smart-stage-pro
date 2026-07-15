@@ -74,6 +74,66 @@
 const https = require("https");
 const crypto = require("crypto");
 
+// SCOPED EXCEPTION (July 2026 — signed-delivery security fix): this file
+// otherwise follows the native-https-only rule (no SDK imports), but
+// minting Cloudinary's authenticated-delivery signed URLs uses a specific
+// HMAC/encoding scheme that's easy to get subtly wrong by hand and fails
+// silently (video just won't play, no error surfaced) if it's off by even
+// one byte. Confirmed with Sam this is worth a narrow exception — the
+// Cloudinary SDK is used ONLY for signVideoUrl() below, nowhere else in
+// this file. Every other Cloudinary interaction in this codebase (see
+// upload-staged.js) stays on the native-https signing pattern.
+const cloudinary = require("cloudinary").v2;
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key:    process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
+// ── signVideoUrl — mints a short-lived signed URL for an authenticated-
+// type Cloudinary video asset. rawUrl is the stored secure_url from
+// uploadToCloudinary() (Railway side) — it's inert on its own now (401s
+// without a signature), so every consumer needs to pass it through this
+// first. Extracts the public_id + format from the stored URL rather than
+// requiring a schema change to store public_id separately.
+//
+// expirySeconds: how long the minted URL stays valid — deliberately
+// different per caller (see each call site):
+//   - live preview (getJobStatus):      1 hour
+//   - download response:                24 hours
+//   - compliance page:                  7 days (page itself re-renders
+//                                        fresh on every visit — see
+//                                        compliance-page.js's own
+//                                        Cache-Control: no-store, so this
+//                                        ceiling is a backstop, not the
+//                                        thing actually protecting users
+//                                        from a stale link)
+function signVideoUrl(rawUrl, expirySeconds) {
+  if (!rawUrl) return null;
+  try {
+    // rawUrl looks like:
+    // https://res.cloudinary.com/<cloud>/video/authenticated/v<version>/<folder>/<public_id>.<ext>
+    const match = rawUrl.match(/\/authenticated\/(?:v(\d+)\/)?(.+)\.(\w+)$/);
+    if (!match) {
+      console.error(`signVideoUrl: could not parse public_id out of ${rawUrl}`);
+      return null;
+    }
+    const [, version, publicId, format] = match;
+    return cloudinary.url(publicId, {
+      resource_type: "video",
+      type: "authenticated",
+      format,
+      version: version || undefined,
+      sign_url: true,
+      secure: true,
+      expires_at: Math.floor(Date.now() / 1000) + expirySeconds,
+    });
+  } catch (err) {
+    console.error(`signVideoUrl failed for ${rawUrl}:`, err.message);
+    return null;
+  }
+}
+
 // ── SUPABASE HELPER (same pattern as project-manage.js) ──────────────────
 
 function supabase(method, table, body, queryParams = "") {
@@ -1418,11 +1478,70 @@ async function consumeVideoQuotaSlot(userId) {
 // consume a quota slot, in that order — see inline comments for why that
 // order specifically.
 
+// Fire-and-forget Pabbly delivery email — same body shape/pattern as the
+// version this replaces in video-notify.js, just triggered from a
+// different, later moment (see downloadVideoJob's header comment for why).
+// A Pabbly outage here must never fail the download response itself — the
+// charge has already succeeded by the time this runs, so the user has
+// genuinely paid and gotten their result either way.
+function triggerPabblyDelivery({ jobId, userId, listingId, output16x9Url, output9x16Url }) {
+  (async () => {
+    try {
+      const [userRes, listingRes] = await Promise.all([
+        supabase("GET", "users", null, `?id=eq.${userId}&select=email,full_name`),
+        listingId
+          ? supabase("GET", "listings", null, `?id=eq.${listingId}&select=address`)
+          : Promise.resolve({ data: [] }),
+      ]);
+      const recipientEmail = userRes.data?.[0]?.email;
+      const recipientName  = userRes.data?.[0]?.full_name || "";
+      const address         = listingRes.data?.[0]?.address || "";
+
+      if (!recipientEmail) {
+        console.warn(`Video job ${jobId}: no email on file for user ${userId} — delivery email skipped.`);
+        return;
+      }
+      if (!process.env.PABBLY_VIDEO_DELIVERY_WEBHOOK_URL) return;
+
+      // 30-day signed URLs — this link has to survive being opened long
+      // after the fact (email, not a live session), unlike the 1hr/24hr
+      // windows used elsewhere in this file.
+      const pabblyUrl = new URL(process.env.PABBLY_VIDEO_DELIVERY_WEBHOOK_URL);
+      const pabblyBody = JSON.stringify({
+        jobId,
+        recipientEmail,
+        recipientName,
+        propertyAddress: address,
+        output16x9Url: signVideoUrl(output16x9Url, 60 * 60 * 24 * 30),
+        output9x16Url: signVideoUrl(output9x16Url, 60 * 60 * 24 * 30),
+        deliveredAt: new Date().toISOString(),
+      });
+      await new Promise((resolve) => {
+        const req = https.request({
+          hostname: pabblyUrl.hostname,
+          path:     pabblyUrl.pathname + pabblyUrl.search,
+          method:   "POST",
+          headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(pabblyBody) },
+        }, (res) => { res.on("data", () => {}); res.on("end", resolve); });
+        req.on("error", (err) => {
+          console.error(`Video job ${jobId}: Pabbly delivery webhook failed (non-fatal): ${err.message}`);
+          resolve();
+        });
+        req.write(pabblyBody);
+        req.end();
+      });
+      console.log(`Video job ${jobId}: Pabbly delivery email triggered for ${recipientEmail}.`);
+    } catch (err) {
+      console.error(`Video job ${jobId}: Pabbly delivery lookup/send error (non-fatal): ${err.message}`);
+    }
+  })();
+}
+
 async function downloadVideoJob({ jobId, userId }) {
   if (!jobId || !userId) throw new Error("Missing jobId or userId");
 
   const jobRes = await supabase("GET", "video_jobs", null,
-    `?id=eq.${jobId}&select=id,user_id,status,output_16x9_url,output_9x16_url,credits_used,credits_charged_at`
+    `?id=eq.${jobId}&select=id,user_id,status,output_16x9_url,output_9x16_url,credits_used,credits_charged_at,listing_id`
   );
   const job = jobRes.data?.[0];
 
@@ -1430,13 +1549,16 @@ async function downloadVideoJob({ jobId, userId }) {
   if (job.user_id !== userId) return { error: "forbidden" };
   if (job.status !== "complete") return { error: "not_ready", status: job.status };
 
-  // Already charged — idempotent, just hand back the URLs again. No debit,
-  // no quota consumption — both already happened on the first download.
+  // Already charged — idempotent, just hand back fresh signed URLs again.
+  // No debit, no quota consumption, no Pabbly re-send — all of that
+  // already happened on the first download. Signed fresh every call
+  // (not cached) since a re-download request might come well after the
+  // first one's 24-hour window expired.
   if (job.credits_charged_at) {
     return {
       downloadReady: true,
-      output16x9Url: job.output_16x9_url,
-      output9x16Url: job.output_9x16_url,
+      output16x9Url: signVideoUrl(job.output_16x9_url, 60 * 60 * 24),
+      output9x16Url: signVideoUrl(job.output_9x16_url, 60 * 60 * 24),
     };
   }
 
@@ -1461,10 +1583,25 @@ async function downloadVideoJob({ jobId, userId }) {
     `?id=eq.${jobId}`
   );
 
-  return {
-    downloadReady: true,
+  // CHANGE (July 2026 — signed-delivery security fix): Pabbly delivery
+  // moved here from video-notify.js's render-complete handler. This is
+  // the first point a real download charge has actually succeeded —
+  // firing the email here (instead of at render-complete, before any
+  // payment) closes the same pre-payment-link-exposure gap the raw
+  // preview URL had. Fire-and-forget — never blocks or fails the
+  // download response itself.
+  triggerPabblyDelivery({
+    jobId,
+    userId,
+    listingId: job.listing_id,
     output16x9Url: job.output_16x9_url,
     output9x16Url: job.output_9x16_url,
+  });
+
+  return {
+    downloadReady: true,
+    output16x9Url: signVideoUrl(job.output_16x9_url, 60 * 60 * 24),
+    output9x16Url: signVideoUrl(job.output_9x16_url, 60 * 60 * 24),
   };
 }
 
@@ -1545,28 +1682,37 @@ async function quoteGeneration({ jobId, userId, frames, wantsNarration }) {
 // ── ACTION: STATUS ───────────────────────────────────────────────────────
 
 async function getJobStatus(jobId) {
-  // CHANGE (July 10, 2026): output_16x9_url/output_9x16_url ARE now
-  // included here, reversing the earlier design. That earlier version's
-  // reasoning doesn't hold anymore: the Kling charge now happens at
-  // Generate (see calculateKlingCharge + its call site in
-  // createVideoJob/regenerateVideoJob), not at Download — so by the time a
-  // job reaches "complete," the real cost has already been paid. Gating
-  // the video itself behind Download no longer protects any actual
-  // revenue; Download is a separate, smaller flat fee for formal
-  // export/delivery/compliance-page-attachment, not for "unlocking"
-  // content that's already been paid for.
+  // CHANGE (July 10, 2026): output_16x9_url/output_9x16_url ARE included
+  // here, by design — the Kling charge happens at Generate, not Download
+  // (see calculateKlingCharge), so by the time a job reaches "complete,"
+  // the real cost is already paid. Gating the video behind Download
+  // doesn't protect revenue; Download is a separate flat fee for formal
+  // export/compliance-page-attachment, not for "unlocking" paid-for
+  // content. The point of showing the real video here is letting the
+  // user genuinely watch what they got and decide Download vs. Iterate
+  // BEFORE committing — iterating loses frame selection/ordering/motion
+  // assignments, so that decision needs the real result. No watermark —
+  // Sam's explicit call, no separate "free draft" tier for video.
   //
-  // The actual purpose of showing the real video here: let the user
-  // genuinely watch what they got and decide whether to Download or
-  // Iterate BEFORE committing — iterating from scratch loses the frame
-  // selection/ordering/motion assignments, so that decision needs the
-  // real result, not a thumbnail, to be meaningful. No watermark — Sam's
-  // explicit call, since there's no separate "free draft" to protect
-  // here the way there is for staged images.
+  // CHANGE (July 2026 — signed-delivery security fix): the DB still
+  // stores the raw (now type:authenticated, inert-on-its-own) Cloudinary
+  // URL. What actually goes out over the wire here is a freshly minted
+  // 1-hour signed URL — long enough to cover one real viewing session,
+  // short enough that a URL grabbed out of dev tools or a saved network
+  // log is dead well before it could be reused later. This is what
+  // closes the gap the raw-URL version had without undoing the July 10
+  // decision above: the user still watches the real, full result live.
   const r = await supabase("GET", "video_jobs", null,
     `?id=eq.${jobId}&select=id,status,thumbnail_url,output_16x9_url,output_9x16_url,credits_used,credits_charged_at,generation_count,kling_images_charged,narration_script,error_message,created_at,completed_at`
   );
-  return r.data?.[0] || null;
+  const job = r.data?.[0];
+  if (!job) return null;
+
+  return {
+    ...job,
+    output_16x9_url: signVideoUrl(job.output_16x9_url, 60 * 60),
+    output_9x16_url: signVideoUrl(job.output_9x16_url, 60 * 60),
+  };
 }
 
 // ── HANDLER ──────────────────────────────────────────────────────────────

@@ -312,10 +312,21 @@ async function addImage(projectId, imageData, userId, ab723Prompt, env) {
         // rather than removed, since the column itself may still be read
         // elsewhere (e.g. compliance audit reports) and NULL could break
         // a report expecting a number.
+        // FIX (Sam's feedback, real render — gallery labels showing
+        // staging-process text like "Clean & Staged Room" instead of the
+        // real room for nearly every staged photo): room_type was never
+        // written here at all, only mode (the staging PROCESS) was — so
+        // even after fixing the read side (getFramesForListing's SELECT,
+        // a few files over), this column would've stayed NULL for every
+        // row regardless. imageEntry.roomName (set above) already holds
+        // the real human-readable room label from Smart Stage PRO's own
+        // staging flow — just was never carried into this specific
+        // compliance-record insert.
         const imgResult = await supabase("POST", "staged_images", {
           listing_id:             listingId,
           user_id:                userId,
           mode:                   imageData.mode || imageEntry.tier,
+          room_type:              imageEntry.roomName || null,
           ab723_prompt:           ab723Prompt    || imageData.ab723Prompt || "",
           cloudinary_original_url: imageData.originalUrl || null,
           cloudinary_staged_url:   imageData.stagedUrl   || null,

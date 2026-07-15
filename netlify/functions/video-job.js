@@ -556,22 +556,9 @@ async function resolveNarrationBilling({ userId, existingFreeUsed, wantsNarratio
 // comment in the schema for the full reasoning.
 
 async function getFramesForListing(listingId) {
-  // FIX (Sam's feedback, real render — gallery labels showing "Clean &
-  // Staged Room" / "Staged Room" for nearly every photo): this query
-  // never selected room_type at all — only `mode` (the staging PROCESS:
-  // vacant_stage/clean_and_stage/etc.), which is why humanizeRoomType on
-  // the frontend always fell through to its mode-based fallback label,
-  // regardless of what room the photo actually shows. Adding room_type
-  // here, mapped the same way externalFrames already correctly does a
-  // few lines below.
-  //
-  // ASSUMPTION FLAGGED: room_type is the column name used here because
-  // it matches external_photos' own column exactly (see the query right
-  // below) — but I haven't verified staged_images actually has a column
-  // by this exact name. If it's named differently, this SELECT will
-  // fail loudly (Supabase errors on an unknown column) rather than
-  // silently misbehaving, so it'll be obvious immediately on first
-  // deploy if the name needs correcting.
+  // room_type column added to staged_images July 15, 2026 (confirmed via
+  // direct schema inspection this time, not guessed) — selecting and
+  // mapping it the same way external_photos already does below.
   const [stagedResult, externalResult] = await Promise.all([
     supabase("GET", "staged_images", null,
       `?listing_id=eq.${listingId}&select=id,mode,room_type,cloudinary_original_url,cloudinary_staged_url,created_at&order=created_at.asc`
@@ -581,7 +568,22 @@ async function getFramesForListing(listingId) {
     ),
   ]);
 
-  const stagedFrames = (stagedResult.data || []).map(row => ({
+  // DEFENSIVE (added after a real break — an unverified column name in
+  // this query's select= param caused Supabase to return an error object
+  // instead of rows, and (stagedResult.data || []).map threw on it,
+  // surfacing a raw JS TypeError directly to the user in the photo
+  // picker with no useful explanation. Guarding on both status and
+  // Array.isArray now — any future query issue (bad column, timeout,
+  // Supabase outage) degrades to an empty gallery with a real server-
+  // side log to debug from, instead of breaking the whole step.
+  if (stagedResult.status !== 200 || !Array.isArray(stagedResult.data)) {
+    console.error(`getFramesForListing: staged_images query failed for listing ${listingId} — status ${stagedResult.status}:`, stagedResult.data);
+  }
+  if (externalResult.status !== 200 || !Array.isArray(externalResult.data)) {
+    console.error(`getFramesForListing: external_photos query failed for listing ${listingId} — status ${externalResult.status}:`, externalResult.data);
+  }
+
+  const stagedFrames = (Array.isArray(stagedResult.data) ? stagedResult.data : []).map(row => ({
     id:            row.id,
     source:        "staged",
     mode:           row.mode,
@@ -592,7 +594,7 @@ async function getFramesForListing(listingId) {
     createdAt:      row.created_at,
   }));
 
-  const externalFrames = (externalResult.data || []).map(row => ({
+  const externalFrames = (Array.isArray(externalResult.data) ? externalResult.data : []).map(row => ({
     id:            row.id,
     source:        "external",
     imageUrl:       row.image_url,

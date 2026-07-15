@@ -5,6 +5,48 @@
 const { getStore } = require("@netlify/blobs");
 const https = require("https");
 
+// SCOPED EXCEPTION (July 2026 — signed-delivery security fix): same
+// narrow exception as video-job.js's signVideoUrl — see that file's
+// header comment for the full reasoning. Duplicated here rather than
+// imported as a shared module, matching this codebase's existing pattern
+// of duplicating small cross-function helpers (see video-notify.js's
+// callDebitCredit comment for the precedent).
+const cloudinary = require("cloudinary").v2;
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key:    process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
+// 7-day ceiling. This page re-renders fresh on every real visit (see
+// htmlHeaders' Cache-Control: no-store below), so in practice a visitor
+// always gets a freshly minted URL — this expiry is a backstop against
+// an edge case (a visitor leaving the tab open for an unusually long
+// single session), not the thing actually keeping links current.
+function signVideoUrl(rawUrl) {
+  if (!rawUrl) return null;
+  try {
+    const match = rawUrl.match(/\/authenticated\/(?:v(\d+)\/)?(.+)\.(\w+)$/);
+    if (!match) {
+      console.error(`compliance-page signVideoUrl: could not parse public_id out of ${rawUrl}`);
+      return null;
+    }
+    const [, version, publicId, format] = match;
+    return cloudinary.url(publicId, {
+      resource_type: "video",
+      type: "authenticated",
+      format,
+      version: version || undefined,
+      sign_url: true,
+      secure: true,
+      expires_at: Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 7,
+    });
+  } catch (err) {
+    console.error(`compliance-page signVideoUrl failed for ${rawUrl}:`, err.message);
+    return null;
+  }
+}
+
 // ── VIDEO TOUR DATA (read-only, server-side, service-role) ──────────────
 // Reads video_jobs + video_job_frames directly from Supabase. This is safe
 // to do unauthenticated-public, unlike video-job.js's own status/download
@@ -58,7 +100,16 @@ async function getDisclosedVideoJobs(projectId) {
         "video_job_frames",
         `?job_id=eq.${job.id}&select=image_url,before_url,is_before_after,room_type,motion_preset,sequence_order&order=sequence_order.asc`
       );
-      return { ...job, frames: framesResult.data || [] };
+      return {
+        ...job,
+        // CHANGE (July 2026 — signed-delivery security fix): outputs are
+        // now Cloudinary type:authenticated — the raw stored URL 401s on
+        // its own. Sign here, once, right after fetch, so renderPage()
+        // downstream never has to think about it.
+        output_16x9_url: signVideoUrl(job.output_16x9_url),
+        output_9x16_url: signVideoUrl(job.output_9x16_url),
+        frames: framesResult.data || [],
+      };
     })
   );
 

@@ -2461,7 +2461,7 @@ function renderRoomQueue(){
         return '';
       }).join('');
       return `<div class="room-card is-exterior" id="card-${room.id}">
-        <div class="room-card-header"><img class="room-card-thumb" src="${orig.dataUrl}" onclick="openLightbox('${room.id}')" title="Click to set Shot Focus" />
+        <div class="room-card-header room-card-header-split"><img class="room-card-thumb" src="${orig.dataUrl}" onclick="openLightbox('${room.id}')" title="Click to set Shot Focus" />
         <div class="room-card-info" style="cursor:pointer;" onclick="openRoomWorkspace('${room.id}')"><div class="room-card-name">${room.roomName} <span class="ext-badge">Exterior</span>${zoneBadgeHtml(room)} ${stageBadgeHtml(room)}</div>${sfBadge}
         <div class="room-card-status" style="color:var(--sky);">Select enhancements · Click photo to set Shot Focus · Click here for results</div></div>
         <div class="room-card-actions">${runBtn}${modeToggle}</div></div>

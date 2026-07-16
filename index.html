@@ -205,7 +205,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
 /* Lightbox — Refine Image (Free Revision + Presets) */
 .lb-refine-textarea{width:100%;min-height:140px;border:1px solid var(--border);border-radius:4px;padding:12px 14px;font-family:'DM Sans',sans-serif;font-size:0.92rem;color:var(--ink);background:var(--cream);resize:vertical;line-height:1.5;}
 .lb-refine-textarea:focus{outline:none;border-color:var(--gold);}
-.lb-elaborate-row{display:flex;align-items:center;gap:10px;margin-top:8px;flex-wrap:wrap;}
+.lb-elaborate-row{display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap;}
 .lb-elaborate-btn{background:var(--warm);border:1px solid var(--gold);border-radius:4px;padding:6px 12px;font-size:0.8rem;font-weight:600;color:var(--ink);cursor:pointer;transition:all 0.15s;}
 .lb-elaborate-btn:hover:not(:disabled){background:var(--gold);color:#fff;}
 .lb-elaborate-btn:disabled{opacity:0.6;cursor:default;}
@@ -532,6 +532,8 @@ const SINGLE_ROOM_OPTIONS = [
   "Bedroom 4 || bedroom",
   "Kids Room || kidsroom",
   "Primary Bath / Bathroom || bathroom",
+  "Bathroom 2 || bathroom",
+  "Bathroom 3 || bathroom",
   "Powder Room || powderroom",
   "Walk-In Closet || walkincloset",
 
@@ -2082,11 +2084,11 @@ function renderRefineBody(){
     const enh = _lbEnhId ? EXT_ENHANCEMENTS.find(e=>e.id===_lbEnhId) : null;
     const placeholder = enh ? 'Revision — e.g. "more dramatic lighting, add potted plants at entry"' : 'Revision — e.g. "warmer lighting, less furniture, match great room sofa"';
     const existingNote = enh ? (room?.extSelections?.[_lbEnhId]?.iterationNote||'') : (room?.iterationNote||'');
-    body.innerHTML=`<textarea class="lb-refine-textarea" id="lb-refine-textarea" placeholder='${placeholder}'>${existingNote}</textarea>
-      <div class="lb-elaborate-row">
+    body.innerHTML=`<div class="lb-elaborate-row">
         <button class="lb-elaborate-btn" id="lb-elaborate-btn" onclick="elaborateRefineNote()">&#10024; Elaborate with AI</button>
         <span class="lb-elaborate-hint">This is an experimental AI writing aid and won't always get it right.</span>
-      </div>`;
+      </div>
+      <textarea class="lb-refine-textarea" id="lb-refine-textarea" placeholder='${placeholder}'>${existingNote}</textarea>`;
     saveBtn.textContent='Re-Stage Draft →';
     saveBtn.setAttribute('onclick','submitRefineRevision()');
   } else {

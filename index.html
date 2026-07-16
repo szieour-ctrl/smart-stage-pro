@@ -205,6 +205,11 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
 /* Lightbox — Refine Image (Free Revision + Presets) */
 .lb-refine-textarea{width:100%;min-height:140px;border:1px solid var(--border);border-radius:4px;padding:12px 14px;font-family:'DM Sans',sans-serif;font-size:0.92rem;color:var(--ink);background:var(--cream);resize:vertical;line-height:1.5;}
 .lb-refine-textarea:focus{outline:none;border-color:var(--gold);}
+.lb-elaborate-row{display:flex;align-items:center;gap:10px;margin-top:8px;flex-wrap:wrap;}
+.lb-elaborate-btn{background:var(--warm);border:1px solid var(--gold);border-radius:4px;padding:6px 12px;font-size:0.8rem;font-weight:600;color:var(--ink);cursor:pointer;transition:all 0.15s;}
+.lb-elaborate-btn:hover:not(:disabled){background:var(--gold);color:#fff;}
+.lb-elaborate-btn:disabled{opacity:0.6;cursor:default;}
+.lb-elaborate-hint{font-size:0.7rem;color:var(--muted);}
 .lb-preset-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
 @media(max-width:580px){.lb-preset-grid{grid-template-columns:1fr;}}
 .lb-preset-card{border:1px solid var(--border);border-radius:5px;padding:12px;cursor:pointer;background:#fff;transition:all 0.15s;}
@@ -2077,7 +2082,11 @@ function renderRefineBody(){
     const enh = _lbEnhId ? EXT_ENHANCEMENTS.find(e=>e.id===_lbEnhId) : null;
     const placeholder = enh ? 'Revision — e.g. "more dramatic lighting, add potted plants at entry"' : 'Revision — e.g. "warmer lighting, less furniture, match great room sofa"';
     const existingNote = enh ? (room?.extSelections?.[_lbEnhId]?.iterationNote||'') : (room?.iterationNote||'');
-    body.innerHTML=`<textarea class="lb-refine-textarea" id="lb-refine-textarea" placeholder='${placeholder}'>${existingNote}</textarea>`;
+    body.innerHTML=`<textarea class="lb-refine-textarea" id="lb-refine-textarea" placeholder='${placeholder}'>${existingNote}</textarea>
+      <div class="lb-elaborate-row">
+        <button class="lb-elaborate-btn" id="lb-elaborate-btn" onclick="elaborateRefineNote()">&#10024; Elaborate with AI</button>
+        <span class="lb-elaborate-hint">This is an experimental AI writing aid and won't always get it right.</span>
+      </div>`;
     saveBtn.textContent='Re-Stage Draft →';
     saveBtn.setAttribute('onclick','submitRefineRevision()');
   } else {
@@ -2118,6 +2127,44 @@ function clearRefinePreset(){
 // room.declutteredBase64 being present). Calling the wrong one always fails:
 // reStageRoom() on a directly-staged room hits its declutteredBase64 guard
 // every time, with no possible state change between retries.
+async function elaborateRefineNote(){
+  const textarea = document.getElementById('lb-refine-textarea');
+  const note = textarea?.value?.trim() || '';
+  if(!note){ showToast('Type a quick note first — then Elaborate expands it.','error'); return; }
+
+  const roomId=_lbRoomId.replace('__refine__:','');
+  const room=SESSION.rooms.find(r=>r.id===roomId);
+  const i = SESSION.intake || {};
+  const btn = document.getElementById('lb-elaborate-btn');
+  const originalBtnText = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = 'Elaborating&hellip;';
+
+  try {
+    const res = await fetch('/.netlify/functions/elaborate-refine-note', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        note,
+        roomName: room?.roomName || 'this room',
+        designStyle: i.style_label || 'Organic Modern',
+        colorPalette: i.palette_label || 'Warm Neutrals',
+        furnishingsDNA: SESSION.stagingDNA?.overallStyle || null,
+      })
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) {
+      showToast(data.error || 'Elaborate failed — your original note is unchanged.', 'error');
+      return;
+    }
+    if (textarea) textarea.value = data.elaborated;
+  } catch(e) {
+    showToast('Elaborate failed — your original note is unchanged.', 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = originalBtnText;
+  }
+}
 async function submitRefineRevision(){
   const roomId=_lbRoomId.replace('__refine__:','');
   const note=document.getElementById('lb-refine-textarea')?.value?.trim()||'';

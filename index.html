@@ -1919,15 +1919,32 @@ function openLightbox(roomId){
     </div>`;
 
   // Session Design DNA (read-only) — same chip styling as the Session Design DNA panel
-  const i = SESSION.intake || {};
-  const DNA_KEYS=[{key:'buyer_label',label:'Buyer Profile'},{key:'feeling_label',label:'Desired Feeling'},{key:'style_label',label:'Design Style'},{key:'intensity_label',label:'Staging Level'},{key:'palette_label',label:'Color Direction'}];
-  const dnaHtml = `
-    <div class="lb-section-label" style="margin-top:16px;">Session Design DNA</div>
-    <div class="summary-grid" style="margin-top:8px;">
-      ${DNA_KEYS.map(s=>`<div class="summary-chip"><div class="summary-chip-label">${s.label}</div><div class="summary-chip-val">${escHtml(i[s.key]||'—')}</div></div>`).join('')}
-    </div>`;
+  // EXCEPT for exterior rooms: DNA (buyer profile, design style, etc.) doesn't apply to
+  // exterior enhancements at all, so show the enhancement checkboxes here instead —
+  // this is the lightbox users land in from clicking the thumbnail, and Sam wants the
+  // enhancement options reachable from here rather than only the separate workspace modal.
+  let secondSectionHtml;
+  if (room.isExterior) {
+    const opts = EXT_ENHANCEMENTS.map(enh => {
+      const sel = !!room.extSelections[enh.id];
+      return `<div class="ext-option ${sel?'selected':''}" onclick="toggleExtSelection('${room.id}','${enh.id}')">
+        <input type="checkbox" ${sel?'checked':''} onclick="event.stopPropagation();toggleExtSelection('${room.id}','${enh.id}')" />
+        <div><div class="ext-option-label">${enh.icon} ${enh.label}</div><div class="ext-option-desc">${enh.desc}</div></div></div>`;
+    }).join('');
+    secondSectionHtml = `
+      <div class="lb-section-label" style="margin-top:16px;">Choose Exterior Enhancements — Multiple Allowed</div>
+      <div class="ext-options" style="margin-top:8px;">${opts}</div>`;
+  } else {
+    const i = SESSION.intake || {};
+    const DNA_KEYS=[{key:'buyer_label',label:'Buyer Profile'},{key:'feeling_label',label:'Desired Feeling'},{key:'style_label',label:'Design Style'},{key:'intensity_label',label:'Staging Level'},{key:'palette_label',label:'Color Direction'}];
+    secondSectionHtml = `
+      <div class="lb-section-label" style="margin-top:16px;">Session Design DNA</div>
+      <div class="summary-grid" style="margin-top:8px;">
+        ${DNA_KEYS.map(s=>`<div class="summary-chip"><div class="summary-chip-label">${s.label}</div><div class="summary-chip-val">${escHtml(i[s.key]||'—')}</div></div>`).join('')}
+      </div>`;
+  }
 
-  document.getElementById('lb-mode-body').innerHTML = roomLabelHtml + dnaHtml;
+  document.getElementById('lb-mode-body').innerHTML = roomLabelHtml + secondSectionHtml;
 
   document.getElementById('lightbox-footer-save').style.display='none';
   document.getElementById('lightbox-footer-cancel').textContent='Close';
@@ -2313,6 +2330,14 @@ function toggleExtSelection(roomId,enhId){
   if(room.extSelections[enhId])delete room.extSelections[enhId];
   else room.extSelections[enhId]={status:'pending',base64:null,finalBase64:null,finalStatus:null};
   renderRoomQueue();
+  // NEW — if this toggle happened from inside the Shot Focus/DNA lightbox
+  // (which now shows enhancement checkboxes for exterior rooms), refresh
+  // that lightbox's own body too — renderRoomQueue() only updates the
+  // cards behind it, so without this the checkbox would visually stay
+  // stale in the lightbox even though the underlying selection changed.
+  if (!document.getElementById('lightbox').classList.contains('hidden') && _lbRoomId === roomId && room.isExterior) {
+    openLightbox(roomId);
+  }
 }
 
 // ══════════════════════════════════════════

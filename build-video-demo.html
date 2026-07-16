@@ -145,6 +145,11 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
 .lightbox-img-wrap{background:var(--ink);display:flex;align-items:center;justify-content:center;max-height:60vh;overflow:hidden;}
 .lightbox-img-wrap img{width:100%;max-height:60vh;object-fit:contain;display:block;}
 .lightbox-close{position:absolute;top:14px;right:14px;width:32px;height:32px;border-radius:50%;background:rgba(26,23,20,0.7);color:#fff;border:none;font-size:1rem;cursor:pointer;z-index:2;}
+.lightbox-topbar{display:flex;justify-content:flex-start;align-items:center;margin-bottom:12px;padding-right:44px;}
+.lightbox-nav{display:flex;gap:8px;}
+.lightbox-nav-btn{background:var(--warm);border:1px solid var(--border);border-radius:4px;padding:6px 12px;font-size:0.8rem;font-weight:600;color:var(--ink);cursor:pointer;transition:all 0.15s;}
+.lightbox-nav-btn:hover:not(:disabled){background:var(--gold);color:#fff;}
+.lightbox-nav-btn:disabled{opacity:0.35;cursor:default;}
 .lightbox-body{padding:18px 20px;position:relative;}
 .lightbox-body .panel-sub{margin-bottom:14px;}
 
@@ -305,7 +310,13 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
   <div class="lightbox-box">
     <div class="lightbox-img-wrap"><img id="lightboxImg" src="" alt=""></div>
     <div class="lightbox-body">
-      <button class="lightbox-close" onclick="closeLightbox()">&times;</button>
+      <div class="lightbox-topbar">
+        <div class="lightbox-nav">
+          <button class="lightbox-nav-btn" id="lightboxPrevBtn" onclick="navigateLightbox(-1)">&larr; Prev</button>
+          <button class="lightbox-nav-btn" id="lightboxNextBtn" onclick="navigateLightbox(1)">Next &rarr;</button>
+        </div>
+        <button class="lightbox-close" onclick="closeLightbox()">&times;</button>
+      </div>
       <div id="lightboxControls"></div>
     </div>
   </div>
@@ -1141,7 +1152,28 @@ function openLightbox(id) {
   const f = frames.find(x => x.id === id);
   document.getElementById("lightboxImg").src = f.dataUrl;
   renderLightboxControls(id);
+  updateLightboxNavButtons();
   document.getElementById("lightboxOverlay").classList.remove("hidden");
+}
+
+// NEW — Prev/Next navigation (Sam's request: assigning motion for 20
+// photos shouldn't mean open → select → close → repeat every time).
+// Moves through the SAME frames array/order the lightbox was opened
+// from — Order step and Motion step both iterate this same array, so
+// "next" always means "the next one in whatever order is currently
+// showing," matching what the user sees behind the lightbox.
+function navigateLightbox(direction) {
+  const currentIndex = frames.findIndex(f => f.id === lightboxFrameId);
+  if (currentIndex === -1) return;
+  const nextIndex = currentIndex + direction;
+  if (nextIndex < 0 || nextIndex >= frames.length) return;
+  openLightbox(frames[nextIndex].id);
+}
+
+function updateLightboxNavButtons() {
+  const currentIndex = frames.findIndex(f => f.id === lightboxFrameId);
+  document.getElementById("lightboxPrevBtn").disabled = (currentIndex <= 0);
+  document.getElementById("lightboxNextBtn").disabled = (currentIndex === -1 || currentIndex >= frames.length - 1);
 }
 
 function closeLightbox() {

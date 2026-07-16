@@ -20,9 +20,10 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
 .demo-banner{background:var(--ink);color:var(--warm);font-size:0.7rem;letter-spacing:0.08em;text-transform:uppercase;text-align:center;padding:8px 12px;}
 .demo-banner b{color:var(--gold-light);}
 
-.app-header{display:flex;align-items:baseline;justify-content:space-between;padding:24px 0 18px;border-bottom:1px solid var(--border);margin-bottom:20px;}
-.app-title{font-family:'Cormorant Garamond',serif;font-size:1.5rem;font-weight:500;letter-spacing:0.01em;}
+.app-header{display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;row-gap:12px;padding:24px 0 18px;border-bottom:1px solid var(--border);margin-bottom:20px;}
+.app-title{font-family:'Cormorant Garamond',serif;font-size:1.5rem;font-weight:500;letter-spacing:0.01em;white-space:nowrap;flex-shrink:0;}
 .app-title em{color:var(--gold);font-style:normal;}
+.app-header-chips{display:flex;gap:8px;flex-wrap:wrap;}
 .balance-chip{font-size:0.78rem;color:var(--muted);background:#fff;border:1px solid var(--border);border-radius:20px;padding:5px 14px;white-space:nowrap;}
 .balance-chip b{color:var(--ink);font-weight:600;}
 
@@ -199,8 +200,10 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
   <div class="app-header">
     <a href="/" class="btn btn-ghost" style="text-decoration:none;flex:none;padding:6px 12px;font-size:0.78rem;" title="Back to Smart Stage PRO">&larr; Back to PRO</a>
     <div class="app-title">Smart Stage <em>PRO Plus</em></div>
-    <div class="balance-chip">Balance: <b id="balanceDisplay">&hellip;</b> Images</div>
-    <div class="balance-chip" id="klingPoolChip">Kling Pool: <b id="klingPoolDisplay">&hellip;</b></div>
+    <div class="app-header-chips">
+      <div class="balance-chip">Balance: <b id="balanceDisplay">&hellip;</b> Images</div>
+      <div class="balance-chip" id="klingPoolChip">Kling Pool: <b id="klingPoolDisplay">&hellip;</b></div>
+    </div>
   </div>
 
   <div class="steps">

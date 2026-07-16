@@ -76,6 +76,17 @@
 
 [functions."upscale-image"]
   timeout = 60
+  # FIX (Sam's report — 502/OOM on interior Generate Final, exterior
+  # worked fine): confirmed via real Netlify function logs — every
+  # failure hit exactly ~1022MB (the 1024MB default memory ceiling) while
+  # successful runs only needed 278-305MB. This specific interior image's
+  # actual decoded pixel dimensions (not necessarily its compressed file
+  # size, which looked similar to the successful cases) genuinely need
+  # more headroom than the default provides. Sharp/libvips memory usage
+  # scales with the image's real pixel count, not its JPEG file size —
+  # two images can compress to a similar KB size while having very
+  # different native resolutions depending on visual complexity.
+  memory = 3008
 
 [functions."upload-original"]
   timeout = 20

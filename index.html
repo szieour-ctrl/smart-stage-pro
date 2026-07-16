@@ -2465,9 +2465,8 @@ function renderRoomQueue(){
         <div class="room-card-info" style="cursor:pointer;" onclick="openRoomWorkspace('${room.id}')"><div class="room-card-name">${room.roomName} <span class="ext-badge">Exterior</span>${zoneBadgeHtml(room)} ${stageBadgeHtml(room)}</div>${sfBadge}
         <div class="room-card-status" style="color:var(--sky);">Select enhancements · Click photo to set Shot Focus · Click here for results</div></div>
         <div class="room-card-actions">${runBtn}${modeToggle}</div></div>
-        <div class="ext-panel"><div class="ext-panel-title">Choose Exterior Enhancements — Multiple Allowed</div>
-        <div class="ext-options">${opts}</div></div></div>
-        ${roomWorkspaceModal(room, enhResults)}`;
+        ${roomWorkspaceModal(room, `<div class="ext-panel"><div class="ext-panel-title">Choose Exterior Enhancements — Multiple Allowed</div>
+        <div class="ext-options">${opts}</div></div>${enhResults}`)}`;
     }
 
     // ── DECLUTTER ONLY ──

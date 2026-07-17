@@ -2265,16 +2265,26 @@ async function triggerOutroFrameGeneration(roomId) {
     const jobId = `outro_${roomId}_${Date.now()}`;
     const imageBase64 = orig.dataUrl.split(',')[1]; // strip the data:image/...;base64, prefix
 
-    await fetch('/.netlify/functions/generate-outro-frame-background', {
+    const triggerRes = await fetch('/.netlify/functions/generate-outro-frame-background', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ jobId, imageBase64, address, ctaText })
     });
 
+    // NEW — was fire-and-forget, never checked whether this actually
+    // started. A 404/500 here (function not deployed yet, bad request)
+    // used to fail completely silently: the UI would show "Generating…"
+    // and poll forever with zero indication anything was wrong.
+    if (!triggerRes.ok) {
+      const errText = await triggerRes.text().catch(() => '');
+      throw new Error(`Trigger request failed (${triggerRes.status}): ${errText.slice(0, 200)}`);
+    }
+
     pollOutroFrameJob(jobId, btn, resultDiv);
   } catch (e) {
     btn.disabled = false;
     btn.textContent = 'Generate Outro End Frame';
+    resultDiv.innerHTML = `<div style="color:var(--muted);font-size:12px;">Failed to start: ${escHtml(e.message || 'unknown error')}</div>`;
     showToast('Outro frame generation failed to start.', 'error');
   }
 }
@@ -2292,6 +2302,14 @@ async function pollOutroFrameJob(jobId, btn, resultDiv, attempt) {
     const data = await res.json();
 
     if (data.status === 'pending') {
+      const stageLabels = {
+        not_started: 'Starting\u2026',
+        received: 'Request received\u2026',
+        calling_openai: 'Applying photographic treatment (GPT Image)\u2026',
+        compositing: 'Adding address &amp; CTA\u2026',
+        unknown: 'Working\u2026',
+      };
+      btn.textContent = stageLabels[data.stage] || 'Generating\u2026';
       setTimeout(() => pollOutroFrameJob(jobId, btn, resultDiv, attempt + 1), 3000);
       return;
     }

@@ -19,10 +19,10 @@ exports.handler = async (event) => {
     const result = await store.get(jobId, { type: "json" });
 
     if (!result) {
-      return { statusCode: 200, headers, body: JSON.stringify({ status: "pending" }) };
+      return { statusCode: 200, headers, body: JSON.stringify({ status: "pending", stage: "not_started" }) };
     }
     if (result.status === "processing") {
-      return { statusCode: 200, headers, body: JSON.stringify({ status: "pending" }) };
+      return { statusCode: 200, headers, body: JSON.stringify({ status: "pending", stage: result.stage || "unknown" }) };
     }
 
     return { statusCode: 200, headers, body: JSON.stringify(result) };

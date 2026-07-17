@@ -1946,20 +1946,7 @@ function openLightbox(roomId){
       </div>`;
   }
 
-  // NEW (July 16, 2026 — Sam's idea): Outro End Frame generator, available
-  // from this same lightbox for ANY room's photo, interior or exterior.
-  // Triggers generate-outro-frame-background.js (GPT Image photographic
-  // treatment, no text) + guaranteed-accurate SVG text compositing on
-  // top — polled via check-outro-frame.js, same pattern as the existing
-  // staging background-job flow.
-  const outroFrameHtml = `
-    <div class="lb-section-label" style="margin-top:20px;">Outro End Frame</div>
-    <div class="panel-sub" style="margin-top:4px;margin-bottom:10px;">Use this photo as your video's closing frame — a cinematic treatment with your address and CTA, ready to add as the last photo in PRO Plus. <strong>Best practice:</strong> an exterior or curb-appeal shot tends to make the strongest closer, but any photo works.</div>
-    <input type="text" id="outro-cta-input" placeholder="Schedule Your Private Showing" value="Schedule Your Private Showing" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:4px;font-size:13px;margin-bottom:8px;" />
-    <button class="btn-ghost" id="outro-generate-btn" onclick="triggerOutroFrameGeneration('${room.id}')" style="width:100%;">Generate Outro End Frame</button>
-    <div id="outro-frame-result" style="margin-top:10px;"></div>`;
-
-  document.getElementById('lb-mode-body').innerHTML = roomLabelHtml + secondSectionHtml + outroFrameHtml;
+  document.getElementById('lb-mode-body').innerHTML = roomLabelHtml + secondSectionHtml;
 
   document.getElementById('lightbox-footer-save').style.display='none';
   document.getElementById('lightbox-footer-cancel').textContent='Close';
@@ -2242,97 +2229,6 @@ async function submitRefinePreset(){
 
 function setLightboxExample(el){document.getElementById('lightbox-input').value=el.textContent;}
 function closeLightbox(){document.getElementById('lightbox').classList.add('hidden');_lbRoomId=null;_lbMode=null;_lbZones=[];_lbFlexNote='';_lbSingleVal='';_lbPresetKey=null;_lbRefineTab='revise';_lbEnhId=null;}
-
-// NEW (July 16, 2026 — Outro End Frame): triggers the GPT Image
-// treatment + text-compositing background job, then polls for the
-// result the same way the existing staging flow already does.
-async function triggerOutroFrameGeneration(roomId) {
-  const room = SESSION.rooms.find(r => r.id === roomId);
-  const orig = SESSION.originals.find(o => o.id === room?.originalId);
-  if (!room || !orig) return;
-
-  const address = SESSION.projectAddress || '';
-  if (!address) { showToast('No property address on this session — cannot generate an outro frame without one.', 'error'); return; }
-
-  const ctaText = document.getElementById('outro-cta-input')?.value?.trim() || 'Schedule Your Private Showing';
-  const btn = document.getElementById('outro-generate-btn');
-  const resultDiv = document.getElementById('outro-frame-result');
-  btn.disabled = true;
-  btn.textContent = 'Generating\u2026 (this can take up to a minute)';
-  resultDiv.innerHTML = '';
-
-  try {
-    const jobId = `outro_${roomId}_${Date.now()}`;
-    const imageBase64 = orig.dataUrl.split(',')[1]; // strip the data:image/...;base64, prefix
-
-    const triggerRes = await fetch('/.netlify/functions/generate-outro-frame-background', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ jobId, imageBase64, address, ctaText })
-    });
-
-    // NEW — was fire-and-forget, never checked whether this actually
-    // started. A 404/500 here (function not deployed yet, bad request)
-    // used to fail completely silently: the UI would show "Generating…"
-    // and poll forever with zero indication anything was wrong.
-    if (!triggerRes.ok) {
-      const errText = await triggerRes.text().catch(() => '');
-      throw new Error(`Trigger request failed (${triggerRes.status}): ${errText.slice(0, 200)}`);
-    }
-
-    pollOutroFrameJob(jobId, btn, resultDiv);
-  } catch (e) {
-    btn.disabled = false;
-    btn.textContent = 'Generate Outro End Frame';
-    resultDiv.innerHTML = `<div style="color:var(--muted);font-size:12px;">Failed to start: ${escHtml(e.message || 'unknown error')}</div>`;
-    showToast('Outro frame generation failed to start.', 'error');
-  }
-}
-
-async function pollOutroFrameJob(jobId, btn, resultDiv, attempt) {
-  attempt = attempt || 0;
-  if (attempt > 40) { // ~2 minutes at 3s intervals — generous for a GPT Image call, matches this codebase's existing polling ceiling conventions
-    btn.disabled = false;
-    btn.textContent = 'Generate Outro End Frame';
-    resultDiv.innerHTML = '<div style="color:var(--muted);font-size:12px;">Timed out — try again.</div>';
-    return;
-  }
-  try {
-    const res = await fetch(`/.netlify/functions/check-outro-frame?jobId=${jobId}`);
-    const data = await res.json();
-
-    if (data.status === 'pending') {
-      const stageLabels = {
-        not_started: 'Starting\u2026',
-        received: 'Request received\u2026',
-        calling_openai: 'Applying photographic treatment (GPT Image)\u2026',
-        compositing: 'Adding address &amp; CTA\u2026',
-        unknown: 'Working\u2026',
-      };
-      btn.textContent = stageLabels[data.stage] || 'Generating\u2026';
-      setTimeout(() => pollOutroFrameJob(jobId, btn, resultDiv, attempt + 1), 3000);
-      return;
-    }
-    if (data.status === 'error') {
-      btn.disabled = false;
-      btn.textContent = 'Generate Outro End Frame';
-      resultDiv.innerHTML = `<div style="color:var(--muted);font-size:12px;">Generation failed: ${escHtml(data.error || 'unknown error')}</div>`;
-      return;
-    }
-
-    // done
-    btn.disabled = false;
-    btn.textContent = 'Generate Outro End Frame';
-    const dataUrl = `data:image/png;base64,${data.outroFrameBase64}`;
-    resultDiv.innerHTML = `
-      <img src="${dataUrl}" style="width:100%;border-radius:4px;margin-bottom:8px;" />
-      <a href="${dataUrl}" download="SmartStage_OutroFrame.png" class="btn-ghost" style="display:block;text-align:center;width:100%;">\u2193 Download Outro End Frame</a>`;
-  } catch (e) {
-    console.error('pollOutroFrameJob fetch/parse error:', e.message, e);
-    btn.textContent = `Checking status\u2026 (attempt ${attempt + 1}, having trouble reaching the server)`;
-    setTimeout(() => pollOutroFrameJob(jobId, btn, resultDiv, attempt + 1), 3000);
-  }
-}
 
 // Save handler for the mapping lightbox (Open Plan / Single Room / Exterior — no Shot Focus)
 function saveLbMapping(){

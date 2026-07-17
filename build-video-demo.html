@@ -202,7 +202,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
     <div class="app-title">Smart Stage <em>PRO Plus</em></div>
     <div class="app-header-chips">
       <div class="balance-chip">Balance: <b id="balanceDisplay">&hellip;</b> Images</div>
-      <div class="balance-chip" id="klingPoolChip">Kling Pool: <b id="klingPoolDisplay">&hellip;</b></div>
+      <div class="balance-chip" id="klingPoolChip">AI Motion Pool: <b id="klingPoolDisplay">&hellip;</b></div>
     </div>
   </div>
 
@@ -228,7 +228,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
         <input type="file" id="fileInput" accept="image/*" multiple>
         <div class="upload-zone-icon">&#128193;</div>
         <div class="upload-zone-text">Drop photos here or click to browse</div>
-        <div class="upload-zone-hint">From your device — these are tagged "Professional Photography," no Kling before/after option.</div>
+        <div class="upload-zone-hint">From your device — these are tagged "Professional Photography," no AI Motion before/after option.</div>
       </div>
     </div>
     <div class="thumb-grid" id="thumbGrid"></div>
@@ -258,7 +258,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
     <div class="panel-pad" style="padding-bottom:0;">
       <div class="eyebrow">Step 3</div>
       <div class="panel-title">Assign room &amp; motion</div>
-      <div class="panel-sub">Tag each photo's room, then choose Ken Burns or AI Motion (Kling). Kling frames are free while your monthly pool lasts, then billed in Images — see the pool count in the header.</div>
+      <div class="panel-sub">Tag each photo's room, then choose Ken Burns or AI Motion. AI Motion frames are free while your monthly pool lasts, then billed in Images — see the pool count in the header.</div>
     </div>
     <div id="motionList"></div>
     <div class="count-bar" id="klingCountBar"></div>
@@ -420,14 +420,14 @@ const KLING_PRESETS = {
   // "the image moving, not the camera" in real footage testing), so a video
   // with multiple rooms needs real preset variety to avoid every room
   // reading as the same 2-3 moves repeated.
-  cinematic_push: { label: "Cinematic Push", desc: "Kling-quality dolly push toward the room's focal point — deeper, more natural depth-of-field than Ken Burns push_in.", eligibility: "single_or_pair" },
+  cinematic_push: { label: "Cinematic Push", desc: "A cinematic dolly push toward the room's focal point — deeper, more natural depth-of-field than Ken Burns push_in.", eligibility: "single_or_pair" },
   luxury_drift: { label: "Luxury Drift", desc: "Slow, elegant lateral drift across the room with real parallax between foreground and background.", eligibility: "single_or_pair" },
   floating_camera_drift: { label: "Floating Camera Drift", desc: "Gentle floating/breathing motion, as if suspended weightlessly in the room — subtler than a directional pan.", eligibility: "single_or_pair" },
   parallax_push: { label: "Parallax Push", desc: "Push-in with foreground elements moving faster than background — real dimensional depth, not just zoom.", eligibility: "single_or_pair" },
   architectural_glide: { label: "Architectural Glide", desc: "Smooth lateral glide along a hallway or open-plan sightline, emphasizing flow between spaces.", eligibility: "single_or_pair" },
   crane_up: { label: "Crane Up", desc: "Rising, slightly-tilting reveal of the upper room — ceiling, chandelier, fan, high windows. The interior counterpart to Drone Boom-Up.", eligibility: "single_or_pair" },
   crane_down: { label: "Crane Down", desc: "Descending, slightly-tilting reveal of the lower room — flooring, tilework, a rug.", eligibility: "single_or_pair" },
-  room_reveal: { label: "Room Reveal", desc: "Slow pull-back widening to show more of the already-visible room. Single-image use requires an exterior room for now — for interior, use with a real before/after pair (Kling has two known images to work from rather than inferring the wider view from one).", eligibility: "exterior_or_pair" },
+  room_reveal: { label: "Room Reveal", desc: "Slow pull-back widening to show more of the already-visible room. Single-image use requires an exterior room for now — for interior, use with a real before/after pair (AI Motion has two known images to work from rather than inferring the wider view from one).", eligibility: "exterior_or_pair" },
 
   // ── Pending your Playground verification (per your own flag on these
   // three) — single-image interior use is intentionally not offered yet,
@@ -991,7 +991,7 @@ function renderMotionStep() {
         ) : ""}
         <div class="motion-toggle">
           <button class="motion-btn kenburns ${f.motion==='kenburns'?'active kenburns':''}" onclick="setMotion(${f.id}, 'kenburns')">Ken Burns</button>
-          <button class="motion-btn kling ${f.motion==='kling'?'active kling':''}" onclick="setMotion(${f.id}, 'kling')">AI Motion (Kling)</button>
+          <button class="motion-btn kling ${f.motion==='kling'?'active kling':''}" onclick="setMotion(${f.id}, 'kling')">AI Motion</button>
         </div>
 
         ${f.motion === 'kenburns' ? `
@@ -1049,7 +1049,7 @@ function renderMotionStep() {
     <button class="format-btn ${selectedFormats.includes('9x16')?'active':''}" ${hasKling ? 'disabled' : ''} onclick="toggleFormat('9x16', ${hasKling})">9:16</button>
   `;
   note.textContent = hasKling
-    ? "AI Motion videos deliver in a single format — Kling's camera composition can't be safely auto-cropped to a second aspect ratio."
+    ? "AI Motion videos deliver in a single format — AI Motion's camera composition can't be safely auto-cropped to a second aspect ratio."
     : "Ken Burns videos can deliver both formats at no extra cost — 9:16 is a clean crop of the same render.";
 
   // NEW (audio build) — populate the music/narration pickers ONCE. This
@@ -1216,7 +1216,7 @@ function renderLightboxControls(id) {
       <div class="panel-sub" style="margin-bottom:10px;">${displayRoomName(f)} — ${f.isExterior ? "Exterior" : "Interior"}</div>
       <div class="motion-toggle">
         <button class="motion-btn kenburns ${f.motion==='kenburns'?'active kenburns':''}" onclick="setMotion(${f.id}, 'kenburns'); renderLightboxControls(${f.id});">Ken Burns</button>
-        <button class="motion-btn kling ${f.motion==='kling'?'active kling':''}" onclick="setMotion(${f.id}, 'kling'); renderLightboxControls(${f.id});">AI Motion (Kling)</button>
+        <button class="motion-btn kling ${f.motion==='kling'?'active kling':''}" onclick="setMotion(${f.id}, 'kling'); renderLightboxControls(${f.id});">AI Motion</button>
       </div>
       ${f.motion === 'kenburns' ? `
         <select class="preset-select" onchange="setKenBurnsPreset(${f.id}, this.value)">
@@ -1418,9 +1418,9 @@ async function renderConfirmStep() {
 
   let rows = "";
   if (quote.klingFrameCount > 0) {
-    rows += `<div class="cost-line muted"><span>Monthly Kling Motion Pool remaining (before this)</span><span class="val">${quote.poolRemainingBefore} of ${quote.poolLimit}</span></div>`;
+    rows += `<div class="cost-line muted"><span>Monthly AI Motion Pool remaining (before this)</span><span class="val">${quote.poolRemainingBefore} of ${quote.poolLimit}</span></div>`;
     rows += `<div class="cost-line muted"><span>Frames covered by pool</span><span class="val">${quote.framesFromPool} free</span></div>`;
-    rows += `<div class="cost-line"><span>Billable Kling frames (${quote.billableKlingFrames} \u00d7 ${KLING_IMAGE_COST_PER_FRAME} Images)</span><span class="val">${quote.klingImageCost} Images</span></div>`;
+    rows += `<div class="cost-line"><span>Billable AI Motion frames (${quote.billableKlingFrames} \u00d7 ${KLING_IMAGE_COST_PER_FRAME} Images)</span><span class="val">${quote.klingImageCost} Images</span></div>`;
   } else {
     rows += `<div class="cost-line muted"><span>No AI Motion frames in this video</span><span class="val">0 Images</span></div>`;
   }
@@ -1506,7 +1506,7 @@ async function handleGenerate() {
     // how many were billed in Images, plus the video-creation count only
     // on a first generation (regenerate never touches that counter).
     const poolLine = data.klingFramesFromPool > 0
-      ? `${data.klingFramesFromPool} Kling frame${data.klingFramesFromPool===1?"":"s"} covered by this month's free pool.<br>`
+      ? `${data.klingFramesFromPool} AI Motion frame${data.klingFramesFromPool===1?"":"s"} covered by this month's free pool.<br>`
       : "";
     const billedLine = data.klingImagesCharged > 0
       ? `${data.klingImagesCharged} Images charged.<br>`
@@ -1527,7 +1527,7 @@ async function handleGenerate() {
     document.getElementById("resultContent").innerHTML = `
       <div class="result-icon">&#9203;</div>
       <div class="result-title">Rendering your video \u2014 generation #${generationCount}</div>
-      <div class="result-body">${poolLine}${billedLine}${narrationLine}${quotaLine}Real renders typically take a few minutes depending on frame count and how many are Kling. No more Images are charged until Download.</div>
+      <div class="result-body">${poolLine}${billedLine}${narrationLine}${quotaLine}Real renders typically take a few minutes depending on frame count and how many use AI Motion. No more Images are charged until Download.</div>
     `;
     pollJobStatus(data.jobId);
   } catch (err) {
@@ -1622,7 +1622,7 @@ function showRenderComplete(job) {
       ? `<video id="renderCompleteVideo" src="${videoUrl}" controls controlsList="nodownload noplaybackrate noremoteplayback" disablePictureInPicture disableRemotePlayback oncontextmenu="return false;" autoplay muted playsinline style="width:100%;max-width:480px;border-radius:4px;margin:12px 0;background:#000;"></video>`
       : (job.thumbnail_url ? `<img src="${job.thumbnail_url}" alt="Preview thumbnail" style="max-width:100%;border-radius:4px;margin:12px 0;">` : "")}
     ${narrationBlock}
-    <div class="result-body">Watch it back \u2014 the Kling cost above is already spent (or drawn from this month's free pool), and ${quotaLine}take your time deciding. Download is a separate flat fee for the formal export: it locks this in and adds it to your AB 723 compliance page, but never touches your monthly video count. If you Iterate instead, this same shared monthly Kling pool applies again \u2014 frames are free if you still have pool balance left, billed in Images once it's gone, exactly like a first generation. Iterating does NOT add to your monthly video count, since it's a redo of this same video, not a new one. The current result is replaced, not kept alongside the new one.</div>
+    <div class="result-body">Watch it back \u2014 the AI Motion cost above is already spent (or drawn from this month's free pool), and ${quotaLine}take your time deciding. Download is a separate flat fee for the formal export: it locks this in and adds it to your AB 723 compliance page, but never touches your monthly video count. If you Iterate instead, this same shared monthly AI Motion pool applies again \u2014 frames are free if you still have pool balance left, billed in Images once it's gone, exactly like a first generation. Iterating does NOT add to your monthly video count, since it's a redo of this same video, not a new one. The current result is replaced, not kept alongside the new one.</div>
     <div style="margin-top:18px;display:flex;gap:10px;justify-content:center;">
       <button class="btn btn-ghost" style="flex:none;" onclick="resetDemo()">Start over</button>
       <button class="btn btn-ghost" style="flex:none;" onclick="handleIterate()">Iterate this video</button>
@@ -1730,7 +1730,7 @@ async function refreshBalanceDisplay() {
       parts.push(`${data.videoQuotaUsed} of ${data.videoQuotaLimit} monthly videos`);
     }
     if (typeof data.klingPoolUsed === "number" && typeof data.klingPoolLimit === "number") {
-      parts.push(`${Math.max(0, data.klingPoolLimit - data.klingPoolUsed)} of ${data.klingPoolLimit} free Kling frames left`);
+      parts.push(`${Math.max(0, data.klingPoolLimit - data.klingPoolUsed)} of ${data.klingPoolLimit} free AI Motion frames left`);
     }
     const quotaPillEl = document.getElementById("quotaPill");
     if (parts.length && quotaPillEl) quotaPillEl.textContent = parts.join(" \u00b7 ");

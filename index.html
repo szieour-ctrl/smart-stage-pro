@@ -2328,6 +2328,8 @@ async function pollOutroFrameJob(jobId, btn, resultDiv, attempt) {
       <img src="${dataUrl}" style="width:100%;border-radius:4px;margin-bottom:8px;" />
       <a href="${dataUrl}" download="SmartStage_OutroFrame.png" class="btn-ghost" style="display:block;text-align:center;width:100%;">\u2193 Download Outro End Frame</a>`;
   } catch (e) {
+    console.error('pollOutroFrameJob fetch/parse error:', e.message, e);
+    btn.textContent = `Checking status\u2026 (attempt ${attempt + 1}, having trouble reaching the server)`;
     setTimeout(() => pollOutroFrameJob(jobId, btn, resultDiv, attempt + 1), 3000);
   }
 }

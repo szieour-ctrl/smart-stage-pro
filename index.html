@@ -1204,6 +1204,7 @@ async function lookupOrCreateProject(address) {
           <div style="margin-top:8px;display:flex;gap:16px;align-items:center;flex-wrap:wrap;">
             <a href="${data.complianceUrl}" target="_blank" style="color:var(--gold);font-size:11px;">View Compliance Page →</a>
             <a href="/.netlify/functions/generate-qr?complianceUrl=${encodeURIComponent(data.complianceUrl)}&address=${encodeURIComponent(address)}&projectId=${data.projectId}" download style="color:var(--muted);font-size:11px;">↓ Download Marketing QR</a>
+            <a href="/.netlify/functions/generate-closing-card?address=${encodeURIComponent(address)}&projectId=${data.projectId}" download style="color:var(--muted);font-size:11px;">↓ Download Video Closing Card</a>
           </div>
         </div>`;
     } else {
@@ -1280,6 +1281,7 @@ async function createNewProject(address) {
         <div style="margin-top:8px;display:flex;gap:16px;align-items:center;flex-wrap:wrap;">
           <a href="${data.complianceUrl}" target="_blank" style="color:var(--gold);font-size:11px;">View Compliance Page →</a>
           <a href="/.netlify/functions/generate-qr?complianceUrl=${encodeURIComponent(data.complianceUrl)}&address=${encodeURIComponent(address)}&projectId=${data.projectId}" download style="color:var(--muted);font-size:11px;">↓ Download Marketing QR</a>
+            <a href="/.netlify/functions/generate-closing-card?address=${encodeURIComponent(address)}&projectId=${data.projectId}" download style="color:var(--muted);font-size:11px;">↓ Download Video Closing Card</a>
         </div>
       </div>`;
 
@@ -1944,7 +1946,20 @@ function openLightbox(roomId){
       </div>`;
   }
 
-  document.getElementById('lb-mode-body').innerHTML = roomLabelHtml + secondSectionHtml;
+  // NEW (July 16, 2026 — Sam's idea): Outro End Frame generator, available
+  // from this same lightbox for ANY room's photo, interior or exterior.
+  // Triggers generate-outro-frame-background.js (GPT Image photographic
+  // treatment, no text) + guaranteed-accurate SVG text compositing on
+  // top — polled via check-outro-frame.js, same pattern as the existing
+  // staging background-job flow.
+  const outroFrameHtml = `
+    <div class="lb-section-label" style="margin-top:20px;">Outro End Frame</div>
+    <div class="panel-sub" style="margin-top:4px;margin-bottom:10px;">Use this photo as your video's closing frame — a cinematic treatment with your address and CTA, ready to add as the last photo in PRO Plus. <strong>Best practice:</strong> an exterior or curb-appeal shot tends to make the strongest closer, but any photo works.</div>
+    <input type="text" id="outro-cta-input" placeholder="Schedule Your Private Showing" value="Schedule Your Private Showing" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:4px;font-size:13px;margin-bottom:8px;" />
+    <button class="btn-ghost" id="outro-generate-btn" onclick="triggerOutroFrameGeneration('${room.id}')" style="width:100%;">Generate Outro End Frame</button>
+    <div id="outro-frame-result" style="margin-top:10px;"></div>`;
+
+  document.getElementById('lb-mode-body').innerHTML = roomLabelHtml + secondSectionHtml + outroFrameHtml;
 
   document.getElementById('lightbox-footer-save').style.display='none';
   document.getElementById('lightbox-footer-cancel').textContent='Close';
@@ -2227,6 +2242,77 @@ async function submitRefinePreset(){
 
 function setLightboxExample(el){document.getElementById('lightbox-input').value=el.textContent;}
 function closeLightbox(){document.getElementById('lightbox').classList.add('hidden');_lbRoomId=null;_lbMode=null;_lbZones=[];_lbFlexNote='';_lbSingleVal='';_lbPresetKey=null;_lbRefineTab='revise';_lbEnhId=null;}
+
+// NEW (July 16, 2026 — Outro End Frame): triggers the GPT Image
+// treatment + text-compositing background job, then polls for the
+// result the same way the existing staging flow already does.
+async function triggerOutroFrameGeneration(roomId) {
+  const room = SESSION.rooms.find(r => r.id === roomId);
+  const orig = SESSION.originals.find(o => o.id === room?.originalId);
+  if (!room || !orig) return;
+
+  const address = SESSION.projectAddress || '';
+  if (!address) { showToast('No property address on this session — cannot generate an outro frame without one.', 'error'); return; }
+
+  const ctaText = document.getElementById('outro-cta-input')?.value?.trim() || 'Schedule Your Private Showing';
+  const btn = document.getElementById('outro-generate-btn');
+  const resultDiv = document.getElementById('outro-frame-result');
+  btn.disabled = true;
+  btn.textContent = 'Generating\u2026 (this can take up to a minute)';
+  resultDiv.innerHTML = '';
+
+  try {
+    const jobId = `outro_${roomId}_${Date.now()}`;
+    const imageBase64 = orig.dataUrl.split(',')[1]; // strip the data:image/...;base64, prefix
+
+    await fetch('/.netlify/functions/generate-outro-frame-background', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jobId, imageBase64, address, ctaText })
+    });
+
+    pollOutroFrameJob(jobId, btn, resultDiv);
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = 'Generate Outro End Frame';
+    showToast('Outro frame generation failed to start.', 'error');
+  }
+}
+
+async function pollOutroFrameJob(jobId, btn, resultDiv, attempt) {
+  attempt = attempt || 0;
+  if (attempt > 40) { // ~2 minutes at 3s intervals — generous for a GPT Image call, matches this codebase's existing polling ceiling conventions
+    btn.disabled = false;
+    btn.textContent = 'Generate Outro End Frame';
+    resultDiv.innerHTML = '<div style="color:var(--muted);font-size:12px;">Timed out — try again.</div>';
+    return;
+  }
+  try {
+    const res = await fetch(`/.netlify/functions/check-outro-frame?jobId=${jobId}`);
+    const data = await res.json();
+
+    if (data.status === 'pending') {
+      setTimeout(() => pollOutroFrameJob(jobId, btn, resultDiv, attempt + 1), 3000);
+      return;
+    }
+    if (data.status === 'error') {
+      btn.disabled = false;
+      btn.textContent = 'Generate Outro End Frame';
+      resultDiv.innerHTML = `<div style="color:var(--muted);font-size:12px;">Generation failed: ${escHtml(data.error || 'unknown error')}</div>`;
+      return;
+    }
+
+    // done
+    btn.disabled = false;
+    btn.textContent = 'Generate Outro End Frame';
+    const dataUrl = `data:image/png;base64,${data.outroFrameBase64}`;
+    resultDiv.innerHTML = `
+      <img src="${dataUrl}" style="width:100%;border-radius:4px;margin-bottom:8px;" />
+      <a href="${dataUrl}" download="SmartStage_OutroFrame.png" class="btn-ghost" style="display:block;text-align:center;width:100%;">\u2193 Download Outro End Frame</a>`;
+  } catch (e) {
+    setTimeout(() => pollOutroFrameJob(jobId, btn, resultDiv, attempt + 1), 3000);
+  }
+}
 
 // Save handler for the mapping lightbox (Open Plan / Single Room / Exterior — no Shot Focus)
 function saveLbMapping(){

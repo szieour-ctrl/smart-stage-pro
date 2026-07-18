@@ -386,6 +386,17 @@ const KEN_BURNS_PRESETS = {
   drift: { label: "Drift", desc: "Slow diagonal dolly, corner to corner." },
   float: { label: "Float", desc: "Gentle sine-wave breathing motion — wide, MLS-safe." },
   static: { label: "Static", desc: "No motion — maximum clarity for a key MLS shot." },
+  // FIX (July 17, 2026 — real bug, found testing the Reveal Presets card):
+  // luxury_parallax exists in motionRenderer.py and in KLING_PRESETS (as
+  // the Kling continuation beat), but was never added HERE — this dropdown
+  // is the one actual source KEN_BURNS_PRESETS[key] lookups draw from.
+  // REVEAL_PRESETS above lists luxury_parallax as a valid End Motion for
+  // all three reveal presets; without this entry, selecting/rendering it
+  // threw "Cannot read properties of undefined (reading 'label')" inside
+  // renderRevealControls and silently killed the rest of renderMotionStep
+  // (Output Format buttons + Audio dropdowns never got populated either,
+  // since they run after the frame cards in the same function).
+  luxury_parallax: { label: "Luxury Parallax", desc: "Ease-in diagonal settle — a soft, elegant finishing move." },
 };
 
 // Reveal Presets — Ken Burns tier (July 17, 2026). Mirrors REVEAL_PRESETS

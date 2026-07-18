@@ -388,6 +388,36 @@ const KEN_BURNS_PRESETS = {
   static: { label: "Static", desc: "No motion — maximum clarity for a key MLS shot." },
 };
 
+// Reveal Presets — Ken Burns tier (July 17, 2026). Mirrors REVEAL_PRESETS
+// in assemble.js exactly (label + allowedEndMotions) — kept as two
+// separate copies since frontend/backend are two different repos/runtimes,
+// same pattern already used for KEN_BURNS_PRESETS/KLING_PRESETS existing
+// side by side with their backend equivalents. If either side's list
+// changes, update both.
+//
+// No Duration control here on purpose — durations are fixed per-phase
+// (opener 1.5s / wipe 0.4s / continuation 4.0s), not user-selectable.
+// pull_back is never in any allowedEndMotions list — every Reveal Preset
+// opener (soft_hold or restrained_push) reads as forward motion, and a
+// pull_back continuation would reverse that and collide.
+const REVEAL_PRESETS = {
+  classic_reveal: {
+    label: "Classic Reveal",
+    desc: "The room holds, then wipes into the staged version as your chosen End Motion begins.",
+    allowedEndMotions: ["push_in", "pan_left", "pan_right", "tilt_up", "tilt_down", "drift", "float", "luxury_parallax"],
+  },
+  luxury_drift: {
+    label: "Luxury Drift",
+    desc: "The room holds, then reveals center-out into a slow lateral drift across the staged space.",
+    allowedEndMotions: ["drift", "pan_left", "pan_right", "float", "luxury_parallax"],
+  },
+  cinematic_reveal: {
+    label: "Cinematic Reveal",
+    desc: "A gentle push begins on the vacant room, wipes into the staged version, and continues pushing forward.",
+    allowedEndMotions: ["push_in", "pan_left", "pan_right", "tilt_up", "tilt_down", "drift", "float", "luxury_parallax"],
+  },
+};
+
 const KLING_PRESETS = {
   // NEW (July 14, 2026) — this is the FULL "hero shot" Sam described: a
   // real, working backend capability (the vacant→staged Kling morph,
@@ -573,12 +603,28 @@ function buildRealFrame(f) {
     addContinuationMotion:       useAiMotion ? (isHero || !!f.addContinuationMotion) : false,
     continuationPreset:          useAiMotion ? (f.continuationPreset || undefined) : undefined,
     continuationDurationSeconds: useAiMotion ? (f.continuationDurationSeconds || undefined) : undefined,
-    // NEW — the vacant-holds-then-wipes-to-staged Ken Burns reveal is now
-    // a deliberate opt-in (see the before/after-pair conversation), never
-    // automatic just because isBeforeAfter happens to be true. Only
-    // meaningful when NOT using AI Motion (Ken Burns only).
+    // CHANGE (July 17, 2026 — Reveal Presets architecture replaces the old
+    // single useRevealEffect boolean + hardcoded pull_back/push_in wipe).
+    // Only meaningful when NOT using AI Motion (Ken Burns only) AND a real
+    // before/after pair exists — same gating the old useRevealEffect had.
+    // revealPreset selects the opener motion + wipe transition (see
+    // REVEAL_PRESETS above); endMotion is the user's chosen continuation-
+    // phase Ken Burns preset, constrained to that reveal preset's
+    // allowedEndMotions list. Backend (renderPipeline.js) resolves these
+    // into real motionRenderer.py calls — see assemble.js's buildRevealClip.
     useRevealEffect: !useAiMotion ? !!f.useRevealEffect : false,
+    revealPreset: (!useAiMotion && f.useRevealEffect) ? (f.revealPreset || "classic_reveal") : undefined,
+    endMotion: (!useAiMotion && f.useRevealEffect) ? (f.endMotion || defaultEndMotionFor(f.revealPreset || "classic_reveal")) : undefined,
   };
+}
+
+// First allowed End Motion for a given Reveal Preset — used as the
+// fallback default so a frame can never be sent with useRevealEffect=true
+// and no endMotion at all (which would leave renderPipeline.js with
+// nothing to pick a continuation preset from).
+function defaultEndMotionFor(presetKey) {
+  const preset = REVEAL_PRESETS[presetKey];
+  return preset ? preset.allowedEndMotions[0] : "push_in";
 }
 
 let balance = null; // null = not yet loaded — real value comes from action=balance
@@ -952,6 +998,75 @@ function eligiblePresetsFor(frame) {
   });
 }
 
+// Shared between the Motion step card and the Motion Assignment lightbox
+// (matches the mockup: Motion Type toggle, then — only when Room Reveal is
+// selected — Reveal Preset dropdown and End Motion dropdown, filtered to
+// that preset's allowedEndMotions). No Duration control — durations are
+// fixed per-phase server-side, not user-selectable. Only rendered at all
+// when f.motion === 'kenburns' && f.isBeforeAfter, same gating the old
+// single checkbox had (a reveal needs a real before/after pair to wipe
+// between).
+function renderRevealControls(f, refreshFn) {
+  const isReveal = !!f.useRevealEffect;
+  const presetKey = f.revealPreset || "classic_reveal";
+  const preset = REVEAL_PRESETS[presetKey];
+  const endMotion = f.endMotion || defaultEndMotionFor(presetKey);
+
+  const presetOptions = Object.entries(REVEAL_PRESETS)
+    .map(([key, p]) => `<option value="${key}" ${presetKey === key ? "selected" : ""}>${p.label}</option>`).join("");
+
+  const endMotionOptions = preset.allowedEndMotions
+    .map(key => `<option value="${key}" ${endMotion === key ? "selected" : ""}>${KEN_BURNS_PRESETS[key].label}</option>`).join("");
+
+  return `
+    <div class="motion-toggle" style="margin-top:8px;">
+      <button class="motion-btn ${!isReveal ? 'active kenburns' : ''}" onclick="setMotionType(${f.id}, false); ${refreshFn}">Standard Motion</button>
+      <button class="motion-btn ${isReveal ? 'active kling' : ''}" onclick="setMotionType(${f.id}, true); ${refreshFn}">Room Reveal</button>
+    </div>
+    ${isReveal ? `
+      <div class="preset-row" style="margin-top:6px;">
+        <select class="preset-select" onchange="setRevealPreset(${f.id}, this.value); ${refreshFn}">
+          ${presetOptions}
+        </select>
+      </div>
+      <div class="preset-desc">${preset.desc}</div>
+      <div class="preset-row" style="margin-top:6px;">
+        <select class="preset-select" onchange="setEndMotion(${f.id}, this.value); ${refreshFn}">
+          ${endMotionOptions}
+        </select>
+        <button class="preview-btn" onclick="openMotionPreview('${endMotion}', 'kenburns')">&#9654; Preview</button>
+      </div>
+      <div class="preset-desc">End Motion — the camera move that continues after the reveal wipes to the staged room.</div>
+    ` : ""}
+  `;
+}
+
+function setMotionType(id, useReveal) {
+  const f = frames.find(x => x.id === id);
+  f.useRevealEffect = useReveal;
+  if (useReveal) {
+    f.revealPreset = f.revealPreset || "classic_reveal";
+    f.endMotion = f.endMotion || defaultEndMotionFor(f.revealPreset);
+  }
+}
+
+function setRevealPreset(id, presetKey) {
+  const f = frames.find(x => x.id === id);
+  f.revealPreset = presetKey;
+  // Re-clamp endMotion to the new preset's allowed list — a previously
+  // valid choice (e.g. push_in under Classic Reveal) may not be legal
+  // under the newly-selected preset (e.g. Luxury Drift excludes push_in).
+  const preset = REVEAL_PRESETS[presetKey];
+  if (!preset.allowedEndMotions.includes(f.endMotion)) {
+    f.endMotion = preset.allowedEndMotions[0];
+  }
+}
+
+function setEndMotion(id, motionKey) {
+  const f = frames.find(x => x.id === id);
+  f.endMotion = motionKey;
+}
+
 function renderMotionStep() {
   const list = document.getElementById("motionList");
   list.innerHTML = frames.map((f, i) => {
@@ -1002,12 +1117,7 @@ function renderMotionStep() {
             <button class="preview-btn" onclick="openMotionPreview('${f.kenBurnsPreset || 'auto'}', 'kenburns')">&#9654; Preview</button>
           </div>
           <div class="preset-desc">${selectedKenBurnsPreset.desc}</div>
-          ${f.isBeforeAfter ? `
-            <label style="display:flex;align-items:center;gap:6px;font-size:0.76rem;color:var(--muted);margin-top:8px;cursor:pointer;">
-              <input type="checkbox" ${f.useRevealEffect ? "checked" : ""} onchange="toggleRevealEffect(${f.id}, this.checked)" style="accent-color:var(--gold);">
-              Show as a before/after reveal (vacant holds, then wipes to staged) instead of standard motion
-            </label>
-          ` : ""}
+          ${f.isBeforeAfter ? renderRevealControls(f, `renderMotionStep()`) : ""}
         ` : ""}
 
         ${f.motion === 'kling' ? (eligible.length > 0 ? `
@@ -1082,22 +1192,21 @@ function toggleBeforeAfter(id, checked) {
   const f = frames.find(x => x.id === id);
   f.isBeforeAfter = checked;
   if (!checked && f.preset && KLING_PRESETS[f.preset].eligibility.startsWith("pair_required")) f.preset = null;
-  // NEW — if the pair is unchecked, the reveal-effect opt-in no longer
-  // makes sense (it needs a real before image to wipe from), so clear it
-  // rather than leave a stale true value the backend would never see
-  // exposed in the UI again.
-  if (!checked) f.useRevealEffect = false;
+  // If the pair is unchecked, the reveal opt-in no longer makes sense (it
+  // needs a real before image to wipe from) — clear the whole Reveal
+  // Presets state rather than leave stale values the UI would never
+  // expose again.
+  if (!checked) {
+    f.useRevealEffect = false;
+    f.revealPreset = undefined;
+    f.endMotion = undefined;
+  }
   renderMotionStep();
 }
 
-// NEW (found during before/after-pair conversation) — separate, explicit
-// opt-in for the vacant-holds-then-wipes-to-staged Ken Burns treatment.
-// Deliberately never auto-set — see isBeforeAfter's own comment for why.
-function toggleRevealEffect(id, checked) {
-  const f = frames.find(x => x.id === id);
-  f.useRevealEffect = checked;
-  renderMotionStep();
-}
+// toggleRevealEffect removed (July 17, 2026) — superseded by
+// setMotionType/setRevealPreset/setEndMotion (Reveal Presets
+// architecture, see renderRevealControls above).
 
 // NEW (found during audio-build session) — the backend/Railway side of
 // this (addContinuationMotion, continuationPreset, continuationDurationSeconds)
@@ -1223,6 +1332,7 @@ function renderLightboxControls(id) {
           ${Object.entries(KEN_BURNS_PRESETS).map(([key, p]) => `<option value="${key}" ${(f.kenBurnsPreset||'auto')===key?'selected':''}>${p.label}</option>`).join("")}
         </select>
         <div class="preset-desc">${KEN_BURNS_PRESETS[f.kenBurnsPreset || 'auto'].desc}</div>
+        ${f.isBeforeAfter ? renderRevealControls(f, `renderLightboxControls(${f.id})`) : ""}
       ` : (eligible.length > 0 ? `
         <select class="preset-select" onchange="setPreset(${f.id}, this.value); renderLightboxControls(${f.id});">
           <option value="">Choose a movement...</option>

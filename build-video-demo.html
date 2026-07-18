@@ -1009,16 +1009,39 @@ function eligiblePresetsFor(frame) {
   });
 }
 
-// Shared between the Motion step card and the Motion Assignment lightbox
-// (matches the mockup: Motion Type toggle, then — only when Room Reveal is
-// selected — Reveal Preset dropdown and End Motion dropdown, filtered to
-// that preset's allowedEndMotions). No Duration control — durations are
-// fixed per-phase server-side, not user-selectable. Only rendered at all
-// when f.motion === 'kenburns' && f.isBeforeAfter, same gating the old
-// single checkbox had (a reveal needs a real before/after pair to wipe
-// between).
-function renderRevealControls(f, refreshFn) {
+// Shared between the Motion step card and the Motion Assignment lightbox.
+// Split into two pieces (July 17, 2026 fix — see below for why):
+//
+// renderMotionTypeToggle — the Standard Motion / Room Reveal toggle
+// itself. Shown whenever f.isBeforeAfter, regardless of which mode is
+// currently active — this is how the user SWITCHES modes.
+//
+// renderRevealPresetControls — the Reveal Preset + End Motion dropdowns.
+// Shown ONLY when Room Reveal is active. No Duration control — durations
+// are fixed per-phase server-side, not user-selectable.
+//
+// FIX: these used to be one function, and the caller rendered the
+// STANDARD Ken Burns preset dropdown (f.kenBurnsPreset, e.g. "Push In")
+// unconditionally whenever motion==='kenburns', with the reveal controls
+// appended below it. That meant Room Reveal mode showed BOTH the
+// standard preset dropdown AND the reveal controls at once — and the
+// standard dropdown is completely dead in Room Reveal mode (renderPipeline.js's
+// reveal branch never reads frame.kenBurnsPreset; it uses the preset's
+// openerMotion + frame.endMotion instead). Sam's real screenshot showed
+// exactly this confusion. Now the two are mutually exclusive: Standard
+// Motion mode shows the single kenBurnsOptions dropdown, Room Reveal mode
+// shows Reveal Preset + End Motion instead — never both.
+function renderMotionTypeToggle(f, refreshFn) {
   const isReveal = !!f.useRevealEffect;
+  return `
+    <div class="motion-toggle" style="margin-bottom:8px;">
+      <button class="motion-btn ${!isReveal ? 'active kenburns' : ''}" onclick="setMotionType(${f.id}, false); ${refreshFn}">Standard Motion</button>
+      <button class="motion-btn ${isReveal ? 'active kling' : ''}" onclick="setMotionType(${f.id}, true); ${refreshFn}">Room Reveal</button>
+    </div>
+  `;
+}
+
+function renderRevealPresetControls(f, refreshFn) {
   const presetKey = f.revealPreset || "classic_reveal";
   const preset = REVEAL_PRESETS[presetKey];
   const endMotion = f.endMotion || defaultEndMotionFor(presetKey);
@@ -1030,25 +1053,19 @@ function renderRevealControls(f, refreshFn) {
     .map(key => `<option value="${key}" ${endMotion === key ? "selected" : ""}>${KEN_BURNS_PRESETS[key].label}</option>`).join("");
 
   return `
-    <div class="motion-toggle" style="margin-top:8px;">
-      <button class="motion-btn ${!isReveal ? 'active kenburns' : ''}" onclick="setMotionType(${f.id}, false); ${refreshFn}">Standard Motion</button>
-      <button class="motion-btn ${isReveal ? 'active kling' : ''}" onclick="setMotionType(${f.id}, true); ${refreshFn}">Room Reveal</button>
+    <div class="preset-row">
+      <select class="preset-select" onchange="setRevealPreset(${f.id}, this.value); ${refreshFn}">
+        ${presetOptions}
+      </select>
     </div>
-    ${isReveal ? `
-      <div class="preset-row" style="margin-top:6px;">
-        <select class="preset-select" onchange="setRevealPreset(${f.id}, this.value); ${refreshFn}">
-          ${presetOptions}
-        </select>
-      </div>
-      <div class="preset-desc">${preset.desc}</div>
-      <div class="preset-row" style="margin-top:6px;">
-        <select class="preset-select" onchange="setEndMotion(${f.id}, this.value); ${refreshFn}">
-          ${endMotionOptions}
-        </select>
-        <button class="preview-btn" onclick="openMotionPreview('${endMotion}', 'kenburns')">&#9654; Preview</button>
-      </div>
-      <div class="preset-desc">End Motion — the camera move that continues after the reveal wipes to the staged room.</div>
-    ` : ""}
+    <div class="preset-desc">${preset.desc}</div>
+    <div class="preset-row" style="margin-top:6px;">
+      <select class="preset-select" onchange="setEndMotion(${f.id}, this.value); ${refreshFn}">
+        ${endMotionOptions}
+      </select>
+      <button class="preview-btn" onclick="openMotionPreview('${endMotion}', 'kenburns')">&#9654; Preview</button>
+    </div>
+    <div class="preset-desc">End Motion — the camera move that continues after the reveal wipes to the staged room.</div>
   `;
 }
 
@@ -1121,14 +1138,16 @@ function renderMotionStep() {
         </div>
 
         ${f.motion === 'kenburns' ? `
-          <div class="preset-row">
-            <select class="preset-select" onchange="setKenBurnsPreset(${f.id}, this.value)">
-              ${kenBurnsOptions}
-            </select>
-            <button class="preview-btn" onclick="openMotionPreview('${f.kenBurnsPreset || 'auto'}', 'kenburns')">&#9654; Preview</button>
-          </div>
-          <div class="preset-desc">${selectedKenBurnsPreset.desc}</div>
-          ${f.isBeforeAfter ? renderRevealControls(f, `renderMotionStep()`) : ""}
+          ${f.isBeforeAfter ? renderMotionTypeToggle(f, `renderMotionStep()`) : ""}
+          ${(!f.isBeforeAfter || !f.useRevealEffect) ? `
+            <div class="preset-row">
+              <select class="preset-select" onchange="setKenBurnsPreset(${f.id}, this.value)">
+                ${kenBurnsOptions}
+              </select>
+              <button class="preview-btn" onclick="openMotionPreview('${f.kenBurnsPreset || 'auto'}', 'kenburns')">&#9654; Preview</button>
+            </div>
+            <div class="preset-desc">${selectedKenBurnsPreset.desc}</div>
+          ` : renderRevealPresetControls(f, `renderMotionStep()`)}
         ` : ""}
 
         ${f.motion === 'kling' ? (eligible.length > 0 ? `
@@ -1339,11 +1358,13 @@ function renderLightboxControls(id) {
         <button class="motion-btn kling ${f.motion==='kling'?'active kling':''}" onclick="setMotion(${f.id}, 'kling'); renderLightboxControls(${f.id});">AI Motion</button>
       </div>
       ${f.motion === 'kenburns' ? `
-        <select class="preset-select" onchange="setKenBurnsPreset(${f.id}, this.value)">
-          ${Object.entries(KEN_BURNS_PRESETS).map(([key, p]) => `<option value="${key}" ${(f.kenBurnsPreset||'auto')===key?'selected':''}>${p.label}</option>`).join("")}
-        </select>
-        <div class="preset-desc">${KEN_BURNS_PRESETS[f.kenBurnsPreset || 'auto'].desc}</div>
-        ${f.isBeforeAfter ? renderRevealControls(f, `renderLightboxControls(${f.id})`) : ""}
+        ${f.isBeforeAfter ? renderMotionTypeToggle(f, `renderLightboxControls(${f.id})`) : ""}
+        ${(!f.isBeforeAfter || !f.useRevealEffect) ? `
+          <select class="preset-select" onchange="setKenBurnsPreset(${f.id}, this.value)">
+            ${Object.entries(KEN_BURNS_PRESETS).map(([key, p]) => `<option value="${key}" ${(f.kenBurnsPreset||'auto')===key?'selected':''}>${p.label}</option>`).join("")}
+          </select>
+          <div class="preset-desc">${KEN_BURNS_PRESETS[f.kenBurnsPreset || 'auto'].desc}</div>
+        ` : renderRevealPresetControls(f, `renderLightboxControls(${f.id})`)}
       ` : (eligible.length > 0 ? `
         <select class="preset-select" onchange="setPreset(${f.id}, this.value); renderLightboxControls(${f.id});">
           <option value="">Choose a movement...</option>

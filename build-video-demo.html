@@ -409,48 +409,50 @@ const KEN_BURNS_PRESETS = {
   luxury_parallax: { label: "Luxury Parallax", desc: "Ease-in diagonal settle — a soft, elegant finishing move." },
 };
 
-// Reveal Presets — Ken Burns tier (July 17, 2026). Mirrors REVEAL_PRESETS
-// in assemble.js exactly (label + allowedEndMotions) — kept as two
-// separate copies since frontend/backend are two different repos/runtimes,
-// same pattern already used for KEN_BURNS_PRESETS/KLING_PRESETS existing
-// side by side with their backend equivalents. If either side's list
-// changes, update both.
+// Reveal Presets — mirrors REVEAL_PRESETS in assemble.js exactly (label +
+// allowedEndMotions) — kept as two separate copies since frontend/backend
+// are two different repos/runtimes.
+//
+// FINAL MODEL (July 19, 2026, after two wrong attempts — see assemble.js's
+// matching comment for the full story): exactly 3 reveal identities,
+// usable under EITHER engine (Ken Burns or AI Motion — never AI
+// Transformations, which has no reveal concept at all). allowedEndMotions
+// lists BOTH namespaces together — the full set of continuations this
+// preset supports across either engine — filtered down to just one
+// namespace at render time by renderRevealPresetControls, based on
+// whichever engine tab (f.motion) is currently active. Billing is decided
+// by the engine alone, never by which preset or End Motion was picked.
 //
 // No Duration control here on purpose — durations are fixed per-phase
 // (opener 1.5s / wipe 0.4s / continuation 4.0s), not user-selectable.
-// pull_back is never in any allowedEndMotions list — every Reveal Preset
-// opener (soft_hold or restrained_push) reads as forward motion, and a
-// pull_back continuation would reverse that and collide.
 const REVEAL_PRESETS = {
   classic_reveal: {
     label: "Classic Reveal",
     desc: "The room holds, then wipes into the staged version as your chosen End Motion begins.",
-    allowedEndMotions: ["push_in", "pan_left", "pan_right", "tilt_up", "tilt_down", "drift", "float", "luxury_parallax"],
+    allowedEndMotions: [
+      "push_in", "pan_left", "pan_right", "tilt_up", "tilt_down", "drift", "float", "luxury_parallax",
+      "cinematic_push", "luxury_drift", "floating_camera_drift", "architectural_glide", "corner_to_corner_drift",
+      "orbit_arc", "rack_focus", "drone_boom_up", "crane_up", "crane_down", "parallax_push", "pan_zoom_reveal",
+      "living_room_ambient", "fireplace_flicker", "water_motion", "outdoor_breeze",
+      "micro_zoom_out", "micro_dolly_back", "open_plan_reveal",
+    ],
   },
   luxury_drift: {
     label: "Luxury Drift",
     desc: "The room holds, then reveals center-out into a slow lateral drift across the staged space.",
-    allowedEndMotions: ["drift", "pan_left", "pan_right", "float", "luxury_parallax"],
+    allowedEndMotions: [
+      "drift", "pan_left", "pan_right", "float", "luxury_parallax",
+      "luxury_drift", "floating_camera_drift", "architectural_glide", "corner_to_corner_drift",
+      "orbit_arc", "drone_boom_up", "crane_up", "crane_down", "pan_zoom_reveal",
+      "living_room_ambient", "fireplace_flicker", "water_motion", "outdoor_breeze",
+      "micro_zoom_out", "micro_dolly_back", "open_plan_reveal",
+    ],
   },
   cinematic_reveal: {
     label: "Cinematic Reveal",
     desc: "A gentle push begins on the vacant room, wipes into the staged version, and continues pushing forward.",
-    allowedEndMotions: ["push_in", "pan_left", "pan_right", "tilt_up", "tilt_down", "drift", "float", "luxury_parallax"],
-  },
-  // NEW (July 19, 2026) — "AI Motion Reveal," a genuinely different 4th
-  // option, not a variant of the 3 above. Those 3 are Ken Burns end to
-  // end; this one's continuation is always real AI Motion. Its opener
-  // isn't fixed either — it automatically matches whichever End Motion
-  // you pick below, so the wipe reads as one continuous move instead of
-  // two unrelated ones stitched together. endMotionIsLtx:true tells
-  // renderRevealPresetControls (below) to look End Motion labels up in
-  // LTX_PRESETS instead of KEN_BURNS_PRESETS — this preset's End Motion
-  // list is entirely AI Motion presets, not Ken Burns ones.
-  ai_motion_reveal: {
-    label: "AI Motion Reveal",
-    desc: "The room holds with an opener that matches your chosen AI Motion, wipes into the staged version, then AI Motion takes over. Costs an AI Motion credit — real AI-generated motion, not Ken Burns.",
-    endMotionIsLtx: true,
     allowedEndMotions: [
+      "push_in", "pan_left", "pan_right", "tilt_up", "tilt_down", "drift", "float", "luxury_parallax",
       "cinematic_push", "luxury_drift", "floating_camera_drift", "architectural_glide", "corner_to_corner_drift",
       "orbit_arc", "rack_focus", "drone_boom_up", "crane_up", "crane_down", "parallax_push", "pan_zoom_reveal",
       "living_room_ambient", "fireplace_flicker", "water_motion", "outdoor_breeze",
@@ -627,6 +629,12 @@ function buildRealFrame(f) {
   // for gating Reveal Presets (see the useRevealEffect fix below).
   const useLtxMotion = f.motion === "ltx";
   const isKenBurns = f.motion === "kenburns";
+  // Room Reveal is reachable from EITHER Ken Burns or AI Motion now —
+  // this is the real gate for it, used both below (which fields get
+  // sent) and nowhere else needs it, so declared right here rather than
+  // buried inside the return object where a `const` statement isn't
+  // even valid syntax (caught by a real syntax check before shipping).
+  const isKenBurnsOrLtx = isKenBurns || useLtxMotion;
   const isHero = useAiMotion && f.preset === "hero_transformation";
   // NEW (July 18, 2026) — Exterior Landscape Transformation needs the
   // identical null-preset treatment as Hero Transformation (see the
@@ -691,30 +699,34 @@ function buildRealFrame(f) {
     addContinuationMotion:       useAiMotion ? (isHero || !!f.addContinuationMotion) : false,
     continuationPreset:          useAiMotion ? (f.continuationPreset || undefined) : undefined,
     continuationDurationSeconds: useAiMotion ? (f.continuationDurationSeconds || undefined) : undefined,
-    // CHANGE (July 17, 2026 — Reveal Presets architecture replaces the old
-    // single useRevealEffect boolean + hardcoded pull_back/push_in wipe).
-    // Only meaningful when NOT using AI Motion (Ken Burns only) AND a real
-    // before/after pair exists — same gating the old useRevealEffect had.
-    // FIX (July 18, 2026) — this used to be gated on `!useAiMotion`, which
-    // was only ever correct back when the only two engines were Ken Burns
-    // and Kling (not-Kling = Ken Burns, true at the time). Adding LTX as a
-    // third engine exposed the real bug: `!useAiMotion` is true for LTX
-    // too, so switching a frame from Ken Burns Room Reveal to LTX Motion
-    // without explicitly toggling Reveal off would have silently carried
-    // stale useRevealEffect/revealPreset/endMotion state into an LTX
-    // request that has no idea what to do with it. Gated on isKenBurns
-    // specifically now — Reveal Presets are a Ken Burns feature, full
-    // stop, not "whatever isn't Kling."
-    // revealPreset selects the opener motion + wipe transition (see
-    // REVEAL_PRESETS above); endMotion is the user's chosen continuation-
-    // phase preset (Ken Burns OR LTX — see renderPipeline.js's dispatch,
-    // which checks LTX_MOTION_TEMPLATES[endMotion] to decide), constrained
-    // to that reveal preset's allowedEndMotions list. Backend
-    // (renderPipeline.js) resolves these into real render calls — see
-    // assemble.js's buildRevealClip.
-    useRevealEffect: isKenBurns ? !!f.useRevealEffect : false,
-    revealPreset: (isKenBurns && f.useRevealEffect) ? (f.revealPreset || "classic_reveal") : undefined,
-    endMotion: (isKenBurns && f.useRevealEffect) ? (f.endMotion || defaultEndMotionFor(f.revealPreset || "classic_reveal")) : undefined,
+    // FINAL MODEL (July 19, 2026, after two wrong attempts — see
+    // assemble.js's matching REVEAL_PRESETS comment for the full story):
+    // Room Reveal is now reachable from EITHER Ken Burns or AI Motion —
+    // isKenBurnsOrLtx gates it, not isKenBurns alone. Which one is active
+    // decides EVERYTHING about billing and which End Motion namespace is
+    // even selectable — see renderRevealPresetControls' engine filtering
+    // and renderPipeline.js's matching server-side clamp.
+    //
+    // revealEngine is a NEW, purpose-built field (not a raw f.motion
+    // passthrough — confirmed via grep that f.motion itself is never
+    // persisted anywhere in video-job.js's frameRows/Railway-dispatch
+    // layer, so a raw passthrough would silently read undefined on the
+    // real backend object). This is THE actual billing/gating signal:
+    // video-job.js's usesAiMotion() and renderPipeline.js's server-side
+    // clamp both read this, not revealPreset or endMotion.
+    //
+    // revealPreset selects the opener motion + wipe transition (fixed per
+    // preset, same regardless of engine); endMotion is the user's chosen
+    // continuation, filtered to the active engine's namespace by
+    // renderRevealPresetControls before it's ever selectable — Ken Burns
+    // engine can only produce a Ken Burns endMotion, AI Motion engine can
+    // only produce an LTX one. Backend (renderPipeline.js) re-enforces
+    // this with its own clamp rather than trusting the frontend filter
+    // held (stale client, direct API call).
+    useRevealEffect: isKenBurnsOrLtx ? !!f.useRevealEffect : false,
+    revealPreset: (isKenBurnsOrLtx && f.useRevealEffect) ? (f.revealPreset || "classic_reveal") : undefined,
+    endMotion: (isKenBurnsOrLtx && f.useRevealEffect) ? (f.endMotion || defaultEndMotionForEngine(f.revealPreset || "classic_reveal", f.motion)) : undefined,
+    revealEngine: (isKenBurnsOrLtx && f.useRevealEffect) ? (useLtxMotion ? "ltx" : "ken_burns") : undefined,
   };
 }
 
@@ -725,6 +737,20 @@ function buildRealFrame(f) {
 function defaultEndMotionFor(presetKey) {
   const preset = REVEAL_PRESETS[presetKey];
   return preset ? preset.allowedEndMotions[0] : "push_in";
+}
+
+// NEW (July 19, 2026) — same idea as defaultEndMotionFor above, but
+// scoped to one engine's namespace specifically. preset.allowedEndMotions
+// now lists BOTH Ken Burns and LTX names together (the full set this
+// reveal identity supports across either engine) — this picks the first
+// one that actually belongs to the requested engine, rather than
+// whatever happens to be first in the combined list regardless of engine.
+function defaultEndMotionForEngine(presetKey, engine) {
+  const preset = REVEAL_PRESETS[presetKey];
+  if (!preset) return engine === "ltx" ? "cinematic_push" : "push_in";
+  const isLtxName = (key) => !!LTX_PRESETS[key];
+  const match = preset.allowedEndMotions.find(key => engine === "ltx" ? isLtxName(key) : !isLtxName(key));
+  return match || preset.allowedEndMotions[0];
 }
 
 let balance = null; // null = not yet loaded — real value comes from action=balance
@@ -1211,32 +1237,41 @@ function renderMotionTypeToggle(f, refreshFn) {
 function renderRevealPresetControls(f, refreshFn) {
   const presetKey = f.revealPreset || "classic_reveal";
   const preset = REVEAL_PRESETS[presetKey];
-  const endMotion = f.endMotion || defaultEndMotionFor(presetKey);
+  // NEW (July 19, 2026) — engine comes from f.motion directly now, not a
+  // per-preset flag (endMotionIsLtx no longer exists — there's no 4th
+  // preset, and all 3 presets support both namespaces, filtered here by
+  // whichever engine tab is currently active). Room Reveal only ever
+  // renders when f.motion is 'kenburns' or 'ltx' (AI Transformations has
+  // no reveal concept at all), so this is always one of those two.
+  const engine = f.motion === "ltx" ? "ltx" : "ken_burns";
+  const endMotion = f.endMotion || defaultEndMotionForEngine(presetKey, f.motion);
 
   const presetOptions = Object.entries(REVEAL_PRESETS)
     .map(([key, p]) => `<option value="${key}" ${presetKey === key ? "selected" : ""}>${p.label}</option>`).join("");
 
-  // FIX (July 19, 2026) — AI Motion Reveal's End Motion list is entirely
-  // LTX presets (preset.endMotionIsLtx), which need TWO things the 3
-  // Ken Burns presets never needed: (1) label lookup in LTX_PRESETS, not
-  // KEN_BURNS_PRESETS, and (2) real eligibility filtering — some LTX
-  // presets are exterior-only or open-plan-gated, so showing all 19
-  // unconditionally would offer things like water_motion on an interior
-  // room. Reuses eligiblePresetsFor(f, LTX_PRESETS) — the same filtering
-  // every other LTX dropdown in this file already goes through — then
-  // narrows to just this preset's own allowedEndMotions.
-  const endMotionOptions = preset.endMotionIsLtx
-    ? (() => {
-        const eligibleKeys = new Set(eligiblePresetsFor(f, LTX_PRESETS).map(([key]) => key));
-        const available = preset.allowedEndMotions.filter(key => eligibleKeys.has(key));
-        if (available.length === 0) {
-          return `<option value="">No AI Motion presets available for this room</option>`;
-        }
-        return available
-          .map(key => `<option value="${key}" ${endMotion === key ? "selected" : ""}>${LTX_PRESETS[key].label}</option>`).join("");
-      })()
-    : preset.allowedEndMotions
-        .map(key => `<option value="${key}" ${endMotion === key ? "selected" : ""}>${KEN_BURNS_PRESETS[key].label}</option>`).join("");
+  // THE REAL GATING ENFORCEMENT, frontend side (mirrors renderPipeline.js's
+  // server-side clamp exactly): only show End Motion options belonging to
+  // the CURRENTLY ACTIVE engine — Ken Burns names when engine is
+  // ken_burns, LTX names when engine is ltx. This is what makes "Ken
+  // Burns engine locks AI Motion out entirely" true in the UI itself, not
+  // just enforced invisibly on the backend. LTX names are further
+  // narrowed through eligiblePresetsFor(f, LTX_PRESETS) — the same real
+  // eligibility filtering (open-plan/exterior) every other LTX dropdown
+  // in this file already goes through.
+  const isLtxName = (key) => !!LTX_PRESETS[key];
+  let availableEndMotions;
+  if (engine === "ltx") {
+    const eligibleKeys = new Set(eligiblePresetsFor(f, LTX_PRESETS).map(([key]) => key));
+    availableEndMotions = preset.allowedEndMotions.filter(key => isLtxName(key) && eligibleKeys.has(key));
+  } else {
+    availableEndMotions = preset.allowedEndMotions.filter(key => !isLtxName(key));
+  }
+
+  const endMotionOptions = availableEndMotions.length > 0
+    ? availableEndMotions
+        .map(key => `<option value="${key}" ${endMotion === key ? "selected" : ""}>${(engine === "ltx" ? LTX_PRESETS[key] : KEN_BURNS_PRESETS[key]).label}</option>`)
+        .join("")
+    : `<option value="">No ${engine === "ltx" ? "AI Motion" : "Ken Burns"} options available for this room</option>`;
 
   return `
     <div class="preset-row">
@@ -1249,7 +1284,7 @@ function renderRevealPresetControls(f, refreshFn) {
       <select class="preset-select" onchange="setEndMotion(${f.id}, this.value); ${refreshFn}">
         ${endMotionOptions}
       </select>
-      <button class="preview-btn" onclick="openMotionPreview('${endMotion}', '${preset.endMotionIsLtx ? "ltx" : "kenburns"}')">&#9654; Preview</button>
+      <button class="preview-btn" onclick="openMotionPreview('${endMotion}', '${engine === "ltx" ? "ltx" : "kenburns"}')">&#9654; Preview</button>
     </div>
     <div class="preset-desc">End Motion — the camera move that continues after the reveal wipes to the staged room.</div>
   `;
@@ -1363,7 +1398,15 @@ function renderMotionStep() {
           ` : `<div class="preset-disabled-note">No AI Transformations available for this room yet — these all require a before/after pair. Check "before/after pair" above, or use Ken Burns instead.</div>`
         ) : ""}
 
-        ${f.motion === 'ltx' ? (eligibleLtx.length > 0 ? `
+        ${f.motion === 'ltx' ? `
+          <!-- NEW (July 19, 2026) — Room Reveal reachable from AI Motion
+               too now, same toggle as Ken Burns above (renderMotionTypeToggle
+               is engine-agnostic, no changes needed to that function
+               itself). This is the actual fix for "where are the AI
+               reveals" — it was never a missing 4th preset, it was this
+               toggle only ever being rendered inside the Ken Burns branch. -->
+          ${f.isBeforeAfter ? renderMotionTypeToggle(f, `renderMotionStep()`) : ""}
+          ${(!f.isBeforeAfter || !f.useRevealEffect) ? (eligibleLtx.length > 0 ? `
             <div class="preset-row">
               <select class="preset-select" onchange="setLtxPreset(${f.id}, this.value)">
                 <option value="">Choose a movement...</option>
@@ -1373,7 +1416,8 @@ function renderMotionStep() {
             </div>
             ${selectedLtxPreset ? `<div class="preset-desc">${selectedLtxPreset.desc}</div>` : `<div class="preset-desc">Pick a camera movement to see what it does.</div>`}
           ` : `<div class="preset-disabled-note">No AI Motion presets available for this room yet.</div>`
-        ) : ""}
+          ) : renderRevealPresetControls(f, `renderMotionStep()`)}
+        ` : ""}
       </div>
     </div>`;
   }).join("");
@@ -1468,6 +1512,17 @@ function setMotion(id, motion) {
   if (motion === "kenburns" && !f.kenBurnsPreset) f.kenBurnsPreset = "auto";
   if (motion === "kling") f.preset = f.preset || null;
   if (motion === "ltx") f.ltxPreset = f.ltxPreset || null;
+  // NEW (July 19, 2026) — Room Reveal is now reachable under EITHER
+  // Ken Burns or AI Motion (see renderMotionTypeToggle's new call sites
+  // below); switching engines while a reveal is active means the
+  // previously-picked End Motion may belong to the wrong namespace now
+  // (a Ken Burns pick like "push_in" is meaningless once the engine is
+  // AI Motion, and vice versa). Re-resolve to that preset's first
+  // allowed option IN THE NEW ENGINE'S namespace, rather than leave a
+  // stale cross-namespace value sitting there until generation time.
+  if (f.useRevealEffect && (motion === "kenburns" || motion === "ltx")) {
+    f.endMotion = defaultEndMotionForEngine(f.revealPreset || "classic_reveal", motion);
+  }
   renderMotionStep();
 }
 
@@ -1604,14 +1659,17 @@ function renderLightboxControls(id) {
         </select>
         ${KLING_PRESETS[f.preset] ? `<div class="preset-desc">${KLING_PRESETS[f.preset].desc}</div>` : `<div class="preset-desc">Pick a transformation to see what it does.</div>`}
       ` : `<div class="preset-disabled-note">No AI Transformations available for this room yet — these all require a before/after pair.</div>`
-      ) : (eligibleLtx.length > 0 ? `
-        <select class="preset-select" onchange="setLtxPreset(${f.id}, this.value); renderLightboxControls(${f.id});">
-          <option value="">Choose a movement...</option>
-          ${ltxPresetOptions}
-        </select>
-        ${LTX_PRESETS[f.ltxPreset] ? `<div class="preset-desc">${LTX_PRESETS[f.ltxPreset].desc}</div>` : `<div class="preset-desc">Pick a camera movement to see what it does.</div>`}
-      ` : `<div class="preset-disabled-note">No AI Motion presets available for this room yet.</div>`
-      ))}
+      ) : `
+        ${f.isBeforeAfter ? renderMotionTypeToggle(f, `renderLightboxControls(${f.id})`) : ""}
+        ${(!f.isBeforeAfter || !f.useRevealEffect) ? (eligibleLtx.length > 0 ? `
+          <select class="preset-select" onchange="setLtxPreset(${f.id}, this.value); renderLightboxControls(${f.id});">
+            <option value="">Choose a movement...</option>
+            ${ltxPresetOptions}
+          </select>
+          ${LTX_PRESETS[f.ltxPreset] ? `<div class="preset-desc">${LTX_PRESETS[f.ltxPreset].desc}</div>` : `<div class="preset-desc">Pick a camera movement to see what it does.</div>`}
+        ` : `<div class="preset-disabled-note">No AI Motion presets available for this room yet.</div>`
+        ) : renderRevealPresetControls(f, `renderLightboxControls(${f.id})`)}
+      `)}
     `;
   }
 }

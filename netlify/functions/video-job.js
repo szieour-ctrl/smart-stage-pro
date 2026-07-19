@@ -426,7 +426,15 @@ async function refundKlingPoolFrames(userId, framesToRefund) {
 // with every other one instead of six separate ad-hoc checks drifting
 // out of sync with each other over time.
 function usesAiMotion(f) {
-  return !!f.useAiMotion || !!f.ltxMotionPreset;
+  // NEW (July 19, 2026) — AI Motion Reveal frames use a completely
+  // different field pair (revealPreset/endMotion) than standalone LTX
+  // (ltxMotionPreset) or Kling (useAiMotion) — without this check, every
+  // AI Motion Reveal frame would render correctly (renderPipeline.js
+  // dispatches its continuation to LTX regardless of billing) but bill
+  // as entirely free, a real revenue leak of the same shape as the one
+  // found and fixed for standalone LTX a day earlier.
+  const usesAiMotionReveal = !!f.useRevealEffect && f.revealPreset === "ai_motion_reveal";
+  return !!f.useAiMotion || !!f.ltxMotionPreset || usesAiMotionReveal;
 }
 
 // applies identically to create AND regenerate. Async now, since it needs

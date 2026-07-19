@@ -426,14 +426,29 @@ async function refundKlingPoolFrames(userId, framesToRefund) {
 // with every other one instead of six separate ad-hoc checks drifting
 // out of sync with each other over time.
 function usesAiMotion(f) {
-  // NEW (July 19, 2026) — AI Motion Reveal frames use a completely
-  // different field pair (revealPreset/endMotion) than standalone LTX
-  // (ltxMotionPreset) or Kling (useAiMotion) — without this check, every
-  // AI Motion Reveal frame would render correctly (renderPipeline.js
-  // dispatches its continuation to LTX regardless of billing) but bill
-  // as entirely free, a real revenue leak of the same shape as the one
-  // found and fixed for standalone LTX a day earlier.
-  const usesAiMotionReveal = !!f.useRevealEffect && f.revealPreset === "ai_motion_reveal";
+  // SIMPLIFIED (July 19, 2026, Sam's explicit correction): billing for a
+  // reveal frame is decided ENTIRELY by which engine is active
+  // (f.revealEngine), never by which of the 3 reveal presets or which
+  // specific End Motion was picked. "When AI Motion is checked it
+  // controls all the billing... they select Ken Burns, Room reveal, and
+  // a movement — this is all Ken Burns [free]." Replaces the earlier,
+  // wrong revealPreset === "ai_motion_reveal" check (that 4th preset no
+  // longer exists at all).
+  //
+  // DIAGNOSTIC (July 19, 2026 — confirmed real bug, first real render):
+  // a reveal frame with revealEngine missing/invalid silently bills as
+  // Ken Burns (free) here — matching renderPipeline.js's identical
+  // silent-default behavior, which is the actual root cause of that
+  // render's "0 Images" quote despite the frame clearly being intended
+  // as AI Motion. Loud now, same reasoning as that file's fix.
+  if (f.useRevealEffect && f.revealEngine !== "ltx" && f.revealEngine !== "ken_burns") {
+    console.error(
+      `[REVEAL ENGINE MISSING — BILLING] frame with useRevealEffect=true has revealEngine="${f.revealEngine}" ` +
+      `(expected "ltx" or "ken_burns"). Billing as Ken Burns (free) by default — if this frame was meant to be ` +
+      `AI Motion, it will neither call LTX nor be charged. Check reveal_engine column/wiring in video-job.js.`
+    );
+  }
+  const usesAiMotionReveal = !!f.useRevealEffect && f.revealEngine === "ltx";
   return !!f.useAiMotion || !!f.ltxMotionPreset || usesAiMotionReveal;
 }
 
@@ -1031,6 +1046,14 @@ async function createVideoJob({ listingId, projectId, userId, frames, formats, m
       // silently unreachable end-to-end despite being fully wired
       // everywhere else this session.
       ltx_motion_preset:             f.ltxMotionPreset || null,
+      // NEW (July 19, 2026) — real, dedicated gating field for reveal
+      // frames specifically. THE BILLING/GATING ENFORCEMENT POINT: which
+      // engine is active decides the entire category of continuation
+      // reachable for a reveal frame (Sam's explicit rule — Ken Burns
+      // engine locks AI Motion out completely, AI Motion engine locks
+      // standard Ken Burns out completely). Only meaningful when
+      // use_reveal_effect is true; null otherwise.
+      reveal_engine:                 f.useRevealEffect ? (f.revealEngine === "ltx" ? "ltx" : "ken_burns") : null,
     }));
 
     // FIX (July 14, 2026 — real diagnosis gap): this insert was never
@@ -1127,6 +1150,9 @@ async function createVideoJob({ listingId, projectId, userId, frames, formats, m
         // klingMotionPreset above. Matches renderPipeline.js's dispatch
         // check exactly: frame.ltxMotionPreset && LTX_MOTION_TEMPLATES[frame.ltxMotionPreset].
         ltxMotionPreset:             f.ltx_motion_preset,
+        // NEW (July 19, 2026) — read back for renderPipeline.js's reveal
+        // branch gating check (frame.revealEngine === "ltx").
+        revealEngine:                f.reveal_engine,
       })),
     });
 
@@ -1392,6 +1418,14 @@ async function regenerateVideoJob({ jobId, userId, frames, formats, musicStyle, 
       // silently unreachable end-to-end despite being fully wired
       // everywhere else this session.
       ltx_motion_preset:             f.ltxMotionPreset || null,
+      // NEW (July 19, 2026) — real, dedicated gating field for reveal
+      // frames specifically. THE BILLING/GATING ENFORCEMENT POINT: which
+      // engine is active decides the entire category of continuation
+      // reachable for a reveal frame (Sam's explicit rule — Ken Burns
+      // engine locks AI Motion out completely, AI Motion engine locks
+      // standard Ken Burns out completely). Only meaningful when
+      // use_reveal_effect is true; null otherwise.
+      reveal_engine:                 f.useRevealEffect ? (f.revealEngine === "ltx" ? "ltx" : "ken_burns") : null,
     }));
 
     // FIX (July 14, 2026 — real diagnosis gap): this insert was never
@@ -1460,6 +1494,9 @@ async function regenerateVideoJob({ jobId, userId, frames, formats, musicStyle, 
         // klingMotionPreset above. Matches renderPipeline.js's dispatch
         // check exactly: frame.ltxMotionPreset && LTX_MOTION_TEMPLATES[frame.ltxMotionPreset].
         ltxMotionPreset:             f.ltx_motion_preset,
+        // NEW (July 19, 2026) — read back for renderPipeline.js's reveal
+        // branch gating check (frame.revealEngine === "ltx").
+        revealEngine:                f.reveal_engine,
       })),
     });
 

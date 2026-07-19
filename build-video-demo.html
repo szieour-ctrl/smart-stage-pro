@@ -1870,11 +1870,22 @@ async function renderConfirmStep() {
     } else {
       badge = `<span class="frame-badge badge-kenburns">Ken Burns</span>`;
     }
-    const motionLabel = f.motion === "kling"
-      ? (KLING_PRESETS[f.preset]?.label || "AI Motion")
-      : (f.motion === "ltx"
-          ? (LTX_PRESETS[f.ltxPreset]?.label || "LTX Motion")
-          : (KEN_BURNS_PRESETS[f.kenBurnsPreset || "auto"].label + " (Ken Burns)"));
+    // FIX (July 19, 2026 — real bug, caught from Sam's own review screen):
+    // this never checked f.useRevealEffect at all, for either engine.
+    // A reveal frame under AI Motion fell through to
+    // LTX_PRESETS[f.ltxPreset]?.label — but reveal frames use
+    // f.revealPreset/f.endMotion, never f.ltxPreset, so that's always
+    // undefined and always showed the generic fallback "LTX Motion"
+    // instead of naming the actual reveal preset. Same bug would have
+    // hit a Ken Burns reveal frame too (showing "Auto (Ken Burns)"
+    // instead of "Classic Reveal..."), just never noticed yet.
+    const motionLabel = f.useRevealEffect
+      ? `${REVEAL_PRESETS[f.revealPreset]?.label || "Reveal"} + ${(f.motion === "ltx" ? LTX_PRESETS[f.endMotion]?.label : KEN_BURNS_PRESETS[f.endMotion]?.label) || "End Motion"} (${f.motion === "ltx" ? "AI Motion" : "Ken Burns"})`
+      : (f.motion === "kling"
+          ? (KLING_PRESETS[f.preset]?.label || "AI Transformation")
+          : (f.motion === "ltx"
+              ? (LTX_PRESETS[f.ltxPreset]?.label || "AI Motion")
+              : (KEN_BURNS_PRESETS[f.kenBurnsPreset || "auto"].label + " (Ken Burns)")));
     return `<div class="frame-row">
       <div class="frame-thumb-sm"><img src="${f.dataUrl}" alt=""></div>
       <div class="frame-main" style="padding:0;">

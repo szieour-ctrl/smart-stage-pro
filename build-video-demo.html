@@ -437,6 +437,26 @@ const REVEAL_PRESETS = {
     desc: "A gentle push begins on the vacant room, wipes into the staged version, and continues pushing forward.",
     allowedEndMotions: ["push_in", "pan_left", "pan_right", "tilt_up", "tilt_down", "drift", "float", "luxury_parallax"],
   },
+  // NEW (July 19, 2026) — "AI Motion Reveal," a genuinely different 4th
+  // option, not a variant of the 3 above. Those 3 are Ken Burns end to
+  // end; this one's continuation is always real AI Motion. Its opener
+  // isn't fixed either — it automatically matches whichever End Motion
+  // you pick below, so the wipe reads as one continuous move instead of
+  // two unrelated ones stitched together. endMotionIsLtx:true tells
+  // renderRevealPresetControls (below) to look End Motion labels up in
+  // LTX_PRESETS instead of KEN_BURNS_PRESETS — this preset's End Motion
+  // list is entirely AI Motion presets, not Ken Burns ones.
+  ai_motion_reveal: {
+    label: "AI Motion Reveal",
+    desc: "The room holds with an opener that matches your chosen AI Motion, wipes into the staged version, then AI Motion takes over. Costs an AI Motion credit — real AI-generated motion, not Ken Burns.",
+    endMotionIsLtx: true,
+    allowedEndMotions: [
+      "cinematic_push", "luxury_drift", "floating_camera_drift", "architectural_glide", "corner_to_corner_drift",
+      "orbit_arc", "rack_focus", "drone_boom_up", "crane_up", "crane_down", "parallax_push", "pan_zoom_reveal",
+      "living_room_ambient", "fireplace_flicker", "water_motion", "outdoor_breeze",
+      "micro_zoom_out", "micro_dolly_back", "open_plan_reveal",
+    ],
+  },
 };
 
 // RENAMED CONCEPTUALLY (July 18, 2026) — "AI Transformations" in the UI
@@ -1105,6 +1125,20 @@ function buildGroupedLtxOptions(eligibleLtxEntries, selectedKey) {
     .join("");
 }
 
+// NEW (July 19, 2026) — single source of truth for "does this frame use
+// paid AI Motion," mirroring video-job.js's usesAiMotion() fix. Three
+// real cases: standalone AI Transformations (f.motion==='kling'),
+// standalone AI Motion (f.motion==='ltx'), and AI Motion Reveal — which
+// lives under the Ken Burns engine tab (f.motion==='kenburns') but its
+// continuation is always real AI Motion once revealPreset is set to
+// "ai_motion_reveal". Missing that third case here would under-count
+// the same way the actual billing endpoint did before its own fix.
+function frameUsesAiMotion(f) {
+  if (f.motion === "kling" || f.motion === "ltx") return true;
+  if (f.useRevealEffect && f.revealPreset === "ai_motion_reveal") return true;
+  return false;
+}
+
 function eligiblePresetsFor(frame, presetsTable) {
   presetsTable = presetsTable || KLING_PRESETS;
   const isExterior = frame.isExterior; // explicit flag from Step 1 — never inferred from the room label
@@ -1182,8 +1216,27 @@ function renderRevealPresetControls(f, refreshFn) {
   const presetOptions = Object.entries(REVEAL_PRESETS)
     .map(([key, p]) => `<option value="${key}" ${presetKey === key ? "selected" : ""}>${p.label}</option>`).join("");
 
-  const endMotionOptions = preset.allowedEndMotions
-    .map(key => `<option value="${key}" ${endMotion === key ? "selected" : ""}>${KEN_BURNS_PRESETS[key].label}</option>`).join("");
+  // FIX (July 19, 2026) — AI Motion Reveal's End Motion list is entirely
+  // LTX presets (preset.endMotionIsLtx), which need TWO things the 3
+  // Ken Burns presets never needed: (1) label lookup in LTX_PRESETS, not
+  // KEN_BURNS_PRESETS, and (2) real eligibility filtering — some LTX
+  // presets are exterior-only or open-plan-gated, so showing all 19
+  // unconditionally would offer things like water_motion on an interior
+  // room. Reuses eligiblePresetsFor(f, LTX_PRESETS) — the same filtering
+  // every other LTX dropdown in this file already goes through — then
+  // narrows to just this preset's own allowedEndMotions.
+  const endMotionOptions = preset.endMotionIsLtx
+    ? (() => {
+        const eligibleKeys = new Set(eligiblePresetsFor(f, LTX_PRESETS).map(([key]) => key));
+        const available = preset.allowedEndMotions.filter(key => eligibleKeys.has(key));
+        if (available.length === 0) {
+          return `<option value="">No AI Motion presets available for this room</option>`;
+        }
+        return available
+          .map(key => `<option value="${key}" ${endMotion === key ? "selected" : ""}>${LTX_PRESETS[key].label}</option>`).join("");
+      })()
+    : preset.allowedEndMotions
+        .map(key => `<option value="${key}" ${endMotion === key ? "selected" : ""}>${KEN_BURNS_PRESETS[key].label}</option>`).join("");
 
   return `
     <div class="preset-row">
@@ -1196,7 +1249,7 @@ function renderRevealPresetControls(f, refreshFn) {
       <select class="preset-select" onchange="setEndMotion(${f.id}, this.value); ${refreshFn}">
         ${endMotionOptions}
       </select>
-      <button class="preview-btn" onclick="openMotionPreview('${endMotion}', 'kenburns')">&#9654; Preview</button>
+      <button class="preview-btn" onclick="openMotionPreview('${endMotion}', '${preset.endMotionIsLtx ? "ltx" : "kenburns"}')">&#9654; Preview</button>
     </div>
     <div class="preset-desc">End Motion — the camera move that continues after the reveal wipes to the staged room.</div>
   `;
@@ -1337,7 +1390,7 @@ function renderMotionStep() {
   // any more than Kling's can. Kept the variable name hasKling rather
   // than renaming everywhere it's referenced below, but it now means
   // "has any AI motion engine," not "has Kling specifically."
-  const hasKling = frames.some(f => f.motion === "kling" || f.motion === "ltx");
+  const hasKling = frames.some(frameUsesAiMotion);
   const formatRow = document.getElementById("formatRow");
   const note = document.getElementById("formatNote");
   let selectedFormats = window._selectedFormats || (hasKling ? ["16x9"] : ["16x9","9x16"]);
@@ -1604,7 +1657,7 @@ function updateKlingCountBar() {
   // FIX (July 18, 2026 — Sam's confirmation, LTX shares the same AI
   // Motion Pool as Kling): this used to count ONLY f.motion === "kling",
   // so an LTX selection didn't even show up in this early count hint.
-  const klingCount = frames.filter(f => f.motion === "kling" || f.motion === "ltx").length;
+  const klingCount = frames.filter(frameUsesAiMotion).length;
   const bar = document.getElementById("klingCountBar");
   // CHANGE (July 13, 2026): can no longer estimate an Images number here
   // without a network call — whether these frames are free depends on the
@@ -1750,7 +1803,7 @@ async function renderConfirmStep() {
   // identical "count both engines" fix before this is actually correct,
   // not just correctly displayed.
   document.getElementById("frameList").innerHTML = frames.map(f => {
-    const isAiMotionFrame = f.motion === "kling" || f.motion === "ltx";
+    const isAiMotionFrame = frameUsesAiMotion(f);
     let badge;
     if (isAiMotionFrame) {
       aiMotionSeen++;

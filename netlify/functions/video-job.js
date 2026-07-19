@@ -732,7 +732,7 @@ function validateAiMotionEligibility(frames) {
 
     if (!hasKnownPair && !isExterior && !isAllowedSingleImageInteriorPreset) {
       throw new Error(
-        `AI motion requested for a frame with no paired image and no allowed single-image preset (room type "${frame.roomType}", preset "${frame.motionPreset || "(none)"}"). AI motion requires a real vacant+staged pair for interior rooms, an exterior frame, or one of the allowed single-image presets (orbit_arc, rack_focus, fireplace_flicker, cinematic_push, luxury_drift, floating_camera_drift, parallax_push, architectural_glide, crane_up, crane_down, room_reveal, living_room_ambient, corner_to_corner_drift, pan_zoom_reveal) — otherwise only standard motion is available.`
+        `AI Motion (Kling) rejected for a frame with no paired image and no allowed single-image preset (room type "${frame.roomType}", preset "${frame.motionPreset || "(none)"}"). As of July 18, 2026, Kling no longer supports ANY single-image camera-motion presets — every one of them (orbit_arc, rack_focus, fireplace_flicker, cinematic_push, luxury_drift, floating_camera_drift, parallax_push, architectural_glide, crane_up, crane_down, room_reveal, living_room_ambient, corner_to_corner_drift, pan_zoom_reveal) now has an LTX equivalent instead (see ltxMotion.js). Kling is reserved for genuine two-image transformations only: Hero Transformation and Exterior Landscape Transformation (both require a real vacant+staged pair) and the day/twilight timelapse family (exterior frames only). Use LTX Motion for camera movement on a single image, or Ken Burns.`
       );
     }
 

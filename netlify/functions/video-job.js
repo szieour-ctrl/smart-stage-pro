@@ -412,6 +412,23 @@ async function refundKlingPoolFrames(userId, framesToRefund) {
 
 // CHANGE (July 13, 2026): calculateKlingChargeForGeneration is now
 // calculateKlingCharge — no more generationCount parameter, since the pool
+// NEW (July 18, 2026 — Sam's confirmation: "LTX draws from the same AI
+// Motion Pool credits. All AI movements used will be charged against the
+// credit pool or image balance"). f.useAiMotion means specifically
+// "Kling" — that's load-bearing for Railway's renderPipeline.js dispatch
+// order (frame.useAiMotion routes to Kling FIRST, before the LTX/Reveal/
+// Ken Burns branches even get checked), so it can't be redefined to mean
+// "any AI engine" without breaking that routing. But for BILLING purposes
+// specifically — which is everything in this file, a completely separate
+// runtime from Railway — an LTX-selected frame is just as much a paid AI
+// Motion Pool draw as a Kling one. This helper is the one place that
+// distinction is made, so every billing/eligibility check below agrees
+// with every other one instead of six separate ad-hoc checks drifting
+// out of sync with each other over time.
+function usesAiMotion(f) {
+  return !!f.useAiMotion || !!f.ltxMotionPreset;
+}
+
 // applies identically to create AND regenerate. Async now, since it needs
 // a real read of this user's current pool balance. Returns everything the
 // caller needs to both debit Images (imageCost) AND decrement the pool
@@ -419,7 +436,15 @@ async function refundKlingPoolFrames(userId, framesToRefund) {
 // separate stores (credit_ledger vs kling_motion_usage) and must both
 // happen, which is why both counts come back rather than just a total.
 async function calculateKlingCharge(frames, userId) {
-  const klingFrameCount = frames.filter(f => f.useAiMotion).length;
+  // FIX (July 18, 2026) — was frames.filter(f => f.useAiMotion), which
+  // silently excluded every LTX-selected frame from the pool entirely —
+  // meaning LTX motion would have rendered fully free, a real revenue
+  // leak, not caught by any error or warning anywhere. This function's
+  // name still says "Kling" (a real naming-drift issue, left as-is
+  // rather than doing a wider rename in the same pass as a billing fix),
+  // but what it actually computes now is the shared AI Motion Pool
+  // charge across both engines, matching Sam's explicit instruction.
+  const klingFrameCount = frames.filter(usesAiMotion).length;
   if (klingFrameCount === 0) {
     return { imageCost: 0, framesFromPool: 0, framesBilled: 0, poolRemainingBefore: null, poolLimit: null };
   }
@@ -450,7 +475,12 @@ async function calculateKlingCharge(frames, userId) {
 function computeKlingBilledFlags(frames, framesFromPool) {
   let klingFramesSeen = 0;
   return frames.map(f => {
-    if (!f.useAiMotion) return false; // never billed as a Kling frame at all
+    // FIX (July 18, 2026) — same usesAiMotion() fix as calculateKlingCharge
+    // above; this MUST agree with that function's counting order exactly,
+    // or the per-frame billed flags written to video_job_frames would be
+    // inconsistent with the aggregate framesFromPool/framesBilled totals
+    // that were actually charged.
+    if (!usesAiMotion(f)) return false; // never billed as an AI Motion frame at all
     klingFramesSeen++;
     return klingFramesSeen > framesFromPool;
   });
@@ -465,7 +495,13 @@ function computeKlingBilledFlags(frames, framesFromPool) {
 function calculateDownloadCost(frames) {
   let cost = BASE_VIDEO_COST;
   for (const frame of frames) {
-    if (!frame.useAiMotion) cost += PER_FRAME_COST.ken_burns;
+    // FIX (July 18, 2026) — same reasoning as above: an LTX frame isn't a
+    // Ken Burns frame, so it must not get the flat ken_burns per-frame
+    // rate added here either (that would double up — it's already
+    // charged through the AI Motion Pool/overage path via
+    // calculateKlingCharge, adding the Ken Burns rate on top would be
+    // billing it twice under two different line items).
+    if (!usesAiMotion(frame)) cost += PER_FRAME_COST.ken_burns;
   }
   return cost;
 }
@@ -726,7 +762,15 @@ function validateAiMotionEligibility(frames) {
 // can't silently default to two formats for an AI motion job.
 
 function validateFormatChoiceForAiMotion(frames, formats) {
-  const hasAiMotion = frames.some(f => f.useAiMotion);
+  // FIX (July 18, 2026) — was frames.some(f => f.useAiMotion), missing
+  // LTX entirely. Same reasoning as the frontend's identical fix in
+  // build-video-demo.html: LTX is real, AI-generated camera motion, not
+  // a deterministic Ken Burns transform — its composition can't be
+  // safely auto-cropped to a second aspect ratio any more than Kling's
+  // can. This is the server-side enforcement of that same rule — exists
+  // specifically so a frontend bug can't silently slip an LTX frame
+  // through with two formats selected.
+  const hasAiMotion = frames.some(usesAiMotion);
   if (hasAiMotion && formats.length !== 1) {
     throw new Error(
       "AI motion videos must be delivered in a single format — choose 16:9 or 9:16 before submitting. The AI-generated motion can't be safely auto-cropped to a second aspect ratio."
@@ -957,6 +1001,28 @@ async function createVideoJob({ listingId, projectId, userId, frames, formats, m
       // Burns reveal. Previously this fired automatically off
       // is_before_after alone, with no way for the user to decline it.
       use_reveal_effect:             !!f.useRevealEffect,
+      // NEW (July 18, 2026 — CRITICAL FIX): reveal_preset and end_motion
+      // were NEVER persisted here at all, in either code path. useRevealEffect
+      // reached Railway correctly, but the two fields that actually SELECT
+      // which Reveal Preset (classic_reveal/luxury_drift/cinematic_reveal)
+      // and which End Motion continuation to use never did — meaning every
+      // Reveal Preset selection was silently defaulting to classic_reveal
+      // plus its first allowed End Motion on Railway's end, regardless of
+      // what the user actually chose in build-video-demo.html. No error
+      // anywhere; renderPipeline.js's own fallback
+      // (REVEAL_PRESETS[frame.revealPreset] ? frame.revealPreset : "classic_reveal")
+      // silently absorbed the missing data. Found while fixing the LTX
+      // billing gap below — same root cause, same category of bug.
+      reveal_preset:                 f.revealPreset || null,
+      end_motion:                    f.endMotion || null,
+      // NEW (July 18, 2026) — same missing-field bug as reveal_preset/
+      // end_motion above, for LTX Motion. Without this, an LTX-selected
+      // frame would reach Railway with useAiMotion=false (correct, so it
+      // doesn't wrongly route to Kling) but NO way to tell renderPipeline.js
+      // which LTX preset was actually chosen — the whole feature would be
+      // silently unreachable end-to-end despite being fully wired
+      // everywhere else this session.
+      ltx_motion_preset:             f.ltxMotionPreset || null,
     }));
 
     // FIX (July 14, 2026 — real diagnosis gap): this insert was never
@@ -1043,6 +1109,16 @@ async function createVideoJob({ listingId, projectId, userId, frames, formats, m
         // silently undefined by the time Railway sees it.
         isOpenPlan:                  f.is_open_plan,
         useRevealEffect:              f.use_reveal_effect,
+        // NEW (July 18, 2026) — see the frameRows insert comment for the
+        // full diagnosis: these two were never forwarded to Railway at
+        // all before this fix, despite reveal_preset/end_motion columns
+        // now existing in the insert above them.
+        revealPreset:                f.reveal_preset,
+        endMotion:                   f.end_motion,
+        // NEW (July 18, 2026) — same fix, LTX Motion's equivalent of
+        // klingMotionPreset above. Matches renderPipeline.js's dispatch
+        // check exactly: frame.ltxMotionPreset && LTX_MOTION_TEMPLATES[frame.ltxMotionPreset].
+        ltxMotionPreset:             f.ltx_motion_preset,
       })),
     });
 
@@ -1286,6 +1362,28 @@ async function regenerateVideoJob({ jobId, userId, frames, formats, musicStyle, 
       // Burns reveal. Previously this fired automatically off
       // is_before_after alone, with no way for the user to decline it.
       use_reveal_effect:             !!f.useRevealEffect,
+      // NEW (July 18, 2026 — CRITICAL FIX): reveal_preset and end_motion
+      // were NEVER persisted here at all, in either code path. useRevealEffect
+      // reached Railway correctly, but the two fields that actually SELECT
+      // which Reveal Preset (classic_reveal/luxury_drift/cinematic_reveal)
+      // and which End Motion continuation to use never did — meaning every
+      // Reveal Preset selection was silently defaulting to classic_reveal
+      // plus its first allowed End Motion on Railway's end, regardless of
+      // what the user actually chose in build-video-demo.html. No error
+      // anywhere; renderPipeline.js's own fallback
+      // (REVEAL_PRESETS[frame.revealPreset] ? frame.revealPreset : "classic_reveal")
+      // silently absorbed the missing data. Found while fixing the LTX
+      // billing gap below — same root cause, same category of bug.
+      reveal_preset:                 f.revealPreset || null,
+      end_motion:                    f.endMotion || null,
+      // NEW (July 18, 2026) — same missing-field bug as reveal_preset/
+      // end_motion above, for LTX Motion. Without this, an LTX-selected
+      // frame would reach Railway with useAiMotion=false (correct, so it
+      // doesn't wrongly route to Kling) but NO way to tell renderPipeline.js
+      // which LTX preset was actually chosen — the whole feature would be
+      // silently unreachable end-to-end despite being fully wired
+      // everywhere else this session.
+      ltx_motion_preset:             f.ltxMotionPreset || null,
     }));
 
     // FIX (July 14, 2026 — real diagnosis gap): this insert was never
@@ -1344,6 +1442,16 @@ async function regenerateVideoJob({ jobId, userId, frames, formats, musicStyle, 
         // NEW (July 9, 2026) — see matching comment in createVideoJob above.
         isOpenPlan:                  f.is_open_plan,
         useRevealEffect:              f.use_reveal_effect,
+        // NEW (July 18, 2026) — see the frameRows insert comment for the
+        // full diagnosis: these two were never forwarded to Railway at
+        // all before this fix, despite reveal_preset/end_motion columns
+        // now existing in the insert above them.
+        revealPreset:                f.reveal_preset,
+        endMotion:                   f.end_motion,
+        // NEW (July 18, 2026) — same fix, LTX Motion's equivalent of
+        // klingMotionPreset above. Matches renderPipeline.js's dispatch
+        // check exactly: frame.ltxMotionPreset && LTX_MOTION_TEMPLATES[frame.ltxMotionPreset].
+        ltxMotionPreset:             f.ltx_motion_preset,
       })),
     });
 
@@ -1671,7 +1779,13 @@ async function quoteGeneration({ jobId, userId, frames, wantsNarration }) {
   }
 
   const klingCharge = await calculateKlingCharge(frames, userId);
-  const klingFrameCount = frames.filter(f => f.useAiMotion).length;
+  // FIX (July 18, 2026) — same usesAiMotion() fix as calculateKlingCharge
+  // itself; this is the exact number build-video-demo.html's cost
+  // breakdown displays as "AI Motion frames," so it must count LTX
+  // selections the same way calculateKlingCharge's internal count does,
+  // or the displayed frame count and the actual charged amount would
+  // silently disagree with each other.
+  const klingFrameCount = frames.filter(usesAiMotion).length;
 
   // Narration quote — side-effect-free, mirrors resolveNarrationBilling's
   // cost math without actually debiting. CHANGE (July 14, 2026): takes a

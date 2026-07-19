@@ -439,104 +439,75 @@ const REVEAL_PRESETS = {
   },
 };
 
+// RENAMED CONCEPTUALLY (July 18, 2026) — "AI Transformations" in the UI
+// now (Sam's confirmed name). Kept as KLING_PRESETS in code — still the
+// literal engine, minimal blast radius vs. a full variable rename. Down
+// to exactly 7 entries: every camera-motion-only preset that used to
+// live here has moved to LTX_PRESETS below. What's left is genuine
+// two-image content TRANSFORMATION — Kling's real, current, final scope.
 const KLING_PRESETS = {
-  // NEW (July 14, 2026) — this is the FULL "hero shot" Sam described: a
-  // real, working backend capability (the vacant→staged Kling morph,
-  // triggered automatically whenever isBeforeAfter is true, PLUS the
-  // Ken Burns parallax continuation) that had no single, findable way to
-  // turn on — it required knowing to check "before/after pair," THEN
-  // separately knowing the addContinuationMotion checkbox existed and
-  // what it did. Deliberately listed FIRST (object key order = dropdown
-  // order) and named for what it does, not how it's built. Selecting
-  // this ONE option does all three things automatically — see
-  // buildRealFrame() for where "hero_transformation" gets translated
-  // into the real underlying preset (cinematic_push) plus the forced
-  // continuation flag. Only eligible when a real pair exists — same
-  // "pair_required" gate already used for the other pair-only presets.
   hero_transformation: { label: "Hero Transformation", desc: "The full before/after treatment: the vacant room holds, then transforms into the staged version as the camera pushes in, finishing with a soft parallax move. Requires a before/after pair.", eligibility: "pair_required" },
-
-  // REMOVED (July 18, 2026): orbit_arc, rack_focus, and drone_boom_up
-  // used to be here — all three now have tested LTX-safe rewrites (see
-  // LTX_PRESETS below) at lower cost, and are no longer offered via
-  // Kling at all. See klingMotion.js's SINGLE_IMAGE_INTERIOR_ALLOWED_
-  // PRESETS comment for the full reasoning.
-  fireplace_flicker: { label: "Fireplace Flicker", desc: "Locked-off shot with the fireplace flame flickering naturally — real motion, not a still.", eligibility: "single_or_pair" },
-  water_motion: { label: "Water Motion", desc: "Gentle, realistic water movement across a pool or fountain.", eligibility: "exterior_only" },
+  // NEW (July 18, 2026) — this existed as real, working backend behavior
+  // (klingMotion.js's generic exterior fallback prompt, triggered by
+  // isExterior + a real pair + no named preset — same underlying
+  // mechanism as Hero Transformation, just for exterior rooms) but had
+  // NO frontend entry at all until now, exactly the kind of "built but
+  // unreachable" gap found repeatedly this session. Confirmed with Sam
+  // as staying Kling-reserved alongside Hero Transformation and the
+  // Time-Lapse family — a genuine two-image transformation, not just
+  // camera motion.
+  exterior_landscape_transformation: { label: "Exterior Landscape Transformation", desc: "The exterior equivalent of Hero Transformation: bare/unfinished landscaping holds, then transforms into the staged version — grass fills in, plants and hardscape settle into place. Requires a before/after pair.", eligibility: "pair_required_exterior" },
   day_to_twilight: { label: "Day → Twilight", desc: "Smooth transition from daylight to dusk — interior, porch, garage, and landscape lighting gradually turn on as the sky deepens to blue-hour with a sunset glow.", eligibility: "pair_required_exterior" },
   twilight_to_day: { label: "Twilight → Day", desc: "The reverse — dusk gradually brightens to clear daytime, all exterior and interior lighting turning off as the sun comes up.", eligibility: "pair_required_exterior" },
   day_to_twilight_timelapse: { label: "Day → Twilight (Time-Lapse)", desc: "Same day-to-dusk transformation as Day → Twilight, but compressed into a rapid time-lapse with streaking clouds — lights switching on in sequence as if hours pass in seconds.", eligibility: "pair_required_exterior" },
   twilight_to_day_timelapse: { label: "Twilight → Day (Time-Lapse)", desc: "The reverse time-lapse — dusk rapidly brightens to day, streaking clouds, all lighting switching off in sequence.", eligibility: "pair_required_exterior" },
   twilight_night_day_timelapse: { label: "Twilight → Night → Day (Time-Lapse)", desc: "The most complete cycle: dusk deepens into full night, interior lights switch off first while exterior/landscape lighting stays on through the night on a timer, then dawn breaks and everything turns off. Longest and most complex of the time-lapse options — give it extra duration.", eligibility: "pair_required_exterior" },
-
-  // ── New Motion Library (July 2026) — added because 3+ Kling movements per
-  // video is now the actual product decision (Ken Burns continuation read as
-  // "the image moving, not the camera" in real footage testing), so a video
-  // with multiple rooms needs real preset variety to avoid every room
-  // reading as the same 2-3 moves repeated.
-  // REMOVED (July 18, 2026): parallax_push, crane_up, crane_down — same
-  // reasoning as above, tested LTX equivalents now exist.
-  cinematic_push: { label: "Cinematic Push", desc: "A cinematic dolly push toward the room's focal point — deeper, more natural depth-of-field than Ken Burns push_in.", eligibility: "single_or_pair" },
-  luxury_drift: { label: "Luxury Drift", desc: "Slow, elegant lateral drift across the room with real parallax between foreground and background.", eligibility: "single_or_pair" },
-  floating_camera_drift: { label: "Floating Camera Drift", desc: "Gentle floating/breathing motion, as if suspended weightlessly in the room — subtler than a directional pan.", eligibility: "single_or_pair" },
-  architectural_glide: { label: "Architectural Glide", desc: "Smooth lateral glide along a hallway or open-plan sightline, emphasizing flow between spaces.", eligibility: "single_or_pair" },
-  room_reveal: { label: "Room Reveal", desc: "Slow pull-back widening to show more of the already-visible room. Single-image use requires an exterior room for now — for interior, use with a real before/after pair (AI Motion has two known images to work from rather than inferring the wider view from one).", eligibility: "exterior_or_pair" },
-
-  // ── Pending your Playground verification (per your own flag on these
-  // three) — single-image interior use is intentionally not offered yet,
-  // since each risks inventing an element (fireplace, water, unphotographed
-  // wall/floor) not actually present in the source photo. Available now only
-  // with a real before/after pair, where Kling has two known images to
-  // anchor to instead of inferring from one.
-  // FIXED (July 18, 2026) — backend (klingMotion.js) cleared these for
-  // single-image interior use on July 9, 2026 ("Sam confirmed via his own
-  // fal.ai Playground testing that these three do not invent unphotographed
-  // content... moved into the allowlist"), but this frontend never got
-  // updated to match — was still showing "(pending verification)" and
-  // pair_required for both, weeks after the backend already allowed
-  // single-image use. Corrected to match the real current backend state.
-  living_room_ambient: { label: "Living Room Ambient", desc: "Subtle ambient motion — flame flicker, curtain sway, plant movement — but only for elements already visible in the photo.", eligibility: "single_or_pair" },
-  corner_to_corner_drift: { label: "Corner-to-Corner Drift", desc: "Diagonal drift across the room, most useful in larger/open spaces.", eligibility: "single_or_pair" },
-  // ADDED (July 18, 2026) — real backend preset (klingMotion.js
-  // KLING_MOTION_TEMPLATES) with no frontend entry at all until now.
-  outdoor_breeze: { label: "Outdoor Breeze", desc: "A subtle breeze moves through visible trees or landscaping — natural, photorealistic motion in already-visible foliage.", eligibility: "exterior_only" },
-  // pan_zoom_reveal was added here earlier this same session, then
-  // removed later the same session — a tested LTX-safe rewrite landed
-  // before this ever shipped, so it's LTX-only, never offered via Kling.
 };
 
-// NEW (July 18, 2026) — LTX Fast presets, mirroring KLING_PRESETS' shape
-// so eligiblePresetsFor() can filter either engine's list with the same
-// logic. Sourced from ltxMotion.js's LTX_MOTION_TEMPLATES — same prompt
-// text as the backend, kept here only for display (label/desc), never
-// re-sent to the server; the actual render call uses the preset KEY,
-// and the server resolves its own prompt independently. room_reveal is
-// intentionally NOT included — Sam's call, "NO Open Plan LTX right now."
-// isOpenPlan filtering happens in eligiblePresetsForLtx() below, not here
-// (every one of these 9 needs the SAME open-plan exclusion, so it's one
-// shared check rather than a per-preset flag).
+// NEW (July 18, 2026) — LTX Fast presets, mirroring KLING_PRESETS' shape.
+// This is now THE "AI Motion" category — every camera-motion-only preset
+// lives here exclusively, 19 total across all 3 batches. Sourced from
+// ltxMotion.js's LTX_MOTION_TEMPLATES — same prompt text as the backend,
+// kept here only for display (label/desc), never re-sent to the server.
+//
+// category groups the dropdown via <optgroup> (see the rendering code
+// below) — Camera Movement / Ambient Detail / Open-Plan Only, a
+// functional split, not a build-history one.
+//
+// openPlanSafe / openPlanOnly replace the old blanket open-plan block:
+// openPlanSafe:true means this preset is cleared to appear when the room
+// is open-plan (mirrors ltxMotion.js's OPEN_PLAN_SAFE_LTX_PRESETS
+// exactly — keep both lists in sync if either changes). openPlanOnly:true
+// is the inverse restriction — these 3 require open-plan and are
+// EXCLUDED on an enclosed single room (their hallway-safety constraints
+// only make sense with real open-plan continuity to work with).
 const LTX_PRESETS = {
-  cinematic_push: { label: "Cinematic Push (LTX)", desc: "A deliberate push-in toward the room's center, with natural parallax from existing room geometry.", eligibility: "single_or_pair" },
-  luxury_drift: { label: "Luxury Drift (LTX)", desc: "A slow, refined lateral drift with stable, controlled motion — like a slider shot across the room.", eligibility: "single_or_pair" },
-  floating_camera_drift: { label: "Floating Camera Drift (LTX)", desc: "Gentle weightless micro-sway, ambient and subtle. Best in rooms with soft lighting and visible depth — avoid highly reflective rooms (mirrors, glossy tile).", eligibility: "single_or_pair" },
-  architectural_glide: { label: "Architectural Glide (LTX)", desc: "A horizontal glide along the room's existing sightline — cabinetry, windows, built-ins. Best in kitchens, hallways, open-plan spaces with real lateral room to move.", eligibility: "single_or_pair" },
-  corner_to_corner_drift: { label: "Corner-to-Corner Drift (LTX)", desc: "A diagonal drift between two visible corners, using the room's existing depth.", eligibility: "single_or_pair" },
-  living_room_ambient: { label: "Living Room Ambient (LTX)", desc: "Stable frame with subtle ambient motion — curtain sway, plant movement, or fireplace flicker — only for elements already visible.", eligibility: "single_or_pair" },
-  fireplace_flicker: { label: "Fireplace Flicker (LTX)", desc: "Locked-off shot, existing fireplace flame flickers naturally. Requires a visible fireplace in the photo.", eligibility: "single_or_pair" },
-  water_motion: { label: "Water Motion (LTX)", desc: "Locked-off exterior shot, gentle natural ripples across existing water. Requires a visible pool, pond, or water feature.", eligibility: "exterior_only" },
-  outdoor_breeze: { label: "Outdoor Breeze (LTX)", desc: "Locked-off exterior shot, subtle breeze through existing trees or landscaping. Requires visible foliage.", eligibility: "exterior_only" },
-  // Batch 2 (July 18, 2026) — tested LTX-safe rewrites, replacing the
-  // equivalent Kling presets entirely (no longer offered via Kling at
-  // all — see the REMOVED comments above). Each simulates the FEEL of
-  // the original camera technique using only in-frame, non-revealing
-  // motion, since LTX genuinely cannot do a true orbit, true rack focus,
-  // or a true geometry-revealing boom/crane move.
-  orbit_arc: { label: "Orbit / Arc (LTX)", desc: "A soft lateral arc-drift around a central feature — a kitchen island, dining table, or pool — simulating the feel of an orbit without literally rotating around the subject.", eligibility: "single_or_pair" },
-  rack_focus: { label: "Rack Focus (LTX)", desc: "A gentle push-in with subtle depth-weighted motion suggesting a soft focus shift — simulates the impression of a focus pull, not a literal depth-of-field change.", eligibility: "single_or_pair" },
-  drone_boom_up: { label: "Drone Boom-Up (LTX)", desc: "A smooth upward drift with a slight forward glide, giving an elevated feel while staying fully within the photographed frame.", eligibility: "exterior_only" },
-  crane_up: { label: "Crane Up (LTX)", desc: "A vertical upward drift with a slight tilt, emphasizing the upper portion already visible — ceiling, chandelier, fan, high windows.", eligibility: "single_or_pair" },
-  crane_down: { label: "Crane Down (LTX)", desc: "A vertical downward drift with a slight tilt, emphasizing the lower portion already visible — flooring, tilework, a rug.", eligibility: "single_or_pair" },
-  parallax_push: { label: "Parallax Push (LTX)", desc: "A gentle push-in with real layered micro-parallax — foreground shifts slightly faster than background for genuine dimensional depth.", eligibility: "single_or_pair" },
-  pan_zoom_reveal: { label: "Pan + Zoom Reveal (LTX)", desc: "A lateral pan combined with a gentle push-in, emphasizing more of the space already visible in the photo.", eligibility: "single_or_pair" },
+  // ── Camera Movement ──────────────────────────────────────────────────
+  cinematic_push: { label: "Cinematic Push", desc: "A deliberate push-in toward the room's center, with natural parallax from existing room geometry.", eligibility: "single_or_pair", category: "Camera Movement", openPlanSafe: true },
+  luxury_drift: { label: "Luxury Drift", desc: "A slow, refined lateral drift with stable, controlled motion — like a slider shot across the room.", eligibility: "single_or_pair", category: "Camera Movement", openPlanSafe: true },
+  architectural_glide: { label: "Architectural Glide", desc: "A horizontal glide along the room's existing sightline — cabinetry, windows, built-ins. Best in kitchens, hallways, open-plan spaces with real lateral room to move.", eligibility: "single_or_pair", category: "Camera Movement", openPlanSafe: true },
+  corner_to_corner_drift: { label: "Corner-to-Corner Drift", desc: "A diagonal drift between two visible corners, using the room's existing depth.", eligibility: "single_or_pair", category: "Camera Movement", openPlanSafe: true },
+  floating_camera_drift: { label: "Floating Camera Drift", desc: "Gentle weightless micro-sway, ambient and subtle. Best in rooms with soft lighting and visible depth — avoid highly reflective rooms (mirrors, glossy tile).", eligibility: "single_or_pair", category: "Camera Movement", openPlanSafe: false },
+  orbit_arc: { label: "Orbit / Arc", desc: "A soft lateral arc-drift around a central feature — a kitchen island, dining table, or pool — simulating the feel of an orbit without literally rotating around the subject.", eligibility: "single_or_pair", category: "Camera Movement", openPlanSafe: false },
+  rack_focus: { label: "Rack Focus", desc: "A gentle push-in with subtle depth-weighted motion suggesting a soft focus shift — simulates the impression of a focus pull, not a literal depth-of-field change.", eligibility: "single_or_pair", category: "Camera Movement", openPlanSafe: false },
+  drone_boom_up: { label: "Drone Boom-Up", desc: "A smooth upward drift with a slight forward glide, giving an elevated feel while staying fully within the photographed frame.", eligibility: "exterior_only", category: "Camera Movement", openPlanSafe: false },
+  crane_up: { label: "Crane Up", desc: "A vertical upward drift with a slight tilt, emphasizing the upper portion already visible — ceiling, chandelier, fan, high windows.", eligibility: "single_or_pair", category: "Camera Movement", openPlanSafe: false },
+  crane_down: { label: "Crane Down", desc: "A vertical downward drift with a slight tilt, emphasizing the lower portion already visible — flooring, tilework, a rug.", eligibility: "single_or_pair", category: "Camera Movement", openPlanSafe: false },
+  parallax_push: { label: "Parallax Push", desc: "A gentle push-in with real layered micro-parallax — foreground shifts slightly faster than background for genuine dimensional depth.", eligibility: "single_or_pair", category: "Camera Movement", openPlanSafe: false },
+  pan_zoom_reveal: { label: "Pan + Zoom Reveal", desc: "A lateral pan combined with a gentle push-in, emphasizing more of the space already visible in the photo.", eligibility: "single_or_pair", category: "Camera Movement", openPlanSafe: false },
+
+  // ── Ambient Detail ────────────────────────────────────────────────────
+  living_room_ambient: { label: "Living Room Ambient", desc: "Stable frame with subtle ambient motion — curtain sway, plant movement, or fireplace flicker — only for elements already visible.", eligibility: "single_or_pair", category: "Ambient Detail", openPlanSafe: true },
+  fireplace_flicker: { label: "Fireplace Flicker", desc: "Locked-off shot, existing fireplace flame flickers naturally. Requires a visible fireplace in the photo.", eligibility: "single_or_pair", category: "Ambient Detail", openPlanSafe: true },
+  water_motion: { label: "Water Motion", desc: "Locked-off exterior shot, gentle natural ripples across existing water. Requires a visible pool, pond, or water feature.", eligibility: "exterior_only", category: "Ambient Detail", openPlanSafe: false },
+  outdoor_breeze: { label: "Outdoor Breeze", desc: "Locked-off exterior shot, subtle breeze through existing trees or landscaping. Requires visible foliage.", eligibility: "exterior_only", category: "Ambient Detail", openPlanSafe: false },
+
+  // ── Open-Plan Only ────────────────────────────────────────────────────
+  // Batch 3 (July 18, 2026) — LTX_Micro_movement_prompts.docx. Explicitly
+  // hallway-safe, restricted TO open-plan (see openPlanOnly above).
+  micro_zoom_out: { label: "Micro Zoom-Out", desc: "A gentle outward breathing motion within the existing frame — expands without ever exposing hallway depth, a doorway edge, or any new geometry.", eligibility: "single_or_pair", category: "Open-Plan Only", openPlanSafe: true, openPlanOnly: true },
+  micro_dolly_back: { label: "Micro Dolly Back", desc: "A very small straight backward shift, staying fully inside the photographed space — never reveals hallway entrances or new wall planes.", eligibility: "single_or_pair", category: "Open-Plan Only", openPlanSafe: true, openPlanOnly: true },
+  open_plan_reveal: { label: "Open-Plan Reveal", desc: "Gently redistributes emphasis across kitchen, dining, and living zones without ever widening the frame or exposing a hallway or new corner.", eligibility: "single_or_pair", category: "Open-Plan Only", openPlanSafe: true, openPlanOnly: true },
 };
 
 // NOTE: vacant_staged_pair was an earlier placeholder name used before the
@@ -637,6 +608,15 @@ function buildRealFrame(f) {
   const useLtxMotion = f.motion === "ltx";
   const isKenBurns = f.motion === "kenburns";
   const isHero = useAiMotion && f.preset === "hero_transformation";
+  // NEW (July 18, 2026) — Exterior Landscape Transformation needs the
+  // identical null-preset treatment as Hero Transformation (see the
+  // comment below for why), but is kept as a SEPARATE check from isHero
+  // rather than folded into it — isHero also forces addContinuationMotion
+  // on further down, and Sam's description of this preset never mentioned
+  // an automatic finishing move the way Hero Transformation's does. Don't
+  // assume the two presets share every behavior just because they share
+  // this one.
+  const isExteriorTransform = useAiMotion && f.preset === "exterior_landscape_transformation";
   // CHANGE (July 14, 2026 — corrected after Sam's real-world testing):
   // originally mapped Hero Transformation to the "cinematic_push" NAMED
   // preset. Checked klingMotion.js directly — that was actively wrong,
@@ -649,8 +629,11 @@ function buildRealFrame(f) {
   // prompt written for exactly this ("...as furniture and decor
   // gradually appear, room becomes fully furnished and staged..."). That
   // built-in fallback IS the real morph reveal — no named preset needed
-  // or wanted here.
-  const resolvedPreset = isHero ? null : f.preset;
+  // or wanted here. Exterior Landscape Transformation uses the SAME
+  // mechanism — klingMotion.js's generic EXTERIOR fallback prompt,
+  // triggered the identical way (no preset name + a real pair, this time
+  // with isExterior true instead of false).
+  const resolvedPreset = (isHero || isExteriorTransform) ? null : f.preset;
   return {
     imageUrl:      f.realUrl || f.dataUrl, // realUrl is the uploaded/Cloudinary URL once available — see uploadAsIsPhoto()
     beforeUrl:     f.isBeforeAfter ? f.beforeUrl : undefined,
@@ -1098,29 +1081,64 @@ function goToConfirmStep() {
 // pass on top of the shared eligibility rules, not baked into each
 // individual LTX preset's eligibility value, since every one of the 9
 // needs the identical exclusion.
+// NEW (July 18, 2026) — builds grouped <optgroup> markup for the LTX
+// dropdown (19 presets is too long as one flat list). Groups by each
+// preset's `category` field, in the fixed order below rather than
+// object-insertion order or alphabetical, so "Camera Movement" (the
+// largest, most commonly-relevant group) always appears first regardless
+// of how LTX_PRESETS happens to be ordered internally.
+const LTX_CATEGORY_ORDER = ["Camera Movement", "Ambient Detail", "Open-Plan Only"];
+function buildGroupedLtxOptions(eligibleLtxEntries, selectedKey) {
+  const byCategory = {};
+  eligibleLtxEntries.forEach(([key, p]) => {
+    const cat = p.category || "Other";
+    (byCategory[cat] = byCategory[cat] || []).push([key, p]);
+  });
+  return LTX_CATEGORY_ORDER
+    .filter(cat => byCategory[cat] && byCategory[cat].length > 0)
+    .map(cat => {
+      const opts = byCategory[cat]
+        .map(([key, p]) => `<option value="${key}" ${selectedKey === key ? "selected" : ""}>${p.label}</option>`)
+        .join("");
+      return `<optgroup label="${cat}">${opts}</optgroup>`;
+    })
+    .join("");
+}
+
 function eligiblePresetsFor(frame, presetsTable) {
   presetsTable = presetsTable || KLING_PRESETS;
   const isExterior = frame.isExterior; // explicit flag from Step 1 — never inferred from the room label
-  let entries = Object.entries(presetsTable).filter(([key, p]) => {
-    if (p.eligibility === "single_or_pair") return true;
-    if (p.eligibility === "exterior_only") return isExterior;
-    if (p.eligibility === "pair_required") return frame.isBeforeAfter;
-    if (p.eligibility === "pair_required_exterior") return frame.isBeforeAfter && isExterior;
-    if (p.eligibility === "exterior_or_pair") return isExterior || frame.isBeforeAfter;
-    return false;
-  });
   // FIX (July 18, 2026) — frame.isOpenPlan is only ever computed inside
   // buildRealFrame() at submission time; it does NOT exist as a live
-  // property on the frame object during editing. Checking it here would
-  // always read undefined (falsy) and silently never block anything —
-  // exactly the bug this comment is here to prevent someone from
-  // reintroducing. Computed inline instead, matching buildRealFrame()'s
-  // own logic (f.room === "Open Plan") exactly, so this works whether
-  // `frame` is the live editing object or a fully-built backend payload.
+  // property on the frame object during editing. Computed inline instead,
+  // matching buildRealFrame()'s own logic (f.room === "Open Plan") exactly.
   const isOpenPlan = frame.isOpenPlan !== undefined ? frame.isOpenPlan : frame.room === "Open Plan";
-  if (presetsTable === LTX_PRESETS && isOpenPlan) {
-    entries = [];
-  }
+  let entries = Object.entries(presetsTable).filter(([key, p]) => {
+    let baseEligible;
+    if (p.eligibility === "single_or_pair") baseEligible = true;
+    else if (p.eligibility === "exterior_only") baseEligible = isExterior;
+    else if (p.eligibility === "pair_required") baseEligible = frame.isBeforeAfter;
+    else if (p.eligibility === "pair_required_exterior") baseEligible = frame.isBeforeAfter && isExterior;
+    else if (p.eligibility === "exterior_or_pair") baseEligible = isExterior || frame.isBeforeAfter;
+    else baseEligible = false;
+    if (!baseEligible) return false;
+
+    // NEW (July 18, 2026) — replaces the old blanket "block everything on
+    // open-plan" rule for LTX. Two independent checks, both per-preset:
+    // openPlanOnly presets (the 3 hallway-safe micro-movements) require
+    // open-plan and are excluded on an enclosed room; everything else on
+    // LTX is excluded on open-plan UNLESS explicitly marked openPlanSafe
+    // (mirrors ltxMotion.js's OPEN_PLAN_SAFE_LTX_PRESETS allowlist —
+    // keep both in sync if either changes). Kling isn't affected by
+    // either check — it no longer has any camera-motion presets at all,
+    // only genuine two-image transformations, which were never
+    // open-plan-gated to begin with.
+    if (presetsTable === LTX_PRESETS) {
+      if (p.openPlanOnly && !isOpenPlan) return false;
+      if (isOpenPlan && !p.openPlanSafe) return false;
+    }
+    return true;
+  });
   return entries;
 }
 
@@ -1220,7 +1238,7 @@ function renderMotionStep() {
     // above, for the LTX engine. Uses f.ltxPreset (separate field, see
     // setLtxPreset's comment for why) and LTX_PRESETS.
     const eligibleLtx = eligiblePresetsFor(f, LTX_PRESETS);
-    const ltxPresetOptions = eligibleLtx.map(([key, p]) => `<option value="${key}" ${f.ltxPreset === key ? "selected" : ""}>${p.label}</option>`).join("");
+    const ltxPresetOptions = buildGroupedLtxOptions(eligibleLtx, f.ltxPreset);
     const selectedLtxPreset = LTX_PRESETS[f.ltxPreset];
     const kenBurnsOptions = Object.entries(KEN_BURNS_PRESETS).map(([key, p]) => `<option value="${key}" ${(f.kenBurnsPreset || "auto") === key ? "selected" : ""}>${p.label}</option>`).join("");
     const selectedKenBurnsPreset = KEN_BURNS_PRESETS[f.kenBurnsPreset || "auto"];
@@ -1255,8 +1273,8 @@ function renderMotionStep() {
         ) : ""}
         <div class="motion-toggle">
           <button class="motion-btn kenburns ${f.motion==='kenburns'?'active kenburns':''}" onclick="setMotion(${f.id}, 'kenburns')">Ken Burns</button>
-          <button class="motion-btn kling ${f.motion==='kling'?'active kling':''}" onclick="setMotion(${f.id}, 'kling')">AI Motion</button>
-          <button class="motion-btn kling ${f.motion==='ltx'?'active kling':''}" onclick="setMotion(${f.id}, 'ltx')">LTX Motion</button>
+          <button class="motion-btn kling ${f.motion==='ltx'?'active kling':''}" onclick="setMotion(${f.id}, 'ltx')">AI Motion</button>
+          <button class="motion-btn kling ${f.motion==='kling'?'active kling':''}" onclick="setMotion(${f.id}, 'kling')">AI Transformations</button>
         </div>
 
         ${f.motion === 'kenburns' ? `
@@ -1275,12 +1293,12 @@ function renderMotionStep() {
         ${f.motion === 'kling' ? (eligible.length > 0 ? `
             <div class="preset-row">
               <select class="preset-select" onchange="setPreset(${f.id}, this.value)">
-                <option value="">Choose a movement...</option>
+                <option value="">Choose a transformation...</option>
                 ${presetOptions}
               </select>
               ${selectedKlingPreset ? `<button class="preview-btn" onclick="openMotionPreview('${f.preset}', 'kling')">&#9654; Preview</button>` : ""}
             </div>
-            ${selectedKlingPreset ? `<div class="preset-desc">${selectedKlingPreset.desc}</div>` : `<div class="preset-desc">Pick a camera movement to see what it does.</div>`}
+            ${selectedKlingPreset ? `<div class="preset-desc">${selectedKlingPreset.desc}</div>` : `<div class="preset-desc">Pick a transformation to see what it does.</div>`}
             ${f.preset === 'hero_transformation' ? `
               <div class="preset-desc" style="font-style:italic;">Includes the finishing move automatically \u2014 nothing else to choose.</div>
             ` : (selectedKlingPreset ? `
@@ -1289,13 +1307,10 @@ function renderMotionStep() {
                 Add a soft finishing move at the end
               </label>
             ` : "")}
-          ` : `<div class="preset-disabled-note">No AI Motion presets available for this room yet — check "before/after pair" above if you have a vacant + staged set, or use Ken Burns instead.</div>`
+          ` : `<div class="preset-disabled-note">No AI Transformations available for this room yet — these all require a before/after pair. Check "before/after pair" above, or use Ken Burns instead.</div>`
         ) : ""}
 
-        ${f.motion === 'ltx' ? (
-            f.room === "Open Plan"
-              ? `<div class="preset-disabled-note">LTX Motion isn't available on open-plan rooms yet — real testing found it drops furniture in as ungrouped clusters on dense, spatially-continuous layouts. Use Ken Burns or AI Motion (Kling) instead for this room.</div>`
-              : (eligibleLtx.length > 0 ? `
+        ${f.motion === 'ltx' ? (eligibleLtx.length > 0 ? `
             <div class="preset-row">
               <select class="preset-select" onchange="setLtxPreset(${f.id}, this.value)">
                 <option value="">Choose a movement...</option>
@@ -1303,8 +1318,8 @@ function renderMotionStep() {
               </select>
               ${selectedLtxPreset ? `<button class="preview-btn" onclick="openMotionPreview('${f.ltxPreset}', 'ltx')">&#9654; Preview</button>` : ""}
             </div>
-            ${selectedLtxPreset ? `<div class="preset-desc">${selectedLtxPreset.desc}</div>` : `<div class="preset-desc">Pick a camera movement to see what it does. LTX Motion costs less than AI Motion (Kling) per clip.</div>`}
-          ` : `<div class="preset-disabled-note">No LTX Motion presets available for this room yet — use Ken Burns or AI Motion (Kling) instead.</div>`)
+            ${selectedLtxPreset ? `<div class="preset-desc">${selectedLtxPreset.desc}</div>` : `<div class="preset-desc">Pick a camera movement to see what it does.</div>`}
+          ` : `<div class="preset-disabled-note">No AI Motion presets available for this room yet.</div>`
         ) : ""}
       </div>
     </div>`;
@@ -1513,13 +1528,13 @@ function renderLightboxControls(id) {
     const eligible = eligiblePresetsFor(f, KLING_PRESETS);
     const presetOptions = eligible.map(([key, p]) => `<option value="${key}" ${f.preset === key ? "selected" : ""}>${p.label}</option>`).join("");
     const eligibleLtx = eligiblePresetsFor(f, LTX_PRESETS);
-    const ltxPresetOptions = eligibleLtx.map(([key, p]) => `<option value="${key}" ${f.ltxPreset === key ? "selected" : ""}>${p.label}</option>`).join("");
+    const ltxPresetOptions = buildGroupedLtxOptions(eligibleLtx, f.ltxPreset);
     document.getElementById("lightboxControls").innerHTML = `
       <div class="panel-sub" style="margin-bottom:10px;">${displayRoomName(f)} — ${f.isExterior ? "Exterior" : "Interior"}</div>
       <div class="motion-toggle">
         <button class="motion-btn kenburns ${f.motion==='kenburns'?'active kenburns':''}" onclick="setMotion(${f.id}, 'kenburns'); renderLightboxControls(${f.id});">Ken Burns</button>
-        <button class="motion-btn kling ${f.motion==='kling'?'active kling':''}" onclick="setMotion(${f.id}, 'kling'); renderLightboxControls(${f.id});">AI Motion</button>
-        <button class="motion-btn kling ${f.motion==='ltx'?'active kling':''}" onclick="setMotion(${f.id}, 'ltx'); renderLightboxControls(${f.id});">LTX Motion</button>
+        <button class="motion-btn kling ${f.motion==='ltx'?'active kling':''}" onclick="setMotion(${f.id}, 'ltx'); renderLightboxControls(${f.id});">AI Motion</button>
+        <button class="motion-btn kling ${f.motion==='kling'?'active kling':''}" onclick="setMotion(${f.id}, 'kling'); renderLightboxControls(${f.id});">AI Transformations</button>
       </div>
       ${f.motion === 'kenburns' ? `
         ${f.isBeforeAfter ? renderMotionTypeToggle(f, `renderLightboxControls(${f.id})`) : ""}
@@ -1531,21 +1546,18 @@ function renderLightboxControls(id) {
         ` : renderRevealPresetControls(f, `renderLightboxControls(${f.id})`)}
       ` : (f.motion === 'kling' ? (eligible.length > 0 ? `
         <select class="preset-select" onchange="setPreset(${f.id}, this.value); renderLightboxControls(${f.id});">
-          <option value="">Choose a movement...</option>
+          <option value="">Choose a transformation...</option>
           ${presetOptions}
         </select>
-        ${KLING_PRESETS[f.preset] ? `<div class="preset-desc">${KLING_PRESETS[f.preset].desc}</div>` : `<div class="preset-desc">Pick a camera movement to see what it does.</div>`}
-      ` : `<div class="preset-disabled-note">No AI Motion presets available for this room yet.</div>`
-      ) : (
-        f.room === "Open Plan"
-          ? `<div class="preset-disabled-note">LTX Motion isn't available on open-plan rooms yet — use Ken Burns or AI Motion (Kling) instead.</div>`
-          : (eligibleLtx.length > 0 ? `
+        ${KLING_PRESETS[f.preset] ? `<div class="preset-desc">${KLING_PRESETS[f.preset].desc}</div>` : `<div class="preset-desc">Pick a transformation to see what it does.</div>`}
+      ` : `<div class="preset-disabled-note">No AI Transformations available for this room yet — these all require a before/after pair.</div>`
+      ) : (eligibleLtx.length > 0 ? `
         <select class="preset-select" onchange="setLtxPreset(${f.id}, this.value); renderLightboxControls(${f.id});">
           <option value="">Choose a movement...</option>
           ${ltxPresetOptions}
         </select>
         ${LTX_PRESETS[f.ltxPreset] ? `<div class="preset-desc">${LTX_PRESETS[f.ltxPreset].desc}</div>` : `<div class="preset-desc">Pick a camera movement to see what it does.</div>`}
-      ` : `<div class="preset-disabled-note">No LTX Motion presets available for this room yet.</div>`)
+      ` : `<div class="preset-disabled-note">No AI Motion presets available for this room yet.</div>`
       ))}
     `;
   }

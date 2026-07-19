@@ -344,6 +344,16 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
 //     captured, so no sample exists yet for either.
 const PREVIEW_CLIP_URLS = {
   // Kling AI Motion
+  //
+  // STALE (July 18, 2026): orbit_arc, rack_focus, parallax_push, crane_up,
+  // crane_down, drone_boom_up, and pan_zoom_reveal (once it gets a clip)
+  // are all Kling-era footage for presets that have since moved to LTX.
+  // The actual rendered look has changed (LTX-safe rewrites deliberately
+  // simulate these motions differently — in-frame drift/parallax instead
+  // of a literal orbit or geometry reveal). These URLs still work and
+  // won't error, but they no longer represent what the preset actually
+  // produces — replace with real LTX-rendered previews once Sam creates
+  // them (see his own note: he needs this exact list to go do that).
   orbit_arc:                    "https://res.cloudinary.com/de18zsi7o/video/upload/v1783606652/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783606651845.mp4",
   rack_focus:                   "https://res.cloudinary.com/de18zsi7o/video/upload/v1783607175/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783607174918.mp4",
   fireplace_flicker:            "https://res.cloudinary.com/de18zsi7o/video/upload/v1783610650/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783610649971.mp4",
@@ -445,10 +455,12 @@ const KLING_PRESETS = {
   // "pair_required" gate already used for the other pair-only presets.
   hero_transformation: { label: "Hero Transformation", desc: "The full before/after treatment: the vacant room holds, then transforms into the staged version as the camera pushes in, finishing with a soft parallax move. Requires a before/after pair.", eligibility: "pair_required" },
 
-  orbit_arc: { label: "Orbit / Arc", desc: "Slow cinematic orbit around a central feature — a kitchen island, dining table, or pool.", eligibility: "single_or_pair" },
-  rack_focus: { label: "Rack Focus", desc: "Foreground detail (hardware, a vignette) racks into sharp focus on the room behind it.", eligibility: "single_or_pair" },
+  // REMOVED (July 18, 2026): orbit_arc, rack_focus, and drone_boom_up
+  // used to be here — all three now have tested LTX-safe rewrites (see
+  // LTX_PRESETS below) at lower cost, and are no longer offered via
+  // Kling at all. See klingMotion.js's SINGLE_IMAGE_INTERIOR_ALLOWED_
+  // PRESETS comment for the full reasoning.
   fireplace_flicker: { label: "Fireplace Flicker", desc: "Locked-off shot with the fireplace flame flickering naturally — real motion, not a still.", eligibility: "single_or_pair" },
-  drone_boom_up: { label: "Drone Boom-Up", desc: "Rising, slightly-forward reveal of the exterior and surrounding landscaping.", eligibility: "exterior_only" },
   water_motion: { label: "Water Motion", desc: "Gentle, realistic water movement across a pool or fountain.", eligibility: "exterior_only" },
   day_to_twilight: { label: "Day → Twilight", desc: "Smooth transition from daylight to dusk — interior, porch, garage, and landscape lighting gradually turn on as the sky deepens to blue-hour with a sunset glow.", eligibility: "pair_required_exterior" },
   twilight_to_day: { label: "Twilight → Day", desc: "The reverse — dusk gradually brightens to clear daytime, all exterior and interior lighting turning off as the sun comes up.", eligibility: "pair_required_exterior" },
@@ -461,13 +473,12 @@ const KLING_PRESETS = {
   // "the image moving, not the camera" in real footage testing), so a video
   // with multiple rooms needs real preset variety to avoid every room
   // reading as the same 2-3 moves repeated.
+  // REMOVED (July 18, 2026): parallax_push, crane_up, crane_down — same
+  // reasoning as above, tested LTX equivalents now exist.
   cinematic_push: { label: "Cinematic Push", desc: "A cinematic dolly push toward the room's focal point — deeper, more natural depth-of-field than Ken Burns push_in.", eligibility: "single_or_pair" },
   luxury_drift: { label: "Luxury Drift", desc: "Slow, elegant lateral drift across the room with real parallax between foreground and background.", eligibility: "single_or_pair" },
   floating_camera_drift: { label: "Floating Camera Drift", desc: "Gentle floating/breathing motion, as if suspended weightlessly in the room — subtler than a directional pan.", eligibility: "single_or_pair" },
-  parallax_push: { label: "Parallax Push", desc: "Push-in with foreground elements moving faster than background — real dimensional depth, not just zoom.", eligibility: "single_or_pair" },
   architectural_glide: { label: "Architectural Glide", desc: "Smooth lateral glide along a hallway or open-plan sightline, emphasizing flow between spaces.", eligibility: "single_or_pair" },
-  crane_up: { label: "Crane Up", desc: "Rising, slightly-tilting reveal of the upper room — ceiling, chandelier, fan, high windows. The interior counterpart to Drone Boom-Up.", eligibility: "single_or_pair" },
-  crane_down: { label: "Crane Down", desc: "Descending, slightly-tilting reveal of the lower room — flooring, tilework, a rug.", eligibility: "single_or_pair" },
   room_reveal: { label: "Room Reveal", desc: "Slow pull-back widening to show more of the already-visible room. Single-image use requires an exterior room for now — for interior, use with a real before/after pair (AI Motion has two known images to work from rather than inferring the wider view from one).", eligibility: "exterior_or_pair" },
 
   // ── Pending your Playground verification (per your own flag on these
@@ -476,8 +487,56 @@ const KLING_PRESETS = {
   // wall/floor) not actually present in the source photo. Available now only
   // with a real before/after pair, where Kling has two known images to
   // anchor to instead of inferring from one.
-  living_room_ambient: { label: "Living Room Ambient (pending verification)", desc: "Subtle ambient motion — flame flicker, curtain sway, plant movement — but only for elements already visible in the photo. Needs a Playground check before single-image interior use; available now only with a before/after pair.", eligibility: "pair_required" },
-  corner_to_corner_drift: { label: "Corner-to-Corner Drift (pending verification)", desc: "Diagonal drift across the room, most useful in larger/open spaces. Needs a Playground check in a small room specifically before single-image interior use; available now only with a before/after pair.", eligibility: "pair_required" },
+  // FIXED (July 18, 2026) — backend (klingMotion.js) cleared these for
+  // single-image interior use on July 9, 2026 ("Sam confirmed via his own
+  // fal.ai Playground testing that these three do not invent unphotographed
+  // content... moved into the allowlist"), but this frontend never got
+  // updated to match — was still showing "(pending verification)" and
+  // pair_required for both, weeks after the backend already allowed
+  // single-image use. Corrected to match the real current backend state.
+  living_room_ambient: { label: "Living Room Ambient", desc: "Subtle ambient motion — flame flicker, curtain sway, plant movement — but only for elements already visible in the photo.", eligibility: "single_or_pair" },
+  corner_to_corner_drift: { label: "Corner-to-Corner Drift", desc: "Diagonal drift across the room, most useful in larger/open spaces.", eligibility: "single_or_pair" },
+  // ADDED (July 18, 2026) — real backend preset (klingMotion.js
+  // KLING_MOTION_TEMPLATES) with no frontend entry at all until now.
+  outdoor_breeze: { label: "Outdoor Breeze", desc: "A subtle breeze moves through visible trees or landscaping — natural, photorealistic motion in already-visible foliage.", eligibility: "exterior_only" },
+  // pan_zoom_reveal was added here earlier this same session, then
+  // removed later the same session — a tested LTX-safe rewrite landed
+  // before this ever shipped, so it's LTX-only, never offered via Kling.
+};
+
+// NEW (July 18, 2026) — LTX Fast presets, mirroring KLING_PRESETS' shape
+// so eligiblePresetsFor() can filter either engine's list with the same
+// logic. Sourced from ltxMotion.js's LTX_MOTION_TEMPLATES — same prompt
+// text as the backend, kept here only for display (label/desc), never
+// re-sent to the server; the actual render call uses the preset KEY,
+// and the server resolves its own prompt independently. room_reveal is
+// intentionally NOT included — Sam's call, "NO Open Plan LTX right now."
+// isOpenPlan filtering happens in eligiblePresetsForLtx() below, not here
+// (every one of these 9 needs the SAME open-plan exclusion, so it's one
+// shared check rather than a per-preset flag).
+const LTX_PRESETS = {
+  cinematic_push: { label: "Cinematic Push (LTX)", desc: "A deliberate push-in toward the room's center, with natural parallax from existing room geometry.", eligibility: "single_or_pair" },
+  luxury_drift: { label: "Luxury Drift (LTX)", desc: "A slow, refined lateral drift with stable, controlled motion — like a slider shot across the room.", eligibility: "single_or_pair" },
+  floating_camera_drift: { label: "Floating Camera Drift (LTX)", desc: "Gentle weightless micro-sway, ambient and subtle. Best in rooms with soft lighting and visible depth — avoid highly reflective rooms (mirrors, glossy tile).", eligibility: "single_or_pair" },
+  architectural_glide: { label: "Architectural Glide (LTX)", desc: "A horizontal glide along the room's existing sightline — cabinetry, windows, built-ins. Best in kitchens, hallways, open-plan spaces with real lateral room to move.", eligibility: "single_or_pair" },
+  corner_to_corner_drift: { label: "Corner-to-Corner Drift (LTX)", desc: "A diagonal drift between two visible corners, using the room's existing depth.", eligibility: "single_or_pair" },
+  living_room_ambient: { label: "Living Room Ambient (LTX)", desc: "Stable frame with subtle ambient motion — curtain sway, plant movement, or fireplace flicker — only for elements already visible.", eligibility: "single_or_pair" },
+  fireplace_flicker: { label: "Fireplace Flicker (LTX)", desc: "Locked-off shot, existing fireplace flame flickers naturally. Requires a visible fireplace in the photo.", eligibility: "single_or_pair" },
+  water_motion: { label: "Water Motion (LTX)", desc: "Locked-off exterior shot, gentle natural ripples across existing water. Requires a visible pool, pond, or water feature.", eligibility: "exterior_only" },
+  outdoor_breeze: { label: "Outdoor Breeze (LTX)", desc: "Locked-off exterior shot, subtle breeze through existing trees or landscaping. Requires visible foliage.", eligibility: "exterior_only" },
+  // Batch 2 (July 18, 2026) — tested LTX-safe rewrites, replacing the
+  // equivalent Kling presets entirely (no longer offered via Kling at
+  // all — see the REMOVED comments above). Each simulates the FEEL of
+  // the original camera technique using only in-frame, non-revealing
+  // motion, since LTX genuinely cannot do a true orbit, true rack focus,
+  // or a true geometry-revealing boom/crane move.
+  orbit_arc: { label: "Orbit / Arc (LTX)", desc: "A soft lateral arc-drift around a central feature — a kitchen island, dining table, or pool — simulating the feel of an orbit without literally rotating around the subject.", eligibility: "single_or_pair" },
+  rack_focus: { label: "Rack Focus (LTX)", desc: "A gentle push-in with subtle depth-weighted motion suggesting a soft focus shift — simulates the impression of a focus pull, not a literal depth-of-field change.", eligibility: "single_or_pair" },
+  drone_boom_up: { label: "Drone Boom-Up (LTX)", desc: "A smooth upward drift with a slight forward glide, giving an elevated feel while staying fully within the photographed frame.", eligibility: "exterior_only" },
+  crane_up: { label: "Crane Up (LTX)", desc: "A vertical upward drift with a slight tilt, emphasizing the upper portion already visible — ceiling, chandelier, fan, high windows.", eligibility: "single_or_pair" },
+  crane_down: { label: "Crane Down (LTX)", desc: "A vertical downward drift with a slight tilt, emphasizing the lower portion already visible — flooring, tilework, a rug.", eligibility: "single_or_pair" },
+  parallax_push: { label: "Parallax Push (LTX)", desc: "A gentle push-in with real layered micro-parallax — foreground shifts slightly faster than background for genuine dimensional depth.", eligibility: "single_or_pair" },
+  pan_zoom_reveal: { label: "Pan + Zoom Reveal (LTX)", desc: "A lateral pan combined with a gentle push-in, emphasizing more of the space already visible in the photo.", eligibility: "single_or_pair" },
 };
 
 // NOTE: vacant_staged_pair was an earlier placeholder name used before the
@@ -567,6 +626,16 @@ const ROOM_TYPE_TO_BACKEND = {
 function buildRealFrame(f) {
   const roomType = f.isExterior ? "exterior" : (ROOM_TYPE_TO_BACKEND[f.room] || "default");
   const useAiMotion = f.motion === "kling";
+  // NEW (July 18, 2026) — LTX Motion, a third engine alongside Ken Burns
+  // and Kling. Sent as a SEPARATE field (ltxMotionPreset), not folded
+  // into useAiMotion — renderPipeline.js's dispatch chain checks
+  // frame.useAiMotion FIRST (routes to Kling), so useAiMotion must stay
+  // false here or an LTX selection would incorrectly render via Kling
+  // instead. isKenBurns below is the real "which engine" boolean this
+  // function actually needs — useAiMotion alone was never quite right
+  // for gating Reveal Presets (see the useRevealEffect fix below).
+  const useLtxMotion = f.motion === "ltx";
+  const isKenBurns = f.motion === "kenburns";
   const isHero = useAiMotion && f.preset === "hero_transformation";
   // CHANGE (July 14, 2026 — corrected after Sam's real-world testing):
   // originally mapped Hero Transformation to the "cinematic_push" NAMED
@@ -597,6 +666,11 @@ function buildRealFrame(f) {
     // exactly as it already was for everything else.
     roomLabel: displayRoomName(f),
     motionPreset:  useAiMotion ? resolvedPreset : (f.kenBurnsPreset || "auto"),
+    // NEW (July 18, 2026) — the LTX equivalent of motionPreset above.
+    // Kept as its own field, matching ltxMotion.js's applyLtxMotion()
+    // and renderPipeline.js's dispatch check (frame.ltxMotionPreset &&
+    // LTX_MOTION_TEMPLATES[frame.ltxMotionPreset]) exactly.
+    ltxMotionPreset: useLtxMotion ? (f.ltxPreset || undefined) : undefined,
     isOpenPlan:    f.room === "Open Plan",
     // durationSeconds intentionally omitted — motionPresets.js's
     // resolveDuration() already has real per-roomType defaults; there is
@@ -618,14 +692,26 @@ function buildRealFrame(f) {
     // single useRevealEffect boolean + hardcoded pull_back/push_in wipe).
     // Only meaningful when NOT using AI Motion (Ken Burns only) AND a real
     // before/after pair exists — same gating the old useRevealEffect had.
+    // FIX (July 18, 2026) — this used to be gated on `!useAiMotion`, which
+    // was only ever correct back when the only two engines were Ken Burns
+    // and Kling (not-Kling = Ken Burns, true at the time). Adding LTX as a
+    // third engine exposed the real bug: `!useAiMotion` is true for LTX
+    // too, so switching a frame from Ken Burns Room Reveal to LTX Motion
+    // without explicitly toggling Reveal off would have silently carried
+    // stale useRevealEffect/revealPreset/endMotion state into an LTX
+    // request that has no idea what to do with it. Gated on isKenBurns
+    // specifically now — Reveal Presets are a Ken Burns feature, full
+    // stop, not "whatever isn't Kling."
     // revealPreset selects the opener motion + wipe transition (see
     // REVEAL_PRESETS above); endMotion is the user's chosen continuation-
-    // phase Ken Burns preset, constrained to that reveal preset's
-    // allowedEndMotions list. Backend (renderPipeline.js) resolves these
-    // into real motionRenderer.py calls — see assemble.js's buildRevealClip.
-    useRevealEffect: !useAiMotion ? !!f.useRevealEffect : false,
-    revealPreset: (!useAiMotion && f.useRevealEffect) ? (f.revealPreset || "classic_reveal") : undefined,
-    endMotion: (!useAiMotion && f.useRevealEffect) ? (f.endMotion || defaultEndMotionFor(f.revealPreset || "classic_reveal")) : undefined,
+    // phase preset (Ken Burns OR LTX — see renderPipeline.js's dispatch,
+    // which checks LTX_MOTION_TEMPLATES[endMotion] to decide), constrained
+    // to that reveal preset's allowedEndMotions list. Backend
+    // (renderPipeline.js) resolves these into real render calls — see
+    // assemble.js's buildRevealClip.
+    useRevealEffect: isKenBurns ? !!f.useRevealEffect : false,
+    revealPreset: (isKenBurns && f.useRevealEffect) ? (f.revealPreset || "classic_reveal") : undefined,
+    endMotion: (isKenBurns && f.useRevealEffect) ? (f.endMotion || defaultEndMotionFor(f.revealPreset || "classic_reveal")) : undefined,
   };
 }
 
@@ -924,8 +1010,15 @@ function updatePhotoExterior(id, isExterior) {
   // preset (e.g. water_motion only makes sense for exterior) — same
   // re-validation pattern as updatePhotoRoom() in renderUpload.
   if (f.motion === "kling" && f.preset) {
-    const stillEligible = eligiblePresetsFor(f).some(([key]) => key === f.preset);
+    const stillEligible = eligiblePresetsFor(f, KLING_PRESETS).some(([key]) => key === f.preset);
     if (!stillEligible) f.preset = null;
+  }
+  // NEW (July 18, 2026) — same staleness risk exists for LTX now that
+  // it's a real third engine with its own exterior_only presets
+  // (water_motion, outdoor_breeze, drone_boom_up).
+  if (f.motion === "ltx" && f.ltxPreset) {
+    const stillEligibleLtx = eligiblePresetsFor(f, LTX_PRESETS).some(([key]) => key === f.ltxPreset);
+    if (!stillEligibleLtx) f.ltxPreset = null;
   }
 }
 
@@ -997,9 +1090,18 @@ function goToConfirmStep() {
   goToStep(4);
 }
 
-function eligiblePresetsFor(frame) {
+// CHANGED (July 18, 2026) — now takes a presets table param instead of
+// hardcoding KLING_PRESETS, so the same filtering logic serves both
+// engines. isOpenPlan blocking is LTX-specific (Sam's call: "NO Open
+// Plan LTX right now" — real testing found LTX drops furniture in as
+// ungrouped clusters on dense open-plan layouts) — applied as an extra
+// pass on top of the shared eligibility rules, not baked into each
+// individual LTX preset's eligibility value, since every one of the 9
+// needs the identical exclusion.
+function eligiblePresetsFor(frame, presetsTable) {
+  presetsTable = presetsTable || KLING_PRESETS;
   const isExterior = frame.isExterior; // explicit flag from Step 1 — never inferred from the room label
-  return Object.entries(KLING_PRESETS).filter(([key, p]) => {
+  let entries = Object.entries(presetsTable).filter(([key, p]) => {
     if (p.eligibility === "single_or_pair") return true;
     if (p.eligibility === "exterior_only") return isExterior;
     if (p.eligibility === "pair_required") return frame.isBeforeAfter;
@@ -1007,6 +1109,19 @@ function eligiblePresetsFor(frame) {
     if (p.eligibility === "exterior_or_pair") return isExterior || frame.isBeforeAfter;
     return false;
   });
+  // FIX (July 18, 2026) — frame.isOpenPlan is only ever computed inside
+  // buildRealFrame() at submission time; it does NOT exist as a live
+  // property on the frame object during editing. Checking it here would
+  // always read undefined (falsy) and silently never block anything —
+  // exactly the bug this comment is here to prevent someone from
+  // reintroducing. Computed inline instead, matching buildRealFrame()'s
+  // own logic (f.room === "Open Plan") exactly, so this works whether
+  // `frame` is the live editing object or a fully-built backend payload.
+  const isOpenPlan = frame.isOpenPlan !== undefined ? frame.isOpenPlan : frame.room === "Open Plan";
+  if (presetsTable === LTX_PRESETS && isOpenPlan) {
+    entries = [];
+  }
+  return entries;
 }
 
 // Shared between the Motion step card and the Motion Assignment lightbox.
@@ -1098,9 +1213,15 @@ function setEndMotion(id, motionKey) {
 function renderMotionStep() {
   const list = document.getElementById("motionList");
   list.innerHTML = frames.map((f, i) => {
-    const eligible = eligiblePresetsFor(f);
+    const eligible = eligiblePresetsFor(f, KLING_PRESETS);
     const presetOptions = eligible.map(([key, p]) => `<option value="${key}" ${f.preset === key ? "selected" : ""}>${p.label}</option>`).join("");
     const selectedKlingPreset = KLING_PRESETS[f.preset];
+    // NEW (July 18, 2026) — same pattern as Kling's eligible/presetOptions
+    // above, for the LTX engine. Uses f.ltxPreset (separate field, see
+    // setLtxPreset's comment for why) and LTX_PRESETS.
+    const eligibleLtx = eligiblePresetsFor(f, LTX_PRESETS);
+    const ltxPresetOptions = eligibleLtx.map(([key, p]) => `<option value="${key}" ${f.ltxPreset === key ? "selected" : ""}>${p.label}</option>`).join("");
+    const selectedLtxPreset = LTX_PRESETS[f.ltxPreset];
     const kenBurnsOptions = Object.entries(KEN_BURNS_PRESETS).map(([key, p]) => `<option value="${key}" ${(f.kenBurnsPreset || "auto") === key ? "selected" : ""}>${p.label}</option>`).join("");
     const selectedKenBurnsPreset = KEN_BURNS_PRESETS[f.kenBurnsPreset || "auto"];
     return `
@@ -1135,6 +1256,7 @@ function renderMotionStep() {
         <div class="motion-toggle">
           <button class="motion-btn kenburns ${f.motion==='kenburns'?'active kenburns':''}" onclick="setMotion(${f.id}, 'kenburns')">Ken Burns</button>
           <button class="motion-btn kling ${f.motion==='kling'?'active kling':''}" onclick="setMotion(${f.id}, 'kling')">AI Motion</button>
+          <button class="motion-btn kling ${f.motion==='ltx'?'active kling':''}" onclick="setMotion(${f.id}, 'ltx')">LTX Motion</button>
         </div>
 
         ${f.motion === 'kenburns' ? `
@@ -1169,6 +1291,21 @@ function renderMotionStep() {
             ` : "")}
           ` : `<div class="preset-disabled-note">No AI Motion presets available for this room yet — check "before/after pair" above if you have a vacant + staged set, or use Ken Burns instead.</div>`
         ) : ""}
+
+        ${f.motion === 'ltx' ? (
+            f.room === "Open Plan"
+              ? `<div class="preset-disabled-note">LTX Motion isn't available on open-plan rooms yet — real testing found it drops furniture in as ungrouped clusters on dense, spatially-continuous layouts. Use Ken Burns or AI Motion (Kling) instead for this room.</div>`
+              : (eligibleLtx.length > 0 ? `
+            <div class="preset-row">
+              <select class="preset-select" onchange="setLtxPreset(${f.id}, this.value)">
+                <option value="">Choose a movement...</option>
+                ${ltxPresetOptions}
+              </select>
+              ${selectedLtxPreset ? `<button class="preview-btn" onclick="openMotionPreview('${f.ltxPreset}', 'ltx')">&#9654; Preview</button>` : ""}
+            </div>
+            ${selectedLtxPreset ? `<div class="preset-desc">${selectedLtxPreset.desc}</div>` : `<div class="preset-desc">Pick a camera movement to see what it does. LTX Motion costs less than AI Motion (Kling) per clip.</div>`}
+          ` : `<div class="preset-disabled-note">No LTX Motion presets available for this room yet — use Ken Burns or AI Motion (Kling) instead.</div>`)
+        ) : ""}
       </div>
     </div>`;
   }).join("");
@@ -1178,7 +1315,14 @@ function renderMotionStep() {
   // BEFORE Motion, so format — which depends on whether any frame uses
   // Kling — can only be correctly decided once motion assignment for
   // THIS render is actually done, not before it).
-  const hasKling = frames.some(f => f.motion === "kling");
+  // FIX (July 18, 2026) — this used to check ONLY f.motion === "kling".
+  // The same reasoning applies to LTX: it's real, AI-generated camera
+  // motion, not a deterministic Ken Burns affine transform — the frame
+  // composition can't be safely auto-cropped to a second aspect ratio
+  // any more than Kling's can. Kept the variable name hasKling rather
+  // than renaming everywhere it's referenced below, but it now means
+  // "has any AI motion engine," not "has Kling specifically."
+  const hasKling = frames.some(f => f.motion === "kling" || f.motion === "ltx");
   const formatRow = document.getElementById("formatRow");
   const note = document.getElementById("formatNote");
   let selectedFormats = window._selectedFormats || (hasKling ? ["16x9"] : ["16x9","9x16"]);
@@ -1255,6 +1399,7 @@ function setMotion(id, motion) {
   f.motion = motion;
   if (motion === "kenburns" && !f.kenBurnsPreset) f.kenBurnsPreset = "auto";
   if (motion === "kling") f.preset = f.preset || null;
+  if (motion === "ltx") f.ltxPreset = f.ltxPreset || null;
   renderMotionStep();
 }
 
@@ -1281,6 +1426,22 @@ function setKenBurnsPreset(id, preset) {
   f.kenBurnsPreset = preset;
   renderMotionStep();
   if (!document.getElementById("lightboxOverlay").classList.contains("hidden")) renderLightboxControls(id);
+}
+
+// NEW (July 18, 2026) — mirrors setPreset() exactly, but writes to
+// f.ltxPreset (a separate field from f.preset/Kling's) so switching
+// between AI Motion and LTX Motion doesn't clobber whichever preset was
+// selected for the other engine — if a user tries LTX, doesn't like it,
+// and switches back to Kling, their Kling preset choice is still there.
+function setLtxPreset(id, preset) {
+  const f = frames.find(x => x.id === id);
+  if (preset && LTX_PRESETS[preset]?.eligibility === "pair_required" && !f.isBeforeAfter) {
+    alert("This movement needs a before/after pair, and this room doesn't have one available. Choose a different movement, or use Ken Burns instead.");
+    renderMotionStep();
+    return;
+  }
+  f.ltxPreset = preset || null;
+  renderMotionStep();
 }
 
 // ── LIGHTBOX — full-size photo, with the same room/motion controls as the
@@ -1349,13 +1510,16 @@ function renderLightboxControls(id) {
   } else {
     // Opened from Step 2 — show the same motion toggle + preset picker as
     // the card, so the user can decide while looking at the full photo.
-    const eligible = eligiblePresetsFor(f);
+    const eligible = eligiblePresetsFor(f, KLING_PRESETS);
     const presetOptions = eligible.map(([key, p]) => `<option value="${key}" ${f.preset === key ? "selected" : ""}>${p.label}</option>`).join("");
+    const eligibleLtx = eligiblePresetsFor(f, LTX_PRESETS);
+    const ltxPresetOptions = eligibleLtx.map(([key, p]) => `<option value="${key}" ${f.ltxPreset === key ? "selected" : ""}>${p.label}</option>`).join("");
     document.getElementById("lightboxControls").innerHTML = `
       <div class="panel-sub" style="margin-bottom:10px;">${displayRoomName(f)} — ${f.isExterior ? "Exterior" : "Interior"}</div>
       <div class="motion-toggle">
         <button class="motion-btn kenburns ${f.motion==='kenburns'?'active kenburns':''}" onclick="setMotion(${f.id}, 'kenburns'); renderLightboxControls(${f.id});">Ken Burns</button>
         <button class="motion-btn kling ${f.motion==='kling'?'active kling':''}" onclick="setMotion(${f.id}, 'kling'); renderLightboxControls(${f.id});">AI Motion</button>
+        <button class="motion-btn kling ${f.motion==='ltx'?'active kling':''}" onclick="setMotion(${f.id}, 'ltx'); renderLightboxControls(${f.id});">LTX Motion</button>
       </div>
       ${f.motion === 'kenburns' ? `
         ${f.isBeforeAfter ? renderMotionTypeToggle(f, `renderLightboxControls(${f.id})`) : ""}
@@ -1365,13 +1529,24 @@ function renderLightboxControls(id) {
           </select>
           <div class="preset-desc">${KEN_BURNS_PRESETS[f.kenBurnsPreset || 'auto'].desc}</div>
         ` : renderRevealPresetControls(f, `renderLightboxControls(${f.id})`)}
-      ` : (eligible.length > 0 ? `
+      ` : (f.motion === 'kling' ? (eligible.length > 0 ? `
         <select class="preset-select" onchange="setPreset(${f.id}, this.value); renderLightboxControls(${f.id});">
           <option value="">Choose a movement...</option>
           ${presetOptions}
         </select>
         ${KLING_PRESETS[f.preset] ? `<div class="preset-desc">${KLING_PRESETS[f.preset].desc}</div>` : `<div class="preset-desc">Pick a camera movement to see what it does.</div>`}
-      ` : `<div class="preset-disabled-note">No AI Motion presets available for this room yet.</div>`)}
+      ` : `<div class="preset-disabled-note">No AI Motion presets available for this room yet.</div>`
+      ) : (
+        f.room === "Open Plan"
+          ? `<div class="preset-disabled-note">LTX Motion isn't available on open-plan rooms yet — use Ken Burns or AI Motion (Kling) instead.</div>`
+          : (eligibleLtx.length > 0 ? `
+        <select class="preset-select" onchange="setLtxPreset(${f.id}, this.value); renderLightboxControls(${f.id});">
+          <option value="">Choose a movement...</option>
+          ${ltxPresetOptions}
+        </select>
+        ${LTX_PRESETS[f.ltxPreset] ? `<div class="preset-desc">${LTX_PRESETS[f.ltxPreset].desc}</div>` : `<div class="preset-desc">Pick a camera movement to see what it does.</div>`}
+      ` : `<div class="preset-disabled-note">No LTX Motion presets available for this room yet.</div>`)
+      ))}
     `;
   }
 }
@@ -1380,7 +1555,7 @@ function renderLightboxControls(id) {
 // Deliberately does not fake a video; says so plainly per the locked
 // decision rather than showing a static image dressed up as a preview.
 function openMotionPreview(presetKey, type) {
-  const preset = type === "kling" ? KLING_PRESETS[presetKey] : KEN_BURNS_PRESETS[presetKey];
+  const preset = type === "kling" ? KLING_PRESETS[presetKey] : (type === "ltx" ? LTX_PRESETS[presetKey] : KEN_BURNS_PRESETS[presetKey]);
   if (!preset) return;
   const clipUrl = PREVIEW_CLIP_URLS[presetKey];
   document.getElementById("previewStage").innerHTML = clipUrl
@@ -1414,7 +1589,10 @@ function closePreview() {
 }
 
 function updateKlingCountBar() {
-  const klingCount = frames.filter(f => f.motion === "kling").length;
+  // FIX (July 18, 2026 — Sam's confirmation, LTX shares the same AI
+  // Motion Pool as Kling): this used to count ONLY f.motion === "kling",
+  // so an LTX selection didn't even show up in this early count hint.
+  const klingCount = frames.filter(f => f.motion === "kling" || f.motion === "ltx").length;
   const bar = document.getElementById("klingCountBar");
   // CHANGE (July 13, 2026): can no longer estimate an Images number here
   // without a network call — whether these frames are free depends on the
@@ -1530,29 +1708,55 @@ async function renderConfirmStep() {
 
   const wouldExceed = !!quote.wouldExceedBalance;
   const isIteration = quote.isIteration;
-  let klingSeen = 0;
+  let aiMotionSeen = 0;
 
   document.getElementById("genLabel").textContent = isIteration ? `Iteration \u00b7 generation #${quote.generationCount}` : "First generation";
   document.getElementById("panelSub").textContent = `${frames.length} rooms, ${(window._selectedFormats||["16x9"]).join(" + ")}`;
 
   // CHANGE (July 13, 2026): badge is now purely about the SHARED monthly
   // Kling Motion Pool, not about generation count — the first
-  // quote.framesFromPool Kling frames in sequence are pool-covered
+  // quote.framesFromPool AI Motion frames in sequence are pool-covered
   // regardless of whether this is a first generation or an iteration.
+  //
+  // FIX (July 18, 2026 — Sam's confirmation: "LTX draws from the same
+  // AI Motion Pool credits"): this loop used to check ONLY
+  // f.motion === "kling" — an LTX frame fell into the else branch and
+  // was silently mislabeled with a "Ken Burns" badge, never counted
+  // toward pool consumption in the display at all. Renamed klingSeen →
+  // aiMotionSeen and broadened the check to both engines, since the pool
+  // itself doesn't care which engine consumed a credit — it's shared.
+  //
+  // REAL DEPENDENCY NOT RESOLVED HERE: quote.framesFromPool,
+  // quote.billableKlingFrames, quote.klingFrameCount, and
+  // quote.poolRemainingBefore all come from a server-side quote endpoint
+  // (not present in this session) that currently only counts Kling
+  // frames when computing those numbers. This frontend fix makes the
+  // DISPLAY correctly walk through frames of either engine against
+  // whatever quote.framesFromPool says — but if the server itself hasn't
+  // also been updated to count LTX frames into that number, the pool
+  // math will still be wrong end-to-end. That server file needs the
+  // identical "count both engines" fix before this is actually correct,
+  // not just correctly displayed.
   document.getElementById("frameList").innerHTML = frames.map(f => {
+    const isAiMotionFrame = f.motion === "kling" || f.motion === "ltx";
     let badge;
-    if (f.motion === "kling") {
-      klingSeen++;
-      const isFromPool = klingSeen <= quote.framesFromPool;
+    if (isAiMotionFrame) {
+      aiMotionSeen++;
+      const isFromPool = aiMotionSeen <= quote.framesFromPool;
       badge = isFromPool ? `<span class="frame-badge badge-included">Free (pool)</span>` : `<span class="frame-badge badge-billable">${KLING_IMAGE_COST_PER_FRAME} Images</span>`;
     } else {
       badge = `<span class="frame-badge badge-kenburns">Ken Burns</span>`;
     }
+    const motionLabel = f.motion === "kling"
+      ? (KLING_PRESETS[f.preset]?.label || "AI Motion")
+      : (f.motion === "ltx"
+          ? (LTX_PRESETS[f.ltxPreset]?.label || "LTX Motion")
+          : (KEN_BURNS_PRESETS[f.kenBurnsPreset || "auto"].label + " (Ken Burns)"));
     return `<div class="frame-row">
       <div class="frame-thumb-sm"><img src="${f.dataUrl}" alt=""></div>
       <div class="frame-main" style="padding:0;">
         <div class="frame-name">${displayRoomName(f)}</div>
-        <div class="frame-tag">${f.motion === 'kling' ? (KLING_PRESETS[f.preset]?.label || 'AI Motion') : (KEN_BURNS_PRESETS[f.kenBurnsPreset || 'auto'].label + ' (Ken Burns)')}</div>
+        <div class="frame-tag">${motionLabel}</div>
       </div>
       ${badge}
     </div>`;

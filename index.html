@@ -1019,7 +1019,24 @@ async function applyVirtuallyStagedBadge(base64Jpeg) {
     const ctx = canvas.getContext('2d');
     ctx.drawImage(sourceImg, 0, 0);
 
-    const targetWidth = Math.max(160, Math.min(420, Math.round(canvas.width * 0.16)));
+    // Composites the badge onto a base64 JPEG, bottom-left, sized
+    // proportionally to the image's own width.
+    // INCREASED (July 21, 2026 — Sam's real-world feedback: badge reads as
+    // "tiny," specifically noticed once staged images are used in the
+    // Smart Stage PRO Plus video pipeline). Root cause: real estate source
+    // photos are routinely 3000-6000px wide, so the old 420px ceiling was
+    // being hit almost every time regardless of how large the actual image
+    // was — the badge's real-world size never scaled up with genuinely
+    // large photos, only ever shrinking (relatively) as resolution went up.
+    // Was 16% of width, clamped 160-420px.
+    // INCREASED AGAIN, same message (Sam's prediction, before even testing
+    // the first bump: "even doubled would have been small") — rather than
+    // ship a modest bump and wait for a second round of "still too small"
+    // feedback, jumping well past a simple double now: 30% of width,
+    // clamped 300-900px (vs. a doubled old max of 840, this exceeds even
+    // that). Position (bottom-left) and the badge PNG itself (unchanged
+    // colors/design) remain untouched — size only, per Sam's explicit ask.
+    const targetWidth = Math.max(300, Math.min(900, Math.round(canvas.width * 0.30)));
     const targetHeight = Math.round(badgeImg.naturalHeight * (targetWidth / badgeImg.naturalWidth));
     const margin = Math.round(canvas.width * 0.02);
     ctx.drawImage(badgeImg, margin, canvas.height - targetHeight - margin, targetWidth, targetHeight);

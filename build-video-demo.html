@@ -1438,6 +1438,23 @@ function renderMotionStep() {
   const formatRow = document.getElementById("formatRow");
   const note = document.getElementById("formatNote");
   let selectedFormats = window._selectedFormats || (hasKling ? ["16x9"] : ["16x9","9x16"]);
+
+  // FIX (July 20, 2026 — real bug Sam hit: the tool required manually
+  // re-selecting 16:9 whenever AI Motion was in use, otherwise a render
+  // errored deep in the pipeline and needed a full restart). Root cause:
+  // the fallback above only ever applied when window._selectedFormats was
+  // completely UNSET. If someone picked both 16:9 AND 9:16 while every
+  // frame was still Ken Burns, then went back and switched a frame to AI
+  // Motion, hasKling flips true here — but the already-set _selectedFormats
+  // (still containing "9x16" from before) was never corrected, just left
+  // alone; the 9x16 button going disabled blocks future CLICKS but doesn't
+  // retroactively deselect a format that was already active. That stale
+  // "9x16" rode all the way to the render request and failed there. Now
+  // force-corrected every time this function runs, not just on first load,
+  // so AI Motion can never leave a stale second format selected again.
+  if (hasKling && selectedFormats.includes("9x16")) {
+    selectedFormats = ["16x9"];
+  }
   window._selectedFormats = selectedFormats;
 
   formatRow.innerHTML = `
@@ -1445,7 +1462,7 @@ function renderMotionStep() {
     <button class="format-btn ${selectedFormats.includes('9x16')?'active':''}" ${hasKling ? 'disabled' : ''} onclick="toggleFormat('9x16', ${hasKling})">9:16</button>
   `;
   note.textContent = hasKling
-    ? "AI Motion videos deliver in a single format — AI Motion's camera composition can't be safely auto-cropped to a second aspect ratio."
+    ? "AI Motion videos can only be rendered in 16:9 — AI Motion's camera composition can't be safely auto-cropped to a second aspect ratio."
     : "Ken Burns videos can deliver both formats at no extra cost — 9:16 is a clean crop of the same render.";
 
   // NEW (audio build) — populate the music/narration pickers ONCE. This

@@ -1017,6 +1017,22 @@ function engineLabel(sig) {
   return KEN_BURNS_PRESETS[key]?.label || "Ken Burns";
 }
 
+// NEW (this session — Sam's exact rule set): classifies a motion
+// signature into the three billing/risk categories the override modal's
+// messaging is driven by. Deliberately independent of whether this is
+// "an override" — the category alone determines risk/cost, never what
+// it's replacing.
+function targetEngineCategory(sig) {
+  if (!sig) return "ken_burns";
+  if (sig.startsWith("reveal:")) {
+    const engine = sig.split(":")[2];
+    return engine === "ltx" ? "ai_motion" : "ken_burns";
+  }
+  if (sig.startsWith("kling:")) return "ai_transformation";
+  if (sig.startsWith("ltx:")) return "ai_motion";
+  return "ken_burns";
+}
+
 let pendingOverrideId = null;
 
 function checkAutoSelectOverride(id) {
@@ -1033,14 +1049,33 @@ function checkAutoSelectOverride(id) {
 function openOverrideWarning(id, entry, newSig, planSig) {
   pendingOverrideId = id;
   const isBookend = frames.length > 0 && (frames[0].id === id || frames[frames.length - 1].id === id);
-  const costNote = isBookend
-    ? "This is one of your two bookend shots (opening or closing frame). Overriding the AI's pick here adds a small extra charge on top of the usual per-frame cost — the opening/closing shots need a longer render than the default. The exact number will show on your next quote."
-    : "Overriding an AI-recommended pick uses a billable Images charge instead of a free AI Motion Pool frame, if the pool still has room. The exact number will show on your next quote.";
+  const targetCategory = targetEngineCategory(newSig);
+
+  // NEW (this session — Sam's exact rule set, replacing the old single
+  // generic "any override costs something" message): risk and cost are
+  // driven ENTIRELY by the TARGET engine category, never by what it's
+  // replacing. Ken Burns is always free and always high confidence, full
+  // stop — overriding TO it never carries risk or cost, even if the AI's
+  // original pick was itself AI Motion. AI Motion / AI Transformations are
+  // always a real generative-model risk and a real billable cost, even if
+  // they're replacing another AI Motion pick.
+  let riskText, costText;
+  if (targetCategory === "ken_burns") {
+    riskText = "None — Ken Burns is a deterministic camera move, not a generative model. Always free, always high confidence.";
+    costText = "No additional cost.";
+  } else {
+    const engineName = targetCategory === "ai_transformation" ? "AI Transformations" : "AI Motion";
+    riskText = `${engineName} uses a generative model to create the motion, not a deterministic camera move — some movements carry a real chance of visual artifacts or an unnatural result that Ken Burns never has.`;
+    costText = isBookend
+      ? "This is one of your two bookend shots. This will use a billable Images charge — bookend overrides also add a small extra render-length surcharge on top of the usual per-frame cost. The exact number will show on your next quote."
+      : "This will use a billable Images charge instead of a free AI Motion Pool frame, if the pool still has room. The exact number will show on your next quote.";
+  }
+
   document.getElementById("overrideOverlay").innerHTML = `
     <div class="override-box" onclick="event.stopPropagation()">
       <div class="override-title">Heads up — this differs from the AI's pick</div>
       <div class="override-section">
-        <b>AI's original reasoning</b>
+        <b>Why the AI selected the original pick</b>
         <span class="override-quote">"${entry.reasoning || "No specific reasoning recorded for this frame."}"</span>
         ${entry.confidence ? `<div style="margin-top:4px;color:var(--muted);">Confidence: ${entry.confidence}</div>` : ""}
       </div>
@@ -1049,8 +1084,12 @@ function openOverrideWarning(id, entry, newSig, planSig) {
         ${engineLabel(newSig)}
       </div>
       <div class="override-section">
+        <b>Risk</b>
+        ${riskText}
+      </div>
+      <div class="override-section">
         <b>Cost</b>
-        ${costNote}
+        ${costText}
       </div>
       <div class="override-actions">
         <button class="btn btn-ghost" onclick="revertToAiPick()">Keep AI pick</button>
@@ -1643,7 +1682,26 @@ function setMotionType(id, useReveal) {
   f.useRevealEffect = useReveal;
   if (useReveal) {
     f.revealPreset = f.revealPreset || "classic_reveal";
-    f.endMotion = f.endMotion || defaultEndMotionFor(f.revealPreset);
+    if (!f.endMotion) {
+      // FIX (this session — Sam's report: overriding structure from
+      // Standard Motion to Room Reveal silently replaced the already-
+      // chosen specific motion — e.g. pan_right, the exact motion the AI's
+      // own visible reasoning still referenced — with the reveal preset's
+      // generic default (push_in), even though pan_right was still a
+      // perfectly legal End Motion under Classic Reveal. That read as a
+      // direct contradiction against the reasoning text still on screen.
+      // Overriding STRUCTURE should never silently discard a still-valid
+      // motion pick; only an explicit End Motion change (its own dropdown)
+      // should change it. Also fixes a latent second bug: this used to
+      // call the older, engine-unaware defaultEndMotionFor (always returns
+      // allowedEndMotions[0] regardless of which engine's namespace that
+      // belongs to) instead of defaultEndMotionForEngine.
+      const preset = REVEAL_PRESETS[f.revealPreset];
+      const priorPick = f.motion === "ltx" ? f.ltxPreset : f.kenBurnsPreset;
+      f.endMotion = (priorPick && preset && preset.allowedEndMotions.includes(priorPick))
+        ? priorPick
+        : defaultEndMotionForEngine(f.revealPreset, f.motion);
+    }
   }
   // NEW (AI Auto-Selection) — called directly here rather than only via
   // the template's "; refreshFn" chain, since this function (unlike
@@ -1800,7 +1858,7 @@ function renderMotionFrameCard(f, i) {
               </select>
               <button class="preview-btn" onclick="openMotionPreview('${f.kenBurnsPreset || 'auto'}', 'kenburns')">&#9654; Preview</button>
             </div>
-            <div class="preset-desc">${selectedKenBurnsPreset.desc}</div>
+            <div class="preset-desc">${selectedKenBurnsPreset?.desc || "Pick a movement to see what it does."}</div>
           ` : renderRevealPresetControls(f, `renderMotionStep()`)}
         ` : ""}
 
@@ -2038,7 +2096,23 @@ function openLightbox(id) {
   lightboxFrameId = id;
   const f = frames.find(x => x.id === id);
   document.getElementById("lightboxImg").src = f.dataUrl;
-  renderLightboxControls(id);
+  // FIX (this session — real bug, confirmed root cause of "thumbnail
+  // doesn't launch the lightbox on this specific image"): renderLightboxControls
+  // ran BEFORE the line that actually reveals the overlay — if it threw
+  // (confirmed cause here: a KEN_BURNS_PRESETS lookup missing the same
+  // optional-chain guard other lookups already had), the overlay's
+  // classList.remove("hidden") below never executed, so the modal never
+  // became visible at all, with no indication why. The photo itself
+  // should always be viewable via its own thumbnail regardless of
+  // whether the motion controls beneath it can render — same isolation
+  // principle as the Step 3/4 per-frame fixes.
+  try {
+    renderLightboxControls(id);
+  } catch (err) {
+    console.error(`[openLightbox] Frame ${id}: controls failed to render, showing the photo anyway:`, err.message);
+    const controlsEl = document.getElementById("lightboxControls");
+    if (controlsEl) controlsEl.innerHTML = `<div style="color:var(--danger);">Motion controls couldn't load for this photo (${(err.message || "unknown error").replace(/</g, "&lt;")}). Use Step 3's list view to assign motion instead.</div>`;
+  }
   updateLightboxNavButtons();
   document.getElementById("lightboxOverlay").classList.remove("hidden");
 }
@@ -2111,7 +2185,7 @@ function renderLightboxControls(id) {
           <select class="preset-select" onchange="setKenBurnsPreset(${f.id}, this.value)">
             ${Object.entries(KEN_BURNS_PRESETS).map(([key, p]) => `<option value="${key}" ${(f.kenBurnsPreset||'auto')===key?'selected':''}>${p.label}</option>`).join("")}
           </select>
-          <div class="preset-desc">${KEN_BURNS_PRESETS[f.kenBurnsPreset || 'auto'].desc}</div>
+          <div class="preset-desc">${KEN_BURNS_PRESETS[f.kenBurnsPreset || 'auto']?.desc || "Pick a movement to see what it does."}</div>
         ` : renderRevealPresetControls(f, `renderLightboxControls(${f.id})`)}
       ` : (f.motion === 'kling' ? (eligible.length > 0 ? `
         <select class="preset-select" onchange="setPreset(${f.id}, this.value); renderLightboxControls(${f.id});">

@@ -150,6 +150,54 @@ const VALID_LTX_PRESETS = new Set([
 // "don't trust the model's compliance" lesson.
 const VALID_REVEAL_PRESETS = new Set(["classic_reveal", "luxury_drift", "cinematic_reveal"]);
 
+// NEW (this session — real bug, not a prompt-wording issue: Claude was
+// NEVER given a field to choose a Room Reveal's end motion at all. It was
+// 100% computed client-side (build-video-demo.html's
+// defaultEndMotionForEngine) as "whichever motion is first in the allowed
+// list for this preset+engine" — a fixed, deterministic default with zero
+// visual judgment involved, which is exactly why it was always push_in
+// for classic/cinematic reveal and always drift for luxury_drift,
+// regardless of what the STAGED photo actually showed. Mirrors
+// build-video-demo.html's REVEAL_PRESETS[key].allowedEndMotions arrays
+// EXACTLY — kept in sync manually (two different runtimes, no shared
+// import path) rather than computed differently in each place. Used to
+// validate Claude's new revealEndMotion pick below.
+const REVEAL_PRESET_END_MOTIONS = {
+  classic_reveal: [
+    "push_in", "pan_left", "pan_right", "tilt_up", "tilt_down", "drift", "float", "luxury_parallax",
+    "cinematic_push", "luxury_drift", "floating_camera_drift", "architectural_glide", "corner_to_corner_drift",
+    "orbit_arc", "rack_focus", "drone_boom_up", "crane_up", "crane_down", "parallax_push", "pan_zoom_reveal",
+    "living_room_ambient", "fireplace_flicker", "water_motion", "outdoor_breeze",
+    "micro_zoom_out", "micro_dolly_back", "open_plan_reveal",
+  ],
+  luxury_drift: [
+    "drift", "pan_left", "pan_right", "float", "luxury_parallax",
+    "luxury_drift", "floating_camera_drift", "architectural_glide", "corner_to_corner_drift",
+    "orbit_arc", "drone_boom_up", "crane_up", "crane_down", "pan_zoom_reveal",
+    "living_room_ambient", "fireplace_flicker", "water_motion", "outdoor_breeze",
+    "micro_zoom_out", "micro_dolly_back", "open_plan_reveal",
+  ],
+  cinematic_reveal: [
+    "push_in", "pan_left", "pan_right", "tilt_up", "tilt_down", "drift", "float", "luxury_parallax",
+    "cinematic_push", "luxury_drift", "floating_camera_drift", "architectural_glide", "corner_to_corner_drift",
+    "orbit_arc", "rack_focus", "drone_boom_up", "crane_up", "crane_down", "parallax_push", "pan_zoom_reveal",
+    "living_room_ambient", "fireplace_flicker", "water_motion", "outdoor_breeze",
+    "micro_zoom_out", "micro_dolly_back", "open_plan_reveal",
+  ],
+};
+
+// Returns the subset of a reveal preset's allowed end motions that
+// actually belong to the requested engine's vocabulary — Ken Burns names
+// for "ken_burns", real LTX preset names for "ltx". Computed from
+// REVEAL_PRESET_END_MOTIONS + VALID_LTX_PRESETS rather than hand-copied a
+// third time, so the two can't drift apart from each other. This is the
+// real "8 movements" Sam's referring to, for classic_reveal/
+// cinematic_reveal's Ken-Burns-filtered subset specifically.
+function endMotionsForEngine(revealPreset, engine) {
+  const all = REVEAL_PRESET_END_MOTIONS[revealPreset] || [];
+  return all.filter((key) => (engine === "ltx" ? VALID_LTX_PRESETS.has(key) : !VALID_LTX_PRESETS.has(key)));
+}
+
 // NEW (this session — Sam's rule, confirmed explicitly): the subscriber's
 // plan includes automatic AI Motion for at most this many frames per
 // video, REGARDLESS of how many real vacant/staged pairs exist or how
@@ -205,7 +253,10 @@ First decide structure:
 - If a frame has a real vacant/before pair: this frame should almost always be Room Reveal, not a plain transformation. This isn't primarily a stylistic choice — the brief unstaged frame plus the "Virtually Staged" wipe satisfies a real digital-alteration disclosure, the video equivalent of the original-adjacent-to-staged requirement California law, NAR, and MLS associations already require for photos. A real pair playing as an undisclosed plain transformation is the outcome to avoid, not the default. Reserve plain "standalone" transformation for a pair ONLY in a genuine edge case — e.g. a near-duplicate angle of a room that already got its own Room Reveal elsewhere in this listing, where a second reveal of the same room would feel redundant. Room Reveal is the default; skipping it is the rare exception, not the other way around.
   - Pick one of "classic_reveal", "luxury_drift", "cinematic_reveal" — and VARY this choice across the different Room Reveal frames in this listing rather than repeating the same one throughout. Judge these as a set that will be watched in sequence, not scored independently; a listing where every reveal uses the same preset reads as repetitive even if each individual pick was defensible on its own.
   - Pick the continuation engine: "ken_burns" (free, deterministic) or "ltx" (real AI Motion, billable — subject to the frame budget below). Most reveals should continue on Ken Burns; reserve the LTX continuation for the handful of frames that most deserve the paid upgrade.
-  - Also VARY the specific End Motion across your Room Reveal frames (see the Output schema's endMotion-equivalent — the continuation motion within whichever engine you picked), for the same reason as the preset: a set of reveals that all end on the same move reads as repetitive.
+  - Pick revealEndMotion by reading the STAGED (after) photo's own visual content — the SAME anchor-matching judgment you'd use for a standalone pick below, not a generic "whatever this preset defaults to" choice. This matters: leaving it to a fixed per-preset default is the exact bug that made every Classic/Cinematic Reveal end on push_in and every Luxury Drift end on drift regardless of what the room actually looked like — the point of this field is that it varies with the photo.
+    - If the continuation engine is "ken_burns": match the STAGED photo's real anchor the same way as a standalone Ken Burns pick — real ceiling/chandelier/fan detail → tilt_up; a hero floor/rug/tilework → tilt_down; a strong lateral sightline (hallway, counter run) → pan_left or pan_right; a corner-to-window or corner-to-patio diagonal → drift; a wide MLS-style shot with no obvious directional feature → float or pan_zoom; a room where stillness reads better than any motion → static; a genuinely high-end/luxury finish → luxury_parallax. Only pick from: ${[...KEN_BURNS_SELECTABLE_PRESETS].join(", ")}, luxury_parallax.
+    - If the continuation engine is "ltx": pick a specific LTX preset key whose real-world use case genuinely matches the STAGED photo, same judgment as a standalone LTX pick. Only pick from: ${[...VALID_LTX_PRESETS].join(", ")}.
+    - VARY this choice across the different Room Reveal frames in this listing, same reasoning as the reveal preset itself above — judge these as a set watched in sequence, not scored independently.
   - If truly not Room Reveal (the rare edge-case exception above): engine is "kling", klingMotionPreset is null (this resolves to the generic interior or exterior transformation automatically — do not invent a preset name here).
 - If no pair at all (a single image with nothing to disclose): decide "ken_burns" or "ltx", picking the specific best-matching motion the same way as always.
   - If "ltx": pick a specific preset key whose real-world use case genuinely matches what you see in THIS photo — do not default everything to the same preset. Only pick from: ${[...VALID_LTX_PRESETS].join(", ")}.
@@ -234,6 +285,7 @@ Return ONLY a JSON array, one object per frame, in the exact shape below. No pro
     "structure": "standalone" | "room_reveal",
     "revealPreset": "classic_reveal" | "luxury_drift" | "cinematic_reveal" | null,
     "revealEngine": "ken_burns" | "ltx" | null,
+    "revealEndMotion": "<a real Ken Burns or LTX preset key, matching whichever engine revealEngine is>" | null,
     "engine": "ken_burns" | "ltx" | "kling" | null,
     "motionPreset": "<a real LTX preset key>" | null,
     "klingMotionPreset": null,
@@ -485,7 +537,7 @@ function enforceAutoSelectionRules(rawPlan, frames, { narrationEnabled, hasExter
       first.engine = "ken_burns";
       first.motionPreset = null;
       first.klingMotionPreset = null;
-      if (first.structure === "room_reveal") first.revealEngine = "ken_burns";
+      if (first.structure === "room_reveal") { first.revealEngine = "ken_burns"; first.revealEndMotion = null; }
     }
     // NEW (this session — Sam's request: deterministic, consistent
     // wording here, not Claude's own varying paraphrase of the rule).
@@ -515,7 +567,7 @@ function enforceAutoSelectionRules(rawPlan, frames, { narrationEnabled, hasExter
         last.engine = "ken_burns";
         last.motionPreset = null;
         last.klingMotionPreset = null;
-        if (last.structure === "room_reveal") last.revealEngine = "ken_burns";
+        if (last.structure === "room_reveal") { last.revealEngine = "ken_burns"; last.revealEndMotion = null; }
       }
       // NEW (this session) — same deterministic-wording treatment as
       // position 1, set unconditionally regardless of whether a
@@ -591,6 +643,24 @@ function enforceAutoSelectionRules(rawPlan, frames, { narrationEnabled, hasExter
       );
       entry.revealPreset = "classic_reveal";
     }
+    // NEW (this session — Sam's report: reveal end motions were always
+    // push_in/drift regardless of the photo, root cause being that
+    // Claude was never given this field to begin with. Now that it is,
+    // validate it the same defensive way as every other preset field —
+    // if Claude's pick doesn't actually belong to this preset+engine
+    // combo's allowed set, clear it to null rather than let a bad value
+    // reach the frontend. A null here isn't a failure state: build-video-
+    // demo.html's defaultEndMotionForEngine already provides a safe
+    // (if generic) fallback for exactly this case.
+    if (entry.structure === "room_reveal" && entry.revealEndMotion) {
+      const allowed = endMotionsForEngine(entry.revealPreset, entry.revealEngine);
+      if (!allowed.includes(entry.revealEndMotion)) {
+        console.error(
+          `[AUTO-SELECT] Frame ${entry.frameId}: reveal end motion "${entry.revealEndMotion}" isn't valid for ${entry.revealPreset}/${entry.revealEngine} — clearing to let the frontend's generic default apply instead.`
+        );
+        entry.revealEndMotion = null;
+      }
+    }
   }
 
   return plan;
@@ -617,6 +687,7 @@ function usesAiMotion(entry) {
 function downgradeToKenBurns(entry) {
   if (entry.structure === "room_reveal") {
     entry.revealEngine = "ken_burns";
+    entry.revealEndMotion = null;
   } else {
     entry.engine = "ken_burns";
     entry.klingMotionPreset = null;

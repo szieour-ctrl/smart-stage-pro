@@ -29,7 +29,7 @@ exports.handler = async (event) => {
   try {
     const body = JSON.parse(event.body || "{}");
     jobId = body.jobId;
-    const { frames, narrationEnabled, hasExteriorEnhancement } = body;
+    const { frames, narrationEnabled, hasExteriorEnhancement, poolRemaining } = body;
 
     if (!jobId) {
       console.error("[autoSelect-background] Missing jobId in request body — cannot write a status any client could poll for.");
@@ -60,6 +60,7 @@ exports.handler = async (event) => {
       narrationEnabled: !!narrationEnabled,
       hasExteriorEnhancement: !!hasExteriorEnhancement,
       anthropicKey: process.env.ANTHROPIC_API_KEY,
+      poolRemaining,
     });
 
     await store.setJSON(jobId, { status: "done", plan });

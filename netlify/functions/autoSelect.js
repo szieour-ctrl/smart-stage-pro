@@ -137,6 +137,20 @@ const VALID_LTX_PRESETS = new Set([
 // "don't trust the model's compliance" lesson.
 const VALID_REVEAL_PRESETS = new Set(["classic_reveal", "luxury_drift", "cinematic_reveal"]);
 
+// NEW (this session — Sam's rule, confirmed explicitly): the subscriber's
+// plan includes automatic AI Motion for at most this many frames per
+// video, REGARDLESS of how many real vacant/staged pairs exist or how
+// many the pool could technically still cover. This is a plan-inclusion
+// limit, not the same thing as the monthly pool balance (kling_motion_
+// usage) — the real cap applied is whichever is SMALLER: this constant,
+// or however many pool frames the subscriber actually has left this
+// period. Counts EVERY AI-motion-consuming pick uniformly — standalone
+// AI Motion (ltx), standalone AI Transformations (kling), and a Room
+// Reveal's continuation running under either engine — including the two
+// bookend positions, since those draw from the exact same pool/plan
+// allotment as any other frame, not a separate budget.
+const MAX_AUTO_SELECTED_AI_MOTION_FRAMES = 3;
+
 // Ken Burns presets Claude may select for a "ken_burns" engine frame — the
 // user-selectable subset of motionPresets.js's VALID_PRESETS. Excludes
 // "luxury_parallax" (Kling-continuation-only, never a standalone pick) and
@@ -151,7 +165,7 @@ const KEN_BURNS_SELECTABLE_PRESETS = new Set([
 // Kept as a template function (not a flat string) because the bookend
 // section genuinely depends on narrationEnabled/hasExteriorEnhancement —
 // see rule 3 above. Everything else is static.
-function buildSystemPrompt({ narrationEnabled, hasExteriorEnhancement }) {
+function buildSystemPrompt({ narrationEnabled, hasExteriorEnhancement, aiMotionCap }) {
   return `You are planning the shot order and camera motion for a real estate walkthrough video. You will see every staged photo for this listing, one at a time, each labeled with a frame ID. Some frames have a real vacant/before photo of the same room available — those will be marked explicitly.
 
 ## Your job, per frame
@@ -190,7 +204,7 @@ ${narrationEnabled
   : `Narration is OFF for this video, with no Exterior Enhancement pair available. Position 1 MUST be Ken Burns (prefer Front Exterior content, pull_back motion). The LAST position MUST be Ken Burns Exterior (prefer a backyard/exterior photo).`}
 
 ## AI Motion frame budget
-Beyond the bookends, select AI Motion for exactly the frames that genuinely earn it based on visual content — do not force it onto rooms with no real anchor just to hit a number. A downstream system will cap the actual free/pool-covered count separately; your job is quality-of-match, not hitting a target count.
+You may select AI Motion or AI Transformations (including a Room Reveal's continuation running under either engine) for AT MOST ${aiMotionCap} frames total across this entire video — this includes the bookends if either of them lands on AI Motion under the exception rules above, not a separate allotment. This is a hard cap: the subscriber's plan only includes automatic AI Motion for ${aiMotionCap} frames per video, regardless of how many real vacant/staged pairs exist. Choose your ${aiMotionCap} STRONGEST opportunities — the frames where a real pair and a genuinely compelling visual anchor coincide — rather than assigning it to every frame that merely qualifies. Every frame you don't select for AI Motion still needs a real Ken Burns pick; don't leave weaker candidates without a placement, just place them under Ken Burns instead. A downstream system will still enforce this cap even if you exceed it, but a plan that already respects it needs no correction and better reflects your own judgment of which ${aiMotionCap} rooms deserve it most.
 
 ## Output
 Return ONLY a JSON array, one object per frame, in the exact shape below. No prose before or after, no markdown fences.
@@ -315,12 +329,23 @@ function callClaudeVision(systemPrompt, userContent, anthropicKey) {
   });
 }
 
-async function generateAutoSelection({ frames, narrationEnabled, hasExteriorEnhancement, anthropicKey }) {
+async function generateAutoSelection({ frames, narrationEnabled, hasExteriorEnhancement, anthropicKey, poolRemaining }) {
   if (!frames || frames.length === 0) {
     throw new Error("generateAutoSelection: no frames provided");
   }
 
-  const systemPrompt = buildSystemPrompt({ narrationEnabled, hasExteriorEnhancement });
+  // NEW (this session) — effective cap is whichever is SMALLER: the
+  // subscriber's plan-inclusion max (MAX_AUTO_SELECTED_AI_MOTION_FRAMES),
+  // or however many pool frames they actually have left this period. If
+  // poolRemaining wasn't provided (e.g. the balance lookup upstream
+  // failed), fail toward the safe/conservative side — the plan max, not
+  // unlimited — rather than silently assuming plenty of pool room exists.
+  const aiMotionCap = Math.max(0, Math.min(
+    MAX_AUTO_SELECTED_AI_MOTION_FRAMES,
+    typeof poolRemaining === "number" ? poolRemaining : MAX_AUTO_SELECTED_AI_MOTION_FRAMES
+  ));
+
+  const systemPrompt = buildSystemPrompt({ narrationEnabled, hasExteriorEnhancement, aiMotionCap });
   const userContent = buildUserContent(frames);
   const text = await callClaudeVision(systemPrompt, userContent, anthropicKey);
   const plan = extractJsonArray(text);
@@ -328,11 +353,12 @@ async function generateAutoSelection({ frames, narrationEnabled, hasExteriorEnha
   if (plan.length !== frames.length) {
     console.error(
       `[AUTO-SELECT MISMATCH] Claude returned ${plan.length} plan entries, expected ${frames.length}. ` +
-      `Proceeding with whatever positions overlap by array order — see enforceAutoSelectionRules for the safety net.`
+      `enforceAutoSelectionRules will identify which frames are missing/duplicated by frameId (not array position) and backfill anything omitted with a safe Ken Burns default.`
     );
   }
 
-  return enforceAutoSelectionRules(plan, frames, { narrationEnabled, hasExteriorEnhancement });
+  const enforced = enforceAutoSelectionRules(plan, frames, { narrationEnabled, hasExteriorEnhancement });
+  return enforceAiMotionPoolCap(enforced, aiMotionCap);
 }
 
 // ── HARD ENFORCEMENT ────────────────────────────────────────────────────
@@ -348,18 +374,74 @@ async function generateAutoSelection({ frames, narrationEnabled, hasExteriorEnha
 // force-correction here should be loud (console.error), never silent —
 // the exact lesson narrationGen.js's silent-skip bug taught.
 function enforceAutoSelectionRules(rawPlan, frames, { narrationEnabled, hasExteriorEnhancement }) {
-  // Match by position (array order), not by re-trusting whatever frameId
-  // string Claude wrote — same reasoning as narrationGen.js's July 21 fix.
-  const plan = rawPlan.map((entry, i) => {
-    const sourceFrame = frames[i];
-    if (!sourceFrame) return entry; // extra entries beyond what we sent are dropped, not fatal
-    if (entry.frameId !== sourceFrame.frameId) {
+  // FIXED (this session — real bug, confirmed from a live test: reasoning
+  // text and room labels were correct for the photo Claude actually
+  // analyzed, but attached to a DIFFERENT frame whenever Claude reordered
+  // anything, producing exactly what Sam reported — "images don't match
+  // the labels"). The old logic here re-keyed entry.frameId to
+  // frames[i].frameId — i.e. whichever frame occupied array position i in
+  // the ORIGINAL INPUT order — copied from narrationGen.js's July 21 fix.
+  // That's correct THERE because narrationGen.js never reorders, only
+  // annotates frames in place; array position and original input position
+  // are always the same thing in that file. Auto-select's entire purpose
+  // is to REORDER frames, so the moment Claude's output array legitimately
+  // differs from input order (the normal, desired case, not an edge case),
+  // the old logic silently reattached one photo's real analysis to a
+  // completely different photo's frameId.
+  //
+  // Correct fix: trust Claude's own echoed frameId as the identity link —
+  // that's literally what it's for, and buildUserContent() explicitly
+  // labels each image with it. Validate against the real set of frameIds
+  // sent (catches a hallucinated/malformed ID) rather than assuming
+  // position encodes identity. Final walkthrough ORDER comes from the
+  // plan array's order itself (same as applyAutoSelectionPlan/
+  // applyAutoSelectionPlanClient already assume — both iterate the plan
+  // array in order and push in that order), not from any position field.
+  const validFrameIds = new Set(frames.map((f) => f.frameId));
+  const seenFrameIds = new Set();
+  const deduped = [];
+  for (const entry of rawPlan) {
+    if (!validFrameIds.has(entry.frameId)) {
       console.error(
-        `[AUTO-SELECT] Position ${i}: Claude's frameId "${entry.frameId}" doesn't match the frame actually sent at this position ("${sourceFrame.frameId}"). Using position, not the frameId string, as the source of truth.`
+        `[AUTO-SELECT] Dropping plan entry with frameId "${entry.frameId}" — doesn't match any frame actually sent. (This is what the old position-based re-keying was silently papering over, by reattaching this entry's content to a real but WRONG frame instead of dropping it — the actual bug this fix addresses.)`
       );
+      continue;
     }
-    return { ...entry, frameId: sourceFrame.frameId, position: i + 1 };
-  });
+    if (seenFrameIds.has(entry.frameId)) {
+      console.error(`[AUTO-SELECT] Dropping duplicate plan entry for frameId "${entry.frameId}" — already seen once in this plan.`);
+      continue;
+    }
+    seenFrameIds.add(entry.frameId);
+    deduped.push(entry);
+  }
+
+  // Claude omitting a frame entirely is different from a bad/duplicate ID
+  // — that frame still needs to be IN the video somewhere. Append with a
+  // safe, loud, Ken Burns default rather than silently dropping it.
+  for (const f of frames) {
+    if (!seenFrameIds.has(f.frameId)) {
+      console.error(
+        `[AUTO-SELECT] Frame "${f.frameId}" is missing from Claude's plan entirely — appending it at the end with a safe Ken Burns default rather than silently dropping it from the video.`
+      );
+      deduped.push({
+        frameId: f.frameId,
+        roomType: f.userProvidedRoomLabel || "unknown",
+        roomGroup: f.userProvidedRoomLabel || f.frameId,
+        groupOrder: 0,
+        visualAnchor: "",
+        structure: "standalone",
+        revealPreset: null,
+        revealEngine: null,
+        engine: "ken_burns",
+        motionPreset: null,
+        klingMotionPreset: null,
+        confidence: "low",
+        reasoning: "Auto-added — Claude's plan omitted this frame entirely.",
+      });
+    }
+  }
+
+  const plan = deduped.map((entry, i) => ({ ...entry, position: i + 1 }));
 
   const first = plan[0];
   const last = plan[plan.length - 1];
@@ -472,7 +554,67 @@ function enforceAutoSelectionRules(rawPlan, frames, { narrationEnabled, hasExter
   return plan;
 }
 
-// ── RENDER PIPELINE WIRING ──────────────────────────────────────────────
+// ── AI MOTION POOL CAP ────────────────────────────────────────────────
+// Hard-enforces MAX_AUTO_SELECTED_AI_MOTION_FRAMES (or the real, smaller
+// pool balance) regardless of what the prompt asked for — same "don't
+// trust the model's compliance" posture as every other rule in this file.
+// Downgrades the LOWEST-confidence AI-motion picks first, preserving a
+// Room Reveal's identity/preset when downgrading it (just switches its
+// continuation engine to Ken Burns — the reveal story survives, only the
+// paid engine choice changes), and touches the two bookend positions
+// last, since an AI-motion bookend only exists via a deliberate, rare
+// exception (see BOOKEND RULE 2) and shouldn't be sacrificed before every
+// ordinary interior pick has already been tried.
+const CONFIDENCE_RANK = { "high": 3, "medium-high": 2, "medium": 1, "low": 0 };
+
+function usesAiMotion(entry) {
+  if (entry.structure === "room_reveal") return entry.revealEngine === "ltx";
+  return entry.engine === "kling" || entry.engine === "ltx";
+}
+
+function downgradeToKenBurns(entry) {
+  if (entry.structure === "room_reveal") {
+    entry.revealEngine = "ken_burns";
+  } else {
+    entry.engine = "ken_burns";
+    entry.klingMotionPreset = null;
+  }
+  entry.motionPreset = null;
+  entry.reasoning = (entry.reasoning ? entry.reasoning + " " : "") +
+    `(Downgraded to Ken Burns — the plan only includes automatic AI Motion for ${MAX_AUTO_SELECTED_AI_MOTION_FRAMES} frames per video, and this was not among the strongest picks once the pool balance was applied.)`;
+}
+
+function enforceAiMotionPoolCap(plan, cap) {
+  const aiMotionEntries = plan.filter(usesAiMotion);
+  if (aiMotionEntries.length <= cap) return plan; // already within budget, nothing to do
+
+  console.error(
+    `[AUTO-SELECT] Plan selected ${aiMotionEntries.length} AI Motion frames, over the cap of ${cap} — downgrading the lowest-confidence excess picks to Ken Burns.`
+  );
+
+  const isBookend = (entry) => entry === plan[0] || entry === plan[plan.length - 1];
+  const interior = aiMotionEntries.filter((e) => !isBookend(e));
+  const bookends = aiMotionEntries.filter(isBookend);
+
+  // Lowest confidence first within each group — interior picks are all
+  // fair game equally, sorted purely by how sure Claude was; bookends are
+  // a last resort, only touched if downgrading every interior pick still
+  // isn't enough (only possible when the pool balance itself is under 1).
+  const byConfidenceAscending = (a, b) => (CONFIDENCE_RANK[a.confidence] ?? 1) - (CONFIDENCE_RANK[b.confidence] ?? 1);
+  interior.sort(byConfidenceAscending);
+  bookends.sort(byConfidenceAscending);
+
+  let excess = aiMotionEntries.length - cap;
+  for (const entry of [...interior, ...bookends]) {
+    if (excess <= 0) break;
+    downgradeToKenBurns(entry);
+    excess--;
+  }
+
+  return plan;
+}
+
+
 // Maps a plan (from generateAutoSelection, or a user-edited version of one)
 // onto the EXACT frame fields renderPipeline.js's existing per-frame
 // dispatch already reads — useAiMotion, useRevealEffect, isBeforeAfter,
@@ -547,6 +689,7 @@ function applyAutoSelectionPlan(localFrames, plan) {
 module.exports = {
   generateAutoSelection,
   enforceAutoSelectionRules,
+  enforceAiMotionPoolCap,
   buildSystemPrompt,
   applyAutoSelectionPlan,
 };

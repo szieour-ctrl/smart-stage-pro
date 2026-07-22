@@ -864,8 +864,15 @@ async function runAutoSelectAndAdvance() {
   const hasExteriorEnhancement = frames.some(f => f.isExterior && f.isBeforeAfter);
   const narrationEnabled = window._narrationPreference !== false;
 
+  // CHANGED (this session — real bug: Netlify's synchronous function
+  // timeout was cutting off the Claude Vision call mid-request, returning
+  // an HTML error page the frontend then failed to JSON.parse). action=
+  // autoSelect is now a dispatcher — it returns a jobId almost immediately,
+  // and the actual analysis happens in autoSelect-background.js (a real
+  // Background Function, 15-minute ceiling). This polls check-autoSelect.js
+  // for the result, same shape pollJobStatus() already uses for render jobs.
   try {
-    const res = await fetch(`${API_BASE}?action=autoSelect`, {
+    const dispatchRes = await fetch(`${API_BASE}?action=autoSelect`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -880,10 +887,13 @@ async function runAutoSelectAndAdvance() {
         })),
       }),
     });
-    const data = await res.json();
-    if (!res.ok || data.error) throw new Error(data.error || "Auto-select failed");
-    if (!Array.isArray(data.plan) || data.plan.length === 0) throw new Error("Auto-select returned no plan");
-    applyAutoSelectionPlanClient(data.plan);
+    const dispatchData = await dispatchRes.json();
+    if (!dispatchRes.ok || dispatchData.error) throw new Error(dispatchData.error || "Auto-select failed to start");
+    if (!dispatchData.jobId) throw new Error("Auto-select didn't return a jobId");
+
+    const plan = await pollAutoSelectJob(dispatchData.jobId, btn, original);
+    if (!Array.isArray(plan) || plan.length === 0) throw new Error("Auto-select returned no plan");
+    applyAutoSelectionPlanClient(plan);
     window._autoSelectFailed = false;
     lastAutoSelectFrameSig = currentSig;
   } catch (err) {
@@ -895,6 +905,47 @@ async function runAutoSelectAndAdvance() {
   btn.disabled = false;
   btn.textContent = original;
   goToStep(2);
+}
+
+// Polls check-autoSelect.js every 3s until the background job resolves to
+// "done" or "error", or the poll gives up after ~2 minutes — a stuck
+// background job should fail open to the manual flow, not hang the button
+// forever. 3s (vs. render polling's 5s) since this is normally a much
+// faster job than a full video render, and Sam's testing shouldn't sit
+// waiting longer than it has to for a job that usually finishes quickly.
+function pollAutoSelectJob(jobId, btn, btnOriginalText) {
+  const startedAt = Date.now();
+  const MAX_WAIT_MS = 120000;
+  return new Promise((resolve, reject) => {
+    const tick = async () => {
+      if (Date.now() - startedAt > MAX_WAIT_MS) {
+        reject(new Error("Auto-select timed out waiting for a result"));
+        return;
+      }
+      try {
+        const res = await fetch(`/.netlify/functions/check-autoSelect?jobId=${encodeURIComponent(jobId)}`);
+        const data = await res.json();
+        if (data.status === "done") {
+          resolve(data.plan);
+          return;
+        }
+        if (data.status === "error") {
+          reject(new Error(data.error || "Auto-select failed"));
+          return;
+        }
+        // "pending" — keep waiting. Update the button text so a long job
+        // (a 20-photo listing) doesn't look frozen.
+        if (btn) btn.textContent = `Auto-selecting order & motion… (${Math.round((Date.now() - startedAt) / 1000)}s)`;
+        setTimeout(tick, 3000);
+      } catch (err) {
+        // Network hiccup on one poll tick — don't kill the whole flow over
+        // it, just wait for the next tick (same tolerance pollJobStatus()
+        // already applies to render-job polling).
+        setTimeout(tick, 3000);
+      }
+    };
+    tick();
+  });
 }
 
 function applyPlanEntryToFrame(f, entry) {

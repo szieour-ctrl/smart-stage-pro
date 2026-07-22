@@ -79,7 +79,20 @@
 const https = require("https");
 
 const MODEL = "claude-sonnet-4-6";
-const MAX_TOKENS = 4096;
+// CHANGED (this session — real bug, strongly suspected root cause: a
+// 13-photo listing failed after the background function ran a full 80s
+// (nowhere near its own 900s ceiling, so this isn't a timeout — the
+// failure is inside the Claude call/JSON parsing itself). This was
+// flagged as an unconfirmed risk from the very first handoff: MAX_TOKENS
+// was never stress-tested against a large listing. 13 frames' worth of
+// "one or two sentences" of reasoning each (verbose in every real test
+// so far) plausibly exceeded 4096 output tokens, truncating the JSON
+// mid-response — extractJsonArray throws cleanly on that (no closing "]"
+// found), which is exactly the fail-open path this went down. Raised
+// with real headroom rather than a minimal bump, plus the reasoning field
+// itself is now tightened (see its schema comment below) so per-frame
+// cost scales better as listings approach the real max frame count.
+const MAX_TOKENS = 8192;
 
 // ── LOCAL, DUPLICATED PRESET LISTS ──────────────────────────────────────
 // CORRECTED (July 21, 2026): an earlier draft of this file did
@@ -223,7 +236,7 @@ Return ONLY a JSON array, one object per frame, in the exact shape below. No pro
     "motionPreset": "<a real LTX preset key>" | null,
     "klingMotionPreset": null,
     "confidence": "high" | "medium-high" | "medium",
-    "reasoning": "One or two sentences naming the specific visual feature that makes this choice the right (or safe) one for THIS photo."
+    "reasoning": "ONE concise sentence (aim for under 25 words) naming the specific visual feature that makes this choice the right (or safe) one for THIS photo. Long, multi-clause explanations cost real output budget across a full listing — say the one thing that matters, not everything you noticed."
   }
 ]`;
 }
@@ -317,6 +330,18 @@ function callClaudeVision(systemPrompt, userContent, anthropicKey) {
           const parsed = JSON.parse(data);
           const text = parsed?.content?.find((b) => b.type === "text")?.text;
           if (!text) return reject(new Error(`Auto-selection call returned no text content: ${data.slice(0, 300)}`));
+          // NEW (this session) — a 13-photo listing failed with only a
+          // generic "no JSON array found" error, leaving real uncertainty
+          // about whether it was actually a max_tokens truncation (raised
+          // MAX_TOKENS above to fix that) or something else entirely.
+          // Checking stop_reason directly removes that ambiguity for any
+          // future occurrence — no more guessing from circumstantial
+          // evidence (frame count, verbosity) after the fact.
+          if (parsed.stop_reason === "max_tokens") {
+            console.error(
+              `[AUTO-SELECT] Response was cut off at max_tokens (${MAX_TOKENS}) — this WILL fail JSON parsing. If this recurs, MAX_TOKENS needs raising further or the reasoning field needs trimming more aggressively.`
+            );
+          }
           resolve(text);
         } catch (err) {
           reject(new Error(`Auto-selection response parse error: ${err.message}. Raw: ${data.slice(0, 500)}`));

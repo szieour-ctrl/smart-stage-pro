@@ -3,6 +3,13 @@
 //
 // Routes via ?action= parameter, same pattern as project-manage.js
 //
+// NEW (July 21, 2026) — action=autoSelect calls out to autoSelect.js
+// (co-located in this same repo/deployment, NOT Railway — see that file's
+// header for why it has to live here: it needs to run BEFORE the quote
+// screen, using only the remote Cloudinary URLs the frontend already has,
+// with nothing local/Railway-side available yet at this point in the flow).
+const { generateAutoSelection, applyAutoSelectionPlan } = require("./autoSelect");
+//
 // ── KLING MOTION POOL MODEL (July 13, 2026 — REPLACES the old
 // generation-count-gated "first 3 Kling frames free on generation #1
 // only" rule) ─────────────────────────────────────────────────────────
@@ -509,6 +516,62 @@ function computeKlingBilledFlags(frames, framesFromPool) {
   });
 }
 
+// ── BOOKEND OVERRIDE SURCHARGE (NEW — July 21, 2026 auto-selection design) ──
+// autoSelect.js's default plan always puts Ken Burns (or, narration-off +
+// Exterior Enhancement available, the earned-free Kling exterior
+// transformation) on position 1 and the last position — genuinely free,
+// same flat AI Motion Pool rules as any other frame. A user CAN override
+// either bookend to AI Motion instead (autoSelect.js does not block this —
+// only its own DEFAULT proposal is constrained). When they do, AND
+// narration is on for this video, that frame's real fal.ai cost is
+// materially higher than a normal 6s AI Motion frame — see ltxMotion.js's
+// generateLtxContinuationClip: a frame carrying introOutroPaddingSeconds
+// requests ~14-16s instead of the 6s floor, at $0.06/s, meaning roughly
+// $0.84-$0.96 real cost instead of $0.36 — a delta of $0.48-$0.60 that the
+// flat KLING_IMAGE_COST_PER_FRAME (customer-facing, duration-independent)
+// does not recover at all today. This function is the one new billing
+// rule needed to close that gap: an explicit surcharge specifically for a
+// narrated bookend override, so the real infra-cost difference stops being
+// silently absorbed by the business on every video that does this.
+//
+// PLACEHOLDER AMOUNT — CONFIRM WITH SAM BEFORE SHIPPING: 3 Images. Picked
+// as a round number roughly proportional to the real ~$0.50 delta at
+// today's Images pricing, but this is a genuine pricing decision, not a
+// derived constant — do not treat 3 as final without explicit sign-off.
+const BOOKEND_OVERRIDE_SURCHARGE_IMAGES = 3;
+
+// A bookend frame counts as an "override" for surcharge purposes only when
+// BOTH true: (1) it's actually using AI Motion (not Ken Burns, not the
+// free earned exterior-transformation case), AND (2) narration is on for
+// this video (no narration → no padding requested at all → no real cost
+// delta to recover, per ltxMotion.js's own duration logic).
+function computeBookendOverrideCharge(frames, wantsNarration) {
+  if (!wantsNarration || !frames || frames.length === 0) {
+    return { bookendSurchargeCount: 0, bookendImageCost: 0, bookendPositions: [] };
+  }
+
+  const first = frames[0];
+  const last = frames[frames.length - 1];
+  const candidates = frames.length === 1 ? [first] : [first, last];
+  const positions = frames.length === 1 ? [1] : [1, frames.length];
+
+  let count = 0;
+  const flaggedPositions = [];
+  candidates.forEach((f, idx) => {
+    if (usesAiMotion(f)) {
+      count++;
+      flaggedPositions.push(positions[idx]);
+    }
+  });
+
+  return {
+    bookendSurchargeCount: count,
+    bookendImageCost: count * BOOKEND_OVERRIDE_SURCHARGE_IMAGES,
+    bookendPositions: flaggedPositions, // e.g. [1] or [1, N] or [N] — which position(s) triggered it, for the quote UI to point at
+  };
+}
+
+
 // Charged once, at action=download, regardless of how many times the video
 // was generated/regenerated before this point (Kling was already paid for
 // at each of those generation events — this only covers Ken Burns + the
@@ -878,19 +941,27 @@ async function createVideoJob({ listingId, projectId, userId, frames, formats, m
   // this is a brand-new video or the user's tenth video this month.
   const klingCharge = await calculateKlingCharge(frames, userId);
 
+  // NEW (July 21, 2026, auto-selection design) — must be computed and
+  // debited HERE too, not just in quoteGeneration's preview, or the quote
+  // screen would show a surcharge the user never actually gets charged —
+  // see computeBookendOverrideCharge's header comment for the full
+  // reasoning behind this rule.
+  const bookendCharge = computeBookendOverrideCharge(frames, wantsNarration);
+  const totalAiMotionCost = klingCharge.imageCost + bookendCharge.bookendImageCost;
+
   // ── THE GUARDRAIL ────────────────────────────────────────────────────
   // If there's anything to charge (i.e. Kling frames beyond the remaining
-  // pool), debit it NOW, before any video_jobs row exists and before
-  // Railway is ever contacted. If the user can't afford it, this returns
-  // immediately and NOTHING downstream happens — no row, no Railway call,
-  // no risk, and no pool consumption either (that happens later, only
-  // once the job is confirmed created).
-  if (klingCharge.imageCost > 0) {
-    const debitResult = await callDebitCredit(userId, klingCharge.imageCost, "kling_generation");
+  // pool, and/or a bookend override surcharge), debit it NOW, before any
+  // video_jobs row exists and before Railway is ever contacted. If the
+  // user can't afford it, this returns immediately and NOTHING downstream
+  // happens — no row, no Railway call, no risk, and no pool consumption
+  // either (that happens later, only once the job is confirmed created).
+  if (totalAiMotionCost > 0) {
+    const debitResult = await callDebitCredit(userId, totalAiMotionCost, "kling_generation");
     if (debitResult.status === 402) {
       return {
         error:    debitResult.data?.code === "NO_SUB" ? "no_active_subscription" : "insufficient_credits",
-        required: klingCharge.imageCost,
+        required: totalAiMotionCost,
         balance:  debitResult.data?.balance,
       };
     }
@@ -939,7 +1010,7 @@ async function createVideoJob({ listingId, projectId, userId, frames, formats, m
       formats,
       music_style:             musicStyle || null,
       generation_count:        1,
-      kling_images_charged:    klingCharge.imageCost,
+      kling_images_charged:    totalAiMotionCost,
       credits_used:            calculateDownloadCost(frames), // deferred — see downloadVideoJob
       // CHANGE (July 14, 2026): these start null now, always — narration
       // is generated DURING the Railway render (see narrationGen.js), not
@@ -1160,7 +1231,8 @@ async function createVideoJob({ listingId, projectId, userId, frames, formats, m
       created: true,
       jobId: job.id,
       generationCount: 1,
-      klingImagesCharged: klingCharge.imageCost,
+      klingImagesCharged: totalAiMotionCost,
+      bookendSurchargeCharged: bookendCharge.bookendImageCost,
       klingFramesFromPool: klingCharge.framesFromPool,
       quotedDownloadCost: job.credits_used,
       // Reporting only — does not gate anything. Lets the frontend show
@@ -1186,16 +1258,16 @@ async function createVideoJob({ listingId, projectId, userId, frames, formats, m
     // failure creating rows or reaching Railway — a pure platform failure,
     // not a user decision, so this is the one case where a refund is
     // correct rather than "no refunds, ever" (Image Economy v2 §7).
-    if (klingCharge.imageCost > 0) {
+    if (totalAiMotionCost > 0) {
       try {
-        await callDebitCredit(userId, klingCharge.imageCost, "kling_generation_refund_dispatch_failed", true);
+        await callDebitCredit(userId, totalAiMotionCost, "kling_generation_refund_dispatch_failed", true);
       } catch (refundErr) {
         // Refund itself failed — log loudly. This is the one scenario that
         // genuinely needs a "contact support" fallback, since the user was
         // charged for a video that never got created.
         console.error(
           "CRITICAL: Kling debit refund failed after dispatch failure — manual ledger correction needed.",
-          { userId, amount: klingCharge.imageCost, originalError: err.message, refundError: refundErr.message }
+          { userId, amount: totalAiMotionCost, originalError: err.message, refundError: refundErr.message }
         );
       }
     }
@@ -1288,12 +1360,18 @@ async function regenerateVideoJob({ jobId, userId, frames, formats, musicStyle, 
   // can still draw from it same as a first generation would.
   const klingCharge = await calculateKlingCharge(frames, userId);
 
-  if (klingCharge.imageCost > 0) {
-    const debitResult = await callDebitCredit(userId, klingCharge.imageCost, "kling_generation_iteration");
+  // NEW (July 21, 2026) — same reasoning as createVideoJob's identical
+  // addition: must be computed and debited here too, or an iteration
+  // would silently skip the bookend surcharge createVideoJob applies.
+  const bookendCharge = computeBookendOverrideCharge(frames, wantsNarration);
+  const totalAiMotionCost = klingCharge.imageCost + bookendCharge.bookendImageCost;
+
+  if (totalAiMotionCost > 0) {
+    const debitResult = await callDebitCredit(userId, totalAiMotionCost, "kling_generation_iteration");
     if (debitResult.status === 402) {
       return {
         error:    debitResult.data?.code === "NO_SUB" ? "no_active_subscription" : "insufficient_credits",
-        required: klingCharge.imageCost,
+        required: totalAiMotionCost,
         balance:  debitResult.data?.balance,
       };
     }
@@ -1335,7 +1413,7 @@ async function regenerateVideoJob({ jobId, userId, frames, formats, musicStyle, 
       formats,
       music_style:          musicStyle || null,
       generation_count:     nextGenerationCount,
-      kling_images_charged: (existing.kling_images_charged || 0) + klingCharge.imageCost,
+      kling_images_charged: (existing.kling_images_charged || 0) + totalAiMotionCost,
       credits_used:         calculateDownloadCost(frames),
       narration_audio_url:      null,
       narration_script:         null,
@@ -1504,7 +1582,8 @@ async function regenerateVideoJob({ jobId, userId, frames, formats, musicStyle, 
       created: true,
       jobId,
       generationCount: nextGenerationCount,
-      klingImagesCharged: klingCharge.imageCost,
+      klingImagesCharged: totalAiMotionCost,
+      bookendSurchargeCharged: bookendCharge.bookendImageCost,
       klingFramesFromPool: klingCharge.framesFromPool,
       narrationRequested: narrationResult.requested,
       narrationImagesCharged: narrationResult.narrationImagesCharged,
@@ -1515,13 +1594,13 @@ async function regenerateVideoJob({ jobId, userId, frames, formats, musicStyle, 
 
     // Same refund-on-platform-failure logic as createVideoJob — see that
     // function's catch block for the full reasoning.
-    if (klingCharge.imageCost > 0) {
+    if (totalAiMotionCost > 0) {
       try {
-        await callDebitCredit(userId, klingCharge.imageCost, "kling_iteration_refund_dispatch_failed", true);
+        await callDebitCredit(userId, totalAiMotionCost, "kling_iteration_refund_dispatch_failed", true);
       } catch (refundErr) {
         console.error(
           "CRITICAL: Kling iteration debit refund failed after dispatch failure — manual ledger correction needed.",
-          { userId, jobId, amount: klingCharge.imageCost, originalError: err.message, refundError: refundErr.message }
+          { userId, jobId, amount: totalAiMotionCost, originalError: err.message, refundError: refundErr.message }
         );
       }
     }
@@ -1832,6 +1911,12 @@ async function quoteGeneration({ jobId, userId, frames, wantsNarration }) {
   // silently disagree with each other.
   const klingFrameCount = frames.filter(usesAiMotion).length;
 
+  // NEW (July 21, 2026, auto-selection design) — see
+  // computeBookendOverrideCharge's header for the full reasoning. Only
+  // fires when a user has overridden position 1 and/or the last position
+  // to AI Motion AND narration is on for this video.
+  const bookendCharge = computeBookendOverrideCharge(frames, wantsNarration);
+
   // Narration quote — side-effect-free, mirrors resolveNarrationBilling's
   // cost math without actually debiting. CHANGE (July 14, 2026): takes a
   // plain wantsNarration boolean now — narration isn't pre-generated in
@@ -1848,7 +1933,7 @@ async function quoteGeneration({ jobId, userId, frames, wantsNarration }) {
     `?user_id=eq.${userId}&order=created_at.desc&limit=1&select=balance_after`
   );
   const currentBalance = ledgerRes.data?.[0]?.balance_after ?? null;
-  const totalCost = klingCharge.imageCost + narrationImageCost;
+  const totalCost = klingCharge.imageCost + narrationImageCost + bookendCharge.bookendImageCost;
 
   return {
     generationCount,
@@ -1862,6 +1947,9 @@ async function quoteGeneration({ jobId, userId, frames, wantsNarration }) {
     narrationRequested:   wantsNarration,
     narrationFreeUsed:    narrationFreeUsed,
     narrationImageCost:   narrationImageCost,
+    bookendSurchargeCount: bookendCharge.bookendSurchargeCount,
+    bookendImageCost:      bookendCharge.bookendImageCost,
+    bookendPositions:      bookendCharge.bookendPositions,
     totalImageCost:       totalCost,
     currentBalance,
     balanceAfter: currentBalance !== null ? currentBalance - totalCost : null,
@@ -1971,6 +2059,35 @@ exports.handler = async (event) => {
       }
       const result = await addExternalPhoto({ listingId, userId, imageUrl, roomType, sourceLabel });
       return { statusCode: 200, headers, body: JSON.stringify(result) };
+    }
+
+    if (action === "autoSelect") {
+      // NEW (July 21, 2026). Side-effect-free (no debit, no job row) — this
+      // is a proposal for the user to review, override, or accept, called
+      // from the frontend before the quote step. Frames arrive with remote
+      // Cloudinary URLs only (stagedImageUrl / beforeImageUrl) — same shape
+      // getFramesForListing already returns, no local download needed since
+      // this never touches Railway.
+      const body = JSON.parse(event.body || "{}");
+      const { frames, narrationEnabled, hasExteriorEnhancement } = body;
+      if (!frames || !frames.length) {
+        return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing frames" }) };
+      }
+      if (!process.env.ANTHROPIC_API_KEY) {
+        return { statusCode: 500, headers, body: JSON.stringify({ error: "Auto-selection is not configured (missing ANTHROPIC_API_KEY)" }) };
+      }
+      try {
+        const plan = await generateAutoSelection({
+          frames,
+          narrationEnabled: !!narrationEnabled,
+          hasExteriorEnhancement: !!hasExteriorEnhancement,
+          anthropicKey: process.env.ANTHROPIC_API_KEY,
+        });
+        return { statusCode: 200, headers, body: JSON.stringify({ plan }) };
+      } catch (err) {
+        console.error("autoSelect action failed:", err.message);
+        return { statusCode: 500, headers, body: JSON.stringify({ error: "Auto-selection failed", detail: err.message }) };
+      }
     }
 
     if (action === "quote") {

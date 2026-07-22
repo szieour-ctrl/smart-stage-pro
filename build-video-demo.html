@@ -1675,7 +1675,57 @@ function setEndMotion(id, motionKey) {
 
 function renderMotionStep() {
   const list = document.getElementById("motionList");
+  // FIX (this session — this exact failure shape has now hit twice: one
+  // bad value on ONE frame throws partway through this .map(), which
+  // aborts list.innerHTML's assignment AND every line of this function
+  // that runs after it — including the format row and audio dropdowns
+  // below, which have nothing to do with the frame that actually failed.
+  // Last time it was an unrecognized revealPreset; there's no guarantee
+  // it's the last field that can ever go wrong here, especially now that
+  // this data can come from a Claude Vision JSON response instead of only
+  // ever being hand-picked from a dropdown. Each frame's card now renders
+  // independently — one bad frame shows a visible error card in its own
+  // slot, logged to console with which frame and why, and every OTHER
+  // frame plus the format row and audio pickers render normally regardless.
   list.innerHTML = frames.map((f, i) => {
+    try {
+      return renderMotionFrameCard(f, i);
+    } catch (err) {
+      console.error(`[renderMotionStep] Frame ${f.id} (${f.roomGroupLabel || f.room || "unknown room"}) failed to render:`, err.message, err.stack);
+      return `
+      <div class="frame-card" style="border-color:var(--danger);">
+        <div class="frame-thumb-sm frame-thumb-clickable" onclick="openLightbox(${f.id})"><img src="${f.dataUrl}" alt=""></div>
+        <div class="frame-main">
+          <div style="color:var(--danger);font-weight:600;margin-bottom:6px;">This frame couldn't be displayed (${(err.message || "unknown error").replace(/</g, "&lt;")}).</div>
+          <div style="font-size:0.8rem;color:var(--muted);">The other frames and the format/audio options below are unaffected. This one will need a manual motion pick, or use the thumbnail to check the photo before continuing.</div>
+        </div>
+      </div>`;
+    }
+  }).join("");
+
+  try {
+    updateKlingCountBar();
+  } catch (err) {
+    console.error("[renderMotionStep] updateKlingCountBar failed:", err.message);
+  }
+
+  try {
+    renderFormatRow();
+  } catch (err) {
+    console.error("[renderMotionStep] format row failed to render:", err.message);
+  }
+
+  try {
+    renderAudioPickers();
+  } catch (err) {
+    console.error("[renderMotionStep] audio pickers failed to render:", err.message);
+  }
+}
+
+// Extracted from renderMotionStep's old inline .map() callback — same
+// logic, just callable per-frame so it can be individually try/caught
+// above instead of all frames sharing one crash.
+function renderMotionFrameCard(f, i) {
     const eligible = eligiblePresetsFor(f, KLING_PRESETS);
     const presetOptions = eligible.map(([key, p]) => `<option value="${key}" ${f.preset === key ? "selected" : ""}>${p.label}</option>`).join("");
     const selectedKlingPreset = KLING_PRESETS[f.preset];
@@ -1796,9 +1846,9 @@ function renderMotionStep() {
         ` : ""}
       </div>
     </div>`;
-  }).join("");
-  updateKlingCountBar();
+}
 
+function renderFormatRow() {
   // MOVED here from the old Order step (flow reorder: Order now happens
   // BEFORE Motion, so format — which depends on whether any frame uses
   // Kling — can only be correctly decided once motion assignment for
@@ -1840,7 +1890,9 @@ function renderMotionStep() {
   note.textContent = hasKling
     ? "AI Motion videos can only be rendered in 16:9 — AI Motion's camera composition can't be safely auto-cropped to a second aspect ratio."
     : "Ken Burns videos can deliver both formats at no extra cost — 9:16 is a clean crop of the same render.";
+}
 
+function renderAudioPickers() {
   // NEW (audio build) — populate the music/narration pickers ONCE. This
   // function re-runs every time this step is (re)entered, and rebuilding
   // <select> options unconditionally would silently reset whatever the
@@ -1856,7 +1908,19 @@ function renderMotionStep() {
   const narrationSelect = document.getElementById("narrationSelect");
   if (narrationSelect && narrationSelect.childElementCount === 0) {
     narrationSelect.innerHTML = NARRATION_VOICES.map(v => `<option value="${v.key}">${v.label}</option>`).join("");
-    window._voiceKey = "";
+    // FIX (this session — real bug: this always defaulted to "" (No
+    // narration) regardless of what was answered on Step 1's Yes/No
+    // toggle, which is exactly why the audio section looked like it was
+    // asking the same question over again from scratch. Step 1's answer
+    // is only a yes/no used for auto-select's bookend planning — this is
+    // the actual voice selection — but they should agree by default
+    // rather than silently ignoring each other. Defaults to the first
+    // real voice when Step 1 said yes, stays "No narration" when it said
+    // no; either way the person can still change their mind here.
+    const wantsNarration = window._narrationPreference !== false;
+    const defaultVoice = wantsNarration ? (NARRATION_VOICES.find(v => v.key)?.key || "") : "";
+    narrationSelect.value = defaultVoice;
+    window._voiceKey = defaultVoice;
     updateAudioSelection();
   }
 }
@@ -2149,7 +2213,7 @@ function renderOrderStep() {
     orderNotice.outerHTML = window._autoSelectFailed
       ? `<div class="ai-fallback-note" id="orderStepNotice"><strong>Auto-selection didn't run</strong> — this is manual order, same as before. Drag to arrange, then assign motion on the next step. <a href="javascript:void(0)" onclick="goToStep(1)">Go back and retry</a> if you'd rather have the AI propose an order.</div>`
       : autoSelectPlan
-      ? `<div class="ai-note" id="orderStepNotice"><span class="ai-note-icon">&#10024;</span><span>This order and each room's motion were auto-selected — drag to rearrange, or adjust motion on the next step (overriding a pick shows the reasoning behind it, plus any added cost).</span></div>`
+      ? `<div class="ai-note" id="orderStepNotice"><span class="ai-note-icon">&#10024;</span><span>This order and each room's motion were auto-selected by Claude Vision. <b>AI pick</b> = the AI chose this room's motion; <b>AI &middot; bookend</b> = the opening/closing shot, held to a fixed default. Hover a photo for the AI's reasoning, or drag to rearrange — adjusting motion on the next step shows the reasoning behind the original pick, plus any added cost.</span></div>`
       : `<div id="orderStepNotice" style="display:none;"></div>`;
   }
 
@@ -2198,9 +2262,17 @@ function updateAudioSelection() {
 
   const note = document.getElementById("narrationNote");
   if (!note) return;
-  note.textContent = window._voiceKey
-    ? `Narration will be generated from the real footage once you click Generate. Billed per video: free the first time, ${NARRATION_IMAGE_COST} Images each time after that.`
-    : "";
+  // NEW (this session) — makes explicit that this dropdown and Step 1's
+  // Yes/No toggle are linked, since seeing an audio picker here right
+  // after already answering a narration question on Step 1 was reading as
+  // a duplicate/contradictory question rather than a continuation of it.
+  if (window._voiceKey) {
+    note.textContent = `Narration will be generated from the real footage once you click Generate. Billed per video: free the first time, ${NARRATION_IMAGE_COST} Images each time after that.`;
+  } else if (window._narrationPreference !== false) {
+    note.textContent = `You said Step 1 would include narration — pick a voice above, or leave this as "No narration" to change your mind.`;
+  } else {
+    note.textContent = `Matches what you chose on Step 1 (no narration). Pick a voice above if you'd rather add it after all.`;
+  }
 }
 
 function toggleFormat(fmt, hasKling) {
@@ -2289,39 +2361,55 @@ async function renderConfirmStep() {
   // identical "count both engines" fix before this is actually correct,
   // not just correctly displayed.
   document.getElementById("frameList").innerHTML = frames.map(f => {
-    const isAiMotionFrame = frameUsesAiMotion(f);
-    let badge;
-    if (isAiMotionFrame) {
-      aiMotionSeen++;
-      const isFromPool = aiMotionSeen <= quote.framesFromPool;
-      badge = isFromPool ? `<span class="frame-badge badge-included">Free (pool)</span>` : `<span class="frame-badge badge-billable">${KLING_IMAGE_COST_PER_FRAME} Images</span>`;
-    } else {
-      badge = `<span class="frame-badge badge-kenburns">Ken Burns</span>`;
+    try {
+      const isAiMotionFrame = frameUsesAiMotion(f);
+      let badge;
+      if (isAiMotionFrame) {
+        aiMotionSeen++;
+        const isFromPool = aiMotionSeen <= quote.framesFromPool;
+        badge = isFromPool ? `<span class="frame-badge badge-included">Free (pool)</span>` : `<span class="frame-badge badge-billable">${KLING_IMAGE_COST_PER_FRAME} Images</span>`;
+      } else {
+        badge = `<span class="frame-badge badge-kenburns">Ken Burns</span>`;
+      }
+      // FIX (July 19, 2026 — real bug, caught from Sam's own review screen):
+      // this never checked f.useRevealEffect at all, for either engine.
+      // A reveal frame under AI Motion fell through to
+      // LTX_PRESETS[f.ltxPreset]?.label — but reveal frames use
+      // f.revealPreset/f.endMotion, never f.ltxPreset, so that's always
+      // undefined and always showed the generic fallback "LTX Motion"
+      // instead of naming the actual reveal preset. Same bug would have
+      // hit a Ken Burns reveal frame too (showing "Auto (Ken Burns)"
+      // instead of "Classic Reveal..."), just never noticed yet.
+      //
+      // FIX (this session — real bug, confirmed root cause of Step 4
+      // hanging on "Getting a real quote..." forever): the Ken Burns
+      // branch below was the ONLY one of these four lookups missing the
+      // ?. every sibling lookup has (REVEAL_PRESETS/KLING_PRESETS/
+      // LTX_PRESETS all guard with ?., this one read .label directly). A
+      // kenBurnsPreset value that isn't a recognized key threw here,
+      // which aborted this ENTIRE frames.map() before the innerHTML
+      // assignment below it could ever run — leaving whatever was on
+      // screen before (the loading message) stuck forever, no visible
+      // error. Same failure shape as Step 3's crash, different line.
+      const motionLabel = f.useRevealEffect
+        ? `${REVEAL_PRESETS[f.revealPreset]?.label || "Reveal"} + ${(f.motion === "ltx" ? LTX_PRESETS[f.endMotion]?.label : KEN_BURNS_PRESETS[f.endMotion]?.label) || "End Motion"} (${f.motion === "ltx" ? "AI Motion" : "Ken Burns"})`
+        : (f.motion === "kling"
+            ? (KLING_PRESETS[f.preset]?.label || "AI Transformation")
+            : (f.motion === "ltx"
+                ? (LTX_PRESETS[f.ltxPreset]?.label || "AI Motion")
+                : ((KEN_BURNS_PRESETS[f.kenBurnsPreset || "auto"]?.label || "Auto") + " (Ken Burns)")));
+      return `<div class="frame-row">
+        <div class="frame-thumb-sm"><img src="${f.dataUrl}" alt=""></div>
+        <div class="frame-main" style="padding:0;">
+          <div class="frame-name">${displayRoomName(f)}</div>
+          <div class="frame-tag">${motionLabel}</div>
+        </div>
+        ${badge}
+      </div>`;
+    } catch (err) {
+      console.error(`[renderConfirmStep] Frame ${f.id} failed to render:`, err.message, err.stack);
+      return `<div class="frame-row"><div class="frame-main" style="padding:0;"><div class="frame-name" style="color:var(--danger);">This frame couldn't be displayed (${(err.message || "unknown error").replace(/</g, "&lt;")})</div></div></div>`;
     }
-    // FIX (July 19, 2026 — real bug, caught from Sam's own review screen):
-    // this never checked f.useRevealEffect at all, for either engine.
-    // A reveal frame under AI Motion fell through to
-    // LTX_PRESETS[f.ltxPreset]?.label — but reveal frames use
-    // f.revealPreset/f.endMotion, never f.ltxPreset, so that's always
-    // undefined and always showed the generic fallback "LTX Motion"
-    // instead of naming the actual reveal preset. Same bug would have
-    // hit a Ken Burns reveal frame too (showing "Auto (Ken Burns)"
-    // instead of "Classic Reveal..."), just never noticed yet.
-    const motionLabel = f.useRevealEffect
-      ? `${REVEAL_PRESETS[f.revealPreset]?.label || "Reveal"} + ${(f.motion === "ltx" ? LTX_PRESETS[f.endMotion]?.label : KEN_BURNS_PRESETS[f.endMotion]?.label) || "End Motion"} (${f.motion === "ltx" ? "AI Motion" : "Ken Burns"})`
-      : (f.motion === "kling"
-          ? (KLING_PRESETS[f.preset]?.label || "AI Transformation")
-          : (f.motion === "ltx"
-              ? (LTX_PRESETS[f.ltxPreset]?.label || "AI Motion")
-              : (KEN_BURNS_PRESETS[f.kenBurnsPreset || "auto"].label + " (Ken Burns)")));
-    return `<div class="frame-row">
-      <div class="frame-thumb-sm"><img src="${f.dataUrl}" alt=""></div>
-      <div class="frame-main" style="padding:0;">
-        <div class="frame-name">${displayRoomName(f)}</div>
-        <div class="frame-tag">${motionLabel}</div>
-      </div>
-      ${badge}
-    </div>`;
   }).join("");
 
   let rows = "";

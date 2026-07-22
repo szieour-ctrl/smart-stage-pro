@@ -2086,12 +2086,28 @@ exports.handler = async (event) => {
       // Frontend polls check-autoSelect.js for the result, same shape
       // check-narration.js already uses.
       const body = JSON.parse(event.body || "{}");
-      const { frames, narrationEnabled, hasExteriorEnhancement } = body;
+      const { frames, narrationEnabled, hasExteriorEnhancement, userId } = body;
       if (!frames || !frames.length) {
         return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing frames" }) };
       }
       if (!process.env.ANTHROPIC_API_KEY) {
         return { statusCode: 500, headers, body: JSON.stringify({ error: "Auto-selection is not configured (missing ANTHROPIC_API_KEY)" }) };
+      }
+
+      // NEW (this session — Sam's rule: automatic AI Motion is capped at
+      // 3 frames per video by plan inclusion, but that's a CEILING, not a
+      // guarantee — if the subscriber's real monthly pool has fewer than
+      // 3 left, autoSelect.js needs to know that lower real number, not
+      // just the flat 3. Reuses getKlingPoolStatus exactly as action=
+      // balance already does — same read, no new query shape.
+      let poolRemaining = null;
+      if (userId) {
+        try {
+          const poolStatus = await getKlingPoolStatus(userId);
+          poolRemaining = poolStatus.remaining;
+        } catch (err) {
+          console.error("autoSelect: failed to read pool balance, letting autoSelect.js fall back to its own default cap:", err.message);
+        }
       }
 
       const jobId = `as-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -2106,7 +2122,7 @@ exports.handler = async (event) => {
         await fetch(`${siteUrl}/.netlify/functions/autoSelect-background`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ jobId, frames, narrationEnabled, hasExteriorEnhancement }),
+          body: JSON.stringify({ jobId, frames, narrationEnabled, hasExteriorEnhancement, poolRemaining }),
         });
       } catch (err) {
         console.error("autoSelect dispatch failed:", err.message);

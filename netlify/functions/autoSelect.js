@@ -118,6 +118,25 @@ const VALID_LTX_PRESETS = new Set([
   "living_room_ambient", "fireplace_flicker", "water_motion", "outdoor_breeze",
 ]);
 
+// NEW (this session — real bug found via a live frontend crash: "Cannot
+// read properties of undefined (reading 'allowedEndMotions')"). The three
+// valid Room Reveal identity keys — matches REVEAL_PRESETS' keys exactly
+// in build-video-demo.html and assemble.js. Unlike motionPreset/
+// klingMotionPreset below, revealPreset was never sanity-checked here at
+// all — if Claude's JSON output for revealPreset ever deviated even
+// slightly from one of these three exact strings (casing, using the label
+// instead of the key, anything), nothing caught it before it reached the
+// frontend, where REVEAL_PRESETS[badValue] resolves to undefined and
+// renderRevealPresetControls() crashes immediately trying to read
+// .allowedEndMotions off it — taking down the ENTIRE motion-assignment
+// step with it, since that crash happens mid-way through a single
+// frames.map() call whose failure aborts everything after it in the same
+// render function (format row, audio dropdowns included). Same failure
+// SHAPE as the luxury_parallax bug documented in KEN_BURNS_PRESETS'
+// comment in build-video-demo.html — different missing validation, same
+// "don't trust the model's compliance" lesson.
+const VALID_REVEAL_PRESETS = new Set(["classic_reveal", "luxury_drift", "cinematic_reveal"]);
+
 // Ken Burns presets Claude may select for a "ken_burns" engine frame — the
 // user-selectable subset of motionPresets.js's VALID_PRESETS. Excludes
 // "luxury_parallax" (Kling-continuation-only, never a standalone pick) and
@@ -142,15 +161,15 @@ For each photo, identify:
 - visualAnchor: the single clearest visual feature a camera-motion preset could key off — an island, a fireplace, a chandelier, a hallway sightline, a rug, whatever is genuinely the most prominent thing in this specific photo. Be concrete and specific, not generic.
 
 ## Ordering
-Produce a natural walkthrough sequence, following this priority — front exterior first, then the home's strongest lifestyle/hero spaces, then private spaces, then the closing exterior shot:
+Produce a natural walkthrough sequence, following this category priority — front exterior first, then the home's strongest lifestyle/hero spaces, then private spaces, then the closing exterior shot:
 1. Exterior front (if present).
 2. Open Plan / multi-room lifestyle spaces — these lead the interior tour, before any single room.
-3. Kitchen, Living Room, Dining Room, and other hero living/lifestyle spaces — in whatever order best fits THIS listing's actual layout and standout features, but always ahead of bedrooms.
+3. Kitchen, Living Room, Dining Room, and other hero living/lifestyle spaces.
 4. Office / Flex / other specialty spaces.
 5. Primary Bedroom, then Primary Bathroom.
 6. Secondary Bedrooms, then Secondary Bathrooms / Utility.
 7. Strongest available exterior/backyard shot, last.
-This is a priority to follow, not an excuse to ignore what's actually in front of you — if a listing's real standout feature doesn't fit this shape cleanly, use judgment, but default to this order when nothing about the specific photos argues otherwise. Two hard constraints, not optional regardless of category order:
+This category order is a hard constraint, same weight as the two below it — categories 2-6 must not interleave (e.g. Office must never land after a bedroom just because a bedroom photo "felt" like it belonged earlier; category 4 always precedes category 5 and 6, full stop). Your judgment applies WITHIN a category only — deciding which specific photo leads when a category has several (e.g. which of two hero living-space shots goes first), never whether a category as a whole jumps the queue. Two further hard constraints:
 1. A real vacant/staged pair must stay adjacent to itself.
 2. Frames sharing a roomGroup must stay contiguous — never split a room's photos apart with a different room in between.
 
@@ -437,6 +456,16 @@ function enforceAutoSelectionRules(rawPlan, frames, { narrationEnabled, hasExter
       );
       entry.engine = "ken_burns";
       entry.motionPreset = null;
+    }
+    // NEW (this session — see VALID_REVEAL_PRESETS' header comment for the
+    // real crash this prevents). Only checked when structure is actually
+    // room_reveal — a standalone frame's revealPreset field is expected to
+    // be null/absent and shouldn't trigger a false-positive correction.
+    if (entry.structure === "room_reveal" && entry.revealPreset && !VALID_REVEAL_PRESETS.has(entry.revealPreset)) {
+      console.error(
+        `[AUTO-SELECT] Frame ${entry.frameId}: reveal pick "${entry.revealPreset}" isn't a real preset name — force-correcting to "classic_reveal" rather than letting it reach the frontend, where an unresolvable key crashes the entire motion-assignment step (confirmed: REVEAL_PRESETS[badValue] is undefined, and renderRevealPresetControls() reads .allowedEndMotions off it unguarded).`
+      );
+      entry.revealPreset = "classic_reveal";
     }
   }
 

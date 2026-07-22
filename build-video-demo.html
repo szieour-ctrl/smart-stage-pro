@@ -1569,7 +1569,21 @@ function renderMotionTypeToggle(f, refreshFn) {
 }
 
 function renderRevealPresetControls(f, refreshFn) {
-  const presetKey = f.revealPreset || "classic_reveal";
+  // FIX (this session — real crash: "Cannot read properties of undefined
+  // (reading 'allowedEndMotions')"). This used to trust f.revealPreset
+  // unconditionally — fine for the hardcoded 3-button dropdown a user
+  // clicks manually, but auto-select's plan now writes this field from a
+  // Claude Vision JSON response, which can occasionally return a value
+  // that doesn't exactly match one of REVEAL_PRESETS' three real keys.
+  // autoSelect.js's enforceAutoSelectionRules now sanity-checks this
+  // server-side too (belt), but this frontend fallback (suspenders) means
+  // a bad value degrades to Classic Reveal instead of crashing this
+  // entire step — the same "don't trust upstream data" posture the rest
+  // of this codebase already applies everywhere else.
+  const presetKey = (f.revealPreset && REVEAL_PRESETS[f.revealPreset]) ? f.revealPreset : "classic_reveal";
+  if (f.revealPreset && !REVEAL_PRESETS[f.revealPreset]) {
+    console.error(`[reveal] Unrecognized revealPreset "${f.revealPreset}" on frame ${f.id} — falling back to classic_reveal instead of crashing.`);
+  }
   const preset = REVEAL_PRESETS[presetKey];
   // NEW (July 19, 2026) — engine comes from f.motion directly now, not a
   // per-preset flag (endMotionIsLtx no longer exists — there's no 4th

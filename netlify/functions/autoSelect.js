@@ -202,10 +202,12 @@ This category order is a hard constraint, same weight as the two below it — ca
 
 ## Structure and motion, per frame
 First decide structure:
-- If a frame has a real vacant/before pair: decide whether this room earns the Room Reveal treatment (opener → wipe → continuation) or should just play as a plain transformation. Don't default to Room Reveal on every available pair — reserve it for the room that most benefits from a before/after story.
-  - If Room Reveal: pick one of "classic_reveal", "luxury_drift", "cinematic_reveal", and pick the continuation engine: "ken_burns" or "ltx". The opener phase is always Ken Burns regardless — this choice only affects what plays after the wipe.
-  - If not Room Reveal (plain pair transformation): engine is "kling", klingMotionPreset is null (this resolves to the generic interior or exterior transformation automatically — do not invent a preset name here).
-- If no pair at all: decide "ken_burns" or "ltx".
+- If a frame has a real vacant/before pair: this frame should almost always be Room Reveal, not a plain transformation. This isn't primarily a stylistic choice — the brief unstaged frame plus the "Virtually Staged" wipe satisfies a real digital-alteration disclosure, the video equivalent of the original-adjacent-to-staged requirement California law, NAR, and MLS associations already require for photos. A real pair playing as an undisclosed plain transformation is the outcome to avoid, not the default. Reserve plain "standalone" transformation for a pair ONLY in a genuine edge case — e.g. a near-duplicate angle of a room that already got its own Room Reveal elsewhere in this listing, where a second reveal of the same room would feel redundant. Room Reveal is the default; skipping it is the rare exception, not the other way around.
+  - Pick one of "classic_reveal", "luxury_drift", "cinematic_reveal" — and VARY this choice across the different Room Reveal frames in this listing rather than repeating the same one throughout. Judge these as a set that will be watched in sequence, not scored independently; a listing where every reveal uses the same preset reads as repetitive even if each individual pick was defensible on its own.
+  - Pick the continuation engine: "ken_burns" (free, deterministic) or "ltx" (real AI Motion, billable — subject to the frame budget below). Most reveals should continue on Ken Burns; reserve the LTX continuation for the handful of frames that most deserve the paid upgrade.
+  - Also VARY the specific End Motion across your Room Reveal frames (see the Output schema's endMotion-equivalent — the continuation motion within whichever engine you picked), for the same reason as the preset: a set of reveals that all end on the same move reads as repetitive.
+  - If truly not Room Reveal (the rare edge-case exception above): engine is "kling", klingMotionPreset is null (this resolves to the generic interior or exterior transformation automatically — do not invent a preset name here).
+- If no pair at all (a single image with nothing to disclose): decide "ken_burns" or "ltx", picking the specific best-matching motion the same way as always.
   - If "ltx": pick a specific preset key whose real-world use case genuinely matches what you see in THIS photo — do not default everything to the same preset. Only pick from: ${[...VALID_LTX_PRESETS].join(", ")}.
   - If "ken_burns": pick a specific preset key matching the visual anchor — do not default everything to the same generic move. Only pick from: ${[...KEN_BURNS_SELECTABLE_PRESETS].join(", ")}. Match the anchor to the motion: real ceiling/chandelier/fan detail → tilt_up; a hero floor/rug/tilework → tilt_down; a strong lateral sightline (hallway, counter run) → pan_left or pan_right; a corner-to-window or corner-to-patio diagonal → drift; a wide MLS-style shot with no obvious directional feature → float or pan_zoom; a room where stillness reads better than any motion → static.
 
@@ -484,8 +486,15 @@ function enforceAutoSelectionRules(rawPlan, frames, { narrationEnabled, hasExter
       first.motionPreset = null;
       first.klingMotionPreset = null;
       if (first.structure === "room_reveal") first.revealEngine = "ken_burns";
-      first.reasoning = (first.reasoning ? first.reasoning + " " : "") + "(Force-corrected to the required Ken Burns default for position 1.)";
     }
+    // NEW (this session — Sam's request: deterministic, consistent
+    // wording here, not Claude's own varying paraphrase of the rule).
+    // Set every time, whether or not a correction was needed above — the
+    // RULE itself is fixed regardless of photo content, so the stated
+    // reason for it shouldn't vary either. Claude still owns which
+    // SPECIFIC Ken Burns preset was picked (visual-anchor judgment) —
+    // this only fixes the wording of WHY the engine itself is Ken Burns.
+    first.reasoning = "Bookend rule: the opening shot is always Ken Burns on the front exterior, regardless of visual content — this default is fixed, not a per-photo judgment call.";
   }
 
   // ── BOOKEND RULE 2: last position, conditional default ───────────────
@@ -507,8 +516,11 @@ function enforceAutoSelectionRules(rawPlan, frames, { narrationEnabled, hasExter
         last.motionPreset = null;
         last.klingMotionPreset = null;
         if (last.structure === "room_reveal") last.revealEngine = "ken_burns";
-        last.reasoning = (last.reasoning ? last.reasoning + " " : "") + "(Force-corrected to the required Ken Burns default for the closing frame.)";
       }
+      // NEW (this session) — same deterministic-wording treatment as
+      // position 1, set unconditionally regardless of whether a
+      // correction was actually needed.
+      last.reasoning = "Bookend rule: the closing shot is always Ken Burns, regardless of visual content — this default is fixed, not a per-photo judgment call.";
     } else if (last.engine !== "ken_burns" && !isKlingExteriorTransformation) {
       // Exception applies (narration off + real exterior enhancement pair),
       // but Claude picked neither Ken Burns nor the specific exterior
@@ -521,6 +533,11 @@ function enforceAutoSelectionRules(rawPlan, frames, { narrationEnabled, hasExter
       last.motionPreset = null;
       last.klingMotionPreset = null;
       last.structure = "standalone";
+      last.reasoning = "Narration is off and a real Exterior Enhancement pair is available — using the earned free exterior transformation closer.";
+    } else {
+      // NEW (this session) — exception applies AND Claude already
+      // complied correctly on its own; still set the same clean, fixed
+      // wording rather than leaving whatever Claude happened to phrase.
       last.reasoning = "Narration is off and a real Exterior Enhancement pair is available — using the earned free exterior transformation closer.";
     }
   }

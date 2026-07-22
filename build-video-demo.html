@@ -189,6 +189,25 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
 .order-room{font-size:0.74rem;font-weight:600;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .order-motion{font-size:0.66rem;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 @media (max-width:480px){.order-grid{grid-template-columns:repeat(2,1fr);}}
+
+/* AI Auto-Selection — badges, reasoning notes, narration toggle, override modal */
+.ai-note{margin:0 22px 16px;background:#f6f1e6;border:1px solid var(--gold-light);border-radius:4px;padding:11px 14px;font-size:0.78rem;color:#5c4a1f;line-height:1.5;display:flex;align-items:flex-start;gap:8px;}
+.ai-note .ai-note-icon{flex-shrink:0;}
+.ai-fallback-note{margin:0 22px 16px;background:#fbeceA;border:1px solid #e2b3ab;border-radius:4px;padding:11px 14px;font-size:0.78rem;color:var(--danger);line-height:1.5;}
+.ai-fallback-note a{color:var(--danger);font-weight:600;}
+.ai-badge{display:inline-flex;align-items:center;gap:4px;font-size:0.62rem;text-transform:uppercase;letter-spacing:0.04em;font-weight:700;color:var(--gold);background:#f6f1e6;border:1px solid var(--gold-light);border-radius:9px;padding:2px 7px;margin-left:6px;cursor:help;}
+.order-thumb{position:relative;}
+.order-ai-badge{position:absolute;bottom:5px;right:5px;background:rgba(184,151,90,0.92);color:#fff;font-size:0.6rem;font-weight:700;text-transform:uppercase;letter-spacing:0.03em;padding:2px 6px;border-radius:8px;}
+.narration-toggle-row{margin:0 22px 18px;}
+.narration-toggle-row .eyebrow{margin-bottom:6px;}
+.narration-toggle{display:flex;gap:6px;}
+.narration-toggle .motion-btn{flex:1;}
+.override-box{background:#fff;border-radius:6px;max-width:440px;width:100%;padding:22px;}
+.override-title{font-family:'Cormorant Garamond',serif;font-size:1.2rem;margin-bottom:10px;}
+.override-section{font-size:0.82rem;line-height:1.55;margin-bottom:12px;}
+.override-section b{display:block;font-size:0.68rem;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted);margin-bottom:3px;}
+.override-quote{font-style:italic;color:var(--ink);border-left:2px solid var(--gold-light);padding-left:10px;}
+.override-actions{display:flex;gap:10px;margin-top:18px;}
 </style>
 </head>
 <body>
@@ -235,9 +254,28 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
     <div class="panel-pad" style="padding-top:0;">
       <div class="upload-count-bar" id="uploadCountBar"></div>
     </div>
+    <!--
+      NEW (AI Auto-Selection frontend, this session) — narration on/off has
+      to be known BEFORE the auto-select call fires, since autoSelect.js's
+      bookend rule (position 1 / last position defaults) genuinely branches
+      on it — see that file's buildSystemPrompt(). Everything else the
+      call needs (hasExteriorEnhancement) is derivable from the frames
+      already selected, so this is the one real piece of state that has to
+      be asked for earlier than it used to be (previously a Step 3 picker
+      only). Step 3's narration dropdown (specific voice, or none) still
+      exists unchanged below — this is only the yes/no the bookend logic
+      needs up front. Defaults to Yes (narration is the common case).
+    -->
+    <div class="narration-toggle-row">
+      <div class="eyebrow">Will this video include voice narration?</div>
+      <div class="narration-toggle">
+        <button class="motion-btn kenburns ${window._narrationPreference !== false ? 'active kenburns' : ''}" id="narrationPrefYesBtn" onclick="setNarrationPreference(true)">Yes, narrated</button>
+        <button class="motion-btn kenburns ${window._narrationPreference === false ? 'active kenburns' : ''}" id="narrationPrefNoBtn" onclick="setNarrationPreference(false)">No narration</button>
+      </div>
+    </div>
     <div class="action-row">
       <button class="btn btn-ghost" onclick="resetDemo()">Reset</button>
-      <button class="btn btn-primary" id="toStep2Btn" onclick="goToStep(2)" disabled>Next — Put in Order</button>
+      <button class="btn btn-primary" id="toStep2Btn" onclick="runAutoSelectAndAdvance()" disabled>Next — Put in Order</button>
     </div>
   </div>
 
@@ -247,6 +285,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
       <div class="panel-title">Put them in order</div>
       <div class="panel-sub">Drag rooms into the sequence you want them to appear. Motion — including format, which depends on it — comes next, once the order is locked in.</div>
     </div>
+    <div id="orderStepNotice" style="display:none;"></div>
     <div class="order-grid" id="orderList"></div>
     <div class="action-row">
       <button class="btn btn-ghost" onclick="goToStep(1)">Back</button>
@@ -324,6 +363,9 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
     </div>
   </div>
 </div>
+
+<!-- AI AUTO-SELECT OVERRIDE WARNING: content injected by openOverrideWarning() -->
+<div class="overlay hidden" id="overrideOverlay" onclick="if(event.target===this) closeOverrideWarning()"></div>
 
 <!-- MOTION PREVIEW: placeholder until real stock clips are produced -->
 <div class="overlay hidden" id="previewOverlay" onclick="if(event.target===this) closePreview()">
@@ -759,6 +801,231 @@ let frames = [];
 let frameIdCounter = 0;
 let draggedId = null;
 
+// ── AI AUTO-SELECTION ────────────────────────────────────────────────────
+// Fires once, when the user leaves Step 1 for Step 2 — order/motion don't
+// exist as user-driven state yet at that point, so this is the earliest
+// point a plan can be requested AND the latest point it can still decide
+// the order shown in Step 2 (order is part of what the plan decides, not
+// just motion). Uses only frame.realUrl/frame.beforeUrl, which are already
+// real Cloudinary URLs by the time a gallery-sourced frame exists, or once
+// uploadAsIsPhoto() resolves for a device upload — see the "not ready"
+// guard in runAutoSelectAndAdvance() below for what happens if one hasn't.
+//
+// See autoSelect.js (smart-stage-pro repo, netlify/functions/) for the
+// actual Claude Vision call + the rules this proposes. THIS file's job is
+// only to (a) request the plan, (b) map its response onto the UI-facing
+// frame fields buildRealFrame() already reads (motion/kenBurnsPreset/
+// preset/ltxPreset/useRevealEffect/revealPreset/endMotion) — a DIFFERENT
+// shape from the backend job-frame shape autoSelect.js's own
+// applyAutoSelectionPlan() targets (useAiMotion/klingMotionPreset/
+// ltxMotionPreset directly) — and (c) warn on override, per the design
+// doc's rule 4 (not built in autoSelect.js itself — frontend work, this).
+let autoSelectPlan = null; // Map<frame.id, planEntry> — null until a plan is successfully applied; used both to render "AI pick" badges/reasoning and to detect overrides
+
+function setNarrationPreference(wantsNarration) {
+  window._narrationPreference = wantsNarration;
+  const yesBtn = document.getElementById("narrationPrefYesBtn");
+  const noBtn = document.getElementById("narrationPrefNoBtn");
+  if (yesBtn) yesBtn.classList.toggle("active", wantsNarration);
+  if (yesBtn) yesBtn.classList.toggle("kenburns", wantsNarration);
+  if (noBtn) noBtn.classList.toggle("active", !wantsNarration);
+  if (noBtn) noBtn.classList.toggle("kenburns", !wantsNarration);
+}
+
+let lastAutoSelectFrameSig = null; // signature of the frame set the last plan was actually generated from
+
+async function runAutoSelectAndAdvance() {
+  const btn = document.getElementById("toStep2Btn");
+  const original = btn.textContent;
+
+  if (frames.some(f => !f.realUrl)) {
+    alert("Still uploading one or more photos — give it a moment and try again.");
+    return;
+  }
+
+  // NEW (AI Auto-Selection) — this calls a real, billed Claude Vision API
+  // (this page's own banner: "real Images charged, real renders"). Going
+  // Back to Step 1 and forward again with the exact same photo set
+  // shouldn't burn a second real call — only actual changes to which
+  // photos are selected (add/remove) invalidate the existing plan.
+  const currentSig = frames.map(f => f.id).sort((a, b) => a - b).join(",");
+  if (autoSelectPlan && !window._autoSelectFailed && currentSig === lastAutoSelectFrameSig) {
+    goToStep(2);
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = "Auto-selecting order & motion…";
+
+  const hasExteriorEnhancement = frames.some(f => f.isExterior && f.isBeforeAfter);
+  const narrationEnabled = window._narrationPreference !== false;
+
+  try {
+    const res = await fetch(`${API_BASE}?action=autoSelect`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        userId: REAL_USER_ID,
+        narrationEnabled,
+        hasExteriorEnhancement,
+        frames: frames.map(f => ({
+          frameId: String(f.id),
+          stagedImageUrl: f.realUrl,
+          beforeImageUrl: f.isBeforeAfter ? f.beforeUrl : undefined,
+          userProvidedRoomLabel: f.room ? (f.room === "Other" ? (f.roomOther || undefined) : f.room) : undefined,
+        })),
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || "Auto-select failed");
+    if (!Array.isArray(data.plan) || data.plan.length === 0) throw new Error("Auto-select returned no plan");
+    applyAutoSelectionPlanClient(data.plan);
+    window._autoSelectFailed = false;
+    lastAutoSelectFrameSig = currentSig;
+  } catch (err) {
+    console.error("[auto-select] failed, falling back to manual flow:", err.message);
+    window._autoSelectFailed = true;
+    autoSelectPlan = null;
+  }
+
+  btn.disabled = false;
+  btn.textContent = original;
+  goToStep(2);
+}
+
+function applyPlanEntryToFrame(f, entry) {
+  f.roomGroupLabel = entry.roomGroup || null;
+  f.groupOrder = entry.groupOrder ?? 0;
+  f.aiReasoning = entry.reasoning || "";
+  f.aiConfidence = entry.confidence || "";
+
+  if (entry.structure === "room_reveal") {
+    f.useRevealEffect = true;
+    f.isBeforeAfter = true;
+    f.revealPreset = entry.revealPreset || "classic_reveal";
+    f.motion = entry.revealEngine === "ltx" ? "ltx" : "kenburns";
+    f.endMotion = defaultEndMotionForEngine(f.revealPreset, f.motion);
+  } else {
+    f.useRevealEffect = false;
+    f.revealPreset = undefined;
+    f.endMotion = undefined;
+    if (entry.engine === "kling") {
+      f.motion = "kling";
+      f.preset = entry.klingMotionPreset || null;
+    } else if (entry.engine === "ltx") {
+      f.motion = "ltx";
+      f.ltxPreset = entry.motionPreset || null;
+    } else {
+      f.motion = "kenburns";
+      f.kenBurnsPreset = entry.motionPreset || "auto";
+    }
+  }
+  f.overrideAcknowledged = null;
+}
+
+function applyAutoSelectionPlanClient(plan) {
+  const byId = new Map(frames.map(f => [String(f.id), f]));
+  const reordered = [];
+  autoSelectPlan = new Map();
+
+  plan.forEach(entry => {
+    const f = byId.get(entry.frameId);
+    if (!f) return;
+    autoSelectPlan.set(f.id, entry);
+    applyPlanEntryToFrame(f, entry);
+    reordered.push(f);
+  });
+
+  frames.forEach(f => { if (!reordered.includes(f)) reordered.push(f); });
+  frames = reordered;
+}
+
+function motionSignature(f) {
+  if (f.useRevealEffect) return `reveal:${f.revealPreset}:${f.motion}`;
+  if (f.motion === "kling") return `kling:${f.preset || "generic"}`;
+  if (f.motion === "ltx") return `ltx:${f.ltxPreset || "none"}`;
+  return `kenburns:${f.kenBurnsPreset || "auto"}`;
+}
+function planSignatureFor(entry) {
+  if (!entry) return null;
+  if (entry.structure === "room_reveal") return `reveal:${entry.revealPreset}:${entry.revealEngine === "ltx" ? "ltx" : "kenburns"}`;
+  if (entry.engine === "kling") return `kling:${entry.klingMotionPreset || "generic"}`;
+  if (entry.engine === "ltx") return `ltx:${entry.motionPreset || "none"}`;
+  return `kenburns:${entry.motionPreset || "auto"}`;
+}
+function engineLabel(sig) {
+  if (!sig) return "";
+  if (sig.startsWith("reveal:")) { const [, preset, engine] = sig.split(":"); return `${REVEAL_PRESETS[preset]?.label || "Room Reveal"} (${engine === "ltx" ? "AI Motion" : "Ken Burns"})`; }
+  if (sig.startsWith("kling:")) { const key = sig.split(":")[1]; return key === "generic" ? "AI Transformation" : (KLING_PRESETS[key]?.label || "AI Transformation"); }
+  if (sig.startsWith("ltx:")) { const key = sig.split(":")[1]; return key === "none" ? "AI Motion" : (LTX_PRESETS[key]?.label || "AI Motion"); }
+  const key = sig.split(":")[1];
+  return KEN_BURNS_PRESETS[key]?.label || "Ken Burns";
+}
+
+let pendingOverrideId = null;
+
+function checkAutoSelectOverride(id) {
+  if (!autoSelectPlan || !autoSelectPlan.has(id)) return;
+  const f = frames.find(x => x.id === id);
+  const entry = autoSelectPlan.get(id);
+  const sig = motionSignature(f);
+  const planSig = planSignatureFor(entry);
+  if (sig === planSig) { f.overrideAcknowledged = null; closeOverrideWarning(); return; }
+  if (f.overrideAcknowledged === sig) return;
+  openOverrideWarning(id, entry, sig, planSig);
+}
+
+function openOverrideWarning(id, entry, newSig, planSig) {
+  pendingOverrideId = id;
+  const isBookend = frames.length > 0 && (frames[0].id === id || frames[frames.length - 1].id === id);
+  const costNote = isBookend
+    ? "This is one of your two bookend shots (opening or closing frame). Overriding the AI's pick here adds a small extra charge on top of the usual per-frame cost — the opening/closing shots need a longer render than the default. The exact number will show on your next quote."
+    : "Overriding an AI-recommended pick uses a billable Images charge instead of a free AI Motion Pool frame, if the pool still has room. The exact number will show on your next quote.";
+  document.getElementById("overrideOverlay").innerHTML = `
+    <div class="override-box" onclick="event.stopPropagation()">
+      <div class="override-title">Heads up — this differs from the AI's pick</div>
+      <div class="override-section">
+        <b>AI's original reasoning</b>
+        <span class="override-quote">"${entry.reasoning || "No specific reasoning recorded for this frame."}"</span>
+        ${entry.confidence ? `<div style="margin-top:4px;color:var(--muted);">Confidence: ${entry.confidence}</div>` : ""}
+      </div>
+      <div class="override-section">
+        <b>You're changing it to</b>
+        ${engineLabel(newSig)}
+      </div>
+      <div class="override-section">
+        <b>Cost</b>
+        ${costNote}
+      </div>
+      <div class="override-actions">
+        <button class="btn btn-ghost" onclick="revertToAiPick()">Keep AI pick</button>
+        <button class="btn btn-primary" onclick="confirmOverride('${newSig.replace(/'/g, "\\'")}')">Use my choice anyway</button>
+      </div>
+    </div>
+  `;
+  document.getElementById("overrideOverlay").classList.remove("hidden");
+}
+
+function confirmOverride(sig) {
+  const f = frames.find(x => x.id === pendingOverrideId);
+  if (f) f.overrideAcknowledged = sig;
+  closeOverrideWarning();
+}
+
+function revertToAiPick() {
+  const f = frames.find(x => x.id === pendingOverrideId);
+  const entry = autoSelectPlan?.get(pendingOverrideId);
+  if (f && entry) applyPlanEntryToFrame(f, entry);
+  closeOverrideWarning();
+  renderMotionStep();
+}
+
+function closeOverrideWarning() {
+  pendingOverrideId = null;
+  document.getElementById("overrideOverlay").classList.add("hidden");
+  document.getElementById("overrideOverlay").innerHTML = "";
+}
+
 // Populated by loadGallery() from the real action=frames response. Kept as
 // module-level state (not local to loadGallery) since toggleGalleryItem()/
 // renderGallery() both need to look items up by id after the fetch resolves.
@@ -1052,6 +1319,18 @@ function updatePhotoExterior(id, isExterior) {
 }
 
 function displayRoomName(f) {
+  // NEW (AI Auto-Selection) — roomGroupLabel (from plan.roomGroup) is
+  // Claude's own same-room-vs-different-room judgment, and is often more
+  // specific/correct than the plain category dropdown (e.g. distinguishing
+  // two primary bedrooms in a main house + casita, which f.room alone
+  // can't do — both would just say "Primary Bedroom"). Preferred for
+  // display when present, but f.room/f.roomOther are left untouched — they
+  // still drive ROOM_TYPE_TO_BACKEND and the manual room dropdown, and stay
+  // the fallback the moment a user overrides via that dropdown or via the
+  // "another view of X" control (neither of those clears roomGroupLabel
+  // today; that's a real gap, flagged for the follow-up "another view of X
+  // interop" item rather than silently patched here).
+  if (f.roomGroupLabel) return f.roomGroupLabel;
   if (!f.room) return null;
   return f.room === "Other" ? (f.roomOther || "Other (unnamed)") : f.room;
 }
@@ -1297,6 +1576,13 @@ function setMotionType(id, useReveal) {
     f.revealPreset = f.revealPreset || "classic_reveal";
     f.endMotion = f.endMotion || defaultEndMotionFor(f.revealPreset);
   }
+  // NEW (AI Auto-Selection) — called directly here rather than only via
+  // the template's "; refreshFn" chain, since this function (unlike
+  // setMotion/setPreset/etc. above) doesn't call renderMotionStep() itself
+  // — every call site already appends its own refresh, so appending the
+  // override check here runs it after the DOM reflects the new state,
+  // same ordering as the self-rendering setters.
+  checkAutoSelectOverride(id);
 }
 
 function setRevealPreset(id, presetKey) {
@@ -1309,11 +1595,13 @@ function setRevealPreset(id, presetKey) {
   if (!preset.allowedEndMotions.includes(f.endMotion)) {
     f.endMotion = preset.allowedEndMotions[0];
   }
+  checkAutoSelectOverride(id);
 }
 
 function setEndMotion(id, motionKey) {
   const f = frames.find(x => x.id === id);
   f.endMotion = motionKey;
+  checkAutoSelectOverride(id);
 }
 
 function renderMotionStep() {
@@ -1335,7 +1623,10 @@ function renderMotionStep() {
       <div class="frame-thumb-sm frame-thumb-clickable" onclick="openLightbox(${f.id})"><img src="${f.dataUrl}" alt=""></div>
       <div class="frame-main">
         <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:8px;">
-          <div><span class="frame-order-num">${i+1}</span><span class="frame-name">${displayRoomName(f)}</span></div>
+          <div>
+            <span class="frame-order-num">${i+1}</span><span class="frame-name">${displayRoomName(f)}</span>
+            ${autoSelectPlan && autoSelectPlan.has(f.id) ? `<span class="ai-badge" title="${(f.aiReasoning || '').replace(/"/g, '&quot;')}">&#10024; AI ${f.overrideAcknowledged ? "overridden" : "pick"}</span>` : ""}
+          </div>
           <span class="frame-tag" style="text-transform:uppercase;letter-spacing:0.04em;font-size:0.66rem;">${f.isExterior ? "Exterior" : "Interior"}</span>
         </div>
         <!--
@@ -1541,6 +1832,7 @@ function setMotion(id, motion) {
     f.endMotion = defaultEndMotionForEngine(f.revealPreset || "classic_reveal", motion);
   }
   renderMotionStep();
+  checkAutoSelectOverride(id); // NEW (AI Auto-Selection) — engine change is the biggest possible deviation from a plan pick; check after every one
 }
 
 function setPreset(id, preset) {
@@ -1559,6 +1851,7 @@ function setPreset(id, preset) {
   }
   f.preset = preset || null;
   renderMotionStep();
+  checkAutoSelectOverride(id);
 }
 
 function setKenBurnsPreset(id, preset) {
@@ -1566,6 +1859,7 @@ function setKenBurnsPreset(id, preset) {
   f.kenBurnsPreset = preset;
   renderMotionStep();
   if (!document.getElementById("lightboxOverlay").classList.contains("hidden")) renderLightboxControls(id);
+  checkAutoSelectOverride(id);
 }
 
 // NEW (July 18, 2026) — mirrors setPreset() exactly, but writes to
@@ -1582,6 +1876,7 @@ function setLtxPreset(id, preset) {
   }
   f.ltxPreset = preset || null;
   renderMotionStep();
+  checkAutoSelectOverride(id);
 }
 
 // ── LIGHTBOX — full-size photo, with the same room/motion controls as the
@@ -1747,8 +2042,30 @@ function updateKlingCountBar() {
 }
 
 function renderOrderStep() {
+  // NEW (AI Auto-Selection) — this step used to start from a blank/
+  // upload-order default; it now opens already in the plan's proposed
+  // order (applyAutoSelectionPlanClient already reordered `frames` before
+  // this step is ever reached — see runAutoSelectAndAdvance). Dragging
+  // still works exactly as before (handleDrop), it's just no longer the
+  // ONLY way an order ever gets set.
+  const orderNotice = document.getElementById("orderStepNotice");
+  if (orderNotice) {
+    orderNotice.outerHTML = window._autoSelectFailed
+      ? `<div class="ai-fallback-note" id="orderStepNotice"><strong>Auto-selection didn't run</strong> — this is manual order, same as before. Drag to arrange, then assign motion on the next step. <a href="javascript:void(0)" onclick="goToStep(1)">Go back and retry</a> if you'd rather have the AI propose an order.</div>`
+      : autoSelectPlan
+      ? `<div class="ai-note" id="orderStepNotice"><span class="ai-note-icon">&#10024;</span><span>This order and each room's motion were auto-selected — drag to rearrange, or adjust motion on the next step (overriding a pick shows the reasoning behind it, plus any added cost).</span></div>`
+      : `<div id="orderStepNotice" style="display:none;"></div>`;
+  }
+
   const list = document.getElementById("orderList");
-  list.innerHTML = frames.map((f, i) => `
+  list.innerHTML = frames.map((f, i) => {
+    const isBookend = i === 0 || i === frames.length - 1;
+    const motionLabel = f.useRevealEffect
+      ? (REVEAL_PRESETS[f.revealPreset]?.label || "Reveal")
+      : f.motion === "kling" ? (KLING_PRESETS[f.preset]?.label || "AI Transformation")
+      : f.motion === "ltx" ? (LTX_PRESETS[f.ltxPreset]?.label || "AI Motion")
+      : (KEN_BURNS_PRESETS[f.kenBurnsPreset || "auto"]?.label || "Ken Burns");
+    return `
     <div class="order-card" draggable="true" data-frame-id="${f.id}"
          ondragstart="draggedId=${f.id}; this.classList.add('drag-ghost')"
          ondragend="this.classList.remove('drag-ghost')"
@@ -1757,12 +2074,14 @@ function renderOrderStep() {
       <div class="order-thumb frame-thumb-clickable" onclick="openLightbox(${f.id})">
         <img src="${f.dataUrl}" alt="">
         <div class="order-num-badge">${i+1}</div>
+        ${autoSelectPlan && autoSelectPlan.has(f.id) ? `<div class="order-ai-badge" title="${(f.aiReasoning || '').replace(/"/g, '&quot;')}">${isBookend ? "AI · bookend" : "AI pick"}</div>` : ""}
       </div>
       <div class="order-info">
         <div class="order-room">${displayRoomName(f)}</div>
+        <div class="order-motion">${motionLabel}</div>
       </div>
-    </div>
-  `).join("");
+    </div>`;
+  }).join("");
 }
 
 // Reads the current dropdown values into window state and updates the
@@ -2245,6 +2564,14 @@ function resetDemo() {
   window._musicStyle = null;
   window._voiceKey = null;
   generationCount = 1;
+  // NEW (AI Auto-Selection) — clear the plan and narration preference too,
+  // so a fresh listing doesn't silently inherit the previous listing's
+  // auto-select plan, override acknowledgments, or narration yes/no choice.
+  autoSelectPlan = null;
+  lastAutoSelectFrameSig = null;
+  window._autoSelectFailed = false;
+  window._narrationPreference = undefined;
+  setNarrationPreference(true);
   // NEW (audio build) — clear the dropdowns' DOM so renderOrderStep's
   // childElementCount guard repopulates them fresh (and re-defaults
   // window._musicStyle/_voiceKey) the next time Step 3 is reached, rather

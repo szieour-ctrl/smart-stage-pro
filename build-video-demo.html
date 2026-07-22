@@ -208,6 +208,10 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
 .override-section b{display:block;font-size:0.68rem;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted);margin-bottom:3px;}
 .override-quote{font-style:italic;color:var(--ink);border-left:2px solid var(--gold-light);padding-left:10px;}
 .override-actions{display:flex;gap:10px;margin-top:18px;}
+.current-motion-banner{background:var(--cream);border:1px solid var(--border);border-radius:4px;padding:9px 12px;margin-bottom:10px;font-size:0.82rem;}
+.current-motion-banner .cmb-label{font-size:0.64rem;text-transform:uppercase;letter-spacing:0.06em;color:var(--muted);margin-bottom:2px;}
+.current-motion-banner .cmb-value{font-family:'Cormorant Garamond',serif;font-size:1.05rem;color:var(--ink);}
+.current-motion-banner .cmb-reasoning{font-size:0.76rem;color:var(--muted);margin-top:4px;line-height:1.45;font-style:italic;}
 </style>
 </head>
 <body>
@@ -269,8 +273,8 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
     <div class="narration-toggle-row">
       <div class="eyebrow">Will this video include voice narration?</div>
       <div class="narration-toggle">
-        <button class="motion-btn kenburns ${window._narrationPreference !== false ? 'active kenburns' : ''}" id="narrationPrefYesBtn" onclick="setNarrationPreference(true)">Yes, narrated</button>
-        <button class="motion-btn kenburns ${window._narrationPreference === false ? 'active kenburns' : ''}" id="narrationPrefNoBtn" onclick="setNarrationPreference(false)">No narration</button>
+        <button class="motion-btn kenburns" id="narrationPrefYesBtn" onclick="setNarrationPreference(true)">Yes, narrated<br><span id="narrationCostYes" style="font-weight:400;font-size:0.68rem;opacity:0.75;"></span></button>
+        <button class="motion-btn kenburns" id="narrationPrefNoBtn" onclick="setNarrationPreference(false)">No narration<br><span style="font-weight:400;font-size:0.68rem;opacity:0.75;">No audio cost</span></button>
       </div>
     </div>
     <div class="action-row">
@@ -283,7 +287,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
     <div class="panel-pad" style="padding-bottom:0;">
       <div class="eyebrow">Step 2</div>
       <div class="panel-title">Put them in order</div>
-      <div class="panel-sub">Drag rooms into the sequence you want them to appear. Motion — including format, which depends on it — comes next, once the order is locked in.</div>
+      <div class="panel-sub">Front exterior opens, your strongest exterior/backyard shot closes. In between: open-plan and hero living spaces (kitchen, living, dining) lead, bedrooms and bathrooms follow. Drag to override any of it.</div>
     </div>
     <div id="orderStepNotice" style="display:none;"></div>
     <div class="order-grid" id="orderList"></div>
@@ -1630,6 +1634,22 @@ function renderMotionStep() {
           <span class="frame-tag" style="text-transform:uppercase;letter-spacing:0.04em;font-size:0.66rem;">${f.isExterior ? "Exterior" : "Interior"}</span>
         </div>
         <!--
+          NEW (this session — Sam's feedback: "the motion needs to be
+          visible," and "Auto" alone doesn't tell anyone anything) — this
+          banner states the CURRENT resolved motion in plain text
+          regardless of engine, plus the AI's own reasoning inline when a
+          plan exists, rather than requiring a hover on a small badge to
+          find out why. Uses resolveMotionLabel() — same function Step 2's
+          order cards use — so the two steps can never show two different
+          answers for the same frame.
+        -->
+        <div class="current-motion-banner">
+          <div class="cmb-label">Currently assigned</div>
+          <div class="cmb-value">${resolveMotionLabel(f)}${f.useRevealEffect ? ` (${f.motion === "ltx" ? "AI Motion" : "Ken Burns"} continuation)` : ""}</div>
+          ${(!f.useRevealEffect && f.motion === "kenburns" && (f.kenBurnsPreset || "auto") === "auto") ? `<div class="cmb-reasoning">The system will pick a specific movement for this room type at render time — choose one from the list below to lock it in instead.</div>` : ""}
+          ${autoSelectPlan && autoSelectPlan.has(f.id) && f.aiReasoning ? `<div class="cmb-reasoning">&#10024; ${f.overrideAcknowledged ? "AI originally suggested this differently: " : "Why: "}"${f.aiReasoning.replace(/"/g, '&quot;')}"</div>` : ""}
+        </div>
+        <!--
           CHANGE (July 14, 2026) — replaced the checkbox entirely. It was
           showing an interactive control AND a green "known pair" badge
           for the exact same fact, right next to each other — asking the
@@ -2041,6 +2061,17 @@ function updateKlingCountBar() {
   `;
 }
 
+// Resolves the plain-text label for whatever motion a frame currently has
+// — shared by renderOrderStep (Step 2) and renderMotionStep (Step 3) so
+// "what's actually selected" reads identically in both places, and can
+// never drift into two different labels for the same frame state.
+function resolveMotionLabel(f) {
+  if (f.useRevealEffect) return REVEAL_PRESETS[f.revealPreset]?.label || "Reveal";
+  if (f.motion === "kling") return KLING_PRESETS[f.preset]?.label || "AI Transformation";
+  if (f.motion === "ltx") return LTX_PRESETS[f.ltxPreset]?.label || "AI Motion";
+  return KEN_BURNS_PRESETS[f.kenBurnsPreset || "auto"]?.label || "Ken Burns";
+}
+
 function renderOrderStep() {
   // NEW (AI Auto-Selection) — this step used to start from a blank/
   // upload-order default; it now opens already in the plan's proposed
@@ -2060,11 +2091,7 @@ function renderOrderStep() {
   const list = document.getElementById("orderList");
   list.innerHTML = frames.map((f, i) => {
     const isBookend = i === 0 || i === frames.length - 1;
-    const motionLabel = f.useRevealEffect
-      ? (REVEAL_PRESETS[f.revealPreset]?.label || "Reveal")
-      : f.motion === "kling" ? (KLING_PRESETS[f.preset]?.label || "AI Transformation")
-      : f.motion === "ltx" ? (LTX_PRESETS[f.ltxPreset]?.label || "AI Motion")
-      : (KEN_BURNS_PRESETS[f.kenBurnsPreset || "auto"]?.label || "Ken Burns");
+    const motionLabel = resolveMotionLabel(f);
     return `
     <div class="order-card" draggable="true" data-frame-id="${f.id}"
          ondragstart="draggedId=${f.id}; this.classList.add('drag-ghost')"
@@ -2606,6 +2633,15 @@ uploadZone.addEventListener("drop", (e) => {
 renderUpload();
 loadGallery();
 refreshBalanceDisplay();
+// NEW (this session — fixing a real bug) — the narration toggle's initial
+// active/inactive styling and cost text used to be set via ${...} template
+// syntax written directly into static HTML, which the browser never
+// evaluates outside a JS template literal; it just rendered as literal
+// text in the class attribute, silently breaking the default "Yes"
+// selection look. Setting both here instead, once, at real page load.
+const narrationCostYesEl = document.getElementById("narrationCostYes");
+if (narrationCostYesEl) narrationCostYesEl.textContent = `Free the first time, ${NARRATION_IMAGE_COST} Images after`;
+setNarrationPreference(true);
 goToStep(1);
 
 if (!REAL_LISTING_ID || !REAL_USER_ID) {

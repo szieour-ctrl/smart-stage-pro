@@ -960,7 +960,21 @@ function applyPlanEntryToFrame(f, entry) {
     f.isBeforeAfter = true;
     f.revealPreset = entry.revealPreset || "classic_reveal";
     f.motion = entry.revealEngine === "ltx" ? "ltx" : "kenburns";
-    f.endMotion = defaultEndMotionForEngine(f.revealPreset, f.motion);
+    // FIX (this session — Sam's report: reveal end motions were always
+    // push_in for Classic/Cinematic Reveal and always drift for Luxury
+    // Drift, regardless of what the staged photo actually showed. Root
+    // cause: this always called defaultEndMotionForEngine unconditionally
+    // — Claude was never even given a field to express an end-motion
+    // preference at all. autoSelect.js now provides entry.revealEndMotion,
+    // chosen by reading the STAGED photo's own visual anchor, same
+    // judgment as a standalone pick, validated server-side against the
+    // real allowed list. Prefer it; only fall back to the generic default
+    // if it's missing or — defense in depth, same posture as everywhere
+    // else in this file — doesn't actually validate against THIS file's
+    // own REVEAL_PRESETS list either.
+    const preset = REVEAL_PRESETS[f.revealPreset];
+    const validEndMotion = entry.revealEndMotion && preset && preset.allowedEndMotions.includes(entry.revealEndMotion);
+    f.endMotion = validEndMotion ? entry.revealEndMotion : defaultEndMotionForEngine(f.revealPreset, f.motion);
   } else {
     f.useRevealEffect = false;
     f.revealPreset = undefined;
@@ -1549,6 +1563,29 @@ function goToStep(n) {
 // goToStep(4) directly, in case a future pre-Confirm check is ever
 // needed again.
 function goToConfirmStep() {
+  // NEW (this session — Sam's report: "the AI Transformation Engine
+  // leaves the End Movement up to the User which is good, BUT the UX
+  // allows the user to move to confirm and render with that movement to
+  // remain undefined"). A Kling/"AI Transformations" frame with no
+  // preset chosen is only ever legitimate in ONE case: the earned generic
+  // exterior-transformation bookend exception (narration off + a real
+  // exterior pair, intentionally null per autoSelect.js's own prompt —
+  // "klingMotionPreset is null, do not invent a preset name"). Any OTHER
+  // frame left on "Choose a transformation..." has no valid generic
+  // fallback and would reach render genuinely undefined. Block with a
+  // clear, specific message rather than letting it through silently.
+  const narrationOff = window._narrationPreference === false;
+  const unresolved = frames.filter((f, i) => {
+    if (f.motion !== "kling" || f.preset) return false;
+    const isLastBookend = i === frames.length - 1 && frames.length > 1;
+    const isLegitimateException = isLastBookend && narrationOff && f.isExterior && f.isBeforeAfter;
+    return !isLegitimateException;
+  });
+  if (unresolved.length > 0) {
+    const names = unresolved.map(f => displayRoomName(f) || "an unnamed frame").join(", ");
+    alert(`Choose a specific AI Transformation for: ${names}. These are currently left on "Choose a transformation..." and can't render until a real movement is picked — go back to Step 3 to finish them.`);
+    return;
+  }
   goToStep(4);
 }
 

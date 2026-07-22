@@ -894,6 +894,7 @@ async function runAutoSelectAndAdvance() {
     const plan = await pollAutoSelectJob(dispatchData.jobId, btn, original);
     if (!Array.isArray(plan) || plan.length === 0) throw new Error("Auto-select returned no plan");
     applyAutoSelectionPlanClient(plan);
+    enforceBookendRuleClientSide();
     window._autoSelectFailed = false;
     lastAutoSelectFrameSig = currentSig;
   } catch (err) {
@@ -993,6 +994,65 @@ function applyAutoSelectionPlanClient(plan) {
 
   frames.forEach(f => { if (!reordered.includes(f)) reordered.push(f); });
   frames = reordered;
+}
+
+// Matches autoSelect.js's own deterministic bookend reasoning text exactly
+// — kept in sync manually (two different runtimes, JS vs Node, no shared
+// import path between them) rather than computed differently in each place.
+const BOOKEND_FIRST_REASONING = "Bookend rule: the opening shot is always Ken Burns on the front exterior, regardless of visual content — this default is fixed, not a per-photo judgment call.";
+const BOOKEND_LAST_REASONING = "Bookend rule: the closing shot is always Ken Burns, regardless of visual content — this default is fixed, not a per-photo judgment call.";
+
+// NEW (this session — real bug: dragging a frame into or out of the
+// bookend slots (position 1 / last) in Step 2 never re-applied the
+// bookend rule at all. A frame dragged INTO position 1 kept whatever AI
+// Motion pick it had for its ORIGINAL position — visibly contradicting
+// the "AI · Bookend" badge Step 2 correctly shows (that badge is purely
+// position-based, computed fresh on every render; the frame's actual
+// motion/reasoning data was never touched). A frame dragged OUT of
+// position 1 kept its stale "this is the bookend" reasoning and forced
+// Ken Burns state even once it was no longer actually the opening frame.
+// Runs after every manual reorder (handleDrop) and once right after the
+// initial auto-select plan is applied, so both directions stay correct.
+//
+// Deliberately NOT run on every renderMotionStep() call — only after an
+// actual reorder — so it can't fight a user's legitimate manual override
+// of a bookend frame's engine (that's a supported, intentional path via
+// the override-warning modal, not something this should silently revert).
+function enforceBookendRuleClientSide() {
+  if (frames.length === 0 || !autoSelectPlan) return;
+  const narrationOff = window._narrationPreference === false;
+
+  frames.forEach((f, i) => {
+    if (!autoSelectPlan.has(f.id)) return; // manually-added frames aren't governed by this rule
+    const isFirst = i === 0;
+    const isLast = i === frames.length - 1 && frames.length > 1;
+
+    if (isFirst || isLast) {
+      // Same earned exception autoSelect.js grants server-side: the
+      // closing frame may be the real exterior-transformation pair when
+      // narration is off and this specific frame actually is one.
+      const qualifiesForExteriorException = isLast && narrationOff && f.isExterior && f.isBeforeAfter;
+      if (qualifiesForExteriorException) return; // legitimate non-Ken-Burns closer — leave it alone
+
+      if (frameUsesAiMotion(f)) {
+        if (!f.useRevealEffect) {
+          f.preset = null;
+          f.ltxPreset = null;
+          f.kenBurnsPreset = f.kenBurnsPreset || "auto";
+        }
+        f.motion = "kenburns"; // reveal continuation OR standalone engine — either way, Ken Burns
+      }
+      f.aiReasoning = isFirst ? BOOKEND_FIRST_REASONING : BOOKEND_LAST_REASONING;
+      f._bookendForced = true;
+    } else if (f._bookendForced) {
+      // Moved out of a bookend slot — restore the AI's original
+      // recommendation for this frame (its pristine plan entry, never
+      // mutated by applyPlanEntryToFrame) rather than leaving it stuck on
+      // the bookend-forced state and reasoning.
+      applyPlanEntryToFrame(f, autoSelectPlan.get(f.id));
+      f._bookendForced = false;
+    }
+  });
 }
 
 function motionSignature(f) {
@@ -2366,6 +2426,7 @@ function handleDrop(e, targetId) {
   const [moved] = frames.splice(fromIdx, 1);
   frames.splice(toIdx, 0, moved);
   draggedId = null;
+  enforceBookendRuleClientSide();
   renderOrderStep();
   // CHANGE (July 14, 2026 — footage-grounded narration rebuild): the
   // reorder-triggered narration regeneration this used to need is gone

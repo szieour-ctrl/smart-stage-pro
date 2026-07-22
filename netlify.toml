@@ -23,6 +23,19 @@
 [functions."check-narration"]
   timeout = 10
 
+# NEW (this session) — same fix, same reason, same shape as the narration
+# pair directly above: action=autoSelect (video-job.js) was blowing past
+# Netlify's synchronous timeout on real multi-photo listings (11 photos in
+# testing), surfacing as an HTML timeout page the frontend couldn't parse
+# as JSON. autoSelect-background.js now does the actual Claude Vision call;
+# check-autoSelect.js is a direct copy of check-narration.js's polling
+# pattern, just pointed at the "autoselect-jobs" Blobs store.
+[functions."autoSelect-background"]
+  timeout = 900
+
+[functions."check-autoSelect"]
+  timeout = 10
+
 [functions."stage-image-start"]
   timeout = 90
 

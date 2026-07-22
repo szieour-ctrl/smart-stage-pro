@@ -142,7 +142,15 @@ For each photo, identify:
 - visualAnchor: the single clearest visual feature a camera-motion preset could key off — an island, a fireplace, a chandelier, a hallway sightline, a rug, whatever is genuinely the most prominent thing in this specific photo. Be concrete and specific, not generic.
 
 ## Ordering
-Produce a natural walkthrough sequence: exterior front first, then entry, main living spaces, kitchen, bedrooms/bathrooms, ending on the strongest available exterior/backyard shot. Two hard constraints, not optional:
+Produce a natural walkthrough sequence, following this priority — front exterior first, then the home's strongest lifestyle/hero spaces, then private spaces, then the closing exterior shot:
+1. Exterior front (if present).
+2. Open Plan / multi-room lifestyle spaces — these lead the interior tour, before any single room.
+3. Kitchen, Living Room, Dining Room, and other hero living/lifestyle spaces — in whatever order best fits THIS listing's actual layout and standout features, but always ahead of bedrooms.
+4. Office / Flex / other specialty spaces.
+5. Primary Bedroom, then Primary Bathroom.
+6. Secondary Bedrooms, then Secondary Bathrooms / Utility.
+7. Strongest available exterior/backyard shot, last.
+This is a priority to follow, not an excuse to ignore what's actually in front of you — if a listing's real standout feature doesn't fit this shape cleanly, use judgment, but default to this order when nothing about the specific photos argues otherwise. Two hard constraints, not optional regardless of category order:
 1. A real vacant/staged pair must stay adjacent to itself.
 2. Frames sharing a roomGroup must stay contiguous — never split a room's photos apart with a different room in between.
 

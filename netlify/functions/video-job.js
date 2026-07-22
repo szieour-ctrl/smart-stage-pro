@@ -3,12 +3,19 @@
 //
 // Routes via ?action= parameter, same pattern as project-manage.js
 //
-// NEW (July 21, 2026) — action=autoSelect calls out to autoSelect.js
-// (co-located in this same repo/deployment, NOT Railway — see that file's
-// header for why it has to live here: it needs to run BEFORE the quote
-// screen, using only the remote Cloudinary URLs the frontend already has,
-// with nothing local/Railway-side available yet at this point in the flow).
-const { generateAutoSelection, applyAutoSelectionPlan } = require("./autoSelect");
+// CHANGED (this session) — generateAutoSelection() itself moved to
+// autoSelect-background.js (see that file's header for the timeout postmortem
+// that caused the move); this file no longer calls it directly, only
+// dispatches to it. applyAutoSelectionPlan is kept imported but is NOT YET
+// called anywhere in this file — it exists for a future pass where
+// action=create/regenerate actually consumes a user-confirmed plan
+// server-side; right now the frontend (build-video-demo.html) applies the
+// plan client-side onto its own frame shape and funnels everything through
+// buildRealFrame() same as any manually-built frame, so this backend-side
+// application never fires yet. Flagged here rather than silently dropping
+// the import, since removing it would look like an accidental deletion to
+// anyone reading this file next.
+const { applyAutoSelectionPlan } = require("./autoSelect");
 //
 // ── KLING MOTION POOL MODEL (July 13, 2026 — REPLACES the old
 // generation-count-gated "first 3 Kling frames free on generation #1
@@ -2062,12 +2069,22 @@ exports.handler = async (event) => {
     }
 
     if (action === "autoSelect") {
-      // NEW (July 21, 2026). Side-effect-free (no debit, no job row) — this
-      // is a proposal for the user to review, override, or accept, called
-      // from the frontend before the quote step. Frames arrive with remote
-      // Cloudinary URLs only (stagedImageUrl / beforeImageUrl) — same shape
-      // getFramesForListing already returns, no local download needed since
-      // this never touches Railway.
+      // CHANGED (this session — real bug found via browser console:
+      // "Unexpected token '<', <HE... is not valid JSON"). This used to
+      // call generateAutoSelection() inline and await it here — a single
+      // Claude Vision call analyzing every photo in the listing (up to 20,
+      // MAX_FRAMES) and reasoning through order/grouping/structure/motion
+      // for each one is genuinely slow, and real-world testing (11 photos)
+      // blew past Netlify's synchronous function timeout. Netlify itself
+      // then returns its own HTML timeout page instead of anything this
+      // function's own error handling ever sees — hence the frontend
+      // trying to JSON.parse an HTML page. Same root cause narration hit
+      // (see generate-narration-background.js's header), same fix: this is
+      // now a dispatcher that fires autoSelect-background.js (a real
+      // Background Function, 15-minute ceiling) and returns immediately
+      // with a jobId — the actual Claude call happens over there now.
+      // Frontend polls check-autoSelect.js for the result, same shape
+      // check-narration.js already uses.
       const body = JSON.parse(event.body || "{}");
       const { frames, narrationEnabled, hasExteriorEnhancement } = body;
       if (!frames || !frames.length) {
@@ -2076,18 +2093,27 @@ exports.handler = async (event) => {
       if (!process.env.ANTHROPIC_API_KEY) {
         return { statusCode: 500, headers, body: JSON.stringify({ error: "Auto-selection is not configured (missing ANTHROPIC_API_KEY)" }) };
       }
+
+      const jobId = `as-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const siteUrl = process.env.URL || `https://${event.headers.host}`;
+
       try {
-        const plan = await generateAutoSelection({
-          frames,
-          narrationEnabled: !!narrationEnabled,
-          hasExteriorEnhancement: !!hasExteriorEnhancement,
-          anthropicKey: process.env.ANTHROPIC_API_KEY,
+        // Fire-and-forget by convention, not by skipping the await: a
+        // Background Function returns its 202 near-instantly regardless of
+        // how long the handler actually runs afterward, so this await
+        // resolves fast — it is NOT waiting for generateAutoSelection()
+        // to finish, only for Netlify to accept the dispatch.
+        await fetch(`${siteUrl}/.netlify/functions/autoSelect-background`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ jobId, frames, narrationEnabled, hasExteriorEnhancement }),
         });
-        return { statusCode: 200, headers, body: JSON.stringify({ plan }) };
       } catch (err) {
-        console.error("autoSelect action failed:", err.message);
-        return { statusCode: 500, headers, body: JSON.stringify({ error: "Auto-selection failed", detail: err.message }) };
+        console.error("autoSelect dispatch failed:", err.message);
+        return { statusCode: 500, headers, body: JSON.stringify({ error: "Auto-selection failed to start", detail: err.message }) };
       }
+
+      return { statusCode: 200, headers, body: JSON.stringify({ jobId }) };
     }
 
     if (action === "quote") {

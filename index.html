@@ -1038,8 +1038,33 @@ async function applyVirtuallyStagedBadge(base64Jpeg) {
     // colors/design) remain untouched — size only, per Sam's explicit ask.
     const targetWidth = Math.max(300, Math.min(900, Math.round(canvas.width * 0.30)));
     const targetHeight = Math.round(badgeImg.naturalHeight * (targetWidth / badgeImg.naturalWidth));
-    const margin = Math.round(canvas.width * 0.02);
-    ctx.drawImage(badgeImg, margin, canvas.height - targetHeight - margin, targetWidth, targetHeight);
+    // FIX (this session — real bug found via PRO Plus video pipeline
+    // testing): margin was computed from canvas.width and then reused for
+    // BOTH the horizontal offset AND the vertical offset from the bottom
+    // edge. That's wrong for the vertical axis specifically — PRO Plus's
+    // video pipeline (motionRenderer.py's load_and_crop) center-crops every
+    // source image to 16:9 before any motion is applied, trimming off the
+    // TOP and BOTTOM by an amount that scales with the image's HEIGHT, not
+    // its width. On a 6000x3996 (3:2) source this trimmed 310px off the
+    // bottom — but the old width-based margin was only ~120px, so a
+    // meaningful portion of the badge (bottom edge was only 6px from the
+    // image's true bottom edge) landed inside the region PRO Plus crops
+    // away entirely. The badge was never visible in Reveal/AI Motion clips
+    // as a result — confirmed on real rendered output, not a hypothesis.
+    //
+    // verticalMargin is now sized against canvas.height, with enough
+    // buffer to clear the crop even in the worst realistic case: a
+    // near-4:3 source (listing photos run roughly 4:3 to 3:2; 4:3 crops
+    // the MOST off top/bottom to reach 16:9, ~12.5% off the bottom alone).
+    // 18% gives real margin above that worst case across the whole
+    // 4:3-to-3:2 range this app actually sees, not just the 3:2 case that
+    // was measured. horizontalMargin is unchanged in spirit — width-based
+    // is correct for that axis, since PRO Plus only trims left/right on a
+    // source WIDER than 16:9, which real estate listing photos essentially
+    // never are.
+    const horizontalMargin = Math.round(canvas.width * 0.02);
+    const verticalMargin   = Math.round(canvas.height * 0.18);
+    ctx.drawImage(badgeImg, horizontalMargin, canvas.height - targetHeight - verticalMargin, targetWidth, targetHeight);
 
     return canvas.toDataURL('image/jpeg', 0.95).split(',')[1];
   } catch (err) {

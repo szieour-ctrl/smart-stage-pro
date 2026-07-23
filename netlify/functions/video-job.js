@@ -1159,11 +1159,19 @@ async function createVideoJob({ listingId, projectId, userId, frames, formats, m
     // to write footage-grounded narration during the render (see
     // narrationGen.js). Only fetched when narration was actually
     // requested — no reason to spend a Supabase round trip otherwise.
+    // CHANGE (this session — End Frame gap found via live test): was
+    // `if (wantsNarration)` only. End Frame (lib/endFrame.js, Railway
+    // side) needs the real address too, and runs independently of
+    // narration — with narration off, job.address was silently staying
+    // null all the way to Railway, and endFrame.js's fallback
+    // ("This Home") would bake a generic placeholder into a real
+    // customer's closing frame instead of erroring or skipping. Now
+    // fetched unconditionally — one extra Supabase round-trip per job
+    // even when neither narration nor End Frame is used, a cheap
+    // tradeoff against that failure mode.
     let listingAddress = null;
-    if (wantsNarration) {
-      const listingRes = await supabase("GET", "listings", null, `?id=eq.${listingId}&select=address`);
-      listingAddress = listingRes.data?.[0]?.address || null;
-    }
+    const listingRes = await supabase("GET", "listings", null, `?id=eq.${listingId}&select=address`);
+    listingAddress = listingRes.data?.[0]?.address || null;
 
     // Dispatch to Railway.
     await dispatchToRailway({
@@ -1537,11 +1545,11 @@ async function regenerateVideoJob({ jobId, userId, frames, formats, musicStyle, 
     // NEW (July 14, 2026) — same address lookup as createVideoJob, using
     // existing.listing_id (already selected above) since regenerate
     // doesn't receive listingId directly as a parameter.
+    // Same fix as createVideoJob above — End Frame needs this regardless
+    // of wantsNarration; see that comment for the full reasoning.
     let listingAddress = null;
-    if (wantsNarration) {
-      const listingRes = await supabase("GET", "listings", null, `?id=eq.${existing.listing_id}&select=address`);
-      listingAddress = listingRes.data?.[0]?.address || null;
-    }
+    const listingRes = await supabase("GET", "listings", null, `?id=eq.${existing.listing_id}&select=address`);
+    listingAddress = listingRes.data?.[0]?.address || null;
 
     await dispatchToRailway({
       jobId,

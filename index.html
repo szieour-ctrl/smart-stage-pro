@@ -2679,6 +2679,7 @@ function renderRoomQueue(){
         </div>
         <div style="display:flex;flex-direction:column;gap:6px;">
           <button class="btn btn-primary btn-sm" onclick="iterateDeclutter('${room.id}')">Re-Declutter</button>
+          <button class="btn btn-outline btn-sm" onclick="openLightboxRefine('${room.id}','revise')">Make Revision →</button>
           <button class="btn btn-outline btn-sm" onclick="openLightboxRefine('${room.id}','enhance')">✨ AI Enhance</button>
         </div>
       </div>` : '';
@@ -5055,7 +5056,7 @@ async function iterateDeclutter(roomId) {
   const revisionPrompt =
     'PRIMARY ROLE: Edit this already-decluttered photo. Make ONLY the change(s) described below — everything else (the furniture-free state, architecture, lighting, camera angle) must remain exactly as shown.\n\n' +
     'REQUESTED CHANGE:\n' + note + '\n\n' +
-    'Do not re-declutter or reprocess the whole room. Do not alter anything not explicitly mentioned above. Never invent a shower door, glass enclosure, or panel that wasn\'t in the original photo. Closet hanging rods must match the original count and position exactly. Bathroom vanity cabinetry (upper and lower) must be fully preserved. This image is prepared per California AB 723 §10140.6 for virtual staging.';
+    'Do not re-declutter or reprocess the whole room. Do not alter anything not explicitly mentioned above. Never invent a shower door, glass enclosure, or panel that wasn\'t in the original photo. Closet hanging rods must match the original count and position exactly. Bathroom vanity cabinetry (upper and lower) must be fully preserved. Windows must stay the exact original size and position — never resize, shift, or convert a window into a door or opening. This image is prepared per California AB 723 §10140.6 for virtual staging.';
 
   room.status = 'prompt-review';
   room.promptStatus = '✏️ Review revision prompt before re-decluttering...';

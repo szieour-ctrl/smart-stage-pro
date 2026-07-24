@@ -73,6 +73,7 @@ CHECK SPECIFICALLY FOR THESE KNOWN FAILURE PATTERNS, in addition to anything els
 2. CLOSET RODS: If BEFORE shows a closet, AFTER must have the exact same number of hanging rods in the same position. Flag if a rod was removed, or if a second/lower rod was added that wasn't in BEFORE (no invented double-hang).
 3. VANITY CABINETS: If BEFORE shows bathroom vanity cabinetry (upper and/or lower, including medicine cabinets), AFTER must preserve ALL of it exactly. Flag if any upper cabinet, medicine cabinet, or lower cabinet was removed or altered.
 4. WINDOWS: If BEFORE shows a window with curtains/drapes/sheers that are gone in AFTER, the window itself (frame, glass, trim, sill, blinds/shutters) must be the EXACT same size and position in both photos. Flag it if the window was resized, shifted, or — most critically — converted into a door, doorway, or any kind of opening that wasn't in BEFORE.
+5. BED FRAMES: If BEFORE shows a bed, AFTER must have NO bed structure remaining at all — no frame, headboard, footboard, or slats, not just missing bedding. A bed frame or headboard left standing while only the sheets/pillows/clothing were removed is an INCOMPLETE declutter, not a correct one — flag it and treat full bed removal as the correction needed.
 
 ALSO CHECK FOR:
 - Leftover furniture/decor from BEFORE that's still visible in AFTER (incomplete removal)
@@ -132,7 +133,8 @@ function buildCorrectionPrompt({ analysis }) {
   p += `4. Closet hanging rods must match the original count and position exactly\n`;
   p += `5. Bathroom vanity cabinetry (upper and lower, including medicine cabinets) must be fully preserved\n`;
   p += `6. Windows must stay the exact original size and position — never resize, shift, or convert a window into a door or opening\n`;
-  p += `7. Maintain the exact same camera angle, field of view, and framing — do not crop, zoom, or reframe\n\n`;
+  p += `7. If a bed is involved, it means the ENTIRE bed (mattress, frame, headboard, footboard, slats) — not just bedding/linens; a stripped frame left standing is not a complete removal\n`;
+  p += `8. Maintain the exact same camera angle, field of view, and framing — do not crop, zoom, or reframe\n\n`;
   p += `This image is prepared per California AB 723 §10140.6 for virtual staging — accurate architectural preservation is a compliance requirement, not a style preference.`;
   return p.trim();
 }

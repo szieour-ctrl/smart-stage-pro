@@ -1702,11 +1702,11 @@ function renderSmartCorrectResultsModal(batchId, results) {
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px;">
         <div>
           <div style="font-size:0.6rem;color:var(--muted,#7a6f63);margin-bottom:2px;">ORIGINAL</div>
-          <img src="${orig.dataUrl}" style="width:100%;border-radius:3px;" />
+          <img src="${orig.dataUrl}" style="width:100%;border-radius:3px;cursor:zoom-in;" onclick="openSmartCorrectPreview('${r.id}', 'original')" />
         </div>
         <div>
           <div style="font-size:0.6rem;color:var(--muted,#7a6f63);margin-bottom:2px;">CORRECTED</div>
-          <img src="data:image/jpeg;base64,${r.correctedBase64}" style="width:100%;border-radius:3px;" />
+          <img src="data:image/jpeg;base64,${r.correctedBase64}" style="width:100%;border-radius:3px;cursor:zoom-in;" onclick="openSmartCorrectPreview('${r.id}', 'corrected')" />
         </div>
       </div>
       <div style="margin-bottom:10px;">${badges}</div>
@@ -1735,6 +1735,62 @@ function renderSmartCorrectResultsModal(batchId, results) {
     </div>`;
   document.body.appendChild(m);
   m.addEventListener('click', (e) => { if (e.target === m) m.remove(); });
+}
+
+// Click-to-enlarge for either thumbnail in a Smart Correct result tile.
+// Looks the image up fresh from existing state (SESSION.originals /
+// _smartCorrectResults) rather than being passed the base64 directly —
+// that data is already sitting in the <img src> right next to it, so
+// threading it through the onclick attribute a second time would just
+// double the base64 payload embedded in the DOM for no benefit. Same
+// dynamically-built-overlay pattern already proven in
+// openHeroShotPreview, so this needed no new CSS and nothing added to
+// <head>.
+function openSmartCorrectPreview(imageId, variant) {
+  const orig = SESSION.originals.find(o => o.id === imageId);
+  if (!orig) return;
+  const result = _smartCorrectResults[imageId];
+
+  const src = variant === 'corrected'
+    ? (result && result.correctedBase64 ? `data:image/jpeg;base64,${result.correctedBase64}` : null)
+    : orig.dataUrl;
+  if (!src) return;
+
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:10000;display:flex;align-items:center;justify-content:center;padding:24px;';
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) document.body.removeChild(overlay); });
+
+  const panel = document.createElement('div');
+  panel.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:10px;max-width:94vw;max-height:94vh;';
+
+  const img = document.createElement('img');
+  img.src = src;
+  img.style.cssText = 'max-width:94vw;max-height:82vh;object-fit:contain;display:block;border-radius:4px;box-shadow:0 8px 32px rgba(0,0,0,0.4);';
+  panel.appendChild(img);
+
+  const caption = document.createElement('div');
+  caption.style.cssText = 'color:#fff;font-size:0.8rem;text-align:center;opacity:0.85;';
+  caption.textContent = `${orig.name} — ${variant === 'corrected' ? 'Corrected' : 'Original'}`;
+  panel.appendChild(caption);
+
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'btn btn-ghost btn-sm';
+  closeBtn.textContent = 'Close';
+  closeBtn.style.cssText = 'background:rgba(255,255,255,0.1);color:#fff;border-color:rgba(255,255,255,0.3);';
+  closeBtn.onclick = () => document.body.removeChild(overlay);
+  panel.appendChild(closeBtn);
+
+  overlay.appendChild(panel);
+  document.body.appendChild(overlay);
+
+  // Esc to close, same as clicking the backdrop — one-shot listener so
+  // repeated opens don't stack handlers on document.
+  document.addEventListener('keydown', function escHandler(e) {
+    if (e.key === 'Escape') {
+      overlay.remove();
+      document.removeEventListener('keydown', escHandler);
+    }
+  });
 }
 
 function useCorrectedForStaging(imageId) {

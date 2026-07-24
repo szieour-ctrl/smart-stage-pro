@@ -229,6 +229,37 @@ exports.handler = async (event) => {
       };
     }
 
+    // ── LIST VISIBLE — the normal published gallery for one property, full
+    // list (not the 5-thumbnail cap get-user-listings.js uses for the card
+    // preview) — this is what backs the "Hide from Compliance Page" button
+    // per image, kept as a separate call from list-hidden so the two views
+    // never accidentally merge on the front end.
+    if (action === "list-visible") {
+      if (event.httpMethod !== "GET") return { statusCode: 405, headers, body: JSON.stringify({ error: "Method Not Allowed" }) };
+
+      const projectId = event.queryStringParameters?.projectId;
+      if (!projectId) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing projectId" }) };
+
+      const access = await checkAccess(projectId, authUser);
+      if (access.error) return { statusCode: access.status, headers, body: JSON.stringify({ error: access.error }) };
+
+      const store = getProjectStore();
+      const raw = await store.get("pid_" + projectId);
+      if (!raw) return { statusCode: 404, headers, body: JSON.stringify({ error: "Project not found" }) };
+
+      const project = JSON.parse(raw);
+      const visibleImages = (project.images || []).filter(img => !img.hidden);
+
+      return {
+        statusCode: 200, headers,
+        body: JSON.stringify({
+          projectId,
+          address: project.address,
+          visibleImages,
+        })
+      };
+    }
+
     // ── HIDE / UNHIDE ──────────────────────────────────────────────────────
     if (action === "hide" || action === "unhide") {
       if (event.httpMethod !== "POST") return { statusCode: 405, headers, body: JSON.stringify({ error: "Method Not Allowed" }) };
@@ -272,6 +303,28 @@ exports.handler = async (event) => {
         .filter(r => !r.ok);
       if (cloudinaryFailures.length) {
         console.error("hide-image: Cloudinary lock incomplete for", imageId, "-", JSON.stringify(cloudinaryFailures));
+      }
+
+      // Mirror onto the matching staged_images row too — this is the row
+      // PRO Plus's video builder actually reads (video-job.js's
+      // getFramesForListing() queries staged_images directly, never
+      // Netlify Blobs). Non-fatal: the Blobs flag + Cloudinary lock above
+      // are already authoritative for the compliance page and dashboard;
+      // this is defense in depth so a hidden image can't be pulled into a
+      // video either. Matched by listing_id + the staged image URL, since
+      // the original staged_images insert never stored this Blobs imageId
+      // (see project-manage.js's addImage()). Requires a `hidden` boolean
+      // column on staged_images — if it doesn't exist yet, this silently
+      // no-ops (logged) rather than blocking the hide/unhide itself.
+      if (target.stagedUrl) {
+        try {
+          await supabase("PATCH", "staged_images",
+            { hidden: nowHide },
+            `?listing_id=eq.${access.listing.id}&cloudinary_staged_url=eq.${encodeURIComponent(target.stagedUrl)}`
+          );
+        } catch (err) {
+          console.error("hide-image: staged_images hidden sync failed (non-fatal) for", imageId, "-", err.message);
+        }
       }
 
       // Idempotent — hiding an already-hidden image (or unhiding a visible

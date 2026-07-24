@@ -2152,13 +2152,23 @@ function toggleLbZone(key){
 // save target both need to branch on whether enhId is present. Brings
 // Exterior to the same lightbox experience Vacant Stage and Clean+Stage
 // already had, instead of the old inline textarea-in-the-panel pattern.
+// Distinguishes a Declutter Only room (declutteredBase64 set, no staging
+// prompt ever run) from a Clean+Stage room (also has declutteredBase64,
+// but lastPrompt gets set once the staging step runs — see runCleanAndStage).
+// This is the same implicit distinction the codebase already relies on
+// elsewhere (declutterIterHtml vs CNS's iterHtml); made explicit here so
+// the Lightbox's tab/routing logic doesn't have to re-derive it twice.
+function isDeclutterOnlyRoom(room) {
+  return !!(room && room.declutteredBase64 && !room.lastPrompt);
+}
+
 function openLightboxRefine(roomId, startTab, enhId){
   const room=SESSION.rooms.find(r=>r.id===roomId);
   if(enhId){
     const es = room?.extSelections?.[enhId];
     if(!room||!es||!es.base64)return;
   } else {
-    if(!room||!room.stagedCleanBase64&&!room.stagedBase64)return;
+    if(!room||!room.stagedCleanBase64&&!room.stagedBase64&&!room.declutteredCleanBase64)return;
   }
   _lbRoomId='__refine__:'+roomId;
   _lbMode=null;
@@ -2166,7 +2176,7 @@ function openLightboxRefine(roomId, startTab, enhId){
   _lbEnhId = enhId || null;
   _lbPresetKey = room.presetKey || null;
 
-  const srcBase64 = enhId ? room.extSelections[enhId].base64 : (room.presetCleanBase64||room.stagedCleanBase64||room.stagedBase64);
+  const srcBase64 = enhId ? room.extSelections[enhId].base64 : (room.presetCleanBase64||room.stagedCleanBase64||room.declutteredCleanBase64||room.stagedBase64);
   const enh = enhId ? EXT_ENHANCEMENTS.find(e=>e.id===enhId) : null;
   document.getElementById('lightbox-img').src='data:image/jpeg;base64,'+srcBase64;
   document.getElementById('lightbox-title').textContent='Refine — '+room.roomName+(enh?' · '+enh.label:'');
@@ -2190,9 +2200,18 @@ function renderRefineTabs(){
   // the exterior enhancement context (room.extSelections[enhId] is the
   // relevant data there instead). Free Revision is the only supported
   // action for exterior, matching what was actually requested.
+  //
+  // Declutter Only rooms get "AI Enhance" in place of "Presets" — a
+  // photographic style preset has no meaning on a bare, unstaged room;
+  // AI Enhance (re-comparing the result against the original) is the
+  // equivalent second action for this mode.
+  const roomId=_lbRoomId.replace('__refine__:','');
+  const room=SESSION.rooms.find(r=>r.id===roomId);
   const tabs=_lbEnhId
     ? [{key:'revise',label:'Free Revision'}]
-    : [{key:'revise',label:'Free Revision'},{key:'presets',label:'Presets'}];
+    : isDeclutterOnlyRoom(room)
+      ? [{key:'revise',label:'Free Revision'},{key:'enhance',label:'✨ AI Enhance'}]
+      : [{key:'revise',label:'Free Revision'},{key:'presets',label:'Presets'}];
   document.getElementById('lb-mode-tabs').innerHTML=tabs.map(t=>
     `<div class="lb-mode-tab ${_lbRefineTab===t.key?'active':''}" onclick="setRefineTab('${t.key}')">${t.label}</div>`
   ).join('');
@@ -2203,19 +2222,29 @@ function renderRefineBody(){
   const saveBtn=document.getElementById('lightbox-footer-save');
   const roomId=_lbRoomId.replace('__refine__:','');
   const room=SESSION.rooms.find(r=>r.id===roomId);
+  const isDcl=isDeclutterOnlyRoom(room);
 
   if(_lbRefineTab==='revise'){
     sub.textContent='Specify only what to change — everything else stays exactly the same.';
     const enh = _lbEnhId ? EXT_ENHANCEMENTS.find(e=>e.id===_lbEnhId) : null;
-    const placeholder = enh ? 'Revision — e.g. "more dramatic lighting, add potted plants at entry"' : 'Revision — e.g. "warmer lighting, less furniture, match great room sofa"';
+    const placeholder = enh ? 'Revision — e.g. "more dramatic lighting, add potted plants at entry"' : isDcl ? 'Revision — e.g. "remove the mark left on the floor, brighten the corner"' : 'Revision — e.g. "warmer lighting, less furniture, match great room sofa"';
     const existingNote = enh ? (room?.extSelections?.[_lbEnhId]?.iterationNote||'') : (room?.iterationNote||'');
     body.innerHTML=`<div class="lb-elaborate-row">
         <button class="lb-elaborate-btn" id="lb-elaborate-btn" onclick="elaborateRefineNote()">&#10024; Elaborate with AI</button>
         <span class="lb-elaborate-hint">This is an experimental AI writing aid and won't always get it right.</span>
       </div>
       <textarea class="lb-refine-textarea" id="lb-refine-textarea" placeholder='${placeholder}'>${existingNote}</textarea>`;
-    saveBtn.textContent='Re-Stage Draft →';
+    saveBtn.textContent = isDcl ? 'Re-Declutter →' : 'Re-Stage Draft →';
     saveBtn.setAttribute('onclick','submitRefineRevision()');
+  } else if(_lbRefineTab==='enhance'){
+    sub.textContent='Compares this result against the original photo and proposes a targeted correction — no need to describe what\'s wrong yourself.';
+    body.innerHTML=`
+      <div class="lb-enhance-info" style="background:var(--cream);border:1px solid var(--border);border-radius:4px;padding:12px 14px;font-size:0.8rem;color:var(--muted);margin-bottom:10px;line-height:1.5;">
+        AI Enhance re-reads the decluttered photo against the original and checks for known issues — leftover clutter, an invented shower door/enclosure, missing or duplicated closet rods, or altered vanity cabinetry — then proposes a targeted fix. If nothing's wrong, no credit is used.
+      </div>
+      <textarea class="lb-refine-textarea" id="lb-enhance-textarea" placeholder='Optional — anything specific to check or fix? e.g. "double-check the closet rod"'></textarea>`;
+    saveBtn.textContent='Run AI Enhance →';
+    saveBtn.setAttribute('onclick','submitRefineEnhance()');
   } else {
     sub.textContent='Choose a professional rendering style for this staged photo. Staging itself is unchanged — only the photographic rendering is adjusted.';
     body.innerHTML=`
@@ -2313,6 +2342,20 @@ async function submitRefineRevision(){
     }
     return;
   }
+  // Declutter Only rooms route to iterateDeclutter() — reStageRoom() would
+  // hit its lastPrompt guard every time on these rooms (they never run a
+  // staging step), same failure mode iterateRoom()/reStageRoom()'s own
+  // comment above already warns about for the wrong-function case.
+  if(isDeclutterOnlyRoom(room)){
+    const dclInput=document.getElementById('iter-dcl-'+roomId);
+    if(dclInput){
+      dclInput.value=note;
+      await iterateDeclutter(roomId);
+    } else {
+      showToast('Could not find revision target for this room.','error');
+    }
+    return;
+  }
   const legacyInput=document.getElementById('iter-'+roomId);
   if(legacyInput){
     legacyInput.value=note;
@@ -2324,6 +2367,14 @@ async function submitRefineRevision(){
   } else {
     showToast('Could not find revision target for this room.','error');
   }
+}
+async function submitRefineEnhance(){
+  const roomId=_lbRoomId.replace('__refine__:','');
+  const note=document.getElementById('lb-enhance-textarea')?.value?.trim()||'';
+  const room=SESSION.rooms.find(r=>r.id===roomId);
+  if(!room){ showToast('Could not find this room.','error'); return; }
+  closeLightbox();
+  await runDeclutterEnhance(roomId, note);
 }
 async function submitRefinePreset(){
   const roomId=_lbRoomId.replace('__refine__:','');
@@ -2616,17 +2667,20 @@ function renderRoomQueue(){
         <button class="btn btn-outline btn-sm" onclick="downloadWatermarked('${room.id}','data:image/jpeg;base64,${room.declutteredBase64||''}','CLEAN_'+bName(getOrigName('${room.id}'))+'.jpg','DECLUTTERED — OBJECTS REMOVED')">↓ Cleaned</button>
         <button class="btn btn-outline btn-sm" onclick="downloadSideBySide('${room.id}',null,'declutter')">↓ Side-by-Side</button>`:'';
       const resultHtml=isDone&&room.declutteredBase64?`<div class="result-viewer">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><span class="dcl-result-badge dcl-badge">Objects Removed</span><span style="font-size:0.72rem;color:var(--muted);">Furniture and clutter removed — architectural elements preserved.</span></div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><span class="dcl-result-badge dcl-badge">Objects Removed</span><span style="font-size:0.72rem;color:var(--muted);">Furniture and clutter removed — architectural elements preserved. Click photo to revise or AI Enhance.</span></div>
         <div class="result-pair">
           <div class="result-img-wrap"><img src="${orig.dataUrl}" /><div class="result-img-badge">Original</div></div>
-          <div class="result-img-wrap"><img src="data:image/jpeg;base64,${room.declutteredBase64}" /><div class="result-img-badge" style="background:#7c5c3e;color:#fff;">Decluttered</div></div>
+          <div class="result-img-wrap"><img src="data:image/jpeg;base64,${room.declutteredBase64}" onclick="openLightboxRefine('${room.id}','revise')" title="Click to revise or AI Enhance" style="cursor:pointer;" /><div class="result-img-badge" style="background:#7c5c3e;color:#fff;">Decluttered</div></div>
         </div></div>`:'';
       const declutterIterHtml = isDone && room.declutteredBase64 ? `<div class="iterate-panel">
         <div style="flex:1;">
           <textarea class="iterate-input" id="iter-dcl-${room.id}" placeholder='Revision — e.g. "brighter, remove the rug mark on floor"' rows="2"></textarea>
           <div class="iterate-hint">Specify only what to change — everything else stays the same.</div>
         </div>
-        <button class="btn btn-primary btn-sm" onclick="iterateDeclutter('${room.id}')">Re-Declutter</button>
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          <button class="btn btn-primary btn-sm" onclick="iterateDeclutter('${room.id}')">Re-Declutter</button>
+          <button class="btn btn-outline btn-sm" onclick="openLightboxRefine('${room.id}','enhance')">✨ AI Enhance</button>
+        </div>
       </div>` : '';
       const declutterFinalHtml = isDone && room.declutteredBase64 ? renderFinalPanelForDeclutter(room.id) : '';
       return `<div class="room-card" id="card-${room.id}" style="border-left:3px solid #7c5c3e;">
@@ -4981,31 +5035,48 @@ async function downloadDeclutterSBS(roomId) {
 }
 
 
+// Free Revision path for Declutter Only rooms. Previously this re-ran the
+// same first-pass Haiku read on the ORIGINAL messy photo again (blind to
+// what actually went wrong) and read a JSON field (removalPrompt/prompt)
+// that declutter-prompt.js never returns — so basePrompt was always empty
+// and this was sending a near-blank prompt to the image model. Fixed to
+// match iterateRoom()/reStageRoom()'s pattern: edit the ACTUAL decluttered
+// result with a targeted, edit-only instruction, reviewed before sending.
 async function iterateDeclutter(roomId) {
   const room = SESSION.rooms.find(r => r.id === roomId);
-  if (!room || !room.declutteredBase64) return;
+  if (!room || !room.declutteredCleanBase64) { showToast('No decluttered result found — run Declutter first.', 'error'); return; }
   const note = document.getElementById('iter-dcl-' + roomId)?.value?.trim() || '';
+  if (!note) { showToast('Enter revision instructions first.', 'error'); return; }
+  const orig = SESSION.originals.find(o => o.id === room.originalId);
+  if (!orig) return;
 
-  room.status = 'processing';
-  room.promptStatus = 'Re-decluttering with revision...';
+  const priorCleanBase64 = room.declutteredCleanBase64;
+
+  const revisionPrompt =
+    'PRIMARY ROLE: Edit this already-decluttered photo. Make ONLY the change(s) described below — everything else (the furniture-free state, architecture, lighting, camera angle) must remain exactly as shown.\n\n' +
+    'REQUESTED CHANGE:\n' + note + '\n\n' +
+    'Do not re-declutter or reprocess the whole room. Do not alter anything not explicitly mentioned above. Never invent a shower door, glass enclosure, or panel that wasn\'t in the original photo. Closet hanging rods must match the original count and position exactly. Bathroom vanity cabinetry (upper and lower) must be fully preserved. This image is prepared per California AB 723 §10140.6 for virtual staging.';
+
+  room.status = 'prompt-review';
+  room.promptStatus = '✏️ Review revision prompt before re-decluttering...';
   renderRoomQueue();
 
   try {
-    const orig = SESSION.originals.find(o => o.id === room.originalId);
-    // Build revised prompt using the current decluttered image as source
-    const revisionSuffix = note ? ` Additional revision: ${note}` : '';
-    const promptRes = await fetch('/.netlify/functions/declutter-prompt', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ imageBase64: orig.base64, mimeType: orig.mimeType })
-    });
-    const promptData = await promptRes.json();
-    const basePrompt = promptData.removalPrompt || promptData.prompt || '';
-    const revisedPrompt = basePrompt + revisionSuffix;
+    const approvedPrompt = await showPromptModal(room, revisionPrompt);
+    if (approvedPrompt === null) {
+      room.status = 'done'; room.promptStatus = null; renderRoomQueue();
+      showToast('Revision cancelled.', '');
+      return;
+    }
 
-    // Use original image as source for re-declutter
-    const iterResult = await callStageAPI(orig.base64, orig.mimeType, revisedPrompt, 'low');
-    const newBase64 = iterResult.watermarked;
+    room.status = 'processing';
+    room.promptStatus = 'Re-decluttering with revision — takes ~15 seconds...';
+    renderRoomQueue();
+
+    const sourceImage = await downscaleForStagingInput(priorCleanBase64, 2048);
+    const iterResult = await callStageAPI(sourceImage, 'image/jpeg', approvedPrompt, 'low');
+    if (!iterResult) throw new Error('Re-declutter failed — no image returned');
+
     room.declutteredBase64 = iterResult.watermarked;
     room.declutteredCleanBase64 = iterResult.clean;
     room.stagedBase64 = iterResult.watermarked;
@@ -5014,11 +5085,99 @@ async function iterateDeclutter(roomId) {
     room.declutterFinalBase64 = null;
     room.status = 'done';
     room.promptStatus = null;
+    await resizeToMatch(room, orig, null, 'declutteredBase64', iterResult.watermarked);
+    await resizeToMatch(room, orig, null, 'declutteredCleanBase64', iterResult.clean);
+    room.stagedBase64 = room.declutteredBase64;
+    room.stagedCleanBase64 = room.declutteredCleanBase64;
     showToast('✓ Re-decluttered.', 'success');
   } catch (err) {
     room.status = 'done'; // revert to done so user can try again
     room.promptStatus = null;
     showToast('Re-declutter failed: ' + err.message, 'error');
+  }
+  renderRoomQueue();
+}
+
+// AI Enhance path for Declutter Only rooms — Iteration Lightbox "AI Enhance"
+// tab. Unlike Free Revision (user describes the fix), this looks again at
+// the actual result compared to the original photo via
+// declutter-enhance-prompt.js and proposes its own correction — the fix for
+// "Haiku had a tough time reading it on the first pass with a messy room."
+// If no issues are found and no note was given, this skips generation
+// entirely rather than spending a credit on a no-op edit.
+async function runDeclutterEnhance(roomId, note) {
+  const room = SESSION.rooms.find(r => r.id === roomId);
+  if (!room || !room.declutteredCleanBase64) { showToast('No decluttered result found — run Declutter first.', 'error'); return; }
+  const orig = SESSION.originals.find(o => o.id === room.originalId);
+  if (!orig) return;
+
+  const priorCleanBase64 = room.declutteredCleanBase64;
+  const userNote = (note || '').trim();
+
+  room.status = 'processing';
+  room.promptStatus = '✨ AI Enhance — comparing result to original...';
+  renderRoomQueue();
+
+  try {
+    const compressedOriginal = await downscaleForStagingInput(orig.base64, 1024);
+    const compressedResult   = await downscaleForStagingInput(priorCleanBase64, 1024);
+
+    const analysisRes = await fetch('/.netlify/functions/declutter-enhance-prompt', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        originalBase64: compressedOriginal,
+        resultBase64: compressedResult,
+        userNote,
+      })
+    });
+    if (!analysisRes.ok) {
+      const d = await analysisRes.json();
+      throw new Error('AI Enhance analysis failed: ' + (d.error || 'unknown'));
+    }
+    const { issuesFound, issues, correctionPrompt } = await analysisRes.json();
+
+    if (!issuesFound && !userNote) {
+      room.status = 'done';
+      room.promptStatus = null;
+      renderRoomQueue();
+      showToast('✓ AI Enhance found no issues — declutter looks clean. No credit used.', 'success');
+      return;
+    }
+
+    room.status = 'prompt-review';
+    room.promptStatus = '✏️ Review AI Enhance correction' + (issues?.length ? ' (' + issues.length + ' issue' + (issues.length > 1 ? 's' : '') + ' found)' : '') + '...';
+    renderRoomQueue();
+    const approvedPrompt = await showPromptModal(room, correctionPrompt);
+    if (approvedPrompt === null) {
+      room.status = 'done'; room.promptStatus = null; renderRoomQueue();
+      showToast('AI Enhance cancelled — no credit used.', '');
+      return;
+    }
+
+    room.status = 'processing';
+    room.promptStatus = 'Applying AI Enhance correction — takes ~15 seconds...';
+    renderRoomQueue();
+
+    const sourceImage = await downscaleForStagingInput(priorCleanBase64, 2048);
+    const enhResult = await callStageAPI(sourceImage, 'image/jpeg', approvedPrompt, 'low');
+    if (!enhResult) throw new Error('AI Enhance failed — no image returned');
+
+    room.declutteredBase64 = enhResult.watermarked;
+    room.declutteredCleanBase64 = enhResult.clean;
+    room.declutterFinalStatus = null;
+    room.declutterFinalBase64 = null;
+    room.status = 'done';
+    room.promptStatus = null;
+    await resizeToMatch(room, orig, null, 'declutteredBase64', enhResult.watermarked);
+    await resizeToMatch(room, orig, null, 'declutteredCleanBase64', enhResult.clean);
+    room.stagedBase64 = room.declutteredBase64;
+    room.stagedCleanBase64 = room.declutteredCleanBase64;
+    showToast('✓ AI Enhance applied.', 'success');
+  } catch (err) {
+    room.status = 'done';
+    room.promptStatus = null;
+    showToast('AI Enhance failed: ' + err.message, 'error');
   }
   renderRoomQueue();
 }

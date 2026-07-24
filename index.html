@@ -3067,12 +3067,20 @@ function renderFinalPanel(roomId,enhId){
     const presetLabel = wasFromPreset && PHOTOGRAPHIC_PRESETS[room.presetKey] ? PHOTOGRAPHIC_PRESETS[room.presetKey].label : null;
     const tag=enh?enh.label.replace(/\s+/g,'') : presetLabel ? presetLabel.replace(/\s+/g,'') : 'VirtuallyStaged';
     const orig=SESSION.originals.find(o=>o.id===room.originalId);
+    const target = enhId ? room.extSelections[enhId] : room;
+    const attachStatus = target?.complianceAttachStatus;
+    const attachNoticeHtml = !SESSION.projectId ? '' :
+      attachStatus === 'pending' ? `<div style="font-size:0.72rem;color:var(--muted);margin-top:6px;">Attaching to compliance page…</div>` :
+      attachStatus === 'success' ? `<div style="font-size:0.72rem;color:var(--success);margin-top:6px;">✓ Added to compliance page</div>` :
+      attachStatus === 'failed' ? `<div style="background:#fdf0ef;border:1px solid #f0c0c0;border-radius:4px;padding:8px 10px;margin-top:8px;font-size:0.75rem;color:#a03030;">⚠ Did not reach the compliance page — ${(target.complianceAttachError||'unknown error').replace(/</g,'&lt;')} <button class="btn btn-outline btn-sm" style="margin-left:6px;padding:2px 8px;" onclick="retryComplianceAttach('${roomId}','${enhId||''}')">↻ Retry</button></div>` :
+      '';
     return `<div class="result-viewer" style="padding:12px 16px;">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><span class="tier-label tier-final">Final — MLS Quality</span>${presetLabel?`<span style="font-size:0.72rem;color:var(--muted);">Includes ${presetLabel} preset</span>`:''}</div>
       <div class="result-pair">
         <div class="result-img-wrap"><img src="${orig.dataUrl}" /><div class="result-img-badge">Original</div></div>
         <div class="result-img-wrap"><img src="data:image/jpeg;base64,${fb64}" /><div class="result-img-badge final-badge">Final · ${enh?enh.mlsTag:(presetLabel||'Virtually Staged')}</div></div>
       </div>
+      ${attachNoticeHtml}
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
         <button class="btn btn-success btn-sm" onclick="downloadB64('data:image/jpeg;base64,'+getFinalB64('${roomId}','${enhId||''}'),'FINAL_${tag}_'+bName(getOrigName('${roomId}'))+'.jpg')">↓ Final</button>
         <button class="btn btn-outline btn-sm" onclick="downloadSideBySide('${roomId}','${enhId||''}','final')">↓ Final Side-by-Side</button>
@@ -3652,6 +3660,11 @@ async function attachFinalToProject(finalBase64, room, orig, enhId) {
   };
   const dbMode = ROOM_MODE_TO_DB_MODE[room.roomMode] || 'vacant_stage';
 
+  const target = enhId ? room.extSelections[enhId] : room;
+  target.complianceAttachStatus = 'pending';
+  target.complianceAttachError = null;
+  renderRoomQueue();
+
   try {
     // Upload staged final to Cloudinary
     const uploadRes = await fetch('/.netlify/functions/upload-staged', {
@@ -3666,14 +3679,14 @@ async function attachFinalToProject(finalBase64, room, orig, enhId) {
       })
     });
     const uploadData = await uploadRes.json();
-    if (!uploadData.publicUrl) throw new Error('No staged URL from Cloudinary');
+    if (!uploadData.publicUrl) throw new Error(uploadData.error || 'No staged URL returned from Cloudinary upload');
 
     // Attach to project in Blobs
     // userId fix (separate, earlier bug): without this, project-manage.js's
     // addImage() guard (`if (userId && process.env.SUPABASE_URL)`) was
     // always false, so the Supabase branch never even attempted to run.
     const _sbUserForAttach = (await getSupabase().auth.getUser()).data?.user;
-    await fetch('/.netlify/functions/project-manage?action=add-image', {
+    const attachRes = await fetch('/.netlify/functions/project-manage?action=add-image', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -3689,13 +3702,41 @@ async function attachFinalToProject(finalBase64, room, orig, enhId) {
         }
       })
     });
+    if (!attachRes.ok) {
+      const d = await attachRes.json().catch(() => ({}));
+      throw new Error(d.error || ('add-image failed: ' + attachRes.status));
+    }
 
     console.log('Image attached to project:', SESSION.projectId, 'room:', room.roomName);
+    target.complianceAttachStatus = 'success';
     showToast(`✓ Added to compliance project: ${SESSION.projectAddress || SESSION.projectId}`, 'success');
 
   } catch (err) {
-    console.warn('attachFinalToProject error:', err.message);
+    // Previously this was a silent console.warn only — a failure here meant
+    // Generate Final still showed "✓ Final generated" with no indication
+    // the image never actually reached the compliance page. Now it's a
+    // visible, non-auto-dismissing error plus a tracked status so
+    // renderFinalPanel() can offer a one-click retry that reuses the
+    // already-generated finalBase64 — no re-generation, no extra credit.
+    console.error('attachFinalToProject error:', err.message);
+    target.complianceAttachStatus = 'failed';
+    target.complianceAttachError = err.message;
+    showToast(`⚠ "${room.roomName}" final was generated but did NOT reach the compliance page — ${err.message}. Use Retry below.`, 'error');
   }
+  renderRoomQueue();
+}
+
+// Manual retry — reuses the already-generated finalBase64, no new credit
+// charged and no re-generation of the image itself, just re-attempts the
+// Cloudinary upload + Blobs/compliance attachment.
+async function retryComplianceAttach(roomId, enhId) {
+  const room = SESSION.rooms.find(r => r.id === roomId);
+  if (!room) return;
+  const target = enhId ? room.extSelections[enhId] : room;
+  const finalBase64 = target?.finalBase64;
+  if (!finalBase64) { showToast('No final image found to retry.', 'error'); return; }
+  const orig = SESSION.originals.find(o => o.id === room.originalId);
+  await attachFinalToProject(finalBase64, room, orig, enhId || null);
 }
 
 // ── MARKETING QR DOWNLOAD ────────────────────────────────────────────────────
@@ -4738,12 +4779,12 @@ async function generateFinal(roomId,enhId){
     renderRoomQueue();
 
     // ── UPLOAD STAGED FINAL TO CLOUDINARY + ATTACH TO COMPLIANCE PAGE ────────
-    // Fires in background — does not block UI
+    // Fires in background — does not block UI. Failures are now surfaced
+    // to the user directly inside attachFinalToProject (toast + retry
+    // control in renderFinalPanel), not swallowed here.
     // This is what populates the compliance page with original + staged pairs
     if (SESSION.projectId) {
-      attachFinalToProject(finalBase64, room, orig, enhId).catch(err => {
-        console.warn('Project attachment failed (non-blocking):', err.message);
-      });
+      attachFinalToProject(finalBase64, room, orig, enhId);
     }
 
   }catch(err){
@@ -5012,12 +5053,22 @@ async function downloadDeclutterSBS(roomId) {
   const origText = btn?.textContent;
   if (btn) { btn.textContent = 'Generating…'; btn.disabled = true; }
   try {
+    // generate-sbs.js immediately shrinks both images to a 900px-wide panel
+    // internally (MAX_PANEL_W) — sending full resolution has no benefit and
+    // risks the request body itself exceeding the same ~6MB Lambda payload
+    // ceiling upscale-image.js's own comments document. An ultra-wide-lens
+    // original photo alone can be several MB before even adding the staged
+    // image, so this isn't a hypothetical edge case.
+    const [origForSBS, stagedForSBS] = await Promise.all([
+      downscaleForStagingInput(origB64, 1400),
+      downscaleForStagingInput(room.declutteredBase64, 1400),
+    ]);
     const res = await fetch('/.netlify/functions/generate-sbs', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        originalBase64: origB64,
-        stagedBase64:   room.declutteredBase64,
+        originalBase64: origForSBS,
+        stagedBase64:   stagedForSBS,
         address:        SESSION.projectAddress || '',
         roomName:       room.roomName || '',
         tier:           'declutter',
@@ -5443,12 +5494,24 @@ async function downloadSideBySide(roomId, enhId, tier) {
   if (btn) { btn.textContent = 'Generating…'; btn.disabled = true; }
 
   try {
+    // Same fix as downloadDeclutterSBS: generate-sbs.js only ever renders a
+    // 900px-wide panel (MAX_PANEL_W) regardless of input size, so sending
+    // the full 4x-upscaled final (can be ~4MB+ on its own per upscale-image.js's
+    // logs) plus a full-resolution original in the same request risks the
+    // combined body exceeding Lambda's ~6MB payload ceiling — exactly what
+    // was happening on an ultra-wide-lens source where the SBS download
+    // failed while the plain draft download (no upscale, no combined
+    // payload) succeeded.
+    const [origForSBS, stagedForSBS] = await Promise.all([
+      downscaleForStagingInput(origB64, 1400),
+      downscaleForStagingInput(stagedB64, 1400),
+    ]);
     const res = await fetch('/.netlify/functions/generate-sbs', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        originalBase64: origB64,
-        stagedBase64:   stagedB64,
+        originalBase64: origForSBS,
+        stagedBase64:   stagedForSBS,
         address:        SESSION.projectAddress || '',
         roomName:       room.roomName || '',
         tier,

@@ -254,12 +254,6 @@ async function addImage(projectId, imageData, userId, ab723Prompt, env) {
   const store  = getProjectStore(env);
   const pidKey = "pid_" + projectId;
 
-  const raw = await store.get(pidKey);
-  if (!raw) throw new Error("Project not found: " + projectId);
-
-  const project = JSON.parse(raw);
-  const addrKey = "addr_" + addressHash(project.address);
-
   const imageEntry = {
     imageId:     "img_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 5),
     roomName:    imageData.roomName    || "Room",
@@ -271,15 +265,73 @@ async function addImage(projectId, imageData, userId, ab723Prompt, env) {
     fileName:    imageData.fileName    || "",
   };
 
-  project.images    = project.images || [];
-  project.images.push(imageEntry);
-  project.updatedAt = new Date().toISOString();
+  // FIX (this session — confirmed real data-loss bug, not a hypothesis):
+  // this was previously a plain read-modify-write on ONE shared Blobs key
+  // with zero concurrency protection:
+  //   const raw = await store.get(pidKey); ...push...; await store.set(pidKey, updated);
+  // Firing several Generate Final calls in quick succession — exactly what
+  // happens staging a batch of rooms — let a second call's GET land before
+  // the first call's SET did, so the second call's in-memory array never
+  // contained the first room's entry. When it wrote back, it silently
+  // overwrote the first room's addition entirely — even though THAT call's
+  // own "Image added to project" log line had already reported success.
+  // Confirmed against real Netlify logs: multiple clean, sequential-looking
+  // successes for Vacant Stage rooms that never actually appeared on the
+  // compliance page, while Declutter and Exterior (run one at a time, no
+  // batch) were unaffected.
+  //
+  // Fixed with optimistic concurrency using Blobs' native conditional
+  // write support (@netlify/blobs v10.7+, confirmed against the installed
+  // package's own type definitions): read the current entry AND its ETag,
+  // write ONLY if that ETag still matches (onlyIfMatch) — i.e. nothing else
+  // wrote in between. If it doesn't match, `modified` comes back false;
+  // re-read the now-newer array and retry the whole append from scratch.
+  // Small randomized backoff between attempts so multiple retrying calls
+  // don't just re-collide in lockstep.
+  const MAX_CAS_ATTEMPTS = 8;
+  let project = null;
+  let succeeded = false;
 
-  // Update Netlify Blobs (existing system — do not change)
-  const updated = JSON.stringify(project);
-  await store.set(pidKey, updated);
-  await store.set(addrKey, updated);
-  console.log("Image added to project:", projectId, "room:", imageEntry.roomName, "total:", project.images.length);
+  for (let attempt = 1; attempt <= MAX_CAS_ATTEMPTS; attempt++) {
+    const existing = await store.getWithMetadata(pidKey);
+    if (!existing) throw new Error("Project not found: " + projectId);
+
+    project = JSON.parse(existing.data);
+    project.images = project.images || [];
+    project.images.push(imageEntry);
+    project.updatedAt = new Date().toISOString();
+
+    const updated = JSON.stringify(project);
+    const writeResult = await store.set(pidKey, updated, { onlyIfMatch: existing.etag });
+
+    if (writeResult.modified === false) {
+      console.warn(`addImage: CAS conflict on ${pidKey} (attempt ${attempt}/${MAX_CAS_ATTEMPTS}) — another write landed first, retrying`);
+      await new Promise(r => setTimeout(r, 60 * attempt + Math.floor(Math.random() * 50)));
+      continue;
+    }
+
+    // Won the write. Mirror to the secondary address-keyed lookup —
+    // best-effort, unconditional. compliance-page.js and every other
+    // reader use pidKey as the source of truth (confirmed directly in
+    // compliance-page.js), so a rare race on addrKey is secondary-index
+    // staleness, not data loss, and doesn't need the same CAS treatment.
+    const addrKey = "addr_" + addressHash(project.address);
+    await store.set(addrKey, updated);
+    console.log(
+      "Image added to project:", projectId, "room:", imageEntry.roomName,
+      "total:", project.images.length,
+      attempt > 1 ? `(succeeded after ${attempt} CAS attempts)` : ""
+    );
+    succeeded = true;
+    break;
+  }
+
+  if (!succeeded) {
+    throw new Error(
+      `addImage: failed to write after ${MAX_CAS_ATTEMPTS} CAS attempts on ${pidKey} — ` +
+      `project is under unusually heavy concurrent write load, or something is retrying without backoff elsewhere`
+    );
+  }
 
   // ── Write to Supabase staged_images (compliance record ONLY) ─────────────
   // CHANGE: removed the credit_ledger debit that used to live in this block

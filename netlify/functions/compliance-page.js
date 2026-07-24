@@ -534,7 +534,28 @@ exports.handler = async (event) => {
 
   try {
     const store = getProjectStore();
-    const raw = await store.get("pid_" + projectId);
+
+    // Retry wrapper — @netlify/blobs uses fetch internally to reach its
+    // storage backend, and a transient network blip there throws a bare
+    // "fetch failed" (Node's literal error for a failed connection), not
+    // a data problem. Confirmed via real logs: the exact next request
+    // seconds later succeeded fine with no code changes in between. A
+    // public-facing compliance page showing a hard error for a one-off
+    // network hiccup is worse than a brief, invisible retry.
+    let raw = null;
+    let lastErr = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        raw = await store.get("pid_" + projectId);
+        lastErr = null;
+        break;
+      } catch (err) {
+        lastErr = err;
+        console.warn(`compliance-page: Blobs read attempt ${attempt}/3 failed (${err.message}) — retrying`);
+        if (attempt < 3) await new Promise(r => setTimeout(r, 150 * attempt));
+      }
+    }
+    if (lastErr) throw lastErr; // all 3 attempts failed — a real problem, let the outer catch handle it
 
     if (!raw) {
       return { statusCode: 404, headers: htmlHeaders, body: renderNotFound(projectId) };

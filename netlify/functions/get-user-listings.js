@@ -135,13 +135,23 @@ exports.handler = async (event) => {
       let lastStaged = listing.updated_at;
       let tier = "solo";
 
+      let hiddenCount = 0;
+
       if (listing.project_id) {
         try {
           const raw = await store.get("pid_" + listing.project_id);
           if (raw) {
             const project = JSON.parse(raw);
-            images = (project.images || []).slice(0, 5); // first 5 for thumbnails
-            imageCount = (project.images || []).length;
+            const allImages = project.images || [];
+            // Soft-hidden images (see hide-image.js) never show up in the
+            // normal dashboard view or its thumbnails/counts — they only
+            // appear via the separate "Review Hidden" action for this
+            // listing, so a pulled image never gets mixed back in with
+            // what's actually published.
+            const visibleImages = allImages.filter(img => !img.hidden);
+            hiddenCount = allImages.length - visibleImages.length;
+            images = visibleImages.slice(0, 5); // first 5 for thumbnails
+            imageCount = visibleImages.length;
             lastStaged = project.updatedAt || project.createdAt;
             tier = project.tier || "solo";
           }
@@ -160,6 +170,7 @@ exports.handler = async (event) => {
         createdAt:      listing.created_at,
         lastStaged:     lastStaged,
         imageCount,
+        hiddenCount,
         tier,
         thumbnails: images.map(img => ({
           roomName:  img.roomName || "Room",

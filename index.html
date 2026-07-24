@@ -1600,56 +1600,64 @@ async function runSmartCorrectBatch() {
   renderSmartCorrectProcessingModal(images.length);
 
   try {
+    // Step 1 — get an upload token. This call carries NO image bytes at
+    // all anymore (just the batchId), so it's tiny and can never hit any
+    // payload limit regardless of how many/how large the actual photos
+    // are — see smart-correct-batch-dispatch.js for the full "why."
     const dispatchRes = await fetch('/.netlify/functions/smart-correct-batch-dispatch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ batchId, images }),
+      body: JSON.stringify({ batchId }),
     });
     if (!dispatchRes.ok) {
-      let errMsg = 'Failed to start batch correction';
+      let errMsg = 'Failed to get an upload token for this batch';
       try { const errData = await dispatchRes.json(); errMsg = errData.error || errMsg; } catch (e) {}
       throw new Error(errMsg);
     }
+    const { token, expiresAt, railwayUploadUrl } = await dispatchRes.json();
 
-    await pollSmartCorrectBatch(batchId);
+    // Step 2 — upload every photo directly to Railway, in parallel, one
+    // photo per request. Each request carries only ONE image's bytes, so
+    // even a large iPhone photo (15-30MB+ base64) is comfortably under
+    // Railway's own body limit — nothing here goes through a Netlify
+    // Function's body at all, so the 6MB Lambda ceiling that caused the
+    // original bug never applies. allSettled (not all) — one bad/oversized
+    // photo failing must not take down the rest of the batch, matching
+    // the same per-image resilience correctOneImage already has server-side.
+    const settled = await Promise.allSettled(
+      images.map(img =>
+        fetch(railwayUploadUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ batchId, token, expiresAt, id: img.id, imageBase64: img.imageBase64, mimeType: img.mimeType }),
+        }).then(async (res) => {
+          if (!res.ok) {
+            let errMsg = `Upload failed (${res.status})`;
+            try { const errData = await res.json(); errMsg = errData.error || errMsg; } catch (e) {}
+            return { id: img.id, status: 'error', error: errMsg };
+          }
+          return res.json(); // {id, status, correctedBase64, ...} or {id, status:'error', error} — same shape either way
+        }).catch(err => ({ id: img.id, status: 'error', error: err.message || 'Network error during upload' }))
+      )
+    );
+
+    // allSettled + the .catch above mean every entry is already a
+    // fulfilled promise wrapping a real {id, status, ...} object — no
+    // entry should ever be 'rejected' at this point, but fall back to a
+    // generic error shape defensively rather than let one slip through
+    // as undefined in the results array.
+    const results = settled.map((s, i) =>
+      s.status === 'fulfilled' ? s.value : { id: images[i].id, status: 'error', error: 'Unknown upload failure' }
+    );
+
+    results.forEach(r => { _smartCorrectResults[r.id] = r; });
+    document.getElementById('smart-correct-modal')?.remove();
+    renderSmartCorrectResultsModal(batchId, results);
 
   } catch (err) {
     document.getElementById('smart-correct-modal')?.remove();
     showToast('Smart Correct error: ' + err.message, 'error');
   }
-}
-
-async function pollSmartCorrectBatch(batchId) {
-  // Same cadence as the existing staging poll (check-openai): 3-second
-  // interval, generous timeout since a real batch of 5-20 images running
-  // OpenCV correction in parallel could reasonably take a couple minutes.
-  const maxPolls = 100; // ~5 minutes at 3s/poll
-  for (let poll = 0; poll < maxPolls; poll++) {
-    await new Promise(r => setTimeout(r, 3000));
-    try {
-      const checkRes = await fetch(`/.netlify/functions/check-smart-correct-batch?batchId=${encodeURIComponent(batchId)}`);
-      if (!checkRes.ok) continue;
-      const result = await checkRes.json();
-
-      if (result.status === 'done') {
-        result.results.forEach(r => { _smartCorrectResults[r.id] = r; });
-        document.getElementById('smart-correct-modal')?.remove();
-        renderSmartCorrectResultsModal(batchId, result.results);
-        return;
-      }
-      if (result.status === 'error') {
-        throw new Error(result.error || 'Batch correction failed');
-      }
-      // status === 'pending' — keep polling
-    } catch (err) {
-      if (err.message && err.message !== 'Batch correction failed' && !err.message.includes('failed')) continue; // network blip
-      document.getElementById('smart-correct-modal')?.remove();
-      showToast('Smart Correct error: ' + err.message, 'error');
-      return;
-    }
-  }
-  document.getElementById('smart-correct-modal')?.remove();
-  showToast('Smart Correct timed out after 5 minutes — please try again.', 'error');
 }
 
 function renderSmartCorrectProcessingModal(count) {

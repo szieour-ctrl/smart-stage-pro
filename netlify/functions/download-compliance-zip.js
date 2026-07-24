@@ -48,7 +48,10 @@ function generateManifest(project, projectId) {
   const agentName     = project.agentName     || process.env.AGENT_NAME     || "";
   const agentBrokerage= project.agentBrokerage|| process.env.AGENT_BROKERAGE|| "";
   const agentDRE      = project.agentDRE      || process.env.AGENT_DRE      || "";
-  const images        = project.images || [];
+  // Same filter as the handler below — a hidden image must not appear in
+  // the manifest listing either, even though its files are already excluded
+  // from the zip itself.
+  const images        = (project.images || []).filter(img => !img.hidden);
 
   const lines = [
     "SMART STAGE PRO™ — COMPLIANCE ARCHIVE",
@@ -102,7 +105,12 @@ exports.handler = async (event) => {
     if (!raw) return { statusCode: 404, body: "Project not found" };
 
     const project = JSON.parse(raw);
-    const images = project.images || [];
+    // Soft-hidden images (see hide-image.js) must never leak through this
+    // path either — the compliance page hides them, but this ZIP endpoint
+    // iterated project.images directly and had no hidden check at all.
+    // Same filter, same rule: nothing hidden reaches an unauthenticated
+    // requester through ANY route.
+    const images = (project.images || []).filter(img => !img.hidden);
     const addrSlug = safeFilename(project.address);
 
     // Build ZIP in memory

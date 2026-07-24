@@ -688,9 +688,20 @@ async function getFramesForListing(listingId) {
   // room_type column added to staged_images July 15, 2026 (confirmed via
   // direct schema inspection this time, not guessed) — selecting and
   // mapping it the same way external_photos already does below.
+  //
+  // hidden=eq.false added July 24, 2026 — staged_images has no concept of a
+  // hide-image.js soft-hide until this filter exists. A hidden image is
+  // pulled from the public compliance page and the My Listings dashboard,
+  // but this query is a COMPLETELY SEPARATE read path (this table, not
+  // Netlify Blobs) — without this filter, a hidden image was still fully
+  // selectable for a PRO Plus video. Requires the `hidden` column to exist
+  // on staged_images (see hide-image.js's matching PATCH) — if that
+  // migration hasn't run yet, this query will fail and getFramesForListing
+  // degrades to an empty gallery per the defensive check below, not a
+  // silent bypass of the filter.
   const [stagedResult, externalResult] = await Promise.all([
     supabase("GET", "staged_images", null,
-      `?listing_id=eq.${listingId}&select=id,mode,room_type,cloudinary_original_url,cloudinary_staged_url,created_at&order=created_at.asc`
+      `?listing_id=eq.${listingId}&hidden=eq.false&select=id,mode,room_type,cloudinary_original_url,cloudinary_staged_url,created_at&order=created_at.asc`
     ),
     supabase("GET", "external_photos", null,
       `?listing_id=eq.${listingId}&select=id,image_url,room_type,source_label,created_at&order=created_at.asc`

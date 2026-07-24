@@ -54,9 +54,9 @@ async function prepareImage(imageBase64, mimeType) {
 // ✅ AB 723 COMPLIANCE HEADER — Every prompt starts with this
 const AB723_HEADER = `PRIMARY ROLE: Remove furniture and decor ONLY. Preserve architecture exactly.
 
-IMMUTABLE LOCK: Never alter, move, remove, replace, or touch: structural walls | ceilings | kitchen/bathroom cabinets (including upper vanity cabinets and medicine cabinets) | countertops | lighting fixtures | doors | windows | built-in appliances | closet hanging rods | shower/tub surrounds and hardware. These must be preserved exactly as photographed.
+IMMUTABLE LOCK: Never alter, move, remove, replace, or touch: structural walls | ceilings | kitchen/bathroom cabinets (including upper vanity cabinets and medicine cabinets) | countertops | lighting fixtures | doors | windows (exact original size and position) | built-in appliances | closet hanging rods | shower/tub surrounds and hardware. These must be preserved exactly as photographed.
 
-NEVER INVENT NEW ELEMENTS: Do not add anything that is not visible in the original photo — this includes shower doors, glass enclosures, sliding panels, a second/lower closet rod, or any hardware not present in the source image. If something is being removed (e.g. a shower curtain), leave the space as an open, bare fixture exactly as it would look with just that item taken away. Do not "complete" or "upgrade" a fixture.
+NEVER INVENT NEW ELEMENTS: Do not add anything that is not visible in the original photo — this includes shower doors, glass enclosures, sliding panels, a second/lower closet rod, or any hardware not present in the source image. Do not convert a window into a door, doorway, or opening, and never resize or reposition a window when its curtains are removed. If something is being removed (e.g. a shower curtain or window curtain), leave the space as an open, bare fixture exactly as it would look with just that item taken away. Do not "complete" or "upgrade" a fixture.
 
 AB 723 COMPLIANCE: Decluttering removes movable objects only. Any alteration to permanent architecture makes the result non-compliant and subject to MLS removal.
 
@@ -98,9 +98,16 @@ Leave the existing curtain rod in place, bare, with no curtain hanging on it.
 Do NOT alter the tile, tub, or shower valve/showerhead in any way.
 An open shower/tub with just a bare rod and no door is the CORRECT and expected result — never "upgrade" it to an enclosure.
 
+CRITICAL INPAINTING RULE FOR WINDOWS:
+Windows are permanent architecture, not furniture — they are NEVER removed, resized, repositioned, or converted into anything else, no matter what is covering them.
+When removing curtains, drapes, or sheers from a window, the window itself (frame, glass, trim, sill, any blinds/shutters) must remain in the EXACT same size and position it was in the original photo — measure against fixed reference points in the photo (wall corners, ceiling line, adjacent furniture-free wall) rather than redrawing the window from scratch.
+Do NOT shrink, enlarge, or shift a window when its curtains are removed.
+Do NOT convert a window into a door, doorway, or opening of any kind. A window stays a window.
+Removing a curtain/drape/sheer means ONLY the fabric and its rod/hardware disappear — the glass, frame, sill, and any blinds or shutters underneath stay exactly as photographed.
+
 PRESERVE (permanent architecture - IMMUTABLE):
 - Structural walls, ceilings, flooring
-- Windows (frames, glass, shutters, plantation blinds)
+- Windows — frame, glass, trim, sill, shutters, and plantation blinds, at their EXACT original size and position. A window must never be resized, repositioned, or turned into a door/opening — see the critical rule above. When curtains are removed, only the fabric and hardware go; the window underneath is untouched.
 - Doors (frames, hinges)
 - Kitchen cabinetry, bathroom cabinetry, countertops, backsplash, appliances (stove, oven, microwave, refrigerator, dishwasher, hood)
 - Bathroom vanity cabinetry — BOTH the lower/base cabinet AND any upper cabinets, medicine cabinets, or wall-mounted storage above the vanity. Preserve every vanity cabinet exactly as photographed, including uppers. If items are sitting on a countertop or inside an open cabinet, remove only those items — never the cabinetry itself.
@@ -196,7 +203,8 @@ function buildDeclutterPrompt({ roomData }) {
   p += `13. Result must be a completely empty room with bare walls ready for staging\n`;
   p += `14. Closet hanging rod(s): preserve the exact original count and position. Never remove a rod, relocate a rod, or add a second/lower rod — no double-hang unless the original photo clearly shows two rods\n`;
   p += `15. Shower/tub: if a shower curtain is removed, leave a bare curtain rod with an open shower/tub opening. Do NOT add a glass door, sliding door, or enclosure panel that was not visible in the original photo\n`;
-  p += `16. Bathroom vanity cabinetry: preserve BOTH upper and lower cabinets exactly, including medicine cabinets — remove only items sitting on the counter or inside an open cabinet, never the cabinet structure itself\n\n`;
+  p += `16. Bathroom vanity cabinetry: preserve BOTH upper and lower cabinets exactly, including medicine cabinets — remove only items sitting on the counter or inside an open cabinet, never the cabinet structure itself\n`;
+  p += `17. Windows: when removing curtains, drapes, or sheers, the window itself (frame, glass, trim, sill, blinds/shutters) must stay the EXACT original size and position — do not shrink, enlarge, shift, or convert a window into a door or opening\n\n`;
 
   p += `COMPLIANCE:\n`;
   p += `This room will be prepared per California AB 723 §10140.6 for virtual staging.\n`;

@@ -72,6 +72,7 @@ CHECK SPECIFICALLY FOR THESE KNOWN FAILURE PATTERNS, in addition to anything els
 1. SHOWER: If BEFORE shows a shower curtain that is gone in AFTER, AFTER should show a bare curtain rod with an open shower/tub — NOT a glass door, sliding panel, or enclosure. Flag it if one was invented that wasn't in BEFORE.
 2. CLOSET RODS: If BEFORE shows a closet, AFTER must have the exact same number of hanging rods in the same position. Flag if a rod was removed, or if a second/lower rod was added that wasn't in BEFORE (no invented double-hang).
 3. VANITY CABINETS: If BEFORE shows bathroom vanity cabinetry (upper and/or lower, including medicine cabinets), AFTER must preserve ALL of it exactly. Flag if any upper cabinet, medicine cabinet, or lower cabinet was removed or altered.
+4. WINDOWS: If BEFORE shows a window with curtains/drapes/sheers that are gone in AFTER, the window itself (frame, glass, trim, sill, blinds/shutters) must be the EXACT same size and position in both photos. Flag it if the window was resized, shifted, or — most critically — converted into a door, doorway, or any kind of opening that wasn't in BEFORE.
 
 ALSO CHECK FOR:
 - Leftover furniture/decor from BEFORE that's still visible in AFTER (incomplete removal)
@@ -130,7 +131,8 @@ function buildCorrectionPrompt({ analysis }) {
   p += `3. Never invent a shower door, glass enclosure, or panel that wasn't in the original photo\n`;
   p += `4. Closet hanging rods must match the original count and position exactly\n`;
   p += `5. Bathroom vanity cabinetry (upper and lower, including medicine cabinets) must be fully preserved\n`;
-  p += `6. Maintain the exact same camera angle, field of view, and framing — do not crop, zoom, or reframe\n\n`;
+  p += `6. Windows must stay the exact original size and position — never resize, shift, or convert a window into a door or opening\n`;
+  p += `7. Maintain the exact same camera angle, field of view, and framing — do not crop, zoom, or reframe\n\n`;
   p += `This image is prepared per California AB 723 §10140.6 for virtual staging — accurate architectural preservation is a compliance requirement, not a style preference.`;
   return p.trim();
 }

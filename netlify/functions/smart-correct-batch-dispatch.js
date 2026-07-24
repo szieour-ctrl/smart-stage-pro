@@ -1,60 +1,39 @@
 // smart-correct-batch-dispatch.js — Netlify Function
 // Smart Connect™ / Smart Correct™ — Module 1/2 deterministic batch correction
 //
-// CONVERTED July 7, 2026 from smart-correct-batch-background.js: that
-// version was a Netlify background function (`*-background.js` naming)
-// and, per Netlify's platform contract, background functions never return
-// a response body to the client — Netlify just acks the invocation. That
-// file's handler also never returned an HTTP response object in any code
-// path, which is valid ONLY for a true background function. When the
-// frontend started getting a generic platform-level "Internal Error" (no
-// error body, background function logs not visible in the dashboard on
-// this site), converting to a regular function was the fastest way to
-// both restore real error visibility AND rule out background-function
-// detection/config as the actual root cause.
+// REBUILT (this session) — real bug: batches of typical iPhone photos
+// were failing with a generic "Failed to start batch correction" error.
+// Root cause: the old version relayed every photo's full base64, for the
+// whole batch, in ONE request body to Railway — and this being a regular
+// (non-background) Netlify Function, that request is hard-capped by AWS
+// Lambda at 6MB (effectively ~4.5MB of real image data after base64
+// overhead). A batch of even 2-3 real iPhone photos (commonly 3-8MB
+// each) can exceed that combined ceiling easily — this wasn't an edge
+// case, it was close to the common case.
 //
-// This never needed to be a background function in the first place —
-// Railway now accepts a batch and returns 202 in well under a second
-// (confirmed repeatedly in Railway logs during testing), nowhere close to
-// Netlify's ~26-30s sync function wall-clock limit. Regular function,
-// same dispatch logic, now with a real response in every path.
+// This function no longer touches image bytes AT ALL. Its only job now
+// is minting a short-lived, single-use-per-batch upload token — a
+// stateless HMAC over `${batchId}:${expiresAt}`, signed with
+// RAILWAY_SECRET (the same shared secret /render and the old
+// /correct-batch route already used server-to-server). The browser then
+// uploads each photo directly to Railway, one photo per request, using
+// that token — see server.js's /correct-image route for the matching
+// verification. No Netlify Blobs job store, no webhook, no polling
+// needed for this feature anymore: Railway processes each image
+// synchronously and returns its real result directly in that request's
+// response, so the browser's own Promise.allSettled across the batch IS
+// the completion signal.
 //
-// Frontend note: index.html's runSmartCorrectBatch() must POST to
-// '/.netlify/functions/smart-correct-batch-dispatch' (not
-// '...-batch-background') — updated in the same delivery as this file.
+// Frontend note: index.html's runSmartCorrectBatch() calls this ONCE per
+// batch (not per image) to get the token, then uploads photos directly
+// to Railway — updated in the same delivery as this file.
 
-const https = require("https");
-const { getStore } = require("@netlify/blobs");
+const crypto = require("crypto");
 
-function getJobStore(siteID, token) {
-  return getStore({ name: "smart-correct-jobs", siteID, token });
-}
+const TOKEN_TTL_MS = 15 * 60 * 1000; // matches server.js's SMART_CORRECT_TOKEN_TTL_MS — keep these two in sync if either changes
 
-// Same shape as video-job.js's dispatchToRailway — plain https.request,
-// no special timeout needed since Railway acknowledges in milliseconds.
-function dispatchToRailway(railwayUrl, railwaySecret, batchId, images) {
-  return new Promise((resolve, reject) => {
-    const url = new URL(`${railwayUrl.replace(/\/$/, "")}/correct-batch`);
-    const bodyStr = JSON.stringify({ batchId, images });
-
-    const req = https.request({
-      hostname: url.hostname,
-      path: url.pathname,
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-railway-secret": railwaySecret,
-        "Content-Length": Buffer.byteLength(bodyStr),
-      },
-    }, (res) => {
-      let data = "";
-      res.on("data", c => data += c);
-      res.on("end", () => resolve({ status: res.statusCode, data }));
-    });
-    req.on("error", reject);
-    req.write(bodyStr);
-    req.end();
-  });
+function mintToken(batchId, expiresAt, secret) {
+  return crypto.createHmac("sha256", secret).update(`${batchId}:${expiresAt}`).digest("hex");
 }
 
 exports.handler = async (event) => {
@@ -67,48 +46,37 @@ exports.handler = async (event) => {
   if (event.httpMethod === "OPTIONS") return { statusCode: 200, headers, body: "" };
   if (event.httpMethod !== "POST") return { statusCode: 405, headers, body: JSON.stringify({ error: "Method not allowed" }) };
 
-  const siteID = process.env.SZREG_SITE_ID || process.env.NETLIFY_SITE_ID;
-  const token  = process.env.NETLIFY_ACCESS_TOKEN;
-  const railwayUrl = process.env.RAILWAY_SMART_CORRECT_URL;
-  const railwaySecret = process.env.RAILWAY_SECRET; // reuses the same shared secret /render already uses
-  let batchId;
+  const railwayUploadUrl = process.env.RAILWAY_SMART_CORRECT_UPLOAD_URL || process.env.RAILWAY_SMART_CORRECT_URL;
+  const railwaySecret = process.env.RAILWAY_SECRET; // same shared secret /render already uses — never sent to the browser, only used here to SIGN the token
 
   try {
-    const { batchId: bId, images } = JSON.parse(event.body || "{}");
-    batchId = bId;
-
-    console.log(`Smart Correct batch ${batchId}: dispatching, ${Array.isArray(images) ? images.length : 0} images. siteID=${siteID ? "SET" : "MISSING"} token=${token ? "SET" : "MISSING"} railwayUrl=${railwayUrl ? "SET" : "MISSING"}`);
+    const { batchId } = JSON.parse(event.body || "{}");
 
     if (!batchId) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing batchId" }) };
-    if (!siteID) throw new Error("NETLIFY_SITE_ID not configured");
-    if (!token) throw new Error("NETLIFY_ACCESS_TOKEN not configured");
-    if (!railwayUrl) throw new Error("RAILWAY_SMART_CORRECT_URL not configured");
+    if (!railwayUploadUrl) throw new Error("RAILWAY_SMART_CORRECT_UPLOAD_URL (or RAILWAY_SMART_CORRECT_URL) not configured");
     if (!railwaySecret) throw new Error("RAILWAY_SECRET not configured");
-    if (!Array.isArray(images) || images.length === 0) throw new Error("No images provided in batch");
 
-    const store = getJobStore(siteID, token);
+    const expiresAt = Date.now() + TOKEN_TTL_MS;
+    const token = mintToken(batchId, expiresAt, railwaySecret);
 
-    // Write heartbeat BEFORE dispatching — if Railway's webhook somehow
-    // races ahead of this write (unlikely given Railway's own processing
-    // time, but not impossible), check-smart-correct-batch.js should never
-    // see a bare "not found" and report something misleading.
-    await store.setJSON(batchId, { status: "processing", startedAt: Date.now(), imageCount: images.length });
-    console.log(`Smart Correct batch ${batchId}: heartbeat written`);
+    console.log(`Smart Correct batch ${batchId}: minted upload token, expires ${new Date(expiresAt).toISOString()}`);
 
-    const dispatchResult = await dispatchToRailway(railwayUrl, railwaySecret, batchId, images);
-    if (dispatchResult.status !== 202) {
-      throw new Error(`Railway did not accept the batch (status ${dispatchResult.status}): ${dispatchResult.data.slice(0, 300)}`);
-    }
-    console.log(`Smart Correct batch ${batchId}: accepted by Railway (202), awaiting webhook`);
-
-    return { statusCode: 200, headers, body: JSON.stringify({ dispatched: true, batchId }) };
+    return {
+      statusCode: 200,
+      headers,
+      body: JSON.stringify({
+        batchId,
+        token,
+        expiresAt,
+        // Base URL only — the browser appends /correct-image itself, so
+        // this env var can point at the same Railway service /render
+        // already uses without needing a second, redundant env var.
+        railwayUploadUrl: `${railwayUploadUrl.replace(/\/$/, "")}/correct-image`,
+      }),
+    };
 
   } catch (err) {
-    console.error(`Smart Correct batch ${batchId} error:`, err.message);
-    try {
-      const store = getJobStore(siteID, token);
-      await store.setJSON(batchId, { status: "error", error: err.message });
-    } catch (e) {}
+    console.error(`Smart Correct batch dispatch error:`, err.message);
     return { statusCode: 500, headers, body: JSON.stringify({ error: err.message }) };
   }
 };

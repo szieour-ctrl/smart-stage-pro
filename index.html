@@ -3666,29 +3666,47 @@ async function attachFinalToProject(finalBase64, room, orig, enhId) {
   renderRoomQueue();
 
   try {
-    // Upload staged final to Cloudinary
-    const uploadRes = await fetch('/.netlify/functions/upload-staged', {
+    // ARCHITECTURE CHANGE (this session): the image no longer passes
+    // through our own Netlify function at all. upload-staged.js now only
+    // issues a signed Cloudinary upload signature (tiny, fast, can never
+    // hit a payload ceiling since it carries no image data); the browser
+    // uploads the actual bytes DIRECTLY to Cloudinary. A prior fix that
+    // changed how upload-staged.js re-encoded the OUTGOING request to
+    // Cloudinary didn't help, because the real failure was the INCOMING
+    // request from the browser to our own function — confirmed by a real
+    // failed invocation ID that produced no matching log output anywhere,
+    // consistent with a gateway-level rejection before our code ever ran.
+    const sigRes = await fetch('/.netlify/functions/upload-staged', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        imageBase64: finalBase64,
-        mimeType: 'image/jpeg',
-        projectId: SESSION.projectId,
-        roomName: room.roomName || 'Room',
-        tier: enhId ? 'final-enhanced' : 'final',
-      })
+      body: JSON.stringify({ projectId: SESSION.projectId })
     });
-    // Read as text first, THEN try to parse — a Lambda-level crash (memory
-    // limit, unhandled exception, timeout) returns a raw platform error
-    // page like "Internal Error", not the function's own JSON error
-    // response. Calling .json() directly on that threw a bare
-    // "Unexpected token 'I', "Internal E"... is not valid JSON" with zero
-    // useful information. This surfaces what actually happened instead.
+    const sigRaw = await sigRes.text();
+    let sig;
+    try { sig = JSON.parse(sigRaw); }
+    catch { throw new Error(`upload-staged (signature) returned a non-JSON response (status ${sigRes.status}): ${sigRaw.slice(0, 200)}`); }
+    if (!sig.signature) throw new Error(sig.error || 'No upload signature returned');
+
+    const imageBlob = base64ToBlob(finalBase64, 'image/jpeg');
+    const formData = new FormData();
+    formData.append('file', imageBlob, 'staged.jpg');
+    formData.append('api_key', sig.apiKey);
+    formData.append('timestamp', sig.timestamp);
+    formData.append('signature', sig.signature);
+    formData.append('folder', sig.folder);
+
+    const uploadRes = await fetch(`https://api.cloudinary.com/v1_1/${sig.cloudName}/image/upload`, {
+      method: 'POST',
+      body: formData,
+    });
+    // Read as text first, THEN try to parse — this is now Cloudinary's own
+    // response. Same defensive parsing as before in case of a network-level
+    // failure reaching Cloudinary directly from the browser.
     const uploadRaw = await uploadRes.text();
     let uploadData;
     try { uploadData = JSON.parse(uploadRaw); }
-    catch { throw new Error(`upload-staged returned a non-JSON response (status ${uploadRes.status}): ${uploadRaw.slice(0, 200)}`); }
-    if (!uploadData.publicUrl) throw new Error(uploadData.error || 'No staged URL returned from Cloudinary upload');
+    catch { throw new Error(`Cloudinary upload returned a non-JSON response (status ${uploadRes.status}): ${uploadRaw.slice(0, 200)}`); }
+    if (!uploadData.secure_url) throw new Error(uploadData.error?.message || 'No staged URL returned from Cloudinary upload');
 
     // Attach to project in Blobs
     // userId fix (separate, earlier bug): without this, project-manage.js's
@@ -3706,7 +3724,7 @@ async function attachFinalToProject(finalBase64, room, orig, enhId) {
           tier: enhId ? 'final-enhanced' : 'final', // quality label — Blobs/compliance-page display only
           mode: dbMode,                              // NEW — the real staged_images.mode value
           originalUrl: orig?.originalUrl || null,
-          stagedUrl: uploadData.publicUrl,
+          stagedUrl: uploadData.secure_url,
           fileName: orig?.name || '',
         }
       })
@@ -4429,6 +4447,17 @@ function downloadHeroDetailShot(roomId, shotId) {
 // elsewhere in this file — fit-inside (never upscales, only shrinks),
 // so a reference image already smaller than the cap passes through
 // unchanged.
+// Converts a base64 string to a Blob without needing a data: URI round
+// trip — used to upload images directly to Cloudinary from the browser
+// via FormData, bypassing our own Netlify functions entirely for the
+// actual image bytes (see attachFinalToProject).
+function base64ToBlob(base64, mimeType) {
+  const byteChars = atob(base64);
+  const byteNumbers = new Array(byteChars.length);
+  for (let i = 0; i < byteChars.length; i++) byteNumbers[i] = byteChars.charCodeAt(i);
+  return new Blob([new Uint8Array(byteNumbers)], { type: mimeType });
+}
+
 function downscaleForStagingInput(base64, maxLongEdge) {
   return new Promise((resolve) => {
     if (!base64) { resolve(base64); return; }

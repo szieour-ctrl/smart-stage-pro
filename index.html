@@ -3678,7 +3678,16 @@ async function attachFinalToProject(finalBase64, room, orig, enhId) {
         tier: enhId ? 'final-enhanced' : 'final',
       })
     });
-    const uploadData = await uploadRes.json();
+    // Read as text first, THEN try to parse — a Lambda-level crash (memory
+    // limit, unhandled exception, timeout) returns a raw platform error
+    // page like "Internal Error", not the function's own JSON error
+    // response. Calling .json() directly on that threw a bare
+    // "Unexpected token 'I', "Internal E"... is not valid JSON" with zero
+    // useful information. This surfaces what actually happened instead.
+    const uploadRaw = await uploadRes.text();
+    let uploadData;
+    try { uploadData = JSON.parse(uploadRaw); }
+    catch { throw new Error(`upload-staged returned a non-JSON response (status ${uploadRes.status}): ${uploadRaw.slice(0, 200)}`); }
     if (!uploadData.publicUrl) throw new Error(uploadData.error || 'No staged URL returned from Cloudinary upload');
 
     // Attach to project in Blobs
@@ -3703,8 +3712,10 @@ async function attachFinalToProject(finalBase64, room, orig, enhId) {
       })
     });
     if (!attachRes.ok) {
-      const d = await attachRes.json().catch(() => ({}));
-      throw new Error(d.error || ('add-image failed: ' + attachRes.status));
+      const attachRaw = await attachRes.text();
+      let d;
+      try { d = JSON.parse(attachRaw); } catch { d = {}; }
+      throw new Error(d.error || `add-image failed (status ${attachRes.status}): ${attachRaw.slice(0, 200)}`);
     }
 
     console.log('Image attached to project:', SESSION.projectId, 'room:', room.roomName);

@@ -29,32 +29,39 @@ exports.handler = async (event) => {
     const { imageBase64, mimeType, scaleFactor } = JSON.parse(event.body);
     if (!imageBase64) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing imageBase64" }) };
 
+    // FIX (this session — real render evidence: an ultra-wide-lens interior
+    // photo, 6144x4096 native / ~25MP, at the requested 4x scale computed
+    // a 24576x16384 target — over 400 megapixels. Every real failure in
+    // Netlify's logs died silently after logging this target and before
+    // "Upscale complete," reporting Memory Usage near the function's
+    // ceiling each time. A normal (non-ultra-wide) photo at the same 4x
+    // request — 2016x1512 → 8064x6048, ~49MP — completed in ~5s using
+    // under 550MB. The scale factor alone isn't the problem; it's that
+    // multiplying an unusually large SOURCE by that factor has no ceiling
+    // at all. No real deliverable (MLS, marketing, even large-format
+    // print) needs a >400MP image — this caps the long edge at a still-
+    // generous 12,000px and scales the EFFECTIVE factor down to fit that
+    // cap, rather than blindly honoring whatever the source size implies.
+    const MAX_OUTPUT_LONG_EDGE = 12000;
     const scale = Math.min(Math.max(parseInt(scaleFactor) || 2, 1), 4);
     const imageBuffer = Buffer.from(imageBase64, "base64");
 
-    // FLAGGED, NOT YET FIXED (Sam's report — 502 on interior Generate
-    // Final, exterior works): this clamps to a max of 4x, but the client
-    // offers Marketing (6x) and Print (8x) tiers — those two tiers are
-    // silently capped down to 4x with no error, never delivering what
-    // they promised. That's a real, separate bug — but I'm deliberately
-    // NOT raising this cap yet, because if the 502 turns out to be a
-    // resource/timeout ceiling on this synchronous function, a HIGHER
-    // scale factor makes that worse, not better. This cap may have been
-    // an intentional (if undocumented) workaround for exactly that. Fix
-    // once the actual 502 cause is confirmed from Netlify's logs, not
-    // before.
-    //
-    // Logging payload size up front regardless — a 502 means Netlify's
-    // platform killed this function (timeout, memory, or payload-size
-    // ceiling), and there was no visibility into which, without a log
-    // line recorded before the point of failure.
     console.log(`Upscale request: scale=${scale}x requestedFactor=${scaleFactor} inputSize=${Math.round(imageBuffer.length/1024)}KB`);
 
     // Get original dimensions then upscale
     const metadata = await sharp(imageBuffer).metadata();
-    const newWidth  = Math.round(metadata.width  * scale);
-    const newHeight = Math.round(metadata.height * scale);
-    console.log(`Upscale target: ${metadata.width}x${metadata.height} → ${newWidth}x${newHeight} (${scale}x)`);
+    let newWidth  = Math.round(metadata.width  * scale);
+    let newHeight = Math.round(metadata.height * scale);
+    const longEdge = Math.max(newWidth, newHeight);
+    if (longEdge > MAX_OUTPUT_LONG_EDGE) {
+      const capRatio = MAX_OUTPUT_LONG_EDGE / longEdge;
+      const cappedWidth  = Math.round(newWidth  * capRatio);
+      const cappedHeight = Math.round(newHeight * capRatio);
+      console.log(`Upscale target ${newWidth}x${newHeight} exceeds the ${MAX_OUTPUT_LONG_EDGE}px long-edge cap (source is unusually large — likely an ultra-wide-lens shot) — capping to ${cappedWidth}x${cappedHeight} instead.`);
+      newWidth = cappedWidth;
+      newHeight = cappedHeight;
+    }
+    console.log(`Upscale target: ${metadata.width}x${metadata.height} → ${newWidth}x${newHeight} (${scale}x requested)`);
 
     const upscaledBuffer = await sharp(imageBuffer)
       .resize(newWidth, newHeight, { kernel: sharp.kernel.lanczos3 })

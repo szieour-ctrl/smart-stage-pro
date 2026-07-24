@@ -79,7 +79,18 @@ exports.handler = async (event) => {
     // to visual fidelity than losing pixels) before falling back to
     // shrinking dimensions further.
     const MAX_RESPONSE_BYTES = 5.5 * 1024 * 1024; // 5.5MB raw base64 — real margin under Lambda's 6MB ceiling for the JSON-wrapped response as a whole, not just the base64 field alone
-    let quality = 92;
+    // Every real failure logged this session needed 2-3 quality step-downs
+    // before fitting under the response ceiling — each step is a full
+    // lanczos3 resize + JPEG encode on a many-megapixel image, genuinely
+    // slow, and the cumulative time across 3 passes is what pushed total
+    // request time past whatever platform ceiling was killing the client
+    // connection (Lambda kept running and completed regardless — see
+    // "Upscale complete" appearing in logs for requests the client never
+    // saw succeed). Starting lower for large targets trims a wasted first
+    // pass rather than always starting optimistic at 92 and stepping down.
+    const outputMegapixels = (newWidth * newHeight) / 1_000_000;
+    let quality = outputMegapixels > 70 ? 78 : 92;
+    console.log(`Upscale starting quality: ${quality} (${Math.round(outputMegapixels)}MP target)`);
     let upscaledBuffer = await sharp(imageBuffer)
       .resize(newWidth, newHeight, { kernel: sharp.kernel.lanczos3 })
       .jpeg({ quality })

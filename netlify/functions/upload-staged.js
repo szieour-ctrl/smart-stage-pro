@@ -1,94 +1,30 @@
 // upload-staged.js — Netlify Function
-// Uploads a staged Final image to Cloudinary for permanent project storage
-// Called after generateFinal completes, before project-manage add-image
+// Issues a signed Cloudinary upload signature for a staged Final image.
+// Called after generateFinal completes, before project-manage add-image.
 //
-// Input:  { imageBase64, mimeType, projectId, roomName, tier }
-// Output: { publicUrl, cloudinaryId }
+// ARCHITECTURE CHANGE (this session — real production failure, not a
+// hypothesis): this function used to receive the full image (imageBase64)
+// and upload it to Cloudinary itself. That put the image through TWO
+// Lambda payload hops — browser → this function (JSON body), then this
+// function → Cloudinary (multipart body) — and a prior fix only addressed
+// the second hop. The actual failure was the FIRST hop: a large final
+// image in the incoming request body can exceed the platform's payload
+// ceiling before this function's own code ever runs at all — confirmed by
+// a real invocation ID from a genuine failure that produced zero matching
+// log output anywhere, consistent with a gateway-level rejection prior to
+// Lambda invocation, not a caught or uncaught error inside our code.
+//
+// Fix: the image never passes through this function, or any of our own
+// infrastructure, at all. This function only signs a short-lived Cloudinary
+// upload request; the browser uploads the actual image bytes DIRECTLY to
+// Cloudinary's own endpoint (which accepts far larger payloads than our
+// Lambda ever will). This is Cloudinary's own documented pattern for
+// exactly this situation, not a workaround specific to this codebase.
+//
+// Input:  { projectId, roomName, tier }  — NO image data
+// Output: { cloudName, apiKey, timestamp, signature, folder }
 
-const https = require("https");
 const crypto = require("crypto");
-
-// Builds a multipart/form-data body. Previously this function built the
-// request as application/x-www-form-urlencoded, running the base64 image
-// string through encodeURIComponent — base64 is full of +, /, and =
-// characters, and percent-encoding turns each of those into a 3-character
-// escape sequence, meaningfully inflating an already-large string. At the
-// same time, the old code held the raw base64, a "data:...;base64,..."
-// prefixed copy, AND the percent-encoded copy in memory simultaneously.
-// Multipart avoids all of this — the image goes in as raw bytes, no
-// re-encoding, and only one buffer copy exists at a time. This directly
-// reduces peak memory for exactly the large/ultra-wide-lens images that
-// have been the recurring problem across this pipeline.
-function buildMultipartBody(fields, fileBuffer, fileFieldName, filename, contentType, boundary) {
-  const CRLF = "\r\n";
-  const parts = [];
-  for (const [key, value] of Object.entries(fields)) {
-    parts.push(Buffer.from(
-      `--${boundary}${CRLF}Content-Disposition: form-data; name="${key}"${CRLF}${CRLF}${value}${CRLF}`,
-      "utf8"
-    ));
-  }
-  parts.push(Buffer.from(
-    `--${boundary}${CRLF}Content-Disposition: form-data; name="${fileFieldName}"; filename="${filename}"${CRLF}Content-Type: ${contentType}${CRLF}${CRLF}`,
-    "utf8"
-  ));
-  parts.push(fileBuffer);
-  parts.push(Buffer.from(`${CRLF}--${boundary}--${CRLF}`, "utf8"));
-  return Buffer.concat(parts);
-}
-
-async function uploadToCloudinary(imageBase64, mimeType, cloudName, uploadPreset, apiKey, apiSecret, folder) {
-  // Decode ONCE to a raw buffer — this is what actually goes over the
-  // wire now, not a base64 string wrapped in a data: URI.
-  const imageBuffer = Buffer.from(imageBase64, "base64");
-  const folderParam = folder || "smart-stage-finals";
-
-  const fields = {};
-  if (apiKey && apiSecret) {
-    const timestamp = Math.floor(Date.now() / 1000).toString();
-    // Signature is computed over non-file params only, alphabetical order
-    // (folder, timestamp) — unchanged from the previous implementation,
-    // still correct with a multipart body.
-    const paramsToSign = `folder=${folderParam}&timestamp=${timestamp}`;
-    const signature = crypto.createHash("sha1").update(paramsToSign + apiSecret).digest("hex");
-    fields.folder    = folderParam;
-    fields.timestamp = timestamp;
-    fields.api_key   = apiKey;
-    fields.signature = signature;
-  } else {
-    fields.folder        = folderParam;
-    fields.upload_preset = uploadPreset;
-  }
-
-  const boundary = "----SmartStageBoundary" + crypto.randomBytes(16).toString("hex");
-  const ext = (mimeType || "image/jpeg").split("/")[1] || "jpg";
-  const bodyBuf = buildMultipartBody(fields, imageBuffer, "file", `staged.${ext}`, mimeType || "image/jpeg", boundary);
-
-  return new Promise((resolve, reject) => {
-    const req = https.request({
-      hostname: "api.cloudinary.com",
-      path: `/v1_1/${cloudName}/image/upload`,
-      method: "POST",
-      headers: {
-        "Content-Type": `multipart/form-data; boundary=${boundary}`,
-        "Content-Length": bodyBuf.length,
-      },
-    }, (res) => {
-      const chunks = [];
-      res.on("data", c => chunks.push(c));
-      res.on("end", () => {
-        try {
-          const parsed = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-          if (res.statusCode !== 200) reject(new Error(`Cloudinary error: ${parsed?.error?.message}`));
-          else resolve(parsed);
-        } catch (e) { reject(new Error("Cloudinary parse error")); }
-      });
-    });
-    req.on("error", reject);
-    req.write(bodyBuf);
-    req.end();
-  });
-}
 
 exports.handler = async (event) => {
   const headers = {
@@ -100,33 +36,30 @@ exports.handler = async (event) => {
   if (event.httpMethod !== "POST") return { statusCode: 405, headers, body: "Method Not Allowed" };
 
   try {
-    const { imageBase64, mimeType, projectId, roomName, tier } = JSON.parse(event.body || "{}");
-    if (!imageBase64) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing imageBase64" }) };
+    const { projectId } = JSON.parse(event.body || "{}");
 
-    const cloudName   = process.env.CLOUDINARY_CLOUD_NAME;
-    const apiKey      = process.env.CLOUDINARY_API_KEY;
-    const apiSecret   = process.env.CLOUDINARY_API_SECRET;
-    const uploadPreset = process.env.CLOUDINARY_UPLOAD_PRESET;
+    const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
+    const apiKey    = process.env.CLOUDINARY_API_KEY;
+    const apiSecret = process.env.CLOUDINARY_API_SECRET;
 
     if (!cloudName) return { statusCode: 500, headers, body: JSON.stringify({ error: "CLOUDINARY_CLOUD_NAME not configured" }) };
+    if (!apiKey || !apiSecret) return { statusCode: 500, headers, body: JSON.stringify({ error: "CLOUDINARY_API_KEY/SECRET not configured — signed upload requires both" }) };
 
-    // Organize by project in Cloudinary folder
-    const folder = projectId ? `smart-stage-finals/${projectId}` : "smart-stage-finals";
+    const folder    = projectId ? `smart-stage-finals/${projectId}` : "smart-stage-finals";
+    const timestamp = Math.floor(Date.now() / 1000).toString();
 
-    console.log(`Uploading ${tier || "final"} staged image for project ${projectId || "none"}, room: ${roomName}`);
-    const result = await uploadToCloudinary(imageBase64, mimeType || "image/jpeg", cloudName, uploadPreset, apiKey, apiSecret, folder);
+    // Signature covers exactly the non-file params the browser will send,
+    // alphabetical order, same rule as Cloudinary always requires.
+    const paramsToSign = `folder=${folder}&timestamp=${timestamp}`;
+    const signature = crypto.createHash("sha1").update(paramsToSign + apiSecret).digest("hex");
 
     return {
-      statusCode: 200, headers,
-      body: JSON.stringify({
-        publicUrl: result.secure_url,
-        cloudinaryId: result.public_id,
-        width: result.width,
-        height: result.height,
-      }),
+      statusCode: 200,
+      headers,
+      body: JSON.stringify({ cloudName, apiKey, timestamp, signature, folder }),
     };
   } catch (err) {
-    console.error("upload-staged error:", err.message);
+    console.error("upload-staged (signature) error:", err.message);
     return { statusCode: 500, headers, body: JSON.stringify({ error: err.message }) };
   }
 };

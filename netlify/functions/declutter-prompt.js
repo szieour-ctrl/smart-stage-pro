@@ -92,7 +92,7 @@ PRESERVE (permanent architecture - IMMUTABLE):
 - Structural walls, ceilings, flooring
 - Windows (frames, glass, shutters, plantation blinds)
 - Doors (frames, hinges)
-- Kitchen cabinetry, countertops, backsplash, appliances (stove, oven, microwave, refrigerator, dishwasher, hood)
+- Kitchen cabinetry, bathroom cabinetry, countertops, backsplash, appliances (stove, oven, microwave, refrigerator, dishwasher, hood)
 - Bathroom fixtures (vanity, toilet, shower, tub, medicine cabinet mirrors)
 - Fireplace surround, hearth, insert
 - Built-in shelving ONLY if permanently constructed into the wall (recessed, nailed to studs, part of wall construction). A shelf leaning against a wall is NOT built-in.

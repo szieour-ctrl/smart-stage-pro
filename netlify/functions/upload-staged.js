@@ -8,24 +8,61 @@
 const https = require("https");
 const crypto = require("crypto");
 
-async function uploadToCloudinary(imageBase64, mimeType, cloudName, uploadPreset, apiKey, apiSecret, folder) {
-  const dataUrl = `data:${mimeType || "image/jpeg"};base64,${imageBase64}`;
+// Builds a multipart/form-data body. Previously this function built the
+// request as application/x-www-form-urlencoded, running the base64 image
+// string through encodeURIComponent — base64 is full of +, /, and =
+// characters, and percent-encoding turns each of those into a 3-character
+// escape sequence, meaningfully inflating an already-large string. At the
+// same time, the old code held the raw base64, a "data:...;base64,..."
+// prefixed copy, AND the percent-encoded copy in memory simultaneously.
+// Multipart avoids all of this — the image goes in as raw bytes, no
+// re-encoding, and only one buffer copy exists at a time. This directly
+// reduces peak memory for exactly the large/ultra-wide-lens images that
+// have been the recurring problem across this pipeline.
+function buildMultipartBody(fields, fileBuffer, fileFieldName, filename, contentType, boundary) {
+  const CRLF = "\r\n";
+  const parts = [];
+  for (const [key, value] of Object.entries(fields)) {
+    parts.push(Buffer.from(
+      `--${boundary}${CRLF}Content-Disposition: form-data; name="${key}"${CRLF}${CRLF}${value}${CRLF}`,
+      "utf8"
+    ));
+  }
+  parts.push(Buffer.from(
+    `--${boundary}${CRLF}Content-Disposition: form-data; name="${fileFieldName}"; filename="${filename}"${CRLF}Content-Type: ${contentType}${CRLF}${CRLF}`,
+    "utf8"
+  ));
+  parts.push(fileBuffer);
+  parts.push(Buffer.from(`${CRLF}--${boundary}--${CRLF}`, "utf8"));
+  return Buffer.concat(parts);
+}
 
-  let bodyObj;
+async function uploadToCloudinary(imageBase64, mimeType, cloudName, uploadPreset, apiKey, apiSecret, folder) {
+  // Decode ONCE to a raw buffer — this is what actually goes over the
+  // wire now, not a base64 string wrapped in a data: URI.
+  const imageBuffer = Buffer.from(imageBase64, "base64");
+  const folderParam = folder || "smart-stage-finals";
+
+  const fields = {};
   if (apiKey && apiSecret) {
     const timestamp = Math.floor(Date.now() / 1000).toString();
-    const folderParam = folder || "smart-stage-finals";
+    // Signature is computed over non-file params only, alphabetical order
+    // (folder, timestamp) — unchanged from the previous implementation,
+    // still correct with a multipart body.
     const paramsToSign = `folder=${folderParam}&timestamp=${timestamp}`;
     const signature = crypto.createHash("sha1").update(paramsToSign + apiSecret).digest("hex");
-    bodyObj = { file: dataUrl, folder: folderParam, timestamp, api_key: apiKey, signature };
+    fields.folder    = folderParam;
+    fields.timestamp = timestamp;
+    fields.api_key   = apiKey;
+    fields.signature = signature;
   } else {
-    bodyObj = { file: dataUrl, folder: folder || "smart-stage-finals", upload_preset: uploadPreset };
+    fields.folder        = folderParam;
+    fields.upload_preset = uploadPreset;
   }
 
-  const bodyStr = Object.entries(bodyObj)
-    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
-    .join("&");
-  const bodyBuf = Buffer.from(bodyStr, "utf8");
+  const boundary = "----SmartStageBoundary" + crypto.randomBytes(16).toString("hex");
+  const ext = (mimeType || "image/jpeg").split("/")[1] || "jpg";
+  const bodyBuf = buildMultipartBody(fields, imageBuffer, "file", `staged.${ext}`, mimeType || "image/jpeg", boundary);
 
   return new Promise((resolve, reject) => {
     const req = https.request({
@@ -33,7 +70,7 @@ async function uploadToCloudinary(imageBase64, mimeType, cloudName, uploadPreset
       path: `/v1_1/${cloudName}/image/upload`,
       method: "POST",
       headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
+        "Content-Type": `multipart/form-data; boundary=${boundary}`,
         "Content-Length": bodyBuf.length,
       },
     }, (res) => {

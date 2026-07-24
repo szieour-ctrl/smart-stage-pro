@@ -63,13 +63,54 @@ exports.handler = async (event) => {
     }
     console.log(`Upscale target: ${metadata.width}x${metadata.height} → ${newWidth}x${newHeight} (${scale}x requested)`);
 
-    const upscaledBuffer = await sharp(imageBuffer)
+    // FIX (this session — real render evidence: the dimension cap above
+    // fixed the MEMORY problem, but exposed a SECOND, different Lambda
+    // ceiling right behind it — the RESPONSE itself. A 12000x8000 JPEG
+    // encoded to an 8.2MB base64 string, and Lambda's synchronous
+    // function response is capped at the same 6MB regular-function limit
+    // that caused Smart Correct's original bug, just on the outbound side
+    // this time: "Exceeded maximum allowed payload size (6291556 bytes)."
+    // A fixed pixel cap "usually" staying under 6MB isn't a real
+    // guarantee — JPEG size depends on image content (a highly detailed
+    // photo compresses far larger than a simple one at the same pixel
+    // count), so this checks the ACTUAL encoded size and shrinks until it
+    // genuinely fits, for any image, rather than hoping a static number
+    // is conservative enough. Quality reduction is tried first (cheaper
+    // to visual fidelity than losing pixels) before falling back to
+    // shrinking dimensions further.
+    const MAX_RESPONSE_BYTES = 5.5 * 1024 * 1024; // 5.5MB raw base64 — real margin under Lambda's 6MB ceiling for the JSON-wrapped response as a whole, not just the base64 field alone
+    let quality = 92;
+    let upscaledBuffer = await sharp(imageBuffer)
       .resize(newWidth, newHeight, { kernel: sharp.kernel.lanczos3 })
-      .jpeg({ quality: 92 })
+      .jpeg({ quality })
       .toBuffer();
 
+    while (upscaledBuffer.length * 1.34 > MAX_RESPONSE_BYTES) { // *1.34 — base64 encoding overhead, applied before actually encoding so this loop works on the cheaper raw buffer size
+      if (quality > 60) {
+        quality -= 10;
+        console.log(`Upscale response would exceed the ${Math.round(MAX_RESPONSE_BYTES/1024/1024)}MB response ceiling at quality ${quality + 10} — retrying at quality ${quality}.`);
+        upscaledBuffer = await sharp(imageBuffer)
+          .resize(newWidth, newHeight, { kernel: sharp.kernel.lanczos3 })
+          .jpeg({ quality })
+          .toBuffer();
+      } else {
+        // Quality floor reached with no relief — the image is too large
+        // at these dimensions regardless of compression. Shrink the
+        // canvas itself by 15% and reset quality, rather than degrading
+        // quality indefinitely into visibly bad territory.
+        newWidth = Math.round(newWidth * 0.85);
+        newHeight = Math.round(newHeight * 0.85);
+        quality = 92;
+        console.log(`Upscale response still too large at the quality floor — shrinking target to ${newWidth}x${newHeight} and resetting quality to ${quality}.`);
+        upscaledBuffer = await sharp(imageBuffer)
+          .resize(newWidth, newHeight, { kernel: sharp.kernel.lanczos3 })
+          .jpeg({ quality })
+          .toBuffer();
+      }
+    }
+
     const upscaledBase64 = upscaledBuffer.toString("base64");
-    console.log(`Upscale complete: ${newWidth}x${newHeight} ${Math.round(upscaledBase64.length/1024)}KB`);
+    console.log(`Upscale complete: ${newWidth}x${newHeight} quality=${quality} ${Math.round(upscaledBase64.length/1024)}KB`);
 
     return {
       statusCode: 200,

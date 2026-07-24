@@ -260,6 +260,11 @@ function renderPage(project, projectId, videoJobs) {
     .compliance-banner h1 { font-size: 15px; font-weight: 500; margin-bottom: 4px; }
     .compliance-banner p { font-size: 12px; color: #9ab0cc; line-height: 1.6; max-width: 900px; }
 
+    /* ── REFRESH NOTE ── */
+    .refresh-note { background: #f0ece4; color: #7a6f63; font-size: 11px; padding: 8px 24px; border-bottom: 1px solid #e0d8ce; text-align: center; }
+    .refresh-note a { color: #b8975a; font-weight: 600; text-decoration: none; margin-left: 8px; }
+    .refresh-note a:hover { text-decoration: underline; }
+
     /* ── PROPERTY CARD ── */
     .property-card { background: #fff; border-bottom: 1px solid #e0d8ce; padding: 20px 24px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
     .property-address { font-size: 20px; font-weight: 500; color: #1a1714; }
@@ -350,6 +355,15 @@ function renderPage(project, projectId, videoJobs) {
     adding virtual furniture and décor for illustrative purposes only. The property is sold as shown
     in the original photographs. This page is maintained by Smart Stage PRO™.
   </p>
+</div>
+
+<!-- REFRESH NOTE — this page always serves fresh, current data server-side
+     (no caching on our end), but a browser tab left open from an earlier
+     visit can still show what was on the page at that time. A simple
+     refresh always pulls the current, up-to-date version. -->
+<div class="refresh-note">
+  For the most current version of this page, please refresh your browser (press F5, or Ctrl/Cmd+R).
+  <a href="javascript:void(0)" onclick="window.location.reload(true)">Refresh now</a>
 </div>
 
 <!-- AGENT BAR -->

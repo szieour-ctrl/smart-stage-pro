@@ -72,6 +72,7 @@ TASK: Identify what must be REMOVED vs. what must be PRESERVED.
 
 REMOVE (movable objects only):
 - Furniture (sofas, chairs, tables, beds, dressers, etc.)
+- Beds — the ENTIRE bed, not just what's on it: mattress, box spring, frame, headboard, footboard, and slats all get removed completely. Stripping the bedding/pillows/clothing off a bed but leaving the frame or headboard standing is INCOMPLETE and INCORRECT — a bed is furniture like a sofa or dresser, and gets removed the same way: entirely. If a bed is in the room, "removeList" must explicitly say the bed/frame/headboard is being removed, not only the items on top of it.
 - Decor (art, plants, throw pillows, lamps, rugs, etc.)
 - Wall-mounted mirrors (decorative, not medicine cabinet)
 - Wall art, framed photos, picture frames
@@ -97,6 +98,12 @@ Do NOT add a glass door, sliding door, glass panel, or frame of any kind unless 
 Leave the existing curtain rod in place, bare, with no curtain hanging on it.
 Do NOT alter the tile, tub, or shower valve/showerhead in any way.
 An open shower/tub with just a bare rod and no door is the CORRECT and expected result — never "upgrade" it to an enclosure.
+
+CRITICAL INPAINTING RULE FOR BEDS:
+A bed — mattress, box spring, frame, headboard, footboard, slats, everything — is furniture and must be removed COMPLETELY, exactly like a sofa, dresser, or table would be.
+Removing only the bedding, pillows, and clothing while leaving the bed frame or headboard standing is WRONG — that is not a decluttered room, it's a stripped bed.
+Fill the entire footprint where the bed stood with matching floor surface, exactly as you would for any other removed furniture piece.
+If unsure whether "the bed" means the whole structure or just the linens: it means the whole structure. There is no partial removal of a bed.
 
 CRITICAL INPAINTING RULE FOR WINDOWS:
 Windows are permanent architecture, not furniture — they are NEVER removed, resized, repositioned, or converted into anything else, no matter what is covering them.
@@ -204,7 +211,8 @@ function buildDeclutterPrompt({ roomData }) {
   p += `14. Closet hanging rod(s): preserve the exact original count and position. Never remove a rod, relocate a rod, or add a second/lower rod — no double-hang unless the original photo clearly shows two rods\n`;
   p += `15. Shower/tub: if a shower curtain is removed, leave a bare curtain rod with an open shower/tub opening. Do NOT add a glass door, sliding door, or enclosure panel that was not visible in the original photo\n`;
   p += `16. Bathroom vanity cabinetry: preserve BOTH upper and lower cabinets exactly, including medicine cabinets — remove only items sitting on the counter or inside an open cabinet, never the cabinet structure itself\n`;
-  p += `17. Windows: when removing curtains, drapes, or sheers, the window itself (frame, glass, trim, sill, blinds/shutters) must stay the EXACT original size and position — do not shrink, enlarge, shift, or convert a window into a door or opening\n\n`;
+  p += `17. Windows: when removing curtains, drapes, or sheers, the window itself (frame, glass, trim, sill, blinds/shutters) must stay the EXACT original size and position — do not shrink, enlarge, shift, or convert a window into a door or opening\n`;
+  p += `18. Beds: remove the ENTIRE bed — mattress, box spring, frame, headboard, footboard, slats — not just the bedding/linens/clothing on top of it. A stripped bed frame or headboard left standing is an incomplete removal, not a correct one\n\n`;
 
   p += `COMPLIANCE:\n`;
   p += `This room will be prepared per California AB 723 §10140.6 for virtual staging.\n`;

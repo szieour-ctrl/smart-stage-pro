@@ -54,7 +54,9 @@ async function prepareImage(imageBase64, mimeType) {
 // ✅ AB 723 COMPLIANCE HEADER — Every prompt starts with this
 const AB723_HEADER = `PRIMARY ROLE: Remove furniture and decor ONLY. Preserve architecture exactly.
 
-IMMUTABLE LOCK: Never alter, move, remove, replace, or touch: structural walls | ceilings | kitchen/bathroom cabinets | countertops | lighting fixtures | doors | windows | built-in appliances. These must be preserved exactly as photographed.
+IMMUTABLE LOCK: Never alter, move, remove, replace, or touch: structural walls | ceilings | kitchen/bathroom cabinets (including upper vanity cabinets and medicine cabinets) | countertops | lighting fixtures | doors | windows | built-in appliances | closet hanging rods | shower/tub surrounds and hardware. These must be preserved exactly as photographed.
+
+NEVER INVENT NEW ELEMENTS: Do not add anything that is not visible in the original photo — this includes shower doors, glass enclosures, sliding panels, a second/lower closet rod, or any hardware not present in the source image. If something is being removed (e.g. a shower curtain), leave the space as an open, bare fixture exactly as it would look with just that item taken away. Do not "complete" or "upgrade" a fixture.
 
 AB 723 COMPLIANCE: Decluttering removes movable objects only. Any alteration to permanent architecture makes the result non-compliant and subject to MLS removal.
 
@@ -79,7 +81,8 @@ REMOVE (movable objects only):
 - Wall-mounted floating shelves (unless recessed into wall cavity)
 - Personal items (books, photos, decorations, collectibles)
 - Curtains, drapes, window treatments (shutters/blinds stay)
-- Any movable object not listed in PRESERVE
+- Shower curtains and shower curtain liners (the curtain ROD stays — see PRESERVE below; do NOT add a glass door, sliding panel, or enclosure in its place)
+- Any movable object not listed in PRESERVE — EXCEPT closet hanging rods and vanity cabinetry, which are never movable objects and must always be preserved (see PRESERVE)
 
 CRITICAL INPAINTING RULE FOR MIRRORS, TVs, AND WALL ART:
 When removing a mirror, TV, or art from a wall, fill that area with MATCHING WALL PAINT AND TEXTURE.
@@ -88,12 +91,22 @@ Do NOT create a doorway, window, opening, niche, or alcove where any wall object
 Do NOT leave any mounting bracket, hardware, or outline visible.
 The result must be a flat, continuous wall surface matching the surrounding wall color and finish.
 
+CRITICAL INPAINTING RULE FOR SHOWERS:
+When a shower curtain is removed, the shower/tub opening becomes simply open and bare — exactly what you'd see if you physically took the curtain down and nothing else changed.
+Do NOT add a glass door, sliding door, glass panel, or frame of any kind unless one is clearly visible in the original photo.
+Leave the existing curtain rod in place, bare, with no curtain hanging on it.
+Do NOT alter the tile, tub, or shower valve/showerhead in any way.
+An open shower/tub with just a bare rod and no door is the CORRECT and expected result — never "upgrade" it to an enclosure.
+
 PRESERVE (permanent architecture - IMMUTABLE):
 - Structural walls, ceilings, flooring
 - Windows (frames, glass, shutters, plantation blinds)
 - Doors (frames, hinges)
 - Kitchen cabinetry, bathroom cabinetry, countertops, backsplash, appliances (stove, oven, microwave, refrigerator, dishwasher, hood)
-- Bathroom fixtures (vanity, toilet, shower, tub, medicine cabinet mirrors)
+- Bathroom vanity cabinetry — BOTH the lower/base cabinet AND any upper cabinets, medicine cabinets, or wall-mounted storage above the vanity. Preserve every vanity cabinet exactly as photographed, including uppers. If items are sitting on a countertop or inside an open cabinet, remove only those items — never the cabinetry itself.
+- Bathroom fixtures (toilet, shower, tub, sink, faucet)
+- Shower/tub surround, tile, glass panel or door (ONLY if actually present in the photo), shower valve, showerhead, and curtain rod — preserve exactly as-is. Do not add a door/enclosure that isn't already there; do not remove a door/enclosure that is already there.
+- Closet hanging rod(s) — preserve the EXACT number and position of rods visible in the photo. If one rod is present, the result must have exactly one rod, in the same position. Never add a second/lower rod (no double-hang) unless a second rod is clearly visible in the original. Only clothing, hangers, bins, and shoes on the floor are removable — the rod hardware itself always stays mounted in place.
 - Fireplace surround, hearth, insert
 - Built-in shelving ONLY if permanently constructed into the wall (recessed, nailed to studs, part of wall construction). A shelf leaning against a wall is NOT built-in.
 - Ceiling fans, chandeliers, light fixtures (in situ)
@@ -180,7 +193,10 @@ function buildDeclutterPrompt({ roomData }) {
   p += `10. Do NOT alter kitchen cabinets, countertops, or appliances\n`;
   p += `11. Maintain realistic perspective and proportions\n`;
   p += `12. Maintain the EXACT same camera angle, field of view, and framing as the original — do NOT crop, zoom, or reframe\n`;
-  p += `13. Result must be a completely empty room with bare walls ready for staging\n\n`;
+  p += `13. Result must be a completely empty room with bare walls ready for staging\n`;
+  p += `14. Closet hanging rod(s): preserve the exact original count and position. Never remove a rod, relocate a rod, or add a second/lower rod — no double-hang unless the original photo clearly shows two rods\n`;
+  p += `15. Shower/tub: if a shower curtain is removed, leave a bare curtain rod with an open shower/tub opening. Do NOT add a glass door, sliding door, or enclosure panel that was not visible in the original photo\n`;
+  p += `16. Bathroom vanity cabinetry: preserve BOTH upper and lower cabinets exactly, including medicine cabinets — remove only items sitting on the counter or inside an open cabinet, never the cabinet structure itself\n\n`;
 
   p += `COMPLIANCE:\n`;
   p += `This room will be prepared per California AB 723 §10140.6 for virtual staging.\n`;

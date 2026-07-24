@@ -4300,6 +4300,50 @@ function downloadHeroDetailShot(roomId, shotId) {
 
 
 
+// FIX (this session — real bug: staging/revising an already-decluttered
+// room could 502/413 at Generate Final on an ultra-wide photo, while a
+// fresh Clean+Stage run on the SAME photo worked fine). Root cause: the
+// AI staging call (callStageAPI) receives a genuinely different-sized
+// reference image depending on path. Clean+Stage's Step 3 always feeds
+// it the RAW, native AI-generation-size declutter output — small. But
+// iterateRoom/reStageRoom, once a prior staged/decluttered result
+// exists, feed it `priorStagedClean`/`room.declutteredBase64` — which by
+// that point has ALREADY been run through resizeToMatch and is a full
+// original-camera-resolution image (6144x4096 for an ultra-wide shot).
+// Same endpoint, up to 8x more pixels as input. resizeToMatch() restores
+// full resolution at the END of every staging path regardless — there's
+// no benefit to the AI call ever seeing more than a modest working
+// resolution, only downside (bigger request, and very likely a larger/
+// more detailed output that compresses to a bigger file at the same
+// final pixel dimensions, pushing it toward the same response-size
+// ceiling upscale-image.js already had to guard against).
+//
+// Downscales via canvas, same technique resizeToMatch already uses
+// elsewhere in this file — fit-inside (never upscales, only shrinks),
+// so a reference image already smaller than the cap passes through
+// unchanged.
+function downscaleForStagingInput(base64, maxLongEdge) {
+  return new Promise((resolve) => {
+    if (!base64) { resolve(base64); return; }
+    const img = new Image();
+    img.onload = () => {
+      const { naturalWidth: w, naturalHeight: h } = img;
+      const longEdge = Math.max(w, h);
+      if (longEdge <= maxLongEdge) { resolve(base64); return; } // already small enough
+      const scale = maxLongEdge / longEdge;
+      const newW = Math.round(w * scale);
+      const newH = Math.round(h * scale);
+      const canvas = document.createElement('canvas');
+      canvas.width = newW; canvas.height = newH;
+      canvas.getContext('2d').drawImage(img, 0, 0, newW, newH);
+      resolve(canvas.toDataURL('image/jpeg', 0.93).split(',')[1]);
+    };
+    img.onerror = () => resolve(base64); // fail open — better to send the large image than fail the whole revision on a decode error
+    const mime = base64.charAt(0) === '/' ? 'image/jpeg' : base64.charAt(0) === 'i' ? 'image/png' : 'image/jpeg';
+    img.src = `data:${mime};base64,${base64}`;
+  });
+}
+
 async function iterateRoom(roomId) {
   const note = document.getElementById('iter-' + roomId)?.value?.trim() || '';
   if (!note) { showToast('Enter revision instructions first.', 'error'); return; }
@@ -4351,8 +4395,13 @@ async function iterateRoom(roomId) {
 
     // Send the PRIOR STAGED photo (unwatermarked) + edit-only prompt to GPT — true
     // surgical edit. Falls back to the original empty-room photo only if no prior
-    // staged result was captured.
-    const sourceImage = hasPriorStaged ? priorStagedClean : orig.base64;
+    // staged result was captured. Downscaled first (see downscaleForStagingInput
+    // above) — a prior staged result may already be full-original-resolution
+    // (resizeToMatch already ran on it once), and the AI call never needs more
+    // than a modest working resolution; resizeToMatch restores full detail at
+    // the end of this function regardless.
+    const rawSourceImage = hasPriorStaged ? priorStagedClean : orig.base64;
+    const sourceImage = await downscaleForStagingInput(rawSourceImage, 2048);
     const sourceMime = hasPriorStaged ? 'image/jpeg' : orig.mimeType;
     const stageResult = await callStageAPI(sourceImage, sourceMime, approvedPrompt, 'low');
     if (!stageResult) throw new Error('Staging engine failed — no image returned');
@@ -4431,9 +4480,13 @@ async function reStageRoom(roomId) {
 
     // Send the PRIOR STAGED photo (unwatermarked) + edit-only prompt to GPT — true
     // surgical edit. Falls back to the decluttered empty room only if no prior staged
-    // result was captured.
-    const sourceImage = hasPriorStaged ? priorStagedClean : room.declutteredBase64;
-    const sourceMime = hasPriorStaged ? 'image/jpeg' : 'image/jpeg';
+    // result was captured. Downscaled first — see downscaleForStagingInput's comment
+    // above iterateRoom() for the full "why" (same fix, same reasoning, both functions
+    // hit the identical bug since both can feed the AI call an already-full-resolution
+    // reference image otherwise).
+    const rawSourceImage = hasPriorStaged ? priorStagedClean : room.declutteredBase64;
+    const sourceImage = await downscaleForStagingInput(rawSourceImage, 2048);
+    const sourceMime = 'image/jpeg';
     const stageResult = await callStageAPI(sourceImage, sourceMime, approvedPrompt, 'low');
     if (!stageResult) throw new Error('Staging engine failed — no image returned');
     const stagedBase64 = stageResult.watermarked;

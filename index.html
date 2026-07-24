@@ -7638,7 +7638,7 @@ async function loadDashboardData() {
 
     const data = await res.json();
     _dashboardData = data;
-    renderDashboard(data, 'all', '');
+    renderDashboard(data, _dbFilter, _dbSearch);
 
   } catch (err) {
     renderDashboardError('Error loading listings: ' + err.message);
@@ -7705,6 +7705,8 @@ function renderDashboard(data, filter, search) {
       <div class="db-card-actions">
         ${l.complianceUrl ? `<button class="db-action-btn" onclick="window.open('${l.complianceUrl}','_blank')">View Compliance Page</button>` : ''}
         ${l.projectId ? `<button class="db-action-btn" onclick="downloadQR('${l.projectId}','${l.address.replace(/'/g,'')}')">↓ Download QR</button>` : ''}
+        ${l.projectId ? `<button class="db-action-btn" onclick="openListingImages('${l.id}','${l.projectId}')">🖼️ View Images</button>` : ''}
+        ${l.hiddenCount ? `<button class="db-action-btn" style="color:#8a6d3b;border-color:#e8d5a8;" onclick="openHiddenImages('${l.id}','${l.projectId}')" title="Images pulled from public view — not deleted, review separately">Hidden (${l.hiddenCount}) — Review</button>` : ''}
         <button class="db-action-btn" onclick="openVideoBuilderFor('${l.id}','${l.projectId || ''}')">+ Create Video</button>
         <button class="db-action-btn primary" onclick="hideDashboard()">Continue Staging →</button>
         <button class="db-action-btn danger" onclick="archiveListing('${l.id}','${l.address.replace(/'/g,'').replace(/"/g,'')}')" title="Hide from dashboard — compliance page stays active">Archive</button>
@@ -7740,6 +7742,153 @@ function filterDashboard(filter, search) {
   _dbFilter = filter !== undefined ? filter : _dbFilter;
   _dbSearch = search !== undefined ? search : _dbSearch;
   if (_dashboardData) renderDashboard(_dashboardData, _dbFilter, _dbSearch);
+}
+
+// ── LISTING IMAGES MODAL — "Hide from Compliance Page" / "Hidden (N) — Review" ──
+// Two deliberately separate views (Sam's design): published images and
+// hidden images are never mixed in the same list, so a pulled image
+// doesn't quietly reappear alongside what's actually live. Both call
+// hide-image.js — list-visible for the gallery, list-hidden for review.
+function ensureImagesModal(){
+  if (document.getElementById('listing-images-modal')) return;
+  const modal = document.createElement('div');
+  modal.id = 'listing-images-modal';
+  modal.className = 'hidden';
+  modal.innerHTML = `
+    <style>
+      #listing-images-modal { position:fixed; inset:0; background:rgba(20,18,16,0.55); z-index:9000; display:flex; align-items:center; justify-content:center; padding:20px; }
+      #listing-images-modal.hidden { display:none; }
+      .lim-box { position:relative; background:#fff; border-radius:8px; max-width:760px; width:100%; max-height:82vh; overflow-y:auto; padding:26px 28px; font-family:'DM Sans',sans-serif; }
+      .lim-title { font-family:'Cormorant Garamond',serif; font-size:1.4rem; font-weight:400; color:var(--ink); margin-bottom:4px; }
+      .lim-sub { font-size:0.78rem; color:var(--muted); margin-bottom:18px; line-height:1.5; }
+      .lim-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:14px; }
+      .lim-item { border:1px solid var(--border); border-radius:6px; overflow:hidden; }
+      .lim-item img { width:100%; height:120px; object-fit:cover; display:block; background:var(--warm); }
+      .lim-item-body { padding:8px 10px; }
+      .lim-item-room { font-size:0.78rem; font-weight:500; color:var(--ink); margin-bottom:6px; }
+      .lim-item-note { font-size:0.65rem; color:var(--muted); margin-bottom:8px; }
+      .lim-item-btn { width:100%; padding:6px 0; border-radius:3px; font-size:0.68rem; font-weight:600; letter-spacing:0.05em; text-transform:uppercase; cursor:pointer; border:1px solid var(--border); background:#fff; font-family:'DM Sans',sans-serif; }
+      .lim-item-btn.hide { color:#c0392b; border-color:#f0c0c0; }
+      .lim-item-btn.hide:hover { background:#fff5f5; }
+      .lim-item-btn.unhide { color:#1a5c3a; border-color:rgba(45,106,79,0.3); }
+      .lim-item-btn.unhide:hover { background:#f2f8f5; }
+      .lim-empty { text-align:center; padding:40px; color:var(--muted); font-size:0.85rem; }
+      .lim-close { position:absolute; top:14px; right:16px; background:none; border:none; font-size:1.1rem; cursor:pointer; color:var(--muted); }
+    </style>
+    <div class="lim-box">
+      <button class="lim-close" onclick="closeImagesModal()">✕</button>
+      <div id="lim-content"></div>
+    </div>`;
+  document.body.appendChild(modal);
+}
+function closeImagesModal(){
+  document.getElementById('listing-images-modal')?.classList.add('hidden');
+}
+async function getDashboardAuthToken(){
+  const session = await getSupabase().auth.getSession();
+  return session?.data?.session?.access_token || null;
+}
+
+async function openListingImages(listingId, projectId){
+  ensureImagesModal();
+  const modal = document.getElementById('listing-images-modal');
+  const content = document.getElementById('lim-content');
+  content.innerHTML = `<div class="lim-title">Published Images</div><div class="lim-sub">Loading…</div>`;
+  modal.classList.remove('hidden');
+  try {
+    const token = await getDashboardAuthToken();
+    if (!token) { content.innerHTML = `<div class="lim-title">Published Images</div><div class="lim-sub">Session expired — please sign in again.</div>`; return; }
+    const res = await fetch(`/.netlify/functions/hide-image?action=list-visible&projectId=${encodeURIComponent(projectId)}`, {
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+    const data = await res.json();
+    if (!res.ok) { content.innerHTML = `<div class="lim-title">Published Images</div><div class="lim-sub">${data.error || 'Could not load images.'}</div>`; return; }
+    renderListingImagesModal('visible', listingId, projectId, data.visibleImages || [], data.address);
+  } catch(err) {
+    content.innerHTML = `<div class="lim-title">Published Images</div><div class="lim-sub">Error: ${err.message}</div>`;
+  }
+}
+
+async function openHiddenImages(listingId, projectId){
+  ensureImagesModal();
+  const modal = document.getElementById('listing-images-modal');
+  const content = document.getElementById('lim-content');
+  content.innerHTML = `<div class="lim-title">Hidden Images</div><div class="lim-sub">Loading…</div>`;
+  modal.classList.remove('hidden');
+  try {
+    const token = await getDashboardAuthToken();
+    if (!token) { content.innerHTML = `<div class="lim-title">Hidden Images</div><div class="lim-sub">Session expired — please sign in again.</div>`; return; }
+    const res = await fetch(`/.netlify/functions/hide-image?action=list-hidden&projectId=${encodeURIComponent(projectId)}`, {
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+    const data = await res.json();
+    if (!res.ok) { content.innerHTML = `<div class="lim-title">Hidden Images</div><div class="lim-sub">${data.error || 'Could not load hidden images.'}</div>`; return; }
+    renderListingImagesModal('hidden', listingId, projectId, data.hiddenImages || [], data.address);
+  } catch(err) {
+    content.innerHTML = `<div class="lim-title">Hidden Images</div><div class="lim-sub">Error: ${err.message}</div>`;
+  }
+}
+
+function renderListingImagesModal(kind, listingId, projectId, images, address){
+  const content = document.getElementById('lim-content');
+  const title = kind === 'hidden' ? 'Hidden Images' : 'Published Images';
+  const sub = kind === 'hidden'
+    ? `Removed from the public compliance page and dashboard for ${address || 'this listing'}. Nothing is deleted — restore any image below.`
+    : `Currently visible on the public compliance page for ${address || 'this listing'}. Hiding an image pulls it from public view and your dashboard — it stays available under "Hidden — Review."`;
+
+  if (!images.length) {
+    content.innerHTML = `<div class="lim-title">${title}</div><div class="lim-sub">${sub}</div><div class="lim-empty">${kind === 'hidden' ? 'No hidden images for this listing.' : 'No published images yet.'}</div>`;
+    return;
+  }
+
+  const itemsHtml = images.map(img => `
+    <div class="lim-item">
+      ${img.stagedUrl ? `<img src="${img.stagedUrl}" alt="${img.roomName||'Room'}" loading="lazy"/>` : `<div style="height:120px;display:flex;align-items:center;justify-content:center;background:var(--warm);color:var(--muted);font-size:0.7rem;">No preview</div>`}
+      <div class="lim-item-body">
+        <div class="lim-item-room">${img.roomName || 'Room'}</div>
+        <div class="lim-item-note">${img.stagedAt ? new Date(img.stagedAt).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : ''}</div>
+        ${kind === 'hidden'
+          ? `<button class="lim-item-btn unhide" onclick="unhideListingImage('${listingId}','${projectId}','${img.imageId}')">Unhide</button>`
+          : `<button class="lim-item-btn hide" onclick="hideListingImage('${listingId}','${projectId}','${img.imageId}')">Hide from Compliance Page</button>`}
+      </div>
+    </div>`).join('');
+
+  content.innerHTML = `<div class="lim-title">${title}</div><div class="lim-sub">${sub}</div><div class="lim-grid">${itemsHtml}</div>`;
+}
+
+async function hideListingImage(listingId, projectId, imageId){
+  const reason = window.prompt('Optional — why is this being hidden? (e.g. "structural element altered")') || null;
+  await setImageHidden(listingId, projectId, imageId, 'hide', reason);
+}
+async function unhideListingImage(listingId, projectId, imageId){
+  await setImageHidden(listingId, projectId, imageId, 'unhide', null);
+}
+
+async function setImageHidden(listingId, projectId, imageId, action, reason){
+  const token = await getDashboardAuthToken();
+  if (!token) { showToast('Session expired — please sign in again.', 'error'); return; }
+  try {
+    const res = await fetch(`/.netlify/functions/hide-image?action=${action}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify({ projectId, imageId, reason })
+    });
+    const data = await res.json();
+    if (!res.ok) { showToast(data.error || (action === 'hide' ? 'Hide failed.' : 'Unhide failed.'), 'error'); return; }
+    if (action === 'hide' && data.cloudinaryLockComplete === false) {
+      showToast('Hidden from the page, but the underlying image lock may be incomplete — check logs.', 'error');
+    } else {
+      showToast(action === 'hide' ? '✓ Image hidden from compliance page.' : '✓ Image restored.', 'success');
+    }
+    // Refresh whichever view is currently open, and re-pull dashboard data
+    // so the card's imageCount/hiddenCount stay accurate without a manual
+    // page reload.
+    if (action === 'hide') { await openListingImages(listingId, projectId); }
+    else { await openHiddenImages(listingId, projectId); }
+    loadDashboardData();
+  } catch(err) {
+    showToast((action === 'hide' ? 'Hide' : 'Unhide') + ' failed: ' + err.message, 'error');
+  }
 }
 
 async function downloadQR(projectId, address) {

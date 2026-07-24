@@ -140,7 +140,10 @@ function renderPage(project, projectId, videoJobs) {
   const agentBrokerage= project.agentBrokerage|| process.env.AGENT_BROKERAGE|| "";
   const agentDRE       = project.agentDRE      || process.env.AGENT_DRE      || "";
   const agentLogoUrl  = project.agentLogoUrl  || process.env.AGENT_LOGO_URL || "";
-  const images        = project.images || [];
+  // Soft-hidden images (see hide-image.js) never appear on the public page.
+  // Nothing is deleted — the record survives in project.images for the
+  // AB 723 3-year retention requirement, it just doesn't render here.
+  const images        = (project.images || []).filter(img => !img.hidden);
   const address       = project.address || "Property Address";
   const compUrl       = project.complianceUrl || `${process.env.URL || "https://smartstagepro.com"}/compliance/${projectId}`;
   const createdAt     = formatDate(project.createdAt);

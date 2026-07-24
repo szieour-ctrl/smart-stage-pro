@@ -3706,7 +3706,15 @@ async function attachFinalToProject(finalBase64, room, orig, enhId) {
     let uploadData;
     try { uploadData = JSON.parse(uploadRaw); }
     catch { throw new Error(`Cloudinary upload returned a non-JSON response (status ${uploadRes.status}): ${uploadRaw.slice(0, 200)}`); }
-    if (!uploadData.secure_url) throw new Error(uploadData.error?.message || 'No staged URL returned from Cloudinary upload');
+    if (!uploadData.secure_url) {
+      // Show exactly what Cloudinary said, not a generic fallback — this
+      // is the direct-to-Cloudinary upload from the browser, and a bad
+      // signature, folder mismatch, timestamp skew, or credential issue
+      // all produce DIFFERENT Cloudinary error text that we need to see
+      // verbatim to fix the right thing instead of guessing.
+      const cloudErr = uploadData.error?.message || uploadData.error || uploadRaw.slice(0, 300);
+      throw new Error(`Cloudinary rejected the upload (status ${uploadRes.status}): ${cloudErr}`);
+    }
 
     // Attach to project in Blobs
     // userId fix (separate, earlier bug): without this, project-manage.js's

@@ -295,6 +295,28 @@ Return ONLY a JSON array, one object per frame, in the exact shape below. No pro
 ]`;
 }
 
+// FIX (this session — real failure, confirmed via console: Claude's API
+// rejected the request outright with "At least one of the image
+// dimensions exceed max allowed size: 8000 pixels"). frame.stagedImageUrl
+// points at the full Cloudinary asset — for a Final-tier image that can
+// be up to 12,000px on the long edge (upscale-image.js's own
+// MAX_OUTPUT_LONG_EDGE), a limit chosen for print/MLS quality with no
+// awareness of Claude's separate 8000px vision ceiling. The two limits
+// were never reconciled against each other until this failure surfaced.
+// Fix: resize via Cloudinary's own on-the-fly URL transformation — no new
+// endpoint, no re-upload, Cloudinary generates and caches the resized
+// version automatically. 1568px matches Anthropic's own documented
+// guidance (images beyond that are downscaled server-side before
+// analysis anyway), so this isn't just squeaking under 8000px, it's the
+// size Claude actually uses regardless of what's sent.
+const CLAUDE_VISION_MAX_DIM = 1568;
+function resizeCloudinaryUrlForVision(url, maxDim) {
+  if (!url || typeof url !== "string") return url;
+  const match = url.match(/^(https?:\/\/res\.cloudinary\.com\/[^/]+\/image\/upload\/)(.*)$/);
+  if (!match) return url; // not a recognizable Cloudinary URL — leave untouched rather than risk breaking it
+  return `${match[1]}w_${maxDim},c_limit,q_auto/${match[2]}`;
+}
+
 // ── BUILD THE VISION MESSAGE ───────────────────────────────────────────
 // Images sent by URL, NOT as local base64 files. CORRECTED (July 21, 2026)
 // — an earlier draft matched narrationGen.js's local-file/base64
@@ -320,7 +342,7 @@ function buildUserContent(frames) {
   for (const frame of frames) {
     content.push({
       type: "image",
-      source: { type: "url", url: frame.stagedImageUrl },
+      source: { type: "url", url: resizeCloudinaryUrlForVision(frame.stagedImageUrl, CLAUDE_VISION_MAX_DIM) },
     });
     const pairNote = frame.beforeImageUrl
       ? `This frame HAS a real vacant/before pair available.`

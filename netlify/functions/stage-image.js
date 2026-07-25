@@ -1,4 +1,5 @@
 const https = require("https");
+const sharp = require("sharp");
 
 // ── Shared HTTPS helper ──────────────────────────────────────────────────────
 function httpsRequest(options, body) {
@@ -66,13 +67,45 @@ Return this exact shape:
   return JSON.parse(clean);
 }
 
+// FIX (this session — real bug, confirmed from a real 4-image comparison:
+// original → Smart Correct → Staged → Iterated, showing the left edge of
+// the room progressively cropped away at each generative step). Root
+// cause: this always requested a hardcoded 1024x1024 SQUARE output from
+// OpenAI's image-edit API, regardless of the input photo's actual aspect
+// ratio. A wide real estate interior forced into a square canvas means
+// the model has to recompose the whole scene to fit — cropping edges to
+// do it — and since Iterate edits the PRIOR staged result (not the
+// original), every additional edit pass forces another square recompose
+// on top of an already-narrower image, compounding the crop each time.
+// resizeToMatch() in index.html was never the bug — it faithfully
+// cover-fits whatever composition the model returns; this is what
+// decides that composition in the first place.
+// gpt-image-1's /v1/images/edits endpoint only accepts three fixed sizes
+// (not arbitrary ratios): 1024x1024, 1536x1024 (landscape), 1024x1536
+// (portrait). Picking the closest match to the real input aspect ratio
+// won't perfectly preserve every possible framing, but eliminates the
+// forced-square recompose that was the actual driver of the crop for the
+// overwhelmingly common landscape-oriented real estate photo case.
+async function pickOutputSize(imageBuffer) {
+  try {
+    const meta = await sharp(imageBuffer).metadata();
+    const w = meta.width || 0, h = meta.height || 0;
+    if (w > h * 1.15) return "1536x1024"; // landscape
+    if (h > w * 1.15) return "1024x1536"; // portrait
+    return "1024x1024"; // genuinely near-square input
+  } catch (e) {
+    console.warn("pickOutputSize: could not read input dimensions, defaulting to 1024x1024 —", e.message);
+    return "1024x1024";
+  }
+}
+
 // ── Build multipart for OpenAI image edits ───────────────────────────────────
-function buildMultipart(boundary, imageBuffer, imageMime, prompt, quality) {
+function buildMultipart(boundary, imageBuffer, imageMime, prompt, quality, size) {
   const parts = [];
   parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\ngpt-image-1`);
   parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="prompt"\r\n\r\n${prompt}`);
   parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="n"\r\n\r\n1`);
-  parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="size"\r\n\r\n1024x1024`);
+  parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="size"\r\n\r\n${size}`);
   parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="quality"\r\n\r\n${quality || "low"}`);
   parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="output_format"\r\n\r\npng`);
 
@@ -118,8 +151,10 @@ exports.handler = async (event) => {
 
     const imageBuffer = Buffer.from(imageBase64, "base64");
     const imageMime = mimeType || "image/jpeg";
+    const outputSize = await pickOutputSize(imageBuffer);
+    console.log(`stage-image: requesting OpenAI output size ${outputSize} to match input aspect ratio`);
     const boundary = "----FormBoundary" + Math.random().toString(36).slice(2);
-    const formData = buildMultipart(boundary, imageBuffer, imageMime, stagingPrompt, quality || "low");
+    const formData = buildMultipart(boundary, imageBuffer, imageMime, stagingPrompt, quality || "low", outputSize);
 
     const result = await httpsRequest({
       hostname: "api.openai.com",

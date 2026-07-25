@@ -5387,6 +5387,11 @@ function resizeToMatch(room,orig,enhId,storeKey,incomingB64){
       loaded++;if(loaded<2)return;
       const oW=oI.naturalWidth,oH=oI.naturalHeight;
       const sW=sI.naturalWidth,sH=sI.naturalHeight;
+      // Diagnostic (this session — Background Function logs for
+      // stage-openai-background.js aren't visible in the Netlify
+      // dashboard, so this is the workaround: the same data, surfaced in
+      // the browser console instead, where it's actually visible.
+      console.log(`resizeToMatch [${storeKey}]: original=${oW}x${oH} staged=${sW}x${sH} scale=${Math.max(oW/sW,oH/sH).toFixed(3)}`);
       const canvas=document.createElement('canvas');
       canvas.width=oW;canvas.height=oH;
       const ctx=canvas.getContext('2d');

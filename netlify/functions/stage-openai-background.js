@@ -13,6 +13,8 @@ PRIMARY ROLE: Stage furniture and decor ONLY.
 
 IMMUTABLE LOCK: Never alter, move, remove, replace, or touch: structural walls | ceilings | kitchen/bathroom cabinets | countertops | lighting fixtures. These must be preserved exactly as photographed.
 
+FRAMING LOCK: Preserve the EXACT original camera framing, angle, field of view, and crop of the input photo. Do not recompose, reframe, zoom in/out, pan, or shift what is visible at the edges of the shot. The output must show precisely the same extent of the room — same walls, same edges, same amount of visible space on every side — as the input image. This applies on every edit pass, including revisions to an already-staged photo: never narrow or shift the field of view from what was already visible.
+
 AB 723 COMPLIANCE: Virtual staging adds furniture only. Any alteration to permanent architecture makes the listing non-compliant and subject to MLS removal.
 
 ═══════════════════════════════════════════════════════════════════════════════
@@ -110,7 +112,18 @@ exports.handler = async (event) => {
     const result = await callOpenAI(imageBase64, mimeType, stagingPrompt, openAIKey, quality);
     const stagedBase64 = result?.data?.[0]?.b64_json;
     if (!stagedBase64) throw new Error("No image data in OpenAI response");
-    console.log(`Job ${jobId}: complete ${Math.round(stagedBase64.length/1024)}KB`);
+    // Diagnostic (this session): confirms whether OpenAI's actual returned
+    // image matches the requested size, or whether it silently returns
+    // something else — the size logged before the call was only ever the
+    // REQUEST, never verified against what actually came back. If the
+    // framing-lock prompt instruction above doesn't fully resolve the
+    // crop issue, this line is the next piece of real evidence needed.
+    try {
+      const returnedMeta = await sharp(Buffer.from(stagedBase64, "base64")).metadata();
+      console.log(`Job ${jobId}: OpenAI returned ${returnedMeta.width}x${returnedMeta.height} (${Math.round(stagedBase64.length/1024)}KB)`);
+    } catch (metaErr) {
+      console.warn(`Job ${jobId}: could not read returned image dimensions —`, metaErr.message);
+    }
 
     // Store result via SDK — no presigned URL expiry issues
     await store.setJSON(jobId, { status: "done", stagedBase64 });

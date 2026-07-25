@@ -3286,7 +3286,65 @@ async function applyDraftWatermark(base64) {
   });
 }
 
+// Pre-crops any source image to exactly 3:2 before it's ever sent to OpenAI.
+// GPT Image 2's /edits endpoint only offers three fixed output sizes — square,
+// 3:2 landscape, 2:3 portrait — with no 4:3 option. Real estate photos are
+// almost always 4:3, so without this step every image gets forced through a
+// genuine ratio mismatch inside the AI call itself: resizeToMatch() has to
+// stretch+crop the 3:2 result to cover the true 4:3 canvas afterward, and the
+// model — recomposing into a wrong-shaped canvas — sometimes fills the extra
+// space with invented content (e.g. an extra chair that was never there).
+// Cropping to 3:2 up front makes input/output ratios match exactly, so
+// resizeToMatch() downstream becomes a no-op (scale=1, zero crop) and the
+// model has no leftover canvas space left to invent anything into.
+// Even top/bottom split, applied uniformly to every staging mode including
+// Exterior Enhancement (Sam's explicit call — same rule everywhere, no
+// per-room-type branching to maintain).
+function preCropTo3x2(base64, mimeType) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const w = img.naturalWidth, h = img.naturalHeight;
+      const targetRatio = 3 / 2;
+      let cropW = w, cropH = h;
+      if (w / h > targetRatio) {
+        // Source wider than 3:2 (rare for real estate photos) — trim sides evenly
+        cropW = Math.round(h * targetRatio);
+      } else {
+        // Source taller than 3:2 (typical 4:3 photo) — trim top/bottom evenly
+        cropH = Math.round(w / targetRatio);
+      }
+      const x = Math.floor((w - cropW) / 2);
+      const y = Math.floor((h - cropH) / 2);
+      const canvas = document.createElement('canvas');
+      canvas.width = cropW;
+      canvas.height = cropH;
+      canvas.getContext('2d').drawImage(img, x, y, cropW, cropH, 0, 0, cropW, cropH);
+      const outMime = mimeType === 'image/png' ? 'image/png' : 'image/jpeg';
+      const dataUrl = outMime === 'image/jpeg'
+        ? canvas.toDataURL(outMime, 0.92)
+        : canvas.toDataURL(outMime);
+      console.log(`Pre-crop to 3:2: ${w}x${h} → ${cropW}x${cropH}`);
+      resolve({ base64: dataUrl.split(',')[1], mimeType: outMime });
+    };
+    // Fallback: if the image somehow fails to load into canvas, pass the
+    // original through untouched rather than breaking the staging call —
+    // matches the existing fallback style used elsewhere in this file
+    // (e.g. the watermark canvas's img.onerror above).
+    img.onerror = () => resolve({ base64, mimeType });
+    img.src = `data:${mimeType};base64,${base64}`;
+  });
+}
+
 async function callStageAPI(imageBase64, mimeType, prompt, quality) {
+  // Pre-crop to 3:2 before anything else touches this image — see
+  // preCropTo3x2() above for why. Every downstream step (compression,
+  // the OpenAI call, resizeToMatch()) now operates on the already-correct
+  // 3:2 shape, so nothing else in this function needs to change.
+  const precropped = await preCropTo3x2(imageBase64, mimeType);
+  imageBase64 = precropped.base64;
+  mimeType = precropped.mimeType;
+
   // Client-side compression — protects against oversized DSLR exterior photos
   // Netlify function payload limit is ~6MB; base64 inflates ~33%, so cap source at ~3.5MB
   let readyBase64 = imageBase64;

@@ -169,7 +169,10 @@ Return ONLY valid JSON — no markdown:
     // stronger vision accuracy is worth the ~3x cost here (still well under a cent per call)
     // for a compliance-critical read: Haiku was confidently misreading shutters behind
     // curtains it couldn't actually see through, which no amount of prompt wording fixed.
-    max_tokens: 1200,
+    max_tokens: 3000, // raised from 1200 (this session) — windowInventory entries now
+    // require treatment + height anchor + exterior view per window, which was
+    // pushing multi-window rooms past the old limit and truncating the JSON
+    // mid-string, causing "Declutter analysis JSON parse failed"
     messages: [{
       role: "user",
       content: [
@@ -193,10 +196,19 @@ Return ONLY valid JSON — no markdown:
 
   if (result.status !== 200) throw new Error("Haiku declutter analysis failed: " + (result.body?.error?.message || result.status));
 
+  const stopReason = result.body?.stop_reason;
   const text = result.body?.content?.[0]?.text?.trim() || "{}";
   const clean = text.replace(/```json|```/g, "").trim();
   try { return JSON.parse(clean); }
-  catch(e) { throw new Error("Declutter analysis JSON parse failed"); }
+  catch(e) {
+    // Diagnostic (this session — the max_tokens truncation bug this replaces
+    // was invisible until Sam pulled Netlify function logs manually): log
+    // stop_reason (max_tokens = truncated response, the actual cause last
+    // time) plus response length and tail, so this is debuggable from logs
+    // alone next time instead of needing a live repro.
+    console.error(`Declutter analysis JSON parse failed. stop_reason=${stopReason}, length=${clean.length} chars. Tail: ...${clean.slice(-200)}`);
+    throw new Error(`Declutter analysis JSON parse failed${stopReason === 'max_tokens' ? ' (response was truncated — max_tokens too low for this room)' : ''}`);
+  }
 }
 
 // ✅ BUILD INPAINTING PROMPT FOR GPT IMAGE 2

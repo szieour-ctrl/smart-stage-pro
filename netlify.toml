@@ -96,6 +96,14 @@
 [functions."extract-staging-dna"]
   timeout = 15
 
+# NEW (this session): no entry existed for this function before — it was
+# running on Netlify's default timeout. Current Haiku baseline is ~9.4s
+# (confirmed via real logs); Sonnet upgrade (see detect-hero-shots.js for why)
+# will run slower, so giving real headroom rather than waiting to find the
+# ceiling the hard way, the way declutter-prompt did before this fix existed.
+[functions."detect-hero-shots"]
+  timeout = 60
+
 [functions."serve-image"]
   timeout = 10
 

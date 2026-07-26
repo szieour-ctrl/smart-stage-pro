@@ -718,17 +718,53 @@ const PRESET_EDIT_INSTRUCTION_HEADER =
   'listing per California AB 723 §10140.6, and any change beyond photographic ' +
   'rendering makes the listing non-compliant.\n\n';
 
+// NEW (this session — Sam's request): applied to EVERY preset via
+// buildPresetPrompt() below, not just MLS Bright. Distinct from the
+// standalone "Window Recovery" PRESET (key 'window_recovery' below, which a
+// user selects on its own) — this is a hard constraint layered onto every
+// preset's rendering pass regardless of which one is chosen, including that
+// one. Do not confuse the two: this constant is never itself a selectable
+// preset, only a universal addition to whichever preset runs.
+const CRITICAL_WINDOW_RULE_SUFFIX =
+  '\n\nCRITICAL WINDOW RULE:\n' +
+  'Use only information already present in the source image. Do not invent, ' +
+  'reconstruct, replace, complete, or clarify into existence any view through ' +
+  'windows or glass doors. Do not add, remove, or change buildings, fences, trees, ' +
+  'sky, patios, landscaping, reflections, window frames, mullions, shutters, or ' +
+  'glass details. If exterior detail is clipped, blurry, obscured, or unavailable, ' +
+  'leave it naturally bright.\n\n' +
+  'OUTPUT GOAL:\n' +
+  'Create a clean, natural, MLS-ready image with conservative brightness, color, ' +
+  'and window balancing. Modify only photographic rendering quality.';
+
 const PHOTOGRAPHIC_PRESETS = {
   mls_bright: {
     key: 'mls_bright', label: 'MLS Bright',
-    shortDescription: 'Neutral white balance, brighter exposure, crisp detail, clean whites.',
+    shortDescription: 'Conservative, adaptive brightening and correction — ideal for iPhone/Smart Corrected source photos.',
+    // CHANGE (this session — Sam's request): rewritten from a flat "brighten
+    // evenly, neutral white balance" instruction to an adaptive one that
+    // preserves whatever's already good and only nudges what's actually
+    // wrong. Built specifically for the iPhone-photo → Smart Correct →
+    // staged → MLS Bright pipeline, where earlier steps have often already
+    // fixed exposure/color — a flat preset was overcorrecting photos that
+    // didn't need it.
     instructionBody:
+      'Do not move, add, remove, replace, or redesign any furniture, decor, fixtures, finishes, ' +
+      'property features, landscaping, exterior objects, windows, doors, or visible views.\n\n' +
+      'ADAPTIVE CORRECTION RULE:\n' +
+      'Preserve any exposure, white balance, color, contrast, sharpness, texture, or window ' +
+      'rendering that is already good to excellent. Make only the smallest adjustment needed ' +
+      'for a clear photographic improvement.\n\n' +
       'Improve only the photographic rendering by:\n' +
-      '• Brightening overall exposure evenly across the frame\n' +
-      '• Setting a neutral, true-to-life white balance — no warm or cool color cast\n' +
-      '• Sharpening detail crisply without introducing noise or haloing\n' +
-      '• Rendering whites (trim, cabinetry, walls) clean and neutral, not yellow or blue\n' +
-      '• Keeping contrast natural and even — no dramatic shadows\n' +
+      '• Brightening the interior only if visibly underexposed\n' +
+      '• Correcting only a clearly visible color cast\n' +
+      '• Keeping whites clean and neutral without bleaching\n' +
+      '• Preserving natural wood tones, warm lighting, fabrics, and finishes\n' +
+      '• Lifting lost shadow detail while maintaining realistic depth\n' +
+      '• Improving clarity without noise, halos, over sharpening, or artificial texture\n' +
+      '• Balancing interior exposure against bright windows only where needed\n' +
+      '• Reducing window highlights only where source detail already exists\n' +
+      '• Preserving exterior detail exactly as visible in the source\n' +
       'Modify only the photographic rendering quality.',
   },
   luxury_editorial: {
@@ -824,7 +860,7 @@ const PRESET_ORDER = ['mls_bright','luxury_editorial','magazine','builder_showca
 function buildPresetPrompt(presetKey) {
   const preset = PHOTOGRAPHIC_PRESETS[presetKey];
   if (!preset) throw new Error('Unknown preset key: ' + presetKey);
-  return PRESET_EDIT_INSTRUCTION_HEADER + preset.instructionBody;
+  return PRESET_EDIT_INSTRUCTION_HEADER + preset.instructionBody + CRITICAL_WINDOW_RULE_SUFFIX;
 }
 
 

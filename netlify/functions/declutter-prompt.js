@@ -117,6 +117,9 @@ Different windows in the same room often have different treatments — some may 
 For every window visible in the photo, identify its position (e.g. "left of fireplace", "right of fireplace", "side wall", "flanking the patio door") and state plainly whether shutters or blinds are physically visible on THAT specific window — yes or no. A window with only a curtain/drape and no shutters or blinds underneath must be described as having no shutters/blinds, even if another window elsewhere in the same photo does have them.
 Shutters/blinds must never be added to a window that does not already have them in the photo, and must never be removed from a window that does. Getting this wrong on even one window is a compliance violation, not a stylistic choice.
 
+CRITICAL RULE — NEVER GUESS WHAT'S BEHIND A CURTAIN YOU CANNOT SEE THROUGH:
+A curtain, drape, or sheer that fully or mostly covers a window means you CANNOT see what is or isn't underneath it — and "I can't see it" must be reported as exactly that, never filled in with a guess. Do NOT assume a window has shutters or blinds just because another window in the room has them, just because that's a common treatment for this style of home, or because you can see a sliver of a frame edge. If the slats, louvers, or blind mechanism of a shutter/blind are not directly and unambiguously visible in the photo for that specific window, you must write that its treatment underneath the curtain is NOT VISIBLE — not "shutters visible," not "shutters present." When curtains are removed from a window whose underlying treatment was not visible, the correct result is a bare window (frame, glass, sill only) — inventing shutters that were never confirmed is a hallucination, not a safe default.
+
 PRESERVE (permanent architecture - IMMUTABLE):
 - Structural walls, ceilings, flooring
 - Windows — frame, glass, trim, sill, shutters, and plantation blinds, at their EXACT original size and position. A window must never be resized, repositioned, or turned into a door/opening — see the critical rule above. When curtains are removed, only the fabric and hardware go; the window underneath is untouched.
@@ -130,13 +133,14 @@ PRESERVE (permanent architecture - IMMUTABLE):
 - Built-in shelving ONLY if permanently constructed into the wall (recessed, nailed to studs, part of wall construction). A shelf leaning against a wall is NOT built-in.
 - Ceiling fans, chandeliers, light fixtures (in situ)
 - Architectural elements (columns, beams, trim, crown molding)
+- Wainscoting / chair-rail paneling, if present on any wall — note its height (e.g. "wainscoting runs to roughly 1/3 wall height, aligning with the bottom of the windows") so that height can be preserved exactly once furniture in front of it is removed
 
 Return ONLY valid JSON — no markdown:
 
 {
   "roomType": "kitchen|living|bedroom|bathroom|dining|etc",
   "windowInventory": [
-    "Position + exact treatment for EACH window individually, e.g. 'Left of fireplace: multi-pane window, cream curtain panels, no shutters or blinds visible' or 'Side wall: multi-pane window, white plantation shutters present'. One entry per window visible in the photo. Never combine multiple windows into one generalized statement — if two windows differ, they get two separate, differently-worded entries."
+    "Position + exact treatment for EACH window individually. Three allowed outcomes: (1) 'Left of fireplace: multi-pane window, no curtain, white plantation shutters clearly visible' — shutters directly seen. (2) 'Right of fireplace: multi-pane window, cream curtain panels, no shutters or blinds visible' — curtain present but sheer/open enough that you can confirm no shutters underneath. (3) 'Side wall: multi-pane window, fully covered by cream curtain panels, treatment underneath NOT VISIBLE' — curtain blocks the view and you genuinely cannot tell what, if anything, is underneath; this is a valid and expected answer, not a gap to fill in with a guess. One entry per window visible in the photo. Never combine multiple windows into one generalized statement — if windows differ (or if some are visible and some are occluded), they get separate, differently-worded entries."
   ],
   "preserveList": "Comprehensive list of every permanent element visible: walls, ceiling, flooring, doors, cabinets, appliances, fixtures, finishes. For windows, refer to windowInventory above rather than repeating a generalized window description here.",
   "removeList": "All furniture and decor to remove: sofas, chairs, tables, rugs, lamps, art, plants, etc.",
@@ -234,7 +238,8 @@ function buildDeclutterPrompt({ roomData }) {
   p += `16. Bathroom vanity cabinetry: preserve BOTH upper and lower cabinets exactly, including medicine cabinets — remove only items sitting on the counter or inside an open cabinet, never the cabinet structure itself\n`;
   p += `17. Windows: when removing curtains, drapes, or sheers, the window itself (frame, glass, trim, sill, blinds/shutters) must stay the EXACT original size and position — do not shrink, enlarge, shift, or convert a window into a door or opening\n`;
   p += `18. Beds: remove the ENTIRE bed — mattress, box spring, frame, headboard, footboard, slats — not just the bedding/linens/clothing on top of it. A stripped bed frame or headboard left standing is an incomplete removal, not a correct one\n`;
-  p += `19. Shutters and blinds are per-window, never generalized: use the WINDOW-BY-WINDOW TREATMENT list above (if provided) as the exact source of truth for each window. Never add shutters or blinds to a window that the list says has none, and never remove them from a window the list says has them, even if another window in the same room has a different treatment\n\n`;
+  p += `19. Shutters and blinds are per-window, never generalized: use the WINDOW-BY-WINDOW TREATMENT list above (if provided) as the exact source of truth for each window. Never add shutters or blinds to a window that the list says has none, and never remove them from a window the list says has them, even if another window in the same room has a different treatment. If a window's entry says the treatment underneath its curtain was NOT VISIBLE, the correct result after removing the curtain is a BARE window — frame, glass, and sill only, no shutters or blinds. Do not invent a shutter/blind for a window the list marks as unconfirmed\n`;
+  p += `20. Wainscoting / chair-rail paneling (if present on any wall): preserve its EXACT height, horizontal line, and profile along every wall it appears on. The top edge of the wainscoting must stay at precisely the same height after furniture is removed as it was in the original photo — do not raise, lower, shift, or redraw the wainscoting line, even in areas that were previously blocked by furniture\n\n`;
 
   p += `COMPLIANCE:\n`;
   p += `This room will be prepared per California AB 723 §10140.6 for virtual staging.\n`;

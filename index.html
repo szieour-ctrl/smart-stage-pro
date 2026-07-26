@@ -4442,6 +4442,36 @@ async function generateHeroShotFinal(roomId, shotId, qualityChoice) {
     // reason.
     const badgedHeroBase64 = await applyVirtuallyStagedBadge(upData.upscaledBase64);
 
+    // ── CREATE PROJECT IF NEEDED (real bug fix — root cause of hero shots
+    // never reaching Cloudinary/compliance page at all) ──────────────────
+    // createNewProject() previously had exactly ONE call site in this
+    // entire file: the main room Generate Final flow (generateFinal()).
+    // attachHeroShotToProject() below has always started with
+    // `if (!SESSION.projectId) return;` — a silent, no-error bail. If a
+    // user runs the Cinematic Asset Generator before ever running a
+    // regular room's Generate Final in this session, SESSION.projectId is
+    // still null (lookupOrCreateProject only sets it for an EXISTING
+    // project; a brand-new listing stays null until Generate Final lazily
+    // creates one — see that flow's own "Projects are created at Generate
+    // Final time" comment). Hero shots had no path to trigger that
+    // creation themselves, so attachHeroShotToProject silently did
+    // nothing — no Cloudinary upload attempt, no compliance-page write, no
+    // visible error — exactly the symptom reported. Same block as the main
+    // flow, verbatim, so hero shots can create the project themselves when
+    // they're the first Generate Final action of the session.
+    if (!SESSION.projectId && SESSION.projectAddress && SESSION.projectStatus === 'pending-create') {
+      showToast('Creating compliance project...', '');
+      try {
+        await createNewProject(SESSION.projectAddress);
+        showToast('✓ Compliance project created.', 'success');
+      } catch (projErr) {
+        console.warn('Project creation failed (non-blocking):', projErr.message);
+      }
+    }
+    if (!SESSION.projectId) {
+      showToast('⚠ No property project active — this hero shot will not attach to a compliance page. Search for a property first.', 'error');
+    }
+
     room.heroDetailShots[shotId] = {
       ...shot,
       status: 'final',

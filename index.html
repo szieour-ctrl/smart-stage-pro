@@ -4940,6 +4940,25 @@ async function runDeclutterOnly(roomId) {
   const room = SESSION.rooms.find(r => r.id === roomId);
   const orig = SESSION.originals.find(o => o.id === room?.originalId);
   if (!room || !orig) return;
+  // FIX (this session — real bug traced from Sam's test session): if this
+  // room previously ran Clean+Stage (or any other mode) before Declutter
+  // ran, stale fields from that run were never cleared here. That caused
+  // two separate symptoms once Declutter completed fresh: (1) a leftover
+  // room.lastPrompt made isDeclutterOnlyRoom() return false even for a
+  // genuinely-Declutter-Only room, misrouting submitRefineRevision() to
+  // look for the wrong DOM element and throw "Could not find revision
+  // target"; (2) a leftover room.stagedCleanBase64 outranked the fresh
+  // declutteredCleanBase64 in openLightboxRefine()'s priority chain, so
+  // the lightbox displayed the old Clean+Stage image instead of the
+  // decluttered result being revised. Clearing all of this up front means
+  // a fresh Declutter run can never inherit state from a different mode.
+  room.stagedCleanBase64 = null;
+  room.presetCleanBase64 = null;
+  room.presetStatus = null;
+  room.presetKey = null;
+  room.lastPrompt = null;
+  room.finalBase64 = null;
+  room.finalStatus = null;
   room.status = 'processing';
   room.promptStatus = 'Reading room for decluttering...';
   renderRoomQueue();
@@ -4979,8 +4998,16 @@ async function runDeclutterOnly(roomId) {
     room.declutteredBase64 = dclResult.watermarked;
     room.declutteredCleanBase64 = dclResult.clean;
     // Resize decluttered image to match original dimensions
+    // FIX (this session): declutteredCleanBase64 was never being run through
+    // resizeToMatch() here — only the watermarked draft was. That left the
+    // clean variant (what the lightbox and iteration functions actually
+    // read) stuck at OpenAI's raw un-corrected size instead of the proper
+    // 3:2 target. iterateDeclutter() and runDeclutterEnhance() already do
+    // this correctly for their own results — this brings the initial run
+    // in line with that same pattern.
     room.stagedBase64 = room.declutteredBase64;
     await resizeToMatch(room, orig, null, 'stagedBase64', room.declutteredBase64);
+    await resizeToMatch(room, orig, null, 'declutteredCleanBase64', room.declutteredCleanBase64);
     room.declutteredBase64 = room.stagedBase64; // keep both in sync
     room.status = 'done';
     room.promptStatus = null;
@@ -5000,6 +5027,18 @@ async function runCleanAndStage(roomId) {
   const orig = SESSION.originals.find(o => o.id === room?.originalId);
   if (!room || !orig) return;
   const i = SESSION.intake || {};
+  // FIX (this session — same class of bug as runDeclutterOnly's reset
+  // above): Clean+Stage's own pipeline already overwrites declutteredBase64/
+  // declutteredCleanBase64/lastPrompt as part of its normal 3-step flow, so
+  // those can't go stale here. But presetCleanBase64/presetStatus/presetKey
+  // and finalBase64/finalStatus are untouched by this pipeline — if this
+  // room previously applied a preset or generated a Final under Declutter-
+  // Only mode, those would otherwise sit around stale after switching modes.
+  room.presetCleanBase64 = null;
+  room.presetStatus = null;
+  room.presetKey = null;
+  room.finalBase64 = null;
+  room.finalStatus = null;
   room.status = 'processing';
   room.promptStatus = 'Step 1 of 3 — Reading room for decluttering...';
   renderRoomQueue();

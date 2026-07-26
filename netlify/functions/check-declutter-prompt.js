@@ -27,10 +27,14 @@ exports.handler = async (event) => {
     const job = await store.get(jobId, { type: "json" });
 
     if (!job) {
-      // Heartbeat not written yet (background function still cold-starting) —
-      // treat as still-processing rather than an error, matching
-      // check-openai.js's tolerance for the same race.
-      return { statusCode: 200, headers, body: JSON.stringify({ status: "processing" }) };
+      // FIX (this session): this used to report "processing" here too —
+      // identical to a job that's genuinely running, just not done yet.
+      // That made it impossible to tell "background function never started"
+      // apart from "running normally," from the client alone. Distinguishing
+      // them matters a lot right now specifically because Netlify's own
+      // function-log UI has been intermittently unavailable tonight, so this
+      // is the only diagnostic signal available when that's down.
+      return { statusCode: 200, headers, body: JSON.stringify({ status: "not_started", note: "No heartbeat found for this jobId yet — background function may not have been invoked, or hasn't run its first write yet." }) };
     }
 
     return { statusCode: 200, headers, body: JSON.stringify(job) };

@@ -18,8 +18,8 @@ const https = require("https");
 
 function triggerBackground(payload, siteUrl, functionName) {
   const body = Buffer.from(JSON.stringify(payload));
-  console.log(`Triggering ${functionName}: payload ${Math.round(body.length / 1024)}KB`);
   const url = new URL(`${siteUrl}/.netlify/functions/${functionName}`);
+  console.log(`Triggering ${functionName}: payload ${Math.round(body.length / 1024)}KB → ${url.toString()}`);
 
   return new Promise((resolve, reject) => {
     const req = https.request({
@@ -34,7 +34,15 @@ function triggerBackground(payload, siteUrl, functionName) {
       const chunks = [];
       res.on("data", (c) => chunks.push(c));
       res.on("end", () => {
-        console.log(`${functionName} response: status=${res.statusCode}`);
+        if (res.statusCode >= 300) {
+          // Diagnostic (this session): previously only the bare status code
+          // was logged, which left every prior 500 undiagnosable — this
+          // surfaces Netlify's actual error/redirect response text.
+          const bodyText = Buffer.concat(chunks).toString("utf8").slice(0, 500);
+          console.error(`${functionName} response: status=${res.statusCode} body=${bodyText}`);
+        } else {
+          console.log(`${functionName} response: status=${res.statusCode}`);
+        }
         resolve(res.statusCode);
       });
     });
@@ -57,14 +65,33 @@ exports.handler = async (event) => {
     const { imageBase64, mimeType } = JSON.parse(event.body);
     if (!imageBase64) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing imageBase64" }) };
 
-    const siteUrl = process.env.NETLIFY_URL || process.env.DEPLOY_URL || "https://smart-stage-pro.netlify.app";
+    // FIX (this session — real root cause of the persistent 500s): siteUrl
+    // was previously process.env.NETLIFY_URL || process.env.DEPLOY_URL ||
+    // a hardcoded fallback, a pattern copied from clean-and-stage-prompt.js
+    // — but that file turned out to be dead code, never actually running
+    // in production, so this exact pattern was never validated live.
+    // Worse, the hardcoded fallback ("smart-stage-pro.netlify.app") is the
+    // OLD domain netlify.toml force-redirects away from (301 to
+    // smartstagepro.com) — if the env vars weren't resolving as assumed,
+    // every trigger request would hit a redirect instead of the function.
+    // Deriving siteUrl from the incoming request's own Host header is more
+    // robust: it's guaranteed to be whatever domain the browser actually
+    // used to reach this dispatcher, with no dependency on env vars.
+    const hostHeader = event.headers?.host || event.headers?.Host;
+    const siteUrl = hostHeader
+      ? `https://${hostHeader}`
+      : (process.env.URL || process.env.DEPLOY_URL || process.env.NETLIFY_URL || "https://smart-stage-pro.netlify.app");
+    console.log(`declutter-prompt dispatcher: using siteUrl=${siteUrl} (from ${hostHeader ? 'request Host header' : 'env var / hardcoded fallback'})`);
     const jobId = "declutter-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8);
 
-    await triggerBackground(
+    const triggerStatus = await triggerBackground(
       { jobId, imageBase64, mimeType },
       siteUrl,
       "declutter-prompt-background"
     );
+    if (triggerStatus >= 300) {
+      console.error(`declutter-prompt dispatcher: trigger returned unexpected status ${triggerStatus} — background function may not have been invoked`);
+    }
 
     return {
       statusCode: 202,

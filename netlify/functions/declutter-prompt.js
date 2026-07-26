@@ -112,6 +112,11 @@ Do NOT shrink, enlarge, or shift a window when its curtains are removed.
 Do NOT convert a window into a door, doorway, or opening of any kind. A window stays a window.
 Removing a curtain/drape/sheer means ONLY the fabric and its rod/hardware disappear — the glass, frame, sill, and any blinds or shutters underneath stay exactly as photographed.
 
+CRITICAL RULE — SHUTTERS AND BLINDS ARE PER-WINDOW, NEVER GENERALIZED:
+Different windows in the same room often have different treatments — some may have plantation shutters or blinds, others may have only curtains/drapes with nothing underneath, others may be bare. You must look at and describe EACH window individually. Do NOT write one general statement like "windows with plantation shutters" that applies a treatment seen on one window to the whole room — that is factually wrong whenever the room's windows differ, and it is the single most common analysis error to avoid.
+For every window visible in the photo, identify its position (e.g. "left of fireplace", "right of fireplace", "side wall", "flanking the patio door") and state plainly whether shutters or blinds are physically visible on THAT specific window — yes or no. A window with only a curtain/drape and no shutters or blinds underneath must be described as having no shutters/blinds, even if another window elsewhere in the same photo does have them.
+Shutters/blinds must never be added to a window that does not already have them in the photo, and must never be removed from a window that does. Getting this wrong on even one window is a compliance violation, not a stylistic choice.
+
 PRESERVE (permanent architecture - IMMUTABLE):
 - Structural walls, ceilings, flooring
 - Windows — frame, glass, trim, sill, shutters, and plantation blinds, at their EXACT original size and position. A window must never be resized, repositioned, or turned into a door/opening — see the critical rule above. When curtains are removed, only the fabric and hardware go; the window underneath is untouched.
@@ -130,7 +135,10 @@ Return ONLY valid JSON — no markdown:
 
 {
   "roomType": "kitchen|living|bedroom|bathroom|dining|etc",
-  "preserveList": "Comprehensive list of every permanent element visible: walls, ceiling, flooring, windows, doors, cabinets, appliances, fixtures, finishes. DO NOT alter any of these.",
+  "windowInventory": [
+    "Position + exact treatment for EACH window individually, e.g. 'Left of fireplace: multi-pane window, cream curtain panels, no shutters or blinds visible' or 'Side wall: multi-pane window, white plantation shutters present'. One entry per window visible in the photo. Never combine multiple windows into one generalized statement — if two windows differ, they get two separate, differently-worded entries."
+  ],
+  "preserveList": "Comprehensive list of every permanent element visible: walls, ceiling, flooring, doors, cabinets, appliances, fixtures, finishes. For windows, refer to windowInventory above rather than repeating a generalized window description here.",
   "removeList": "All furniture and decor to remove: sofas, chairs, tables, rugs, lamps, art, plants, etc.",
   "architecturePreserved": [
     "wall color and texture",
@@ -185,6 +193,19 @@ function buildDeclutterPrompt({ roomData }) {
 
   p += `PRESERVE EXACTLY (do not alter):\n${roomData.preserveList}\n\n`;
 
+  // Itemized per-window treatment — see the "SHUTTERS AND BLINDS ARE
+  // PER-WINDOW, NEVER GENERALIZED" rule in the Haiku analysis prompt above.
+  // This is the direct fix for a real hallucination Sam hit: a single
+  // generalized "windows with plantation shutters" sentence in preserveList
+  // caused GPT to add shutters to windows that only had curtains. Spelling
+  // out each window individually here, in the prompt GPT actually reads,
+  // makes it impossible to apply one window's treatment to another.
+  if (Array.isArray(roomData.windowInventory) && roomData.windowInventory.length) {
+    p += `WINDOW-BY-WINDOW TREATMENT (each window is independent — do not apply one window's shutters/blinds to another window that doesn't have them):\n`;
+    roomData.windowInventory.forEach(w => { p += `— ${w}\n`; });
+    p += `\n`;
+  }
+
   p += `REMOVE (inpaint/fill with appropriate background):\n${roomData.removeList}\n\n`;
 
   p += `DECLUTTERING STRATEGY:\n${roomData.declutteringStrategy}\n\n`;
@@ -212,7 +233,8 @@ function buildDeclutterPrompt({ roomData }) {
   p += `15. Shower/tub: if a shower curtain is removed, leave a bare curtain rod with an open shower/tub opening. Do NOT add a glass door, sliding door, or enclosure panel that was not visible in the original photo\n`;
   p += `16. Bathroom vanity cabinetry: preserve BOTH upper and lower cabinets exactly, including medicine cabinets — remove only items sitting on the counter or inside an open cabinet, never the cabinet structure itself\n`;
   p += `17. Windows: when removing curtains, drapes, or sheers, the window itself (frame, glass, trim, sill, blinds/shutters) must stay the EXACT original size and position — do not shrink, enlarge, shift, or convert a window into a door or opening\n`;
-  p += `18. Beds: remove the ENTIRE bed — mattress, box spring, frame, headboard, footboard, slats — not just the bedding/linens/clothing on top of it. A stripped bed frame or headboard left standing is an incomplete removal, not a correct one\n\n`;
+  p += `18. Beds: remove the ENTIRE bed — mattress, box spring, frame, headboard, footboard, slats — not just the bedding/linens/clothing on top of it. A stripped bed frame or headboard left standing is an incomplete removal, not a correct one\n`;
+  p += `19. Shutters and blinds are per-window, never generalized: use the WINDOW-BY-WINDOW TREATMENT list above (if provided) as the exact source of truth for each window. Never add shutters or blinds to a window that the list says has none, and never remove them from a window the list says has them, even if another window in the same room has a different treatment\n\n`;
 
   p += `COMPLIANCE:\n`;
   p += `This room will be prepared per California AB 723 §10140.6 for virtual staging.\n`;

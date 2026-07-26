@@ -3462,8 +3462,31 @@ async function callDeclutterPromptAPI(imageBase64, mimeType) {
     await new Promise(r => setTimeout(r, 1500));
     try {
       const checkRes = await fetch(`/.netlify/functions/check-declutter-prompt?jobId=${encodeURIComponent(jobId)}`);
-      if (!checkRes.ok) continue;
-      const result = await checkRes.json();
+      // FIX (this session): every poll now logs its raw HTTP status and
+      // response text unconditionally, before attempting to parse it as
+      // JSON. The previous version only logged AFTER a successful
+      // checkRes.json() parse — so if the response was ever non-200, or
+      // 200 with a body that wasn't valid JSON, the poll loop would fail
+      // completely silently (caught by the catch block below with no log
+      // at all), which is exactly what happened this session: 80 silent
+      // polls over 2 minutes with zero console output despite Sam
+      // confirming via DevTools the requests were actually returning 200.
+      // This makes that class of failure impossible to miss next time.
+      const rawText = await checkRes.text();
+      if (poll < 3 || poll % 10 === 0) {
+        console.log(`Declutter poll ${poll}: HTTP ${checkRes.status}, body: ${rawText.slice(0, 300)}`);
+      }
+      if (!checkRes.ok) {
+        console.warn(`Declutter poll ${poll}: non-200 response (${checkRes.status}) — will retry`);
+        continue;
+      }
+      let result;
+      try {
+        result = JSON.parse(rawText);
+      } catch (parseErr) {
+        console.error(`Declutter poll ${poll}: response was 200 but not valid JSON — raw body: ${rawText.slice(0, 300)}`);
+        continue;
+      }
       if (result.status !== lastLoggedStatus) {
         console.log(`Declutter job ${jobId}: status=${result.status}` + (result.note ? ` (${result.note})` : ''));
         lastLoggedStatus = result.status;
@@ -3481,15 +3504,9 @@ async function callDeclutterPromptAPI(imageBase64, mimeType) {
         e.isFatal = true;
         throw e;
       }
-      // FIX (this session): distinguishes "background function never
-      // invoked" (not_started) from "running normally" (processing) — the
-      // old code treated both identically and would silently poll for the
-      // full 2 minutes either way. Netlify's own function-log UI has been
-      // intermittently unavailable tonight, so this console signal is the
-      // only diagnostic available when that's down. 10 consecutive
-      // not_started polls (~15s) is well past any reasonable cold-start
-      // window, so escalate to a specific, actionable error instead of
-      // grinding through the full timeout with no useful message.
+      // Distinguishes "background function never invoked" (not_started)
+      // from "running normally" (processing) — 10 consecutive not_started
+      // polls (~15s) is well past any reasonable cold-start window.
       if (result.status === 'not_started') {
         notStartedStreak++;
         if (notStartedStreak >= 10) {
@@ -3503,7 +3520,7 @@ async function callDeclutterPromptAPI(imageBase64, mimeType) {
       // status === 'processing' — keep polling
     } catch(err) {
       if (err.isFatal) throw err;
-      // genuine network blip — keep polling
+      console.warn(`Declutter poll ${poll}: exception during poll (will retry): ${err.message}`);
     }
   }
   throw new Error('Declutter analysis timed out after 2 minutes — please try again.');

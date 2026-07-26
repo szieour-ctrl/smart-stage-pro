@@ -701,7 +701,7 @@ async function getFramesForListing(listingId) {
   // silent bypass of the filter.
   const [stagedResult, externalResult] = await Promise.all([
     supabase("GET", "staged_images", null,
-      `?listing_id=eq.${listingId}&hidden=eq.false&select=id,mode,room_type,cloudinary_original_url,cloudinary_staged_url,created_at&order=created_at.asc`
+      `?listing_id=eq.${listingId}&hidden=eq.false&select=id,mode,room_type,cloudinary_original_url,cloudinary_staged_url,created_at,is_hero_shot,parent_room_label&order=created_at.asc`
     ),
     supabase("GET", "external_photos", null,
       `?listing_id=eq.${listingId}&select=id,image_url,room_type,source_label,created_at&order=created_at.asc`
@@ -732,6 +732,11 @@ async function getFramesForListing(listingId) {
     stagedUrl:      row.cloudinary_staged_url,
     sourceLabel:    "Virtually Staged",
     createdAt:      row.created_at,
+    // NEW (Hero Shot B-Roll tagging) — ground truth from Smart Stage PRO,
+    // not inferred here. See frameRows comment below for how these two
+    // flow the rest of the way to Railway.
+    isHeroShot:     !!row.is_hero_shot,
+    parentRoomLabel: row.parent_room_label || null,
   }));
 
   const externalFrames = (Array.isArray(externalResult.data) ? externalResult.data : []).map(row => ({
@@ -1108,6 +1113,16 @@ async function createVideoJob({ listingId, projectId, userId, frames, formats, m
       // NEW (July 9, 2026) — gates room_reveal to open-concept rooms only.
       // See is_open_plan_migration.sql for the full reasoning.
       is_open_plan:                  !!f.isOpenPlan,
+      // NEW (Hero Shot B-Roll tagging) — carries the Cinematic Asset
+      // Generator's ground-truth linkage through to Railway. is_hero_shot
+      // marks the frame as a detail/B-roll crop; parent_room_label is the
+      // literal room.roomName it was cropped from (set at Generate Final
+      // time in Smart Stage PRO, not guessed here). autoSelect.js uses
+      // parent_room_label to force-merge into the parent's roomGroup when
+      // that parent frame is present in the same batch — deterministic,
+      // not a Claude Vision guess.
+      is_hero_shot:                  !!f.isHeroShot,
+      parent_room_label:             f.parentRoomLabel || null,
       // NEW (found during before/after-pair conversation) — separate,
       // explicit opt-in for the vacant-holds-then-wipes-to-staged Ken
       // Burns reveal. Previously this fired automatically off
@@ -1207,6 +1222,13 @@ async function createVideoJob({ listingId, projectId, userId, frames, formats, m
         useAiMotion:       f.use_ai_motion,
         roomType:          f.room_type,
         roomLabel:         f.room_label, // NEW — footage-grounded narration, see narrationGen.js
+        // NEW (Hero Shot B-Roll tagging) — same explicit-picklist pattern
+        // as every fix above in this dispatch block: a field not named
+        // here is silently dropped before Railway ever sees it. isHeroShot
+        // and parentRoomLabel are read by narrationGen.js's word-budget
+        // logic on the far side.
+        isHeroShot:        !!f.is_hero_shot,
+        parentRoomLabel:   f.parent_room_label,
         motionPreset:      f.motion_preset,    // Ken Burns reads this field name
         klingMotionPreset: f.motion_preset,    // FIX: Kling reads THIS name instead —
                                                  // confirmed via klingMotion.js's
@@ -1495,6 +1517,16 @@ async function regenerateVideoJob({ jobId, userId, frames, formats, musicStyle, 
       // NEW (July 9, 2026) — gates room_reveal to open-concept rooms only.
       // See is_open_plan_migration.sql for the full reasoning.
       is_open_plan:                  !!f.isOpenPlan,
+      // NEW (Hero Shot B-Roll tagging) — carries the Cinematic Asset
+      // Generator's ground-truth linkage through to Railway. is_hero_shot
+      // marks the frame as a detail/B-roll crop; parent_room_label is the
+      // literal room.roomName it was cropped from (set at Generate Final
+      // time in Smart Stage PRO, not guessed here). autoSelect.js uses
+      // parent_room_label to force-merge into the parent's roomGroup when
+      // that parent frame is present in the same batch — deterministic,
+      // not a Claude Vision guess.
+      is_hero_shot:                  !!f.isHeroShot,
+      parent_room_label:             f.parentRoomLabel || null,
       // NEW (found during before/after-pair conversation) — separate,
       // explicit opt-in for the vacant-holds-then-wipes-to-staged Ken
       // Burns reveal. Previously this fired automatically off
@@ -1576,6 +1608,13 @@ async function regenerateVideoJob({ jobId, userId, frames, formats, musicStyle, 
         useAiMotion:       f.use_ai_motion,
         roomType:          f.room_type,
         roomLabel:         f.room_label, // NEW — footage-grounded narration, see narrationGen.js
+        // NEW (Hero Shot B-Roll tagging) — same explicit-picklist pattern
+        // as every fix above in this dispatch block: a field not named
+        // here is silently dropped before Railway ever sees it. isHeroShot
+        // and parentRoomLabel are read by narrationGen.js's word-budget
+        // logic on the far side.
+        isHeroShot:        !!f.is_hero_shot,
+        parentRoomLabel:   f.parent_room_label,
         motionPreset:      f.motion_preset,    // Ken Burns reads this field name
         klingMotionPreset: f.motion_preset,    // FIX: Kling reads THIS name — see
                                                  // matching comment in createVideoJob

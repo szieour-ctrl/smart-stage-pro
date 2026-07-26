@@ -73,7 +73,7 @@ const AB723_HEADER = `PRIMARY ROLE: Remove furniture and decor ONLY. Preserve ar
 
 IMMUTABLE LOCK: Never alter, move, remove, replace, or touch: structural walls | ceilings | kitchen/bathroom cabinets (including upper vanity cabinets and medicine cabinets) | countertops | lighting fixtures | doors | windows (exact original size and position) | built-in appliances | closet hanging rods | shower/tub surrounds and hardware. These must be preserved exactly as photographed.
 
-NEVER INVENT NEW ELEMENTS: Do not add anything that is not visible in the original photo — this includes shower doors, glass enclosures, sliding panels, a second/lower closet rod, or any hardware not present in the source image. Do not convert a window into a door, doorway, or opening, and never resize or reposition a window when its curtains are removed. If something is being removed (e.g. a shower curtain or window curtain), leave the space as an open, bare fixture exactly as it would look with just that item taken away. Do not "complete" or "upgrade" a fixture.
+NEVER INVENT NEW ELEMENTS: Do not add anything that is not visible in the original photo — this includes shower doors, glass enclosures, sliding panels, a second/lower closet rod, or any hardware not present in the source image. Do not convert a window into a door, doorway, or opening. Window curtains, drapes, shutters, and blinds are NOT removed — see the window-coverings rule below; they stay exactly as photographed. If something else is being removed (e.g. a shower curtain), leave the space as an open, bare fixture exactly as it would look with just that item taken away. Do not "complete" or "upgrade" a fixture.
 
 AB 723 COMPLIANCE: Decluttering removes movable objects only. Any alteration to permanent architecture makes the result non-compliant and subject to MLS removal.
 
@@ -122,31 +122,18 @@ Removing only the bedding, pillows, and clothing while leaving the bed frame or 
 Fill the entire footprint where the bed stood with matching floor surface, exactly as you would for any other removed furniture piece.
 If unsure whether "the bed" means the whole structure or just the linens: it means the whole structure. There is no partial removal of a bed.
 
-CRITICAL INPAINTING RULE FOR WINDOWS:
-Windows are permanent architecture, not furniture — they are NEVER removed, resized, repositioned, or converted into anything else, no matter what is covering them.
-When removing curtains, drapes, or sheers from a window, the window itself (frame, glass, trim, sill, any blinds/shutters) must remain in the EXACT same size and position it was in the original photo — measure against fixed reference points in the photo (wall corners, ceiling line, adjacent furniture-free wall) rather than redrawing the window from scratch.
-Do NOT shrink, enlarge, or shift a window when its curtains are removed.
-Do NOT convert a window into a door, doorway, or opening of any kind. A window stays a window.
-Removing a curtain/drape/sheer means ONLY the fabric and its rod/hardware disappear — the glass, frame, sill, and any blinds or shutters underneath stay exactly as photographed.
+CRITICAL INPAINTING RULE FOR WINDOWS AND WINDOW COVERINGS:
+Windows are permanent architecture and are NEVER removed, resized, repositioned, or converted into anything else.
+CHANGE (this session — Sam's call, after repeated real-world hallucinations): curtains, drapes, sheers, shutters, and blinds are now treated as PRESERVED, not removed. Earlier versions of this prompt tried to have you identify what's behind each curtain so it could be stripped away — after several rounds of real testing, this consistently produced confident, wrong guesses (shutters invented on windows that don't have them, window proportions redrawn incorrectly). The fix is to stop asking for that inference at all: leave every window covering exactly as photographed, fabric and hardware included. This is not a stylistic choice, it's the fix — you do not need to determine what is or isn't behind any curtain, and you must not alter, part, open, or remove any curtain, drape, sheer, shutter, or blind on any window for any reason.
 
-CRITICAL RULE — SHUTTERS AND BLINDS ARE PER-WINDOW, NEVER GENERALIZED:
-Different windows in the same room often have different treatments — some may have plantation shutters or blinds, others may have only curtains/drapes with nothing underneath, others may be bare. You must look at and describe EACH window individually. Do NOT write one general statement like "windows with plantation shutters" that applies a treatment seen on one window to the whole room — that is factually wrong whenever the room's windows differ, and it is the single most common analysis error to avoid.
-For every window visible in the photo, identify its position (e.g. "left of fireplace", "right of fireplace", "side wall", "flanking the patio door") and state plainly whether shutters or blinds are physically visible on THAT specific window — yes or no. A window with only a curtain/drape and no shutters or blinds underneath must be described as having no shutters/blinds, even if another window elsewhere in the same photo does have them.
-Shutters/blinds must never be added to a window that does not already have them in the photo, and must never be removed from a window that does. Getting this wrong on even one window is a compliance violation, not a stylistic choice.
-
-CRITICAL RULE — NEVER GUESS WHAT'S BEHIND A CURTAIN YOU CANNOT SEE THROUGH:
-A curtain, drape, or sheer that fully or mostly covers a window means you CANNOT see what is or isn't underneath it — and "I can't see it" must be reported as exactly that, never filled in with a guess. Do NOT assume a window has shutters or blinds just because another window in the room has them, just because that's a common treatment for this style of home, or because you can see a sliver of a frame edge. If the slats, louvers, or blind mechanism of a shutter/blind are not directly and unambiguously visible in the photo for that specific window, you must write that its treatment underneath the curtain is NOT VISIBLE — not "shutters visible," not "shutters present." When curtains are removed from a window whose underlying treatment was not visible, the correct result is a bare window (frame, glass, sill only) — inventing shutters that were never confirmed is a hallucination, not a safe default.
-
-CRITICAL RULE — WINDOW HEIGHT AND POSITION MUST BE ANCHORED TO FIXED REFERENCE POINTS:
-"Exact original size and position" is meaningless to an inpainting model unless you give it something concrete to measure against. For EVERY window and glass door, describe its vertical extent relative to fixed points actually visible in the photo — for example: "top of window sits roughly 6 inches below the ceiling line; bottom of window sits at the wainscoting/chair-rail line" or "extends from ceiling trim down to about knee height, well above the baseboard." If a wainscoting or chair-rail line is present in the room, use it as the primary reference for where each window bottom sits — this is the single most common way window proportions drift during inpainting. Also note each window's width relative to its neighbors (e.g., "narrower than the center window, roughly half its width"). Include this anchoring directly in each window's windowInventory entry, not as a separate note.
-
-CRITICAL RULE — THE VIEW THROUGH GLASS IS FIXED CONTENT, NEVER INVENTED:
-Whatever is visible through a window's glass or a patio/French door's glass — sky, yard, fence, trees, neighboring structures, patio furniture, umbrellas — is part of the original photograph, not a backdrop to be regenerated. Note in your analysis, for at least the largest window and any patio/French doors, a brief factual description of what's actually visible through the glass (e.g., "wood fence and green lawn visible through French doors; blue umbrella visible in yard"), so that exact scene can be preserved rather than replaced with a generic or different exterior view once furniture in front of the glass is removed.
+CRITICAL RULE — THE VIEW THROUGH UNCOVERED GLASS IS FIXED CONTENT, NEVER INVENTED:
+Some glass (typically French/patio doors, and any window with no curtain covering it) is directly visible with nothing in front of it. Whatever is visible through that glass — sky, yard, pool, fence, trees, neighboring structures, patio furniture, umbrellas — is part of the original photograph, not a backdrop to invent or approximate. Describe factually, for the largest uncovered glass area, exactly what's visible through it (e.g., "pool and patio furniture visible through French doors" — not a generic guess like "grass" if a pool is actually what's there), so that exact scene can be preserved rather than replaced with different or generic exterior content once furniture in front of the glass is removed. If you cannot tell precisely what's outside (e.g. overexposed/blown-out glass), say so plainly rather than guessing a specific object.
 
 PRESERVE (permanent architecture - IMMUTABLE):
 - Structural walls, ceilings, flooring
-- Windows — frame, glass, trim, sill, shutters, and plantation blinds, at their EXACT original size and position. A window must never be resized, repositioned, or turned into a door/opening — see the critical rule above. When curtains are removed, only the fabric and hardware go; the window underneath is untouched.
-- The exact scene visible through every window and glass door (sky, yard, fences, structures, plants) — never regenerated or altered, see the critical rule above.
+- Windows — frame, glass, trim, sill, at their EXACT original size and position. A window must never be resized, repositioned, or turned into a door/opening.
+- ALL window coverings (curtains, drapes, sheers, shutters, blinds) exactly as photographed — these are preserved along with the window itself now, not removed. See the critical rule above.
+- The exact scene visible through any uncovered glass (sky, yard, pool, fences, structures, plants) — never regenerated or altered, see the critical rule above.
 - Doors (frames, hinges)
 - Kitchen cabinetry, bathroom cabinetry, countertops, backsplash, appliances (stove, oven, microwave, refrigerator, dishwasher, hood)
 - Bathroom vanity cabinetry — BOTH the lower/base cabinet AND any upper cabinets, medicine cabinets, or wall-mounted storage above the vanity. Preserve every vanity cabinet exactly as photographed, including uppers. If items are sitting on a countertop or inside an open cabinet, remove only those items — never the cabinetry itself.
@@ -163,11 +150,9 @@ Return ONLY valid JSON — no markdown:
 
 {
   "roomType": "kitchen|living|bedroom|bathroom|dining|etc",
-  "windowInventory": [
-    "Position + exact treatment + height anchor + exterior view (if visible) for EACH window individually. Three treatment outcomes: (1) 'Left of fireplace: multi-pane window, no curtain, white plantation shutters clearly visible' — shutters directly seen. (2) 'Right of fireplace: multi-pane window, cream curtain panels, no shutters or blinds visible' — curtain present but sheer/open enough that you can confirm no shutters underneath. (3) 'Side wall: multi-pane window, fully covered by cream curtain panels, treatment underneath NOT VISIBLE' — curtain blocks the view and you genuinely cannot tell what, if anything, is underneath; this is a valid and expected answer, not a gap to fill in with a guess. ALWAYS also append a height anchor relative to a fixed point (e.g. 'top sits just below ceiling trim, bottom aligns with wainscoting line') and, for any window or glass door with an unobstructed exterior view, a brief note of what's visible through the glass (e.g. 'wood fence and lawn visible beyond'). One entry per window visible in the photo. Never combine multiple windows into one generalized statement — if windows differ (in treatment, height, or view), they get separate, differently-worded entries."
-  ],
-  "preserveList": "Comprehensive list of every permanent element visible: walls, ceiling, flooring, doors, cabinets, appliances, fixtures, finishes. For windows, refer to windowInventory above rather than repeating a generalized window description here.",
-  "removeList": "All furniture and decor to remove: sofas, chairs, tables, rugs, lamps, art, plants, etc.",
+  "exteriorView": "For any UNCOVERED glass (French/patio doors, windows with no curtain in front of them): a brief, factual description of what's actually visible through it — e.g. 'pool and patio furniture visible through French doors' or 'wood fence and lawn visible through side window'. If glass is overexposed/blown-out or nothing meaningful is distinguishable, say so plainly rather than guessing. Omit or leave brief if all windows are curtain-covered.",
+  "preserveList": "Comprehensive list of every permanent element visible: walls, ceiling, flooring, doors, cabinets, appliances, fixtures, finishes, AND all window coverings (curtains, drapes, shutters, blinds — these are preserved now, not removed).",
+  "removeList": "All furniture and decor to remove: sofas, chairs, tables, rugs, lamps, art, plants, etc. Do NOT include curtains, drapes, shutters, or blinds in this list — window coverings are preserved, not removed.",
   "architecturePreserved": [
     "wall color and texture",
     "ceiling and fixtures",
@@ -186,10 +171,13 @@ Return ONLY valid JSON — no markdown:
     // stronger vision accuracy is worth the ~3x cost here (still well under a cent per call)
     // for a compliance-critical read: Haiku was confidently misreading shutters behind
     // curtains it couldn't actually see through, which no amount of prompt wording fixed.
-    max_tokens: 3000, // raised from 1200 (this session) — windowInventory entries now
-    // require treatment + height anchor + exterior view per window, which was
-    // pushing multi-window rooms past the old limit and truncating the JSON
-    // mid-string, causing "Declutter analysis JSON parse failed"
+    max_tokens: 1800, // reduced from 3000 (this session) — that raise was to
+    // accommodate windowInventory's verbose per-window entries (treatment +
+    // height anchor + exterior view, repeated per window), which are gone
+    // now that window coverings are preserved wholesale instead of analyzed
+    // per-window. Shorter expected output = faster generation = less
+    // pressure on the 900s background-function ceiling. Still comfortably
+    // above the original 1200 that caused truncation before any of this.
     messages: [{
       role: "user",
       content: [
@@ -236,17 +224,15 @@ function buildDeclutterPrompt({ roomData }) {
 
   p += `PRESERVE EXACTLY (do not alter):\n${roomData.preserveList}\n\n`;
 
-  // Itemized per-window treatment — see the "SHUTTERS AND BLINDS ARE
-  // PER-WINDOW, NEVER GENERALIZED" rule in the Haiku analysis prompt above.
-  // This is the direct fix for a real hallucination Sam hit: a single
-  // generalized "windows with plantation shutters" sentence in preserveList
-  // caused GPT to add shutters to windows that only had curtains. Spelling
-  // out each window individually here, in the prompt GPT actually reads,
-  // makes it impossible to apply one window's treatment to another.
-  if (Array.isArray(roomData.windowInventory) && roomData.windowInventory.length) {
-    p += `WINDOW-BY-WINDOW TREATMENT (each window is independent — do not apply one window's shutters/blinds to another window that doesn't have them):\n`;
-    roomData.windowInventory.forEach(w => { p += `— ${w}\n`; });
-    p += `\n`;
+  // CHANGE (this session — replaces the earlier per-window shutter
+  // itemization approach): window coverings are now preserved wholesale
+  // (see rule 17 below), so there's no need to itemize each window's
+  // treatment anymore. What's still needed is factual grounding for
+  // whatever's visible through UNCOVERED glass, so rule 20's "don't
+  // invent" instruction has something concrete to anchor against rather
+  // than just a prohibition with nothing to preserve toward.
+  if (roomData.exteriorView && roomData.exteriorView.trim()) {
+    p += `EXTERIOR VIEW THROUGH UNCOVERED GLASS (factual — preserve exactly, do not invent anything different):\n${roomData.exteriorView}\n\n`;
   }
 
   p += `REMOVE (inpaint/fill with appropriate background):\n${roomData.removeList}\n\n`;
@@ -275,12 +261,10 @@ function buildDeclutterPrompt({ roomData }) {
   p += `14. Closet hanging rod(s): preserve the exact original count and position. Never remove a rod, relocate a rod, or add a second/lower rod — no double-hang unless the original photo clearly shows two rods\n`;
   p += `15. Shower/tub: if a shower curtain is removed, leave a bare curtain rod with an open shower/tub opening. Do NOT add a glass door, sliding door, or enclosure panel that was not visible in the original photo\n`;
   p += `16. Bathroom vanity cabinetry: preserve BOTH upper and lower cabinets exactly, including medicine cabinets — remove only items sitting on the counter or inside an open cabinet, never the cabinet structure itself\n`;
-  p += `17. Windows: when removing curtains, drapes, or sheers, the window itself (frame, glass, trim, sill, blinds/shutters) must stay the EXACT original size and position — do not shrink, enlarge, shift, or convert a window into a door or opening\n`;
+  p += `17. Window coverings (curtains, drapes, sheers, shutters, blinds) are preserved exactly as photographed — do NOT remove, part, open, alter, or attempt to reveal anything behind any of them. The window itself (frame, glass, trim, sill) must also stay the EXACT original size and position — do not shrink, enlarge, shift, or convert a window into a door or opening\n`;
   p += `18. Beds: remove the ENTIRE bed — mattress, box spring, frame, headboard, footboard, slats — not just the bedding/linens/clothing on top of it. A stripped bed frame or headboard left standing is an incomplete removal, not a correct one\n`;
-  p += `19. Shutters and blinds are per-window, never generalized: use the WINDOW-BY-WINDOW TREATMENT list above (if provided) as the exact source of truth for each window. Never add shutters or blinds to a window that the list says has none, and never remove them from a window the list says has them, even if another window in the same room has a different treatment. If a window's entry says the treatment underneath its curtain was NOT VISIBLE, the correct result after removing the curtain is a BARE window — frame, glass, and sill only, no shutters or blinds. Do not invent a shutter/blind for a window the list marks as unconfirmed\n`;
-  p += `20. Wainscoting / chair-rail paneling (if present on any wall): preserve its EXACT height, horizontal line, and profile along every wall it appears on. The top edge of the wainscoting must stay at precisely the same height after furniture is removed as it was in the original photo — do not raise, lower, shift, or redraw the wainscoting line, even in areas that were previously blocked by furniture\n`;
-  p += `21. Window and glass door height/position: use the height anchor given for each window in the WINDOW-BY-WINDOW TREATMENT list above (e.g. "bottom aligns with wainscoting line") as the literal measurement to match — do not redraw a window's proportions from general assumptions about what looks right. Every window's top and bottom edge must land at the same anchor point stated for it\n`;
-  p += `22. The view through window glass and patio/French door glass — sky, yard, fence, trees, neighboring structures, patio furniture — is fixed content from the original photo, not a background to regenerate. Preserve it pixel-for-pixel where visible; do not invent a different or generic exterior scene\n\n`;
+  p += `19. Wainscoting / chair-rail paneling (if present on any wall): preserve its EXACT height, horizontal line, and profile along every wall it appears on. The top edge of the wainscoting must stay at precisely the same height after furniture is removed as it was in the original photo — do not raise, lower, shift, or redraw the wainscoting line, even in areas that were previously blocked by furniture\n`;
+  p += `20. CRITICAL WINDOW RULE: Use only information already present in the source image. Do not invent, reconstruct, replace, complete, or clarify into existence any view through windows or glass doors. Do not add, remove, or change buildings, fences, trees, sky, patios, landscaping, reflections, window frames, mullions, shutters, or glass details. If exterior detail is clipped, blurry, obscured, or unavailable, leave it naturally bright\n\n`;
 
   p += `COMPLIANCE:\n`;
   p += `This room will be prepared per California AB 723 §10140.6 for virtual staging.\n`;

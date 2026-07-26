@@ -282,7 +282,10 @@ RETURN ONLY THIS JSON — no markdown, no preamble:
 
       // Haiku reads the decluttered room
       const readPayload = JSON.stringify({
-        model: "claude-haiku-4-5",
+        model: "claude-sonnet-4-6", // upgraded from claude-haiku-4-5 (this session), matching
+        // declutter-prompt.js — NOTE: this file does not appear to be in index.html's live
+        // Clean+Stage request path (that goes through declutter-prompt.js + stage-vacant-prompt.js
+        // instead), so this swap is for consistency/hygiene rather than a confirmed live fix.
         max_tokens: 2000,
         messages: [{
           role: "user",

@@ -729,10 +729,24 @@ function buildRealFrame(f) {
     // LTX_MOTION_TEMPLATES[frame.ltxMotionPreset]) exactly.
     ltxMotionPreset: useLtxMotion ? (f.ltxPreset || undefined) : undefined,
     isOpenPlan:    f.room === "Open Plan",
-    // durationSeconds intentionally omitted — motionPresets.js's
-    // resolveDuration() already has real per-roomType defaults; there is
-    // no duration control in this UI, so let the backend's own sensible
-    // default apply rather than hardcoding a guess here.
+    // durationSeconds omitted for every normal frame — motionPresets.js's
+    // resolveDuration() already has real per-roomType defaults, and there
+    // is no general duration control in this UI, so the backend's own
+    // sensible default applies rather than a hardcoded guess here.
+    // EXCEPTION (Hero Shot B-Roll tagging): hero shots get an explicit 4s
+    // override (Sam's spec — short detail cutaways, not full room
+    // establishing shots). resolveDuration() checks frame.durationSeconds
+    // FIRST, before any roomType default, so this always wins for them.
+    durationSeconds: f.isHeroShot ? 4 : undefined,
+    // NEW (Hero Shot B-Roll tagging) — ground truth forwarded straight
+    // through to video-job.js's frameRows → staged video_job_frames rows →
+    // Railway. isHeroShot flags a detail/B-roll crop; parentRoomLabel is
+    // the literal source room name, used by autoSelect.js to force-merge
+    // this frame into its parent room's narration group deterministically
+    // (only when that parent's own frame is present in the same batch —
+    // otherwise it stays standalone, see autoSelect.js's grouping rule).
+    isHeroShot:      !!f.isHeroShot,
+    parentRoomLabel: f.isHeroShot ? (f.parentRoomLabel || null) : undefined,
     // FIX (found during audio-build session) — these three were already
     // fully plumbed through video-job.js and renderPipeline.js (both
     // read frame.addContinuationMotion etc. directly), but buildRealFrame
@@ -884,6 +898,13 @@ async function runAutoSelectAndAdvance() {
           stagedImageUrl: f.realUrl,
           beforeImageUrl: f.isBeforeAfter ? f.beforeUrl : undefined,
           userProvidedRoomLabel: f.room ? (f.room === "Other" ? (f.roomOther || undefined) : f.room) : undefined,
+          // NEW (Hero Shot B-Roll tagging) — the actual ground truth
+          // autoSelect.js's grouping rule keys off. userProvidedRoomLabel
+          // above is just a hint for Vision's ordinary judgment; these two
+          // are exact match fields for the deterministic merge (see
+          // autoSelect.js's applyHeroShotGrouping()).
+          isHeroShot: !!f.isHeroShot,
+          parentRoomLabel: f.isHeroShot ? (f.parentRoomLabel || undefined) : undefined,
         })),
       }),
     });
@@ -1219,7 +1240,17 @@ async function loadGallery() {
     // Map the real action=frames response shape (id, mode, originalUrl,
     // stagedUrl / imageUrl, roomType, sourceLabel) onto the fields
     // renderGallery()/toggleGalleryItem() already expect (roomLabel).
-    galleryStagedFrames = (data.stagedFrames || []).map(f => ({ ...f, roomLabel: humanizeRoomType(f.mode, f.roomType) }));
+    // CHANGED (Hero Shot B-Roll tagging): roomType now holds just the
+    // readable shot name for hero shots (e.g. "Fireplace Feature"), with
+    // parentRoomLabel carrying the source room separately — humanizeRoomType
+    // alone would show only "Fireplace Feature" with no room context, so
+    // hero shots get their own label combining both.
+    galleryStagedFrames = (data.stagedFrames || []).map(f => ({
+      ...f,
+      roomLabel: f.isHeroShot
+        ? `${f.parentRoomLabel || "Room"} — ${f.roomType || "Hero Shot"}`
+        : humanizeRoomType(f.mode, f.roomType),
+    }));
     galleryExternalFrames = (data.externalFrames || []).map(f => ({ ...f, roomLabel: f.roomType || f.sourceLabel || "Photo" }));
 
     document.getElementById("galleryLoading").style.display = "none";
@@ -1305,6 +1336,7 @@ function toggleGalleryItem(itemId) {
     gallerySelectedIds.add(itemId);
     const isStaged = item.source === "staged";
     const matchedRoom = matchToRoomType(item.roomType);
+    const isHeroShot = isStaged && !!item.isHeroShot;
     frames.push({
       id: ++frameIdCounter,
       galleryId: itemId, // links back to the gallery item for deselect/toggle
@@ -1317,8 +1349,16 @@ function toggleGalleryItem(itemId) {
       motion: "kenburns",
       kenBurnsPreset: "auto",
       preset: null,
-      isBeforeAfter: isStaged && !!item.originalUrl, // set AUTOMATICALLY from real data — never a user choice
-      beforeUrl: isStaged ? item.originalUrl : null,  // the actual pair URL, carried silently — never shown to the user
+      // CHANGED (Hero Shot B-Roll tagging): a hero shot's compliance
+      // originalUrl exists for AB 723 disclosure, NOT for video treatment —
+      // it's a still crop of an already-staged room, never a real
+      // vacant→staged pair. Without this override it would have inherited
+      // isBeforeAfter: true purely because item.originalUrl happens to be
+      // set, making it wrongly eligible for Hero Transformation / Room
+      // Reveal (both require a genuine pair). Forced false regardless of
+      // originalUrl whenever isHeroShot is true.
+      isBeforeAfter: isHeroShot ? false : (isStaged && !!item.originalUrl), // set AUTOMATICALLY from real data — never a user choice
+      beforeUrl: isHeroShot ? null : (isStaged ? item.originalUrl : null),  // the actual pair URL, carried silently — never shown to the user
       // NEW (audio-build-adjacent fix) — SEPARATE from isBeforeAfter on
       // purpose. isBeforeAfter is a data fact (do we have a real pair on
       // file) and drives Kling preset ELIGIBILITY only. Whether Ken Burns
@@ -1328,6 +1368,17 @@ function toggleGalleryItem(itemId) {
       // to false always, regardless of isBeforeAfter.
       useRevealEffect: false,
       addContinuationMotion: false,
+      // NEW (Hero Shot B-Roll tagging) — ground truth carried from Smart
+      // Stage PRO through to autoSelect.js and Railway. isHeroShot marks
+      // this as a detail/B-roll crop; parentRoomLabel is the literal source
+      // room it came from, used for deterministic roomGroup merging (not a
+      // Vision guess — see autoSelect.js). durationSeconds is an explicit
+      // 4s override (Sam's spec — these are short cutaways, not full room
+      // establishing shots); resolveDuration() on Railway checks this field
+      // FIRST, before any per-roomType default, so it always wins.
+      isHeroShot,
+      parentRoomLabel: isHeroShot ? (item.parentRoomLabel || null) : null,
+      durationSeconds: isHeroShot ? 4 : undefined,
     });
   }
   renderGallery();

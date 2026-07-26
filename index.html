@@ -4459,7 +4459,7 @@ async function generateHeroShotFinal(roomId, shotId, qualityChoice) {
     // delivered the final shot but never wrote an original/altered pair to
     // the compliance page. Fire-and-forget, same as attachFinalToProject —
     // must never block the shot from reaching the user if this fails.
-    attachHeroShotToProject(badgedHeroBase64, room, shot).catch(err => {
+    attachHeroShotToProject(badgedHeroBase64, room, room.heroDetailShots[shotId], shotId).catch(err => {
       console.warn('attachHeroShotToProject error:', err.message);
     });
   } catch (err) {
@@ -4482,7 +4482,7 @@ async function generateHeroShotFinal(roomId, shotId, qualityChoice) {
 // what's now being marketed — same reasoning the SSP path spec states
 // explicitly: "The AB 723 original should be the original uploaded image,
 // not the Smart Correct™ master." That principle generalizes here.
-async function attachHeroShotToProject(finalBase64, room, shot) {
+async function attachHeroShotToProject(finalBase64, room, shot, shotId) {
   if (!SESSION.projectId) return;
 
   const orig = SESSION.originals.find(o => o.id === room?.originalId);
@@ -4500,44 +4500,119 @@ async function attachHeroShotToProject(finalBase64, room, shot) {
   };
   const dbMode = ROOM_MODE_TO_DB_MODE[room.roomMode] || 'vacant_stage';
 
-  // Upload the final hero shot to Cloudinary — reuses the existing
-  // upload-staged.js function unchanged, same finals folder convention
-  // as the main staging flow, tagged with the shot name for identification
-  // on the compliance page image-pair list.
-  const uploadRes = await fetch('/.netlify/functions/upload-staged', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      imageBase64: finalBase64,
-      mimeType: 'image/jpeg',
-      projectId: SESSION.projectId,
-      roomName: `${room.roomName || 'Room'} — ${shot.name || 'Hero Shot'}`,
-      tier: 'hero_shot',
-    })
-  });
-  const uploadData = await uploadRes.json();
-  if (!uploadData.publicUrl) throw new Error('No hero shot URL from Cloudinary');
+  shot.complianceAttachStatus = 'pending';
+  shot.complianceAttachError = null;
+  renderRoomQueue();
 
-  const _sbUserForHero = (await getSupabase().auth.getUser()).data?.user;
-  await fetch('/.netlify/functions/project-manage?action=add-image', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      projectId: SESSION.projectId,
-      userId: _sbUserForHero?.id || null,
-      imageData: {
-        roomName: `${room.roomName || 'Room'} — ${shot.name || 'Hero Shot'}`,
-        tier: 'hero_shot',           // quality label — Blobs/compliance-page display only
-        mode: dbMode,                // real staged_images.mode value (constraint-safe)
-        originalUrl: orig?.originalUrl || null,  // true camera-ready original, NOT the staged image
-        stagedUrl: uploadData.publicUrl,
-        fileName: orig?.name || '',
-      }
-    })
-  });
+  try {
+    // BUG FIX (this session): this function was still calling upload-staged.js
+    // with the OLD contract (imageBase64 in, publicUrl out). upload-staged.js
+    // was rewritten during the Generate Final pipeline fix to the direct-to-
+    // Cloudinary architecture — it now only signs a request and returns
+    // {cloudName, apiKey, timestamp, signature, folder}, no publicUrl, no
+    // image upload at all. That mismatch meant `uploadData.publicUrl` was
+    // always undefined, this always threw, and because the caller only did
+    // .catch(err => console.warn(...)), every single hero shot final silently
+    // never reached the compliance page — confirmed via direct trace of
+    // both files, matching the exact symptom reported (final generates fine,
+    // never appears on compliance page, no visible error). Same fix pattern
+    // as attachFinalToProject: get signature → FormData direct upload to
+    // Cloudinary from the browser → attach with the real secure_url.
+    const sigRes = await fetch('/.netlify/functions/upload-staged', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId: SESSION.projectId })
+    });
+    const sigRaw = await sigRes.text();
+    let sig;
+    try { sig = JSON.parse(sigRaw); }
+    catch { throw new Error(`upload-staged (signature) returned a non-JSON response (status ${sigRes.status}): ${sigRaw.slice(0, 200)}`); }
+    if (!sig.signature) throw new Error(sig.error || 'No upload signature returned');
 
-  console.log('Hero shot attached to project:', SESSION.projectId, 'shot:', shot.name, 'room:', room.roomName);
-  showToast(`✓ Hero shot added to compliance project: ${SESSION.projectAddress || SESSION.projectId}`, 'success');
+    const imageBlob = base64ToBlob(finalBase64, 'image/jpeg');
+    const formData = new FormData();
+    formData.append('file', imageBlob, 'hero-shot.jpg');
+    formData.append('api_key', sig.apiKey);
+    formData.append('timestamp', sig.timestamp);
+    formData.append('signature', sig.signature);
+    formData.append('folder', sig.folder);
+
+    const uploadRes = await fetch(`https://api.cloudinary.com/v1_1/${sig.cloudName}/image/upload`, {
+      method: 'POST',
+      body: formData,
+    });
+    const uploadRaw = await uploadRes.text();
+    let uploadData;
+    try { uploadData = JSON.parse(uploadRaw); }
+    catch { throw new Error(`Cloudinary upload returned a non-JSON response (status ${uploadRes.status}): ${uploadRaw.slice(0, 200)}`); }
+    if (!uploadData.secure_url) {
+      const cloudErr = uploadData.error?.message || uploadData.error || uploadRaw.slice(0, 300);
+      throw new Error(`Cloudinary rejected the upload (status ${uploadRes.status}): ${cloudErr}`);
+    }
+
+    const _sbUserForHero = (await getSupabase().auth.getUser()).data?.user;
+    const attachRes = await fetch('/.netlify/functions/project-manage?action=add-image', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        projectId: SESSION.projectId,
+        userId: _sbUserForHero?.id || null,
+        imageData: {
+          // CHANGED (Hero Shot B-Roll tagging): room_type used to hold the
+          // squashed "Room — Shot" composite string, which broke clean
+          // matching downstream (PRO Plus's matchToRoomType() couldn't
+          // match it against a plain category, autoSelect.js had no
+          // reliable ground truth to group on). room_type now holds just
+          // the readable shot name; the room it came from moves to its own
+          // parent_room_label field — see isHeroShot/parentRoomLabel below.
+          roomName: shot.name || 'Hero Shot',
+          tier: 'hero_shot',           // quality label — Blobs/compliance-page display only
+          mode: dbMode,                // real staged_images.mode value (constraint-safe)
+          originalUrl: orig?.originalUrl || null,  // true camera-ready original, NOT the staged image
+          stagedUrl: uploadData.secure_url,
+          fileName: orig?.name || '',
+          // NEW — ground truth captured here, at Generate Final time,
+          // where room.roomName and shot.name both exist together. Flows
+          // through staged_images → video-job.js → build-video-demo.html →
+          // autoSelect.js, where parentRoomLabel drives deterministic
+          // room-group merging (not a Claude Vision guess).
+          isHeroShot: true,
+          parentRoomLabel: room.roomName || 'Room',
+        }
+      })
+    });
+    if (!attachRes.ok) {
+      const attachRaw = await attachRes.text();
+      let d;
+      try { d = JSON.parse(attachRaw); } catch { d = {}; }
+      throw new Error(d.error || `add-image failed (status ${attachRes.status}): ${attachRaw.slice(0, 200)}`);
+    }
+
+    console.log('Hero shot attached to project:', SESSION.projectId, 'shot:', shot.name, 'room:', room.roomName);
+    shot.complianceAttachStatus = 'success';
+    showToast(`✓ Hero shot added to compliance project: ${SESSION.projectAddress || SESSION.projectId}`, 'success');
+
+  } catch (err) {
+    // Previously silent (console.warn only) — same visibility fix as
+    // attachFinalToProject: never let this fail quietly, since a hero shot
+    // that "generated fine" but never reached the compliance page is an
+    // AB 723 compliance gap, not just a UX inconvenience.
+    console.error('attachHeroShotToProject error:', err.message);
+    shot.complianceAttachStatus = 'failed';
+    shot.complianceAttachError = err.message;
+    showToast(`⚠ "${shot.name}" final was generated but did NOT reach the compliance page — ${err.message}. Use Retry below.`, 'error');
+  }
+  renderRoomQueue();
+}
+
+// Manual retry — reuses the already-generated hero shot finalBase64, no new
+// credit charged and no re-generation, just re-attempts the Cloudinary
+// upload + Blobs/compliance attachment. Mirrors retryComplianceAttach().
+async function retryHeroShotComplianceAttach(roomId, shotId) {
+  const room = SESSION.rooms.find(r => r.id === roomId);
+  const shot = room?.heroDetailShots?.[shotId];
+  if (!shot?.finalBase64) { showToast('No hero shot final found to retry.', 'error'); return; }
+  await attachHeroShotToProject(shot.finalBase64, room, shot, shotId);
 }
 
 
@@ -4597,10 +4672,16 @@ function renderCinematicAssetPanel(roomId) {
     }
 
     if (shot.status === 'final' && shot.finalBase64) {
+      const attachStatus = shot.complianceAttachStatus;
+      const attachWarning = attachStatus === 'failed'
+        ? `<div style="background:#fdf0ef;border:1px solid #f0c0c0;border-radius:4px;padding:6px 8px;margin-top:4px;font-size:0.62rem;color:#a03030;grid-column:1/-1;">⚠ Did not reach the compliance page — ${(shot.complianceAttachError||'unknown error').replace(/</g,'&lt;')} <button class="btn btn-outline btn-sm" style="margin-left:4px;padding:1px 6px;font-size:0.6rem;" onclick="event.stopPropagation();retryHeroShotComplianceAttach('${roomId}','${shotId}')">↻ Retry</button></div>`
+        : attachStatus === 'pending'
+        ? `<div style="font-size:0.6rem;color:var(--muted);margin-top:4px;grid-column:1/-1;">Adding to compliance page…</div>`
+        : '';
       return `<div class="result-img-wrap" style="position:relative;cursor:pointer;" onclick="openHeroShotPreview('${roomId}','${shotId}')">
         <img src="data:image/jpeg;base64,${shot.finalBase64}" title="Click to preview / download" />
         <div style="position:absolute;top:4px;left:4px;background:rgba(30,110,60,0.85);color:#fff;font-size:0.6rem;font-weight:700;padding:2px 6px;border-radius:2px;">FINAL</div>
-      </div>`;
+      </div>${attachWarning}`;
     }
 
     return `<div class="result-img-wrap" style="display:flex;flex-direction:column;align-items:center;justify-content:center;background:#fff8e7;min-height:110px;border:1px solid #f0d080;border-radius:3px;gap:4px;padding:8px;text-align:center;">
@@ -4624,8 +4705,13 @@ function downloadHeroDetailShot(roomId, shotId) {
   if (!shot?.finalBase64) { showToast('Generate a Final first — drafts cannot be downloaded.', 'error'); return; }
   const a = document.createElement('a');
   a.href = 'data:image/jpeg;base64,' + shot.finalBase64;
-  const safeName = (shot.name || shotId).toString().replace(/[^a-z0-9]/gi, '_');
-  a.download = `CinematicAsset_${safeName}_${bName(getOrigName(roomId))}.jpg`;
+  // CHANGED (Hero Shot B-Roll tagging, Sam's spec): filename now carries
+  // the same [Hero Shot] [Room Label] [Shot Name] structure as the
+  // parentRoomLabel/roomType fields written at Generate Final time — the
+  // filename is just a human-readable mirror of that same ground-truth
+  // data, not a separate label invented here.
+  const safe = (s) => (s || '').toString().trim().replace(/[^a-z0-9]+/gi, '_').replace(/^_+|_+$/g, '');
+  a.download = `HeroShot_${safe(room?.roomName || 'Room')}_${safe(shot.name || shotId)}.jpg`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);

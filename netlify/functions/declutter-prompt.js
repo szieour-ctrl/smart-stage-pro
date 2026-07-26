@@ -13,8 +13,45 @@
 // check-declutter-prompt.js for the actual result. Same three-piece pattern
 // already proven out by stage-openai.js + stage-openai-background.js +
 // check-openai.js — this just applies it to the room-analysis step too.
+//
+// FIX (this session, round 2 — the actual root cause of the persistent 500s
+// after the netlify.toml/siteUrl fixes): Netlify Background Functions run
+// on AWS Lambda's asynchronous ("Event") invocation model, which caps the
+// invocation payload at 1MB (raised from 256KB in Oct 2025) — this is a
+// hard platform limit, not something Netlify config can raise. This
+// dispatcher was forwarding the client's FULL, uncompressed original image
+// (2.4-2.47MB in testing) straight through to declutter-prompt-background.js
+// as the trigger payload — more than double even the newer 1MB ceiling.
+// Lambda rejects an oversized async payload before the function's code ever
+// loads, which is exactly why it surfaced as an opaque "Internal Error. ID:
+// ..." with zero logs from the background function ever, no matter how it
+// was watched. Compressing here, before the trigger, keeps the payload at
+// ~80-100KB — the same target declutter-prompt-background.js's own
+// prepareImage() already used, just now applied before the size limit that
+// actually matters, not after.
 
 const https = require("https");
+const sharp = require("sharp");
+
+// Compress before triggering — the background function only needs to READ
+// the room, not reproduce it. Mirrors prepareImage() in
+// declutter-prompt-background.js; that function's own compression step
+// becomes a fast no-op once this has already run.
+async function compressForTrigger(imageBase64, mimeType) {
+  const buffer = Buffer.from(imageBase64, 'base64');
+  const meta = await sharp(buffer).metadata();
+  const sizeKB = Math.round(buffer.length / 1024);
+  const maxDim = Math.max(meta.width || 0, meta.height || 0);
+  if (maxDim <= 768 && sizeKB <= 80) return { base64: imageBase64, mimeType };
+  const compressed = await sharp(buffer)
+    .rotate()
+    .flatten({ background: { r: 255, g: 255, b: 255 } })
+    .resize(768, 768, { fit: 'inside', withoutEnlargement: true })
+    .jpeg({ quality: 82 })
+    .toBuffer();
+  console.log(`declutter-prompt dispatcher: compressed ${meta.width}x${meta.height} ${sizeKB}KB → ${Math.round(compressed.length/1024)}KB before triggering background function`);
+  return { base64: compressed.toString('base64'), mimeType: 'image/jpeg' };
+}
 
 function triggerBackground(payload, siteUrl, functionName) {
   const body = Buffer.from(JSON.stringify(payload));
@@ -84,8 +121,13 @@ exports.handler = async (event) => {
     console.log(`declutter-prompt dispatcher: using siteUrl=${siteUrl} (from ${hostHeader ? 'request Host header' : 'env var / hardcoded fallback'})`);
     const jobId = "declutter-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8);
 
+    // Compress BEFORE building the trigger payload — see the file-level
+    // comment above for why this has to happen here, not just inside
+    // declutter-prompt-background.js.
+    const { base64: compressedBase64, mimeType: compressedMime } = await compressForTrigger(imageBase64, mimeType);
+
     const triggerStatus = await triggerBackground(
-      { jobId, imageBase64, mimeType },
+      { jobId, imageBase64: compressedBase64, mimeType: compressedMime },
       siteUrl,
       "declutter-prompt-background"
     );

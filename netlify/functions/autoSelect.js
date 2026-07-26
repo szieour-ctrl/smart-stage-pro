@@ -247,6 +247,7 @@ Produce a natural walkthrough sequence, following this category priority — fro
 This category order is a hard constraint, same weight as the two below it — categories 2-6 must not interleave (e.g. Office must never land after a bedroom just because a bedroom photo "felt" like it belonged earlier; category 4 always precedes category 5 and 6, full stop). Your judgment applies WITHIN a category only — deciding which specific photo leads when a category has several (e.g. which of two hero living-space shots goes first), never whether a category as a whole jumps the queue. Two further hard constraints:
 1. A real vacant/staged pair must stay adjacent to itself.
 2. Frames sharing a roomGroup must stay contiguous — never split a room's photos apart with a different room in between.
+3. A frame marked HERO SHOT in its notes is a detail crop of an existing room, not a new room. Set its roomGroup to match the parent room's roomGroup and place it immediately adjacent to that room's own frame(s) — treat it as a supporting cutaway within that room's segment, not a new stop on the tour. (A deterministic pass after your plan is generated will correct roomGroup for these automatically if you miss it, but getting placement/order right yourself keeps the video from re-shuffling frames it didn't expect.)
 
 ## Structure and motion, per frame
 First decide structure:
@@ -347,9 +348,20 @@ function buildUserContent(frames) {
     const pairNote = frame.beforeImageUrl
       ? `This frame HAS a real vacant/before pair available.`
       : `This frame has NO before pair — single image only.`;
+    // NEW (Hero Shot B-Roll tagging) — tells Claude this frame is a detail
+    // crop of an already-staged room, not a new room. This informs YOUR
+    // ordering/anchor/motion judgment (place it near its parent room, treat
+    // it as a cutaway, don't give it Room Reveal structure). It does NOT
+    // need to get the roomGroup exactly right on its own — a deterministic
+    // code pass after your plan comes back force-corrects roomGroup to
+    // match the parent room whenever that parent's own frame is also in
+    // this batch, using the real parentRoomLabel value, not a guess.
+    const heroNote = frame.isHeroShot
+      ? ` HERO SHOT: this is a detail/B-roll crop from the room "${frame.parentRoomLabel || "unknown"}" — not a separate room. Place it adjacent to that room's own frame if it's in this batch, and treat it as a supporting cutaway (never Room Reveal structure).`
+      : "";
     content.push({
       type: "text",
-      text: `Frame ID: ${frame.frameId}. ${pairNote}${frame.userProvidedRoomLabel ? ` User-provided label: "${frame.userProvidedRoomLabel}".` : ""}`,
+      text: `Frame ID: ${frame.frameId}. ${pairNote}${frame.userProvidedRoomLabel ? ` User-provided label: "${frame.userProvidedRoomLabel}".` : ""}${heroNote}`,
     });
   }
   content.push({
@@ -459,7 +471,49 @@ async function generateAutoSelection({ frames, narrationEnabled, hasExteriorEnha
   }
 
   const enforced = enforceAutoSelectionRules(plan, frames, { narrationEnabled, hasExteriorEnhancement });
-  return enforceAiMotionPoolCap(enforced, aiMotionCap);
+  const grouped = applyHeroShotGrouping(enforced, frames);
+  return enforceAiMotionPoolCap(grouped, aiMotionCap);
+}
+
+// ── HERO SHOT / B-ROLL GROUPING — DETERMINISTIC CORRECTION ─────────────
+// Claude is asked (system prompt rule 3) to set a hero shot's roomGroup to
+// match its parent room's, but this is enforced here regardless of what it
+// actually did — same "loud, never silent" force-correction posture as
+// enforceAutoSelectionRules above, not a duplicate of Claude's judgment.
+// Ground truth is frame.parentRoomLabel — the literal room.roomName set in
+// Smart Stage PRO at Generate Final time, not a Vision guess — matched
+// against every OTHER frame's userProvidedRoomLabel in this same batch
+// (the closest existing stable room-identity string already flowing
+// through this pipeline; see build-video-demo.html's matchToRoomType()).
+// If no frame in this batch carries a matching label, the hero shot has no
+// parent to join here — it keeps whatever standalone roomGroup Claude gave
+// it, no correction, no error logged, since that's the expected shape
+// whenever a hero shot is included without its source room's own photo in
+// the same video (narrationGen.js's word-budget fix handles that case).
+function applyHeroShotGrouping(plan, frames) {
+  const frameById = new Map(frames.map((f) => [f.frameId, f]));
+
+  const roomGroupByLabel = new Map();
+  for (const entry of plan) {
+    const frame = frameById.get(entry.frameId);
+    if (!frame || frame.isHeroShot) continue;
+    const label = (frame.userProvidedRoomLabel || "").trim().toLowerCase();
+    if (label) roomGroupByLabel.set(label, entry.roomGroup);
+  }
+
+  for (const entry of plan) {
+    const frame = frameById.get(entry.frameId);
+    if (!frame || !frame.isHeroShot || !frame.parentRoomLabel) continue;
+    const parentGroup = roomGroupByLabel.get(frame.parentRoomLabel.trim().toLowerCase());
+    if (parentGroup && entry.roomGroup !== parentGroup) {
+      console.error(
+        `[AUTO-SELECT] Hero shot "${entry.frameId}" (parent room "${frame.parentRoomLabel}") had roomGroup="${entry.roomGroup}" — force-correcting to match its parent's roomGroup="${parentGroup}" so narrationGen.js merges them into one segment. Deterministic from parentRoomLabel, not left to Claude's own judgment.`
+      );
+      entry.roomGroup = parentGroup;
+    }
+  }
+
+  return plan;
 }
 
 // ── HARD ENFORCEMENT ────────────────────────────────────────────────────

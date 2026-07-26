@@ -158,7 +158,10 @@ Return ONLY valid JSON — no markdown:
 }`;
 
   const payload = JSON.stringify({
-    model: "claude-haiku-4-5",
+    model: "claude-sonnet-4-6", // upgraded from claude-haiku-4-5 (this session) — Sonnet's
+    // stronger vision accuracy is worth the ~3x cost here (still well under a cent per call)
+    // for a compliance-critical read: Haiku was confidently misreading shutters behind
+    // curtains it couldn't actually see through, which no amount of prompt wording fixed.
     max_tokens: 1200,
     messages: [{
       role: "user",

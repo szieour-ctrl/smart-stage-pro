@@ -3456,21 +3456,54 @@ async function callDeclutterPromptAPI(imageBase64, mimeType) {
   // Sonnet vision on this call has run 30-35s in testing — poll generously.
   // 1.5s interval x 80 polls = 2 minutes, same ceiling callStageAPI uses.
   const maxPolls = 80;
+  let notStartedStreak = 0;
+  let lastLoggedStatus = null;
   for (let poll = 0; poll < maxPolls; poll++) {
     await new Promise(r => setTimeout(r, 1500));
     try {
       const checkRes = await fetch(`/.netlify/functions/check-declutter-prompt?jobId=${encodeURIComponent(jobId)}`);
       if (!checkRes.ok) continue;
       const result = await checkRes.json();
+      if (result.status !== lastLoggedStatus) {
+        console.log(`Declutter job ${jobId}: status=${result.status}` + (result.note ? ` (${result.note})` : ''));
+        lastLoggedStatus = result.status;
+      }
       if (result.status === 'done') {
-        if (!result.declutterPrompt) throw new Error('No prompt in completed job');
+        if (!result.declutterPrompt) {
+          const e = new Error('No prompt in completed job — background function reported done but wrote no declutterPrompt');
+          e.isFatal = true;
+          throw e;
+        }
         return { declutterPrompt: result.declutterPrompt, roomData: result.roomData };
       }
-      if (result.status === 'error') throw new Error('Declutter analysis error: ' + (result.error || 'unknown'));
+      if (result.status === 'error') {
+        const e = new Error('Declutter analysis error: ' + (result.error || 'unknown'));
+        e.isFatal = true;
+        throw e;
+      }
+      // FIX (this session): distinguishes "background function never
+      // invoked" (not_started) from "running normally" (processing) — the
+      // old code treated both identically and would silently poll for the
+      // full 2 minutes either way. Netlify's own function-log UI has been
+      // intermittently unavailable tonight, so this console signal is the
+      // only diagnostic available when that's down. 10 consecutive
+      // not_started polls (~15s) is well past any reasonable cold-start
+      // window, so escalate to a specific, actionable error instead of
+      // grinding through the full timeout with no useful message.
+      if (result.status === 'not_started') {
+        notStartedStreak++;
+        if (notStartedStreak >= 10) {
+          const e = new Error('Declutter background function never started (no heartbeat after 15s) — check the declutter-prompt dispatcher log for the trigger response, and confirm declutter-prompt-background is deployed.');
+          e.isFatal = true;
+          throw e;
+        }
+      } else {
+        notStartedStreak = 0;
+      }
       // status === 'processing' — keep polling
     } catch(err) {
-      if (err.message.startsWith('Declutter analysis error:')) throw err;
-      // network blip — keep polling
+      if (err.isFatal) throw err;
+      // genuine network blip — keep polling
     }
   }
   throw new Error('Declutter analysis timed out after 2 minutes — please try again.');

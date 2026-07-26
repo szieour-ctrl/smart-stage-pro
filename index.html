@@ -3425,6 +3425,56 @@ async function callStageAPI(imageBase64, mimeType, prompt, quality) {
   throw new Error('Staging timed out after 4 minutes — please try again.');
 }
 
+// ── Declutter room analysis (Sonnet vision) — background + poll pattern ────────
+// FIX (this session): this used to be a single synchronous fetch to
+// declutter-prompt.js, which worked fine on Haiku but started timing out
+// once we upgraded this call to Sonnet (for AB 723-critical window/shutter
+// accuracy) with a higher max_tokens — Sonnet's slower generation pushed
+// real-world duration to 30-35s, well past Netlify's synchronous function
+// ceiling (10s default, 26s max even with an increase). Netlify then kills
+// the function and returns its own HTML error page instead of JSON, which
+// is what surfaced as "Unexpected token '<'... is not valid JSON".
+// Mirrors callStageAPI()'s established fire-and-poll pattern exactly:
+// declutter-prompt.js is now a thin dispatcher (fires declutter-prompt-
+// background.js, returns jobId immediately), and this polls
+// check-declutter-prompt.js — same shape as check-openai, just a
+// different jobId prefix and Blobs store name on the backend.
+async function callDeclutterPromptAPI(imageBase64, mimeType) {
+  const startRes = await fetch('/.netlify/functions/declutter-prompt', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ imageBase64, mimeType })
+  });
+  if (!startRes.ok) {
+    const d = await startRes.json().catch(() => ({}));
+    throw new Error('Declutter analysis failed to start: ' + (d.error || startRes.status));
+  }
+  const { jobId } = await startRes.json();
+  if (!jobId) throw new Error('No jobId returned from declutter-prompt dispatcher');
+  console.log('Declutter analysis job fired:', jobId);
+
+  // Sonnet vision on this call has run 30-35s in testing — poll generously.
+  // 1.5s interval x 80 polls = 2 minutes, same ceiling callStageAPI uses.
+  const maxPolls = 80;
+  for (let poll = 0; poll < maxPolls; poll++) {
+    await new Promise(r => setTimeout(r, 1500));
+    try {
+      const checkRes = await fetch(`/.netlify/functions/check-declutter-prompt?jobId=${encodeURIComponent(jobId)}`);
+      if (!checkRes.ok) continue;
+      const result = await checkRes.json();
+      if (result.status === 'done') {
+        if (!result.declutterPrompt) throw new Error('No prompt in completed job');
+        return { declutterPrompt: result.declutterPrompt, roomData: result.roomData };
+      }
+      if (result.status === 'error') throw new Error('Declutter analysis error: ' + (result.error || 'unknown'));
+      // status === 'processing' — keep polling
+    } catch(err) {
+      if (err.message.startsWith('Declutter analysis error:')) throw err;
+      // network blip — keep polling
+    }
+  }
+  throw new Error('Declutter analysis timed out after 2 minutes — please try again.');
+}
 
 // ── Replicate SDXL Inpainting engine ─────────────────────────────────────────
 async function callReplicateAPI(imageBase64,mimeType,prompt){
@@ -4963,20 +5013,8 @@ async function runDeclutterOnly(roomId) {
   room.promptStatus = 'Reading room for decluttering...';
   renderRoomQueue();
   try {
-    // Step 1: Haiku reads room — identifies what to remove vs preserve
-    const promptRes = await fetch('/.netlify/functions/declutter-prompt', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        imageBase64: orig.base64,
-        mimeType: orig.mimeType,
-      })
-    });
-    if (!promptRes.ok) {
-      const d = await promptRes.json();
-      throw new Error('Declutter prompt failed: ' + (d.error || 'unknown'));
-    }
-    const { declutterPrompt } = await promptRes.json();
+    // Step 1: Sonnet reads room — identifies what to remove vs preserve
+    const { declutterPrompt } = await callDeclutterPromptAPI(orig.base64, orig.mimeType);
 
     // Step 2: Show modal for user review
     room.status = 'prompt-review';
@@ -5043,17 +5081,8 @@ async function runCleanAndStage(roomId) {
   room.promptStatus = 'Step 1 of 3 — Reading room for decluttering...';
   renderRoomQueue();
   try {
-    // Step 1A: Haiku reads room for decluttering
-    const declutterRes = await fetch('/.netlify/functions/declutter-prompt', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        imageBase64: orig.base64,
-        mimeType: orig.mimeType,
-      })
-    });
-    if (!declutterRes.ok) throw new Error('Declutter prompt failed: ' + declutterRes.status);
-    const { declutterPrompt } = await declutterRes.json();
+    // Step 1A: Sonnet reads room for decluttering
+    const { declutterPrompt } = await callDeclutterPromptAPI(orig.base64, orig.mimeType);
 
     // Step 1B: Show declutter modal
     room.status = 'prompt-review';

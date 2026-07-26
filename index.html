@@ -3300,20 +3300,28 @@ async function applyDraftWatermark(base64) {
 // Even top/bottom split, applied uniformly to every staging mode including
 // Exterior Enhancement (Sam's explicit call — same rule everywhere, no
 // per-room-type branching to maintain).
+// Shared 3:2 target-dimension math — used both to actually crop the source
+// pixels (preCropTo3x2, below) and to tell resizeToMatch() what canvas size
+// to target (so it lands on the SAME 3:2 shape instead of the raw original's
+// uncropped dimensions). Keeping this in one place means the two can never
+// drift out of sync with each other.
+function get3x2TargetDims(w, h) {
+  const targetRatio = 3 / 2;
+  let targetW = w, targetH = h;
+  if (w / h > targetRatio) {
+    targetW = Math.round(h * targetRatio);
+  } else {
+    targetH = Math.round(w / targetRatio);
+  }
+  return { targetW, targetH };
+}
+
 function preCropTo3x2(base64, mimeType) {
   return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => {
       const w = img.naturalWidth, h = img.naturalHeight;
-      const targetRatio = 3 / 2;
-      let cropW = w, cropH = h;
-      if (w / h > targetRatio) {
-        // Source wider than 3:2 (rare for real estate photos) — trim sides evenly
-        cropW = Math.round(h * targetRatio);
-      } else {
-        // Source taller than 3:2 (typical 4:3 photo) — trim top/bottom evenly
-        cropH = Math.round(w / targetRatio);
-      }
+      const { targetW: cropW, targetH: cropH } = get3x2TargetDims(w, h);
       const x = Math.floor((w - cropW) / 2);
       const y = Math.floor((h - cropH) / 2);
       const canvas = document.createElement('canvas');
@@ -5443,18 +5451,30 @@ function resizeToMatch(room,orig,enhId,storeKey,incomingB64){
     const oI=new Image(),sI=new Image();let loaded=0;
     const onLoad=()=>{
       loaded++;if(loaded<2)return;
-      const oW=oI.naturalWidth,oH=oI.naturalHeight;
+      const rawOW=oI.naturalWidth,rawOH=oI.naturalHeight;
       const sW=sI.naturalWidth,sH=sI.naturalHeight;
+      // FIX (this session — real bug found via Sam's test render): this used
+      // to target orig's RAW uncropped dimensions (e.g. 2856x2142, still 4:3)
+      // regardless of the fact that callStageAPI() now pre-crops every source
+      // to 3:2 before it's ever sent to OpenAI. That mismatch meant this
+      // function was re-doing the exact cover-fit-then-crop damage the
+      // pre-crop step was built to eliminate — just moved here instead of
+      // happening inside the OpenAI call. Now derives the SAME 3:2 target
+      // dimensions preCropTo3x2() used on this original, so the staged image
+      // (already 3:2) lands on a same-ratio canvas — scale≈1 on both axes,
+      // no re-crop.
+      const {targetW:oW, targetH:oH} = get3x2TargetDims(rawOW, rawOH);
       // Diagnostic (this session — Background Function logs for
       // stage-openai-background.js aren't visible in the Netlify
       // dashboard, so this is the workaround: the same data, surfaced in
       // the browser console instead, where it's actually visible.
-      console.log(`resizeToMatch [${storeKey}]: original=${oW}x${oH} staged=${sW}x${sH} scale=${Math.max(oW/sW,oH/sH).toFixed(3)}`);
+      console.log(`resizeToMatch [${storeKey}]: original=${rawOW}x${rawOH} target3x2=${oW}x${oH} staged=${sW}x${sH} scale=${Math.max(oW/sW,oH/sH).toFixed(3)}`);
       const canvas=document.createElement('canvas');
       canvas.width=oW;canvas.height=oH;
       const ctx=canvas.getContext('2d');
-      // Strategy: scale the staged image to fill the original dimensions
+      // Strategy: scale the staged image to fill the 3:2 target dimensions
       // Use cover-fit: scale so staged image covers the canvas, crop excess
+      // (now a near no-op since both sides already share the 3:2 ratio)
       const scaleX=oW/sW, scaleY=oH/sH;
       const scale=Math.max(scaleX,scaleY); // cover
       const scaledW=Math.round(sW*scale);

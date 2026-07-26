@@ -380,6 +380,16 @@ async function addImage(projectId, imageData, userId, ab723Prompt, env) {
           cloudinary_sbs_url:      imageData.sbsUrl       || null,
           credits_used:            0,
           ab723_disclosed:         false,
+          // NEW (Hero Shot B-Roll tagging) — ground truth captured at
+          // Generate Final time in index.html, not reconstructed here.
+          // is_hero_shot marks this row as a Cinematic Asset Generator
+          // detail crop; parent_room_label is the literal source room name
+          // (e.g. "Living Room") — PRO Plus's autoSelect.js uses this to
+          // force-merge the hero shot into its parent room's narration
+          // group when that parent frame is present in the same video
+          // batch, deterministically rather than guessing from Vision.
+          is_hero_shot:            !!imageData.isHeroShot,
+          parent_room_label:       imageData.parentRoomLabel || null,
         });
 
         const stagedImageId = imgResult.data?.[0]?.id || null;

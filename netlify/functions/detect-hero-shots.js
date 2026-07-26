@@ -14,9 +14,10 @@
 //   aspect ratio), render_direction, and disallow list — not generic style
 //   words, and not just a bbox.
 //
-// FLAG FOR SAM: env var name (ANTHROPIC_API_KEY) and model string
-// (claude-haiku-4-5-20251001) are still inferred, not confirmed against your
-// existing Haiku spatial-read function.
+// UPDATE (this session): model upgraded from claude-haiku-4-5-20251001 to
+// claude-sonnet-4-6 — see the inline comment at the model string below for why.
+// env var name (ANTHROPIC_API_KEY) confirmed against declutter-prompt-background.js,
+// which uses the same one.
 
 const https = require("https");
 
@@ -73,7 +74,13 @@ function callClaudeVision(imageBase64, mimeType, apiKey) {
   const rulesJson = JSON.stringify(ruleSummaries);
 
   const body = JSON.stringify({
-    model: "claude-haiku-4-5-20251001",
+    model: "claude-sonnet-4-6", // upgraded from claude-haiku-4-5-20251001 (this session) —
+    // this file confirmed a second hallucination incident on real production images
+    // (invented mountain view + hardwood flooring, repeated across 4 separate fields
+    // including the top-level room_type summary), following an earlier incident
+    // (invented window/sink) already mitigated with the window_visible gate below.
+    // Same escalation reasoning as declutter-prompt-background.js: real product-
+    // quality stakes since this drives what GPT Image 2 actually renders.
     max_tokens: 2048,
     messages: [{
       role: "user",

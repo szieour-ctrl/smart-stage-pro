@@ -357,7 +357,7 @@ function buildUserContent(frames) {
     // match the parent room whenever that parent's own frame is also in
     // this batch, using the real parentRoomLabel value, not a guess.
     const heroNote = frame.isHeroShot
-      ? ` HERO SHOT: this is a detail/B-roll crop from the room "${frame.parentRoomLabel || "unknown"}" — not a separate room. Place it adjacent to that room's own frame if it's in this batch, and treat it as a supporting cutaway (never Room Reveal structure).`
+      ? ` HERO SHOT: this is a detail/B-roll crop from the room "${frame.parentRoomLabel || "unknown"}" — not a separate room. Place it adjacent to that room's own frame if it's in this batch, and treat it as a supporting cutaway (never Room Reveal structure). It still needs its own complete plan entry, same as every other frame — a real, specific motionPreset chosen from its actual visual content, not a generic placeholder and not an entry you skip.`
       : "";
     content.push({
       type: "text",
@@ -472,7 +472,16 @@ async function generateAutoSelection({ frames, narrationEnabled, hasExteriorEnha
 
   const enforced = enforceAutoSelectionRules(plan, frames, { narrationEnabled, hasExteriorEnhancement });
   const grouped = applyHeroShotGrouping(enforced, frames);
-  return enforceAiMotionPoolCap(grouped, aiMotionCap);
+  // Re-run AFTER reordering: applyHeroShotGrouping can move array elements
+  // (splice a hero shot next to its parent group), which stales the
+  // `position` field every entry already has, and — in the rare case a
+  // hero shot's move touched index 0 or the last index — could silently
+  // undo the bookend guarantees enforceAutoSelectionRules just verified.
+  // Safe to re-run: same frameIds, no duplicates/omissions introduced by
+  // reordering, so dedup is a no-op here and this only renumbers position
+  // + re-checks the two bookend slots against the corrected order.
+  const reboundaried = enforceAutoSelectionRules(grouped, frames, { narrationEnabled, hasExteriorEnhancement });
+  return enforceAiMotionPoolCap(reboundaried, aiMotionCap);
 }
 
 // ── HERO SHOT / B-ROLL GROUPING — DETERMINISTIC CORRECTION ─────────────
@@ -513,7 +522,54 @@ function applyHeroShotGrouping(plan, frames) {
     }
   }
 
-  return plan;
+  // FIX (real bug, Sam's report: narration described a scene prematurely,
+  // sequence off by a couple clips). Correcting roomGroup's STRING value
+  // above is not sufficient on its own — narrationGen.js's
+  // groupContiguousByRoom() only merges CONTIGUOUS matching labels in
+  // final sequence order. If Claude placed a hero shot somewhere other
+  // than immediately next to its parent room's own frame(s) (nothing
+  // forced it to place it there — the system prompt only asked nicely),
+  // force-matching the label produces two separate, non-adjacent segments
+  // that happen to share a name, not one merged segment. Claude's
+  // narration call sees the same room label appear twice in its group
+  // list and gets confused about what's already been described vs. what's
+  // still ahead — exactly the "described prematurely, sequence off"
+  // symptom. This physically moves each such hero shot to sit immediately
+  // after the last frame currently in its parent's group.
+  const toMove = [];
+  const kept = [];
+  for (const entry of plan) {
+    const frame = frameById.get(entry.frameId);
+    const parentGroup = (frame?.isHeroShot && frame.parentRoomLabel)
+      ? roomGroupByLabel.get(frame.parentRoomLabel.trim().toLowerCase())
+      : null;
+    if (parentGroup) {
+      toMove.push({ entry, parentGroup });
+    } else {
+      kept.push(entry);
+    }
+  }
+
+  if (toMove.length > 0) {
+    for (const { entry, parentGroup } of toMove) {
+      let insertAt = -1;
+      for (let i = kept.length - 1; i >= 0; i--) {
+        if (kept[i].roomGroup === parentGroup) { insertAt = i; break; }
+      }
+      if (insertAt === -1) {
+        // Parent group vanished from `kept` somehow — shouldn't happen,
+        // it was derived from this same plan. Append rather than lose the
+        // frame from the video entirely.
+        console.error(`[AUTO-SELECT] Hero shot "${entry.frameId}": expected parent roomGroup="${parentGroup}" not found while repositioning — appending at the end instead of losing the frame.`);
+        kept.push(entry);
+      } else {
+        console.error(`[AUTO-SELECT] Hero shot "${entry.frameId}" repositioned to sit immediately after its parent's group (roomGroup="${parentGroup}") — was not contiguous with it in Claude's original order.`);
+        kept.splice(insertAt + 1, 0, entry);
+      }
+    }
+  }
+
+  return kept;
 }
 
 // ── HARD ENFORCEMENT ────────────────────────────────────────────────────

@@ -36,6 +36,24 @@
 [functions."check-autoSelect"]
   timeout = 10
 
+# NEW (this session) — same fix, same reason, same shape as the autoSelect
+# pair directly above: declutter-prompt.js's room analysis was upgraded from
+# Haiku to Sonnet (for AB 723-critical window/shutter accuracy) with a
+# higher max_tokens for the fuller windowInventory requirements. Sonnet's
+# slower generation pushed real duration to 30-35s — past Netlify's
+# synchronous ceiling (10s default, 26s max) — surfacing as the same HTML
+# timeout page the frontend couldn't parse as JSON. declutter-prompt.js is
+# now a thin dispatcher; declutter-prompt-background.js does the actual
+# Sonnet call; check-declutter-prompt.js is the polling endpoint, pointed
+# at the "declutter-jobs" Blobs store. This entry is what was missing after
+# the first deploy — every other background function in this file has an
+# explicit timeout=900 registration, and these two didn't yet.
+[functions."declutter-prompt-background"]
+  timeout = 900
+
+[functions."check-declutter-prompt"]
+  timeout = 10
+
 [functions."stage-image-start"]
   timeout = 90
 
@@ -52,6 +70,13 @@
   timeout = 90
 
 [functions."stage-openai"]
+  timeout = 30
+
+# declutter-prompt.js is the thin dispatcher for declutter-prompt-background.js
+# (see the fuller comment above, near that entry) — registered explicitly for
+# the same reason stage-openai is: consistency with the dispatcher/background
+# pairing convention used throughout this file.
+[functions."declutter-prompt"]
   timeout = 30
 
 [functions."stage-openai-background"]

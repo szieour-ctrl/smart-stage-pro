@@ -1343,6 +1343,18 @@ async function createNewProject(address) {
     SESSION.projectAddress = address;
     SESSION.complianceUrl = data.complianceUrl;
     SESSION.projectStatus = 'new';
+    // FIX (real bug, Sam's report: "+ Add More Rooms" button gone).
+    // updateSessionButtons() is only ever called once, from
+    // confirmMapping() when a batch of rooms first enters the staging
+    // step — at that point SESSION.projectId is still null, since
+    // projects are created lazily at Generate Final time (see the
+    // "CREATE PROJECT IF NEEDED" blocks that call this function). Nothing
+    // re-called it afterward, so the button stayed hidden for the rest of
+    // the session even once a project existed, no matter how many rooms
+    // got finalized. Fixed here at the source — every call site
+    // (generateFinal's main flow, generateHeroShotFinal) is covered
+    // automatically rather than needing the same fix repeated at each one.
+    updateSessionButtons();
 
     cardContent.innerHTML = `
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">

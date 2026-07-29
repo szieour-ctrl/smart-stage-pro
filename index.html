@@ -7447,6 +7447,21 @@ const CD_TAB_URLS = {
     if (e.key === 'Escape') closeCdLightbox();
   });
 
+  // ── s6b-zillow-scan.html ──
+function runZsScan(){
+    const input = document.getElementById('zs-url-input');
+    const wrapper = input.closest('.zs-card-input');
+    const url = input.value.trim();
+    if (!url) {
+      input.focus();
+      wrapper.style.borderColor = '#a4543f';
+      setTimeout(() => { wrapper.style.borderColor = ''; }, 1500);
+      return;
+    }
+    const target = '/ab723-check?url=' + encodeURIComponent(url);
+    window.open(target, '_blank', 'noopener');
+  }
+
   // ── s7-pricing.html ──
 const PR_ANNUAL = {
     solo:      { price: "$490", period: "/ year" },
@@ -8583,11 +8598,16 @@ function showLandingPage() {
     padding:12px 14px; margin-bottom:16px; min-width:0;
   }
   .zs-card-input svg{ width:16px; height:16px; flex-shrink:0; color:var(--muted); }
-  .zs-card-input span{ font-size:0.8rem; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .zs-card-input input{
+    flex:1; min-width:0; border:none; outline:none; background:transparent;
+    font-size:0.8rem; color:var(--ink); font-family:'DM Sans',sans-serif;
+  }
+  .zs-card-input input::placeholder{ color:var(--muted); }
+  .zs-card-input:focus-within{ border-color:var(--gold); box-shadow:0 0 0 2px rgba(184,151,90,0.15); }
   .zs-card-scan-btn{
     display:block; width:100%; text-align:center; background:var(--gold); color:var(--ink);
     border:none; border-radius:7px; padding:12px; font-size:0.8rem; font-weight:700;
-    text-decoration:none; margin-bottom:8px;
+    text-decoration:none; margin-bottom:8px; cursor:pointer; font-family:'DM Sans',sans-serif;
   }
   .zs-card-scan-btn:hover{ background:var(--gold-light); }
   .zs-card-scan-hint{ text-align:center; font-size:0.7rem; color:var(--muted); margin-bottom:18px; }
@@ -8857,8 +8877,8 @@ function showLandingPage() {
       <h1 class="hero-headline">Turn listing photos into <em>complete marketing assets</em>.</h1>
       <p class="hero-sub">Correct imperfect photos, virtually stage interiors and exteriors, and automatically maintain the disclosure record for every published listing.</p>
       <div class="hero-ctas">
-        <button class="hero-btn-primary">Start Creating Now</button>
-        <button class="hero-btn-secondary">See the Transformation</button>
+        <button class="hero-btn-primary" onclick="hideLandingPage(); showAuthModal('signup');">Start Creating Now</button>
+        <button class="hero-btn-secondary" onclick="document.getElementById('transformations').scrollIntoView({behavior:'smooth'});">See the Transformation</button>
       </div>
     </div>
 
@@ -9670,13 +9690,13 @@ function showLandingPage() {
     <div class="zs-card">
       <div class="zs-card-heading">Run Your Free AB 723 Compliance Scan</div>
       <div class="zs-card-instructions">Paste a Zillow listing URL below to get started.</div>
-      <div class="zs-card-label">Zillow Listing URL</div>
+      <label class="zs-card-label" for="zs-url-input">Zillow Listing URL</label>
       <div class="zs-card-input">
         <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.8"/><path d="M20 20l-4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-        <span>zillow.com/homedetails/1515-Demo-St...</span>
+        <input type="text" id="zs-url-input" placeholder="zillow.com/homedetails/1515-Demo-St..." autocomplete="off" spellcheck="false">
       </div>
-      <a href="/ab723-check" class="zs-card-scan-btn">Run Free Scan</a>
-      <div class="zs-card-scan-hint">Takes about 60 seconds. No listings are altered.</div>
+      <button type="button" class="zs-card-scan-btn" onclick="runZsScan()">Run Free Scan</button>
+      <div class="zs-card-scan-hint">Opens in a new tab. Takes about 60 seconds. No listings are altered.</div>
       <div class="zs-card-result">
         <div class="zs-card-result-row">Photo 4 of 22 <span class="zs-card-flag flagged">Review Suggested</span></div>
         <div class="zs-card-result-row">Photo 9 of 22 <span class="zs-card-flag clear">Disclosed</span></div>

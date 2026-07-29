@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Smart Stage PRO™ — Virtual Staging Platform</title>
-<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&family=DM+Sans:wght@300;400;500;700&display=swap" rel="stylesheet" />
 <style>
 :root{--ink:#1a1714;--cream:#f7f4ef;--warm:#e8e0d4;--gold:#b8975a;--gold-light:#d4b87a;--muted:#7a6f63;--danger:#c0392b;--success:#2d6a4f;--border:#ddd5c8;--sky:#3a7ca5;--shadow:0 2px 20px rgba(26,23,20,0.08);}
 *{box-sizing:border-box;margin:0;padding:0;}
@@ -7140,828 +7140,192 @@ async function startCheckout(plan) {
 // LANDING PAGE
 // ══════════════════════════════════════════
 
-function showLandingPage() {
-  // Remove any existing landing page
-  document.getElementById('landing-page')?.remove();
-  // Hide app header and compliance bar
-  document.querySelector('.compliance-bar').style.display = 'none';
-  document.querySelector('.header').style.display = 'none';
+// ══════════════════════════════════════════
+// LANDING PAGE FUNCTIONS — global definitions
+// (Injected via innerHTML below, so these must be true top-level
+//  functions, not nested inside showLandingPage(), or onclick=""
+//  handlers on the injected markup won't find them.)
+// ══════════════════════════════════════════
+// ── HEADER ───────────────────────────────────────────────────────────
+  function toggleHdMenu(){
+    const burger = document.getElementById('hd-burger');
+    const mobile = document.getElementById('hd-mobile');
+    const isOpen = mobile.classList.toggle('is-open');
+    burger.classList.toggle('open', isOpen);
+    burger.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+  }
+  function closeHdMenu(){
+    document.getElementById('hd-mobile').classList.remove('is-open');
+    document.getElementById('hd-burger').classList.remove('open');
+    document.getElementById('hd-burger').setAttribute('aria-expanded', 'false');
+  }
+  window.addEventListener('scroll', () => {
+    const header = document.getElementById('hd-header');
+    if (!header) return;
+    if (window.scrollY > 8) header.classList.add('scrolled');
+    else header.classList.remove('scrolled');
+  });
 
-  const page = document.createElement('div');
-  page.id = 'landing-page';
-  document.body.appendChild(page);
+  // ── s1-hero.html ──
+function switchHeroTab(paneKey) {
+    document.querySelectorAll('.hero-tab').forEach(btn => {
+      const isActive = btn.getAttribute('onclick').includes(`'${paneKey}'`);
+      btn.classList.toggle('active', isActive);
+      btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
+    });
+    document.querySelectorAll('.hero-slider-pane').forEach(pane => {
+      pane.classList.toggle('active', pane.dataset.pane === paneKey);
+    });
+  }
 
-  page.innerHTML = `
-  <style>
-    #landing-page {
-      min-height: 100vh;
-      background: var(--cream);
-      color: var(--ink);
-      font-family: 'DM Sans', sans-serif;
-    }
-    .lp-nav {
-      position: sticky;
-      top: 0;
-      z-index: 200;
-      background: var(--ink);
-      border-bottom: 1px solid rgba(184,151,90,0.2);
-      padding: 14px 32px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-    .lp-nav-logo { height: 44px; width: auto; display: block; }
-    .lp-nav-right { display: flex; align-items: center; gap: 12px; }
-    .lp-btn-signin {
-      background: transparent;
-      border: 1px solid rgba(184,151,90,0.5);
-      color: var(--cream);
-      padding: 8px 20px;
-      border-radius: 3px;
-      font-size: 0.8rem;
-      font-weight: 500;
-      letter-spacing: 0.06em;
-      text-transform: uppercase;
-      cursor: pointer;
-      transition: all 0.15s;
-      font-family: 'DM Sans', sans-serif;
-    }
-    .lp-btn-signin:hover { background: rgba(184,151,90,0.12); border-color: var(--gold); }
-    .lp-hero {
-      padding: 100px 32px 80px;
-      max-width: 860px;
-      margin: 0 auto;
-      text-align: center;
-    }
-    .lp-compliance-pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 7px;
-      background: rgba(184,151,90,0.1);
-      border: 1px solid rgba(184,151,90,0.3);
-      border-radius: 20px;
-      padding: 5px 14px;
-      font-size: 0.7rem;
-      color: var(--cream);
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-      margin-bottom: 32px;
-    }
-    .lp-hero-title {
-      font-family: 'Cormorant Garamond', serif;
-      font-size: clamp(2.4rem, 6vw, 4rem);
-      font-weight: 300;
-      line-height: 1.15;
-      color: var(--cream);
-      margin-bottom: 24px;
-      letter-spacing: -0.01em;
-    }
-    .lp-hero-title em {
-      font-style: italic;
-      color: var(--gold);
-    }
-    .lp-hero-sub {
-      font-size: 1.05rem;
-      color: #c8bfb0;
-      line-height: 1.7;
-      max-width: 580px;
-      margin: 0 auto 40px;
-    }
-    .lp-hero-ctas {
-      display: flex;
-      gap: 12px;
-      justify-content: center;
-      flex-wrap: wrap;
-    }
-    .lp-btn-primary {
-      background: var(--gold);
-      color: var(--ink);
-      border: none;
-      padding: 14px 32px;
-      border-radius: 3px;
-      font-size: 0.85rem;
-      font-weight: 600;
-      letter-spacing: 0.06em;
-      text-transform: uppercase;
-      cursor: pointer;
-      transition: all 0.15s;
-      font-family: 'DM Sans', sans-serif;
-    }
-    .lp-btn-primary:hover { background: var(--gold-light); }
-    .lp-hero-img {
-      margin: 64px auto 0;
-      max-width: 820px;
-      width: 100%;
-      border-radius: 6px;
-      border: 1px solid rgba(184,151,90,0.2);
-      overflow: hidden;
-      box-shadow: 0 32px 80px rgba(0,0,0,0.5);
-    }
-    .lp-hero-placeholder {
-      background: rgba(255,255,255,0.04);
-      aspect-ratio: 16/9;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      flex-direction: column;
-      gap: 12px;
-      color: rgba(184,151,90,0.4);
-      font-size: 0.78rem;
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-    }
-    .lp-hero-placeholder-icon { font-size: 2.5rem; opacity: 0.3; }
-    .lp-divider {
-      border: none;
-      border-top: 1px solid var(--border);
-      margin: 0;
-    }
-    .lp-section { padding: 80px 32px; max-width: 1000px; margin: 0 auto; }
-    .lp-section-label {
-      font-size: 0.68rem;
-      letter-spacing: 0.16em;
-      text-transform: uppercase;
-      color: var(--gold);
-      margin-bottom: 14px;
-      font-weight: 500;
-    }
-    .lp-section-title {
-      font-family: 'Cormorant Garamond', serif;
-      font-size: clamp(1.8rem, 4vw, 2.6rem);
-      font-weight: 300;
-      color: var(--ink);
-      line-height: 1.2;
-      margin-bottom: 48px;
-    }
-    .lp-pillars {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-      gap: 2px;
-      background: var(--border);
-      border: 1px solid var(--border);
-      border-radius: 4px;
-      overflow: hidden;
-    }
-    .lp-pillar {
-      background: #fff;
-      padding: 36px 28px;
-    }
-    .lp-pillar-icon {
-      font-size: 1.6rem;
-      margin-bottom: 16px;
-      display: block;
-    }
-    .lp-pillar-title {
-      font-family: 'Cormorant Garamond', serif;
-      font-size: 1.3rem;
-      font-weight: 400;
-      color: var(--ink);
-      margin-bottom: 10px;
-    }
-    .lp-pillar-body {
-      font-size: 0.85rem;
-      color: var(--muted);
-      line-height: 1.7;
-    }
-    .lp-modules {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-      gap: 16px;
-    }
-    .lp-module {
-      border: 1px solid var(--border);
-      border-radius: 4px;
-      overflow: hidden;
-      background: #fff;
-    }
-    .lp-module-img {
-      background: var(--warm);
-      aspect-ratio: 4/3;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      flex-direction: column;
-      gap: 8px;
-      color: var(--muted);
-      font-size: 0.68rem;
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-      border-bottom: 1px solid var(--border);
-    }
-    .lp-module-img-icon { font-size: 1.8rem; opacity: 0.5; }
-    .mod-sl-label {
-      position: absolute;
-      top: 10px;
-      padding: 3px 9px;
-      border-radius: 20px;
-      font-size: 9px;
-      font-weight: 700;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      pointer-events: none;
-      z-index: 4;
-    }
-    .mod-sl-label-before {
-      left: 10px;
-      background: rgba(0,0,0,0.55);
-      color: #e0e0e0;
-      border: 1px solid rgba(255,255,255,0.15);
-    }
-    .mod-sl-label-after {
-      right: 10px;
-      background: rgba(201,168,76,0.88);
-      color: #1a1a1a;
-      font-weight: 800;
-    }
-    .lp-module-body { padding: 16px 18px; }
-    .lp-module-name {
-      font-family: 'Cormorant Garamond', serif;
-      font-size: 1.05rem;
-      color: var(--ink);
-      margin-bottom: 5px;
-    }
-    .lp-module-desc { font-size: 0.78rem; color: var(--muted); line-height: 1.6; }
-    .lp-compliance-section {
-      background: var(--warm);
-      border-top: 1px solid var(--border);
-      border-bottom: 1px solid var(--border);
-    }
-    .lp-compliance-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-      gap: 24px;
-    }
-    .lp-compliance-item { display: flex; align-items: flex-start; gap: 12px; }
-    .lp-compliance-check {
-      width: 22px;
-      height: 22px;
-      background: rgba(45,106,79,0.12);
-      border: 1px solid rgba(45,106,79,0.4);
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 0.7rem;
-      color: var(--success);
-      flex-shrink: 0;
-      margin-top: 2px;
-    }
-    .lp-compliance-text { font-size: 0.82rem; color: var(--ink); line-height: 1.5; }
-    .lp-compliance-text strong { color: var(--ink); display: block; margin-bottom: 2px; font-weight: 600; }
-    .lp-pricing-grid {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 16px;
-      margin-top: 48px;
-    }
-    @media (max-width: 1024px) {
-      .lp-pricing-grid { grid-template-columns: repeat(2, 1fr); }
-    }
-    @media (max-width: 600px) {
-      .lp-pricing-grid { grid-template-columns: 1fr; }
-    }
-    .lp-plan {
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 32px 28px;
-      background: #fff;
-      display: flex;
-      flex-direction: column;
-      position: relative;
-      transition: border-color 0.2s;
-    }
-    .lp-plan:hover { border-color: var(--gold); }
-    .lp-plan.featured {
-      border: 2px solid var(--gold);
-      background: #fff;
-      box-shadow: 0 4px 24px rgba(184,151,90,0.18);
-    }
-    .lp-plan-badge {
-      position: absolute;
-      top: -12px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: var(--gold);
-      color: var(--ink);
-      font-size: 0.62rem;
-      font-weight: 700;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      padding: 3px 14px;
-      border-radius: 20px;
-      white-space: nowrap;
-    }
-    .lp-plan-name {
-      font-family: 'Cormorant Garamond', serif;
-      font-size: 1.4rem;
-      font-weight: 400;
-      color: var(--ink);
-      margin-bottom: 6px;
-    }
-    .lp-plan-price {
-      font-size: 2.2rem;
-      font-weight: 300;
-      color: var(--gold);
-      margin-bottom: 4px;
-      line-height: 1;
-    }
-    .lp-plan-price span { font-size: 1rem; color: var(--muted); }
-    .lp-plan-annual { font-size: 0.72rem; color: var(--muted); margin-bottom: 24px; }
-    .lp-plan-features {
-      list-style: none;
-      font-size: 0.82rem;
-      color: var(--ink);
-      line-height: 2;
-      flex: 1;
-      margin-bottom: 24px;
-    }
-    .lp-plan-features li::before { content: "✓  "; color: var(--success); }
-    .lp-plan-features li.muted { color: var(--muted); }
-    .lp-plan-features li.muted::before { content: "○  "; color: var(--muted); }
-    .lp-plan-btn {
-      width: 100%;
-      padding: 13px;
-      background: var(--gold);
-      color: var(--ink);
-      border: none;
-      border-radius: 3px;
-      font-size: 0.82rem;
-      font-weight: 600;
-      letter-spacing: 0.06em;
-      text-transform: uppercase;
-      cursor: pointer;
-      transition: all 0.15s;
-      font-family: 'DM Sans', sans-serif;
-      text-align: center;
-    }
-    .lp-plan-btn:hover { background: var(--gold-light); }
-    .lp-plan-btn.outline {
-      background: transparent;
-      border: 1px solid rgba(184,151,90,0.4);
-      color: var(--gold);
-    }
-    .lp-plan-btn.outline:hover { background: rgba(184,151,90,0.1); }
-    .lp-footer {
-      background: var(--ink);
-      border-top: 1px solid rgba(184,151,90,0.2);
-      padding: 40px 32px;
-      text-align: center;
-    }
-    .lp-footer-text { font-size: 0.75rem; color: var(--cream); line-height: 1.8; }
-    .lp-footer-text a { color: var(--gold); text-decoration: none; }
-    .lp-footer-text a:hover { color: var(--gold-light); }
-    @media(max-width: 600px) {
-      .lp-nav { padding: 12px 16px; }
-      .lp-hero { padding: 60px 20px 60px; }
-      .lp-section { padding: 60px 20px; }
-    }
-  </style>
+  function initHeroSliders() {
+    document.querySelectorAll('.hero-slider-container[data-slider]').forEach(container => {
+      const beforeWrap = container.querySelector('.hero-sl-before-wrap');
+      const divider = container.querySelector('.hero-sl-divider');
+      let isDragging = false;
 
-  <!-- NAV -->
-  <nav class="lp-nav">
-    <div></div>
-    <div class="lp-nav-right">
-      <button class="lp-btn-signin" onclick="hideLandingPage(); showAuthModal('login');">Sign In</button>
-    </div>
-  </nav>
+      function setPosition(pct) {
+        pct = Math.max(2, Math.min(98, pct));
+        beforeWrap.style.width = pct + '%';
+        divider.style.left = pct + '%';
+      }
+      function getPct(clientX) {
+        const rect = container.getBoundingClientRect();
+        return ((clientX - rect.left) / rect.width) * 100;
+      }
 
-  <!-- HERO -->
-  <section class="lp-hero" style="background:var(--ink);">
-    <img src="https://res.cloudinary.com/de18zsi7o/image/upload/w_800,q_auto,f_auto/v1780935171/Smart_Stage_PRO_Logo_zciwlo.png" alt="Smart Stage PRO™" style="height:220px;width:auto;display:block;margin:0 auto 28px;" />
-    <div class="lp-compliance-pill">
-      <span>⚖️</span> California AB 723 §10140.8 Compliant
-    </div>
-    <h1 class="lp-hero-title">
-      Virtual staging that's<br><em>built for California law.</em>
-    </h1>
-    <p class="lp-hero-sub">
-      Five staging modules. Permanent compliance records. QR codes on every Final image. The only platform built from the ground up for California disclosure requirements.
-    </p>
-    <!-- Before/After Slider -->
-    <div class="lp-hero-img" style="padding:0;background:none;border:none;max-width:900px;width:100%;margin:0 auto;">
-      <div id="ba-slider-container">
-        <img id="ba-after" src="https://res.cloudinary.com/de18zsi7o/image/upload/q_auto/f_auto/v1781151892/FINAL_VirtuallyStaged_Great_Room_2_2_gvrjdz.jpg" alt="Virtually Staged Great Room" draggable="false" />
-        <div id="ba-before-wrap">
-          <img id="ba-before" src="https://res.cloudinary.com/de18zsi7o/image/upload/q_auto/f_auto/v1781151945/Great_Room_2_ljkd0b.jpg" alt="Empty Great Room" draggable="false" />
-        </div>
-        <div id="ba-divider">
-          <div id="ba-handle">
-            <svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
-              <circle cx="20" cy="20" r="19" fill="#1a1a1a" stroke="#c9a84c" stroke-width="1.5"/>
-              <polyline points="16,13 9,20 16,27" fill="none" stroke="#c9a84c" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
-              <polyline points="24,13 31,20 24,27" fill="none" stroke="#c9a84c" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-          </div>
-        </div>
-        <div class="ba-label ba-label-before">BEFORE</div>
-        <div class="ba-label ba-label-after">AFTER</div>
-      </div>
-      <div id="hero-slider-caption">
-        <p class="caption-headline">See the Difference.</p>
-        <p class="caption-sub">Architecture Preserved. Furniture Added. California AB 723 Compliant.</p>
-      </div>
-    </div>
+      container.addEventListener('mousedown', (e) => { isDragging = true; setPosition(getPct(e.clientX)); e.preventDefault(); });
+      window.addEventListener('mousemove', (e) => { if (isDragging) setPosition(getPct(e.clientX)); });
+      window.addEventListener('mouseup', () => { isDragging = false; });
+      container.addEventListener('touchstart', (e) => { isDragging = true; setPosition(getPct(e.touches[0].clientX)); e.preventDefault(); }, { passive: false });
+      window.addEventListener('touchmove', (e) => { if (isDragging) setPosition(getPct(e.touches[0].clientX)); }, { passive: true });
+      window.addEventListener('touchend', () => { isDragging = false; });
 
-    <!-- See All Plans — below slider -->
-    <div class="lp-hero-ctas" style="margin-top:8px;">
-      <button class="lp-btn-primary" onclick="document.getElementById('lp-pricing').scrollIntoView({behavior:'smooth'})">See All Plans →</button>
-    </div>
-  </section>
+      setPosition(50);
+    });
+  }
 
-  <style>
-    #ba-slider-container {
-      position: relative;
-      width: 100%;
-      aspect-ratio: 16 / 9;
-      overflow: hidden;
-      border-radius: 12px;
-      border: 1px solid #2a2a2a;
-      box-shadow: 0 8px 40px rgba(0,0,0,0.6);
-      cursor: ew-resize;
-      user-select: none;
-      -webkit-user-select: none;
-    }
-    #ba-after {
-      position: absolute;
-      inset: 0;
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-      display: block;
-      pointer-events: none;
-    }
-    #ba-before-wrap {
-      position: absolute;
-      inset: 0;
-      width: 50%;
-      overflow: hidden;
-      pointer-events: none;
-    }
-    #ba-before {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-      object-position: left center;
-      display: block;
-      pointer-events: none;
-    }
-    #ba-divider {
-      position: absolute;
-      top: 0;
-      bottom: 0;
-      left: 50%;
-      width: 2px;
-      background: #c9a84c;
-      transform: translateX(-50%);
-      pointer-events: none;
-      z-index: 3;
-    }
-    #ba-handle {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      width: 44px;
-      height: 44px;
-      filter: drop-shadow(0 2px 8px rgba(0,0,0,0.5));
-    }
-    #ba-handle svg { width: 44px; height: 44px; }
-    .ba-label {
-      position: absolute;
-      top: 16px;
-      padding: 4px 12px;
-      border-radius: 20px;
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      pointer-events: none;
-      z-index: 4;
-    }
-    .ba-label-before {
-      left: 16px;
-      background: rgba(0,0,0,0.55);
-      color: #e0e0e0;
-      border: 1px solid rgba(255,255,255,0.15);
-    }
-    .ba-label-after {
-      right: 16px;
-      background: rgba(201,168,76,0.88);
-      color: #1a1a1a;
-      font-weight: 800;
-    }
-    #hero-slider-caption {
-      text-align: center;
-      padding: 24px 0 8px;
-    }
-    .caption-headline {
-      margin: 0 0 6px;
-      font-size: clamp(20px, 2.5vw, 28px);
-      font-weight: 700;
-      color: #f0f0f0;
-    }
-    .caption-sub {
-      margin: 0;
-      font-size: clamp(13px, 1.5vw, 15px);
-      color: #c9a84c;
-      letter-spacing: 0.04em;
-    }
-    @media (max-width: 600px) {
-      #ba-slider-container { aspect-ratio: 4 / 3; }
-    }
-  </style>
+  
 
+  function openHvLightbox(){
+    document.getElementById('hv-lightbox').classList.add('is-open');
+    document.body.style.overflow = 'hidden';
+  }
+  function closeHvLightbox(){
+    const el = document.getElementById('hv-lightbox');
+    if (!el) return;
+    el.classList.remove('is-open');
+    document.body.style.overflow = '';
+    const v = document.getElementById('hv-lightbox-video');
+    if (v) v.pause();
+  }
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeHvLightbox();
+  });
 
-  <hr class="lp-divider" />
+  // ── s2-oneimage.html ──
+const OA_IMAGES = [
+    { src: "https://res.cloudinary.com/de18zsi7o/image/upload/v1785191910/Social_Post_nh8bv8.png", label: "Social Post" },
+    { src: "https://res.cloudinary.com/de18zsi7o/image/upload/v1783611982/smart-stage-finals/szregsolo_234benttreect_061726/sgkib6nys15kcr0bxtfb.jpg", label: "Approved Staged Image" },
+    { src: "https://res.cloudinary.com/de18zsi7o/image/upload/v1785181992/smart-stage-finals/szregsolo_3027blackpointct_072726/ytbyqyi6nburoo8tofon.jpg", label: "Hero Image — angle 1" },
+    { src: "https://res.cloudinary.com/de18zsi7o/image/upload/v1785181963/smart-stage-finals/szregsolo_3027blackpointct_072726/py0rnc5ej1btygffxnmn.jpg", label: "Hero Image — angle 2" },
+    { src: "https://res.cloudinary.com/de18zsi7o/image/upload/v1785108532/smart-stage-finals/szregsolo_234benttreect_061726/ehb3de5qtczarmkdltgf.jpg", label: "Hero Image — angle 3" },
+    { src: "https://res.cloudinary.com/de18zsi7o/image/upload/v1783610067/smart-stage-finals/szregsolo_234benttreect_061726/s2e3nqcvwc7f9edoog5l.jpg", label: "Hero Image — angle 4" },
+    { src: "https://res.cloudinary.com/de18zsi7o/image/upload/v1785173079/smart-stage-finals/szregsolo_3027blackpointct_072726/n7dcpowdtrth1cgzlsfi.jpg", label: "PRO Plus Video" },
+    { src: "https://res.cloudinary.com/de18zsi7o/image/upload/v1785192661/Compliance_Page_oslzp3.png", label: "Compliance Page" },
+  ];
+  let oaCurrentIdx = 0;
+  let oaLastFocused = null;
 
-  <!-- 3 PILLARS -->
-  <section class="lp-section">
-    <div class="lp-section-label">How it works</div>
-    <div class="lp-section-title" style="color:var(--ink);">Stage. Comply. Publish.</div>
-    <div class="lp-pillars">
-      <div class="lp-pillar">
-        <span class="lp-pillar-icon">🎨</span>
-        <div class="lp-pillar-title">Stage</div>
-        <div class="lp-pillar-body">Upload listing photos and let the Smart Stage engine furnish vacant rooms, clean cluttered spaces, enhance exteriors, and produce multi-angle group stagings — all from one session.</div>
-      </div>
-      <div class="lp-pillar">
-        <span class="lp-pillar-icon">⚖️</span>
-        <div class="lp-pillar-title">Comply</div>
-        <div class="lp-pillar-body">Every staged image gets a mandatory AB 723 disclosure overlay and a permanent compliance record. QR codes on Finals link buyers directly to the original photo — stored for 3 years.</div>
-      </div>
-      <div class="lp-pillar">
-        <span class="lp-pillar-icon">📤</span>
-        <div class="lp-pillar-title">Publish</div>
-        <div class="lp-pillar-body">Download MLS Ready, Marketing Quality, or Print Quality Finals. Each one carries the disclosure overlay and compliance QR code, ready to upload to Matrix or send to clients.</div>
-      </div>
-    </div>
-  </section>
+  function openOaLightbox(i) {
+    oaCurrentIdx = i;
+    oaLastFocused = document.activeElement;
+    renderOaLightbox();
+    document.getElementById('oa-lightbox').classList.add('is-open');
+    document.body.style.overflow = 'hidden';
+    document.querySelector('.oa-lightbox-close').focus();
+  }
+  function closeOaLightbox() {
+    document.getElementById('oa-lightbox').classList.remove('is-open');
+    document.body.style.overflow = '';
+    if (oaLastFocused) oaLastFocused.focus();
+  }
+  function stepOaLightbox(dir) {
+    oaCurrentIdx = (oaCurrentIdx + dir + OA_IMAGES.length) % OA_IMAGES.length;
+    renderOaLightbox();
+  }
+  function renderOaLightbox() {
+    const item = OA_IMAGES[oaCurrentIdx];
+    const img = document.getElementById('oa-lightbox-img');
+    img.src = item.src;
+    img.alt = item.label + ', enlarged';
+    document.getElementById('oa-lightbox-caption').textContent = item.label;
+  }
+  document.addEventListener('keydown', (e) => {
+    const lb = document.getElementById('oa-lightbox');
+    if (!lb || !lb.classList.contains('is-open')) return;
+    if (e.key === 'Escape') closeOaLightbox();
+    if (e.key === 'ArrowLeft') stepOaLightbox(-1);
+    if (e.key === 'ArrowRight') stepOaLightbox(1);
+  });
 
-  <hr class="lp-divider" />
+  // ── s3-transformations.html ──
+function initTrSliders() {
+    document.querySelectorAll('.tr-slider[data-slider]').forEach(container => {
+      const beforeWrap = container.querySelector('.tr-sl-before-wrap');
+      const divider = container.querySelector('.tr-sl-divider');
+      let isDragging = false;
 
-  <!-- 5 MODULES -->
-  <section class="lp-section" style="background:var(--cream);margin:0;max-width:100%;padding-left:0;padding-right:0;"><div style="max-width:1000px;margin:0 auto;padding:80px 32px;">
-    <div class="lp-section-label" style="color:var(--gold);">Staging modules</div>
-    <div class="lp-section-title" style="color:var(--ink);">Six tools. One platform.</div>
-    <div class="lp-modules">
-      <!-- Vacant Stage -->
-      <div class="lp-module">
-        <div class="lp-module-img mod-slider-wrap" style="padding:0;overflow:hidden;position:relative;cursor:ew-resize;user-select:none;-webkit-user-select:none;">
-          <img class="mod-sl-after" src="https://res.cloudinary.com/de18zsi7o/image/upload/q_auto/f_auto/v1783611982/smart-stage-finals/szregsolo_234benttreect_061726/sgkib6nys15kcr0bxtfb.jpg" alt="Vacant Stage After" draggable="false" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;pointer-events:none;" />
-          <div class="mod-sl-before-wrap" style="position:absolute;inset:0;width:50%;overflow:hidden;pointer-events:none;">
-            <img class="mod-sl-before" src="https://res.cloudinary.com/de18zsi7o/image/upload/q_auto/f_auto/v1783611979/smart-stage-originals/eo6w5cnubfua0ykaum7b.jpg" alt="Vacant Stage Before" draggable="false" style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;object-position:left center;display:block;pointer-events:none;" />
-          </div>
-          <div class="mod-sl-divider" style="position:absolute;top:0;bottom:0;left:50%;width:2px;background:#c9a84c;transform:translateX(-50%);pointer-events:none;z-index:3;">
-            <div class="mod-sl-handle" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:32px;height:32px;filter:drop-shadow(0 2px 6px rgba(0,0,0,0.5));">
-              <svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" style="width:32px;height:32px;"><circle cx="20" cy="20" r="19" fill="#1a1a1a" stroke="#c9a84c" stroke-width="1.5"/><polyline points="16,13 9,20 16,27" fill="none" stroke="#c9a84c" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><polyline points="24,13 31,20 24,27" fill="none" stroke="#c9a84c" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            </div>
-          </div>
-          <span class="mod-sl-label mod-sl-label-before">BEFORE</span>
-          <span class="mod-sl-label mod-sl-label-after">AFTER</span>
-        </div>
-        <div class="lp-module-body">
-          <div class="lp-module-name">Vacant Stage</div>
-          <div class="lp-module-desc">Fully furnish empty rooms with cohesive style and palette guided by your session DNA.</div>
-        </div>
-      </div>
+      function setPosition(pct) {
+        pct = Math.max(2, Math.min(98, pct));
+        beforeWrap.style.width = pct + '%';
+        divider.style.left = pct + '%';
+      }
+      function getPct(clientX) {
+        const rect = container.getBoundingClientRect();
+        return ((clientX - rect.left) / rect.width) * 100;
+      }
 
-      <!-- Clean & Stage -->
-      <div class="lp-module">
-        <div class="lp-module-img mod-slider-wrap" style="padding:0;overflow:hidden;position:relative;cursor:ew-resize;user-select:none;-webkit-user-select:none;">
-          <img class="mod-sl-after" src="https://res.cloudinary.com/de18zsi7o/image/upload/q_auto/f_auto/v1781192520/ChatGPT_Image_Jun_11_2026_08_41_17_AM_qtuzy1.png" alt="Clean &amp; Stage After" draggable="false" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;pointer-events:none;" />
-          <div class="mod-sl-before-wrap" style="position:absolute;inset:0;width:50%;overflow:hidden;pointer-events:none;">
-            <img class="mod-sl-before" src="https://res.cloudinary.com/de18zsi7o/image/upload/q_auto/f_auto/v1783694842/Clean_and_Stage_Original_b3oo9u.jpg" alt="Clean &amp; Stage Before" draggable="false" style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;object-position:left center;display:block;pointer-events:none;" />
-          </div>
-          <div class="mod-sl-divider" style="position:absolute;top:0;bottom:0;left:50%;width:2px;background:#c9a84c;transform:translateX(-50%);pointer-events:none;z-index:3;">
-            <div class="mod-sl-handle" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:32px;height:32px;filter:drop-shadow(0 2px 6px rgba(0,0,0,0.5));">
-              <svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" style="width:32px;height:32px;"><circle cx="20" cy="20" r="19" fill="#1a1a1a" stroke="#c9a84c" stroke-width="1.5"/><polyline points="16,13 9,20 16,27" fill="none" stroke="#c9a84c" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><polyline points="24,13 31,20 24,27" fill="none" stroke="#c9a84c" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            </div>
-          </div>
-          <span class="mod-sl-label mod-sl-label-before">BEFORE</span>
-          <span class="mod-sl-label mod-sl-label-after">AFTER</span>
-        </div>
-        <div class="lp-module-body">
-          <div class="lp-module-name">Clean &amp; Stage</div>
-          <div class="lp-module-desc">Remove clutter and personal items, then restage with fresh, market-ready furnishings.</div>
-        </div>
-      </div>
+      container.addEventListener('mousedown', (e) => { isDragging = true; setPosition(getPct(e.clientX)); e.preventDefault(); });
+      window.addEventListener('mousemove', (e) => { if (isDragging) setPosition(getPct(e.clientX)); });
+      window.addEventListener('mouseup', () => { isDragging = false; });
+      container.addEventListener('touchstart', (e) => { isDragging = true; setPosition(getPct(e.touches[0].clientX)); e.preventDefault(); }, { passive: false });
+      window.addEventListener('touchmove', (e) => { if (isDragging) setPosition(getPct(e.touches[0].clientX)); }, { passive: true });
+      window.addEventListener('touchend', () => { isDragging = false; });
 
-      <!-- Exterior Enhancement -->
-      <div class="lp-module">
-        <div class="lp-module-img mod-slider-wrap" style="padding:0;overflow:hidden;position:relative;cursor:ew-resize;user-select:none;-webkit-user-select:none;">
-          <img class="mod-sl-after" src="https://res.cloudinary.com/de18zsi7o/image/upload/q_auto/f_auto/v1781200608/FINAL_LandscapeEnhancement_Backyard_n2wtnj.jpg" alt="Exterior Enhancement After" draggable="false" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;pointer-events:none;" />
-          <div class="mod-sl-before-wrap" style="position:absolute;inset:0;width:50%;overflow:hidden;pointer-events:none;">
-            <img class="mod-sl-before" src="https://res.cloudinary.com/de18zsi7o/image/upload/q_auto/f_auto/v1781157260/Backyard_tnco79.jpg" alt="Exterior Enhancement Before" draggable="false" style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;object-position:left center;display:block;pointer-events:none;" />
-          </div>
-          <div class="mod-sl-divider" style="position:absolute;top:0;bottom:0;left:50%;width:2px;background:#c9a84c;transform:translateX(-50%);pointer-events:none;z-index:3;">
-            <div class="mod-sl-handle" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:32px;height:32px;filter:drop-shadow(0 2px 6px rgba(0,0,0,0.5));">
-              <svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" style="width:32px;height:32px;"><circle cx="20" cy="20" r="19" fill="#1a1a1a" stroke="#c9a84c" stroke-width="1.5"/><polyline points="16,13 9,20 16,27" fill="none" stroke="#c9a84c" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><polyline points="24,13 31,20 24,27" fill="none" stroke="#c9a84c" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            </div>
-          </div>
-          <span class="mod-sl-label mod-sl-label-before">BEFORE</span>
-          <span class="mod-sl-label mod-sl-label-after">AFTER</span>
-        </div>
-        <div class="lp-module-body">
-          <div class="lp-module-name">Exterior Enhancement</div>
-          <div class="lp-module-desc">Upgrade curb appeal with landscaping, lighting, and outdoor living additions across 4 lighting conditions.</div>
-        </div>
-      </div>
+      setPosition(50);
+    });
+  }
 
-      <!-- Declutter -->
-      <div class="lp-module">
-        <div class="lp-module-img mod-slider-wrap" style="padding:0;overflow:hidden;position:relative;cursor:ew-resize;user-select:none;-webkit-user-select:none;">
-          <img class="mod-sl-after" src="https://res.cloudinary.com/de18zsi7o/image/upload/q_auto/f_auto/v1781158004/FINAL_Decluttered_Landing_Page_Declutter_a8h7qz.jpg" alt="Declutter After" draggable="false" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;pointer-events:none;" />
-          <div class="mod-sl-before-wrap" style="position:absolute;inset:0;width:50%;overflow:hidden;pointer-events:none;">
-            <img class="mod-sl-before" src="https://res.cloudinary.com/de18zsi7o/image/upload/q_auto/f_auto/v1781158058/Landing_Page_Declutter_mmi08k.jpg" alt="Declutter Before" draggable="false" style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;object-position:left center;display:block;pointer-events:none;" />
-          </div>
-          <div class="mod-sl-divider" style="position:absolute;top:0;bottom:0;left:50%;width:2px;background:#c9a84c;transform:translateX(-50%);pointer-events:none;z-index:3;">
-            <div class="mod-sl-handle" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:32px;height:32px;filter:drop-shadow(0 2px 6px rgba(0,0,0,0.5));">
-              <svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" style="width:32px;height:32px;"><circle cx="20" cy="20" r="19" fill="#1a1a1a" stroke="#c9a84c" stroke-width="1.5"/><polyline points="16,13 9,20 16,27" fill="none" stroke="#c9a84c" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><polyline points="24,13 31,20 24,27" fill="none" stroke="#c9a84c" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            </div>
-          </div>
-          <span class="mod-sl-label mod-sl-label-before">BEFORE</span>
-          <span class="mod-sl-label mod-sl-label-after">AFTER</span>
-        </div>
-        <div class="lp-module-body">
-          <div class="lp-module-name">Declutter</div>
-          <div class="lp-module-desc">Remove freestanding items completely — furniture, boxes, personal effects — leaving a clean canvas.</div>
-        </div>
-      </div>
+  // ── s4-featurecards.html ──
+// ── PRESET TABS + LIVE SLIDER ──────────────────────────────────────
+  // Order matches the tab buttons exactly (MLS Bright, Luxury Editorial,
+  // HDR Natural, Magazine, Builder Showcase, Premium Detail).
+  const PRESET_URLS = [
+    "https://res.cloudinary.com/de18zsi7o/image/upload/v1785194942/FINAL_MLSBright_eedde97f-0ff7-46ff-9e6e-61fbef4479ff_laqvpu.jpg",
+    "https://res.cloudinary.com/de18zsi7o/image/upload/v1785194963/FINAL_LuxuryEditorial_eedde97f-0ff7-46ff-9e6e-61fbef4479ff_fkxj6x.jpg",
+    "https://res.cloudinary.com/de18zsi7o/image/upload/v1785194994/FINAL_HDRNatural_eedde97f-0ff7-46ff-9e6e-61fbef4479ff_ncekon.jpg",
+    "https://res.cloudinary.com/de18zsi7o/image/upload/v1785195032/FINAL_Magazine_eedde97f-0ff7-46ff-9e6e-61fbef4479ff_gx7eos.jpg",
+    "https://res.cloudinary.com/de18zsi7o/image/upload/v1785195013/FINAL_BuilderShowcase_eedde97f-0ff7-46ff-9e6e-61fbef4479ff_i0fwyz.jpg",
+    "https://res.cloudinary.com/de18zsi7o/image/upload/v1785195059/FINAL_PremiumDetail_eedde97f-0ff7-46ff-9e6e-61fbef4479ff_x0v4lf.jpg",
+  ];
 
-      <!-- Multi-Angle Group Staging -->
-      <div class="lp-module">
-        <div class="lp-module-img mod-slider-wrap" style="padding:0;overflow:hidden;position:relative;cursor:ew-resize;user-select:none;-webkit-user-select:none;">
-          <img class="mod-sl-after" src="https://res.cloudinary.com/de18zsi7o/image/upload/q_auto/f_auto/v1781159231/FINAL_VirtuallyStaged_Open_Plan_3_plryhw.jpg" alt="Multi-Angle Group Staging After" draggable="false" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;pointer-events:none;" />
-          <div class="mod-sl-before-wrap" style="position:absolute;inset:0;width:50%;overflow:hidden;pointer-events:none;">
-            <img class="mod-sl-before" src="https://res.cloudinary.com/de18zsi7o/image/upload/q_auto/f_auto/v1781159311/Open_Plan_3_uxkpt3.jpg" alt="Multi-Angle Group Staging Before" draggable="false" style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;object-position:left center;display:block;pointer-events:none;" />
-          </div>
-          <div class="mod-sl-divider" style="position:absolute;top:0;bottom:0;left:50%;width:2px;background:#c9a84c;transform:translateX(-50%);pointer-events:none;z-index:3;">
-            <div class="mod-sl-handle" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:32px;height:32px;filter:drop-shadow(0 2px 6px rgba(0,0,0,0.5));">
-              <svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" style="width:32px;height:32px;"><circle cx="20" cy="20" r="19" fill="#1a1a1a" stroke="#c9a84c" stroke-width="1.5"/><polyline points="16,13 9,20 16,27" fill="none" stroke="#c9a84c" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><polyline points="24,13 31,20 24,27" fill="none" stroke="#c9a84c" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            </div>
-          </div>
-          <span class="mod-sl-label mod-sl-label-before">BEFORE</span>
-          <span class="mod-sl-label mod-sl-label-after">AFTER</span>
-        </div>
-        <div class="lp-module-body">
-          <div class="lp-module-name">Multi-Angle Group Staging</div>
-          <div class="lp-module-desc">Stage open-plan spaces from multiple angles simultaneously using a single Master Staging Plan.</div>
-        </div>
-      </div>
-      <div class="lp-module">
-        <div class="lp-module-img" style="padding:0;overflow:hidden;">
-          <img src="https://res.cloudinary.com/de18zsi7o/image/upload/w_640,q_auto,f_auto/v1781058091/Compliance_dashboard_egnsdp.png" alt="AB 723 Compliance Dashboard" style="width:100%;height:100%;object-fit:contain;display:block;background:#f7f4ef;" />
-        </div>
-        <div class="lp-module-body">
-          <div class="lp-module-name">Compliance Dashboard</div>
-          <div class="lp-module-desc">Every listing gets a permanent AB 723 compliance page with QR code, original photo, and 3-year record retention — generated automatically on every project.</div>
-        </div>
-      </div>
-    </div>
-  </div></section>
+  function switchPresetTab(idx, btnEl) {
+    document.querySelectorAll('.ps-preset-tab').forEach(btn => {
+      btn.classList.toggle('active', btn === btnEl);
+      btn.setAttribute('aria-selected', btn === btnEl ? 'true' : 'false');
+    });
+    document.getElementById('ps-preset-after-img').src = PRESET_URLS[idx];
+  }
 
-  <!-- COMPLIANCE STRIP -->
-  <section class="lp-compliance-section">
-    <div class="lp-section" style="padding-top:56px;padding-bottom:56px;">
-      <div class="lp-section-label">AB 723 Compliance</div>
-      <div class="lp-section-title" style="margin-bottom:36px;">Built for California law from day one.</div>
-      <div class="lp-compliance-grid">
-        <div class="lp-compliance-item">
-          <div class="lp-compliance-check">✓</div>
-          <div class="lp-compliance-text"><strong>Disclosure on every image</strong>AB 723 §10140.8 header applied to all staged and enhanced images — immutable.</div>
-        </div>
-        <div class="lp-compliance-item">
-          <div class="lp-compliance-check">✓</div>
-          <div class="lp-compliance-text"><strong>Permanent compliance pages</strong>Every listing gets a public URL with original and staged images stored for 3 years.</div>
-        </div>
-        <div class="lp-compliance-item">
-          <div class="lp-compliance-check">✓</div>
-          <div class="lp-compliance-text"><strong>QR codes on Finals</strong>Every Final image carries a QR code linking buyers to the compliance page and original photo.</div>
-        </div>
-        <div class="lp-compliance-item">
-          <div class="lp-compliance-check">✓</div>
-          <div class="lp-compliance-text"><strong>MetroList Rule 11.6.1</strong>Original photo disclosure notice included on every staged image for Matrix upload compliance.</div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- PRICING -->
-  <section class="lp-section" id="lp-pricing">
-    <div class="lp-section-label">Pricing</div>
-    <div class="lp-section-title">Simple, transparent plans.</div>
-    <div style="font-size:0.85rem;color:var(--muted);margin-top:-32px;margin-bottom:0;">All plans include AB 723 compliance · Stripe secure billing · Cancel anytime</div>
-    <div class="lp-pricing-grid">
-
-      <!-- FREE TRIAL -->
-      <div class="lp-plan" style="background:linear-gradient(135deg,#f9f7f3,#fff);border:1.5px dashed rgba(184,151,90,0.4);">
-        <div class="lp-plan-name">Free Trial</div>
-        <div class="lp-plan-price" style="font-size:2.6rem;">$0</div>
-        <div class="lp-plan-annual" style="color:var(--gold);font-weight:600;letter-spacing:0.02em;">No credit card required</div>
-        <ul class="lp-plan-features">
-          <li>10 staged images</li>
-          <li>All 5 staging modules</li>
-          <li>AB 723 compliance pages</li>
-          <li>QR codes on all Finals</li>
-          <li class="muted">No rollover</li>
-          <li class="muted">Upgrade to Solo anytime</li>
-        </ul>
-        <div style="flex:1;"></div>
-        <div style="font-size:0.7rem;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);text-align:center;margin-bottom:8px;">Free Trial</div>
-        <button class="lp-plan-btn" style="background:var(--ink);color:var(--gold);border:none;" onclick="showAuthModal('signup')">Start Free →</button>
-      </div>
-
-      <!-- SOLO -->
-      <div class="lp-plan">
-        <div class="lp-plan-name">Solo</div>
-        <div style="font-size:0.72rem;color:var(--gold);font-weight:600;letter-spacing:0.04em;margin-bottom:6px;">$0.98 / staged image</div>
-        <div class="lp-plan-price">$49<span>/mo</span></div>
-        <div class="lp-plan-annual">or $490/yr — 2 months free</div>
-        <ul class="lp-plan-features">
-          <li>50 staged images / month</li>
-          <li>1 agent account</li>
-          <li>All 5 staging modules</li>
-          <li>AB 723 compliance pages</li>
-          <li>QR codes on all Finals</li>
-          <li>3-year record retention</li>
-        </ul>
-        <div style="background:rgba(45,106,79,0.08);border:1px solid rgba(45,106,79,0.2);border-radius:3px;padding:8px 12px;margin-bottom:16px;font-size:0.78rem;color:var(--success);font-weight:500;">✓ Unused images roll over month to month</div>
-        <div style="font-size:0.7rem;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);text-align:center;margin-bottom:8px;">Solo</div>
-        <button class="lp-plan-btn outline" onclick="landingStartCheckout('solo')">Subscribe Now →</button>
-      </div>
-
-      <!-- TEAM -->
-      <div class="lp-plan featured">
-        <div class="lp-plan-badge">Most Popular</div>
-        <div class="lp-plan-name">Team</div>
-        <div style="font-size:0.72rem;color:var(--gold);font-weight:600;letter-spacing:0.04em;margin-bottom:6px;">$0.79 / staged image</div>
-        <div class="lp-plan-price">$99<span>/mo</span></div>
-        <div class="lp-plan-annual">or $990/yr — 2 months free</div>
-        <ul class="lp-plan-features">
-          <li>125 staged images / month</li>
-          <li>Up to 5 agent sub-accounts</li>
-          <li>Shared image pool</li>
-          <li>Team AB 723 dashboard</li>
-          <li>All Solo features</li>
-        </ul>
-        <div style="background:rgba(45,106,79,0.08);border:1px solid rgba(45,106,79,0.2);border-radius:3px;padding:8px 12px;margin-bottom:16px;font-size:0.78rem;color:var(--success);font-weight:500;">✓ Unused images roll over month to month</div>
-        <div style="font-size:0.7rem;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);text-align:center;margin-bottom:8px;">Team</div>
-        <button class="lp-plan-btn" onclick="landingStartCheckout('team')">Subscribe Now →</button>
-      </div>
-
-      <!-- BROKERAGE -->
-      <div class="lp-plan">
-        <div class="lp-plan-name">Brokerage</div>
-        <div style="font-size:0.72rem;color:var(--gold);font-weight:600;letter-spacing:0.04em;margin-bottom:6px;">$0.69 / staged image</div>
-        <div class="lp-plan-price">$279<span>/mo</span></div>
-        <div class="lp-plan-annual">or $2,790/yr — 2 months free</div>
-        <ul class="lp-plan-features">
-          <li>400 staged images / month</li>
-          <li>Unlimited agents</li>
-          <li>Brokerage compliance dashboard</li>
-          <li>AB 723 CSV export</li>
-          <li>All Team features</li>
-        </ul>
-        <div style="background:rgba(45,106,79,0.08);border:1px solid rgba(45,106,79,0.2);border-radius:3px;padding:8px 12px;margin-bottom:16px;font-size:0.78rem;color:var(--success);font-weight:500;">✓ Unused images roll over month to month</div>
-        <div style="font-size:0.7rem;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);text-align:center;margin-bottom:8px;">Brokerage</div>
-        <button class="lp-plan-btn outline" onclick="landingStartCheckout('brokerage')">Subscribe Now →</button>
-      </div>
-
-    </div>
-    <div style="font-size:0.72rem;color:var(--muted);margin-top:24px;padding-top:16px;border-top:1px solid var(--border);line-height:2;">
-      <strong style="color:var(--ink);">Overage image packs available:</strong> Solo $25 / 20 images &nbsp;·&nbsp; Team $45 / 50 images &nbsp;·&nbsp; Brokerage $75 / 100 images<br>
-      * Unused staged images roll over month to month. Solo plans cap at 150 images · Team plans cap at 375 images · Brokerage plans cap at 1,200 images. Rolled-over images are forfeited upon cancellation.
-    </div>
-  </section>
-
-  <!-- FOOTER -->
-  <footer class="lp-footer">
-    <img src="https://res.cloudinary.com/de18zsi7o/image/upload/v1780935171/Smart_Stage_PRO_Logo_zciwlo.png" alt="Smart Stage PRO™" style="height:36px;width:auto;margin:0 auto 16px;display:block;opacity:0.7;" />
-    <div class="lp-footer-text">
-      Smart Stage PRO™<br>
-      California AB 723 §10140.8 compliant · All staged images include mandatory disclosure overlays<br>
-      <a href="mailto:sam@smartstagepro.com">sam@smartstagepro.com</a>
-      &nbsp;·&nbsp;
-      <a href="/privacy-policy.html">Privacy Policy</a>
-    </div>
-  </footer>
-  `;
-  setTimeout(initBaSlider, 0);
-  setTimeout(initModuleSliders, 0);
-}
-
-
-// ── Before/After Slider ──────────────────────────────────
-function initModuleSliders() {
-  document.querySelectorAll('.mod-slider-wrap').forEach(function(container) {
-    const beforeWrap = container.querySelector('.mod-sl-before-wrap');
-    const divider    = container.querySelector('.mod-sl-divider');
-    if (!beforeWrap || !divider) return;
+  function initPsTopSlider() {
+    const container = document.querySelector('.ps-top-hero[data-slider]');
+    if (!container) return;
+    const beforeWrap = container.querySelector('.ps-top-hero-before-wrap');
+    const divider = container.querySelector('.ps-top-hero-divider');
     let isDragging = false;
-    function setPos(pct) {
+
+    function setPosition(pct) {
       pct = Math.max(2, Math.min(98, pct));
       beforeWrap.style.width = pct + '%';
       divider.style.left = pct + '%';
@@ -7970,38 +7334,2541 @@ function initModuleSliders() {
       const rect = container.getBoundingClientRect();
       return ((clientX - rect.left) / rect.width) * 100;
     }
-    container.addEventListener('mousedown', function(e) { isDragging = true; setPos(getPct(e.clientX)); e.preventDefault(); });
-    window.addEventListener('mousemove', function(e) { if (isDragging) setPos(getPct(e.clientX)); });
-    window.addEventListener('mouseup', function() { isDragging = false; });
-    container.addEventListener('touchstart', function(e) { isDragging = true; setPos(getPct(e.touches[0].clientX)); e.preventDefault(); }, { passive: false });
-    window.addEventListener('touchmove', function(e) { if (isDragging) setPos(getPct(e.touches[0].clientX)); }, { passive: true });
-    window.addEventListener('touchend', function() { isDragging = false; });
-    setPos(50);
-  });
-}
 
-function initBaSlider() {
-  const container  = document.getElementById('ba-slider-container');
-  const beforeWrap = document.getElementById('ba-before-wrap');
-  const divider    = document.getElementById('ba-divider');
-  if (!container) return;
-  let isDragging = false;
-  function setPosition(pct) {
-    pct = Math.max(2, Math.min(98, pct));
-    beforeWrap.style.width = pct + '%';
-    divider.style.left = pct + '%';
+    container.addEventListener('mousedown', (e) => { isDragging = true; setPosition(getPct(e.clientX)); e.preventDefault(); });
+    window.addEventListener('mousemove', (e) => { if (isDragging) setPosition(getPct(e.clientX)); });
+    window.addEventListener('mouseup', () => { isDragging = false; });
+    container.addEventListener('touchstart', (e) => { isDragging = true; setPosition(getPct(e.touches[0].clientX)); e.preventDefault(); }, { passive: false });
+    window.addEventListener('touchmove', (e) => { if (isDragging) setPosition(getPct(e.touches[0].clientX)); }, { passive: true });
+    window.addEventListener('touchend', () => { isDragging = false; });
+
+    setPosition(50);
   }
-  function getPct(clientX) {
-    const rect = container.getBoundingClientRect();
-    return ((clientX - rect.left) / rect.width) * 100;
+  
+
+  const FC_IMAGES = [
+    { src: "https://res.cloudinary.com/de18zsi7o/image/upload/v1785173037/smart-stage-finals/szregsolo_3027blackpointct_072726/h7zqp79a5osopty094md.jpg", label: "Staged — Original", tag: "Original" },
+    { src: "https://res.cloudinary.com/de18zsi7o/image/upload/v1785194942/FINAL_MLSBright_eedde97f-0ff7-46ff-9e6e-61fbef4479ff_laqvpu.jpg", label: "MLS Bright", tag: "Preset" },
+    { src: "https://res.cloudinary.com/de18zsi7o/image/upload/v1785194963/FINAL_LuxuryEditorial_eedde97f-0ff7-46ff-9e6e-61fbef4479ff_fkxj6x.jpg", label: "Luxury Editorial", tag: "Preset" },
+    { src: "https://res.cloudinary.com/de18zsi7o/image/upload/v1785194994/FINAL_HDRNatural_eedde97f-0ff7-46ff-9e6e-61fbef4479ff_ncekon.jpg", label: "HDR Natural", tag: "Preset" },
+    { src: "https://res.cloudinary.com/de18zsi7o/image/upload/v1785195032/FINAL_Magazine_eedde97f-0ff7-46ff-9e6e-61fbef4479ff_gx7eos.jpg", label: "Magazine", tag: "Preset" },
+    { src: "https://res.cloudinary.com/de18zsi7o/image/upload/v1785195013/FINAL_BuilderShowcase_eedde97f-0ff7-46ff-9e6e-61fbef4479ff_i0fwyz.jpg", label: "Builder Showcase", tag: "Preset" },
+    { src: "https://res.cloudinary.com/de18zsi7o/image/upload/v1785195059/FINAL_PremiumDetail_eedde97f-0ff7-46ff-9e6e-61fbef4479ff_x0v4lf.jpg", label: "Premium Detail", tag: "Preset" },
+    { src: "https://res.cloudinary.com/de18zsi7o/image/upload/v1785194765/AI_Cinematic_Photo_Director_n7petz.png", label: "AI Cinematic Photo Director", tag: "Feature" },
+    { src: "https://res.cloudinary.com/de18zsi7o/image/upload/v1785181992/smart-stage-finals/szregsolo_3027blackpointct_072726/ytbyqyi6nburoo8tofon.jpg", label: "Hero Image Collections", tag: "Feature" },
+    { src: "https://res.cloudinary.com/de18zsi7o/image/upload/v1784241931/smart-stage-finals/szregsolo_5935quilterst_071626/a5j8asox2eolsljdkgqm.jpg", label: "Exterior Enhancements", tag: "Feature" },
+    { src: "https://res.cloudinary.com/de18zsi7o/image/upload/v1785192661/Compliance_Page_oslzp3.png", label: "Compliance & Listing Records", tag: "Feature" },
+  ];
+  let fcCurrentIdx = 0;
+  let fcLastFocused = null;
+
+  function openFcLightbox(i) {
+    fcCurrentIdx = i;
+    fcLastFocused = document.activeElement;
+    renderFcLightbox();
+    document.getElementById('fc-lightbox').classList.add('is-open');
+    document.body.style.overflow = 'hidden';
+    document.querySelector('.fc-lightbox-close').focus();
   }
-  container.addEventListener('mousedown', (e) => { isDragging = true; setPosition(getPct(e.clientX)); e.preventDefault(); });
-  window.addEventListener('mousemove', (e) => { if (isDragging) setPosition(getPct(e.clientX)); });
-  window.addEventListener('mouseup', () => { isDragging = false; });
-  container.addEventListener('touchstart', (e) => { isDragging = true; setPosition(getPct(e.touches[0].clientX)); e.preventDefault(); }, { passive: false });
-  window.addEventListener('touchmove', (e) => { if (isDragging) setPosition(getPct(e.touches[0].clientX)); }, { passive: true });
-  window.addEventListener('touchend', () => { isDragging = false; });
-  setPosition(50);
+  function closeFcLightbox() {
+    document.getElementById('fc-lightbox').classList.remove('is-open');
+    document.body.style.overflow = '';
+    if (fcLastFocused) fcLastFocused.focus();
+  }
+  function stepFcLightbox(dir) {
+    fcCurrentIdx = (fcCurrentIdx + dir + FC_IMAGES.length) % FC_IMAGES.length;
+    renderFcLightbox();
+  }
+  function renderFcLightbox() {
+    const item = FC_IMAGES[fcCurrentIdx];
+    const img = document.getElementById('fc-lightbox-img');
+    img.src = item.src;
+    img.alt = item.label + ', enlarged';
+    document.getElementById('fc-lightbox-title').textContent = item.label;
+    document.getElementById('fc-lightbox-tag').textContent = item.tag;
+  }
+  document.addEventListener('keydown', (e) => {
+    const lb = document.getElementById('fc-lightbox');
+    if (!lb || !lb.classList.contains('is-open')) return;
+    if (e.key === 'Escape') closeFcLightbox();
+    if (e.key === 'ArrowLeft') stepFcLightbox(-1);
+    if (e.key === 'ArrowRight') stepFcLightbox(1);
+  });
+
+  // ── s6-compliance.html ──
+const CD_TAB_URLS = {
+    solo: 'app.smartstagepro.com/listings',
+    team: 'app.smartstagepro.com/team/listings',
+    brokerage: 'app.smartstagepro.com/brokerage/listings'
+  };
+  function switchCdTab(id, btnEl){
+    document.querySelectorAll('.cd-tab').forEach(t => {
+      t.classList.toggle('active', t === btnEl);
+      t.setAttribute('aria-selected', t === btnEl ? 'true' : 'false');
+    });
+    document.querySelectorAll('.cd-panel').forEach(p => p.classList.remove('active'));
+    document.getElementById('cd-panel-' + id).classList.add('active');
+    document.getElementById('cd-frame-url').textContent = CD_TAB_URLS[id];
+  }
+
+  function selectSeat(panel, agent, el){
+    document.querySelectorAll('.lpdb-seat[data-panel="' + panel + '"]').forEach(s => s.classList.remove('active'));
+    el.classList.add('active');
+    const cards = document.querySelectorAll('.lpdb-card[data-panel="' + panel + '"]');
+    let visible = 0;
+    cards.forEach(c => {
+      const show = agent === 'all' || c.dataset.agent === agent;
+      c.style.display = show ? '' : 'none';
+      if (show) visible++;
+    });
+    const empty = document.querySelector('.lpdb-empty[data-panel="' + panel + '"]');
+    if (empty) empty.style.display = visible === 0 ? 'block' : 'none';
+  }
+
+  const CD_IMAGES = [
+    { src: "https://res.cloudinary.com/de18zsi7o/image/upload/v1784950018/AB_723_Dashboard_pezbce.png", label: "Solo Agent — My Listings" },
+    { src: "https://res.cloudinary.com/de18zsi7o/image/upload/v1785279727/SmartStage_QR_1515_Demo_St_Rocklin_CA_ijtxhh.png", label: "1515 Demo St, Rocklin, CA — Compliance QR Code" }
+  ];
+  function openCdLightbox(i){
+    const item = CD_IMAGES[i];
+    document.getElementById('cd-lightbox-img').src = item.src;
+    document.getElementById('cd-lightbox-img').alt = item.label + ', enlarged';
+    document.getElementById('cd-lightbox-caption').textContent = item.label;
+    document.getElementById('cd-lightbox').classList.add('is-open');
+    document.body.style.overflow = 'hidden';
+  }
+  function closeCdLightbox(){
+    const el = document.getElementById('cd-lightbox');
+    if (!el) return;
+    el.classList.remove('is-open');
+    document.body.style.overflow = '';
+  }
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeCdLightbox();
+  });
+
+  // ── s7-pricing.html ──
+const PR_ANNUAL = {
+    solo:      { price: "$490", period: "/ year" },
+    team:      { price: "$990", period: "/ year" },
+    brokerage: { price: "$2,790", period: "/ year" }
+  };
+  const PR_MONTHLY = {
+    solo:      { price: "$49", period: "/ month" },
+    team:      { price: "$99", period: "/ month" },
+    brokerage: { price: "$279", period: "/ month" }
+  };
+
+  function setPrBilling(mode){
+    document.getElementById('pr-btn-monthly').classList.toggle('active', mode === 'monthly');
+    document.getElementById('pr-btn-annual').classList.toggle('active', mode === 'annual');
+
+    document.querySelectorAll('.pr-card[data-plan]').forEach(card => {
+      const plan = card.dataset.plan;
+      const data = mode === 'annual' ? PR_ANNUAL[plan] : PR_MONTHLY[plan];
+      card.querySelector('.pr-price-monthly').textContent = data.price;
+      card.querySelector('.pr-period-monthly').textContent = data.period;
+      card.querySelector('.pr-save-annual').style.display = mode === 'annual' ? 'block' : 'none';
+      card.querySelector('.pr-save-monthly').style.display = mode === 'annual' ? 'none' : 'block';
+    });
+  }
+
+function showLandingPage() {
+  document.getElementById('landing-page')?.remove();
+  document.querySelector('.compliance-bar').style.display = 'none';
+  document.querySelector('.header').style.display = 'none';
+
+  const page = document.createElement('div');
+  page.id = 'landing-page';
+  document.body.appendChild(page);
+
+  page.innerHTML = `<style>
+/* ══════════════════════════════════════════════════════════════════
+     HEADER / NAVIGATION
+     ══════════════════════════════════════════════════════════════════ */
+  body{ padding-top:66px; }
+  section[id]{ scroll-margin-top:84px; }
+
+  .hd{
+    position:fixed; top:0; left:0; right:0; z-index:900;
+    background:var(--ink); border-bottom:1px solid rgba(247,244,239,0.08);
+    transition:box-shadow 0.2s ease;
+  }
+  .hd.scrolled{ box-shadow:0 6px 24px rgba(0,0,0,0.35); }
+
+  .hd-inner{
+    max-width:1320px; margin:0 auto; padding:13px 32px;
+    display:flex; align-items:center; justify-content:space-between; gap:24px;
+  }
+
+  .hd-logo{ display:flex; align-items:center; gap:10px; text-decoration:none; flex-shrink:0; min-width:0; }
+  .hd-logo-mark{
+    width:34px; height:34px; flex-shrink:0; object-fit:contain; display:block;
+  }
+  .hd-logo-word{ font-size:0.95rem; font-weight:700; color:#fdfbf7; letter-spacing:0.01em; white-space:nowrap; }
+  .hd-logo-word em{ font-style:normal; color:var(--gold-light); }
+
+  .hd-nav{ display:flex; align-items:center; gap:28px; }
+  .hd-nav-link{
+    color:#cfc6b8; font-size:0.82rem; font-weight:600; text-decoration:none;
+    padding:6px 1px; transition:color 0.15s ease; white-space:nowrap;
+  }
+  .hd-nav-link:hover{ color:#fdfbf7; }
+
+  .hd-actions{ display:flex; align-items:center; gap:18px; flex-shrink:0; }
+  .hd-signin{ color:#cfc6b8; font-size:0.82rem; font-weight:600; text-decoration:none; white-space:nowrap; }
+  .hd-signin:hover{ color:#fdfbf7; }
+  .hd-cta{
+    background:var(--gold); color:var(--ink); font-size:0.8rem; font-weight:700;
+    padding:9px 18px; border-radius:6px; text-decoration:none; white-space:nowrap;
+  }
+  .hd-cta:hover{ background:var(--gold-light); }
+
+  .hd-burger{
+    display:none; flex-direction:column; justify-content:center; gap:5px;
+    background:none; border:none; cursor:pointer; padding:8px; flex-shrink:0;
+  }
+  .hd-burger span{
+    width:22px; height:2px; background:#fdfbf7; border-radius:2px;
+    transition:transform 0.2s ease, opacity 0.2s ease;
+  }
+  .hd-burger.open span:nth-child(1){ transform:translateY(7px) rotate(45deg); }
+  .hd-burger.open span:nth-child(2){ opacity:0; }
+  .hd-burger.open span:nth-child(3){ transform:translateY(-7px) rotate(-45deg); }
+
+  .hd-mobile{
+    display:none; flex-direction:column; background:var(--ink);
+    border-top:1px solid rgba(247,244,239,0.08); padding:8px 24px 18px;
+  }
+  .hd-mobile.is-open{ display:flex; }
+  .hd-mobile-link{
+    color:#e4ddd0; font-size:0.92rem; font-weight:600; text-decoration:none;
+    padding:13px 2px; border-bottom:1px solid rgba(247,244,239,0.07);
+  }
+  .hd-mobile-divider{ height:1px; background:rgba(247,244,239,0.1); margin:6px 0; }
+  .hd-mobile-cta{
+    margin-top:12px; background:var(--gold); color:var(--ink); text-align:center;
+    padding:13px; border-radius:7px; font-weight:700; font-size:0.85rem; text-decoration:none;
+  }
+
+  @media (max-width:900px){
+    .hd-nav, .hd-actions{ display:none; }
+    .hd-burger{ display:flex; }
+  }
+  @media (min-width:901px){
+    .hd-mobile{ display:none !important; }
+  }
+  @media (max-width:520px){
+    .hd-inner{ padding:12px 20px; }
+    .hd-logo-word{ font-size:0.86rem; }
+  }
+
+  /* ── s1-hero.html ── */
+.hero{
+    background:var(--ink);
+    padding:64px 32px 72px;
+  }
+  .hero-inner{
+    max-width:1240px; margin:0 auto;
+    display:grid;
+    grid-template-columns: 0.92fr 1.08fr;
+    grid-template-rows: auto auto;
+    column-gap:56px;
+    row-gap:28px;
+  }
+  .hero-left-top{ grid-column:1; grid-row:1; align-self:center; }
+  .hero-right-top{ grid-column:2; grid-row:1; align-self:center; }
+  /* Row 2 — trust badges and video teaser as siblings in the same row,
+     default align-items:stretch (grid) makes both cells fill the row's
+     height (the taller of the two natural contents), so the teaser
+     grows to match the trust row instead of sizing independently. */
+  .hero-trust{ grid-column:1; grid-row:2; }
+  .hero-video-teaser{ grid-column:2; grid-row:2; }
+
+  /* ── LEFT COLUMN ──────────────────────────────────────────────────── */
+  .hero-eyebrow{
+    display:flex; align-items:center; gap:10px;
+    font-size:0.7rem; letter-spacing:0.14em; text-transform:uppercase;
+    color:var(--gold-light); font-weight:700; margin-bottom:16px;
+  }
+  .hero-eyebrow::before{ content:""; width:26px; height:1px; background:var(--gold); }
+
+  .hero-headline{
+    font-family:'Cormorant Garamond',serif; font-weight:400;
+    font-size:clamp(2rem, 2.6vw + 1rem, 3rem);
+    line-height:1.1; letter-spacing:-0.01em;
+    color:#fdfbf7;
+    margin:0 0 18px 0;
+  }
+  .hero-headline em{ font-style:italic; color:var(--gold-light); }
+
+  .hero-sub{
+    font-size:0.95rem; color:#cfc6b8; line-height:1.7;
+    max-width:460px; margin:0 0 28px 0;
+  }
+
+  .hero-ctas{ display:flex; gap:12px; flex-wrap:wrap; margin-bottom:36px; }
+  .hero-btn-primary{
+    background:var(--gold); color:var(--ink); border:none;
+    padding:14px 26px; border-radius:3px; font-size:0.85rem; font-weight:700;
+    letter-spacing:0.01em; cursor:pointer; font-family:'DM Sans',sans-serif;
+    transition:background 0.15s ease;
+  }
+  .hero-btn-primary:hover{ background:var(--gold-light); }
+  .hero-btn-secondary{
+    background:transparent; color:var(--cream); border:1px solid rgba(247,244,239,0.28);
+    padding:14px 26px; border-radius:3px; font-size:0.85rem; font-weight:700;
+    letter-spacing:0.01em; cursor:pointer; font-family:'DM Sans',sans-serif;
+    transition:border-color 0.15s ease, background 0.15s ease;
+  }
+  .hero-btn-secondary:hover{ border-color:var(--gold); background:rgba(184,151,90,0.1); }
+
+  .hero-trust{
+    display:grid; grid-template-columns:repeat(3, 1fr); gap:22px;
+    align-content:start;
+    padding-top:24px; border-top:1px solid rgba(247,244,239,0.14);
+  }
+  .hero-trust-item{ display:flex; flex-direction:column; gap:4px; }
+  .hero-trust-icon{ font-size:1.15rem; margin-bottom:2px; }
+  .hero-trust-title{ font-size:0.76rem; font-weight:700; color:var(--cream); }
+  .hero-trust-desc{ font-size:0.7rem; color:#9a8f80; line-height:1.4; }
+
+  /* ── RIGHT COLUMN ─────────────────────────────────────────────────── */
+  .hero-right-top{ display:flex; flex-direction:column; }
+
+  .hero-tabs{
+    display:flex; gap:2px; margin-bottom:14px;
+    background:rgba(247,244,239,0.07); border-radius:4px; padding:4px;
+  }
+  .hero-tab{
+    flex:1; background:none; border:none; cursor:pointer;
+    padding:10px 8px; border-radius:3px;
+    font-family:'DM Sans',sans-serif; font-size:0.78rem; font-weight:600;
+    color:#9a8f80; transition:background 0.15s ease, color 0.15s ease;
+  }
+  .hero-tab.active{ background:var(--gold); color:var(--ink); }
+  .hero-tab:hover:not(.active){ color:var(--cream); }
+
+  .hero-slider-pane{ display:none; }
+  .hero-slider-pane.active{ display:block; }
+
+  .hero-slider-container{
+    position:relative;
+    width:100%;
+    aspect-ratio:16/10;
+    border-radius:8px;
+    overflow:hidden;
+    cursor:ew-resize;
+    user-select:none;
+    box-shadow:var(--shadow);
+    background:#000;
+  }
+  .hero-sl-after, .hero-sl-before{
+    position:absolute; inset:0; width:100%; height:100%;
+    object-fit:cover; display:block; pointer-events:none;
+  }
+  .hero-sl-before-wrap{ position:absolute; inset:0; width:50%; overflow:hidden; pointer-events:none; }
+  .hero-sl-before{ position:absolute; top:0; left:0; object-position:left center; }
+
+  .hero-sl-divider{
+    position:absolute; top:0; bottom:0; left:50%; width:2px;
+    background:var(--gold); transform:translateX(-50%); pointer-events:none; z-index:3;
+  }
+  .hero-sl-handle{
+    position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+    width:38px; height:38px; filter:drop-shadow(0 3px 8px rgba(0,0,0,0.4));
+  }
+  .hero-sl-label{
+    position:absolute; top:12px; font-size:0.6rem; font-weight:700;
+    letter-spacing:0.08em; text-transform:uppercase; padding:5px 9px;
+    border-radius:2px; z-index:2; pointer-events:none;
+    background:rgba(26,23,20,0.8); color:var(--cream);
+  }
+  .hero-sl-label.before-label{ left:12px; }
+  .hero-sl-label.after-label{ right:12px; background:var(--gold); color:var(--ink); }
+
+  /* ── "SEE THIS BECOME A VIDEO" MODULE ────────────────────────────── */
+  .hero-video-teaser{
+    height:100%;
+    display:flex; align-items:center; gap:16px;
+    background:rgba(247,244,239,0.06);
+    border:1px solid rgba(247,244,239,0.1);
+    border-radius:6px; padding:16px 20px;
+    cursor:pointer;
+  }
+  .hero-video-thumb{
+    position:relative; flex-shrink:0;
+    width:88px; height:62px; border-radius:4px; overflow:hidden;
+    background:#333;
+  }
+  .hero-video-thumb img{ width:100%; height:100%; object-fit:cover; display:block; opacity:0.75; }
+  .hero-video-play{
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+  }
+  .hero-video-play svg{ width:26px; height:26px; }
+  .hero-video-text{ flex:1; min-width:0; }
+  .hero-video-title{ font-size:0.86rem; font-weight:700; color:var(--cream); }
+  .hero-video-sub{ font-size:0.72rem; color:#a89d8c; margin-top:3px; }
+  .hero-video-link{
+    font-size:0.76rem; font-weight:700; color:var(--gold-light);
+    white-space:nowrap; text-decoration:none; flex-shrink:0;
+  }
+
+  @media (max-width:900px){
+    .hero-inner{ grid-template-columns:1fr; grid-template-rows:auto; row-gap:36px; }
+    .hero-left-top, .hero-right-top, .hero-trust, .hero-video-teaser{ grid-column:1; grid-row:auto; }
+    .hero-trust{ grid-template-columns:1fr 1fr; }
+  }
+  @media (max-width:520px){
+    .hero{ padding:40px 20px 48px; }
+    .hero-trust{ grid-template-columns:1fr; }
+    .hero-video-teaser{ flex-wrap:wrap; }
+  }
+
+  /* ── HERO VIDEO LIGHTBOX ─────────────────────────────────────────────── */
+  .hv-lightbox{
+    position:fixed; inset:0; z-index:1000; background:rgba(26,23,20,0.94);
+    display:none; align-items:center; justify-content:center; padding:24px; box-sizing:border-box;
+  }
+  .hv-lightbox.is-open{ display:flex; }
+  .hv-lightbox-figure{ position:relative; width:min(90vw, 900px); }
+  .hv-lightbox video{
+    display:block; width:100%; height:auto; aspect-ratio:16/9; border-radius:8px;
+    box-shadow:0 24px 60px rgba(0,0,0,0.5); background:#000;
+  }
+  .hv-lightbox-close{
+    position:absolute; top:-44px; right:0; width:36px; height:36px; border-radius:50%;
+    background:var(--cream); border:none; cursor:pointer; display:flex; align-items:center; justify-content:center;
+    font-size:1.1rem; color:var(--ink); box-shadow:0 4px 14px rgba(0,0,0,0.3);
+  }
+
+  /* ── s2-oneimage.html ── */
+.oa{ background:var(--cream); padding:72px 32px 88px; }
+  .oa-inner{
+    max-width:1260px; margin:0 auto;
+    display:grid;
+    grid-template-columns: 300px 1fr;
+    gap:44px;
+    align-items:center;
+  }
+
+  /* ── LEFT: TEXT (left-aligned, not centered) ─────────────────────── */
+  .oa-eyebrow{
+    font-size:0.7rem; letter-spacing:0.12em; text-transform:uppercase;
+    color:var(--gold); font-weight:700; margin-bottom:10px;
+  }
+  .oa-title{
+    font-family:'Cormorant Garamond',serif; font-weight:600;
+    font-size:1.7rem; line-height:1.2; color:var(--ink); margin:0 0 14px 0;
+    text-transform:uppercase; letter-spacing:0.01em;
+  }
+  .oa-sub{ font-size:0.86rem; color:var(--muted); line-height:1.65; margin:0 0 22px 0; }
+  .oa-cta{
+    display:inline-flex; align-items:center; gap:8px;
+    background:var(--gold); color:var(--ink); border:none;
+    padding:13px 22px; border-radius:3px; font-size:0.8rem; font-weight:700;
+    cursor:pointer; font-family:'DM Sans',sans-serif;
+    transition:background 0.15s ease;
+  }
+  .oa-cta:hover{ background:var(--gold-light); }
+
+  /* ── RIGHT: CONNECTED CARD FLOW ───────────────────────────────────── */
+  .oa-flow{
+    position:relative;
+    display:grid;
+    grid-template-columns: 0.85fr 0.85fr 1.7fr 0.85fr 0.85fr;
+    align-items:end;
+    gap:14px;
+    padding-top:22px; /* room for the pointer above the center card */
+  }
+
+  /* Dashed baseline connecting every card, drawn once behind them all */
+  .oa-flow::before{
+    content:"";
+    position:absolute;
+    left:6%; right:6%; bottom:38px;
+    height:0;
+    border-top:1.5px dashed rgba(184,151,90,0.55);
+    z-index:0;
+  }
+
+  .oa-card{
+    position:relative;
+    z-index:1;
+    background:#fff;
+    border:1px solid var(--border);
+    border-radius:8px;
+    overflow:hidden;
+    box-shadow:var(--shadow);
+    cursor:zoom-in;
+    transition:transform 0.15s ease, box-shadow 0.15s ease;
+  }
+  .oa-card:hover{ transform:translateY(-3px); box-shadow:0 14px 34px rgba(26,23,20,0.14); }
+  .oa-card:focus-visible{ outline:2px solid var(--gold); outline-offset:2px; }
+  .oa-card-passive{ cursor:default; }
+  .oa-card-passive:hover{ transform:none; box-shadow:var(--shadow); }
+
+  /* Small dashed tick connecting each card down to the baseline */
+  .oa-card::after{
+    content:"";
+    position:absolute;
+    left:50%; bottom:-38px;
+    width:0; height:38px;
+    border-left:1.5px dashed rgba(184,151,90,0.55);
+    z-index:0;
+  }
+
+  .oa-card-img{ width:100%; aspect-ratio:3/4; object-fit:cover; display:block; }
+  .oa-card-label{
+    padding:9px 6px; text-align:center;
+    font-size:0.66rem; font-weight:700; letter-spacing:0.04em; text-transform:uppercase;
+    color:var(--ink); line-height:1.3;
+  }
+
+  /* Center "source" card — larger, highlighted */
+  .oa-card.oa-source{
+    border:2px solid var(--gold);
+    box-shadow:0 18px 44px rgba(26,23,20,0.16);
+  }
+  .oa-card.oa-source .oa-card-img{ aspect-ratio:4/5; }
+  .oa-card.oa-source .oa-card-label{
+    background:var(--ink); color:var(--cream); font-size:0.68rem; padding:11px 6px;
+  }
+  .oa-source-pointer{
+    position:absolute; top:-11px; left:50%; transform:translateX(-50%);
+    width:0; height:0;
+    border-left:8px solid transparent; border-right:8px solid transparent;
+    border-top:10px solid var(--ink);
+    z-index:2;
+  }
+
+  .oa-card-thumb-grid{
+    display:grid; grid-template-columns:1fr 1fr; grid-template-rows:1fr 1fr; gap:1px;
+    width:100%; aspect-ratio:3/4;
+  }
+  .oa-card-thumb-grid img{
+    width:100%; height:100%; object-fit:cover; display:block;
+    cursor:zoom-in; transition:opacity 0.12s ease;
+  }
+  .oa-card-thumb-grid img:hover{ opacity:0.82; }
+  .oa-card-thumb-grid img:focus-visible{ outline:2px solid var(--gold); outline-offset:-2px; }
+
+  .oa-card-play{
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    background:rgba(26,23,20,0.25); pointer-events:none;
+  }
+
+  @media (max-width:960px){
+    .oa-inner{ grid-template-columns:1fr; gap:32px; }
+    .oa-flow{ grid-template-columns:repeat(3, 1fr); gap:16px 12px; padding-top:0; }
+    .oa-flow::before{ display:none; }
+    .oa-card::after{ display:none; }
+    .oa-card.oa-source{ grid-column:1/-1; max-width:340px; margin:0 auto; }
+    .oa-source-pointer{ display:none; }
+  }
+  @media (max-width:520px){
+    .oa{ padding:48px 20px 56px; }
+    .oa-flow{ grid-template-columns:1fr 1fr; }
+  }
+
+  /* ── LIGHTBOX (same proven pattern from the Photographic Presets
+     filmstrip — min-width:0 on every flex item, image sized directly
+     against the viewport, not a percentage of an ambiguous parent) ──── */
+  .oa-lightbox{
+    position:fixed; inset:0; z-index:1000;
+    background:rgba(26,23,20,0.92);
+    display:none; align-items:center; justify-content:center;
+    padding:24px; box-sizing:border-box; overflow:auto;
+  }
+  .oa-lightbox.is-open{ display:flex; }
+  .oa-lightbox-figure{
+    position:relative; display:flex; flex-direction:column; align-items:center;
+    min-width:0; min-height:0; max-width:100%; max-height:100%;
+  }
+  .oa-lightbox img{
+    display:block; min-width:0; min-height:0;
+    max-width:min(88vw, 1000px); max-height:min(82vh, 900px);
+    width:auto; height:auto; border-radius:6px;
+    box-shadow:0 20px 60px rgba(0,0,0,0.5); background:#111; object-fit:contain;
+  }
+  .oa-lightbox-caption{
+    margin-top:14px; font-family:'Cormorant Garamond',serif;
+    font-size:1.1rem; color:var(--cream);
+  }
+  .oa-lightbox-close{
+    position:absolute; top:-6px; right:-6px; width:36px; height:36px; border-radius:50%;
+    background:var(--cream); border:none; cursor:pointer;
+    display:flex; align-items:center; justify-content:center; font-size:1rem; color:var(--ink);
+    box-shadow:0 4px 14px rgba(0,0,0,0.3);
+  }
+  .oa-lightbox-nav{
+    position:fixed; top:50%; transform:translateY(-50%);
+    width:44px; height:44px; border-radius:50%;
+    background:rgba(247,244,239,0.12); border:1px solid rgba(247,244,239,0.3);
+    color:var(--cream); font-size:1.3rem; cursor:pointer;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .oa-lightbox-nav:hover{ background:rgba(247,244,239,0.22); }
+  .oa-lightbox-prev{ left:20px; }
+  .oa-lightbox-next{ right:20px; }
+
+  /* ── s3-transformations.html ── */
+.tr{ background:var(--ink); padding:72px 32px 84px; }
+  .tr-inner{ max-width:1240px; margin:0 auto; }
+
+  .tr-header{ max-width:640px; margin:0 auto 48px; text-align:center; }
+  .tr-eyebrow{
+    display:inline-flex; align-items:center; gap:10px;
+    font-size:0.7rem; letter-spacing:0.14em; text-transform:uppercase;
+    color:var(--gold-light); font-weight:700; margin-bottom:14px;
+  }
+  .tr-eyebrow::before, .tr-eyebrow::after{ content:""; width:22px; height:1px; background:var(--gold); }
+  .tr-title{
+    font-family:'Cormorant Garamond',serif; font-weight:400;
+    font-size:clamp(1.9rem, 1.6vw + 1.3rem, 2.6rem);
+    line-height:1.15; color:#fdfbf7; margin:0 0 14px 0;
+  }
+  .tr-title em{ font-style:italic; color:var(--gold-light); }
+  .tr-sub{ font-size:0.92rem; color:#cfc6b8; line-height:1.65; }
+
+  .tr-grid{
+    display:grid;
+    grid-template-columns:repeat(4, 1fr);
+    gap:20px;
+  }
+
+  .tr-card{ display:flex; flex-direction:column; }
+
+  .tr-slider{
+    position:relative;
+    width:100%;
+    aspect-ratio:4/3;
+    border-radius:7px;
+    overflow:hidden;
+    cursor:ew-resize;
+    user-select:none;
+    box-shadow:0 10px 30px rgba(0,0,0,0.35);
+    background:#000;
+  }
+  .tr-sl-after, .tr-sl-before{
+    position:absolute; inset:0; width:100%; height:100%;
+    object-fit:cover; display:block; pointer-events:none;
+  }
+  .tr-sl-before-wrap{ position:absolute; inset:0; width:50%; overflow:hidden; pointer-events:none; }
+  .tr-sl-before{ position:absolute; top:0; left:0; object-position:left center; }
+
+  .tr-sl-divider{
+    position:absolute; top:0; bottom:0; left:50%; width:2px;
+    background:var(--gold); transform:translateX(-50%); pointer-events:none; z-index:3;
+  }
+  .tr-sl-handle{
+    position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+    width:30px; height:30px; filter:drop-shadow(0 2px 6px rgba(0,0,0,0.5));
+  }
+  .tr-sl-label{
+    position:absolute; top:8px; font-size:0.56rem; font-weight:700;
+    letter-spacing:0.06em; text-transform:uppercase; padding:3px 7px;
+    border-radius:2px; z-index:2; pointer-events:none;
+    background:rgba(26,23,20,0.8); color:var(--cream);
+  }
+  .tr-sl-label.before-label{ left:8px; }
+  .tr-sl-label.after-label{ right:8px; background:var(--gold); color:var(--ink); }
+
+  .tr-card-title{ font-size:0.82rem; font-weight:700; color:var(--cream); margin-top:12px; }
+  .tr-card-desc{ font-size:0.7rem; color:#9a8f80; margin-top:2px; line-height:1.4; }
+
+  @media (max-width:1080px){
+    .tr-grid{ grid-template-columns:repeat(3, 1fr); }
+  }
+  @media (max-width:760px){
+    .tr-grid{ grid-template-columns:repeat(2, 1fr); }
+  }
+  @media (max-width:480px){
+    .tr{ padding:48px 20px 56px; }
+    .tr-grid{ grid-template-columns:1fr; gap:24px; }
+  }
+
+  /* ── s4-featurecards.html ── */
+.fc{ background:var(--cream); padding:56px 32px 64px; }
+  .fc-inner{ max-width:1240px; margin:0 auto; }
+
+  /* ── FLAGSHIP: unified left column (dark box + Photographic Presets
+     text, stacked) beside a single right column (tabs + slider) ────── */
+  .ps-flagship{
+    display:grid;
+    grid-template-columns: 1fr 1.1fr;
+    gap:32px;
+    align-items:stretch;
+    margin-bottom:24px;
+  }
+  .ps-flagship-left{ display:flex; flex-direction:column; gap:20px; }
+  .fc-header{
+    text-align:left;
+    background:var(--ink);
+    border-radius:12px;
+    padding:32px 30px;
+  }
+  .ps-text-block{ padding:0 4px; }
+  @media (max-width:900px){
+    .ps-flagship{ grid-template-columns:1fr; }
+  }
+  .fc-eyebrow{
+    display:inline-flex; align-items:center; gap:10px;
+    font-size:0.7rem; letter-spacing:0.14em; text-transform:uppercase;
+    color:var(--gold-light); font-weight:700; margin-bottom:14px;
+  }
+  .fc-eyebrow::before, .fc-eyebrow::after{ content:""; width:22px; height:1px; background:var(--gold); }
+  .fc-header-title{
+    font-family:'Cormorant Garamond',serif; font-weight:400;
+    font-size:clamp(1.6rem, 1.3vw + 1.1rem, 2.1rem);
+    line-height:1.15; color:#fdfbf7; margin:0 0 12px 0;
+  }
+  .fc-header-title em{ font-style:italic; color:var(--gold-light); }
+  .fc-header-sub{ font-size:0.86rem; color:#cfc6b8; line-height:1.6; }
+
+  /* ── PHOTOGRAPHIC PRESETS — FLAGSHIP SHOWCASE ────────────────────── */
+  .ps-showcase{
+    background:#fff; border:1px solid var(--border); border-radius:12px;
+    padding:28px 32px; box-shadow:var(--shadow); margin-bottom:20px;
+  }
+  .ps-eyebrow{ font-size:0.7rem; letter-spacing:0.1em; text-transform:uppercase; color:var(--gold); font-weight:700; margin-bottom:8px; }
+  .ps-title{ font-family:'Cormorant Garamond',serif; font-weight:400; font-size:1.5rem; color:var(--ink); margin:0 0 6px 0; }
+  .ps-sub{ font-size:0.84rem; color:var(--muted); line-height:1.6; }
+  .ps-top-right{ display:flex; flex-direction:column; min-width:0; height:100%; }
+
+  .ps-preset-tabs{
+    display:flex; gap:10px; margin-bottom:16px;
+    overflow-x:auto; width:100%; min-width:0;
+    padding-bottom:2px; /* room for the active tab's pointer notch below */
+  }
+  .ps-preset-tab{
+    position:relative;
+    flex:1; min-width:0; cursor:pointer;
+    white-space:normal; line-height:1.35;
+    padding:9px 8px; border-radius:5px;
+    background:#fff; border:1px solid var(--border);
+    font-family:'DM Sans',sans-serif; font-size:0.64rem; font-weight:600;
+    color:var(--muted); box-shadow:0 1px 3px rgba(26,23,20,0.06);
+    transition:background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  }
+  .ps-preset-tab.active{
+    background:var(--ink); color:var(--cream); border-color:var(--ink);
+  }
+  /* Pointer notch — only on the active tab, points straight down toward
+     the slider frame immediately below, making the link between "which
+     tab is selected" and "what the slider is showing" visually explicit
+     rather than implied only by the tab's own highlight color. */
+  .ps-preset-tab.active::after{
+    content:"";
+    position:absolute; bottom:-7px; left:50%; transform:translateX(-50%);
+    width:0; height:0;
+    border-left:6px solid transparent; border-right:6px solid transparent;
+    border-top:7px solid var(--ink);
+  }
+  .ps-preset-tab:hover:not(.active){ color:var(--ink); border-color:var(--gold); }
+
+  .ps-top-hero{
+    position:relative; aspect-ratio:4/3; flex:1; border-radius:8px; overflow:hidden;
+    cursor:ew-resize; user-select:none;
+    box-shadow:0 10px 30px rgba(26,23,20,0.14);
+    min-width:0; min-height:0; background:#000;
+  }
+  .ps-top-hero-after, .ps-top-hero-before{
+    position:absolute; inset:0; width:100%; height:100%;
+    object-fit:cover; display:block; pointer-events:none;
+  }
+  .ps-top-hero-before-wrap{ position:absolute; inset:0; width:50%; overflow:hidden; pointer-events:none; }
+  .ps-top-hero-before{ position:absolute; top:0; left:0; object-position:left center; }
+  .ps-top-hero-divider{
+    position:absolute; top:0; bottom:0; left:50%; width:2px;
+    background:var(--gold); transform:translateX(-50%); pointer-events:none; z-index:3;
+  }
+  .ps-top-hero-handle{
+    position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+    width:38px; height:38px; filter:drop-shadow(0 3px 8px rgba(0,0,0,0.4));
+  }
+  .ps-top-hero-label{
+    position:absolute; top:12px; font-size:0.62rem; font-weight:700;
+    letter-spacing:0.08em; text-transform:uppercase; padding:5px 9px;
+    border-radius:2px; z-index:2; pointer-events:none;
+    background:rgba(26,23,20,0.8); color:var(--cream);
+  }
+  .ps-top-hero-label.before-label{ left:12px; }
+  .ps-top-hero-label.after-label{ right:12px; background:var(--gold); color:var(--ink); }
+
+  @media (max-width:900px){
+    .ps-top{ grid-template-columns:1fr; }
+  }
+  @media (max-width:560px){
+    .ps-preset-tab{ flex:0 0 auto; }
+  }
+
+  .ps-strip{ display:grid; grid-template-columns: 1.25fr auto repeat(6, 1fr); align-items:center; gap:0; }
+  .ps-col{ padding:0 6px; min-width:0; min-height:0; }
+  .ps-tile{
+    position:relative; background:#fff; border:1px solid var(--border); border-radius:6px;
+    overflow:hidden; box-shadow:var(--shadow); aspect-ratio:4/3; cursor:zoom-in;
+    min-width:0; min-height:0; transition:transform 0.18s ease, box-shadow 0.18s ease;
+  }
+  .ps-tile:hover{ transform:translateY(-3px); box-shadow:0 10px 30px rgba(26,23,20,0.16); }
+  .ps-tile:focus-visible{ outline:2px solid var(--gold); outline-offset:3px; }
+  .ps-tile img{ min-width:0; min-height:0; width:100%; height:100%; object-fit:cover; display:block; }
+  .ps-source{ border:2px solid var(--gold); box-shadow:0 4px 26px rgba(184,151,90,0.28); }
+  .ps-source-tag{
+    position:absolute; top:8px; left:8px; background:var(--ink); color:var(--cream);
+    font-size:0.6rem; letter-spacing:0.08em; text-transform:uppercase; font-weight:600;
+    padding:4px 8px; border-radius:3px;
+  }
+  .ps-arrow{ display:flex; align-items:center; justify-content:center; padding:0 14px; color:var(--gold); font-size:1.3rem; opacity:0.7; }
+  .ps-label{ margin-top:10px; text-align:left; font-size:0.72rem; font-weight:600; color:var(--ink); }
+  .ps-source-label{ margin-top:10px; text-align:left; font-size:0.72rem; font-weight:600; color:var(--gold); }
+
+  @media (max-width:960px){
+    .ps-strip{ grid-template-columns:repeat(4, 1fr); gap:14px; }
+    .ps-arrow{ display:none; }
+  }
+  @media (max-width:560px){
+    .ps-strip{ grid-template-columns:repeat(2, 1fr); }
+  }
+
+  /* ── SECOND SECTION — dark band header + feature cards ────────────── */
+  .fcs{ background:var(--cream); }
+  .fcs-band{ background:var(--ink); padding:56px 32px; }
+  .fcs-band-inner{ max-width:1240px; margin:0 auto; }
+  .fcs-title{
+    font-family:'Cormorant Garamond',serif; font-weight:600;
+    font-size:clamp(2rem, 2vw + 1.2rem, 2.7rem);
+    color:#fdfbf7; margin:0 0 10px 0;
+  }
+  .fcs-sub{ font-size:1.05rem; color:var(--cream); margin:0 0 4px 0; }
+  .fcs-sub strong{ font-weight:700; }
+  .fcs-sub em{ font-style:italic; color:var(--gold-light); }
+  .fcs-sub2{ font-size:0.9rem; color:#a89d8c; margin:0; }
+  .fcs .fc-inner{ padding:44px 32px 64px; }
+
+  /* ── 4 SIMPLE FEATURE CARDS ────────────────────────────────────────── */
+  .fc-grid{ display:grid; grid-template-columns:repeat(4, 1fr); gap:20px; }
+  .fc-card{
+    background:#fff; border:1px solid var(--border); border-radius:10px;
+    overflow:hidden; box-shadow:var(--shadow);
+    display:flex; flex-direction:column;
+  }
+  .fc-card-img-wrap{
+    position:relative; aspect-ratio:4/3; overflow:hidden; cursor:zoom-in;
+    min-width:0; min-height:0;
+  }
+  .fc-card-img-wrap img{ min-width:0; min-height:0; width:100%; height:100%; object-fit:cover; display:block; transition:transform 0.2s ease; }
+  .fc-card-img-wrap:hover img{ transform:scale(1.04); }
+  .fc-card-img-wrap:focus-visible{ outline:2px solid var(--gold); outline-offset:-2px; }
+  .fc-card-body{ padding:16px 18px 20px; }
+  .fc-card-title{ font-size:0.9rem; font-weight:700; color:var(--ink); margin-bottom:5px; }
+  .fc-card-desc{ font-size:0.78rem; color:var(--muted); line-height:1.5; }
+
+  @media (max-width:960px){
+    .fc-grid{ grid-template-columns:repeat(2, 1fr); }
+  }
+  @media (max-width:520px){
+    .fc{ padding:48px 20px 56px; }
+    .fc-grid{ grid-template-columns:1fr; }
+    .ps-showcase{ padding:24px; }
+  }
+
+  /* ── LIGHTBOX (shared across the flagship strip AND the 4 cards) ──── */
+  .fc-lightbox{
+    position:fixed; inset:0; z-index:1000;
+    background:rgba(26,23,20,0.92);
+    display:none; align-items:center; justify-content:center;
+    padding:24px; box-sizing:border-box; overflow:auto;
+  }
+  .fc-lightbox.is-open{ display:flex; }
+  .fc-lightbox-figure{
+    position:relative; display:flex; flex-direction:column; align-items:center;
+    min-width:0; min-height:0; max-width:100%; max-height:100%;
+  }
+  .fc-lightbox img{
+    display:block; min-width:0; min-height:0;
+    max-width:min(88vw, 1100px); max-height:min(82vh, 900px);
+    width:auto; height:auto; border-radius:6px;
+    box-shadow:0 20px 60px rgba(0,0,0,0.5); background:#111; object-fit:contain;
+  }
+  .fc-lightbox-caption{
+    margin-top:16px; font-family:'Cormorant Garamond',serif;
+    font-size:1.2rem; color:var(--cream); display:flex; align-items:center; gap:10px;
+  }
+  .fc-lightbox-tag{
+    font-family:'DM Sans',sans-serif; font-size:0.6rem; letter-spacing:0.08em; text-transform:uppercase;
+    font-weight:600; color:var(--ink); background:var(--gold); padding:3px 8px; border-radius:3px;
+  }
+  .fc-lightbox-close{
+    position:absolute; top:-6px; right:-6px; width:38px; height:38px; border-radius:50%;
+    background:var(--cream); border:none; cursor:pointer;
+    display:flex; align-items:center; justify-content:center; font-size:1.1rem; color:var(--ink);
+    box-shadow:0 4px 14px rgba(0,0,0,0.3);
+  }
+  .fc-lightbox-nav{
+    position:fixed; top:50%; transform:translateY(-50%); width:48px; height:48px; border-radius:50%;
+    background:rgba(247,244,239,0.12); border:1px solid rgba(247,244,239,0.3);
+    color:var(--cream); font-size:1.4rem; cursor:pointer;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .fc-lightbox-nav:hover{ background:rgba(247,244,239,0.22); }
+  .fc-lightbox-prev{ left:20px; }
+  .fc-lightbox-next{ right:20px; }
+  @media (max-width:640px){
+    .fc-lightbox-nav{ width:40px; height:40px; font-size:1.1rem; }
+    .fc-lightbox-prev{ left:8px; }
+    .fc-lightbox-next{ right:8px; }
+  }
+
+  /* ── s5-proplus.html ── */
+.pp{ background:var(--ink); padding:64px 32px 72px; }
+  .pp-inner{ max-width:1100px; margin:0 auto; }
+
+  /* ── HEADER — centered, this section's whole job is the video below it,
+     so the copy stays short and points down rather than competing ──── */
+  .pp-header{ max-width:640px; margin:0 auto 40px; text-align:center; }
+  .pp-eyebrow{
+    display:inline-flex; align-items:center; gap:10px;
+    font-size:0.7rem; letter-spacing:0.14em; text-transform:uppercase;
+    color:var(--gold-light); font-weight:700; margin-bottom:16px;
+  }
+  .pp-eyebrow::before, .pp-eyebrow::after{ content:""; width:22px; height:1px; background:var(--gold); }
+  .pp-title{
+    font-family:'Cormorant Garamond',serif; font-weight:400;
+    font-size:clamp(2rem, 2vw + 1.2rem, 2.8rem);
+    line-height:1.15; color:#fdfbf7; margin:0 0 16px 0;
+  }
+  .pp-title em{ font-style:italic; color:var(--gold-light); }
+  .pp-sub{ font-size:0.98rem; color:#cfc6b8; line-height:1.7; margin:0; }
+
+  /* ── VIDEO — the thesis of this section, framed with editorial
+     restraint (thin gold hairline, not a heavy card) so it reads as
+     evidence, not a marketing graphic ──────────────────────────────── */
+  .pp-video-frame{
+    position:relative; max-width:860px; margin:0 auto;
+    border-radius:10px; overflow:hidden;
+    border:1px solid rgba(184,151,90,0.35);
+    box-shadow:0 24px 60px rgba(0,0,0,0.45);
+    background:#000;
+  }
+  .pp-video-frame video{
+    display:block; width:100%; height:auto; aspect-ratio:16/9;
+    min-width:0; min-height:0; background:#000;
+  }
+  .pp-video-tag{
+    position:absolute; top:14px; left:14px; z-index:2;
+    display:flex; align-items:center; gap:6px;
+    font-size:0.62rem; letter-spacing:0.09em; text-transform:uppercase; font-weight:700;
+    color:var(--ink); background:var(--gold-light);
+    padding:5px 10px; border-radius:3px;
+  }
+  .pp-video-tag-dot{ width:6px; height:6px; border-radius:50%; background:var(--ink); opacity:0.55; }
+  .pp-video-caption{
+    max-width:860px; margin:16px auto 0; text-align:center;
+    font-size:0.82rem; color:#a89d8c;
+  }
+
+  /* ── ENGINE CARDS — Ken Burns vs AI Motion, side by side, honest about
+     what's included vs. what's curated rather than selling both the
+     same way ────────────────────────────────────────────────────────── */
+  .pp-engines{
+    display:grid; grid-template-columns:1fr 1fr; gap:20px;
+    max-width:900px; margin:52px auto 0;
+  }
+  .pp-engine-card{
+    background:rgba(247,244,239,0.04);
+    border:1px solid rgba(247,244,239,0.12);
+    border-radius:10px; padding:26px 26px 24px;
+  }
+  .pp-engine-icon{
+    width:38px; height:38px; border-radius:8px;
+    display:flex; align-items:center; justify-content:center;
+    background:rgba(184,151,90,0.14); margin-bottom:16px;
+  }
+  .pp-engine-icon svg{ width:19px; height:19px; }
+  .pp-engine-label{
+    font-size:0.66rem; letter-spacing:0.1em; text-transform:uppercase;
+    font-weight:700; color:var(--gold-light); margin-bottom:8px;
+  }
+  .pp-engine-title{
+    font-family:'Cormorant Garamond',serif; font-weight:600;
+    font-size:1.3rem; color:#fdfbf7; margin:0 0 8px 0;
+  }
+  .pp-engine-desc{ font-size:0.84rem; color:#cfc6b8; line-height:1.65; margin:0; }
+
+  /* ── FEATURE CHIPS — Room Reveal / Narration / Compliance, kept to a
+     single honest line each rather than inventing screenshots we
+     don't have assets for yet ───────────────────────────────────────── */
+  .pp-chips{
+    display:grid; grid-template-columns:repeat(3, 1fr); gap:1px;
+    max-width:900px; margin:16px auto 0;
+    background:rgba(247,244,239,0.1);
+    border-radius:10px; overflow:hidden;
+  }
+  .pp-chip{
+    background:var(--ink); padding:22px 22px 24px;
+    display:flex; flex-direction:column; gap:10px;
+  }
+  .pp-chip-icon{ width:22px; height:22px; }
+  .pp-chip-icon svg{ width:100%; height:100%; }
+  .pp-chip-title{ font-size:0.84rem; font-weight:700; color:#fdfbf7; }
+  .pp-chip-desc{ font-size:0.78rem; color:#a89d8c; line-height:1.55; }
+
+  .pp-footnote{
+    max-width:900px; margin:22px auto 0; text-align:center;
+    font-size:0.78rem; color:#7a6f63;
+  }
+  .pp-footnote strong{ color:var(--gold-light); font-weight:600; }
+
+  @media (max-width:760px){
+    .pp-engines{ grid-template-columns:1fr; }
+    .pp-chips{ grid-template-columns:1fr; }
+  }
+  @media (max-width:520px){
+    .pp{ padding:52px 20px 56px; }
+  }
+
+  /* ── s6-compliance.html ── */
+.cd{ background:var(--cream); padding:64px 32px 72px; }
+  .cd-inner{ max-width:1180px; margin:0 auto; }
+
+  /* ── HEADER ─────────────────────────────────────────────────────────── */
+  .cd-header{ max-width:660px; margin:0 auto 36px; text-align:center; }
+  .cd-eyebrow{
+    display:inline-flex; align-items:center; gap:10px;
+    font-size:0.7rem; letter-spacing:0.14em; text-transform:uppercase;
+    color:var(--gold); font-weight:700; margin-bottom:14px;
+  }
+  .cd-eyebrow::before, .cd-eyebrow::after{ content:""; width:22px; height:1px; background:var(--gold); }
+  .cd-title{
+    font-family:'Cormorant Garamond',serif; font-weight:400;
+    font-size:clamp(1.9rem, 2vw + 1.1rem, 2.6rem);
+    line-height:1.18; color:var(--ink); margin:0 0 14px 0;
+  }
+  .cd-title em{ font-style:italic; color:var(--gold); }
+  .cd-sub{ font-size:0.95rem; color:var(--muted); line-height:1.7; margin:0; }
+
+  /* ── PLAN TABS ──────────────────────────────────────────────────────── */
+  .cd-tabs{
+    display:flex; justify-content:center; gap:8px; margin-bottom:18px;
+  }
+  .cd-tab{
+    cursor:pointer; padding:10px 22px; border-radius:24px;
+    background:#fff; border:1px solid var(--border);
+    font-family:'DM Sans',sans-serif; font-size:0.8rem; font-weight:700;
+    color:var(--muted); transition:background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  }
+  .cd-tab.active{ background:var(--ink); color:var(--cream); border-color:var(--ink); }
+  .cd-tab:hover:not(.active){ border-color:var(--gold); color:var(--ink); }
+
+  /* ── BROWSER-CHROME FRAME ───────────────────────────────────────────── */
+  .cd-frame{
+    background:#fff; border:1px solid var(--border); border-radius:12px;
+    overflow:hidden; box-shadow:0 20px 50px rgba(26,23,20,0.14);
+    max-width:1000px; margin:0 auto;
+  }
+  .cd-frame-chrome{
+    background:var(--ink); padding:11px 16px;
+    display:flex; align-items:center; gap:14px;
+  }
+  .cd-frame-dots{ display:flex; gap:6px; flex-shrink:0; }
+  .cd-frame-dots span{ width:9px; height:9px; border-radius:50%; background:rgba(247,244,239,0.25); }
+  .cd-frame-url{
+    flex:1; min-width:0; background:rgba(247,244,239,0.08); border-radius:14px;
+    padding:5px 14px; font-size:0.72rem; color:#a89d8c; text-align:center;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .cd-frame-body{ max-height:640px; overflow-y:auto; background:var(--cream); }
+
+  /* ── SOLO PANEL (real screenshot) ──────────────────────────────────── */
+  .cd-solo-shot{ display:block; width:100%; height:auto; cursor:zoom-in; }
+
+  /* ── TEAM / BROKERAGE PANELS (live interactive mockup, scoped) ──────── */
+  .cd-panel{ display:none; }
+  .cd-panel.active{ display:block; }
+
+  .lpdb-nav{
+    background:var(--ink); display:flex; align-items:center; gap:16px;
+    padding:14px 20px; flex-wrap:wrap; min-width:0;
+  }
+  .lpdb-nav > *{ min-width:0; }
+  .lpdb-brand-chip{
+    background:rgba(184,151,90,0.14); border:1px solid rgba(184,151,90,0.4);
+    color:#fdfbf7; padding:7px 14px; border-radius:6px;
+    font-size:0.86rem; font-weight:700;
+  }
+  .lpdb-brand-chip .lpdb-plan-tag{
+    font-size:0.58rem; font-weight:700; letter-spacing:0.08em; text-transform:uppercase;
+    color:var(--gold-light); margin-left:8px; opacity:0.85;
+  }
+  .lpdb-nav-spacer{ flex:1; min-width:8px; }
+  .lpdb-pill{
+    border:1px solid rgba(184,151,90,0.5); color:var(--gold-light);
+    font-size:0.7rem; font-weight:700; padding:6px 11px; border-radius:5px; white-space:nowrap;
+  }
+
+  .lpdb-layout{ display:grid; grid-template-columns:220px 1fr; }
+  .lpdb-sidebar, .lpdb-main{ min-width:0; }
+  @media (max-width:640px){ .lpdb-layout{ grid-template-columns:1fr; } }
+
+  .lpdb-sidebar{ padding:20px 16px; border-right:1px solid var(--border); }
+  .lpdb-sidebar-label{
+    font-size:0.64rem; letter-spacing:0.08em; text-transform:uppercase;
+    font-weight:700; color:var(--muted); margin-bottom:10px;
+  }
+  .lpdb-seat{
+    display:flex; align-items:center; gap:9px;
+    padding:8px 9px; border-radius:6px; cursor:pointer; margin-bottom:2px;
+  }
+  .lpdb-seat:hover{ background:rgba(184,151,90,0.08); }
+  .lpdb-seat.active{ background:var(--ink); }
+  .lpdb-seat.active .lpdb-seat-name, .lpdb-seat.active .lpdb-seat-id{ color:#fdfbf7; }
+  .lpdb-seat-check{
+    width:14px; height:14px; border-radius:4px; border:1.5px solid var(--border);
+    flex-shrink:0; display:flex; align-items:center; justify-content:center; font-size:0.55rem; color:transparent;
+  }
+  .lpdb-seat.active .lpdb-seat-check{ background:var(--gold); border-color:var(--gold); color:var(--ink); }
+  .lpdb-seat-text{ min-width:0; }
+  .lpdb-seat-name{ font-size:0.78rem; font-weight:700; color:var(--ink); }
+  .lpdb-seat-id{ font-size:0.62rem; color:var(--muted); margin-top:1px; overflow-wrap:anywhere; }
+  .lpdb-sidebar-divider{ height:1px; background:var(--border); margin:10px 0; }
+  .lpdb-seat-more{ cursor:default; }
+  .lpdb-seat-more:hover{ background:transparent; }
+
+  .lpdb-main{ padding:22px 22px 26px; }
+  .lpdb-title-row{ display:flex; align-items:center; gap:10px; margin-bottom:14px; }
+  .lpdb-title{ font-size:1.2rem; font-weight:700; margin:0; color:var(--ink); }
+  .lpdb-plan-badge{
+    font-size:0.6rem; font-weight:700; letter-spacing:0.06em; text-transform:uppercase;
+    background:var(--warm); color:var(--ink); padding:4px 9px; border-radius:4px;
+  }
+  .lpdb-stats{ display:grid; grid-template-columns:repeat(3, 1fr); gap:10px; margin-bottom:18px; }
+  .lpdb-stat{ background:#fff; border:1px solid var(--border); border-radius:7px; padding:12px 14px; }
+  .lpdb-stat-num{ font-size:1.15rem; font-weight:700; color:var(--ink); }
+  .lpdb-stat-num.gold{ color:var(--gold); }
+  .lpdb-stat-label{ font-size:0.6rem; letter-spacing:0.04em; text-transform:uppercase; color:var(--muted); margin-top:2px; }
+  @media (max-width:500px){ .lpdb-stats{ grid-template-columns:1fr 1fr; } }
+
+  .lpdb-card{
+    background:#fff; border:1px solid var(--border); border-radius:9px;
+    padding:14px 16px 16px; margin-bottom:12px;
+  }
+  .lpdb-card-top{ display:flex; align-items:flex-start; justify-content:space-between; gap:8px; }
+  .lpdb-card-addr{ font-size:0.88rem; font-weight:700; margin:0; color:var(--ink); }
+  .lpdb-card-slug{ font-size:0.66rem; color:var(--muted); margin:3px 0 0; overflow-wrap:anywhere; }
+  .lpdb-card-badge{
+    font-size:0.58rem; font-weight:700; letter-spacing:0.05em; text-transform:uppercase;
+    background:var(--warm); color:var(--ink); padding:3px 8px; border-radius:4px; flex-shrink:0; white-space:nowrap;
+  }
+  .lpdb-card-meta{ font-size:0.7rem; color:var(--muted); margin:8px 0 4px; }
+  .lpdb-card-agent{ font-size:0.7rem; color:var(--gold); font-weight:700; margin:0 0 10px; }
+  .lpdb-thumbs{ display:flex; gap:7px; }
+  .lpdb-thumb{ width:56px; height:42px; border-radius:5px; overflow:hidden; flex-shrink:0; background:var(--warm); }
+  .lpdb-thumb img{ width:100%; height:100%; object-fit:cover; display:block; }
+  .lpdb-thumb-more{
+    width:56px; height:42px; border-radius:5px; background:var(--warm);
+    display:flex; align-items:center; justify-content:center;
+    font-size:0.62rem; color:var(--muted); font-weight:700; flex-shrink:0;
+  }
+  .lpdb-empty{ text-align:center; padding:30px 20px; color:var(--muted); font-size:0.78rem; display:none; }
+
+  /* ── COMPLIANCE CALLOUT ─────────────────────────────────────────────── */
+  .cd-callout{
+    display:grid; grid-template-columns:1fr 1fr; gap:44px; align-items:start;
+    max-width:1080px; margin:64px auto 0;
+  }
+  .cd-callout-eyebrow{
+    font-size:0.7rem; letter-spacing:0.1em; text-transform:uppercase; color:var(--gold);
+    font-weight:700; margin-bottom:12px;
+  }
+  .cd-callout-title{
+    font-family:'Cormorant Garamond',serif; font-weight:400;
+    font-size:clamp(1.5rem, 1.4vw + 1rem, 1.9rem);
+    line-height:1.22; color:var(--ink); margin:0 0 14px 0;
+  }
+  .cd-callout-text{ font-size:0.88rem; color:var(--muted); line-height:1.7; margin:0 0 10px; }
+  .cd-callout-list{ margin:16px 0 0; padding:0; list-style:none; }
+  .cd-callout-list li{
+    display:flex; align-items:flex-start; gap:10px; font-size:0.84rem; color:var(--ink);
+    margin-bottom:10px; line-height:1.5;
+  }
+  .cd-callout-list li::before{
+    content:"✓"; color:var(--gold); font-weight:700; flex-shrink:0;
+  }
+  .cd-callout-img-wrap{
+    border-radius:10px; overflow:hidden; box-shadow:var(--shadow); border:1px solid var(--border);
+    cursor:zoom-in; min-width:0; min-height:0;
+  }
+  .cd-callout-img-wrap img{ width:100%; height:auto; display:block; min-width:0; min-height:0; }
+  @media (max-width:860px){ .cd-callout{ grid-template-columns:1fr; gap:24px; } }
+
+  @media (max-width:520px){ .cd{ padding:48px 20px 56px; } }
+
+  /* ── COMPLIANCE QR CARD (replaces slider — large, simple, scannable) ── */
+  .cs-block{ position:relative; }
+  .cs-qr-card{
+    background:#fff; border:1px solid var(--border); border-radius:12px;
+    box-shadow:var(--shadow); padding:28px 28px 32px; text-align:center;
+  }
+  .cs-qr-eyebrow{
+    font-size:0.68rem; letter-spacing:0.1em; text-transform:uppercase;
+    color:var(--gold); font-weight:700; margin-bottom:10px;
+  }
+  .cs-qr-addr{ font-size:1.15rem; font-weight:700; color:var(--ink); margin-bottom:6px; }
+  .cs-qr-hint{ font-size:0.78rem; color:var(--muted); margin-bottom:20px; }
+  .cs-qr-large{
+    width:100%; max-width:280px; height:auto; display:block; margin:0 auto;
+    cursor:zoom-in; min-width:0; min-height:0;
+  }
+
+  /* ── LIGHTBOX (real screenshots + QR) ────────────────────────────────── */
+  .cd-lightbox{
+    position:fixed; inset:0; z-index:1000; background:rgba(26,23,20,0.92);
+    display:none; align-items:center; justify-content:center; padding:24px; box-sizing:border-box; overflow:auto;
+  }
+  .cd-lightbox.is-open{ display:flex; }
+  .cd-lightbox-figure{ position:relative; display:flex; flex-direction:column; align-items:center; max-width:100%; max-height:100%; }
+  .cd-lightbox img{
+    display:block; max-width:min(90vw, 1200px); max-height:min(84vh, 940px);
+    width:auto; height:auto; border-radius:6px; box-shadow:0 20px 60px rgba(0,0,0,0.5); background:#111; object-fit:contain;
+  }
+  .cd-lightbox-caption{ margin-top:16px; font-family:'Cormorant Garamond',serif; font-size:1.15rem; color:var(--cream); }
+  .cd-lightbox-close{
+    position:absolute; top:-6px; right:-6px; width:38px; height:38px; border-radius:50%;
+    background:var(--cream); border:none; cursor:pointer; display:flex; align-items:center; justify-content:center;
+    font-size:1.1rem; color:var(--ink); box-shadow:0 4px 14px rgba(0,0,0,0.3);
+  }
+
+  /* ── s6b-zillow-scan.html ── */
+.zs{ background:var(--cream); padding:76px 32px 84px; }
+  .zs-inner{
+    max-width:1080px; margin:0 auto 56px;
+    display:grid; grid-template-columns:1.1fr 0.9fr; gap:52px; align-items:center;
+  }
+
+  .zs-eyebrow{
+    display:inline-flex; align-items:center; gap:10px;
+    font-size:0.7rem; letter-spacing:0.14em; text-transform:uppercase;
+    color:var(--gold); font-weight:700; margin-bottom:16px;
+  }
+  .zs-eyebrow::before{ content:""; width:22px; height:1px; background:var(--gold); }
+
+  .zs-title{
+    font-family:'Cormorant Garamond',serif; font-weight:400;
+    font-size:clamp(1.8rem, 1.8vw + 1.1rem, 2.5rem);
+    line-height:1.18; color:var(--ink); margin:0 0 16px 0;
+  }
+  .zs-title em{ font-style:italic; color:var(--gold); }
+
+  .zs-sub{ font-size:0.92rem; color:var(--muted); line-height:1.7; margin:0 0 26px; }
+
+  .zs-list{ list-style:none; margin:0 0 30px; padding:0; }
+  .zs-list li{
+    display:flex; align-items:flex-start; gap:10px; font-size:0.84rem; color:#332e28;
+    margin-bottom:12px; line-height:1.5;
+  }
+  .zs-list li::before{ content:"✓"; color:var(--gold); font-weight:700; flex-shrink:0; }
+
+  /* ── MOCK SCANNER CARD ────────────────────────────────────────────── */
+  .zs-card{
+    background:#fff; border:1px solid var(--border);
+    border-radius:14px; padding:26px 24px; min-width:0; box-shadow:var(--shadow);
+  }
+  .zs-card-heading{ font-size:1rem; font-weight:700; color:var(--ink); margin-bottom:4px; }
+  .zs-card-instructions{ font-size:0.8rem; color:var(--muted); margin-bottom:18px; line-height:1.5; }
+  .zs-card-label{ font-size:0.68rem; letter-spacing:0.08em; text-transform:uppercase; font-weight:700; color:var(--muted); margin-bottom:10px; }
+  .zs-card-input{
+    display:flex; align-items:center; gap:10px;
+    background:var(--cream); border:1px solid var(--border); border-radius:8px;
+    padding:12px 14px; margin-bottom:16px; min-width:0;
+  }
+  .zs-card-input svg{ width:16px; height:16px; flex-shrink:0; color:var(--muted); }
+  .zs-card-input span{ font-size:0.8rem; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .zs-card-scan-btn{
+    display:block; width:100%; text-align:center; background:var(--gold); color:var(--ink);
+    border:none; border-radius:7px; padding:12px; font-size:0.8rem; font-weight:700;
+    text-decoration:none; margin-bottom:8px;
+  }
+  .zs-card-scan-btn:hover{ background:var(--gold-light); }
+  .zs-card-scan-hint{ text-align:center; font-size:0.7rem; color:var(--muted); margin-bottom:18px; }
+  .zs-card-result{
+    border-top:1px solid var(--border); padding-top:16px;
+  }
+  .zs-card-result-row{
+    display:flex; align-items:center; justify-content:space-between;
+    font-size:0.78rem; color:var(--muted); padding:6px 0;
+  }
+  .zs-card-flag{
+    font-size:0.62rem; font-weight:700; letter-spacing:0.04em; text-transform:uppercase;
+    padding:3px 8px; border-radius:4px;
+  }
+  .zs-card-flag.flagged{ background:rgba(180,90,70,0.12); color:#a4543f; }
+  .zs-card-flag.clear{ background:rgba(184,151,90,0.14); color:#8a6c3a; }
+
+  /* ── 10 CHECKS BLOCK ──────────────────────────────────────────────── */
+  .zs-checks{
+    max-width:1080px; margin:0 auto; background:#fff; border:1px solid var(--border);
+    border-radius:14px; padding:34px 36px 30px; box-shadow:var(--shadow);
+  }
+  .zs-checks-title{ font-size:1.15rem; font-weight:700; color:var(--ink); margin-bottom:6px; }
+  .zs-checks-sub{ font-size:0.84rem; color:var(--muted); margin-bottom:26px; }
+  .zs-checks-grid{
+    display:grid; grid-template-columns:repeat(5, 1fr); gap:22px 20px;
+  }
+  .zs-check-item{ display:flex; align-items:flex-start; gap:10px; min-width:0; }
+  .zs-check-num{
+    width:24px; height:24px; border-radius:50%; background:var(--ink); color:var(--gold-light);
+    font-size:0.72rem; font-weight:700; flex-shrink:0;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .zs-check-label{ font-size:0.78rem; color:#332e28; line-height:1.35; padding-top:2px; }
+
+  @media (max-width:860px){
+    .zs-inner{ grid-template-columns:1fr; gap:36px; }
+    .zs-card{ order:-1; }
+    .zs-checks-grid{ grid-template-columns:repeat(2, 1fr); }
+  }
+  @media (max-width:520px){
+    .zs{ padding:56px 20px 60px; }
+    .zs-checks{ padding:26px 22px 24px; }
+    .zs-checks-grid{ grid-template-columns:1fr; }
+  }
+
+  /* ── s7-pricing.html ── */
+.pr{ background:var(--ink); padding:72px 32px 84px; }
+  .pr-inner{ max-width:1320px; margin:0 auto; }
+
+  .pr-header{ max-width:660px; margin:0 auto 30px; text-align:center; }
+  .pr-eyebrow{
+    display:inline-flex; align-items:center; gap:10px;
+    font-size:0.7rem; letter-spacing:0.14em; text-transform:uppercase;
+    color:var(--gold-light); font-weight:700; margin-bottom:14px;
+  }
+  .pr-eyebrow::before, .pr-eyebrow::after{ content:""; width:22px; height:1px; background:var(--gold); }
+  .pr-title{
+    font-family:'Cormorant Garamond',serif; font-weight:400;
+    font-size:clamp(1.9rem, 1.6vw + 1.3rem, 2.6rem);
+    line-height:1.15; color:#fdfbf7; margin:0 0 14px 0;
+  }
+  .pr-title em{ font-style:italic; color:var(--gold-light); }
+  .pr-sub{ font-size:0.92rem; color:#cfc6b8; line-height:1.65; }
+
+  /* ── MONTHLY / ANNUAL TOGGLE ─────────────────────────────────────────── */
+  .pr-toggle-wrap{ display:flex; justify-content:center; margin-bottom:40px; }
+  .pr-toggle{
+    display:inline-flex; background:rgba(247,244,239,0.06); border:1px solid rgba(247,244,239,0.16);
+    border-radius:26px; padding:4px; gap:2px;
+  }
+  .pr-toggle-btn{
+    border:none; background:transparent; cursor:pointer; padding:9px 20px; border-radius:22px;
+    font-family:'DM Sans',sans-serif; font-size:0.8rem; font-weight:700; color:#cfc6b8;
+    display:flex; align-items:center; gap:8px; transition:background 0.15s ease, color 0.15s ease;
+  }
+  .pr-toggle-btn.active{ background:var(--gold); color:var(--ink); }
+  .pr-toggle-save{
+    font-size:0.62rem; font-weight:700; letter-spacing:0.02em;
+    background:rgba(26,23,20,0.18); padding:2px 7px; border-radius:10px;
+  }
+  .pr-toggle-btn:not(.active) .pr-toggle-save{ background:rgba(212,184,122,0.18); color:var(--gold-light); }
+
+  /* ── CARD GRID ─────────────────────────────────────────────────────── */
+  .pr-grid{
+    display:grid; grid-template-columns:repeat(4, 1fr); gap:18px;
+    align-items:stretch;
+  }
+
+  .pr-card{
+    background:var(--cream); border:1px solid var(--border);
+    border-radius:14px; padding:28px 24px 26px; display:flex; flex-direction:column;
+    position:relative; min-width:0; box-shadow:0 18px 40px rgba(0,0,0,0.25);
+  }
+  .pr-card.trial{ background:var(--warm); }
+  .pr-card.featured{ border:2px solid var(--gold); box-shadow:0 24px 55px rgba(184,151,90,0.28); }
+
+  .pr-badge{
+    position:absolute; top:-13px; left:50%; transform:translateX(-50%);
+    background:var(--gold); color:var(--ink); font-size:0.6rem; font-weight:700;
+    letter-spacing:0.08em; text-transform:uppercase; padding:5px 13px; border-radius:20px;
+    white-space:nowrap;
+  }
+
+  .pr-plan-name{ font-size:0.7rem; letter-spacing:0.1em; text-transform:uppercase; font-weight:700; color:var(--muted); margin-bottom:10px; }
+  .pr-price-row{ display:flex; align-items:flex-end; gap:6px; margin-bottom:4px; min-height:2.6rem; }
+  .pr-price{ font-family:'Cormorant Garamond',serif; font-size:2.3rem; font-weight:600; color:var(--ink); line-height:1; }
+  .pr-price-period{ font-size:0.78rem; color:var(--muted); margin-bottom:3px; }
+  .pr-price-save{
+    font-size:0.66rem; font-weight:700; color:var(--gold); margin-bottom:14px; min-height:1.1em;
+  }
+  .pr-tagline{ font-size:0.78rem; color:var(--muted); line-height:1.5; margin-bottom:18px; min-height:2em; }
+
+  .pr-cta{
+    display:block; width:100%; text-align:center; padding:11px 16px; border-radius:7px;
+    font-size:0.78rem; font-weight:700; letter-spacing:0.02em; cursor:pointer;
+    border:1px solid var(--ink); background:var(--ink); color:var(--cream);
+    text-decoration:none; margin-bottom:6px;
+  }
+  .pr-card.trial .pr-cta{ background:transparent; color:var(--ink); }
+  .pr-cta-hint{ text-align:center; font-size:0.66rem; color:var(--muted); margin-bottom:18px; min-height:1.2em; }
+
+  .pr-features{ list-style:none; margin:0 0 14px; padding:0; flex:1; }
+  .pr-features li{
+    display:flex; align-items:flex-start; gap:9px; font-size:0.78rem; color:#332e28;
+    padding:7px 0; border-top:1px solid rgba(26,23,20,0.08); line-height:1.4;
+  }
+  .pr-features li:first-child{ border-top:none; }
+  .pr-features li::before{ content:"✓"; color:var(--gold); font-weight:700; flex-shrink:0; }
+  .pr-features li strong{ color:var(--ink); }
+  .pr-features li.summary{ font-style:italic; color:var(--muted); }
+  .pr-features li.summary::before{ content:"+"; color:var(--muted); font-weight:700; }
+
+  .pr-rollover-strip{
+    border-top:1px solid rgba(26,23,20,0.1); padding-top:12px; margin-top:auto;
+  }
+  .pr-rollover-line{
+    display:flex; align-items:flex-start; gap:8px; font-size:0.7rem; color:var(--muted);
+    line-height:1.4; margin-bottom:5px;
+  }
+  .pr-rollover-line .yes{ color:var(--success); font-weight:700; flex-shrink:0; }
+  .pr-rollover-line .no{ color:#a45a4a; font-weight:700; flex-shrink:0; }
+
+  /* ── FOOTNOTES ─────────────────────────────────────────────────────── */
+  .pr-footnotes{ max-width:920px; margin:40px auto 0; text-align:center; }
+  .pr-overage{ font-size:0.82rem; color:#e4ddd0; margin-bottom:12px; }
+  .pr-overage strong{ color:var(--gold-light); }
+  .pr-fineprint{ font-size:0.74rem; color:#8a8074; line-height:1.7; }
+
+  @media (max-width:1080px){
+    .pr-grid{ grid-template-columns:repeat(2, 1fr); }
+  }
+  @media (max-width:600px){
+    .pr-grid{ grid-template-columns:1fr; max-width:400px; margin:0 auto; }
+    .pr-card.featured{ order:-1; }
+  }
+  @media (max-width:520px){
+    .pr{ padding:52px 20px 60px; }
+    .pr-toggle-btn{ padding:9px 14px; font-size:0.74rem; }
+  }
+
+  /* ── s8-finalcta.html ── */
+.cta{ background:var(--cream); padding:88px 32px 96px; }
+  .cta-inner{ max-width:680px; margin:0 auto; text-align:center; }
+
+  .cta-eyebrow{
+    display:inline-flex; align-items:center; gap:10px;
+    font-size:0.7rem; letter-spacing:0.14em; text-transform:uppercase;
+    color:var(--gold); font-weight:700; margin-bottom:16px;
+  }
+  .cta-eyebrow::before, .cta-eyebrow::after{ content:""; width:22px; height:1px; background:var(--gold); }
+
+  .cta-title{
+    font-family:'Cormorant Garamond',serif; font-weight:400;
+    font-size:clamp(2.1rem, 2.4vw + 1.2rem, 3rem);
+    line-height:1.15; color:var(--ink); margin:0 0 18px 0;
+  }
+  .cta-title em{ font-style:italic; color:var(--gold); }
+
+  .cta-sub{ font-size:0.98rem; color:var(--muted); line-height:1.7; margin:0 0 34px; }
+
+  .cta-actions{ display:flex; align-items:center; justify-content:center; gap:16px; flex-wrap:wrap; margin-bottom:28px; }
+  .cta-cta-primary{
+    display:inline-block; padding:14px 30px; border-radius:7px;
+    background:var(--ink); color:var(--cream); border:1px solid var(--ink);
+    font-size:0.86rem; font-weight:700; letter-spacing:0.02em; text-decoration:none;
+  }
+  .cta-cta-secondary{
+    display:inline-block; padding:14px 26px; border-radius:7px;
+    background:transparent; color:var(--ink); border:1px solid var(--border);
+    font-size:0.86rem; font-weight:700; letter-spacing:0.02em; text-decoration:none;
+  }
+
+  .cta-trust{
+    display:flex; align-items:center; justify-content:center; gap:22px; flex-wrap:wrap;
+    padding-top:26px; border-top:1px solid var(--border);
+  }
+  .cta-trust-item{
+    display:flex; align-items:center; gap:7px; font-size:0.76rem; color:var(--muted); font-weight:600;
+  }
+  .cta-trust-item svg{ width:14px; height:14px; flex-shrink:0; }
+
+  @media (max-width:520px){
+    .cta{ padding:64px 20px 72px; }
+    .cta-actions{ flex-direction:column; }
+    .cta-cta-primary, .cta-cta-secondary{ width:100%; text-align:center; }
+    .cta-trust{ gap:14px 20px; }
+  }
+</style>
+
+<!-- ══════════════════════════════════════════════════════════════════
+     HEADER / NAVIGATION — built after all 8 sections, per Sam's request
+     that the header react to the finished page rather than the other
+     way around. Fixed/sticky, ink background, gains a shadow on scroll.
+     ══════════════════════════════════════════════════════════════════ -->
+<header class="hd" id="hd-header">
+  <div class="hd-inner">
+    <a href="#hero" class="hd-logo">
+      <img class="hd-logo-mark" src="https://res.cloudinary.com/de18zsi7o/image/upload/v1780935171/Smart_Stage_PRO_Logo_zciwlo.png" alt="Smart Stage PRO">
+      <span class="hd-logo-word">Smart Stage <em>PRO</em></span>
+    </a>
+
+    <nav class="hd-nav" id="hd-nav" aria-label="Primary">
+      <a href="#how-it-works" class="hd-nav-link">How It Works</a>
+      <a href="#transformations" class="hd-nav-link">Transformations</a>
+      <a href="#presets" class="hd-nav-link">AI Intelligence</a>
+      <a href="#features" class="hd-nav-link">AI Marketing Suite</a>
+      <a href="#pro-plus" class="hd-nav-link">PRO Plus</a>
+      <a href="#compliance" class="hd-nav-link">Compliance</a>
+      <a href="#zillow-scan" class="hd-nav-link">Free Scan</a>
+      <a href="#pricing" class="hd-nav-link">Pricing</a>
+    </nav>
+
+    <div class="hd-actions">
+      <a href="#" class="hd-signin" onclick="hideLandingPage(); showAuthModal('login'); return false;">Sign In</a>
+      <a href="#pricing" class="hd-cta">Get Started</a>
+    </div>
+
+    <button class="hd-burger" id="hd-burger" aria-label="Open menu" aria-expanded="false" onclick="toggleHdMenu()">
+      <span></span><span></span><span></span>
+    </button>
+  </div>
+
+  <!-- Mobile menu -->
+  <div class="hd-mobile" id="hd-mobile">
+    <a href="#how-it-works" class="hd-mobile-link" onclick="closeHdMenu()">How It Works</a>
+    <a href="#transformations" class="hd-mobile-link" onclick="closeHdMenu()">Transformations</a>
+    <a href="#presets" class="hd-mobile-link" onclick="closeHdMenu()">AI Intelligence</a>
+    <a href="#features" class="hd-mobile-link" onclick="closeHdMenu()">AI Marketing Suite</a>
+    <a href="#pro-plus" class="hd-mobile-link" onclick="closeHdMenu()">PRO Plus</a>
+    <a href="#compliance" class="hd-mobile-link" onclick="closeHdMenu()">Compliance</a>
+    <a href="#zillow-scan" class="hd-mobile-link" onclick="closeHdMenu()">Free Scan</a>
+    <a href="#pricing" class="hd-mobile-link" onclick="closeHdMenu()">Pricing</a>
+    <div class="hd-mobile-divider"></div>
+    <a href="#" class="hd-mobile-link" onclick="closeHdMenu(); hideLandingPage(); showAuthModal('login'); return false;">Sign In</a>
+    <a href="#pricing" class="hd-mobile-cta" onclick="closeHdMenu()">Get Started</a>
+  </div>
+</header>
+
+<!-- ══════════════ s1-hero.html ══════════════ -->
+<section class="hero" id="hero">
+  <div class="hero-inner">
+
+    <!-- ── LEFT: MESSAGING (top) ─────────────────────────────────────── -->
+    <div class="hero-left-top">
+      <div class="hero-eyebrow">The Complete Virtual Staging Platform</div>
+      <h1 class="hero-headline">Turn listing photos into <em>complete marketing assets</em>.</h1>
+      <p class="hero-sub">Correct imperfect photos, virtually stage interiors and exteriors, and automatically maintain the disclosure record for every published listing.</p>
+      <div class="hero-ctas">
+        <button class="hero-btn-primary">Start Creating Now</button>
+        <button class="hero-btn-secondary">See the Transformation</button>
+      </div>
+    </div>
+
+    <!-- ── RIGHT: TABS + SLIDER (top) ───────────────────────────────── -->
+    <div class="hero-right-top">
+      <div class="hero-tabs" role="tablist">
+        <button class="hero-tab active" role="tab" aria-selected="true" onclick="switchHeroTab('correct')">Correct</button>
+        <button class="hero-tab" role="tab" aria-selected="false" onclick="switchHeroTab('declutter')">Declutter</button>
+        <button class="hero-tab" role="tab" aria-selected="false" onclick="switchHeroTab('stage')">Stage</button>
+        <button class="hero-tab" role="tab" aria-selected="false" onclick="switchHeroTab('enhance')">Enhance</button>
+      </div>
+
+
+      <div class="hero-slider-pane active" data-pane="correct">
+        <div class="hero-slider-container" data-slider>
+          <img class="hero-sl-after" src="https://res.cloudinary.com/de18zsi7o/image/upload/v1785087833/Corrected_IMG_8310__2__lq2clv.jpg" alt="Smart Corrected photo" draggable="false" />
+          <div class="hero-sl-before-wrap">
+            <img class="hero-sl-before" src="https://res.cloudinary.com/de18zsi7o/image/upload/v1785087638/IMG_8310_2_drhmrs.jpg" alt="Original uncorrected photo" draggable="false" />
+          </div>
+          <span class="hero-sl-label before-label">Original</span>
+          <span class="hero-sl-label after-label">Smart Stage PRO Final</span>
+          <div class="hero-sl-divider"><div class="hero-sl-handle">
+            <svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg"><circle cx="20" cy="20" r="19" fill="#1a1714" stroke="#b8975a" stroke-width="1.5"/><polyline points="16,13 9,20 16,27" fill="none" stroke="#b8975a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><polyline points="24,13 31,20 24,27" fill="none" stroke="#b8975a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </div></div>
+        </div>
+      </div>
+
+      <div class="hero-slider-pane" data-pane="declutter">
+        <div class="hero-slider-container" data-slider>
+          <img class="hero-sl-after" src="https://res.cloudinary.com/de18zsi7o/image/upload/v1781158004/FINAL_Decluttered_Landing_Page_Declutter_a8h7qz.jpg" alt="Decluttered room" draggable="false" />
+          <div class="hero-sl-before-wrap">
+            <img class="hero-sl-before" src="https://res.cloudinary.com/de18zsi7o/image/upload/v1781158058/Landing_Page_Declutter_mmi08k.jpg" alt="Cluttered room before" draggable="false" />
+          </div>
+          <span class="hero-sl-label before-label">Original</span>
+          <span class="hero-sl-label after-label">Smart Stage PRO Final</span>
+          <div class="hero-sl-divider"><div class="hero-sl-handle">
+            <svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg"><circle cx="20" cy="20" r="19" fill="#1a1714" stroke="#b8975a" stroke-width="1.5"/><polyline points="16,13 9,20 16,27" fill="none" stroke="#b8975a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><polyline points="24,13 31,20 24,27" fill="none" stroke="#b8975a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </div></div>
+        </div>
+      </div>
+
+      <div class="hero-slider-pane" data-pane="stage">
+        <div class="hero-slider-container" data-slider>
+          <img class="hero-sl-after" src="https://res.cloudinary.com/de18zsi7o/image/upload/v1783611982/smart-stage-finals/szregsolo_234benttreect_061726/sgkib6nys15kcr0bxtfb.jpg" alt="Virtually staged room" draggable="false" />
+          <div class="hero-sl-before-wrap">
+            <img class="hero-sl-before" src="https://res.cloudinary.com/de18zsi7o/image/upload/v1783611979/smart-stage-originals/eo6w5cnubfua0ykaum7b.jpg" alt="Vacant room before" draggable="false" />
+          </div>
+          <span class="hero-sl-label before-label">Original</span>
+          <span class="hero-sl-label after-label">Smart Stage PRO Final</span>
+          <div class="hero-sl-divider"><div class="hero-sl-handle">
+            <svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg"><circle cx="20" cy="20" r="19" fill="#1a1714" stroke="#b8975a" stroke-width="1.5"/><polyline points="16,13 9,20 16,27" fill="none" stroke="#b8975a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><polyline points="24,13 31,20 24,27" fill="none" stroke="#b8975a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </div></div>
+        </div>
+      </div>
+
+      <div class="hero-slider-pane" data-pane="enhance">
+        <div class="hero-slider-container" data-slider>
+          <img class="hero-sl-after" src="https://res.cloudinary.com/de18zsi7o/image/upload/v1784241931/smart-stage-finals/szregsolo_5935quilterst_071626/a5j8asox2eolsljdkgqm.jpg" alt="Enhanced exterior" draggable="false" />
+          <div class="hero-sl-before-wrap">
+            <img class="hero-sl-before" src="https://res.cloudinary.com/de18zsi7o/image/upload/v1784228718/smart-stage-originals/h8qv8znmklrauhjnb1xs.jpg" alt="Exterior before" draggable="false" />
+          </div>
+          <span class="hero-sl-label before-label">Original</span>
+          <span class="hero-sl-label after-label">Smart Stage PRO Final</span>
+          <div class="hero-sl-divider"><div class="hero-sl-handle">
+            <svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg"><circle cx="20" cy="20" r="19" fill="#1a1714" stroke="#b8975a" stroke-width="1.5"/><polyline points="16,13 9,20 16,27" fill="none" stroke="#b8975a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><polyline points="24,13 31,20 24,27" fill="none" stroke="#b8975a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── ROW 2: TRUST BADGES (left) + VIDEO TEASER (right) ──────────
+         Both placed as siblings in the SAME grid row (see .hero-inner's
+         grid-template-rows) so they share height via align-items:stretch
+         — the video teaser now grows to match whatever height the trust
+         row naturally needs, rather than sizing independently within its
+         own column's content flow. Fixes Sam's report: the two didn't
+         line up and the teaser looked small next to the 3-item trust row. -->
+    <div class="hero-trust">
+      <div class="hero-trust-item">
+        <div class="hero-trust-icon">✨</div>
+        <div class="hero-trust-title">AI-Powered</div>
+        <div class="hero-trust-desc">Real estate intelligence built in</div>
+      </div>
+      <div class="hero-trust-item">
+        <div class="hero-trust-icon">🛡️</div>
+        <div class="hero-trust-title">AB 723 Compliant</div>
+        <div class="hero-trust-desc">Disclosure built in, not bolted on</div>
+      </div>
+      <div class="hero-trust-item">
+        <div class="hero-trust-icon">🔒</div>
+        <div class="hero-trust-title">Secure & Searchable</div>
+        <div class="hero-trust-desc">Every listing record, stored</div>
+      </div>
+    </div>
+
+    <div class="hero-video-teaser" role="button" tabindex="0" onclick="openHvLightbox()" onkeydown="if(event.key==='Enter'){openHvLightbox()}">
+      <div class="hero-video-thumb">
+        <img src="https://res.cloudinary.com/de18zsi7o/image/upload/v1785173079/smart-stage-finals/szregsolo_3027blackpointct_072726/n7dcpowdtrth1cgzlsfi.jpg" alt="PRO Plus video preview" />
+        <div class="hero-video-play">
+          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="11" fill="rgba(184,151,90,0.92)"/><path d="M9.5 7.5L16.5 12L9.5 16.5V7.5Z" fill="#1a1714"/></svg>
+        </div>
+      </div>
+      <div class="hero-video-text">
+        <div class="hero-video-title">See this image become a video</div>
+        <div class="hero-video-sub">Motion Only · Motion + Music · Motion + Narration + Music</div>
+      </div>
+      <span class="hero-video-link">Watch example →</span>
+    </div>
+
+  </div>
+</section>
+
+<!-- ── HERO VIDEO LIGHTBOX ──────────────────────────────────────────────── -->
+<div class="hv-lightbox" id="hv-lightbox" onclick="if(event.target===this)closeHvLightbox()">
+  <div class="hv-lightbox-figure">
+    <button class="hv-lightbox-close" onclick="closeHvLightbox()" aria-label="Close">&#10005;</button>
+    <video id="hv-lightbox-video" controls
+      poster="https://res.cloudinary.com/de18zsi7o/image/upload/v1785173079/smart-stage-finals/szregsolo_3027blackpointct_072726/n7dcpowdtrth1cgzlsfi.jpg">
+      <source src="https://res.cloudinary.com/de18zsi7o/video/authenticated/s--yEuuIBoK--/v1785266771/smart-stage-pro-plus/szregsolo_1515demost_072726/video_16x9_1785266770390.mp4?_a=BAMAAAfi0" type="video/mp4">
+    </video>
+  </div>
+</div>
+
+<!-- ══════════════ s2-oneimage.html ══════════════ -->
+<section class="oa" id="how-it-works">
+  <div class="oa-inner">
+
+    <!-- ── LEFT: TEXT ────────────────────────────────────────────────── -->
+    <div>
+      <div class="oa-eyebrow">One Photo, Every Asset</div>
+      <h2 class="oa-title">One Approved Image.<br>Multiple Marketing Assets.</h2>
+      <p class="oa-sub">Smart Stage PRO turns the same source photo into the assets agents need across MLS, social media, property websites, digital advertising, and video.</p>
+      <button class="oa-cta">See All Examples →</button>
+    </div>
+
+    <!-- ── RIGHT: CONNECTED FLOW ─────────────────────────────────────── -->
+    <div class="oa-flow">
+
+      <div class="oa-card" style="order:1;" tabindex="0" role="button" aria-label="Enlarge Social Post" onclick="openOaLightbox(0)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openOaLightbox(0);}">
+        <img class="oa-card-img" src="https://res.cloudinary.com/de18zsi7o/image/upload/v1785191910/Social_Post_nh8bv8.png" alt="Social Post" />
+        <div class="oa-card-label">Social<br>Post</div>
+      </div>
+
+      <div class="oa-card oa-source" style="order:3;" tabindex="0" role="button" aria-label="Enlarge Approved Staged Image" onclick="openOaLightbox(1)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openOaLightbox(1);}">
+        <div class="oa-source-pointer"></div>
+        <img class="oa-card-img" src="https://res.cloudinary.com/de18zsi7o/image/upload/v1783611982/smart-stage-finals/szregsolo_234benttreect_061726/sgkib6nys15kcr0bxtfb.jpg" alt="Approved Staged Image" />
+        <div class="oa-card-label">Approved Staged Image</div>
+      </div>
+
+      <!-- CHANGED (Sam's request): each of the 4 quadrants now opens ITS
+           OWN image in the lightbox — previously the whole card had one
+           onclick that always opened the same single image regardless of
+           which thumbnail was actually clicked. Each <img> now has its
+           own onclick + event.stopPropagation() so a click on quadrant 3
+           doesn't bubble up and get overridden by a card-level handler.
+           order:2 (not DOM position) places this visually before the
+           source card, keeping tab/reading order (Social, Staged, Hero,
+           ProPlus, Compliance) sensible while the VISUAL order matches
+           Sam's 2-left/2-right layout (Social, Hero, Staged, ProPlus,
+           Compliance). -->
+      <div class="oa-card oa-card-passive" style="order:2;" aria-label="Hero Images — click any photo to enlarge it">
+        <div class="oa-card-thumb-grid">
+          <img tabindex="0" role="button" aria-label="Enlarge Hero image 1" src="https://res.cloudinary.com/de18zsi7o/image/upload/v1785181992/smart-stage-finals/szregsolo_3027blackpointct_072726/ytbyqyi6nburoo8tofon.jpg" alt="Hero image 1" onclick="event.stopPropagation();openOaLightbox(2)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();openOaLightbox(2);}" />
+          <img tabindex="0" role="button" aria-label="Enlarge Hero image 2" src="https://res.cloudinary.com/de18zsi7o/image/upload/v1785181963/smart-stage-finals/szregsolo_3027blackpointct_072726/py0rnc5ej1btygffxnmn.jpg" alt="Hero image 2" onclick="event.stopPropagation();openOaLightbox(3)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();openOaLightbox(3);}" />
+          <img tabindex="0" role="button" aria-label="Enlarge Hero image 3" src="https://res.cloudinary.com/de18zsi7o/image/upload/v1785108532/smart-stage-finals/szregsolo_234benttreect_061726/ehb3de5qtczarmkdltgf.jpg" alt="Hero image 3" onclick="event.stopPropagation();openOaLightbox(4)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();openOaLightbox(4);}" />
+          <img tabindex="0" role="button" aria-label="Enlarge Hero image 4" src="https://res.cloudinary.com/de18zsi7o/image/upload/v1783610067/smart-stage-finals/szregsolo_234benttreect_061726/s2e3nqcvwc7f9edoog5l.jpg" alt="Hero image 4" onclick="event.stopPropagation();openOaLightbox(5)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();openOaLightbox(5);}" />
+        </div>
+        <div class="oa-card-label">Hero<br>Image</div>
+      </div>
+
+      <div class="oa-card" style="order:4;" tabindex="0" role="button" aria-label="Enlarge PRO Plus Video" onclick="openOaLightbox(6)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openOaLightbox(6);}">
+        <div style="position:relative;">
+          <img class="oa-card-img" src="https://res.cloudinary.com/de18zsi7o/image/upload/v1785173079/smart-stage-finals/szregsolo_3027blackpointct_072726/n7dcpowdtrth1cgzlsfi.jpg" alt="PRO Plus Video" />
+          <div class="oa-card-play">
+            <svg width="30" height="30" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="11" fill="rgba(184,151,90,0.94)"/><path d="M9.5 7.5L16.5 12L9.5 16.5V7.5Z" fill="#1a1714"/></svg>
+          </div>
+        </div>
+        <div class="oa-card-label">PRO Plus<br>Video</div>
+      </div>
+
+      <div class="oa-card" style="order:5;" tabindex="0" role="button" aria-label="Enlarge Compliance Page" onclick="openOaLightbox(7)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openOaLightbox(7);}">
+        <img class="oa-card-img" src="https://res.cloudinary.com/de18zsi7o/image/upload/v1785192661/Compliance_Page_oslzp3.png" alt="Compliance Page" />
+        <div class="oa-card-label">Compliance<br>Page</div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ── LIGHTBOX ─────────────────────────────────────────────────────── -->
+<div class="oa-lightbox" id="oa-lightbox" onclick="if(event.target===this)closeOaLightbox()">
+  <div class="oa-lightbox-figure">
+    <button class="oa-lightbox-close" onclick="closeOaLightbox()" aria-label="Close">&#10005;</button>
+    <img id="oa-lightbox-img" src="" alt="">
+    <div class="oa-lightbox-caption" id="oa-lightbox-caption"></div>
+  </div>
+</div>
+<button class="oa-lightbox-nav oa-lightbox-prev" onclick="stepOaLightbox(-1)" aria-label="Previous image">&#8249;</button>
+<button class="oa-lightbox-nav oa-lightbox-next" onclick="stepOaLightbox(1)" aria-label="Next image">&#8250;</button>
+
+<!-- ══════════════ s3-transformations.html ══════════════ -->
+<section class="tr" id="transformations">
+  <div class="tr-inner">
+
+    <div class="tr-header">
+      <div class="tr-eyebrow">Every Room, Inside &amp; Out</div>
+      <h2 class="tr-title">Transform <em>every listing</em>,<br>interior and exterior.</h2>
+      <p class="tr-sub">Eight distinct transformations, one platform — drag any slider to see the difference for yourself.</p>
+    </div>
+
+    <div class="tr-grid" id="tr-grid">
+
+      <div class="tr-card">
+        <div class="tr-slider" data-slider>
+          <img class="tr-sl-after" src="https://res.cloudinary.com/de18zsi7o/image/upload/v1785261201/smart-stage-finals/szregsolo_234benttreect_061726/raxbigoaneb2rzo4sctk.jpg" alt="Smart Corrected" draggable="false" />
+          <div class="tr-sl-before-wrap"><img class="tr-sl-before" src="https://res.cloudinary.com/de18zsi7o/image/upload/v1785087638/IMG_8310_2_drhmrs.jpg" alt="Original uncorrected photo" draggable="false" /></div>
+          <span class="tr-sl-label before-label">Before</span>
+          <span class="tr-sl-label after-label">After</span>
+          <div class="tr-sl-divider"><div class="tr-sl-handle"><svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg"><circle cx="20" cy="20" r="19" fill="#1a1714" stroke="#b8975a" stroke-width="1.5"/><polyline points="16,13 9,20 16,27" fill="none" stroke="#b8975a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><polyline points="24,13 31,20 24,27" fill="none" stroke="#b8975a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></div></div>
+        </div>
+        <div class="tr-card-title">Smart Correct™</div>
+        <div class="tr-card-desc">Exposure, color & perspective, automatically</div>
+      </div>
+
+      <div class="tr-card">
+        <div class="tr-slider" data-slider>
+          <img class="tr-sl-after" src="https://res.cloudinary.com/de18zsi7o/image/upload/v1781158004/FINAL_Decluttered_Landing_Page_Declutter_a8h7qz.jpg" alt="Decluttered room" draggable="false" />
+          <div class="tr-sl-before-wrap"><img class="tr-sl-before" src="https://res.cloudinary.com/de18zsi7o/image/upload/v1781158058/Landing_Page_Declutter_mmi08k.jpg" alt="Cluttered room before" draggable="false" /></div>
+          <span class="tr-sl-label before-label">Before</span>
+          <span class="tr-sl-label after-label">After</span>
+          <div class="tr-sl-divider"><div class="tr-sl-handle"><svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg"><circle cx="20" cy="20" r="19" fill="#1a1714" stroke="#b8975a" stroke-width="1.5"/><polyline points="16,13 9,20 16,27" fill="none" stroke="#b8975a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><polyline points="24,13 31,20 24,27" fill="none" stroke="#b8975a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></div></div>
+        </div>
+        <div class="tr-card-title">Declutter</div>
+        <div class="tr-card-desc">Personal items & clutter removed</div>
+      </div>
+
+      <div class="tr-card">
+        <div class="tr-slider" data-slider>
+          <img class="tr-sl-after" src="https://res.cloudinary.com/de18zsi7o/image/upload/q_auto/f_auto/v1781192520/ChatGPT_Image_Jun_11_2026_08_41_17_AM_qtuzy1.png" alt="Cleaned and staged room" draggable="false" />
+          <div class="tr-sl-before-wrap"><img class="tr-sl-before" src="https://res.cloudinary.com/de18zsi7o/image/upload/q_auto/f_auto/v1783694842/Clean_and_Stage_Original_b3oo9u.jpg" alt="Occupied room before" draggable="false" /></div>
+          <span class="tr-sl-label before-label">Before</span>
+          <span class="tr-sl-label after-label">After</span>
+          <div class="tr-sl-divider"><div class="tr-sl-handle"><svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg"><circle cx="20" cy="20" r="19" fill="#1a1714" stroke="#b8975a" stroke-width="1.5"/><polyline points="16,13 9,20 16,27" fill="none" stroke="#b8975a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><polyline points="24,13 31,20 24,27" fill="none" stroke="#b8975a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></div></div>
+        </div>
+        <div class="tr-card-title">Clean + Stage</div>
+        <div class="tr-card-desc">Occupied to fully staged, in one pass</div>
+      </div>
+
+      <div class="tr-card">
+        <div class="tr-slider" data-slider>
+          <img class="tr-sl-after" src="https://res.cloudinary.com/de18zsi7o/image/upload/v1783611982/smart-stage-finals/szregsolo_234benttreect_061726/sgkib6nys15kcr0bxtfb.jpg" alt="Virtually staged room" draggable="false" />
+          <div class="tr-sl-before-wrap"><img class="tr-sl-before" src="https://res.cloudinary.com/de18zsi7o/image/upload/v1783611979/smart-stage-originals/eo6w5cnubfua0ykaum7b.jpg" alt="Vacant room before" draggable="false" /></div>
+          <span class="tr-sl-label before-label">Before</span>
+          <span class="tr-sl-label after-label">After</span>
+          <div class="tr-sl-divider"><div class="tr-sl-handle"><svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg"><circle cx="20" cy="20" r="19" fill="#1a1714" stroke="#b8975a" stroke-width="1.5"/><polyline points="16,13 9,20 16,27" fill="none" stroke="#b8975a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><polyline points="24,13 31,20 24,27" fill="none" stroke="#b8975a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></div></div>
+        </div>
+        <div class="tr-card-title">Vacant Stage</div>
+        <div class="tr-card-desc">Room-aware furniture, matched to scale</div>
+      </div>
+
+      <div class="tr-card">
+        <div class="tr-slider" data-slider>
+          <img class="tr-sl-after" src="https://res.cloudinary.com/de18zsi7o/image/upload/v1784822501/smart-stage-finals/szregsolo_234benttreect_061726/rsc7c8slfk2wmpoatcdh.jpg" alt="Landscape enhanced exterior" draggable="false" />
+          <div class="tr-sl-before-wrap"><img class="tr-sl-before" src="https://res.cloudinary.com/de18zsi7o/image/upload/v1784822498/smart-stage-originals/mbrekxvrjm7azwys5kvo.jpg" alt="Exterior before landscaping" draggable="false" /></div>
+          <span class="tr-sl-label before-label">Before</span>
+          <span class="tr-sl-label after-label">After</span>
+          <div class="tr-sl-divider"><div class="tr-sl-handle"><svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg"><circle cx="20" cy="20" r="19" fill="#1a1714" stroke="#b8975a" stroke-width="1.5"/><polyline points="16,13 9,20 16,27" fill="none" stroke="#b8975a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><polyline points="24,13 31,20 24,27" fill="none" stroke="#b8975a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></div></div>
+        </div>
+        <div class="tr-card-title">Landscape Enhancement</div>
+        <div class="tr-card-desc">Fresh lawn, hedges & seasonal color</div>
+      </div>
+
+      <div class="tr-card">
+        <div class="tr-slider" data-slider>
+          <img class="tr-sl-after" src="https://res.cloudinary.com/de18zsi7o/image/upload/v1784241924/smart-stage-originals/hzygsrulokul0q9pbfki.jpg" alt="Outdoor living staged" draggable="false" />
+          <div class="tr-sl-before-wrap"><img class="tr-sl-before" src="https://res.cloudinary.com/de18zsi7o/image/upload/v1785117913/Backyard_tnco79_doimfx.jpg" alt="Backyard before staging" draggable="false" /></div>
+          <span class="tr-sl-label before-label">Before</span>
+          <span class="tr-sl-label after-label">After</span>
+          <div class="tr-sl-divider"><div class="tr-sl-handle"><svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg"><circle cx="20" cy="20" r="19" fill="#1a1714" stroke="#b8975a" stroke-width="1.5"/><polyline points="16,13 9,20 16,27" fill="none" stroke="#b8975a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><polyline points="24,13 31,20 24,27" fill="none" stroke="#b8975a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></div></div>
+        </div>
+        <div class="tr-card-title">Outdoor Staging</div>
+        <div class="tr-card-desc">Patio furniture, dining set, fire pit</div>
+      </div>
+
+      <div class="tr-card">
+        <div class="tr-slider" data-slider>
+          <img class="tr-sl-after" src="https://res.cloudinary.com/de18zsi7o/image/upload/v1784230572/smart-stage-originals/kmyo8j3un4qemwk3ynop.jpg" alt="Golden hour exterior" draggable="false" />
+          <div class="tr-sl-before-wrap"><img class="tr-sl-before" src="https://res.cloudinary.com/de18zsi7o/image/upload/v1784228608/smart-stage-originals/p71pfnfgncrfwdroeg8s.jpg" alt="Exterior before golden hour" draggable="false" /></div>
+          <span class="tr-sl-label before-label">Before</span>
+          <span class="tr-sl-label after-label">After</span>
+          <div class="tr-sl-divider"><div class="tr-sl-handle"><svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg"><circle cx="20" cy="20" r="19" fill="#1a1714" stroke="#b8975a" stroke-width="1.5"/><polyline points="16,13 9,20 16,27" fill="none" stroke="#b8975a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><polyline points="24,13 31,20 24,27" fill="none" stroke="#b8975a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></div></div>
+        </div>
+        <div class="tr-card-title">Golden Hour</div>
+        <div class="tr-card-desc">Warm sunset lighting, long soft shadows</div>
+      </div>
+
+      <div class="tr-card">
+        <div class="tr-slider" data-slider>
+          <img class="tr-sl-after" src="https://res.cloudinary.com/de18zsi7o/image/upload/v1784772780/smart-stage-finals/szregsolo_234benttreect_061726/t4yjv2i10fhwnkjwholq.jpg" alt="Twilight exterior" draggable="false" />
+          <div class="tr-sl-before-wrap"><img class="tr-sl-before" src="https://res.cloudinary.com/de18zsi7o/image/upload/v1784822501/smart-stage-finals/szregsolo_234benttreect_061726/rsc7c8slfk2wmpoatcdh.jpg" alt="Exterior before twilight" draggable="false" /></div>
+          <span class="tr-sl-label before-label">Before</span>
+          <span class="tr-sl-label after-label">After</span>
+          <div class="tr-sl-divider"><div class="tr-sl-handle"><svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg"><circle cx="20" cy="20" r="19" fill="#1a1714" stroke="#b8975a" stroke-width="1.5"/><polyline points="16,13 9,20 16,27" fill="none" stroke="#b8975a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><polyline points="24,13 31,20 24,27" fill="none" stroke="#b8975a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></div></div>
+        </div>
+        <div class="tr-card-title">Twilight</div>
+        <div class="tr-card-desc">Blue-hour sky, warm window glow</div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════ s4-featurecards.html ══════════════ -->
+<section class="fc" id="presets">
+  <div class="fc-inner">
+
+    <!-- ── FLAGSHIP: HEADER TEXT + PHOTOGRAPHIC PRESETS, UNIFIED ─────────
+         Sam's request: one left column with both text blocks stacked
+         (dark "Built for Real Estate" box directly above the light
+         "Photographic Presets" box), and one right column holding the
+         tabs+slider, spanning the combined height of both. The two
+         flanking images from the earlier version added nothing relevant
+         to either feature and just pushed the page down — removed. -->
+    <div class="ps-showcase">
+      <div class="ps-flagship">
+        <div class="ps-flagship-left">
+          <div class="fc-header">
+            <div class="fc-eyebrow">Built for Real Estate</div>
+            <h2 class="fc-header-title">The intelligence behind <em>every image</em>.</h2>
+            <p class="fc-header-sub">AI that understands rooms, protects your listings, and gives you every asset a modern brokerage needs — from one approved photo.</p>
+          </div>
+          <div class="ps-text-block">
+            <div class="ps-eyebrow">Photographic Presets</div>
+            <h3 class="ps-title">One staged photo. Six finished looks.</h3>
+            <p class="ps-sub">The same approved staged image, rendered through every preset — no re-staging, no new furniture, just professional-grade color, light, and tone matched to how you want the listing to feel.</p>
+          </div>
+        </div>
+        <div class="ps-top-right">
+          <div class="ps-preset-tabs" role="tablist">
+            <button class="ps-preset-tab active" role="tab" aria-selected="true" onclick="switchPresetTab(0, this)">MLS Bright</button>
+            <button class="ps-preset-tab" role="tab" aria-selected="false" onclick="switchPresetTab(1, this)">Luxury Editorial</button>
+            <button class="ps-preset-tab" role="tab" aria-selected="false" onclick="switchPresetTab(2, this)">HDR Natural</button>
+            <button class="ps-preset-tab" role="tab" aria-selected="false" onclick="switchPresetTab(3, this)">Magazine</button>
+            <button class="ps-preset-tab" role="tab" aria-selected="false" onclick="switchPresetTab(4, this)">Builder Showcase</button>
+            <button class="ps-preset-tab" role="tab" aria-selected="false" onclick="switchPresetTab(5, this)">Premium Detail</button>
+          </div>
+          <div class="ps-top-hero" data-slider>
+            <img class="ps-top-hero-after" id="ps-preset-after-img" src="https://res.cloudinary.com/de18zsi7o/image/upload/v1785194942/FINAL_MLSBright_eedde97f-0ff7-46ff-9e6e-61fbef4479ff_laqvpu.jpg" alt="Selected preset" />
+            <div class="ps-top-hero-before-wrap">
+              <img class="ps-top-hero-before" src="https://res.cloudinary.com/de18zsi7o/image/upload/v1785173037/smart-stage-finals/szregsolo_3027blackpointct_072726/h7zqp79a5osopty094md.jpg" alt="Staged original" />
+            </div>
+            <span class="ps-top-hero-label before-label">Before</span>
+            <span class="ps-top-hero-label after-label">After</span>
+            <div class="ps-top-hero-divider"><div class="ps-top-hero-handle">
+              <svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg"><circle cx="20" cy="20" r="19" fill="#1a1714" stroke="#b8975a" stroke-width="1.5"/><polyline points="16,13 9,20 16,27" fill="none" stroke="#b8975a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><polyline points="24,13 31,20 24,27" fill="none" stroke="#b8975a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="ps-strip">
+        <div class="ps-col">
+          <div class="ps-tile ps-source" tabindex="0" role="button" aria-label="Enlarge Staged — Original photo" onclick="openFcLightbox(0)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openFcLightbox(0);}">
+            <span class="ps-source-tag">Staged</span>
+            <img src="https://res.cloudinary.com/de18zsi7o/image/upload/v1785173037/smart-stage-finals/szregsolo_3027blackpointct_072726/h7zqp79a5osopty094md.jpg" alt="Original staged photo, no preset applied">
+          </div>
+          <div class="ps-source-label">Original — no preset</div>
+        </div>
+        <div class="ps-arrow">&#8594;</div>
+        <div class="ps-col">
+          <div class="ps-tile" tabindex="0" role="button" aria-label="Enlarge MLS Bright photo" onclick="openFcLightbox(1)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openFcLightbox(1);}">
+            <img src="https://res.cloudinary.com/de18zsi7o/image/upload/v1785194942/FINAL_MLSBright_eedde97f-0ff7-46ff-9e6e-61fbef4479ff_laqvpu.jpg" alt="MLS Bright preset">
+          </div>
+          <div class="ps-label">MLS Bright</div>
+        </div>
+        <div class="ps-col">
+          <div class="ps-tile" tabindex="0" role="button" aria-label="Enlarge Luxury Editorial photo" onclick="openFcLightbox(2)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openFcLightbox(2);}">
+            <img src="https://res.cloudinary.com/de18zsi7o/image/upload/v1785194963/FINAL_LuxuryEditorial_eedde97f-0ff7-46ff-9e6e-61fbef4479ff_fkxj6x.jpg" alt="Luxury Editorial preset">
+          </div>
+          <div class="ps-label">Luxury Editorial</div>
+        </div>
+        <div class="ps-col">
+          <div class="ps-tile" tabindex="0" role="button" aria-label="Enlarge HDR Natural photo" onclick="openFcLightbox(3)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openFcLightbox(3);}">
+            <img src="https://res.cloudinary.com/de18zsi7o/image/upload/v1785194994/FINAL_HDRNatural_eedde97f-0ff7-46ff-9e6e-61fbef4479ff_ncekon.jpg" alt="HDR Natural preset">
+          </div>
+          <div class="ps-label">HDR Natural</div>
+        </div>
+        <div class="ps-col">
+          <div class="ps-tile" tabindex="0" role="button" aria-label="Enlarge Magazine photo" onclick="openFcLightbox(4)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openFcLightbox(4);}">
+            <img src="https://res.cloudinary.com/de18zsi7o/image/upload/v1785195032/FINAL_Magazine_eedde97f-0ff7-46ff-9e6e-61fbef4479ff_gx7eos.jpg" alt="Magazine preset">
+          </div>
+          <div class="ps-label">Magazine</div>
+        </div>
+        <div class="ps-col">
+          <div class="ps-tile" tabindex="0" role="button" aria-label="Enlarge Builder Showcase photo" onclick="openFcLightbox(5)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openFcLightbox(5);}">
+            <img src="https://res.cloudinary.com/de18zsi7o/image/upload/v1785195013/FINAL_BuilderShowcase_eedde97f-0ff7-46ff-9e6e-61fbef4479ff_i0fwyz.jpg" alt="Builder Showcase preset">
+          </div>
+          <div class="ps-label">Builder Showcase</div>
+        </div>
+        <div class="ps-col">
+          <div class="ps-tile" tabindex="0" role="button" aria-label="Enlarge Premium Detail photo" onclick="openFcLightbox(6)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openFcLightbox(6);}">
+            <img src="https://res.cloudinary.com/de18zsi7o/image/upload/v1785195059/FINAL_PremiumDetail_eedde97f-0ff7-46ff-9e6e-61fbef4479ff_x0v4lf.jpg" alt="Premium Detail preset">
+          </div>
+          <div class="ps-label">Premium Detail</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════════
+     SECOND, SEPARATE SECTION — Sam's request: Photographic Presets and
+     the 4 feature cards should not read as one continuous block. This
+     is its own distinct section element, separate from the Photographic
+     Presets showcase above. -->
+<section class="fcs" id="features">
+  <div class="fcs-band">
+    <div class="fcs-band-inner">
+      <h2 class="fcs-title">One-Click AI Marketing Suite</h2>
+      <p class="fcs-sub"><strong>Your AI Property Marketing Studio,</strong> <em>One photo &rarr; One click</em></p>
+      <p class="fcs-sub2">A complete collection of listing-ready assets.</p>
+    </div>
+  </div>
+
+  <div class="fc-inner">
+    <!-- ── 4 FEATURE CARDS ───────────────────────────────────────────── -->
+    <div class="fc-grid">
+
+      <div class="fc-card">
+        <div class="fc-card-img-wrap" tabindex="0" role="button" aria-label="Enlarge AI Cinematic Photo Director screenshot" onclick="openFcLightbox(7)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openFcLightbox(7);}">
+          <img src="https://res.cloudinary.com/de18zsi7o/image/upload/v1785194765/AI_Cinematic_Photo_Director_n7petz.png" alt="AI Cinematic Photo Director" />
+        </div>
+        <div class="fc-card-body">
+          <div class="fc-card-title">AI Cinematic Photo Director</div>
+          <div class="fc-card-desc">Finds the hero shots in every room, automatically.</div>
+        </div>
+      </div>
+
+      <div class="fc-card">
+        <div class="fc-card-img-wrap" tabindex="0" role="button" aria-label="Enlarge Hero Image Collections example" onclick="openFcLightbox(8)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openFcLightbox(8);}">
+          <img src="https://res.cloudinary.com/de18zsi7o/image/upload/v1785181992/smart-stage-finals/szregsolo_3027blackpointct_072726/ytbyqyi6nburoo8tofon.jpg" alt="Hero Image Collections" />
+        </div>
+        <div class="fc-card-body">
+          <div class="fc-card-title">Hero Image Collections</div>
+          <div class="fc-card-desc">The best angles, ready for every marketing channel.</div>
+        </div>
+      </div>
+
+      <div class="fc-card">
+        <div class="fc-card-img-wrap" tabindex="0" role="button" aria-label="Enlarge Exterior Enhancements example" onclick="openFcLightbox(9)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openFcLightbox(9);}">
+          <img src="https://res.cloudinary.com/de18zsi7o/image/upload/v1784241931/smart-stage-finals/szregsolo_5935quilterst_071626/a5j8asox2eolsljdkgqm.jpg" alt="Exterior Enhancements" />
+        </div>
+        <div class="fc-card-body">
+          <div class="fc-card-title">Exterior Enhancements</div>
+          <div class="fc-card-desc">Landscape, Golden Hour & Twilight, on demand.</div>
+        </div>
+      </div>
+
+      <div class="fc-card">
+        <div class="fc-card-img-wrap" tabindex="0" role="button" aria-label="Enlarge Compliance & Listing Records example" onclick="openFcLightbox(10)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openFcLightbox(10);}">
+          <img src="https://res.cloudinary.com/de18zsi7o/image/upload/v1785192661/Compliance_Page_oslzp3.png" alt="Compliance & Listing Records" />
+        </div>
+        <div class="fc-card-body">
+          <div class="fc-card-title">Compliance & Listing Records</div>
+          <div class="fc-card-desc">Disclose, store, and search every published listing.</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ── LIGHTBOX ─────────────────────────────────────────────────────── -->
+<div class="fc-lightbox" id="fc-lightbox" onclick="if(event.target===this)closeFcLightbox()">
+  <div class="fc-lightbox-figure">
+    <button class="fc-lightbox-close" onclick="closeFcLightbox()" aria-label="Close">&#10005;</button>
+    <img id="fc-lightbox-img" src="" alt="">
+    <div class="fc-lightbox-caption">
+      <span class="fc-lightbox-tag" id="fc-lightbox-tag"></span>
+      <span id="fc-lightbox-title"></span>
+    </div>
+  </div>
+</div>
+<button class="fc-lightbox-nav fc-lightbox-prev" onclick="stepFcLightbox(-1)" aria-label="Previous image">&#8249;</button>
+<button class="fc-lightbox-nav fc-lightbox-next" onclick="stepFcLightbox(1)" aria-label="Next image">&#8250;</button>
+
+<!-- ══════════════ s5-proplus.html ══════════════ -->
+<section class="pp" id="pro-plus">
+  <div class="pp-inner">
+
+    <div class="pp-header">
+      <div class="pp-eyebrow">Smart Stage PRO Plus</div>
+      <h2 class="pp-title">Your staged photos, <em>walking through the listing.</em></h2>
+      <p class="pp-sub">PRO Plus turns the images you've already approved into a complete property tour video — real camera motion, a written and voiced walkthrough, and music. No videographer, no script, no editing timeline.</p>
+    </div>
+
+    <div class="pp-video-frame">
+      <div class="pp-video-tag"><span class="pp-video-tag-dot"></span>Real Client Render</div>
+      <video
+        controls
+        preload="metadata"
+        poster="https://res.cloudinary.com/de18zsi7o/image/upload/v1785173079/smart-stage-finals/szregsolo_3027blackpointct_072726/n7dcpowdtrth1cgzlsfi.jpg"
+        aria-label="PRO Plus example video — a real client render with Motion, Narration and Music">
+        <source src="https://res.cloudinary.com/de18zsi7o/video/authenticated/s--yEuuIBoK--/v1785266771/smart-stage-pro-plus/szregsolo_1515demost_072726/video_16x9_1785266770390.mp4?_a=BAMAAAfi0" type="video/mp4">
+      </video>
+    </div>
+    <p class="pp-video-caption">An actual PRO Plus render — Motion, Narration &amp; Music</p>
+
+    <div class="pp-engines">
+      <div class="pp-engine-card">
+        <div class="pp-engine-icon">
+          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="8" cy="12" r="4.5" stroke="#d4b87a" stroke-width="1.6"/><circle cx="18" cy="12" r="2.2" stroke="#d4b87a" stroke-width="1.6"/></svg>
+        </div>
+        <div class="pp-engine-label">Included — Every Frame</div>
+        <h3 class="pp-engine-title">Ken Burns Motion</h3>
+        <p class="pp-engine-desc">Smooth, professional pan-and-zoom rendered on every clip, at no extra cost. It's the dependable default underneath the whole video — never a placeholder, never "coming soon."</p>
+      </div>
+      <div class="pp-engine-card">
+        <div class="pp-engine-icon">
+          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M4 12c2-5 6-7.5 8-7.5s6 2.5 8 7.5c-2 5-6 7.5-8 7.5s-6-2.5-8-7.5Z" stroke="#d4b87a" stroke-width="1.6"/><circle cx="12" cy="12" r="2.4" stroke="#d4b87a" stroke-width="1.6"/></svg>
+        </div>
+        <div class="pp-engine-label">Curated — Where It Earns Its Place</div>
+        <h3 class="pp-engine-title">AI Motion</h3>
+        <p class="pp-engine-desc">Real AI-generated camera movement — an orbit, a slow drift, a room reveal — drawn from a tested preset library. Applied to the shots that benefit, not layered onto every frame by default.</p>
+      </div>
+    </div>
+
+    <div class="pp-chips">
+      <div class="pp-chip">
+        <div class="pp-chip-icon"><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="3" y="5" width="18" height="14" rx="1.5" stroke="#d4b87a" stroke-width="1.5"/><path d="M8 5v14M16 5v14" stroke="#d4b87a" stroke-width="1.5"/></svg></div>
+        <div class="pp-chip-title">Room Reveal</div>
+        <div class="pp-chip-desc">The vacant photo transforms into the fully staged room, live, before the walkthrough continues to the next space.</div>
+      </div>
+      <div class="pp-chip">
+        <div class="pp-chip-icon"><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M4 12h2l2-6 3 14 2-9 2 5 2-4h3" stroke="#d4b87a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+        <div class="pp-chip-title">AI Narration</div>
+        <div class="pp-chip-desc">A natural-sounding voiceover, written and read for every room automatically — no script to write, no voiceover artist to book.</div>
+      </div>
+      <div class="pp-chip">
+        <div class="pp-chip-icon"><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6l7-3Z" stroke="#d4b87a" stroke-width="1.5" stroke-linejoin="round"/></svg></div>
+        <div class="pp-chip-title">AB 723 Reviewed</div>
+        <div class="pp-chip-desc">Every AI Motion preset is compliance-checked before release — the same disclosure standard applied to every staged image.</div>
+      </div>
+    </div>
+
+    <p class="pp-footnote">PRO Plus shares your existing project pool — <strong>no separate subscription required.</strong></p>
+
+  </div>
+</section>
+
+<!-- ══════════════ s6-compliance.html ══════════════ -->
+<section class="cd" id="compliance">
+  <div class="cd-inner">
+
+    <div class="cd-header">
+      <div class="cd-eyebrow">Compliance &amp; Searchable Database</div>
+      <h2 class="cd-title">One dashboard. Every listing. <em>However your office is structured.</em></h2>
+      <p class="cd-sub">Solo agents get a personal listings hub. Teams and brokerages get the same compliance tracking and QR-linked disclosure pages — with visibility across every seat, searchable by address.</p>
+    </div>
+
+    <div class="cd-tabs" role="tablist">
+      <button class="cd-tab active" role="tab" aria-selected="true" onclick="switchCdTab('solo', this)">Solo Agent</button>
+      <button class="cd-tab" role="tab" aria-selected="false" onclick="switchCdTab('team', this)">Team</button>
+      <button class="cd-tab" role="tab" aria-selected="false" onclick="switchCdTab('brokerage', this)">Brokerage</button>
+    </div>
+
+    <div class="cd-frame">
+      <div class="cd-frame-chrome">
+        <div class="cd-frame-dots"><span></span><span></span><span></span></div>
+        <div class="cd-frame-url" id="cd-frame-url">app.smartstagepro.com/listings</div>
+      </div>
+      <div class="cd-frame-body">
+
+        <!-- ── SOLO — real product screenshot ──────────────────────────── -->
+        <div class="cd-panel active" id="cd-panel-solo">
+          <img class="cd-solo-shot" tabindex="0" role="button" aria-label="Enlarge Solo Agent My Listings screenshot"
+            src="https://res.cloudinary.com/de18zsi7o/image/upload/v1784950018/AB_723_Dashboard_pezbce.png"
+            alt="Solo Agent My Listings dashboard"
+            onclick="openCdLightbox(0)" onkeydown="if(event.key==='Enter'){openCdLightbox(0);}">
+        </div>
+
+        <!-- ── TEAM — live interactive mockup ───────────────────────────── -->
+        <div class="cd-panel" id="cd-panel-team">
+          <div class="lpdb-nav">
+            <div class="lpdb-brand-chip">Sierra Oaks Realty Team<span class="lpdb-plan-tag">Team Plan</span></div>
+            <div class="lpdb-nav-spacer"></div>
+            <div class="lpdb-pill">88 images remaining</div>
+          </div>
+          <div class="lpdb-layout">
+            <div class="lpdb-sidebar">
+              <div class="lpdb-sidebar-label">Viewing Listings For</div>
+              <div class="lpdb-seat active" data-panel="team" data-agent="all" onclick="selectSeat('team','all', this)">
+                <div class="lpdb-seat-check">✓</div>
+                <div class="lpdb-seat-text"><div class="lpdb-seat-name">All Team Members</div><div class="lpdb-seat-id">3 of 3 seats</div></div>
+              </div>
+              <div class="lpdb-sidebar-divider"></div>
+              <div class="lpdb-seat" data-panel="team" data-agent="sam" onclick="selectSeat('team','sam', this)">
+                <div class="lpdb-seat-check">✓</div>
+                <div class="lpdb-seat-text"><div class="lpdb-seat-name">Sam Ziegler</div><div class="lpdb-seat-id">szregteam_owner</div></div>
+              </div>
+              <div class="lpdb-seat" data-panel="team" data-agent="maria" onclick="selectSeat('team','maria', this)">
+                <div class="lpdb-seat-check">✓</div>
+                <div class="lpdb-seat-text"><div class="lpdb-seat-name">Maria Chen</div><div class="lpdb-seat-id">szregteam_mchen</div></div>
+              </div>
+              <div class="lpdb-seat" data-panel="team" data-agent="jordan" onclick="selectSeat('team','jordan', this)">
+                <div class="lpdb-seat-check">✓</div>
+                <div class="lpdb-seat-text"><div class="lpdb-seat-name">Jordan Patel</div><div class="lpdb-seat-id">szregteam_jpatel</div></div>
+              </div>
+            </div>
+            <div class="lpdb-main">
+              <div class="lpdb-title-row"><h3 class="lpdb-title">Team Listings</h3><span class="lpdb-plan-badge">Team</span></div>
+              <div class="lpdb-stats">
+                <div class="lpdb-stat"><div class="lpdb-stat-num">24</div><div class="lpdb-stat-label">Listings</div></div>
+                <div class="lpdb-stat"><div class="lpdb-stat-num">61</div><div class="lpdb-stat-label">Image Sets</div></div>
+                <div class="lpdb-stat"><div class="lpdb-stat-num gold">88</div><div class="lpdb-stat-label">Remaining</div></div>
+              </div>
+
+              <div class="lpdb-card" data-panel="team" data-agent="sam">
+                <div class="lpdb-card-top">
+                  <div><p class="lpdb-card-addr">1515 Demo St, Rocklin, CA</p><p class="lpdb-card-slug">szregteam_1515demost_072726</p></div>
+                  <span class="lpdb-card-badge">Team</span>
+                </div>
+                <p class="lpdb-card-meta">37 staged image sets · ✓ QR active · Last staged Jul 28, 2026</p>
+                <p class="lpdb-card-agent">Staged by Sam Ziegler</p>
+                <div class="lpdb-thumbs">
+                  <div class="lpdb-thumb"><img src="https://res.cloudinary.com/de18zsi7o/image/upload/v1785181992/smart-stage-finals/szregsolo_3027blackpointct_072726/ytbyqyi6nburoo8tofon.jpg" alt=""></div>
+                  <div class="lpdb-thumb"><img src="https://res.cloudinary.com/de18zsi7o/image/upload/v1785181963/smart-stage-finals/szregsolo_3027blackpointct_072726/py0rnc5ej1btygffxnmn.jpg" alt=""></div>
+                  <div class="lpdb-thumb-more">+35</div>
+                </div>
+              </div>
+
+              <div class="lpdb-card" data-panel="team" data-agent="maria">
+                <div class="lpdb-card-top">
+                  <div><p class="lpdb-card-addr">889 Autumn Ridge Ln, Loomis, CA</p><p class="lpdb-card-slug">szregteam_889autumnridge_072526</p></div>
+                  <span class="lpdb-card-badge">Team</span>
+                </div>
+                <p class="lpdb-card-meta">14 staged image sets · ✓ QR active · Last staged Jul 25, 2026</p>
+                <p class="lpdb-card-agent">Staged by Maria Chen</p>
+                <div class="lpdb-thumbs">
+                  <div class="lpdb-thumb"><img src="https://res.cloudinary.com/de18zsi7o/image/upload/v1784241931/smart-stage-finals/szregsolo_5935quilterst_071626/a5j8asox2eolsljdkgqm.jpg" alt=""></div>
+                  <div class="lpdb-thumb-more">+13</div>
+                </div>
+              </div>
+
+              <div class="lpdb-card" data-panel="team" data-agent="jordan">
+                <div class="lpdb-card-top">
+                  <div><p class="lpdb-card-addr">234 Bent Tree Road, Sunbury, OH</p><p class="lpdb-card-slug">szregteam_234benttreeroad_072626</p></div>
+                  <span class="lpdb-card-badge">Team</span>
+                </div>
+                <p class="lpdb-card-meta">3 staged image sets · ✓ QR active · Last staged Jul 26, 2026</p>
+                <p class="lpdb-card-agent">Staged by Jordan Patel</p>
+                <div class="lpdb-thumbs">
+                  <div class="lpdb-thumb"><img src="https://res.cloudinary.com/de18zsi7o/image/upload/v1785192661/Compliance_Page_oslzp3.png" alt=""></div>
+                </div>
+              </div>
+
+              <div class="lpdb-empty" data-panel="team">No listings for this seat holder yet.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── BROKERAGE — live interactive mockup ──────────────────────── -->
+        <div class="cd-panel" id="cd-panel-brokerage">
+          <div class="lpdb-nav">
+            <div class="lpdb-brand-chip">Placer Hills Brokerage Group<span class="lpdb-plan-tag">Brokerage Plan</span></div>
+            <div class="lpdb-nav-spacer"></div>
+            <div class="lpdb-pill">312 images remaining</div>
+          </div>
+          <div class="lpdb-layout">
+            <div class="lpdb-sidebar">
+              <div class="lpdb-sidebar-label">Viewing Listings For</div>
+              <div class="lpdb-seat active" data-panel="brokerage" data-agent="all" onclick="selectSeat('brokerage','all', this)">
+                <div class="lpdb-seat-check">✓</div>
+                <div class="lpdb-seat-text"><div class="lpdb-seat-name">All Agents</div><div class="lpdb-seat-id">14 active · unlimited seats</div></div>
+              </div>
+              <div class="lpdb-sidebar-divider"></div>
+              <div class="lpdb-seat" data-panel="brokerage" data-agent="sam" onclick="selectSeat('brokerage','sam', this)">
+                <div class="lpdb-seat-check">✓</div>
+                <div class="lpdb-seat-text"><div class="lpdb-seat-name">Sam Ziegler</div><div class="lpdb-seat-id">szregbrk_owner</div></div>
+              </div>
+              <div class="lpdb-seat" data-panel="brokerage" data-agent="renee" onclick="selectSeat('brokerage','renee', this)">
+                <div class="lpdb-seat-check">✓</div>
+                <div class="lpdb-seat-text"><div class="lpdb-seat-name">Renee Alvarez</div><div class="lpdb-seat-id">szregbrk_ralvarez</div></div>
+              </div>
+              <div class="lpdb-seat" data-panel="brokerage" data-agent="devon" onclick="selectSeat('brokerage','devon', this)">
+                <div class="lpdb-seat-check">✓</div>
+                <div class="lpdb-seat-text"><div class="lpdb-seat-name">Devon Wu</div><div class="lpdb-seat-id">szregbrk_dwu</div></div>
+              </div>
+              <div class="lpdb-seat lpdb-seat-more">
+                <div class="lpdb-seat-check" style="border-style:dashed;"></div>
+                <div class="lpdb-seat-text"><div class="lpdb-seat-name" style="color:var(--muted); font-weight:600;">+ 11 more agents</div><div class="lpdb-seat-id">View full roster →</div></div>
+              </div>
+            </div>
+            <div class="lpdb-main">
+              <div class="lpdb-title-row"><h3 class="lpdb-title">Brokerage Listings</h3><span class="lpdb-plan-badge">Brokerage</span></div>
+              <div class="lpdb-stats">
+                <div class="lpdb-stat"><div class="lpdb-stat-num">96</div><div class="lpdb-stat-label">Listings</div></div>
+                <div class="lpdb-stat"><div class="lpdb-stat-num">214</div><div class="lpdb-stat-label">Image Sets</div></div>
+                <div class="lpdb-stat"><div class="lpdb-stat-num gold">312</div><div class="lpdb-stat-label">Remaining</div></div>
+              </div>
+
+              <div class="lpdb-card" data-panel="brokerage" data-agent="sam">
+                <div class="lpdb-card-top">
+                  <div><p class="lpdb-card-addr">1515 Demo St, Rocklin, CA</p><p class="lpdb-card-slug">szregbrk_1515demost_072726</p></div>
+                  <span class="lpdb-card-badge">Brokerage</span>
+                </div>
+                <p class="lpdb-card-meta">37 staged image sets · ✓ QR active · Last staged Jul 28, 2026</p>
+                <p class="lpdb-card-agent">Staged by Sam Ziegler</p>
+                <div class="lpdb-thumbs">
+                  <div class="lpdb-thumb"><img src="https://res.cloudinary.com/de18zsi7o/image/upload/v1785173037/smart-stage-finals/szregsolo_3027blackpointct_072726/h7zqp79a5osopty094md.jpg" alt=""></div>
+                  <div class="lpdb-thumb-more">+35</div>
+                </div>
+              </div>
+
+              <div class="lpdb-card" data-panel="brokerage" data-agent="renee">
+                <div class="lpdb-card-top">
+                  <div><p class="lpdb-card-addr">7702 Meadowlark Ct, Granite Bay, CA</p><p class="lpdb-card-slug">szregbrk_7702meadowlark_072226</p></div>
+                  <span class="lpdb-card-badge">Brokerage</span>
+                </div>
+                <p class="lpdb-card-meta">22 staged image sets · ✓ QR active · Last staged Jul 22, 2026</p>
+                <p class="lpdb-card-agent">Staged by Renee Alvarez</p>
+                <div class="lpdb-thumbs">
+                  <div class="lpdb-thumb"><img src="https://res.cloudinary.com/de18zsi7o/image/upload/v1785194942/FINAL_MLSBright_eedde97f-0ff7-46ff-9e6e-61fbef4479ff_laqvpu.jpg" alt=""></div>
+                  <div class="lpdb-thumb-more">+20</div>
+                </div>
+              </div>
+
+              <div class="lpdb-card" data-panel="brokerage" data-agent="devon">
+                <div class="lpdb-card-top">
+                  <div><p class="lpdb-card-addr">4410 Silverado Trail, Roseville, CA</p><p class="lpdb-card-slug">szregbrk_4410silverado_071926</p></div>
+                  <span class="lpdb-card-badge">Brokerage</span>
+                </div>
+                <p class="lpdb-card-meta">9 staged image sets · ✓ QR active · Last staged Jul 19, 2026</p>
+                <p class="lpdb-card-agent">Staged by Devon Wu</p>
+                <div class="lpdb-thumbs">
+                  <div class="lpdb-thumb"><img src="https://res.cloudinary.com/de18zsi7o/image/upload/v1785195032/FINAL_Magazine_eedde97f-0ff7-46ff-9e6e-61fbef4479ff_gx7eos.jpg" alt=""></div>
+                  <div class="lpdb-thumb-more">+7</div>
+                </div>
+              </div>
+
+              <div class="lpdb-empty" data-panel="brokerage">No listings for this seat holder yet.</div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ── COMPLIANCE CALLOUT ─────────────────────────────────────────── -->
+    <div class="cd-callout">
+      <div>
+        <div class="cd-callout-eyebrow">Every Listing, Documented</div>
+        <h3 class="cd-callout-title">A permanent, searchable compliance record for every listing you publish.</h3>
+        <p class="cd-callout-text">Every finished listing gets its own disclosure page automatically — no extra step, nothing to remember before you publish to MLS.</p>
+        <ul class="cd-callout-list">
+          <li>One QR code linked to the property listing, tying back to the original, unedited photo and the Virtually Staged image</li>
+          <li>Instantly download the QR code with the property address, ready to publish in the listing photo gallery</li>
+          <li>Permanent public URL — the record stays live for the compliance retention period, not just while the listing is active</li>
+          <li>Instant "Copy for MLS Notes" tab that generates the required URL and disclosure verbiage to paste into public comments</li>
+          <li>Built to California AB 723 §10140.8, NAR guidelines, and MetroList Rule 11.6.1</li>
+          <li>Searchable by address across every listing in your account, team, or brokerage</li>
+        </ul>
+      </div>
+      <div class="cs-block">
+        <div class="cs-qr-card">
+          <div class="cs-qr-eyebrow">Scan to View Record</div>
+          <div class="cs-qr-addr">1515 Demo St, Rocklin, CA</div>
+          <div class="cs-qr-hint">Same QR code that gets downloaded for the MLS photo gallery</div>
+          <img class="cs-qr-large"
+            src="https://res.cloudinary.com/de18zsi7o/image/upload/v1785279727/SmartStage_QR_1515_Demo_St_Rocklin_CA_ijtxhh.png"
+            alt="Scannable QR code linking to the 1515 Demo St compliance record"
+            tabindex="0" role="button" aria-label="Enlarge QR code"
+            onclick="openCdLightbox(1)" onkeydown="if(event.key==='Enter'){openCdLightbox(1);}">
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ── LIGHTBOX ─────────────────────────────────────────────────────── -->
+<div class="cd-lightbox" id="cd-lightbox" onclick="if(event.target===this)closeCdLightbox()">
+  <div class="cd-lightbox-figure">
+    <button class="cd-lightbox-close" onclick="closeCdLightbox()" aria-label="Close">&#10005;</button>
+    <img id="cd-lightbox-img" src="" alt="">
+    <div class="cd-lightbox-caption" id="cd-lightbox-caption"></div>
+  </div>
+</div>
+
+<!-- ══════════════ s6b-zillow-scan.html ══════════════ -->
+<section class="zs" id="zillow-scan">
+  <div class="zs-inner">
+
+    <div>
+      <div class="zs-eyebrow">Free Compliance Check</div>
+      <h2 class="zs-title">Already have listings live? <em>Check those too.</em></h2>
+      <p class="zs-sub">Every image you finalize through Smart Stage PRO already includes a QR-linked disclosure page — built to California AB 723 §10140.8 and MetroList Rule 12.10(f), with nothing extra for you to do.</p>
+      <p class="zs-sub">Have listings that weren't staged through Smart Stage PRO — from another platform, or from before you started using ours? Run them through our free scanner to check for the same disclosure gaps most agents don't know to look for.</p>
+
+      <ul class="zs-list">
+        <li>Every photo checked against its same-room pair for undisclosed staging</li>
+        <li>Evaluated against MetroList Rule 12.10(f)</li>
+        <li>Free PDF report, sent directly to you</li>
+        <li>Read-only — nothing about your listing is changed or touched</li>
+      </ul>
+    </div>
+
+    <div class="zs-card">
+      <div class="zs-card-heading">Run Your Free AB 723 Compliance Scan</div>
+      <div class="zs-card-instructions">Paste a Zillow listing URL below to get started.</div>
+      <div class="zs-card-label">Zillow Listing URL</div>
+      <div class="zs-card-input">
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.8"/><path d="M20 20l-4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        <span>zillow.com/homedetails/1515-Demo-St...</span>
+      </div>
+      <a href="/ab723-check" class="zs-card-scan-btn">Run Free Scan</a>
+      <div class="zs-card-scan-hint">Takes about 60 seconds. No listings are altered.</div>
+      <div class="zs-card-result">
+        <div class="zs-card-result-row">Photo 4 of 22 <span class="zs-card-flag flagged">Review Suggested</span></div>
+        <div class="zs-card-result-row">Photo 9 of 22 <span class="zs-card-flag clear">Disclosed</span></div>
+        <div class="zs-card-result-row">Photo 14 of 22 <span class="zs-card-flag clear">Disclosed</span></div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="zs-checks">
+    <div class="zs-checks-title">Our AB 723 Compliance Scan Checks — 10 Key Compliance Items</div>
+    <div class="zs-checks-sub">Every scan runs through the full compliance framework below — not just a single pass/fail guess.</div>
+    <div class="zs-checks-grid">
+      <div class="zs-check-item"><span class="zs-check-num">1</span><span class="zs-check-label">Altered photos detected</span></div>
+      <div class="zs-check-item"><span class="zs-check-num">2</span><span class="zs-check-label">Disclosure on or adjacent</span></div>
+      <div class="zs-check-item"><span class="zs-check-num">3</span><span class="zs-check-label">Disclosure states original available</span></div>
+      <div class="zs-check-item"><span class="zs-check-num">4</span><span class="zs-check-label">Link / QR code provided</span></div>
+      <div class="zs-check-item"><span class="zs-check-num">5</span><span class="zs-check-label">Link is live &amp; public</span></div>
+      <div class="zs-check-item"><span class="zs-check-num">6</span><span class="zs-check-label">Originals available at link</span></div>
+      <div class="zs-check-item"><span class="zs-check-num">7</span><span class="zs-check-label">Originals clearly identified</span></div>
+      <div class="zs-check-item"><span class="zs-check-num">8</span><span class="zs-check-label">Matches altered photos</span></div>
+      <div class="zs-check-item"><span class="zs-check-num">9</span><span class="zs-check-label">Survived syndication to Zillow</span></div>
+      <div class="zs-check-item"><span class="zs-check-num">10</span><span class="zs-check-label">Overall status &amp; recommendations</span></div>
+    </div>
+  </div>
+
+</section>
+
+<!-- ══════════════ s7-pricing.html ══════════════ -->
+<section class="pr" id="pricing">
+  <div class="pr-inner">
+
+    <div class="pr-header">
+      <div class="pr-eyebrow">Simple, Transparent Pricing</div>
+      <h2 class="pr-title">One plan for <em>however your office works.</em></h2>
+      <p class="pr-sub">Every paid plan includes the full staging suite, AB 723 compliance pages, and PRO Plus video generation. Start with a free trial — no credit card required.</p>
+    </div>
+
+    <div class="pr-toggle-wrap">
+      <div class="pr-toggle" role="tablist">
+        <button class="pr-toggle-btn active" id="pr-btn-monthly" onclick="setPrBilling('monthly')">Monthly</button>
+        <button class="pr-toggle-btn" id="pr-btn-annual" onclick="setPrBilling('annual')">Annual <span class="pr-toggle-save">2 months free</span></button>
+      </div>
+    </div>
+
+    <div class="pr-grid">
+
+      <!-- FREE TRIAL -->
+      <div class="pr-card trial">
+        <div class="pr-plan-name">Free Trial</div>
+        <div class="pr-price-row"><span class="pr-price">$0</span></div>
+        <div class="pr-price-save">&nbsp;</div>
+        <p class="pr-tagline">No credit card required. Expires 30 days after signup.</p>
+        <a href="#" class="pr-cta" onclick="hideLandingPage(); showAuthModal('signup'); return false;">Start Free Trial</a>
+        <div class="pr-cta-hint">Upgrade anytime</div>
+        <ul class="pr-features">
+          <li>10 staged images</li>
+          <li>All 5 staging modules</li>
+          <li>AB 723 compliance pages</li>
+          <li>QR codes on Final Image</li>
+          <li>Smart Correct™ one-click photo correction</li>
+          <li><strong>1 Video</strong> included</li>
+          <li><strong>1 AI Motion Frame</strong> included</li>
+        </ul>
+        <div class="pr-rollover-strip">
+          <div class="pr-rollover-line"><span class="no">✗</span> No rollover</div>
+          <div class="pr-rollover-line"><span class="no">✗</span> Trial expires 30 days after signup</div>
+        </div>
+      </div>
+
+      <!-- SOLO -->
+      <div class="pr-card" data-plan="solo">
+        <div class="pr-plan-name">Solo</div>
+        <div class="pr-price-row"><span class="pr-price pr-price-monthly">$49</span><span class="pr-price-period pr-period-monthly">/ month</span></div>
+        <div class="pr-price-save pr-save-annual" style="display:none;">$490/yr — 2 months free</div>
+        <div class="pr-price-save pr-save-monthly">&nbsp;</div>
+        <p class="pr-tagline">For individual agents managing their own listings.</p>
+        <a href="#" class="pr-cta" onclick="landingStartCheckout('solo'); return false;">Get Started</a>
+        <div class="pr-cta-hint">&nbsp;</div>
+        <ul class="pr-features">
+          <li><strong>50 staged images</strong> / month</li>
+          <li>1 agent account</li>
+          <li>All 5 staging modules</li>
+          <li>AB 723 compliance pages</li>
+          <li>QR codes on all Finals</li>
+          <li>3-year record retention</li>
+          <li>Smart Correct™ one-click photo correction</li>
+          <li><strong>5 Videos</strong> per month included</li>
+          <li><strong>15 AI Motion Frames</strong> per month included</li>
+        </ul>
+        <div class="pr-rollover-strip">
+          <div class="pr-rollover-line"><span class="yes">✓</span> Unused images roll over month to month</div>
+          <div class="pr-rollover-line"><span class="no">✗</span> Unused monthly AI Motion Frames expire</div>
+        </div>
+      </div>
+
+      <!-- TEAM (featured) -->
+      <div class="pr-card featured" data-plan="team">
+        <div class="pr-badge">Most Popular</div>
+        <div class="pr-plan-name">Team</div>
+        <div class="pr-price-row"><span class="pr-price pr-price-monthly">$99</span><span class="pr-price-period pr-period-monthly">/ month</span></div>
+        <div class="pr-price-save pr-save-annual" style="display:none;">$990/yr — 2 months free</div>
+        <div class="pr-price-save pr-save-monthly">&nbsp;</div>
+        <p class="pr-tagline">For small teams staging listings across multiple agents.</p>
+        <a href="#" class="pr-cta" onclick="landingStartCheckout('team'); return false;">Get Started</a>
+        <div class="pr-cta-hint">&nbsp;</div>
+        <ul class="pr-features">
+          <li><strong>125 staged images</strong> / month, shared pool</li>
+          <li>Up to 3 agent sub-accounts</li>
+          <li>Team AB 723 dashboard</li>
+          <li class="summary">All Solo features</li>
+          <li><strong>Smart Stage PRO Plus™</strong> Video Generation</li>
+          <li><strong>12 Videos</strong> per month included</li>
+          <li><strong>36 AI Motion Frames</strong> per month included</li>
+        </ul>
+        <div class="pr-rollover-strip">
+          <div class="pr-rollover-line"><span class="yes">✓</span> Unused images roll over month to month</div>
+          <div class="pr-rollover-line"><span class="no">✗</span> Unused monthly AI Motion Frames expire</div>
+        </div>
+      </div>
+
+      <!-- BROKERAGE -->
+      <div class="pr-card" data-plan="brokerage">
+        <div class="pr-plan-name">Brokerage</div>
+        <div class="pr-price-row"><span class="pr-price pr-price-monthly">$279</span><span class="pr-price-period pr-period-monthly">/ month</span></div>
+        <div class="pr-price-save pr-save-annual" style="display:none;">$2,790/yr — 2 months free</div>
+        <div class="pr-price-save pr-save-monthly">&nbsp;</div>
+        <p class="pr-tagline">For brokerages with a growing roster of agents.</p>
+        <a href="#" class="pr-cta" onclick="landingStartCheckout('brokerage'); return false;">Get Started</a>
+        <div class="pr-cta-hint">&nbsp;</div>
+        <ul class="pr-features">
+          <li><strong>400 staged images</strong> / month, shared pool</li>
+          <li>Unlimited agents</li>
+          <li>Brokerage compliance dashboard</li>
+          <li>AB 723 CSV export</li>
+          <li class="summary">All Team features</li>
+          <li><strong>Smart Stage PRO Plus™</strong> Video Generation</li>
+          <li><strong>40 Videos</strong> per month included</li>
+          <li><strong>120 AI Motion Frames</strong> per month included</li>
+        </ul>
+        <div class="pr-rollover-strip">
+          <div class="pr-rollover-line"><span class="yes">✓</span> Unused images roll over month to month</div>
+          <div class="pr-rollover-line"><span class="no">✗</span> Unused monthly AI Motion Frames expire</div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="pr-footnotes">
+      <p class="pr-overage"><strong>Overage image packs available:</strong> Solo $25 / 20 images · Team $45 / 50 images · Brokerage $75 / 100 images</p>
+      <p class="pr-fineprint">Unused staged images roll over month to month. Solo plans cap at 150 images · Team plans cap at 375 images · Brokerage plans cap at 1,200 images. Rolled-over images are forfeited upon cancellation. Unused monthly AI Motion Frames expire and do not roll over.</p>
+    </div>
+
+  </div>
+</section>
+
+<!-- ══════════════ s8-finalcta.html ══════════════ -->
+<section class="cta" id="get-started">
+  <div class="cta-inner">
+
+    <div class="cta-eyebrow">Ready When You Are</div>
+    <h2 class="cta-title">Give every listing the presentation <em>it deserves.</em></h2>
+    <p class="cta-sub">Start free — no credit card required. Your 30-day trial includes 10 staged images and a full look at the platform.</p>
+
+    <div class="cta-actions">
+      <a href="#" class="cta-cta-primary" onclick="hideLandingPage(); showAuthModal('signup'); return false;">Start Free Trial</a>
+      <a href="#pricing" class="cta-cta-secondary">View Pricing</a>
+    </div>
+
+    <div class="cta-trust">
+      <div class="cta-trust-item">
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6l7-3Z" stroke="#b8975a" stroke-width="1.6" stroke-linejoin="round"/></svg>
+        AB 723 Compliant
+      </div>
+      <div class="cta-trust-item">
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="3" y="5" width="18" height="14" rx="1.5" stroke="#b8975a" stroke-width="1.6"/><path d="M3 9h18" stroke="#b8975a" stroke-width="1.6"/></svg>
+        3-Year Compliance Retention
+      </div>
+      <div class="cta-trust-item">
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M4 12l5 5L20 6" stroke="#b8975a" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        No Credit Card Required
+      </div>
+    </div>
+
+  </div>
+</section>`;
+
+  // innerHTML-inserted <script> tags do not auto-execute, so the slider
+  // init calls run here explicitly, after the DOM above actually exists.
+  initHeroSliders();
+    initTrSliders();
+    initPsTopSlider();
 }
 
 function hideLandingPage() {

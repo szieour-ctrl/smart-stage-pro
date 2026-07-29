@@ -7765,14 +7765,14 @@ function showGate() {
   const desc = document.getElementById('verdictDesc');
 
   if (composedReport.overallVerdict === 'clean') {
-    banner.className = 'verdict-banner green';
+    banner.className = 'zs-verdict-banner green';
     icon.textContent = '\u2713';
     title.textContent = 'We Found No Compliance Gaps';
     desc.textContent = 'This listing looks clean on the checks we can run automatically. See the full breakdown below.';
   } else {
-    banner.className = 'verdict-banner red';
+    banner.className = 'zs-verdict-banner red';
     icon.textContent = '!';
-    title.textContent = 'We Found Compliance Gaps';
+    title.textContent = '\u26A0\uFE0F We Found Compliance Gaps \u26A0\uFE0F';
     desc.textContent = 'This listing may have real AB 723 issues. Enter your details to see exactly what — and get a PDF copy.';
   }
   showState('stateGate');
@@ -7817,8 +7817,8 @@ function renderReport() {
   const r = composedReport;
   const banner = document.getElementById('reportBanner');
   const isGreen = r.overallVerdict === 'clean';
-  banner.className = 'report-summary-banner ' + (isGreen ? 'green' : 'red');
-  document.getElementById('reportHeadline').textContent = (isGreen ? '\u25CF ' : '\u25CF ') + r.finalFinding.headline;
+  banner.className = 'zs-report-summary-banner ' + (isGreen ? 'green' : 'red');
+  document.getElementById('reportHeadline').textContent = (isGreen ? '\u2713 ' : '\u26A0\uFE0F ') + r.finalFinding.headline + (isGreen ? '' : ' \u26A0\uFE0F');
   document.getElementById('reportSummary').textContent = r.overallSummary;
 
   const statsEl = document.getElementById('reportStats');
@@ -9038,10 +9038,10 @@ function showLandingPage() {
   }
   @keyframes zsShimmer{ 0%{background-position:120% 0;} 100%{background-position:-20% 0;} }
   .zs-corner{ position:absolute; width:20px; height:20px; }
-  .zs-corner.tl{ top:8px; left:8px; border-top:2px solid rgba(255,255,255,0.85); border-left:2px solid rgba(255,255,255,0.85); }
-  .zs-corner.tr{ top:8px; right:8px; border-top:2px solid rgba(255,255,255,0.85); border-right:2px solid rgba(255,255,255,0.85); }
-  .zs-corner.bl{ bottom:8px; left:8px; border-bottom:2px solid rgba(255,255,255,0.85); border-left:2px solid rgba(255,255,255,0.85); }
-  .zs-corner.br{ bottom:8px; right:8px; border-bottom:2px solid rgba(255,255,255,0.85); border-right:2px solid rgba(255,255,255,0.85); }
+  .zs-corner-tl{ top:8px; left:8px; border-top:2px solid rgba(255,255,255,0.85); border-left:2px solid rgba(255,255,255,0.85); }
+  .zs-corner-tr{ top:8px; right:8px; border-top:2px solid rgba(255,255,255,0.85); border-right:2px solid rgba(255,255,255,0.85); }
+  .zs-corner-bl{ bottom:8px; left:8px; border-bottom:2px solid rgba(255,255,255,0.85); border-left:2px solid rgba(255,255,255,0.85); }
+  .zs-corner-br{ bottom:8px; right:8px; border-bottom:2px solid rgba(255,255,255,0.85); border-right:2px solid rgba(255,255,255,0.85); }
   .zs-scan-address{ font-weight:700; font-size:0.9rem; color:var(--ink); margin-bottom:2px; }
   .zs-scan-price{ color:var(--muted); font-size:0.8rem; margin-bottom:22px; }
   .zs-scan-steps{ text-align:left; display:flex; flex-direction:column; gap:11px; }
@@ -9063,7 +9063,7 @@ function showLandingPage() {
   .zs-verdict-banner.red .zs-verdict-icon{ background:#a4543f; }
   .zs-verdict-banner.green .zs-verdict-icon{ background:var(--success); }
   .zs-verdict-title{ font-family:'Cormorant Garamond',serif; font-weight:600; font-size:1.05rem; }
-  .zs-verdict-banner.red .zs-verdict-title{ color:#a4543f; }
+  .zs-verdict-banner.red .zs-verdict-title{ color:#c0392b; font-weight:800; font-family:'DM Sans',sans-serif; font-size:1rem; }
   .zs-verdict-banner.green .zs-verdict-title{ color:var(--success); }
   .zs-verdict-desc{ font-size:0.78rem; color:var(--muted); margin-top:2px; }
 
@@ -9085,7 +9085,7 @@ function showLandingPage() {
   .zs-report-summary-banner.red{ background:rgba(180,90,70,0.1); }
   .zs-report-summary-banner.green{ background:rgba(45,106,79,0.1); }
   .zs-report-summary-banner .zs-headline{ font-family:'Cormorant Garamond',serif; font-weight:600; font-size:1.05rem; margin-bottom:8px; }
-  .zs-report-summary-banner.red .zs-headline{ color:#a4543f; }
+  .zs-report-summary-banner.red .zs-headline{ color:#c0392b; font-weight:800; font-family:'DM Sans',sans-serif; font-size:1rem; }
   .zs-report-summary-banner.green .zs-headline{ color:var(--success); }
   .zs-report-summary-banner .zs-body{ font-size:0.82rem; color:var(--ink); line-height:1.6; }
   .zs-stat-row{ display:flex; gap:18px; margin-top:14px; flex-wrap:wrap; }
@@ -10234,7 +10234,7 @@ function showLandingPage() {
         <div class="zs-scan-title">Scanning listing&hellip;</div>
         <div class="zs-photo-frame" id="photoFrame">
           <div class="zs-photo-placeholder" id="photoPlaceholder">Fetching listing photo&hellip;</div>
-          <div class="zs-corner tl"></div><div class="zs-corner tr"></div><div class="zs-corner bl"></div><div class="zs-corner br"></div>
+          <div class="zs-corner zs-corner-tl"></div><div class="zs-corner zs-corner-tr"></div><div class="zs-corner zs-corner-bl"></div><div class="zs-corner zs-corner-br"></div>
         </div>
         <div class="zs-scan-address" id="scanAddressLabel">&nbsp;</div>
         <div class="zs-scan-price" id="scanPriceLabel">&nbsp;</div>

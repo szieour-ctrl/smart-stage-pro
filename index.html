@@ -1878,22 +1878,17 @@ async function downloadCorrectedOnly(imageId) {
   if (!result || !orig || result.status !== 'done') return;
 
   try {
-    const res = await fetch('/.netlify/functions/generate-corrected-final', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        imageBase64: result.correctedBase64,
-        mimeType: 'image/jpeg',
-        projectId: SESSION.projectId || null,
-        roomName: orig.name,
-      }),
-    });
-    const data = await res.json();
-    if (!res.ok || !data.publicUrl) throw new Error(data.error || 'Upload failed');
-
-    // Trigger browser download of the corrected image directly — the
-    // Cloudinary upload (SSC final) already happened above; this download
-    // is just a convenience so the user has the file locally too.
+    // FIX (per Sam, cleanup investigation): this used to call
+    // generate-corrected-final.js first, which uploaded the corrected
+    // photo to Cloudinary purely to check the response was OK, then
+    // discarded the returned URL — it was never stored, displayed, or
+    // used by anything else in the app. Confirmed via grep that
+    // downloadCorrectedOnly() is the ONLY caller of that function
+    // anywhere in the codebase, and generate-corrected-final.js writes
+    // no Supabase record either — so that upload had no purpose beyond
+    // burning a Cloudinary storage credit on every SSC download. The
+    // download itself only ever needed result.correctedBase64, already
+    // sitting in the browser from the draft/preview step. Removed.
     const a = document.createElement('a');
     a.href = 'data:image/jpeg;base64,' + result.correctedBase64;
     a.download = `Corrected_${(orig.name || 'photo').replace(/[^a-z0-9.]/gi, '_')}`;

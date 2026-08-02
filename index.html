@@ -1741,11 +1741,34 @@ function renderSmartCorrectResultsModal(batchId, results) {
       </div>`;
     }
 
-    const badges = (r.modulesApplied || []).map(m =>
+    // ── QC-flag handling (Aug 2, 2026) ──────────────────────────────────
+    // Previously: modulesApplied was rendered as plain badge pills with
+    // no special-casing, so a "needs_manual_review" / reverted-to-
+    // original result looked IDENTICAL to a normal successful correction
+    // -- same badges, same live "Use for Staging"/"Download Corrected"
+    // buttons. That defeats the entire point of the backend's QC
+    // retry-then-fallback loop: the safety mechanism worked correctly in
+    // the JSON but was invisible on screen, meaning an agent could ship
+    // a photo that never actually got corrected while believing it had.
+    const tags = r.modulesApplied || [];
+    const isManualReview = tags.includes('needs_manual_review');
+    const isSoftFlag = !isManualReview && tags.includes('qc_flagged_possible_artifact');
+
+    const badges = tags.map(m =>
       `<span style="display:inline-block;background:var(--cream,#f7f4ef);border:1px solid var(--border,#e0d8ce);border-radius:12px;padding:2px 8px;font-size:0.65rem;color:var(--muted,#7a6f63);margin:2px 3px 0 0;">${m.replace(/_/g, ' ')}</span>`
     ).join('');
 
-    return `<div style="border:1px solid var(--border,#e0d8ce);border-radius:4px;padding:12px;">
+    const warningBanner = isManualReview
+      ? `<div style="background:#fdf0ee;border:1px solid #e8b4ac;border-radius:4px;padding:8px 10px;margin-bottom:8px;font-size:0.7rem;color:#8a3428;line-height:1.4;">
+           ⚠ <strong>Needs manual review.</strong> The AI correction introduced a visible artifact, even after an automatic retry — so the image below is the ORIGINAL, unmodified photo, not a correction. Please retouch manually before use.
+         </div>`
+      : isSoftFlag
+      ? `<div style="background:#fdf7ea;border:1px solid #e0c98a;border-radius:4px;padding:8px 10px;margin-bottom:8px;font-size:0.7rem;color:#7a5c14;line-height:1.4;">
+           ⚠ <strong>Possible artifact detected.</strong> Please compare the original and corrected versions closely before using.
+         </div>`
+      : '';
+
+    return `<div style="border:1px solid ${isManualReview ? '#e8b4ac' : 'var(--border,#e0d8ce)'};border-radius:4px;padding:12px;">
       <div style="font-size:0.75rem;font-weight:600;margin-bottom:6px;color:var(--ink,#1a1714);">${esc(orig.name)}</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px;">
         <div>
@@ -1753,14 +1776,14 @@ function renderSmartCorrectResultsModal(batchId, results) {
           <img src="${orig.dataUrl}" style="width:100%;border-radius:3px;cursor:zoom-in;" onclick="openSmartCorrectPreview('${r.id}', 'original')" />
         </div>
         <div>
-          <div style="font-size:0.6rem;color:var(--muted,#7a6f63);margin-bottom:2px;">CORRECTED</div>
+          <div style="font-size:0.6rem;color:var(--muted,#7a6f63);margin-bottom:2px;">${isManualReview ? 'ORIGINAL (correction reverted)' : 'CORRECTED'}</div>
           <img src="data:image/jpeg;base64,${r.correctedBase64}" style="width:100%;border-radius:3px;cursor:zoom-in;" onclick="openSmartCorrectPreview('${r.id}', 'corrected')" />
         </div>
       </div>
-      <div style="margin-bottom:10px;">${badges}</div>
+      <div style="margin-bottom:10px;">${warningBanner}${badges}</div>
       <div style="display:flex;gap:6px;">
         <button class="btn btn-outline btn-sm" onclick="useCorrectedForStaging('${r.id}')" style="flex:1;">Use for Staging</button>
-        <button class="btn btn-outline btn-sm" onclick="downloadCorrectedOnly('${r.id}')" style="flex:1;">Download Corrected</button>
+        <button class="btn btn-outline btn-sm" onclick="downloadCorrectedOnly('${r.id}')" style="flex:1;${isManualReview ? 'opacity:0.55;' : ''}" ${isManualReview ? `title="This is the unmodified original -- no correction was applied"` : ''}>${isManualReview ? 'Download Original' : 'Download Corrected'}</button>
       </div>
     </div>`;
   }).join('');

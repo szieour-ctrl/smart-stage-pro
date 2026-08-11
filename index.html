@@ -1636,7 +1636,7 @@ let _smartCorrectResults = {}; // keyed by original.id → {status, correctedBas
 // Smart Correct is meant to raise the baseline for every photo; the only
 // photo that should leave the staging pipeline is one explicitly routed to
 // Apply Cinematic Presets (orig.excludedFromStaging, set in
-// applyCinematicPresetsToCorrected()). Everything else proceeds normally —
+// launchSmartCorrectPresetSelection()). Everything else proceeds normally —
 // closeSmartCorrectResultsModal() applies the corrected version to it.
 function isStagingCandidate(o) {
   return !o.isFloorplan && !o.excludedFromStaging;
@@ -1791,10 +1791,13 @@ function renderSmartCorrectResultsModal(batchId, results) {
         </div>
       </div>
       <div style="margin-bottom:10px;">${warningBanner}${badges}</div>
-      <div style="display:flex;gap:6px;${isManualReview ? 'opacity:0.55;' : ''}">
-        <button class="btn btn-outline btn-sm" onclick="downloadCorrectedOnly('${r.id}')" style="flex:1;" ${isManualReview ? `title="This is the unmodified original -- no correction was applied"` : ''}>${isManualReview ? 'Download Original' : 'Download Corrected'}</button>
-        <button class="btn btn-outline btn-sm" onclick="applyCinematicPresetsToCorrected('${r.id}')" style="flex:1;" ${isManualReview ? 'disabled title="This is the unmodified original -- no correction was applied"' : ''}>Apply Cinematic Presets</button>
+      <div style="display:flex;gap:6px;">
+        <button class="btn btn-outline btn-sm" onclick="downloadCorrectedOnly('${r.id}')" style="flex:1;${isManualReview ? 'opacity:0.55;' : ''}" ${isManualReview ? `title="This is the unmodified original -- no correction was applied"` : ''}>${isManualReview ? 'Download Original' : 'Download Corrected'}</button>
       </div>
+      <label style="display:flex;align-items:center;gap:6px;margin-top:8px;font-size:0.75rem;color:var(--ink,#1a1714);${isManualReview ? 'opacity:0.55;' : ''} cursor:pointer;">
+        <input type="checkbox" id="sc-preset-check-${r.id}" onchange="toggleSmartCorrectPresetSelection('${r.id}', this.checked)" ${isManualReview ? 'disabled' : ''} />
+        Select for Presets / Hero Shot
+      </label>
     </div>`;
   }).join('');
 
@@ -1808,14 +1811,63 @@ function renderSmartCorrectResultsModal(batchId, results) {
         <button onclick="closeSmartCorrectResultsModal()" style="background:none;border:none;font-size:1.4rem;cursor:pointer;color:var(--muted,#7a6f63);">×</button>
       </div>
       <div style="font-size:0.8rem;color:var(--muted,#7a6f63);margin-bottom:16px;line-height:1.6;">
-        Corrected photos are ready. <strong>Download Corrected</strong> saves the photo directly for MLS, or to use in Pro Plus Video via its photo picker. <strong>Apply Cinematic Presets</strong> pulls this photo out to pick a photographic rendering style and hero shots — that path involves real digital alteration, so it goes through Generate Final and the compliance page, same as staging. Close this window to continue — every other corrected photo becomes the new working copy for staging automatically, and you can still add or remove photos before staging begins.
+        Corrected photos are ready. <strong>Download Corrected</strong> saves the photo directly for MLS, or to use in Pro Plus Video via its photo picker. Check <strong>Select for Presets / Hero Shot</strong> on any photos you want that for, then launch them below — they'll land in the Room Queue already past staging, just like a staged room's draft, ready for you to click in and apply a preset or hero shot. That's real digital alteration, so it goes through Generate Final and the compliance page from there, same as staging. Close this window to continue — every other corrected photo becomes the new working copy for staging automatically, and you can still add or remove photos before staging begins.
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px;">
         ${tiles}
       </div>
+      <div id="sc-preset-launch-bar" style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border,#e0d8ce);display:flex;align-items:center;gap:10px;">
+        <button class="btn btn-primary btn-sm" id="sc-preset-launch-btn" onclick="launchSmartCorrectPresetSelection()" disabled>Launch Selected into Room Queue →</button>
+        <span id="sc-preset-launch-count" style="font-size:0.75rem;color:var(--muted,#7a6f63);">0 selected</span>
+      </div>
     </div>`;
   document.body.appendChild(m);
   m.addEventListener('click', (e) => { if (e.target === m) closeSmartCorrectResultsModal(); });
+}
+
+// Selection state for the "Select for Presets / Hero Shot" checkboxes —
+// cleared whenever the modal closes (closeSmartCorrectResultsModal and
+// launchSmartCorrectPresetSelection both reset it).
+let _smartCorrectPresetSelections = new Set();
+
+function toggleSmartCorrectPresetSelection(imageId, checked) {
+  if (checked) _smartCorrectPresetSelections.add(imageId);
+  else _smartCorrectPresetSelections.delete(imageId);
+  const n = _smartCorrectPresetSelections.size;
+  const btn = document.getElementById('sc-preset-launch-btn');
+  const count = document.getElementById('sc-preset-launch-count');
+  if (btn) btn.disabled = n === 0;
+  if (count) count.textContent = n === 0 ? '0 selected' : `${n} selected`;
+}
+
+// Bug fix (Sam, Aug 11 — "leaves Smart Correct card with EVERY IMAGE...
+// drops me back to the original upload screen"): the previous version
+// closed the ENTIRE modal and auto-launched the Presets lightbox the
+// instant ANY one photo's button was clicked — no way to select more than
+// one photo, and after applying a preset nothing ever navigated the user
+// anywhere, so the newly-created room was invisible. Redesigned: select any
+// number of photos via checkbox, then launch them all at once. Each
+// selected photo gets its corrected-only room created and is pulled out of
+// the staging pipeline (orig.excludedFromStaging) — same as before — but
+// now nothing auto-opens. They land in the Room Queue exactly like a
+// staged room's draft (see getOrCreateCorrectedOnlyRoom), and the user
+// clicks into each one from there to apply a preset or hero shot, the same
+// interaction a real staged room already uses. Unselected photos are
+// untouched here — closing the modal (below) still auto-applies the
+// corrected version to them for normal staging, same as always.
+function launchSmartCorrectPresetSelection() {
+  if (!_smartCorrectPresetSelections.size) { showToast('Select at least one photo first.', 'error'); return; }
+  let count = 0;
+  _smartCorrectPresetSelections.forEach(imageId => {
+    const room = getOrCreateCorrectedOnlyRoom(imageId);
+    if (!room) return;
+    const orig = SESSION.originals.find(o => o.id === imageId);
+    if (orig) orig.excludedFromStaging = true;
+    count++;
+  });
+  _smartCorrectPresetSelections.clear();
+  closeSmartCorrectResultsModal();
+  showToast(`✓ ${count} photo${count > 1 ? 's' : ''} ready in the Room Queue, past staging — click Begin Session Setup, then click the card there to apply a preset or hero shot.`, 'success');
 }
 
 // Bug fix (Sam, Aug 11): "Use for Staging" as a per-photo opt-in button was
@@ -1824,7 +1876,7 @@ function renderSmartCorrectResultsModal(batchId, results) {
 // Closing this modal (the normal way back into the staging pipeline) now
 // auto-applies the corrected version to every remaining photo — except any
 // photo explicitly pulled out via Apply Cinematic Presets, which already
-// left the staging pipeline entirely (see applyCinematicPresetsToCorrected).
+// left the staging pipeline entirely (see launchSmartCorrectPresetSelection).
 // The user still adds/removes photos freely afterward, same as always,
 // before Begin Session Setup.
 function closeSmartCorrectResultsModal() {
@@ -1943,19 +1995,10 @@ function getOrCreateCorrectedOnlyRoom(imageId) {
   return room;
 }
 
-// Pulls this photo out of the staging pipeline entirely (see the matching
-// check in isStagingCandidate()) and opens the Presets picker directly on
-// its corrected-only room. No separate project-creation step needed here
-// anymore — project creation now happens eagerly at address lookup, and
-// generateFinal() has its own lazy-create safety net besides.
-async function applyCinematicPresetsToCorrected(imageId) {
-  const room = getOrCreateCorrectedOnlyRoom(imageId);
-  if (!room) { showToast('Correction not ready for this photo yet.', 'error'); return; }
-  const orig = SESSION.originals.find(o => o.id === imageId);
-  if (orig) orig.excludedFromStaging = true;
-  document.getElementById('smart-correct-modal')?.remove();
-  openLightboxRefine(room.id, 'presets');
-}
+// (applyCinematicPresetsToCorrected() removed Aug 11 — superseded by the
+// checkbox-select + launchSmartCorrectPresetSelection() flow above, which
+// replaced the old single-click auto-launch that closed the whole modal
+// and never navigated the user anywhere afterward.)
 
 async function downloadCorrectedOnly(imageId) {
   const result = _smartCorrectResults[imageId];

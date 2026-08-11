@@ -1867,7 +1867,20 @@ function launchSmartCorrectPresetSelection() {
   });
   _smartCorrectPresetSelections.clear();
   closeSmartCorrectResultsModal();
-  showToast(`✓ ${count} photo${count > 1 ? 's' : ''} ready in the Room Queue, past staging — click Begin Session Setup, then click the card there to apply a preset or hero shot.`, 'success');
+  // Bug fix (Sam, Aug 11 — "the launch reverts back to the original upload
+  // page"): closing the modal alone just leaves the user on step-upload,
+  // where the new corrected-only room is invisible — the SAME missing-
+  // navigation problem as the old auto-launch version, just one click
+  // later. Navigate straight to the Room Queue so the card is visible
+  // immediately, matching "just like a staged image does before
+  // rendering." Any OTHER photo not selected here still hasn't been
+  // through Begin Session Setup, so it won't appear as a room yet — that's
+  // expected, it still needs intake/mapping like any normal upload.
+  buildSummary();
+  showStep('step-staging');
+  updateSessionButtons();
+  renderRoomQueue();
+  showToast(`✓ ${count} photo${count > 1 ? 's' : ''} ready in the Room Queue, past staging — click the card to apply a preset or hero shot.`, 'success');
 }
 
 // Bug fix (Sam, Aug 11): "Use for Staging" as a per-photo opt-in button was

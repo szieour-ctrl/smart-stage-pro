@@ -1286,26 +1286,23 @@ async function lookupOrCreateProject(address) {
           </div>
         </div>`;
     } else {
-      // No existing project — store address, create only when Generate Final fires
+      // Bug fix (Sam, Aug 11): project creation used to be deferred all the
+      // way to Generate Final ("create only when Generate Final fires"),
+      // which meant a session that never staged anything — Smart Correct
+      // only, straight to Video — had no listingId and no way to unlock
+      // Create Video no matter what happened afterward. Sam's call: Create
+      // Video should be available "after property address lookup / create
+      // property id," full stop, independent of whether staging ever
+      // happens. Creating the project row itself is lightweight (no images
+      // involved yet) — the eager-upload concern the old comment described
+      // was specifically about compliance IMAGES, not the project/listing
+      // row, so creating the row eagerly here doesn't reintroduce that
+      // problem. createNewProject() writes its own cardContent on success.
       SESSION.projectAddress = address;
       SESSION.projectId = null;
       SESSION.complianceUrl = null;
       SESSION.projectStatus = 'pending-create';
-
-      cardContent.innerHTML = `
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
-          <span style="font-size:20px;">🆕</span>
-          <div>
-            <div style="font-weight:500;font-size:14px;color:var(--ink);">New Listing</div>
-            <div style="font-size:12px;color:var(--muted);">${escHtml(address)}</div>
-          </div>
-        </div>
-        <div style="background:var(--bg);border-radius:4px;padding:12px;font-size:12px;color:var(--muted);line-height:1.7;">
-          A compliance project will be created automatically when you Generate your first Final image.<br>
-          • Permanent compliance page URL<br>
-          • AB 723 QR code for all staged images<br>
-          • 3-year record retention per DRE requirements
-        </div>`;
+      await createNewProject(address);
     }
 
     // Show continue button
@@ -1633,19 +1630,16 @@ function updateUploadUI(){
 let _smartCorrectResults = {}; // keyed by original.id → {status, correctedBase64, modulesApplied, ...}
 
 // Single source of truth for "does this photo belong in the staging
-// pipeline right now." Bug fix (Sam, Aug 10 test pass): excluding un-opted
-// Smart Correct photos ONLY at buildRoomQueue() wasn't enough — the intake
-// wizard and Room Assignment screen ran before it and still forced every
-// photo through room labeling regardless of what the user chose in the
-// Smart Correct modal, and confirmMapping() then BLOCKED progress on those
-// photos being labeled at all ("Label all photos before continuing"). A
-// photo that went through Smart Correct only belongs in this pipeline once
-// the user explicitly opts in via useCorrectedForStaging(). Used by every
-// staging-facing screen — intake, mapping, confirm, build, and group-select
-// — so a photo routed to Download/Video/Presets never enters the labeling
-// flow in the first place, not just filtered out at the very end of it.
+// pipeline right now." Redesigned Aug 11: the old model excluded a
+// Smart-Correct'd photo by DEFAULT unless the user explicitly opted in via
+// a "Use for Staging" button — backwards from Sam's actual intent. Running
+// Smart Correct is meant to raise the baseline for every photo; the only
+// photo that should leave the staging pipeline is one explicitly routed to
+// Apply Cinematic Presets (orig.excludedFromStaging, set in
+// applyCinematicPresetsToCorrected()). Everything else proceeds normally —
+// closeSmartCorrectResultsModal() applies the corrected version to it.
 function isStagingCandidate(o) {
-  return !o.isFloorplan && !(_smartCorrectResults[o.id] && !o.stagingOptIn);
+  return !o.isFloorplan && !o.excludedFromStaging;
 }
 
 function generateBatchId() {
@@ -1797,12 +1791,8 @@ function renderSmartCorrectResultsModal(batchId, results) {
         </div>
       </div>
       <div style="margin-bottom:10px;">${warningBanner}${badges}</div>
-      <div style="display:flex;gap:6px;margin-bottom:6px;">
-        <button class="btn btn-outline btn-sm" onclick="useCorrectedForStaging('${r.id}')" style="flex:1;">Use for Staging</button>
-        <button class="btn btn-outline btn-sm" onclick="downloadCorrectedOnly('${r.id}')" style="flex:1;${isManualReview ? 'opacity:0.55;' : ''}" ${isManualReview ? `title="This is the unmodified original -- no correction was applied"` : ''}>${isManualReview ? 'Download Original' : 'Download Corrected'}</button>
-      </div>
       <div style="display:flex;gap:6px;${isManualReview ? 'opacity:0.55;' : ''}">
-        <button class="btn btn-outline btn-sm" onclick="useCorrectedForVideo('${r.id}')" style="flex:1;" ${isManualReview ? 'disabled title="This is the unmodified original -- no correction was applied"' : ''}>Use for Video</button>
+        <button class="btn btn-outline btn-sm" onclick="downloadCorrectedOnly('${r.id}')" style="flex:1;" ${isManualReview ? `title="This is the unmodified original -- no correction was applied"` : ''}>${isManualReview ? 'Download Original' : 'Download Corrected'}</button>
         <button class="btn btn-outline btn-sm" onclick="applyCinematicPresetsToCorrected('${r.id}')" style="flex:1;" ${isManualReview ? 'disabled title="This is the unmodified original -- no correction was applied"' : ''}>Apply Cinematic Presets</button>
       </div>
     </div>`;
@@ -1815,17 +1805,43 @@ function renderSmartCorrectResultsModal(batchId, results) {
     <div style="background:#fff;border-radius:6px;padding:24px;max-width:900px;width:100%;max-height:88vh;overflow-y:auto;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
         <div style="font-family:'Cormorant Garamond',serif;font-size:1.4rem;color:var(--ink,#1a1714);">Smart Correct™ Results</div>
-        <button onclick="document.getElementById('smart-correct-modal').remove()" style="background:none;border:none;font-size:1.4rem;cursor:pointer;color:var(--muted,#7a6f63);">×</button>
+        <button onclick="closeSmartCorrectResultsModal()" style="background:none;border:none;font-size:1.4rem;cursor:pointer;color:var(--muted,#7a6f63);">×</button>
       </div>
       <div style="font-size:0.8rem;color:var(--muted,#7a6f63);margin-bottom:16px;line-height:1.6;">
-        Corrected photos are ready — choose where each one goes next. <strong>Use for Staging</strong> swaps the corrected version into this session and continues to the normal staging flow. <strong>Download Corrected</strong> saves the corrected photo directly for MLS. <strong>Use for Video</strong> makes it available in Pro Plus Video. <strong>Apply Cinematic Presets</strong> lets you pick a photographic rendering style. None of these last three paths involve virtual staging, so none require AB 723 disclosure. A photo you don't choose an action for stays out of every pipeline — nothing happens automatically.
+        Corrected photos are ready. <strong>Download Corrected</strong> saves the photo directly for MLS, or to use in Pro Plus Video via its photo picker. <strong>Apply Cinematic Presets</strong> pulls this photo out to pick a photographic rendering style and hero shots — that path involves real digital alteration, so it goes through Generate Final and the compliance page, same as staging. Close this window to continue — every other corrected photo becomes the new working copy for staging automatically, and you can still add or remove photos before staging begins.
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px;">
         ${tiles}
       </div>
     </div>`;
   document.body.appendChild(m);
-  m.addEventListener('click', (e) => { if (e.target === m) m.remove(); });
+  m.addEventListener('click', (e) => { if (e.target === m) closeSmartCorrectResultsModal(); });
+}
+
+// Bug fix (Sam, Aug 11): "Use for Staging" as a per-photo opt-in button was
+// the wrong mental model — running Smart Correct is meant to raise the
+// baseline for every photo, not something each photo separately opts into.
+// Closing this modal (the normal way back into the staging pipeline) now
+// auto-applies the corrected version to every remaining photo — except any
+// photo explicitly pulled out via Apply Cinematic Presets, which already
+// left the staging pipeline entirely (see applyCinematicPresetsToCorrected).
+// The user still adds/removes photos freely afterward, same as always,
+// before Begin Session Setup.
+function closeSmartCorrectResultsModal() {
+  SESSION.originals.forEach(orig => {
+    const result = _smartCorrectResults[orig.id];
+    if (!result || result.status !== 'done' || orig.excludedFromStaging) return;
+    orig.base64 = result.correctedBase64;
+    orig.dataUrl = 'data:image/jpeg;base64,' + result.correctedBase64;
+    // Reset the compliance reference so generateFinal()'s lazy upload check
+    // re-uploads the CORRECTED version (not the pre-correction camera file)
+    // as the AB723 "original" if this room reaches Generate Final.
+    orig.originalUrl = null;
+    orig.ab723Status = 'pending';
+    const thumbEl = document.querySelector(`.thumb-item[data-id="${orig.id}"] img`);
+    if (thumbEl) thumbEl.src = orig.dataUrl;
+  });
+  document.getElementById('smart-correct-modal')?.remove();
 }
 
 // Click-to-enlarge for either thumbnail in a Smart Correct result tile.
@@ -1884,56 +1900,28 @@ function openSmartCorrectPreview(imageId, variant) {
   });
 }
 
-function useCorrectedForStaging(imageId) {
-  const result = _smartCorrectResults[imageId];
-  const orig = SESSION.originals.find(o => o.id === imageId);
-  if (!result || !orig || result.status !== 'done') return;
+// (useCorrectedForStaging() removed Aug 11 — superseded by
+// closeSmartCorrectResultsModal(), which applies the same swap to every
+// remaining corrected photo automatically instead of requiring a per-photo
+// opt-in click.)
 
-  // Swap the corrected image into the existing originals array in place —
-  // everything downstream (intake, room mapping, staging) treats this
-  // exactly like any other uploaded photo. No pipeline changes needed.
-  orig.base64 = result.correctedBase64;
-  orig.dataUrl = 'data:image/jpeg;base64,' + result.correctedBase64;
-  // Re-upload the corrected version as the new AB723 original reference —
-  // if this room later goes through SSP staging, the compliance "original"
-  // should be the corrected photo actually used as input, not the
-  // pre-correction camera file.
-  // Reset the compliance reference so generateFinal()'s lazy upload check
-  // re-uploads the CORRECTED version (not the pre-correction camera file)
-  // as the AB723 "original" — but only if this room actually reaches
-  // Generate Final. Smart Correct runs are frequently just tests/previews
-  // that never get finalized, so uploading here eagerly (the old behavior)
-  // meant Cloudinary was filling up with corrected versions of photos that
-  // were never posted to MLS and never needed a compliance record.
-  orig.originalUrl = null;
-  orig.ab723Status = 'pending';
-  // Bug fix (Sam, Aug 10): this is the ONLY place a Smart-Correct'd photo
-  // should be marked as belonging in the staging pipeline. See the matching
-  // filter in buildRoomQueue() — without this flag, every photo that went
-  // through Smart Correct used to roll into staging regardless of what the
-  // user actually chose in the results modal.
-  orig.stagingOptIn = true;
-
-  // Refresh the thumbnail to show the corrected version
-  const thumbEl = document.querySelector(`.thumb-item[data-id="${imageId}"] img`);
-  if (thumbEl) thumbEl.src = orig.dataUrl;
-
-  showToast(`✓ ${orig.name} updated with corrected version.`, 'success');
-}
-
-// ── CORRECTED-ONLY ROOMS (Aug 10 — closes the "Create Video hole") ─────────
-// A Smart Correct output routed to Use for Video / Apply Cinematic Presets
-// gets a lightweight room object so it can reuse the SAME machinery a
-// staged room uses for Presets, the Cinematic Asset Generator, and Create
-// Video eligibility (updateCreateVideoButton() already checks
-// SESSION.rooms.some(r=>r.finalBase64) — deliberately unchanged, this just
-// gives it something to find). roomMode:'corrected-only' is the marker that
-// keeps it out of the normal staging pipeline (see buildRoomQueue()) and
-// out of the AB 723 badge/compliance path (see syncCorrectedOnlyFinal()) —
-// these images were never virtually staged, so per Sam's own compliance
-// call in the Smart Correct modal, no disclosure applies to them either.
+// ── CORRECTED-ONLY ROOMS (Aug 10, redesigned Aug 11) ────────────────────────
+// A Smart Correct output routed to Apply Cinematic Presets gets a lightweight
+// room object so it lands in the SAME "already has a staged draft" state a
+// normal room reaches after staging — Presets, Cinematic Asset Generator,
+// Generate Final, Upscale — instead of a special bypass state. roomMode
+// stays 'stage' so renderRoomQueue() takes its normal default branch;
+// correctedOnly:true is the marker used to (a) hide the Stage/Declutter/
+// Clean+Stage/Exterior mode toggle, which is meaningless here, and (b) tell
+// attachFinalToProject() to record 'photo_enhancement' instead of
+// 'vacant_stage' — per Sam (Aug 11): applying a preset or hero shot to a
+// corrected image IS a real digital alteration, so it goes through the same
+// Generate Final → compliance-page path as staging, with the corrected
+// image as the "original" and the preset/hero-shot output as the "Final."
+// finalBase64 is intentionally left null here — Generate Final is what
+// produces it for real now, not an automatic stand-in.
 function getOrCreateCorrectedOnlyRoom(imageId) {
-  const existing = SESSION.rooms.find(r => r.originalId === imageId && r.roomMode === 'corrected-only');
+  const existing = SESSION.rooms.find(r => r.originalId === imageId && r.correctedOnly);
   if (existing) return existing;
 
   const result = _smartCorrectResults[imageId];
@@ -1945,62 +1933,26 @@ function getOrCreateCorrectedOnlyRoom(imageId) {
     isOpenPlan: false, adjacentRooms: [], zoneList: [], flexNote: '', isExterior: false,
     isReference: false, shotFocus: '', status: 'done',
     stagedBase64: result.correctedBase64, stagedCleanBase64: result.correctedBase64,
-    finalBase64: result.correctedBase64, finalStatus: 'done',
+    finalBase64: null, finalStatus: null,
     iterationNote: '', approvedDNA: null, extSelections: {}, spatialAnalysis: null,
-    spatialStatus: null, dnaStatus: null, roomMode: 'corrected-only', declutteredBase64: null,
+    spatialStatus: null, dnaStatus: null, roomMode: 'stage', declutteredBase64: null,
     presetCleanBase64: null, presetKey: null, presetStatus: null,
+    correctedOnly: true,
   };
   SESSION.rooms.push(room);
   return room;
 }
 
-// Keeps finalBase64 in sync with the latest corrected-only output (plain
-// correction, or a preset applied on top) WITHOUT routing through
-// generateFinal()'s badge/upscale/compliance pipeline — see the note above.
-function syncCorrectedOnlyFinal(roomId) {
-  const room = SESSION.rooms.find(r => r.id === roomId);
-  if (!room || room.roomMode !== 'corrected-only') return;
-  room.finalBase64 = room.presetCleanBase64 || room.stagedCleanBase64 || room.stagedBase64;
-  room.finalStatus = 'done';
-}
-
-// Same lazy-create idiom already used by attachHeroShotToProject() for the
-// identical problem (first real deliverable in a brand-new listing has to
-// create the compliance project itself). Corrected-only rooms need a
-// listingId for Create Video the same way a staged Final does, even though
-// — per AB 723 — they carry no disclosure themselves.
-async function ensureProjectForCorrectedOnly() {
-  if (!SESSION.projectId && SESSION.projectAddress && SESSION.projectStatus === 'pending-create') {
-    showToast('Creating compliance project...', '');
-    try {
-      await createNewProject(SESSION.projectAddress);
-    } catch (err) {
-      console.warn('Project creation failed (non-blocking):', err.message);
-    }
-  }
-  // Bug fix (Sam, Aug 10 test pass): the Upload-step "+ Create Video"
-  // shortcut (#step-upload-video-shortcut) already existed in the HTML but
-  // its hidden/visible state was only ever re-evaluated inside showStep(),
-  // which fires once on navigating TO step-upload — not reactively when
-  // SESSION.listingId gets set mid-step, which is exactly what happens
-  // here. Without this, a Smart-Correct-only session had a listingId and a
-  // Create Video-eligible room but literally no visible button anywhere on
-  // screen to reach it.
-  document.getElementById('step-upload-video-shortcut')?.classList.toggle('hidden', !SESSION.listingId);
-}
-
-async function useCorrectedForVideo(imageId) {
-  const room = getOrCreateCorrectedOnlyRoom(imageId);
-  if (!room) { showToast('Correction not ready for this photo yet.', 'error'); return; }
-  await ensureProjectForCorrectedOnly();
-  renderRoomQueue(); // also calls updateCreateVideoButton()
-  showToast(`✓ ${room.roomName} ready for Pro Plus Video — no staging needed.`, 'success');
-}
-
+// Pulls this photo out of the staging pipeline entirely (see the matching
+// check in isStagingCandidate()) and opens the Presets picker directly on
+// its corrected-only room. No separate project-creation step needed here
+// anymore — project creation now happens eagerly at address lookup, and
+// generateFinal() has its own lazy-create safety net besides.
 async function applyCinematicPresetsToCorrected(imageId) {
   const room = getOrCreateCorrectedOnlyRoom(imageId);
   if (!room) { showToast('Correction not ready for this photo yet.', 'error'); return; }
-  await ensureProjectForCorrectedOnly();
+  const orig = SESSION.originals.find(o => o.id === imageId);
+  if (orig) orig.excludedFromStaging = true;
   document.getElementById('smart-correct-modal')?.remove();
   openLightboxRefine(room.id, 'presets');
 }
@@ -2010,18 +1962,16 @@ async function downloadCorrectedOnly(imageId) {
   const orig = SESSION.originals.find(o => o.id === imageId);
   if (!result || !orig || result.status !== 'done') return;
 
+  // Reverted (Sam, Aug 11, same day): the upscale-on-download version below
+  // wrongly charged the STAGED credit cost (1 image) for a plain Smart
+  // Correct download. Smart Correct is meant to be a cheap touch-up step —
+  // Sam's stated direction is something like 5 corrected photos = 1 image
+  // credit, not yet built — and the real cost is meant to land later, when
+  // the corrected image actually gets used downstream (staging, video,
+  // presets/upscale, which already carry their own costs). This button
+  // stays a plain, free, non-upscaled download — no credit debit, no
+  // upscale call. Do not reintroduce a credit charge here.
   try {
-    // FIX (per Sam, cleanup investigation): this used to call
-    // generate-corrected-final.js first, which uploaded the corrected
-    // photo to Cloudinary purely to check the response was OK, then
-    // discarded the returned URL — it was never stored, displayed, or
-    // used by anything else in the app. Confirmed via grep that
-    // downloadCorrectedOnly() is the ONLY caller of that function
-    // anywhere in the codebase, and generate-corrected-final.js writes
-    // no Supabase record either — so that upload had no purpose beyond
-    // burning a Cloudinary storage credit on every SSC download. The
-    // download itself only ever needed result.correctedBase64, already
-    // sitting in the browser from the draft/preview step. Removed.
     const a = document.createElement('a');
     a.href = 'data:image/jpeg;base64,' + result.correctedBase64;
     a.download = `Corrected_${(orig.name || 'photo').replace(/[^a-z0-9.]/gi, '_')}`;
@@ -2633,15 +2583,12 @@ function buildSummary(){
 // ROOM QUEUE
 // ══════════════════════════════════════════
 function buildRoomQueue(){
-  // Bug fix (Sam, Aug 10): previously EVERY uploaded photo unconditionally
-  // became a staging room, so a photo the user ran through Smart Correct
-  // but didn't explicitly click "Use for Staging" on (they may have chosen
-  // Download Corrected / Use for Video / Apply Cinematic Presets instead)
-  // still silently pulled the UNCORRECTED original into the staging
-  // pipeline. Now: a photo that went through Smart Correct only reaches
-  // staging if the user opted in (orig.stagingOptIn, set exclusively by
-  // useCorrectedForStaging()). Photos never sent through Smart Correct at
-  // all are unaffected — normal upload flow, included as always.
+  // Redesigned Aug 11 (see isStagingCandidate()): every photo goes to
+  // staging by default once Smart Correct has run, using the corrected
+  // version (applied automatically in closeSmartCorrectResultsModal()).
+  // The only exclusion is a photo explicitly routed to Apply Cinematic
+  // Presets, which leaves the staging pipeline entirely for its own
+  // corrected-only room/Generate Final path instead.
   const photos=SESSION.originals.filter(isStagingCandidate);
   const stagingRooms=photos.map(orig=>{
     const m=SESSION.photoRoomMap[orig.id];
@@ -2652,7 +2599,7 @@ function buildRoomQueue(){
   // outside the normal photo→room mapping above and must survive a rebuild
   // triggered by confirming staging labels for OTHER photos in the same
   // batch — without this they'd be silently wiped by the replace below.
-  const correctedOnlyRooms=SESSION.rooms.filter(r=>r.roomMode==='corrected-only');
+  const correctedOnlyRooms=SESSION.rooms.filter(r=>r.correctedOnly);
   SESSION.rooms=[...correctedOnlyRooms,...stagingRooms];
   // Track Open Plan room ID for enforcement
   const openPlanRoom = SESSION.rooms.find(r => r.isOpenPlan);
@@ -2784,7 +2731,11 @@ function renderRoomQueue(){
       <div class="room-card-status pending">Not staged — spatial reference only</div></div></div></div>`;
 
     const mode=room.roomMode||'stage';
-    const modeToggle=`<div class="mode-toggle">
+    // Corrected-only rooms skip the mode toggle entirely — Stage Vacant/
+    // Declutter/Clean+Stage/Exterior are staging-workflow choices with no
+    // meaning here, and toggleRoomMode() would overwrite the corrected
+    // image with an empty staging pipeline if clicked by mistake.
+    const modeToggle=room.correctedOnly?'':`<div class="mode-toggle">
       <button class="mode-toggle-btn ${mode==='stage'?'active-int':''}" onclick="toggleRoomMode('${room.id}','stage')" title="Vacant home — stage empty room">Stage Vacant</button>
       <button class="mode-toggle-btn ${mode==='declutter'?'active-dcl':''}" onclick="toggleRoomMode('${room.id}','declutter')" title="Remove clutter only — no staging">Declutter Only</button>
       <button class="mode-toggle-btn ${mode==='cns'?'active-cns':''}" onclick="toggleRoomMode('${room.id}','cns')" title="Remove furniture then restage — occupied listings">Clean + Stage</button>
@@ -4015,7 +3966,15 @@ async function attachFinalToProject(finalBase64, room, orig, enhId) {
     cns:       'clean_and_stage',
     exterior:  'exterior_enhancement',
   };
-  const dbMode = ROOM_MODE_TO_DB_MODE[room.roomMode] || 'vacant_stage';
+  // Sam (Aug 11): a corrected-only room reaching Generate Final was never
+  // virtually staged -- a preset applied to it is real digital alteration,
+  // but not vacant staging, so it needs its own compliance `mode` value
+  // ('photo_enhancement', confirmed with Sam) instead of inheriting
+  // 'vacant_stage' through room.roomMode (which stays 'stage' purely so
+  // this room renders through the normal post-draft UI). NEEDS a matching
+  // Postgres CHECK constraint update on staged_images.mode before this
+  // will actually write successfully -- not yet applied.
+  const dbMode = room.correctedOnly ? 'photo_enhancement' : (ROOM_MODE_TO_DB_MODE[room.roomMode] || 'vacant_stage');
 
   const target = enhId ? room.extSelections[enhId] : room;
   target.complianceAttachStatus = 'pending';
@@ -4192,7 +4151,7 @@ async function applyPreset(roomId, presetKey) {
     // Decor8 room_type, Open Plan warning, "uses 1 staged image" — none of
     // which apply to a plain rendering-style pass over an already-corrected
     // photo with no staging content involved. Skip straight to the prompt.
-    const approvedPrompt = room.roomMode === 'corrected-only'
+    const approvedPrompt = room.correctedOnly
       ? presetPrompt
       : await showPromptModal({ ...room, lastPrompt: presetPrompt }, presetPrompt);
     if (approvedPrompt === null) {
@@ -4215,9 +4174,11 @@ async function applyPreset(roomId, presetKey) {
     room.promptStatus = null;
     const orig = SESSION.originals.find(o => o.id === room.originalId);
     await resizeToMatch(room, orig, null, 'presetCleanBase64', presetResult.clean);
-    if (room.roomMode === 'corrected-only') syncCorrectedOnlyFinal(room.id);
+    // Sam (Aug 11): applying a preset here is real digital alteration — it
+    // goes through the real Generate Final button next, same as staging,
+    // not an automatic stand-in finalBase64.
     renderRoomQueue();
-    showToast(`✓ ${preset.label} preset applied to ${room.roomName}.`, 'success');
+    showToast(`✓ ${preset.label} preset applied to ${room.roomName}. Generate Final when ready to send it to compliance.`, 'success');
   } catch (err) {
     room.presetStatus = 'error';
     room.promptStatus = null;
@@ -4692,7 +4653,10 @@ async function attachHeroShotToProject(finalBase64, room, shot, shotId) {
     cns:       'clean_and_stage',
     exterior:  'exterior_enhancement',
   };
-  const dbMode = ROOM_MODE_TO_DB_MODE[room.roomMode] || 'vacant_stage';
+  // Same corrected-only override as attachFinalToProject() -- a hero shot
+  // generated from a corrected-only room is still real digital alteration
+  // on a photo that was never virtually staged.
+  const dbMode = room.correctedOnly ? 'photo_enhancement' : (ROOM_MODE_TO_DB_MODE[room.roomMode] || 'vacant_stage');
 
   shot.complianceAttachStatus = 'pending';
   shot.complianceAttachError = null;

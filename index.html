@@ -1632,6 +1632,22 @@ function updateUploadUI(){
 
 let _smartCorrectResults = {}; // keyed by original.id → {status, correctedBase64, modulesApplied, ...}
 
+// Single source of truth for "does this photo belong in the staging
+// pipeline right now." Bug fix (Sam, Aug 10 test pass): excluding un-opted
+// Smart Correct photos ONLY at buildRoomQueue() wasn't enough — the intake
+// wizard and Room Assignment screen ran before it and still forced every
+// photo through room labeling regardless of what the user chose in the
+// Smart Correct modal, and confirmMapping() then BLOCKED progress on those
+// photos being labeled at all ("Label all photos before continuing"). A
+// photo that went through Smart Correct only belongs in this pipeline once
+// the user explicitly opts in via useCorrectedForStaging(). Used by every
+// staging-facing screen — intake, mapping, confirm, build, and group-select
+// — so a photo routed to Download/Video/Presets never enters the labeling
+// flow in the first place, not just filtered out at the very end of it.
+function isStagingCandidate(o) {
+  return !o.isFloorplan && !(_smartCorrectResults[o.id] && !o.stagingOptIn);
+}
+
 function generateBatchId() {
   return 'sc_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
 }
@@ -1962,6 +1978,15 @@ async function ensureProjectForCorrectedOnly() {
       console.warn('Project creation failed (non-blocking):', err.message);
     }
   }
+  // Bug fix (Sam, Aug 10 test pass): the Upload-step "+ Create Video"
+  // shortcut (#step-upload-video-shortcut) already existed in the HTML but
+  // its hidden/visible state was only ever re-evaluated inside showStep(),
+  // which fires once on navigating TO step-upload — not reactively when
+  // SESSION.listingId gets set mid-step, which is exactly what happens
+  // here. Without this, a Smart-Correct-only session had a listingId and a
+  // Create Video-eligible room but literally no visible button anywhere on
+  // screen to reach it.
+  document.getElementById('step-upload-video-shortcut')?.classList.toggle('hidden', !SESSION.listingId);
 }
 
 async function useCorrectedForVideo(imageId) {
@@ -2066,7 +2091,7 @@ async function analyzeFloorplan(fp){
   }catch(err){showToast('Floor plan analysis failed — switching to manual labeling.','error');showMappingManual();}
 }
 function showMappingWithFloorplan(rooms){
-  const photos=SESSION.originals.filter(o=>!o.isFloorplan);
+  const photos=SESSION.originals.filter(isStagingCandidate);
   const roomOpts=rooms.map(r=>`<option value="${r.id}">${r.name}${r.floor?' (Fl.'+r.floor+')':''}</option>`).join('');
   document.getElementById('mapping-body').innerHTML=`
     <div class="panel-sub" style="margin-bottom:16px;">AI identified <strong>${rooms.length} rooms</strong>. Assign each photo.</div>
@@ -2094,7 +2119,7 @@ function updatePhotoRoom(photoId,roomId){
   SESSION.photoRoomMap[photoId]={...SESSION.photoRoomMap[photoId]||{},roomId:room.id,roomName:room.name,adjacentNames:adjNames,isExterior:isExt};
 }
 function showMappingManual(){
-  const photos=SESSION.originals.filter(o=>!o.isFloorplan);
+  const photos=SESSION.originals.filter(isStagingCandidate);
   document.getElementById('mapping-body').innerHTML=`
     <div class="panel-sub" style="margin-bottom:16px;">Label each photo. Critical for open-concept shots showing multiple spaces — select all rooms/zone(s) that apply. Click Exterior and Single Room to choose staging options, without this the AI tries to fill every space.</div>
     <div class="no-fp-label-list">
@@ -2119,7 +2144,7 @@ function renderPhotoAssignRow(p){
       </div>`;
 }
 function confirmMapping(){
-  const photos=SESSION.originals.filter(o=>!o.isFloorplan);
+  const photos=SESSION.originals.filter(isStagingCandidate);
   const unlabeled=photos.filter(p=>!SESSION.photoRoomMap[p.id]?.roomName);
   if(unlabeled.length){
     showToast(`Label all photos before continuing — ${unlabeled.length} remaining.`,'error');
@@ -2617,7 +2642,7 @@ function buildRoomQueue(){
   // staging if the user opted in (orig.stagingOptIn, set exclusively by
   // useCorrectedForStaging()). Photos never sent through Smart Correct at
   // all are unaffected — normal upload flow, included as always.
-  const photos=SESSION.originals.filter(o=>!o.isFloorplan && !(_smartCorrectResults[o.id] && !o.stagingOptIn));
+  const photos=SESSION.originals.filter(isStagingCandidate);
   const stagingRooms=photos.map(orig=>{
     const m=SESSION.photoRoomMap[orig.id];
     const isOpenPlan=m?.isOpenPlan||false;
@@ -4161,7 +4186,15 @@ async function applyPreset(roomId, presetKey) {
     // Same Prompt Review step as staging/revisions — Sam wants to see assembled
     // preset prompts while testing. A throwaway room-shaped object satisfies
     // showPromptModal()'s signature without disturbing the real room.lastPrompt.
-    const approvedPrompt = await showPromptModal({ ...room, lastPrompt: presetPrompt }, presetPrompt);
+    //
+    // EXCEPT for corrected-only rooms (Aug 10 test finding — felt like getting
+    // "bounced out"): that modal is entirely staging-flavored — DNA tier chips,
+    // Decor8 room_type, Open Plan warning, "uses 1 staged image" — none of
+    // which apply to a plain rendering-style pass over an already-corrected
+    // photo with no staging content involved. Skip straight to the prompt.
+    const approvedPrompt = room.roomMode === 'corrected-only'
+      ? presetPrompt
+      : await showPromptModal({ ...room, lastPrompt: presetPrompt }, presetPrompt);
     if (approvedPrompt === null) {
       room.presetStatus = null;
       renderRoomQueue();
@@ -6175,7 +6208,7 @@ function renderGroupSelectArea() {
   const actions = document.getElementById('group-actions');
   if (!area) return;
 
-  const photos = SESSION.originals.filter(o => !o.isFloorplan);
+  const photos = SESSION.originals.filter(isStagingCandidate);
   if (!photos.length) { area.innerHTML = '<div style="font-size:0.75rem;color:var(--muted);">Upload photos first, then return here to group them.</div>'; return; }
 
   const selectedIds = new Set(SESSION.groupImages.map(g => g.originalId));

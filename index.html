@@ -1848,19 +1848,26 @@ function toggleSmartCorrectPresetSelection(imageId, checked) {
 // anywhere, so the newly-created room was invisible. Redesigned: select any
 // number of photos via checkbox, then launch them all at once. Each
 // selected photo gets its corrected-only room created and is pulled out of
-// the staging pipeline (orig.excludedFromStaging) — same as before — but
-// now nothing auto-opens. They land in the Room Queue exactly like a
-// staged room's draft (see getOrCreateCorrectedOnlyRoom), and the user
-// clicks into each one from there to apply a preset or hero shot, the same
-// interaction a real staged room already uses. Unselected photos are
-// untouched here — closing the modal (below) still auto-applies the
+// the staging pipeline (orig.excludedFromStaging) — same as before.
+// Refined again (Sam, same day): landing on the Room Queue still left the
+// user to hunt for the room card and open it themselves. Now the first
+// selected photo's Refine lightbox opens automatically (Revise/Presets —
+// there's no Stage tab in this lightbox at all, staging mode-selection is
+// separate UI that's already suppressed for these rooms), so editing starts
+// immediately. Hero Shot isn't reachable from inside this same lightbox —
+// it's a separate modal off the room card — but it's one click away once
+// this closes. Any additional selected photos still land as cards in the
+// queue behind it, same as before, ready to open the same way. Unselected
+// photos are untouched here — closing the modal still auto-applies the
 // corrected version to them for normal staging, same as always.
 function launchSmartCorrectPresetSelection() {
   if (!_smartCorrectPresetSelections.size) { showToast('Select at least one photo first.', 'error'); return; }
   let count = 0;
+  let firstRoomId = null;
   _smartCorrectPresetSelections.forEach(imageId => {
     const room = getOrCreateCorrectedOnlyRoom(imageId);
     if (!room) return;
+    if (!firstRoomId) firstRoomId = room.id;
     const orig = SESSION.originals.find(o => o.id === imageId);
     if (orig) orig.excludedFromStaging = true;
     count++;
@@ -1880,7 +1887,12 @@ function launchSmartCorrectPresetSelection() {
   showStep('step-staging');
   updateSessionButtons();
   renderRoomQueue();
-  showToast(`✓ ${count} photo${count > 1 ? 's' : ''} ready in the Room Queue, past staging — click the card to apply a preset or hero shot.`, 'success');
+  if (firstRoomId) {
+    openLightboxRefine(firstRoomId, 'revise');
+    if (count > 1) showToast(`✓ ${count} photos ready — editing the first now, the rest are waiting in the Room Queue.`, 'success');
+  } else {
+    showToast(`✓ ${count} photo${count > 1 ? 's' : ''} ready in the Room Queue, past staging.`, 'success');
+  }
 }
 
 // Bug fix (Sam, Aug 11): "Use for Staging" as a per-photo opt-in button was

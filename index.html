@@ -1781,9 +1781,13 @@ function renderSmartCorrectResultsModal(batchId, results) {
         </div>
       </div>
       <div style="margin-bottom:10px;">${warningBanner}${badges}</div>
-      <div style="display:flex;gap:6px;">
+      <div style="display:flex;gap:6px;margin-bottom:6px;">
         <button class="btn btn-outline btn-sm" onclick="useCorrectedForStaging('${r.id}')" style="flex:1;">Use for Staging</button>
         <button class="btn btn-outline btn-sm" onclick="downloadCorrectedOnly('${r.id}')" style="flex:1;${isManualReview ? 'opacity:0.55;' : ''}" ${isManualReview ? `title="This is the unmodified original -- no correction was applied"` : ''}>${isManualReview ? 'Download Original' : 'Download Corrected'}</button>
+      </div>
+      <div style="display:flex;gap:6px;${isManualReview ? 'opacity:0.55;' : ''}">
+        <button class="btn btn-outline btn-sm" onclick="useCorrectedForVideo('${r.id}')" style="flex:1;" ${isManualReview ? 'disabled title="This is the unmodified original -- no correction was applied"' : ''}>Use for Video</button>
+        <button class="btn btn-outline btn-sm" onclick="applyCinematicPresetsToCorrected('${r.id}')" style="flex:1;" ${isManualReview ? 'disabled title="This is the unmodified original -- no correction was applied"' : ''}>Apply Cinematic Presets</button>
       </div>
     </div>`;
   }).join('');
@@ -1798,7 +1802,7 @@ function renderSmartCorrectResultsModal(batchId, results) {
         <button onclick="document.getElementById('smart-correct-modal').remove()" style="background:none;border:none;font-size:1.4rem;cursor:pointer;color:var(--muted,#7a6f63);">×</button>
       </div>
       <div style="font-size:0.8rem;color:var(--muted,#7a6f63);margin-bottom:16px;line-height:1.6;">
-        Corrected photos are ready. <strong>Use for Staging</strong> swaps the corrected version into this session and continues to the normal staging flow. <strong>Download Corrected</strong> saves the corrected photo directly for MLS — no virtual staging, no AB 723 disclosure required for this path.
+        Corrected photos are ready — choose where each one goes next. <strong>Use for Staging</strong> swaps the corrected version into this session and continues to the normal staging flow. <strong>Download Corrected</strong> saves the corrected photo directly for MLS. <strong>Use for Video</strong> makes it available in Pro Plus Video. <strong>Apply Cinematic Presets</strong> lets you pick a photographic rendering style. None of these last three paths involve virtual staging, so none require AB 723 disclosure. A photo you don't choose an action for stays out of every pipeline — nothing happens automatically.
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px;">
         ${tiles}
@@ -1887,12 +1891,93 @@ function useCorrectedForStaging(imageId) {
   // were never posted to MLS and never needed a compliance record.
   orig.originalUrl = null;
   orig.ab723Status = 'pending';
+  // Bug fix (Sam, Aug 10): this is the ONLY place a Smart-Correct'd photo
+  // should be marked as belonging in the staging pipeline. See the matching
+  // filter in buildRoomQueue() — without this flag, every photo that went
+  // through Smart Correct used to roll into staging regardless of what the
+  // user actually chose in the results modal.
+  orig.stagingOptIn = true;
 
   // Refresh the thumbnail to show the corrected version
   const thumbEl = document.querySelector(`.thumb-item[data-id="${imageId}"] img`);
   if (thumbEl) thumbEl.src = orig.dataUrl;
 
   showToast(`✓ ${orig.name} updated with corrected version.`, 'success');
+}
+
+// ── CORRECTED-ONLY ROOMS (Aug 10 — closes the "Create Video hole") ─────────
+// A Smart Correct output routed to Use for Video / Apply Cinematic Presets
+// gets a lightweight room object so it can reuse the SAME machinery a
+// staged room uses for Presets, the Cinematic Asset Generator, and Create
+// Video eligibility (updateCreateVideoButton() already checks
+// SESSION.rooms.some(r=>r.finalBase64) — deliberately unchanged, this just
+// gives it something to find). roomMode:'corrected-only' is the marker that
+// keeps it out of the normal staging pipeline (see buildRoomQueue()) and
+// out of the AB 723 badge/compliance path (see syncCorrectedOnlyFinal()) —
+// these images were never virtually staged, so per Sam's own compliance
+// call in the Smart Correct modal, no disclosure applies to them either.
+function getOrCreateCorrectedOnlyRoom(imageId) {
+  const existing = SESSION.rooms.find(r => r.originalId === imageId && r.roomMode === 'corrected-only');
+  if (existing) return existing;
+
+  const result = _smartCorrectResults[imageId];
+  const orig = SESSION.originals.find(o => o.id === imageId);
+  if (!result || !orig || result.status !== 'done') return null;
+
+  const room = {
+    id: 'room_co_' + imageId, originalId: imageId, roomName: orig.name, decor8Type: null,
+    isOpenPlan: false, adjacentRooms: [], zoneList: [], flexNote: '', isExterior: false,
+    isReference: false, shotFocus: '', status: 'done',
+    stagedBase64: result.correctedBase64, stagedCleanBase64: result.correctedBase64,
+    finalBase64: result.correctedBase64, finalStatus: 'done',
+    iterationNote: '', approvedDNA: null, extSelections: {}, spatialAnalysis: null,
+    spatialStatus: null, dnaStatus: null, roomMode: 'corrected-only', declutteredBase64: null,
+    presetCleanBase64: null, presetKey: null, presetStatus: null,
+  };
+  SESSION.rooms.push(room);
+  return room;
+}
+
+// Keeps finalBase64 in sync with the latest corrected-only output (plain
+// correction, or a preset applied on top) WITHOUT routing through
+// generateFinal()'s badge/upscale/compliance pipeline — see the note above.
+function syncCorrectedOnlyFinal(roomId) {
+  const room = SESSION.rooms.find(r => r.id === roomId);
+  if (!room || room.roomMode !== 'corrected-only') return;
+  room.finalBase64 = room.presetCleanBase64 || room.stagedCleanBase64 || room.stagedBase64;
+  room.finalStatus = 'done';
+}
+
+// Same lazy-create idiom already used by attachHeroShotToProject() for the
+// identical problem (first real deliverable in a brand-new listing has to
+// create the compliance project itself). Corrected-only rooms need a
+// listingId for Create Video the same way a staged Final does, even though
+// — per AB 723 — they carry no disclosure themselves.
+async function ensureProjectForCorrectedOnly() {
+  if (!SESSION.projectId && SESSION.projectAddress && SESSION.projectStatus === 'pending-create') {
+    showToast('Creating compliance project...', '');
+    try {
+      await createNewProject(SESSION.projectAddress);
+    } catch (err) {
+      console.warn('Project creation failed (non-blocking):', err.message);
+    }
+  }
+}
+
+async function useCorrectedForVideo(imageId) {
+  const room = getOrCreateCorrectedOnlyRoom(imageId);
+  if (!room) { showToast('Correction not ready for this photo yet.', 'error'); return; }
+  await ensureProjectForCorrectedOnly();
+  renderRoomQueue(); // also calls updateCreateVideoButton()
+  showToast(`✓ ${room.roomName} ready for Pro Plus Video — no staging needed.`, 'success');
+}
+
+async function applyCinematicPresetsToCorrected(imageId) {
+  const room = getOrCreateCorrectedOnlyRoom(imageId);
+  if (!room) { showToast('Correction not ready for this photo yet.', 'error'); return; }
+  await ensureProjectForCorrectedOnly();
+  document.getElementById('smart-correct-modal')?.remove();
+  openLightboxRefine(room.id, 'presets');
 }
 
 async function downloadCorrectedOnly(imageId) {
@@ -2523,12 +2608,27 @@ function buildSummary(){
 // ROOM QUEUE
 // ══════════════════════════════════════════
 function buildRoomQueue(){
-  const photos=SESSION.originals.filter(o=>!o.isFloorplan);
-  SESSION.rooms=photos.map(orig=>{
+  // Bug fix (Sam, Aug 10): previously EVERY uploaded photo unconditionally
+  // became a staging room, so a photo the user ran through Smart Correct
+  // but didn't explicitly click "Use for Staging" on (they may have chosen
+  // Download Corrected / Use for Video / Apply Cinematic Presets instead)
+  // still silently pulled the UNCORRECTED original into the staging
+  // pipeline. Now: a photo that went through Smart Correct only reaches
+  // staging if the user opted in (orig.stagingOptIn, set exclusively by
+  // useCorrectedForStaging()). Photos never sent through Smart Correct at
+  // all are unaffected — normal upload flow, included as always.
+  const photos=SESSION.originals.filter(o=>!o.isFloorplan && !(_smartCorrectResults[o.id] && !o.stagingOptIn));
+  const stagingRooms=photos.map(orig=>{
     const m=SESSION.photoRoomMap[orig.id];
     const isOpenPlan=m?.isOpenPlan||false;
     return {id:'room_'+orig.id,originalId:orig.id,roomName:m?.roomName||orig.name,decor8Type:m?.decor8Type||null,isOpenPlan,adjacentRooms:m?.adjacentNames||[],zoneList:m?.zoneList||[],flexNote:m?.flexNote||'',isExterior:m?.isExterior||false,isReference:m?.isReference||false,shotFocus:m?.shotFocus||'',status:'pending',stagedBase64:null,finalBase64:null,finalStatus:null,iterationNote:'',approvedDNA:null,extSelections:{},spatialAnalysis:null,spatialStatus:null,dnaStatus:null,roomMode:'stage',declutteredBase64:null};
   });
+  // Corrected-only rooms (Use for Video / Apply Cinematic Presets) live
+  // outside the normal photo→room mapping above and must survive a rebuild
+  // triggered by confirming staging labels for OTHER photos in the same
+  // batch — without this they'd be silently wiped by the replace below.
+  const correctedOnlyRooms=SESSION.rooms.filter(r=>r.roomMode==='corrected-only');
+  SESSION.rooms=[...correctedOnlyRooms,...stagingRooms];
   // Track Open Plan room ID for enforcement
   const openPlanRoom = SESSION.rooms.find(r => r.isOpenPlan);
   SESSION.openPlanRoomId = openPlanRoom?.id || null;
@@ -4082,6 +4182,7 @@ async function applyPreset(roomId, presetKey) {
     room.promptStatus = null;
     const orig = SESSION.originals.find(o => o.id === room.originalId);
     await resizeToMatch(room, orig, null, 'presetCleanBase64', presetResult.clean);
+    if (room.roomMode === 'corrected-only') syncCorrectedOnlyFinal(room.id);
     renderRoomQueue();
     showToast(`✓ ${preset.label} preset applied to ${room.roomName}.`, 'success');
   } catch (err) {

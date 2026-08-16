@@ -305,7 +305,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
   </div>
   <div class="header-right" style="display:flex;align-items:center;gap:12px;">
     <div id="header-credit-badge" class="hidden" style="background:rgba(184,151,90,0.18);border:1px solid var(--gold);border-radius:3px;padding:4px 12px;font-size:0.72rem;color:var(--gold);letter-spacing:0.06em;white-space:nowrap;"></div>
-    <div id="header-smart-correct-badge" class="hidden" style="background:rgba(184,151,90,0.08);border:1px solid rgba(184,151,90,0.4);border-radius:3px;padding:4px 12px;font-size:0.72rem;color:#c8bfb0;letter-spacing:0.04em;white-space:nowrap;" title="Smart Correct™ — every 5 corrections uses 1 image credit"></div>
+    <div id="header-smart-correct-badge" class="hidden" style="background:rgba(184,151,90,0.08);border:1px solid rgba(184,151,90,0.4);border-radius:3px;padding:4px 12px;font-size:0.72rem;color:#c8bfb0;letter-spacing:0.04em;white-space:nowrap;" title="Smart Correct™ — every 5 corrections uses 1 Image"></div>
     <div id="header-user-info" class="hidden" style="font-size:0.75rem;color:#c8bfb0;letter-spacing:0.04em;"></div>
     <button id="header-listings-btn" class="hidden btn btn-ghost" style="font-size:0.72rem;padding:5px 14px;color:#c8bfb0;border:1px solid rgba(184,151,90,0.3);border-radius:3px;" onclick="showDashboard()">My Listings</button>
     <button id="header-signout-btn" class="hidden btn btn-ghost" style="font-size:0.72rem;padding:5px 12px;color:#c8bfb0;" onclick="signOut()">Sign Out</button>
@@ -1904,8 +1904,8 @@ function updateSmartCorrectUsageFooter(chargeResult, completedCount) {
   const toward = chargeResult.chargeDeferred
     ? `charge pending — will apply on your next batch`
     : chargeResult.creditsChargedThisBatch > 0
-    ? `1 image credit charged this batch`
-    : `${Math.max(0, 5 - (chargeResult.totalCorrections - (chargeResult.creditsCharged * 5)))} more correction${(5 - (chargeResult.totalCorrections - (chargeResult.creditsCharged * 5))) !== 1 ? 's' : ''} until next credit`;
+    ? `1 Image charged this batch`
+    : `${Math.max(0, 5 - (chargeResult.totalCorrections - (chargeResult.creditsCharged * 5)))} more correction${(5 - (chargeResult.totalCorrections - (chargeResult.creditsCharged * 5))) !== 1 ? 's' : ''} until next Image`;
   el.textContent = `${base} · ${toward}`;
 }
 
@@ -7029,7 +7029,7 @@ async function updateHeaderForUser(user, userRec) {
   refreshSmartCorrectUsageChip();
 }
 
-// Populates the "Smart Correct: X of 5 to next credit" header chip. Called
+// Populates the "Smart Correct: X of 5 to next Image" header chip. Called
 // on login/header load and again after every committed charge, so it always
 // reflects the real lifetime counter — see smart-correct-usage.js's
 // ?action=status.
@@ -7040,7 +7040,7 @@ async function refreshSmartCorrectUsageChip() {
     const res = await fetch(`/.netlify/functions/smart-correct-usage?action=status&userId=${encodeURIComponent(_currentUser.id)}`);
     if (!res.ok) return;
     const data = await res.json();
-    chip.textContent = `Smart Correct: ${data.correctionsTowardNextCredit} of 5 to next credit`;
+    chip.textContent = `Smart Correct: ${data.correctionsTowardNextCredit} of 5 to next Image`;
     chip.classList.remove('hidden');
   } catch (err) {
     console.error('Smart Correct chip refresh failed:', err.message);

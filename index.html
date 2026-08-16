@@ -6939,6 +6939,17 @@ async function initAuth() {
   });
 }
 
+// Trial length — mirrors debit-credit.js's isTrialExpired exactly (same
+// 30-day window, same created_at-as-trial-start reasoning). Duplicated
+// rather than shared because this is a static-file frontend with no
+// shared module system between it and the Netlify functions — see
+// debit-credit.js's own comment for the full "why created_at" reasoning.
+const TRIAL_LENGTH_MS = 30 * 24 * 60 * 60 * 1000;
+function isTrialExpired(createdAt) {
+  if (!createdAt) return false;
+  return (Date.now() - new Date(createdAt).getTime()) > TRIAL_LENGTH_MS;
+}
+
 async function handleAuthenticatedUser(user) {
   hideAllAuthModals();
 
@@ -6966,6 +6977,18 @@ async function handleAuthenticatedUser(user) {
   // Check subscription status — must be explicitly active OR have free trial credits
   const status = userRec.subscription_status;
   if (status !== 'active') {
+    // Expired trial blocks unconditionally, BEFORE the credit-balance
+    // check below — a trial user can easily still be sitting on unused
+    // Images past 30 days, and unused balance was never meant to extend
+    // access past the promised window. Mirrors debit-credit.js's
+    // identical check, which is what actually protects Generate Final /
+    // Kling / video download / Smart Correct — this one just gives an
+    // expired trial user a clean redirect instead of a raw error the
+    // first time they try to spend an Image.
+    if (status === 'trial' && isTrialExpired(userRec.created_at)) {
+      showPricingPage(user, userRec, 'trial_expired');
+      return;
+    }
     // Check if user has free trial credits
     const sb = getSupabase();
     const { data: trialCredits } = await sb
@@ -7289,7 +7312,7 @@ async function acceptTos() {
 // ══════════════════════════════════════════
 // PRICING PAGE
 // ══════════════════════════════════════════
-function showPricingPage(user, userRec) {
+function showPricingPage(user, userRec, reason) {
   hideAllAuthModals();
   hideAppUI();
 
@@ -7303,11 +7326,16 @@ function showPricingPage(user, userRec) {
 
   const urlParams = new URLSearchParams(window.location.search);
   const checkoutSuccess = urlParams.get('checkout') === 'success';
+  const trialExpired = reason === 'trial_expired';
 
   page.innerHTML = `
     ${checkoutSuccess ? `
     <div style="background:#2d6a4f;color:#fff;text-align:center;padding:14px;font-size:0.85rem;letter-spacing:0.04em;">
       ✅ Subscription activated — welcome to Smart Stage PRO™! Loading your account...
+    </div>` : ''}
+    ${trialExpired && !checkoutSuccess ? `
+    <div style="background:var(--ink,#1a1714);color:#f0f0f0;text-align:center;padding:14px;font-size:0.85rem;letter-spacing:0.04em;">
+      Your 30-day free trial has ended. Choose a plan below to keep going — any Images left on your trial balance carry over.
     </div>` : ''}
     <div style="max-width:860px;margin:0 auto;padding:48px 20px 0;">
       <div style="text-align:center;margin-bottom:48px;">

@@ -305,6 +305,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
   </div>
   <div class="header-right" style="display:flex;align-items:center;gap:12px;">
     <div id="header-credit-badge" class="hidden" style="background:rgba(184,151,90,0.18);border:1px solid var(--gold);border-radius:3px;padding:4px 12px;font-size:0.72rem;color:var(--gold);letter-spacing:0.06em;white-space:nowrap;"></div>
+    <div id="header-smart-correct-badge" class="hidden" style="background:rgba(184,151,90,0.08);border:1px solid rgba(184,151,90,0.4);border-radius:3px;padding:4px 12px;font-size:0.72rem;color:#c8bfb0;letter-spacing:0.04em;white-space:nowrap;" title="Smart Correct™ — every 5 corrections uses 1 image credit"></div>
     <div id="header-user-info" class="hidden" style="font-size:0.75rem;color:#c8bfb0;letter-spacing:0.04em;"></div>
     <button id="header-listings-btn" class="hidden btn btn-ghost" style="font-size:0.72rem;padding:5px 14px;color:#c8bfb0;border:1px solid rgba(184,151,90,0.3);border-radius:3px;" onclick="showDashboard()">My Listings</button>
     <button id="header-signout-btn" class="hidden btn btn-ghost" style="font-size:0.72rem;padding:5px 12px;color:#c8bfb0;" onclick="signOut()">Sign Out</button>
@@ -1646,6 +1647,37 @@ function generateBatchId() {
   return 'sc_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
 }
 
+// Smart Correct charge model: 5 corrections = 1 image credit, billed as a
+// lifetime running counter with a carried remainder (Sam's decision, Aug 16
+// 2026) — blocked upfront if the balance can't cover it, same overage-modal
+// convention as Generate Final / Kling / video download. "No free lunch."
+// See smart-correct-usage.js for the quote/commit split this calls into.
+async function quoteSmartCorrectCharge(userId, count) {
+  const res = await fetch(`/.netlify/functions/smart-correct-usage?action=quote&userId=${encodeURIComponent(userId)}&count=${count}`);
+  if (!res.ok) throw new Error('Failed to check Smart Correct balance');
+  return res.json();
+}
+
+async function commitSmartCorrectCharge(userId, correctionsCompleted) {
+  try {
+    const res = await fetch('/.netlify/functions/smart-correct-usage', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, correctionsCompleted }),
+    });
+    const data = await res.json();
+    refreshSmartCorrectUsageChip(); // update the header chip with the new totals regardless of outcome
+    return data;
+  } catch (err) {
+    // Charging failure should never block the user from seeing photos they
+    // already corrected — the increment/commit split in smart-correct-usage.js
+    // means an uncharged correction is simply picked up on the next batch's
+    // quote check, never lost or silently double-charged.
+    console.error('Smart Correct charge commit failed:', err.message);
+    return null;
+  }
+}
+
 async function runSmartCorrectBatch() {
   if (SESSION.originals.length === 0) {
     showToast('Upload photos first.', 'error');
@@ -1654,6 +1686,24 @@ async function runSmartCorrectBatch() {
 
   const batchId = generateBatchId();
   const images = SESSION.originals.map(o => ({ id: o.id, imageBase64: o.base64, mimeType: o.mimeType }));
+
+  // Pre-flight block: check whether this batch would push the lifetime
+  // counter past a multiple of 5 that the user's balance can't cover.
+  // Runs BEFORE any photo is dispatched to Railway — no free correction
+  // runs while an unaffordable charge is pending.
+  if (_currentUser?.id) {
+    try {
+      const quote = await quoteSmartCorrectCharge(_currentUser.id, images.length);
+      if (!quote.sufficient) {
+        showOverageModal(quote.balance, quote.creditsOwedIfRun, 'Smart Correct batch');
+        return;
+      }
+    } catch (err) {
+      console.error('Smart Correct balance check failed:', err.message);
+      showToast('Could not verify Image balance — please try again.', 'error');
+      return;
+    }
+  }
 
   renderSmartCorrectProcessingModal(images.length);
 
@@ -1711,6 +1761,17 @@ async function runSmartCorrectBatch() {
     results.forEach(r => { _smartCorrectResults[r.id] = r; });
     document.getElementById('smart-correct-modal')?.remove();
     renderSmartCorrectResultsModal(batchId, results);
+
+    // Charge AFTER results are known, counting only photos that actually
+    // corrected — a failed correction was never delivered, so it never
+    // counts toward the 5-for-1 total. Pre-flight quote already confirmed
+    // the balance can cover this; see commitSmartCorrectCharge's own
+    // comment for what happens on the rare case that changed in between.
+    const completedCount = results.filter(r => r.status !== 'error').length;
+    if (_currentUser?.id && completedCount > 0) {
+      commitSmartCorrectCharge(_currentUser.id, completedCount)
+        .then(chargeResult => updateSmartCorrectUsageFooter(chargeResult, completedCount));
+    }
 
   } catch (err) {
     document.getElementById('smart-correct-modal')?.remove();
@@ -1820,9 +1881,32 @@ function renderSmartCorrectResultsModal(batchId, results) {
         <button class="btn btn-primary btn-sm" id="sc-preset-launch-btn" onclick="launchSmartCorrectPresetSelection()" disabled>Launch Selected into Room Queue →</button>
         <span id="sc-preset-launch-count" style="font-size:0.75rem;color:var(--muted,#7a6f63);">0 selected</span>
       </div>
+      <div id="sc-usage-footer" style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border,#e0d8ce);font-size:0.72rem;color:var(--muted,#7a6f63);text-align:center;">
+        ${results.filter(r => r.status !== 'error').length} photo${results.filter(r => r.status !== 'error').length !== 1 ? 's' : ''} corrected this batch · updating Image balance…
+      </div>
     </div>`;
   document.body.appendChild(m);
   m.addEventListener('click', (e) => { if (e.target === m) closeSmartCorrectResultsModal(); });
+}
+
+// Updates the results modal's footer once the batch's charge has actually
+// been committed (or deferred) — called from runSmartCorrectBatch after
+// commitSmartCorrectCharge resolves. Guarded on the element still existing,
+// since the user may have already closed the modal by then.
+function updateSmartCorrectUsageFooter(chargeResult, completedCount) {
+  const el = document.getElementById('sc-usage-footer');
+  if (!el) return;
+  const base = `${completedCount} photo${completedCount !== 1 ? 's' : ''} corrected this batch`;
+  if (!chargeResult) {
+    el.textContent = `${base} · Image balance unavailable`;
+    return;
+  }
+  const toward = chargeResult.chargeDeferred
+    ? `charge pending — will apply on your next batch`
+    : chargeResult.creditsChargedThisBatch > 0
+    ? `1 image credit charged this batch`
+    : `${Math.max(0, 5 - (chargeResult.totalCorrections - (chargeResult.creditsCharged * 5)))} more correction${(5 - (chargeResult.totalCorrections - (chargeResult.creditsCharged * 5))) !== 1 ? 's' : ''} until next credit`;
+  el.textContent = `${base} · ${toward}`;
 }
 
 // Selection state for the "Select for Presets / Hero Shot" checkboxes —
@@ -6751,7 +6835,7 @@ function resetSession(){
 }
 function showToast(msg,type=''){const t=document.getElementById('toast');t.textContent=msg;t.className='show '+(type||'');setTimeout(()=>{t.className='';},4000);}
 
-function showOverageModal(balance, cost) {
+function showOverageModal(balance, cost, actionLabel = 'Final') {
   // Remove any existing modal
   document.getElementById('overage-modal')?.remove();
   const m = document.createElement('div');
@@ -6762,7 +6846,7 @@ function showOverageModal(balance, cost) {
       <div style="font-size:2rem;margin-bottom:12px;">⚡</div>
       <div style="font-family:'Cormorant Garamond',serif;font-size:1.45rem;color:#f0f0f0;margin-bottom:8px;">Image Balance Empty</div>
       <div style="color:#aaa;font-size:0.88rem;margin-bottom:24px;line-height:1.6;">
-        You have <strong style="color:#f0f0f0;">${balance} images</strong> remaining but this Final costs <strong style="color:#f0f0f0;">${cost} image${cost>1?'s':''}</strong>.<br>
+        You have <strong style="color:#f0f0f0;">${balance} images</strong> remaining but this ${actionLabel} costs <strong style="color:#f0f0f0;">${cost} image${cost>1?'s':''}</strong>.<br>
         Upgrade your plan or purchase overage images to continue.
       </div>
       <div style="display:flex;flex-direction:column;gap:10px;">
@@ -6940,6 +7024,26 @@ async function updateHeaderForUser(user, userRec) {
     const balance = ledger?.[0]?.balance_after ?? TIER_DEFAULT[userRec?.role] ?? 50;
     creditBadge.textContent = `${balance} images remaining`;
     creditBadge.classList.remove('hidden');
+  }
+
+  refreshSmartCorrectUsageChip();
+}
+
+// Populates the "Smart Correct: X of 5 to next credit" header chip. Called
+// on login/header load and again after every committed charge, so it always
+// reflects the real lifetime counter — see smart-correct-usage.js's
+// ?action=status.
+async function refreshSmartCorrectUsageChip() {
+  const chip = document.getElementById('header-smart-correct-badge');
+  if (!chip || !_currentUser?.id) return;
+  try {
+    const res = await fetch(`/.netlify/functions/smart-correct-usage?action=status&userId=${encodeURIComponent(_currentUser.id)}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    chip.textContent = `Smart Correct: ${data.correctionsTowardNextCredit} of 5 to next credit`;
+    chip.classList.remove('hidden');
+  } catch (err) {
+    console.error('Smart Correct chip refresh failed:', err.message);
   }
 }
 

@@ -337,6 +337,16 @@ const MONTHLY_KLING_ALLOTMENT = {
   team_lead:        36,   // Team
   broker_admin:     120,  // Brokerage
 };
+// Trial/Demo account allotment (Sam's decision, Aug 16 2026): "1 free video
+// with 1 AI Motion included" — NOT the full Solo allotment a trial user's
+// role (individual_agent) would otherwise map to. Checked via
+// subscription_status === 'trial', which is orthogonal to role — role stays
+// 'individual_agent' for the whole trial (see seed_trial_credits()), so a
+// role-only lookup would have silently given trial users the full paid
+// Solo quota (5 videos / 15 AI Motion frames) instead of the 1/1 promised
+// on the pricing page.
+const TRIAL_VIDEO_LIMIT = 1;
+const TRIAL_KLING_ALLOTMENT = 1;
 const KLING_IMAGE_COST_PER_FRAME = 5; // every Kling frame once the monthly pool is exhausted, no exceptions
 
 // Per-frame cost for the DOWNLOAD-TIME charge only. Kling frames are
@@ -365,9 +375,10 @@ const PER_FRAME_COST = {
 // created — add via migration before this ships.
 
 async function getKlingPoolStatus(userId) {
-  const userRes = await supabase("GET", "users", null, `?id=eq.${userId}&select=role`);
+  const userRes = await supabase("GET", "users", null, `?id=eq.${userId}&select=role,subscription_status`);
   const role = userRes.data?.[0]?.role;
-  const limit = MONTHLY_KLING_ALLOTMENT[role] ?? 15;
+  const isTrial = userRes.data?.[0]?.subscription_status === "trial";
+  const limit = isTrial ? TRIAL_KLING_ALLOTMENT : (MONTHLY_KLING_ALLOTMENT[role] ?? 15);
 
   const periodStart = currentPeriodStart();
   const usageRes = await supabase("GET", "kling_motion_usage", null,
@@ -579,13 +590,31 @@ function computeBookendOverrideCharge(frames, wantsNarration) {
 }
 
 
+// Trial/Demo account's single free video (see TRIAL_VIDEO_LIMIT/
+// TRIAL_KLING_ALLOTMENT above) costs 0 Images at download, not the usual
+// flat BASE_VIDEO_COST every paid tier pays — "1 free video" means free,
+// not "still costs an Image but the quota lets you make one." The 1
+// included AI Motion frame is already free by virtue of TRIAL_KLING_
+// ALLOTMENT=1 keeping it inside the (free) pool rather than triggering
+// KLING_IMAGE_COST_PER_FRAME overage — this only needs to separately waive
+// the flat per-video fee. A dedicated lightweight query (not reused from
+// checkVideoQuota/getKlingPoolStatus) because regenerateVideoJob doesn't
+// otherwise fetch subscription_status at all, and calculateKlingCharge
+// skips its own user query entirely when a video has zero AI Motion
+// frames — neither path can be relied on to always have this available.
+async function isTrialUser(userId) {
+  const res = await supabase("GET", "users", null, `?id=eq.${userId}&select=subscription_status`);
+  return res.data?.[0]?.subscription_status === "trial";
+}
+
 // Charged once, at action=download, regardless of how many times the video
 // was generated/regenerated before this point (Kling was already paid for
 // at each of those generation events — this only covers Ken Burns + the
 // flat assembly fee). Ken Burns frames currently cost 0 each per
 // PER_FRAME_COST — the entire Ken Burns contribution to this video is the
 // flat BASE_VIDEO_COST, per the locked "Ken Burns video = 1 Image" rule.
-function calculateDownloadCost(frames) {
+function calculateDownloadCost(frames, isTrial = false) {
+  if (isTrial) return 0; // trial/demo account's 1 free video — see isTrialUser's header comment
   let cost = BASE_VIDEO_COST;
   for (const frame of frames) {
     // FIX (July 18, 2026) — same reasoning as above: an LTX frame isn't a
@@ -1012,6 +1041,15 @@ async function createVideoJob({ listingId, projectId, userId, frames, formats, m
     };
   }
 
+  // Trial/Demo account's ONE free video: only when this is genuinely their
+  // first video this period (quotaBefore.used === 0, already computed
+  // above) AND they're still in trial status. Every subsequent video —
+  // even while still 'trial' — bills normally; quota is informational-only
+  // in this codebase (see quotaBefore's July 13 comment above), so nothing
+  // else stops a trial user from creating a 2nd video. Decided once, here,
+  // and persisted on the row — see trial_video_free's migration comment.
+  const isFreeTrialVideo = quotaBefore.used === 0 && await isTrialUser(userId);
+
   // From here on, if Images were charged above, they are SPENT — see the
   // header comment and Image Economy v2 §3: generation-time Kling charges
   // are never refundable for user-side reasons (didn't like the result,
@@ -1034,7 +1072,8 @@ async function createVideoJob({ listingId, projectId, userId, frames, formats, m
       music_style:             musicStyle || null,
       generation_count:        1,
       kling_images_charged:    totalAiMotionCost,
-      credits_used:            calculateDownloadCost(frames), // deferred — see downloadVideoJob
+      credits_used:            calculateDownloadCost(frames, isFreeTrialVideo), // deferred — see downloadVideoJob
+      trial_video_free:        isFreeTrialVideo,
       // CHANGE (July 14, 2026): these start null now, always — narration
       // is generated DURING the Railway render (see narrationGen.js), not
       // before this row is even created. video-notify.js fills these in
@@ -1390,7 +1429,7 @@ async function regenerateVideoJob({ jobId, userId, frames, formats, musicStyle, 
   }
 
   const existingRes = await supabase("GET", "video_jobs", null,
-    `?id=eq.${jobId}&select=id,user_id,listing_id,generation_count,kling_images_charged,narration_free_used`
+    `?id=eq.${jobId}&select=id,user_id,listing_id,generation_count,kling_images_charged,narration_free_used,trial_video_free`
   );
   const existing = existingRes.data?.[0];
   if (!existing) return { error: "job_not_found" };
@@ -1462,7 +1501,7 @@ async function regenerateVideoJob({ jobId, userId, frames, formats, musicStyle, 
       music_style:          musicStyle || null,
       generation_count:     nextGenerationCount,
       kling_images_charged: (existing.kling_images_charged || 0) + totalAiMotionCost,
-      credits_used:         calculateDownloadCost(frames),
+      credits_used:         calculateDownloadCost(frames, !!existing.trial_video_free),
       narration_audio_url:      null,
       narration_script:         null,
       narration_free_used:      narrationResult.narrationFreeUsedAfter,
@@ -1748,9 +1787,10 @@ function currentPeriodStart() {
 // NOT increment anything — see consumeVideoQuotaSlot for the actual
 // decrement.
 async function checkVideoQuota(userId) {
-  const userRes = await supabase("GET", "users", null, `?id=eq.${userId}&select=role`);
+  const userRes = await supabase("GET", "users", null, `?id=eq.${userId}&select=role,subscription_status`);
   const role = userRes.data?.[0]?.role;
-  const limit = MONTHLY_VIDEO_LIMIT[role] ?? 5;
+  const isTrial = userRes.data?.[0]?.subscription_status === "trial";
+  const limit = isTrial ? TRIAL_VIDEO_LIMIT : (MONTHLY_VIDEO_LIMIT[role] ?? 5);
 
   const periodStart = currentPeriodStart();
   const usageRes = await supabase("GET", "video_quota_usage", null,
@@ -1893,7 +1933,20 @@ async function downloadVideoJob({ jobId, userId }) {
   // Video quota was already checked and consumed at Generate time (see
   // createVideoJob) — Download no longer touches it at all. Only Images
   // (the flat download-time fee) get checked/charged here now.
-  const debitResult = await callDebitCredit(userId, job.credits_used, "video_download");
+  //
+  // FIX (Aug 16, 2026, found while building trial_video_free): a trial
+  // user's free video has credits_used === 0, but debit-credit.js rejects
+  // any cost < 1 outright (400, "Missing userId or cost") — it was never
+  // designed to be called for a genuinely free charge. Every other
+  // 0-cost path in this file (see resolveNarrationBilling) already
+  // guards with `if (cost > 0)` before calling debit-credit.js; this one
+  // didn't, so a trial user's free download would have hard-failed
+  // instead of succeeding for free. Skipping the call entirely when
+  // there's nothing to charge — same pattern, applied here too.
+  let debitResult = { status: 200, data: { balance: null } };
+  if (job.credits_used > 0) {
+    debitResult = await callDebitCredit(userId, job.credits_used, "video_download");
+  }
 
   if (debitResult.status === 402) {
     return {

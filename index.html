@@ -7296,7 +7296,7 @@ async function acceptTos() {
         'Content-Type': 'application/json',
         ...(jwt ? { 'Authorization': 'Bearer ' + jwt } : {}),
       },
-      body: JSON.stringify({ userId: _currentUser?.id }),
+      body: JSON.stringify({ userId: _currentUser?.id, signupSource: getCapturedSignupSource() }),
     });
     // Proceed regardless — if DB write fails, terms_accepted_at may already be set via SQL
     // Brief pause to allow DB trigger to seed free trial credits
@@ -10791,6 +10791,22 @@ function showLandingPage() {
   initHeroSliders();
     initTrSliders();
     initPsTopSlider();
+
+  // NEW (Aug 16, 2026) — scroll to a #section if the URL arrived with one
+  // already in it (e.g. a prospecting email's "?src=...#pricing" link).
+  // The browser's own native hash-scroll-on-load does NOT fire here: the
+  // target element (id="pricing" etc.) doesn't exist in the DOM until
+  // THIS function's innerHTML assignment above runs, and by then the
+  // browser has already given up trying. rAF, not a bare call, so the
+  // scroll happens after the browser has actually laid out the freshly
+  // inserted DOM — scrollIntoView against not-yet-laid-out content can
+  // land at the wrong offset or no-op entirely.
+  if (window.location.hash) {
+    const targetId = window.location.hash.slice(1);
+    requestAnimationFrame(() => {
+      document.getElementById(targetId)?.scrollIntoView({ behavior: 'smooth' });
+    });
+  }
 }
 
 function hideLandingPage() {
@@ -11210,6 +11226,28 @@ async function archiveListing(listingId, address) {
   } catch (err) {
     alert('Archive failed: ' + err.message);
   }
+}
+
+// ── SIGNUP SOURCE CAPTURE (Aug 16, 2026) ────────────────────────────────────
+// Captures ?src= from the landing URL (e.g. from a prospecting email's
+// "start free trial" link) into sessionStorage — a plain JS variable isn't
+// enough here because magic-link and OAuth signup both navigate away to
+// Supabase and back, which would wipe in-memory state. sessionStorage
+// survives that round trip but not a brand-new tab/session, which is the
+// right scope: this is meant to capture "the link this specific visit
+// arrived from," not become a permanent cookie-like identity signal.
+// Once captured, never overwritten by a later page load without ?src= —
+// a signup flow may hit index.html more than once (e.g. the OAuth
+// redirect back) and a later hit with no param must not erase the
+// original attribution.
+(function captureSignupSource() {
+  const src = new URLSearchParams(window.location.search).get('src');
+  if (src) {
+    try { sessionStorage.setItem('ssp_signup_source', src); } catch (e) { /* storage unavailable — attribution just won't persist, never fatal */ }
+  }
+})();
+function getCapturedSignupSource() {
+  try { return sessionStorage.getItem('ssp_signup_source') || null; } catch (e) { return null; }
 }
 
 // ── INIT ─────────────────────────────────────────────────────────────────────

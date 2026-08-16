@@ -120,6 +120,16 @@ Organic Modern, Transitional, Contemporary, Modern, Scandinavian, Minimalist, Co
 
 ## Color Palettes (10)
 Warm Neutrals, Bright Airy, Soft Luxury, Cool Gray, Earth Tones, Bold Contrast, Coastal Blue, Sage Green, Jewel Tones, Desert Modern
+
+## Smart Correct™ — Deterministic Photo Correction
+A separate, lightweight tool from the six staging modules above — one-click white balance, exposure, perspective, and noise correction on any uploaded photo. Runs on classical computer-vision math, not AI generation: nothing is added, removed, or altered in the scene, so a Smart Correct'd photo carries no AB 723 disclosure obligation on its own.
+Access: "Auto-Correct Photos" button on the photo upload step.
+What it does: corrects every uploaded photo in one batch, then shows a before/after Results modal for each photo.
+Three things an agent can do with a corrected photo from that modal:
+1. Download Corrected — free, instant, full original resolution, ready straight for MLS. Never costs an Image, no matter how many times it's used.
+2. Use for Staging (the default) — closing the modal automatically carries every corrected photo forward as the new working copy for any of the six staging modules above. No extra click needed; the only way a photo is excluded is being explicitly selected for Presets/Hero Shot instead (see next point).
+3. Select for Presets / Hero Shot — routes a corrected photo to Photographic Presets or the Hero Shot Generator instead of staging. Applying a preset or hero shot on top of a correction IS real digital alteration, so that path goes through Generate Final and gets a compliance page and "Digitally Enhanced" badge, exactly like a staged image — the only difference from normal staging is the badge wording.
+See "Smart Correct™ Usage Charges" in the Business Rules document for how Smart Correct itself is billed — separate from, and much cheaper than, staged-image pricing.
 `;
 
 // KB Document 2 — Business Rules
@@ -166,6 +176,20 @@ Caps: Solo 150 / Team 375 / Brokerage 1,200.
 Example: Solo subscriber uses 30 of 50 in January → 20 roll over → February starts with 70 available (50 new + 20 rollover). Cap is 150 so all 70 available.
 Rollover images are FORFEITED on cancellation — permanently gone.
 Monthly allocation for paid current period remains available until period ends.
+
+## Smart Correct™ Usage Charges
+Smart Correct is billed completely separately from staged images, and much more cheaply: every 5 photos corrected costs 1 Image, not 1 photo = 1 Image.
+The count is a lifetime running total per agent, not a per-batch or per-month total — it never resets, and a remainder always carries forward. Correcting 3 photos today and 3 more next month still charges exactly 1 Image total (6 ÷ 5 = 1, remainder 1 carried forward), never 2.
+Only photos that actually finish correcting successfully count toward the total — a photo that fails during correction is never charged for.
+Downloading a corrected photo (Download Corrected) is always free and never touches this count — only running the correction itself does.
+Blocked if insufficient balance: before running a batch, the system checks whether the Images this batch would use are actually available. If not, the batch is blocked entirely — no photos are corrected — and the agent is prompted to upgrade or buy overage Images, the same as being blocked on Generate Final. There is no way to run a Smart Correct batch on credit.
+Where to see it: the app header shows "Smart Correct: X of 5 to next Image" at all times, and the Smart Correct Results modal shows what happened after each batch (how many photos corrected, and whether an Image was just charged or how many corrections remain until the next one).
+
+Example: An agent has never used Smart Correct before (0 of 5) and corrects a batch of 7 photos, all of which succeed.
+- 7 corrections total. 7 ÷ 5 = 1 Image charged, with 2 corrections carried forward toward the next Image.
+- The header chip updates to "Smart Correct: 2 of 5 to next Image."
+- The next time they correct 3 more (all succeed): 2 + 3 = 5 corrections since the last charge → exactly 1 more Image charged, remainder resets to 0.
+- If that agent's balance is 0 Images when they try to correct a batch that would push them over a multiple of 5, the batch is blocked before anything runs and they're prompted to buy Images — the corrections that would've completed are never run for free.
 
 ## Overage Pricing
 Solo: $25 per 20 staged images

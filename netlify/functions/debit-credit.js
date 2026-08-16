@@ -57,6 +57,20 @@ function sbRequest(method, path, body) {
   });
 }
 
+// Trial length — 30 days from signup (users.created_at), per the pricing
+// page copy ("Expires 30 days after signup") which nothing in the backend
+// previously enforced. A trial user's created_at IS their trial start —
+// trg_seed_trial_credits (the Postgres trigger that grants the 10 trial
+// Images) fires unconditionally on every new users row, before any other
+// status is ever set, so there's no separate "trial began" moment to track
+// with a new column.
+const TRIAL_LENGTH_MS = 30 * 24 * 60 * 60 * 1000;
+
+function isTrialExpired(createdAt) {
+  if (!createdAt) return false; // defensive — never block on missing data
+  return (Date.now() - new Date(createdAt).getTime()) > TRIAL_LENGTH_MS;
+}
+
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: JSON.stringify({ error: 'Method not allowed' }) };
@@ -94,8 +108,9 @@ exports.handler = async (event) => {
     // can be attributed to a team for team-admin spend rollups (existing
     // image-staging debits never populated this; see ledger insert below
     // for why that path is intentionally left unchanged).
+    // CHANGE (Aug 16, 2026): added created_at — see isTrialExpired above.
     const userRes = await sbRequest('GET',
-      `/rest/v1/users?id=eq.${userId}&select=role,subscription_status,team_id&limit=1`
+      `/rest/v1/users?id=eq.${userId}&select=role,subscription_status,team_id,created_at&limit=1`
     );
 
     const userRec = Array.isArray(userRes.body) ? userRes.body[0] : null;
@@ -108,6 +123,19 @@ exports.handler = async (event) => {
       };
     }
     if (userRec.subscription_status !== 'active') {
+      // Expired trial blocks unconditionally — checked BEFORE the trial
+      // credit balance below, since a trial user can easily still be
+      // sitting on unused Images past 30 days (10 Images is more than
+      // most agents burn through in a month of light use) and unused
+      // balance was never meant to extend access past the promised
+      // window. Same NO_SUB response as "never had a subscription" —
+      // from the frontend's perspective these are the same dead end.
+      if (userRec.subscription_status === 'trial' && isTrialExpired(userRec.created_at)) {
+        return {
+          statusCode: 402,
+          body: JSON.stringify({ error: 'Free trial has ended', code: 'NO_SUB', trialExpired: true }),
+        };
+      }
       // Check for free trial credits before blocking
       const trialRes = await sbRequest('GET',
         `/rest/v1/credit_ledger?user_id=eq.${userId}&reason=eq.signup_trial&order=created_at.desc&limit=1&select=balance_after`

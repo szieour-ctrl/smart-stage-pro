@@ -308,10 +308,23 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
     <div id="header-smart-correct-badge" class="hidden" style="background:rgba(184,151,90,0.08);border:1px solid rgba(184,151,90,0.4);border-radius:3px;padding:4px 12px;font-size:0.72rem;color:#c8bfb0;letter-spacing:0.04em;white-space:nowrap;" title="Smart Correct™ — every 5 corrections uses 1 Image"></div>
     <div id="header-user-info" class="hidden" style="font-size:0.75rem;color:#c8bfb0;letter-spacing:0.04em;"></div>
     <button id="header-listings-btn" class="hidden btn btn-ghost" style="font-size:0.72rem;padding:5px 14px;color:#c8bfb0;border:1px solid rgba(184,151,90,0.3);border-radius:3px;" onclick="showDashboard()">My Listings</button>
+    <button id="header-getting-started-btn" class="hidden btn btn-ghost" style="font-size:0.72rem;padding:5px 14px;color:#c8bfb0;border:1px solid rgba(184,151,90,0.3);border-radius:3px;" onclick="showGettingStartedModal()">Getting Started</button>
     <button id="header-signout-btn" class="hidden btn btn-ghost" style="font-size:0.72rem;padding:5px 12px;color:#c8bfb0;" onclick="signOut()">Sign Out</button>
   </div>
 </header>
 <canvas id="sbs-canvas"></canvas>
+
+<!-- GETTING STARTED MODAL (in-app) -->
+<div id="gs-modal" class="hidden" style="position:fixed;inset:0;background:rgba(26,23,20,0.6);z-index:950;overflow-y:auto;">
+  <div class="gs-modal-inner">
+    <div class="gs-modal-header">
+      <h3 class="gs-modal-title">Getting Started</h3>
+      <button class="gs-modal-close" onclick="hideGettingStartedModal()" aria-label="Close">&#10005;</button>
+    </div>
+    <div class="gs-tabs" id="gs-tabs-app" role="tablist"></div>
+    <div id="gs-panels-app"></div>
+  </div>
+</div>
 
 <!-- PROMPT PREVIEW MODAL -->
 <div id="prompt-modal" class="hidden">
@@ -428,7 +441,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
     <div id="thumb-grid" class="thumb-grid"></div>
     <div id="upload-actions" class="hidden" style="margin-top:20px;display:flex;gap:10px;align-items:center;">
       <button class="btn btn-primary" onclick="startIntake()">Begin Session Setup →</button>
-      <button class="btn btn-outline" onclick="runSmartCorrectBatch()" title="Deterministic photo correction — white balance, exposure, perspective, noise reduction. No AI staging, no AB 723 disclosure required.">✨ Auto-Correct Photos (Smart Connect™)</button>
+      <button class="btn btn-outline" onclick="runSmartCorrectBatch()" title="Deterministic photo correction — white balance, exposure, perspective, noise reduction. No AI staging, no AB 723 disclosure required.">✨ Auto-Correct Photos (Smart Correct™)</button>
       <span id="upload-count-label" style="font-size:0.8rem;color:var(--muted);"></span>
     </div>
   </div>
@@ -7033,6 +7046,8 @@ async function updateHeaderForUser(user, userRec) {
   if (signOutBtn) signOutBtn.classList.remove('hidden');
   const listingsBtn = document.getElementById('header-listings-btn');
   if (listingsBtn) listingsBtn.classList.remove('hidden');
+  const gsBtn = document.getElementById('header-getting-started-btn');
+  if (gsBtn) gsBtn.classList.remove('hidden');
 
   // Load credit balance from Supabase
   if (creditBadge && userRec) {
@@ -7082,9 +7097,19 @@ function hideAppUI() {
   document.getElementById('app-container').classList.add('hidden');
   const lb = document.getElementById('header-listings-btn');
   if (lb) lb.classList.add('hidden');
+  document.getElementById('header-getting-started-btn')?.classList.add('hidden');
   document.getElementById('header-user-info')?.classList.add('hidden');
   document.getElementById('header-signout-btn')?.classList.add('hidden');
   document.getElementById('header-credit-badge')?.classList.add('hidden');
+}
+
+// ── GETTING STARTED MODAL (in-app) ──────────────────────────────────────────
+function showGettingStartedModal() {
+  renderGettingStarted('app');
+  document.getElementById('gs-modal').classList.remove('hidden');
+}
+function hideGettingStartedModal() {
+  document.getElementById('gs-modal').classList.add('hidden');
 }
 
 // ── SIGN OUT ─────────────────────────────────────────────────────────────────
@@ -8204,6 +8229,105 @@ const PR_ANNUAL = {
     });
   }
 
+// ── GETTING STARTED — shared content + renderer ─────────────────────────────
+// Single source of truth for both the marketing landing page (#getting-started)
+// and the in-app "Getting Started" modal, so the two never drift out of sync.
+const GETTING_STARTED_CONTENT = [
+  {
+    id: "start",
+    tab: "Start a Listing",
+    intro: "Every project in Smart Stage PRO begins with the property address — that's what ties your photos, corrections, staged images, and compliance record together.",
+    steps: [
+      { title: "Search for the property", desc: "From <strong>Property Search</strong>, begin typing the listing address. Smart Stage PRO uses it to find or create the project and its compliance record." },
+      { title: "Select the address", desc: "Choose the correct property from the results. If it's a new listing, Smart Stage PRO creates a new project — if it already exists, you'll pick up right where you left off." },
+      { title: "Upload your photos", desc: "Drag your listing photos into the upload area, or click to browse. Smart Stage PRO prepares them for Smart Correct, staging, or a PRO Plus video." },
+      { title: "Choose where to go next", desc: "Camera-ready photos go straight to <strong>Begin Session Setup</strong>. Photos that need correction go to <strong>Auto-Correct Photos (Smart Correct™)</strong>. Ready to build a video from photos you already have? Choose <strong>+ Create Video</strong>." }
+    ]
+  },
+  {
+    id: "correct",
+    tab: "Smart Correct™",
+    intro: "Smart Correct fixes white balance, exposure, perspective, and noise on any uploaded photo — deterministic photographic correction, not AI staging, so it carries no AB 723 disclosure on its own.",
+    steps: [
+      { title: "Upload your photos", desc: "From the property's <strong>Upload Listing Photos</strong> screen, add the photos that need correction." },
+      { title: "Click Auto-Correct Photos (Smart Correct™)", desc: "Smart Correct processes every uploaded photo in one batch — white balance, exposure, perspective, and noise, all at once." },
+      { title: "Review Original vs. Corrected", desc: "The Smart Correct™ Results window shows each photo's original and corrected version side by side, so you can compare before deciding what's next." },
+      { title: "Choose what happens to each photo", desc: "<strong>Download Corrected</strong> saves it for MLS or marketing use — free, every time. Leave it as-is and it automatically becomes the working copy for staging. Or check <strong>Select for Presets / Hero Shot</strong> to route it somewhere else instead." }
+    ]
+  },
+  {
+    id: "stage",
+    tab: "Stage a Room",
+    intro: "Once your photos are camera-ready — original or Smart Corrected — staging starts with your Session Design DNA and a quick room assignment, then a draft you can revise before it's final.",
+    steps: [
+      { title: "Set your Session Design DNA", desc: "Choose the <strong>Buyer Profile</strong>, <strong>Stage Feel</strong>, <strong>Design Style</strong>, <strong>Stage Level</strong>, <strong>Color Selection</strong>, and <strong>Marketing Direction</strong> for the listing. These choices carry through every room you stage in this session." },
+      { title: "Assign each room", desc: "For each photo, choose <strong>Open Plan</strong>, <strong>Single Room</strong>, or <strong>Exterior</strong>, then identify the specific space — Family Room, Entry, Dining Zone, and so on — so Smart Stage PRO knows exactly what it's looking at." },
+      { title: "Generate a Draft and review it", desc: "Your first staged image is a Draft. Check furniture selection, placement, style, color, and composition before moving on." },
+      { title: "Revise if needed", desc: "Enter what you want changed and create a revised draft. Only what you specify changes — everything else stays true to your Design DNA." },
+      { title: "Add a photographic preset (optional)", desc: "Apply a look like <strong>MLS Bright</strong>, <strong>Luxury Editorial</strong>, or <strong>Twilight Boost</strong> before generating the Final." },
+      { title: "Generate the Final", desc: "Choose your output quality — MLS Ready, Marketing Quality, or Print Quality — then click <strong>Generate Final</strong>. This creates the finished image and adds it to the property's compliance record." }
+    ]
+  },
+  {
+    id: "hero",
+    tab: "Hero Shots",
+    intro: "Hero Shots turn an approved staged image into additional marketing compositions, built from the strongest photographic areas already in the scene.",
+    steps: [
+      { title: "Start from a Final image", desc: "After generating your Final staged image, click <strong>Create Hero Shots</strong>." },
+      { title: "Let the Cinematic Photo Director analyze it", desc: "It identifies the strongest potential compositions and shows recommendations directly over the image, each with a confidence level." },
+      { title: "Select the shots you want", desc: "Check or uncheck the recommended compositions — you're always in control of what gets created." },
+      { title: "Generate a draft collage", desc: "Preview drafts let you inspect each composition before spending an Image on the full-resolution Final." },
+      { title: "Choose output quality and generate", desc: "Pick MLS, Marketing, or Print quality, then click <strong>Generate Final</strong> for the finished Hero Shot." }
+    ]
+  },
+  {
+    id: "video",
+    tab: "PRO Plus Video",
+    intro: "PRO Plus turns your staged and camera-ready photos into a finished real estate video — motion, music, and optional AI narration, built around the property you're already working on.",
+    steps: [
+      { title: "Select your images", desc: "Choose the staged images for the video. For the strongest flow, include a front exterior, a rear exterior, and your key interior rooms." },
+      { title: "Add more photos if needed", desc: "Upload additional camera-ready images, or build a video from scratch even if the photos weren't staged in Smart Stage PRO first. Turn on AI Narration here if you want it." },
+      { title: "Review and arrange the frame order", desc: "Smart Stage PRO suggests a natural walkthrough sequence — review it, rearrange frames, and check room labels before continuing." },
+      { title: "Assign motion", desc: "Smart Stage PRO assigns up to 3 AI Motions from the Premium pool and Ken Burns motion to the rest. Override any assignment if you want something different." },
+      { title: "Choose music and narration", desc: "Pick your music and decide whether to use AI Narration or go without." },
+      { title: "Review cost and approve", desc: "The Review Cost screen shows every frame, its cost, your AI Motion Pool usage, and your remaining Image balance — confirm and approve to build the video." }
+    ]
+  }
+];
+
+// scope = 'landing' or 'app' — keeps element IDs unique so both placements
+// can be mounted on the page at once without colliding.
+function renderGettingStarted(scope) {
+  const tabsEl = document.getElementById('gs-tabs-' + scope);
+  const panelsEl = document.getElementById('gs-panels-' + scope);
+  if (!tabsEl || !panelsEl) return;
+  tabsEl.innerHTML = GETTING_STARTED_CONTENT.map((s, i) =>
+    `<button class="gs-tab${i === 0 ? ' active' : ''}" role="tab" aria-selected="${i === 0}" onclick="switchGsTab('${scope}','${s.id}', this)">${s.tab}</button>`
+  ).join('');
+  panelsEl.innerHTML = GETTING_STARTED_CONTENT.map((s, i) => `
+    <div class="gs-panel${i === 0 ? ' active' : ''}" id="gs-panel-${scope}-${s.id}">
+      <p class="gs-panel-intro">${s.intro}</p>
+      <ol class="gs-steps">
+        ${s.steps.map(step => `
+          <li class="gs-step">
+            <div class="gs-step-num"></div>
+            <div class="gs-step-body">
+              <div class="gs-step-title">${step.title}</div>
+              <div class="gs-step-desc">${step.desc}</div>
+            </div>
+          </li>`).join('')}
+      </ol>
+    </div>`).join('');
+}
+function switchGsTab(scope, id, btn) {
+  const tabsEl = document.getElementById('gs-tabs-' + scope);
+  tabsEl.querySelectorAll('.gs-tab').forEach(t => { t.classList.remove('active'); t.setAttribute('aria-selected', 'false'); });
+  const panelsEl = document.getElementById('gs-panels-' + scope);
+  panelsEl.querySelectorAll('.gs-panel').forEach(p => p.classList.remove('active'));
+  btn.classList.add('active'); btn.setAttribute('aria-selected', 'true');
+  document.getElementById('gs-panel-' + scope + '-' + id).classList.add('active');
+}
+
 function showLandingPage() {
   document.getElementById('landing-page')?.remove();
   document.querySelector('.compliance-bar').style.display = 'none';
@@ -8214,6 +8338,39 @@ function showLandingPage() {
   document.body.appendChild(page);
 
   page.innerHTML = `<style>
+/* ── GETTING STARTED — used on landing page AND in-app modal ─────────────── */
+.gs-tabs{display:flex;gap:6px;flex-wrap:wrap;border-bottom:1px solid var(--border);margin-bottom:24px;}
+.gs-tab{background:none;border:none;border-bottom:2px solid transparent;padding:10px 16px;font-family:'DM Sans',sans-serif;font-size:0.82rem;font-weight:600;color:var(--muted);cursor:pointer;transition:all 0.15s;white-space:nowrap;}
+.gs-tab:hover{color:var(--ink);}
+.gs-tab.active{color:var(--ink);border-bottom-color:var(--gold);}
+.gs-panel{display:none;}
+.gs-panel.active{display:block;}
+.gs-panel-intro{font-size:0.92rem;color:var(--muted);margin:0 0 20px;max-width:640px;}
+.gs-steps{list-style:none;margin:0;padding:0;counter-reset:gs-step;}
+.gs-step{counter-increment:gs-step;display:flex;gap:16px;padding:16px 0;border-bottom:1px solid var(--border);}
+.gs-step:last-child{border-bottom:none;}
+.gs-step-num{flex-shrink:0;width:30px;height:30px;border-radius:50%;background:var(--warm);color:var(--gold);font-weight:700;font-size:0.85rem;display:flex;align-items:center;justify-content:center;}
+.gs-step-num::before{content:counter(gs-step);}
+.gs-step-body{flex:1;min-width:0;}
+.gs-step-title{font-weight:700;font-size:0.94rem;margin-bottom:3px;}
+.gs-step-desc{font-size:0.87rem;color:var(--muted);}
+.gs-step-desc strong{color:var(--ink);font-weight:600;}
+
+/* Landing-page section wrapper */
+.gs-section{padding:80px 32px;background:var(--cream);}
+.gs-inner{max-width:900px;margin:0 auto;}
+.gs-eyebrow{font-size:0.72rem;letter-spacing:0.14em;text-transform:uppercase;color:var(--gold);font-weight:600;margin-bottom:8px;}
+.gs-title{font-family:'Cormorant Garamond',Georgia,serif;font-size:2.1rem;font-weight:600;margin:0 0 10px;}
+.gs-sub{color:var(--muted);font-size:0.95rem;max-width:560px;margin:0 0 28px;}
+.gs-cta-row{margin-top:26px;display:flex;gap:10px;flex-wrap:wrap;}
+
+/* In-app modal wrapper */
+.gs-modal-inner{max-width:640px;margin:40px auto;background:#fff;border-radius:6px;padding:28px 32px;max-height:85vh;overflow-y:auto;}
+.gs-modal-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;}
+.gs-modal-title{font-family:'Cormorant Garamond',Georgia,serif;font-size:1.5rem;font-weight:600;margin:0;}
+.gs-modal-close{background:none;border:none;font-size:1.3rem;color:var(--muted);cursor:pointer;line-height:1;}
+.gs-modal-close:hover{color:var(--ink);}
+
 /* ══════════════════════════════════════════════════════════════════
      HEADER / NAVIGATION
      ══════════════════════════════════════════════════════════════════ */
@@ -9652,6 +9809,7 @@ function showLandingPage() {
 
     <nav class="hd-nav" id="hd-nav" aria-label="Primary">
       <a href="#how-it-works" class="hd-nav-link">How It Works</a>
+      <a href="#getting-started" class="hd-nav-link">Getting Started</a>
       <a href="#transformations" class="hd-nav-link">Transformations</a>
       <a href="#presets" class="hd-nav-link">AI Intelligence</a>
       <a href="#features" class="hd-nav-link">AI Marketing Suite</a>
@@ -9674,6 +9832,7 @@ function showLandingPage() {
   <!-- Mobile menu -->
   <div class="hd-mobile" id="hd-mobile">
     <a href="#how-it-works" class="hd-mobile-link" onclick="closeHdMenu()">How It Works</a>
+    <a href="#getting-started" class="hd-mobile-link" onclick="closeHdMenu()">Getting Started</a>
     <a href="#transformations" class="hd-mobile-link" onclick="closeHdMenu()">Transformations</a>
     <a href="#presets" class="hd-mobile-link" onclick="closeHdMenu()">AI Intelligence</a>
     <a href="#features" class="hd-mobile-link" onclick="closeHdMenu()">AI Marketing Suite</a>
@@ -9898,6 +10057,22 @@ function showLandingPage() {
 </div>
 <button class="oa-lightbox-nav oa-lightbox-prev" onclick="stepOaLightbox(-1)" aria-label="Previous image">&#8249;</button>
 <button class="oa-lightbox-nav oa-lightbox-next" onclick="stepOaLightbox(1)" aria-label="Next image">&#8250;</button>
+
+<section class="gs-section" id="getting-started">
+  <div class="gs-inner">
+    <div class="gs-eyebrow">Getting Started</div>
+    <h2 class="gs-title">One property, start to finish.</h2>
+    <p class="gs-sub">Every listing follows the same connected path — search the address, upload your photos, and go as far through the workflow as that listing needs.</p>
+
+    <div class="gs-tabs" id="gs-tabs-landing" role="tablist"></div>
+    <div id="gs-panels-landing"></div>
+
+    <div class="gs-cta-row">
+      <a href="#" class="pr-cta" onclick="hideLandingPage(); showAuthModal('signup'); return false;">Start Free Trial</a>
+      <a href="#pricing" class="hd-nav-link" style="color:var(--ink);border:1px solid var(--border);padding:11px 22px;border-radius:3px;">See Pricing</a>
+    </div>
+  </div>
+</section>
 
 <!-- ══════════════ s3-transformations.html ══════════════ -->
 <section class="tr" id="transformations">
@@ -10807,6 +10982,8 @@ function showLandingPage() {
       document.getElementById(targetId)?.scrollIntoView({ behavior: 'smooth' });
     });
   }
+
+  renderGettingStarted('landing');
 }
 
 function hideLandingPage() {

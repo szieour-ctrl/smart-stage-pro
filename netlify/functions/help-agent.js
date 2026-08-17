@@ -17,7 +17,7 @@ const KB1_PRODUCT_SPEC = `
 ## What Is Smart Stage PRO?
 Smart Stage PRO is an AI-powered virtual staging platform built for real estate agents, teams, and brokerages. It transforms property photographs into MLS-ready marketing images — staging vacant rooms, decluttering occupied spaces, enhancing exteriors, and generating professional side-by-side compliance documents. Every image is fully compliant with California AB 723 §10140.8 and MetroList Rule 11.6.1. Accessible at smartstagepro.com.
 
-## The Six Staging Modules
+## The Five Staging Modules
 
 ### 1. Stage Vacant
 Stages an empty room with furniture and decor matching the agent's chosen design style and color palette.
@@ -39,13 +39,7 @@ Best for: Occupied properties, furnished homes with dated interiors.
 Dual Prompt Preview Modals — agent can edit at each step.
 Processing time: 45–90 seconds (two engine calls).
 
-### 4. Multi-Angle Group Staging
-Flagship feature for open-plan homes. Stages 2–5 photographs of the same open-concept space taken from different angles with a unified furniture plan consistent across all views.
-Best for: Open-plan great rooms, kitchen/dining/living combinations, homes with multiple MLS angles of the same space.
-Three steps: (1) Upload + label images by zone → (2) Review/edit zone plan (no staged images consumed) → (3) Confirm style and stage all angles simultaneously.
-Zone label intelligence: Labeling an image "Living Room" scopes that image's prompt to living room furniture only. Adjacent zones in frame are marked KEEP VACANT.
-
-### 5. Exterior Enhancements
+### 4. Exterior Enhancements
 Transforms exterior photographs with lighting, landscape, and outdoor living improvements.
 What is NEVER changed: House structure, roofline, windows, doors, driveway, fencing, property lines, neighboring structures.
 Enhancements available:
@@ -57,18 +51,23 @@ Enhancements available:
 - Outdoor Living Staging: Adds patio/deck furniture. Five configurations. Placed on existing hardscape only.
 Iteration: Each enhancement can be independently re-run with revision instructions.
 
-### 6. Compliance Dashboard (My Listings)
+### 5. Compliance Dashboard (My Listings)
 Subscriber dashboard at smartstagepro.com. Displays all property projects with live compliance status.
 Stats bar: Total Listings, Staged Image Sets, Images Remaining, Subscription plan and status.
 Listing cards: address, project ID, tier badge, image count, compliance status, last staged date, thumbnails.
 Actions per card: View Compliance Page, Download QR, Continue Staging, Archive.
 Role-based scope: Solo/Team member = own listings. Team lead = all team listings. Broker admin = all brokerage listings.
 
+## Session Design DNA — How Cross-Image Consistency Works
+Multi-Angle Group Staging (a separate panel for staging 2-5 angles of the same open-concept space together) has been retired — the spatial engine now reads anchors and zone boundaries per-image directly, so a dedicated cross-image read is no longer needed.
+Consistency across multiple photos of the same space now comes from Session Design DNA instead: the buyer profile, stage feel, design style, stage level, color selection, and marketing direction an agent sets at the start of a session carry through automatically to every room staged in that session — including rooms added later via "+ Add More Rooms." Agents don't need to do anything extra to keep furniture style and palette consistent across angles; it happens by default within a session.
+
+
 ## AI Motion Video (Smart Stage PRO Plus — separate add-on)
 Smart Stage PRO Plus turns a staged image into a short video using AI-generated camera motion. Two kinds:
 - Known-pair motion: interpolates between two real, already-disclosed images (e.g. vacant→staged, or day→twilight) — the camera move happens between two real states the agent already has.
 - Single-image motion: a small set of named presets (camera orbit, focus pull, fireplace flame, curtain sway) that animate camera movement or a dynamic element within one already-staged, already-disclosed photo.
-AI Motion video follows the exact same AB 723 disclosure standard as any staged image — see "AI Motion Video — Disclosure Requirements" in the Business Rules document. There is no separate or lower bar for video.
+AI Motion video automatically gets the exact same AB 723 disclosure and compliance page as any staged image — Smart Stage PRO handles this for you, with no extra disclosure work required. See "AI Motion Video — Disclosure Requirements" in the Business Rules document for the full picture.
 
 ## The Staging Workflow
 
@@ -148,7 +147,7 @@ const KB2_BUSINESS_RULES = `
 
 ### Team — $99/month
 - 125 staged images per month
-- Up to 5 agent accounts
+- Up to 3 agent accounts
 - All 6 staging modules
 - Team dashboard (team lead sees all team listings)
 - Rollover cap: 375 staged images
@@ -167,7 +166,7 @@ All plans include: All 6 modules, AB 723 compliance pages, QR codes, 3-year reco
 ## Staged Images — How Usage Is Counted
 One staged image = one Generate Final click.
 IMPORTANT: The correct term is always "staged images" — never "credits."
-Staged image balance is debited at Generate Final only. Draft generations and iterations run the full engine but do not debit the subscription balance.
+Staged image balance is debited at Generate Final only. Draft generations and iterations run the full engine but don't cost anything — they carry a SMART STAGE PRO™ DRAFT watermark and are for review only. Only Generate Final produces the MLS Ready image without a watermark, and that's the moment the balance is debited.
 Check balance: header display or My Listings dashboard stats bar.
 
 ## Rollover Policy
@@ -197,10 +196,15 @@ Team: $45 per 50 staged images
 Brokerage: $75 per 100 staged images
 Overage packs are available immediately. They do NOT roll over — expire end of current billing period.
 
+## AI Motion Pool — Monthly Allotment (Smart Stage PRO Plus)
+Each subscription includes an AI Motion Pool of 15 images per month for premium AI Motion video frames.
+Unused AI Motion Pool images do NOT roll over — use them or lose them, they reset at the start of each billing period. This is different from staged images, which do roll over up to the plan's cap (see Rollover Policy above).
+Ken Burns motion frames are not drawn from the AI Motion Pool and are billed separately (flat 1 Image at download).
+
 ## Account Lifecycle
 Signup: smartstagepro.com → Subscribe → create account → accept ToS (once) → Stripe checkout → immediately active.
 Subscription must be "active" status — no grace period, no fail-open access.
-Cancellation: Active through end of paid period. Rollover forfeited. Compliance pages stay live 30+ days post-cancellation. All project files delivered via email archive. 3-year retention maintained.
+Cancellation: Active through end of paid period. Rollover forfeited. Compliance pages stay live 30+ days post-cancellation. All project files are available as a downloadable ZIP (photos and compliance documents) and are also delivered via email archive. 3-year retention maintained.
 Plan changes: Upgrades immediate. Downgrades at next billing cycle.
 
 ## Team and Brokerage Roles
@@ -227,11 +231,11 @@ What agents must do in MLS:
 What agents do NOT need to do: add text overlays, watermarks, or create their own disclosure documents — Smart Stage PRO generates the compliance page, QR code, and Side-by-Side document automatically. Uploading both images to the MLS gallery is the agent's responsibility — Smart Stage PRO provides everything needed to do it correctly, but doesn't submit to the MLS on the agent's behalf.
 
 ## AI Motion Video — Disclosure Requirements (Smart Stage PRO Plus)
-AI Motion videos require the exact same disclosure as any staged image — there is no separate or lesser standard for video.
-Before publishing an AI Motion video:
+Short answer: no extra disclosure work for the agent. Smart Stage PRO automatically attaches the exact same AB 723 disclosure and compliance page to every AI Motion video that it attaches to any staged image, for your records — there is no separate or lesser standard for video, and nothing to build yourself.
+That said, a quick check before publishing is still worth doing:
 1. Watch the full clip and compare it to the original photo — AI camera motion can reveal an angle or detail (a flooring type glimpsed in the distance, a cabinet run around a corner) that wasn't actually captured in the source photo.
-2. Make sure the compliance page link/QR code is included with the listing, same as for any staged image.
-3. Make sure the original, un-animated photo is included in the MLS photo gallery — required by MetroList Rule 11.6.1(b), and not satisfied by the video link alone.
+2. Confirm the compliance page link/QR code is included with the listing, same as for any staged image.
+3. Confirm the original, un-animated photo is included in the MLS photo gallery — required by MetroList Rule 11.6.1(b), and not satisfied by the video link alone.
 4. If anything in the video doesn't match the real room, regenerate with a different motion preset, or use standard Ken Burns motion instead.
 This applies to every AI Motion preset equally — none of them are exempt from disclosure.
 
@@ -239,6 +243,7 @@ This applies to every AI Motion preset equally — none of them are exempt from 
 Compliance pages: permanent for life of subscription + minimum 30 days post-cancellation.
 Image storage: minimum 3 years per California DRE requirements.
 Compliance pages CANNOT be deleted — archive is soft-delete only.
+A full ZIP download of a listing's photos and compliance documents is available at any time from My Listings.
 
 ## Privacy
 Help Agent conversations: processed in real time, not stored permanently. No property addresses, image content, or personal data transmitted through Help Agent.
@@ -291,14 +296,9 @@ Kitchen islands = architecture, not furniture. Island is locked — cannot be mo
 
 ## KEEP VACANT Rule
 Explicit instruction: leave specified area completely empty — no furniture, no decor, no objects.
-Fires automatically: adjacent rooms visible through openings, zones outside the boundary polygon, non-labeled zones in group staging.
+Fires automatically: adjacent rooms visible through openings, zones outside the boundary polygon.
 Agent can add manually in Prompt Preview: "KEEP VACANT — do not stage the area beyond the back wall opening."
-Purpose: prevents inconsistency across MLS photo set when the same space appears in multiple angles.
-
-## Multi-Angle Group Staging Sequence
-Step 1 — Simultaneous Spatial Read: all images analyzed at once. Zone boundaries, anchor fixtures, overlapping zones, spatial relationships identified. Unified zone assignment plan produced.
-Step 2 — Agent Review: confirm zone assignments, correct misidentifications. No staged images consumed at this step.
-Step 3 — Staged Image Generation: each image staged with confirmed zone assignment, anchor fixtures, KEEP VACANT for adjacent zones, shared design style/palette. Result: same sofa, same scale, correct orientation, consistent across all angles.
+Purpose: prevents furniture from being placed in spaces the agent didn't intend to stage.
 
 ## Prompt Preview Modal — What Edits Do
 Add items: "Add a baby grand piano in the far left corner" — works within existing zone/anchor rules.

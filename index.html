@@ -294,6 +294,32 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
 .tier-label{font-size:0.62rem;text-transform:uppercase;letter-spacing:0.1em;font-weight:600;padding:2px 6px;border-radius:2px;}
 .tier-draft{background:#e8e0d4;color:#7a6f63;}
 .tier-final{background:rgba(45,106,79,0.15);color:var(--success);}
+
+/* ── GETTING STARTED — shared tab/step components + in-app modal ─────────── */
+/* Used by both the landing page section (#getting-started) and the in-app
+   modal (#gs-modal). Lives in the global stylesheet, not the landing page's
+   dynamic <style>, so it's present whether or not showLandingPage() has run. */
+.gs-tabs{display:flex;gap:6px;flex-wrap:wrap;border-bottom:1px solid var(--border);margin-bottom:24px;}
+.gs-tab{background:none;border:none;border-bottom:2px solid transparent;padding:10px 16px;font-family:'DM Sans',sans-serif;font-size:0.82rem;font-weight:600;color:var(--muted);cursor:pointer;transition:all 0.15s;white-space:nowrap;}
+.gs-tab:hover{color:var(--ink);}
+.gs-tab.active{color:var(--ink);border-bottom-color:var(--gold);}
+.gs-panel{display:none;}
+.gs-panel.active{display:block;}
+.gs-panel-intro{font-size:0.92rem;color:var(--muted);margin:0 0 20px;max-width:640px;}
+.gs-steps{list-style:none;margin:0;padding:0;counter-reset:gs-step;}
+.gs-step{counter-increment:gs-step;display:flex;gap:16px;padding:16px 0;border-bottom:1px solid var(--border);}
+.gs-step:last-child{border-bottom:none;}
+.gs-step-num{flex-shrink:0;width:30px;height:30px;border-radius:50%;background:var(--warm);color:var(--gold);font-weight:700;font-size:0.85rem;display:flex;align-items:center;justify-content:center;}
+.gs-step-num::before{content:counter(gs-step);}
+.gs-step-body{flex:1;min-width:0;}
+.gs-step-title{font-weight:700;font-size:0.94rem;margin-bottom:3px;}
+.gs-step-desc{font-size:0.87rem;color:var(--muted);}
+.gs-step-desc strong{color:var(--ink);font-weight:600;}
+.gs-modal-inner{max-width:640px;margin:40px auto;background:#fff;border-radius:6px;padding:28px 32px;max-height:85vh;overflow-y:auto;}
+.gs-modal-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;}
+.gs-modal-title{font-family:'Cormorant Garamond',Georgia,serif;font-size:1.5rem;font-weight:600;margin:0;}
+.gs-modal-close{background:none;border:none;font-size:1.3rem;color:var(--muted);cursor:pointer;line-height:1;}
+.gs-modal-close:hover{color:var(--ink);}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.min.js"></script>
 </head>
@@ -8338,38 +8364,13 @@ function showLandingPage() {
   document.body.appendChild(page);
 
   page.innerHTML = `<style>
-/* ── GETTING STARTED — used on landing page AND in-app modal ─────────────── */
-.gs-tabs{display:flex;gap:6px;flex-wrap:wrap;border-bottom:1px solid var(--border);margin-bottom:24px;}
-.gs-tab{background:none;border:none;border-bottom:2px solid transparent;padding:10px 16px;font-family:'DM Sans',sans-serif;font-size:0.82rem;font-weight:600;color:var(--muted);cursor:pointer;transition:all 0.15s;white-space:nowrap;}
-.gs-tab:hover{color:var(--ink);}
-.gs-tab.active{color:var(--ink);border-bottom-color:var(--gold);}
-.gs-panel{display:none;}
-.gs-panel.active{display:block;}
-.gs-panel-intro{font-size:0.92rem;color:var(--muted);margin:0 0 20px;max-width:640px;}
-.gs-steps{list-style:none;margin:0;padding:0;counter-reset:gs-step;}
-.gs-step{counter-increment:gs-step;display:flex;gap:16px;padding:16px 0;border-bottom:1px solid var(--border);}
-.gs-step:last-child{border-bottom:none;}
-.gs-step-num{flex-shrink:0;width:30px;height:30px;border-radius:50%;background:var(--warm);color:var(--gold);font-weight:700;font-size:0.85rem;display:flex;align-items:center;justify-content:center;}
-.gs-step-num::before{content:counter(gs-step);}
-.gs-step-body{flex:1;min-width:0;}
-.gs-step-title{font-weight:700;font-size:0.94rem;margin-bottom:3px;}
-.gs-step-desc{font-size:0.87rem;color:var(--muted);}
-.gs-step-desc strong{color:var(--ink);font-weight:600;}
-
-/* Landing-page section wrapper */
+/* ── GETTING STARTED — landing page section only ─────────────────────────── */
 .gs-section{padding:80px 32px;background:var(--cream);}
 .gs-inner{max-width:900px;margin:0 auto;}
 .gs-eyebrow{font-size:0.72rem;letter-spacing:0.14em;text-transform:uppercase;color:var(--gold);font-weight:600;margin-bottom:8px;}
 .gs-title{font-family:'Cormorant Garamond',Georgia,serif;font-size:2.1rem;font-weight:600;margin:0 0 10px;}
 .gs-sub{color:var(--muted);font-size:0.95rem;max-width:560px;margin:0 0 28px;}
 .gs-cta-row{margin-top:26px;display:flex;gap:10px;flex-wrap:wrap;}
-
-/* In-app modal wrapper */
-.gs-modal-inner{max-width:640px;margin:40px auto;background:#fff;border-radius:6px;padding:28px 32px;max-height:85vh;overflow-y:auto;}
-.gs-modal-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;}
-.gs-modal-title{font-family:'Cormorant Garamond',Georgia,serif;font-size:1.5rem;font-weight:600;margin:0;}
-.gs-modal-close{background:none;border:none;font-size:1.3rem;color:var(--muted);cursor:pointer;line-height:1;}
-.gs-modal-close:hover{color:var(--ink);}
 
 /* ══════════════════════════════════════════════════════════════════
      HEADER / NAVIGATION

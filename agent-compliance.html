@@ -371,6 +371,24 @@ let composedReport = null;
 let savedReportId = null;
 let pollTimer = null;
 
+// ── PRE-FILL FROM PROSPECTING EMAIL LINK ────────────────────────────────────
+// Supports links like /ab723-check?zillow=<url> (or ?url=<url> as an alias),
+// so a recipient's own listing URL is already sitting in the field when they
+// land on the page. Deliberately does NOT auto-run the scan — email clients
+// and link-preview bots often pre-fetch URLs, and auto-triggering would burn
+// a Bright Data snapshot on every email open instead of on an actual visitor.
+(function prefillFromQueryParam() {
+  const params = new URLSearchParams(window.location.search);
+  const zillowUrl = params.get('zillow') || params.get('url');
+  if (!zillowUrl) return;
+  if (!/^https:\/\/(www\.)?zillow\.com\/homedetails\//.test(zillowUrl)) return;
+  const input = document.getElementById('urlInput');
+  if (!input) return;
+  input.value = zillowUrl;
+  const sub = document.querySelector('.intake-card .sub');
+  if (sub) sub.textContent = "We've pre-filled your listing below — just click Run Compliance Scan.";
+})();
+
 function showState(id) {
   document.querySelectorAll('.state').forEach(el => el.classList.remove('active'));
   document.getElementById(id).classList.add('active');

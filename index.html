@@ -320,6 +320,28 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
 .gs-modal-title{font-family:'Cormorant Garamond',Georgia,serif;font-size:1.5rem;font-weight:600;margin:0;}
 .gs-modal-close{background:none;border:none;font-size:1.3rem;color:var(--muted);cursor:pointer;line-height:1;}
 .gs-modal-close:hover{color:var(--ink);}
+
+/* ── FAQ — shared accordion + modal components ────────────────────────────── */
+/* Used by both the landing page section (#faq) and the in-app modal
+   (#faq-modal). Lives in the global stylesheet so it's present whether or
+   not showLandingPage() has run — same lesson as the Getting Started fix. */
+.faq-category{margin-bottom:28px;}
+.faq-category:last-child{margin-bottom:0;}
+.faq-category-title{font-size:0.72rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--gold);font-weight:600;margin-bottom:10px;}
+.faq-item{border-bottom:1px solid var(--border);}
+.faq-q{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;background:none;border:none;text-align:left;padding:14px 0;font-family:'DM Sans',sans-serif;font-size:0.9rem;font-weight:600;color:var(--ink);cursor:pointer;}
+.faq-q:hover{color:var(--gold);}
+.faq-caret{flex-shrink:0;font-size:1.1rem;color:var(--gold);transition:transform 0.15s;}
+.faq-q.open .faq-caret{transform:rotate(45deg);}
+.faq-a{display:none;font-size:0.86rem;color:var(--muted);line-height:1.7;padding:0 0 16px;max-width:680px;}
+.faq-a.open{display:block;}
+.faq-a strong{color:var(--ink);font-weight:600;}
+
+.faq-modal-inner{max-width:680px;margin:40px auto;background:#fff;border-radius:6px;padding:28px 32px;max-height:85vh;overflow-y:auto;}
+.faq-modal-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;}
+.faq-modal-title{font-family:'Cormorant Garamond',Georgia,serif;font-size:1.5rem;font-weight:600;margin:0;}
+.faq-modal-close{background:none;border:none;font-size:1.3rem;color:var(--muted);cursor:pointer;line-height:1;}
+.faq-modal-close:hover{color:var(--ink);}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.min.js"></script>
 </head>
@@ -335,6 +357,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
     <div id="header-user-info" class="hidden" style="font-size:0.75rem;color:#c8bfb0;letter-spacing:0.04em;"></div>
     <button id="header-listings-btn" class="hidden btn btn-ghost" style="font-size:0.72rem;padding:5px 14px;color:#c8bfb0;border:1px solid rgba(184,151,90,0.3);border-radius:3px;" onclick="showDashboard()">My Listings</button>
     <button id="header-getting-started-btn" class="hidden btn btn-ghost" style="font-size:0.72rem;padding:5px 14px;color:#c8bfb0;border:1px solid rgba(184,151,90,0.3);border-radius:3px;" onclick="showGettingStartedModal()">Getting Started</button>
+    <button id="header-faq-btn" class="hidden btn btn-ghost" style="font-size:0.72rem;padding:5px 14px;color:#c8bfb0;border:1px solid rgba(184,151,90,0.3);border-radius:3px;" onclick="showFaqModal()">FAQ</button>
     <button id="header-signout-btn" class="hidden btn btn-ghost" style="font-size:0.72rem;padding:5px 12px;color:#c8bfb0;" onclick="signOut()">Sign Out</button>
   </div>
 </header>
@@ -349,6 +372,17 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
     </div>
     <div class="gs-tabs" id="gs-tabs-app" role="tablist"></div>
     <div id="gs-panels-app"></div>
+  </div>
+</div>
+
+<!-- FAQ MODAL (in-app) -->
+<div id="faq-modal" class="hidden" style="position:fixed;inset:0;background:rgba(26,23,20,0.6);z-index:950;overflow-y:auto;">
+  <div class="faq-modal-inner">
+    <div class="faq-modal-header">
+      <h3 class="faq-modal-title">FAQ</h3>
+      <button class="faq-modal-close" onclick="hideFaqModal()" aria-label="Close">&#10005;</button>
+    </div>
+    <div id="faq-content-app"></div>
   </div>
 </div>
 
@@ -7074,6 +7108,8 @@ async function updateHeaderForUser(user, userRec) {
   if (listingsBtn) listingsBtn.classList.remove('hidden');
   const gsBtn = document.getElementById('header-getting-started-btn');
   if (gsBtn) gsBtn.classList.remove('hidden');
+  const faqBtn = document.getElementById('header-faq-btn');
+  if (faqBtn) faqBtn.classList.remove('hidden');
 
   // Load credit balance from Supabase
   if (creditBadge && userRec) {
@@ -7124,6 +7160,7 @@ function hideAppUI() {
   const lb = document.getElementById('header-listings-btn');
   if (lb) lb.classList.add('hidden');
   document.getElementById('header-getting-started-btn')?.classList.add('hidden');
+  document.getElementById('header-faq-btn')?.classList.add('hidden');
   document.getElementById('header-user-info')?.classList.add('hidden');
   document.getElementById('header-signout-btn')?.classList.add('hidden');
   document.getElementById('header-credit-badge')?.classList.add('hidden');
@@ -7136,6 +7173,15 @@ function showGettingStartedModal() {
 }
 function hideGettingStartedModal() {
   document.getElementById('gs-modal').classList.add('hidden');
+}
+
+// ── FAQ MODAL (in-app) ──────────────────────────────────────────────────────
+function showFaqModal() {
+  renderFAQ('app');
+  document.getElementById('faq-modal').classList.remove('hidden');
+}
+function hideFaqModal() {
+  document.getElementById('faq-modal').classList.add('hidden');
 }
 
 // ── SIGN OUT ─────────────────────────────────────────────────────────────────
@@ -7423,7 +7469,7 @@ function showPricingPage(user, userRec, reason) {
           <div style="font-size:0.75rem;color:var(--muted);margin-bottom:20px;">or $990/yr — 2 months free</div>
           <ul style="list-style:none;font-size:0.82rem;color:var(--ink);line-height:1.9;flex:1;margin-bottom:20px;">
             <li>✓ &nbsp;125 staged images / month</li>
-            <li>✓ &nbsp;Up to 5 agent sub-accounts</li>
+            <li>✓ &nbsp;Up to 3 agent sub-accounts</li>
             <li>✓ &nbsp;Shared image pool</li>
             <li>✓ &nbsp;Team AB 723 dashboard</li>
             <li>✓ &nbsp;All Solo features</li>
@@ -8354,6 +8400,113 @@ function switchGsTab(scope, id, btn) {
   document.getElementById('gs-panel-' + scope + '-' + id).classList.add('active');
 }
 
+// ── FAQ — shared content + renderer ──────────────────────────────────────
+// Single source of truth for the marketing landing page (#faq) and the
+// in-app FAQ modal, so the two never drift out of sync.
+const FAQ_CONTENT = [
+  {
+    category: "General",
+    items: [
+      { q: "What is Smart Stage PRO?", a: "An AI-powered virtual staging platform for real estate agents, teams, and brokerages. It turns listing photos into MLS-ready marketing images — staging vacant rooms, decluttering occupied ones, enhancing exteriors, and generating the compliance documentation to go with every staged image. Every image is fully compliant with California AB 723." },
+      { q: "What's the difference between Smart Stage PRO and Smart Stage PRO Plus?", a: "Smart Stage PRO covers photo staging and correction. PRO Plus is a separate add-on that turns your staged and camera-ready photos into a finished real estate video, with AI-generated camera motion, music, and optional narration." },
+      { q: "Which staging module should I use for my listing?", a: "Vacant room → <strong>Stage Vacant</strong>. Occupied and cluttered → <strong>Declutter</strong>, or <strong>Clean & Stage</strong> if you want both steps done in one pass. Outdoor photos → <strong>Exterior Enhancements</strong>." },
+      { q: "Is this virtual staging or AI-generated staging — what's the difference?", a: "It's AI-generated virtual staging — the engine adds furniture and decor to a real photo of the room. It's never allowed to alter permanent architecture (walls, cabinets, flooring, fixtures), which is what keeps every image AB 723 compliant." },
+      { q: "Does this work for occupied homes, or only vacant ones?", a: "Both. Vacant rooms go through Stage Vacant. Occupied, furnished rooms go through Declutter (removes the existing furniture) or Clean & Stage (declutters, then stages, in one operation)." }
+    ]
+  },
+  {
+    category: "Compliance",
+    items: [
+      { q: "Is virtual staging legal in California?", a: "Yes, under California AB 723 §10140.8, as long as staged images are properly disclosed. Smart Stage PRO builds that disclosure into every staged image automatically — you don't have to create it yourself." },
+      { q: "Do I have to disclose that a photo was staged?", a: "Yes. Every virtually staged MLS image must be disclosed as digitally altered, and the original unaltered photo has to be available alongside it — not just linked, but included in the listing itself." },
+      { q: "What exactly do I need to upload to MLS?", a: "Both the clean staged image and the original unaltered photo, ideally placed next to each other in the photo gallery — then answer \"Yes\" to the digital alteration disclosure question. Smart Stage PRO generates everything you need for this; it doesn't submit to the MLS on your behalf." },
+      { q: "What's the QR code / compliance page, and do I have to use it?", a: "Every staged image gets a permanent compliance page with the original, the staged version, your agent/brokerage info, and the AB 723 disclosure. Copy that page's URL into MLS public comments, or add the QR code to the photo gallery — whichever your MLS accepts." },
+      { q: "Does AI Motion video need the same disclosure as a staged photo?", a: "No — you don't have to do anything extra. But Smart Stage PRO automatically attaches the exact same AB 723 disclosure and compliance page to every AI Motion video that it attaches to any staged image, for your records." },
+      { q: "What happens to my compliance pages if I cancel my subscription?", a: "They stay live for a minimum of 30 days after cancellation. Compliance pages can never be deleted — only archived, which just hides them from your dashboard. You can also download a ZIP of your listing's photos and compliance documents at any time." },
+      { q: "How long are my records kept?", a: "A minimum of 3 years, per California DRE requirements." }
+    ]
+  },
+  {
+    category: "Pricing & Billing",
+    items: [
+      { q: "What counts as one \"staged image\"?", a: "One Generate Final click. Drafts and iterations (these are watermarked) run the full engine but don't cost anything — only Generate Final produces MLS Ready images without watermark and debits your balance." },
+      { q: "Do unused images roll over? Is there a cap?", a: "Yes, automatically, month to month. Caps: Solo 150, Team 375, Brokerage 1,200. Rollover images are forfeited if you cancel." },
+      { q: "What's the difference between Solo, Team, and Brokerage?", a: "Solo ($49/mo) is 1 agent, 50 images/month. Team ($99/mo) is up to 3 agents sharing 125 images/month. Brokerage ($279/mo) is unlimited agents sharing 400 images/month, plus CSV export for DRE audits. All three include every staging module and full AB 723 compliance." },
+      { q: "How is Smart Correct billed differently from staging?", a: "Much more cheaply — every 5 photos corrected costs 1 Image, not 1 photo = 1 Image. It's a running lifetime count that never resets, so partial batches always carry forward. Downloading a corrected photo is always free." },
+      { q: "What happens if I run out of images mid-month?", a: "You can buy an overage pack immediately, or upgrade your plan. Overage pricing: Solo $25/20 images, Team $45/50 images, Brokerage $75/100 images. Overage images don't roll over — they expire at the end of the current billing period." },
+      { q: "Can I add more agents to my Team/Brokerage plan later?", a: "Yes — Team supports up to 3 agents, Brokerage is unlimited. All agents under a plan share the same monthly image allocation." },
+      { q: "Is there a contract, or can I cancel anytime?", a: "No contracts, cancel anytime. Your plan stays active through the end of the paid period; unused rollover images are forfeited on cancellation, but compliance pages and 3-year record retention continue regardless." }
+    ]
+  },
+  {
+    category: "Smart Correct™",
+    items: [
+      { q: "What does Smart Correct actually fix?", a: "White balance, exposure, perspective, and noise — deterministic photographic correction, not AI generation. Nothing is added, removed, or altered in the scene." },
+      { q: "Does a Smart Corrected photo need an AB 723 disclosure?", a: "No — on its own, a Smart Corrected photo carries no disclosure obligation, since nothing was digitally added or changed. If you later apply a preset or Hero Shot on top of it, that step does count as digital alteration and goes through the normal compliance flow." },
+      { q: "What's the difference between Smart Correct and full staging?", a: "Smart Correct is classical photo correction — no AI staging involved, and much cheaper to run. Staging adds furniture and decor via the AI engine and always goes through Generate Final." }
+    ]
+  },
+  {
+    category: "Staging Process & Quality",
+    items: [
+      { q: "How long does staging take?", a: "About 30–60 seconds for a single-step module like Stage Vacant; 45–90 seconds for Clean & Stage, since it's two engine calls in sequence." },
+      { q: "Why did my staged image come out sparse-looking?", a: "Usually the design style — Minimalist, Scandinavian, and Japandi lean spare by design. Use iteration to ask for more furniture pieces, or switch to a fuller style like Transitional, Traditional, or Luxe Modern." }
+    ]
+  },
+  {
+    category: "Iterations & Revisions",
+    items: [
+      { q: "How do I request changes to a staged draft?", a: "Type exactly what you want changed into the revision box, then click Re-Stage (or Re-Declutter). Only what you specify changes — everything else stays exactly as it was, based on your Design DNA." },
+      { q: "Why didn't my first draft get the room layout right?", a: "The AI sometimes misreads open-concept spaces on the first pass — placing furniture in a zone that should have stayed empty, or missing a zone boundary. This shows up most with Open Plan rooms. Don't start over — iterate on just the part that's wrong, e.g. \"keep the dining area empty\" or \"remove the chair near the window.\"" },
+      { q: "Can I iterate more than once on the same draft?", a: "Yes — but after about 3 iterations on the same room, it's often faster to start over with a fresh draft than to keep nudging the same one." }
+    ]
+  },
+  {
+    category: "PRO Plus Video",
+    items: [
+      { q: "What's included in a PRO Plus video?", a: "Your staged and camera-ready photos assembled into a real estate walkthrough, with AI-assigned camera motion, music, and optional AI narration — built around images from a property you're already working on in Smart Stage PRO." },
+      { q: "What's the difference between AI Motion and Ken Burns motion?", a: "AI Motion is premium, AI-generated camera movement — up to 3 frames get it by default. The rest use Ken Burns motion, a classic pan-and-zoom. You can override either assignment manually." },
+      { q: "Can I add narration?", a: "Yes — turn on AI Narration when you're selecting images, then choose it again at the music/narration step." },
+      { q: "Does the video count against my image balance?", a: "Yes, at download. Ken Burns frames are billed flat at 1 Image, while AI Motion frames are charged at generation time from your AI Motion Pool." },
+      { q: "Does my AI Motion Pool roll over month to month?", a: "No — you get 15 AI Motion Pool images each month for premium AI Motion frames, and they don't carry over. Use them or lose them. This is different from staged images, which do roll over up to your plan's cap." }
+    ]
+  },
+  {
+    category: "Account & Team",
+    items: [
+      { q: "Who can see what on a Team or Brokerage plan?", a: "Team members see only their own listings; the Team Lead sees everyone's. On Brokerage, individual agents see their own, Team Leads see their team's, and the Broker Admin sees everything across the brokerage, plus CSV export for audits." },
+      { q: "Can I have someone else stage listings under my account?", a: "Not under your individual login, but Team and Brokerage plans support multiple agent accounts sharing the same monthly image allocation — so your team can each log in and stage under their own account." }
+    ]
+  }
+];
+
+// scope = 'landing' or 'app' — keeps element IDs unique so both placements
+// can be mounted on the page at once without colliding.
+function renderFAQ(scope) {
+  const mountEl = document.getElementById('faq-content-' + scope);
+  if (!mountEl) return;
+  mountEl.innerHTML = FAQ_CONTENT.map((cat, ci) => `
+    <div class="faq-category">
+      <div class="faq-category-title">${cat.category}</div>
+      ${cat.items.map((item, ii) => `
+        <div class="faq-item">
+          <button class="faq-q" onclick="toggleFaqItem('${scope}-${ci}-${ii}', this)" aria-expanded="false">
+            <span>${item.q}</span>
+            <span class="faq-caret">+</span>
+          </button>
+          <div class="faq-a" id="faq-a-${scope}-${ci}-${ii}">${item.a}</div>
+        </div>
+      `).join('')}
+    </div>
+  `).join('');
+}
+function toggleFaqItem(id, btn) {
+  const answerEl = document.getElementById('faq-a-' + id);
+  const isOpen = answerEl.classList.toggle('open');
+  btn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+  btn.classList.toggle('open', isOpen);
+}
+
 function showLandingPage() {
   document.getElementById('landing-page')?.remove();
   document.querySelector('.compliance-bar').style.display = 'none';
@@ -8371,6 +8524,12 @@ function showLandingPage() {
 .gs-title{font-family:'Cormorant Garamond',Georgia,serif;font-size:2.1rem;font-weight:600;margin:0 0 10px;}
 .gs-sub{color:var(--muted);font-size:0.95rem;max-width:560px;margin:0 0 28px;}
 .gs-cta-row{margin-top:26px;display:flex;gap:10px;flex-wrap:wrap;}
+
+.faq-section{padding:80px 32px;background:#fff;}
+.faq-inner{max-width:820px;margin:0 auto;}
+.faq-eyebrow{font-size:0.72rem;letter-spacing:0.14em;text-transform:uppercase;color:var(--gold);font-weight:600;margin-bottom:8px;}
+.faq-title{font-family:'Cormorant Garamond',Georgia,serif;font-size:2.1rem;font-weight:600;margin:0 0 10px;}
+.faq-sub{color:var(--muted);font-size:0.95rem;max-width:560px;margin:0 0 32px;}
 
 /* ══════════════════════════════════════════════════════════════════
      HEADER / NAVIGATION
@@ -9818,6 +9977,7 @@ function showLandingPage() {
       <a href="#zillow-scan" class="hd-nav-link">Free Scan</a>
       <a href="#pricing" class="hd-nav-link">Pricing</a>
       <a href="#getting-started" class="hd-nav-link">Getting Started</a>
+      <a href="#faq" class="hd-nav-link">FAQ</a>
     </nav>
 
     <div class="hd-actions">
@@ -9841,6 +10001,7 @@ function showLandingPage() {
     <a href="#zillow-scan" class="hd-mobile-link" onclick="closeHdMenu()">Free Scan</a>
     <a href="#pricing" class="hd-mobile-link" onclick="closeHdMenu()">Pricing</a>
     <a href="#getting-started" class="hd-mobile-link" onclick="closeHdMenu()">Getting Started</a>
+    <a href="#faq" class="hd-mobile-link" onclick="closeHdMenu()">FAQ</a>
     <div class="hd-mobile-divider"></div>
     <a href="#" class="hd-mobile-link" onclick="closeHdMenu(); hideLandingPage(); showAuthModal('login'); return false;">Sign In</a>
     <a href="#pricing" class="hd-mobile-cta" onclick="closeHdMenu()">Get Started</a>
@@ -10072,6 +10233,15 @@ function showLandingPage() {
       <a href="#" class="pr-cta" onclick="hideLandingPage(); showAuthModal('signup'); return false;">Start Free Trial</a>
       <a href="#pricing" class="hd-nav-link" style="color:var(--ink);border:1px solid var(--border);padding:11px 22px;border-radius:3px;">See Pricing</a>
     </div>
+  </div>
+</section>
+
+<section class="faq-section" id="faq">
+  <div class="faq-inner">
+    <div class="faq-eyebrow">FAQ</div>
+    <h2 class="faq-title">Questions agents actually ask.</h2>
+    <p class="faq-sub">Compliance, pricing, staging quality — the answers agents look for before and after they sign up.</p>
+    <div id="faq-content-landing"></div>
   </div>
 </section>
 
@@ -10985,6 +11155,7 @@ function showLandingPage() {
   }
 
   renderGettingStarted('landing');
+  renderFAQ('landing');
 }
 
 function hideLandingPage() {

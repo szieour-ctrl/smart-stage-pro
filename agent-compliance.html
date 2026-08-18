@@ -186,6 +186,15 @@
 
   footer{background:var(--navy-deep);color:rgba(255,255,255,0.6);padding:34px 0;text-align:center;font-size:12px;}
   footer .link{color:rgba(255,255,255,0.85);}
+
+  .legal-basis{background:var(--navy-deep);border-bottom:1px solid rgba(255,255,255,0.08);padding:22px 0;}
+  .legal-basis-grid{display:grid;grid-template-columns:1fr 1fr;gap:32px;}
+  @media(max-width:760px){.legal-basis-grid{grid-template-columns:1fr;gap:18px;}}
+  .legal-basis-label{font-family:var(--mono);font-size:10.5px;letter-spacing:1px;text-transform:uppercase;color:var(--orange);font-weight:700;margin-bottom:6px;}
+  .legal-basis-text{font-size:13.5px;line-height:1.55;color:rgba(255,255,255,0.82);margin-bottom:8px;}
+  .legal-basis-text strong{color:#fff;}
+  .legal-basis-link{font-size:13px;font-weight:600;color:#fff;text-decoration:none;border-bottom:1px solid rgba(255,255,255,0.35);padding-bottom:1px;}
+  .legal-basis-link:hover{border-bottom-color:#fff;}
 </style>
 </head>
 <body>
@@ -210,6 +219,23 @@
     </div>
   </div>
 </header>
+
+<div class="legal-basis">
+  <div class="wrap">
+    <div class="legal-basis-grid">
+      <div class="legal-basis-item">
+        <div class="legal-basis-label">California Law</div>
+        <div class="legal-basis-text">Assembly Bill 723 added <strong>Business &amp; Professions Code §10140.8</strong>, effective January 1, 2026. It requires real estate licensees to disclose when a marketing image has been digitally altered, and to give the public access to the original, unaltered photo.</div>
+        <a href="https://leginfo.legislature.ca.gov/faces/billNavClient.xhtml?bill_id=202520260AB723" target="_blank" rel="noopener" class="legal-basis-link">Read the official bill text &rarr;</a>
+      </div>
+      <div class="legal-basis-item">
+        <div class="legal-basis-label">NAR Code of Ethics</div>
+        <div class="legal-basis-text">Article 12 of the National Association of REALTORS&reg; Code of Ethics requires a true picture in advertising, and Standard of Practice 12-1 extends that specifically to electronically altered images — separate from California law and enforced through MLS and professional-standards complaints.</div>
+        <a href="https://www.nar.realtor/about-nar/governing-documents/the-code-of-ethics" target="_blank" rel="noopener" class="legal-basis-link">Read the NAR Code of Ethics &rarr;</a>
+      </div>
+    </div>
+  </div>
+</div>
 
 <div class="hero">
   <div class="wrap">

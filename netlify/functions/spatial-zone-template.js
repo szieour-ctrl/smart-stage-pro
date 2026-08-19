@@ -41,6 +41,20 @@
 // type, event style, or aesthetic context" and "Preserve Original Image Immutability" (the
 // latter under Mandatory Output Behavior) — and have been removed accordingly.
 //
+// v6.3.5 (Aug 19, 2026): root-caused GPT Image 2 silently dropping listed zones with no
+// fixture anchor (e.g. a Dining Zone with no chandelier present in the original photo).
+// Confirmed via 1340 El Camino Verde Dr: zoneList had 'dining' explicitly checked and
+// correctly passed through (zoneList plumbing in index.html verified clean — this was
+// never a checkbox/data bug), but the render still omitted the dining set. Root cause:
+// instruction imbalance — anchored zones (Living/Dining-with-chandelier) get three
+// reinforcement blocks (anchor rule, contradiction check, RPIV check) while an anchor-less
+// listed zone only had one thin architectural-identification line to compete against all
+// of that fixture-immutability text. Fix: added MANDATORY ZONE COVERAGE — NO SILENT
+// OMISSIONS block directly after the zone list (explicit: fixture anchors resolve WHERE,
+// never WHETHER, a listed zone gets furnished), plus a ZONE COVERAGE VERIFICATION step in
+// OUTPUT REQUIREMENTS mirroring the existing RPIV self-check pattern already used for
+// fixture immutability. No existing rules were removed or reordered.
+//
 // Two variable slots: {{room_assignment_variables}} and the Design DNA block (style,
 // palette, buyer/feeling/staging-level, plus a per-project Furniture Profile drawn from
 // STYLE_FURNITURE_VOCABULARY, plus captured furnishingsDNA continuity when present).
@@ -137,6 +151,12 @@ const SPATIAL_ZONE_TEMPLATE = [
 '',
 'Find and stage: {{room_assignment_variables}}',
 '',
+'MANDATORY ZONE COVERAGE — NO SILENT OMISSIONS',
+'Every zone listed above MUST receive appropriate furniture placement. This requirement applies EQUALLY to zones with a fixture anchor (chandelier, fireplace, ceiling fan) and zones with NO fixture anchor.',
+'The absence of a chandelier, fireplace, or other fixture anchor is NEVER grounds to leave a listed zone vacant, sparse, or under-furnished. Fixture anchors are used ONLY to resolve WHERE a zone sits and to settle placement conflicts between zones — they are not a precondition for a listed zone to be furnished at all.',
+'If a listed zone has no fixture anchor, identify its location using the ZONE IDENTIFICATION RULES and ZONE BOUNDARIES above (wall count, open-space position, sightline, adjacency to other identified zones, circulation paths) and furnish it fully to the same standard as an anchored zone.',
+'Treat every zone name in the list above as an independent, non-optional staging requirement — not a suggestion to be dropped if placement is ambiguous. If placement is genuinely ambiguous, choose the most architecturally plausible location and stage it; do not omit the zone.',
+'',
 'NON-CREATION CHANDELIER RULES',
 'Do NOT add any chandelier, pendant cluster, or decorative overhead fixture to the staged render unless one already exists in the original photograph.',
 'Do NOT add a chandelier that does not exist in the original photograph. Existing chandeliers visible in the original photo ARE recognized as zone anchors and ALWAYS lock the Dining Zone directly below them.',
@@ -187,6 +207,7 @@ const SPATIAL_ZONE_TEMPLATE = [
 '',
 'OUTPUT REQUIREMENTS',
 'Do not alter architecture.',
+'ZONE COVERAGE VERIFICATION — Before finalizing the render, confirm every zone named in "Find and stage" above contains appropriate furniture. If any listed zone is empty, sparse, or missing its primary furniture pieces, flag "ZONE COVERAGE VIOLATION," return to that zone, and place furniture using the architectural cues available — even without a fixture anchor — before finalizing.',
 'AB-723 COMPLIANCE — Planning and visualization only. Do not alter, remove, relocate, resize, conceal, or modify any architectural element including walls, windows, doors, cabinetry, fireplaces, flooring, ceilings, lighting fixtures, appliances, or built-in features. All architectural elements must remain exactly as photographed.',
 'State: "All permanent fixtures preserved exactly as photographed. AB-723 compliant."'
 ].join('\n');

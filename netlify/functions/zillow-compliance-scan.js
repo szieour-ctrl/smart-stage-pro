@@ -299,6 +299,7 @@ function evaluateCompliance(listing) {
     mlsNumber: listing.attribution_info?.mls_id || null,
     listingAgent: listing.attribution_info?.agent_name || null,
     address: listing.address ? `${listing.address.street_address}, ${listing.address.city}, ${listing.address.state} ${listing.address.zipcode}` : null,
+    streetAddress: listing.address?.street_address || null,
     // Honest, explicit limitation — always included, not just when relevant.
     // A compliance checker that doesn't say what it can't see is more
     // dangerous than one that does.

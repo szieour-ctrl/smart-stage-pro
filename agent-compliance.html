@@ -709,6 +709,7 @@ function synthesizeReport() {
     },
     limitation: (ab723.limitation || '') + (photoScanData ? ' ' + photoScanData.limitation : '') + (destinationData ? ' ' + destinationData.limitation : ''),
     address: checkData.address,
+    streetAddress: checkData.streetAddress || null,
     heroPhotoUrl: checkData.heroPhotoUrl || null,
     rule1210f: checkData.rule1210f,
   };
@@ -753,6 +754,7 @@ async function submitLead() {
         email, phone,
         listingUrl: currentListingUrl,
         address: composedReport.address,
+        streetAddress: composedReport.streetAddress,
         ab723Verdict: checkData.ab723.verdict,
         rule1210fVerdict: checkData.rule1210f?.verdict,
         source: 'agent-compliance-landing',

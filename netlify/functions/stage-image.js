@@ -82,10 +82,15 @@ Return this exact shape:
 // decides that composition in the first place.
 // gpt-image-1's /v1/images/edits endpoint only accepts three fixed sizes
 // (not arbitrary ratios): 1024x1024, 1536x1024 (landscape), 1024x1536
-// (portrait). Picking the closest match to the real input aspect ratio
-// won't perfectly preserve every possible framing, but eliminates the
-// forced-square recompose that was the actual driver of the crop for the
-// overwhelmingly common landscape-oriented real estate photo case.
+// (portrait). gpt-image-2 additionally supports arbitrary WIDTHxHEIGHT
+// (divisible by 16, aspect ratio between 1:3 and 3:1) -- but this function
+// intentionally keeps returning the same three standard sizes rather than
+// requesting an exact-match custom size. Reasoning: none of this session's
+// zone/anchor diagnosis has isolated whether arbitrary sizing helps or
+// hurts spatial placement, and changing two variables (model AND sizing
+// strategy) in the same deploy would make a regression impossible to
+// attribute. Revisit only after the model swap alone has been validated
+// against the known-good regression set.
 async function pickOutputSize(imageBuffer) {
   try {
     const meta = await sharp(imageBuffer).metadata();
@@ -100,9 +105,20 @@ async function pickOutputSize(imageBuffer) {
 }
 
 // ── Build multipart for OpenAI image edits ───────────────────────────────────
+// MODEL (Aug 20, 2026): switched from gpt-image-1 to gpt-image-2. gpt-image-1
+// is OpenAI's previous-generation model, scheduled to sunset Oct 23, 2026;
+// gpt-image-2 (Apr 2026) is the current flagship and was, until this change,
+// never actually in this pipeline despite months of prompt/template tuning
+// being diagnosed against it. gpt-image-2 reasons before rendering (plans
+// layout, self-checks) rather than rendering directly, which is directly
+// relevant to the open-plan zone/anchor placement problems this pipeline has
+// been fighting. Confirmed via OpenAI's own docs: standard sizes
+// (1024x1024/1536x1024/1024x1536) and the low/medium/high quality params
+// below are unchanged across the model family, so no other logic in this
+// file needed to change for this swap.
 function buildMultipart(boundary, imageBuffer, imageMime, prompt, quality, size) {
   const parts = [];
-  parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\ngpt-image-1`);
+  parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\ngpt-image-2`);
   parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="prompt"\r\n\r\n${prompt}`);
   parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="n"\r\n\r\n1`);
   parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="size"\r\n\r\n${size}`);

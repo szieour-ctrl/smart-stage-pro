@@ -214,3 +214,48 @@ function buildRoomAssignmentText(zones) {
 }
 
 module.exports = { analyzeOpenPlanZones, buildRoomAssignmentText, OPEN_PLAN_ZONE_PROMPT, FLEX_ROOM_TYPES };
+
+// ── Netlify handler ──────────────────────────────────────────────────────
+// Called once per Open Plan photo, BEFORE stage-vacant-prompt.js. Returns
+// roomAssignmentText, which index.html passes straight through as the
+// roomAssignmentText override on the stage-vacant-prompt.js request --
+// see buildRoomAssignmentVariable() in spatial-zone-template.js, which
+// uses this verbatim instead of auto-building a plain zone-label list.
+//
+// CACHING NOTE (not implemented here -- this handler is stateless, same
+// as analyzeFloorplan in stage-image.js): the caller should cache this
+// result per photoId once computed, the same way zoneList is already
+// cached in SESSION.photoRoomMap. Anchors should stay stable across
+// Iterate/Enhance-with-AI passes on the same photo -- re-running Vision on
+// every stage call risks the read drifting between iterations of what
+// should be the same room.
+exports.handler = async (event) => {
+  if (event.httpMethod !== "POST") return { statusCode: 405, body: "Method Not Allowed" };
+
+  const headers = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Headers": "Content-Type",
+    "Content-Type": "application/json",
+  };
+
+  try {
+    const claudeKey = process.env.ANTHROPIC_API_KEY;
+    if (!claudeKey) return { statusCode: 500, headers, body: JSON.stringify({ error: "ANTHROPIC_API_KEY not configured" }) };
+
+    const { imageBase64, mimeType, model } = JSON.parse(event.body);
+    if (!imageBase64) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing imageBase64" }) };
+
+    const result = await analyzeOpenPlanZones(imageBase64, mimeType, claudeKey, { model });
+
+    console.log(
+      "analyze-open-plan-zones: " + (result.raw?.zones?.length || 0) + " zone(s) identified -- " +
+      (result.raw?.zones || []).map(z => z.zone + "/" + z.anchorType).join(", ")
+    );
+
+    return { statusCode: 200, headers, body: JSON.stringify(result) };
+
+  } catch (err) {
+    console.error("analyze-open-plan-zones error:", err.message);
+    return { statusCode: 500, headers, body: JSON.stringify({ error: err.message, details: err.stack }) };
+  }
+};

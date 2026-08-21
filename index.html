@@ -4011,6 +4011,44 @@ async function extractStagingDNA(stagedBase64, mimeType) {
 }
 
 // ── Decor8 staging engine ─────────────────────────────────────────────────────
+// ── Open Plan zone/anchor Vision read ────────────────────────────────────
+// Calls analyze-open-plan-zones.js once per Open Plan room, caches the
+// result on the room object. Anchors must stay stable across Iterate/
+// Enhance-with-AI passes on the SAME photo — re-running Vision on every
+// stage call risks the read drifting between iterations of what should be
+// one consistent room. If Vision fails for any reason, returns '' —
+// buildRoomAssignmentVariable() in spatial-zone-template.js falls back
+// cleanly to the existing plain zone-label list, so a Vision outage
+// degrades gracefully instead of blocking staging entirely.
+async function analyzeOpenPlanZonesForRoom(room, orig) {
+  if (!room.isOpenPlan) return '';
+  if (room.roomAssignmentText) return room.roomAssignmentText; // cached
+
+  try {
+    const res = await fetch('/.netlify/functions/analyze-open-plan-zones', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        imageBase64: orig.base64,
+        mimeType: orig.mimeType,
+      })
+    });
+
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}));
+      console.warn('analyze-open-plan-zones failed (' + (d.error || res.status) + ') — falling back to plain zone list');
+      return '';
+    }
+
+    const data = await res.json();
+    room.roomAssignmentText = data.roomAssignmentText || '';
+    return room.roomAssignmentText;
+  } catch (e) {
+    console.warn('analyze-open-plan-zones request failed — falling back to plain zone list:', e.message);
+    return '';
+  }
+}
+
 async function stageRoom(roomId) {
   const room = SESSION.rooms.find(r => r.id === roomId);
   const orig = SESSION.originals.find(o => o.id === room.originalId);
@@ -4027,6 +4065,18 @@ async function stageRoom(roomId) {
   renderRoomQueue();
 
   try {
+    // Step 0: for Open Plan rooms, get Vision's zone/anchor read BEFORE
+    // building the staging prompt — this produces the per-zone anchor text
+    // (e.g. "Kitchen: Anchor: island.\nLiving Room: Anchor: fireplace
+    // wall...") that reliably gets zone placement right on the first pass,
+    // validated this session against the plain zone-list approach which
+    // was not.
+    if (room.isOpenPlan) {
+      room.promptStatus = 'Reading zones and anchors...';
+      renderRoomQueue();
+    }
+    const roomAssignmentText = await analyzeOpenPlanZonesForRoom(room, orig);
+
     // Step 1: assemble the staging prompt from this room's Image Assignment selections —
     // no Haiku call (Phase 6.2 template)
     const promptRes = await fetch('/.netlify/functions/stage-vacant-prompt', {
@@ -4037,6 +4087,7 @@ async function stageRoom(roomId) {
         zoneList: room.zoneList || [],
         flexNote: room.flexNote || '',
         isOpenPlan: !!room.isOpenPlan,
+        roomAssignmentText: roomAssignmentText || '',
         designStyle: i.style_label || 'Organic Modern',
         colorPalette: i.palette_label || 'Warm Neutrals',
         buyerProfile: i.buyer_label || '',
@@ -5685,6 +5736,12 @@ async function runCleanAndStage(roomId) {
     // no Haiku call (Phase 6.2 template)
     room.promptStatus = 'Step 2 of 3 — Assembling staging prompt...';
     renderRoomQueue();
+    // Vision zone/anchor read runs against the ORIGINAL photo, not the
+    // decluttered one -- zones/anchors are architectural facts (walls,
+    // fixtures) that decluttering doesn't change. Reuses the same cached
+    // helper as stageRoom() so a room that's already had this read done
+    // doesn't pay for it twice.
+    const roomAssignmentText = await analyzeOpenPlanZonesForRoom(room, orig);
     const stageRes = await fetch('/.netlify/functions/stage-vacant-prompt', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -5693,6 +5750,7 @@ async function runCleanAndStage(roomId) {
         zoneList: room.zoneList || [],
         flexNote: room.flexNote || '',
         isOpenPlan: !!room.isOpenPlan,
+        roomAssignmentText: roomAssignmentText || '',
         designStyle: i.style_label || 'Organic Modern',
         colorPalette: i.palette_label || 'Warm Neutrals',
         buyerProfile: i.buyer_label || '',

@@ -136,7 +136,15 @@ Return this exact JSON shape:
 zone must be exactly one of "Dining Zone", "Living Room", "Flex Room" (never Kitchen). flexRoomType is only used when zone is "Flex Room" -- it must be exactly one of: Office, Formal Dining Room, Media Room, Play Room, Music Room, Den, Study Room, Gym, Reading Nook, or an empty string if none fit confidently. No other value is valid. anchorType must be exactly "FIXTURE", "WALL", or "FOREGROUND". anchorText should read naturally as a short phrase, matching the style of the examples above -- no full sentences, no restating the zone name.`;
 
 async function analyzeOpenPlanZones(base64, mimeType, claudeKey, opts = {}) {
-  const model = opts.model || "claude-haiku-4-5-20251001";
+  // Swapped default from claude-haiku-4-5-20251001 -> claude-sonnet-5 (Aug 21
+  // rewire): sample9.jpg's fireplace anchor was skipped entirely at the
+  // detection stage on Haiku, under both the old prompt and the new
+  // Foreground/Contradiction rewrite -- the same anchor was correctly
+  // resolved by hand under Sonnet. Isolated swap, no other change in this
+  // edit, so any behavior shift is attributable to the model alone (same
+  // discipline as the gpt-image-1 -> gpt-image-2 swap in stage-image.js).
+  // opts.model still overrides if passed by the caller, unchanged.
+  const model = opts.model || "claude-sonnet-5";
 
   const payload = JSON.stringify({
     model,

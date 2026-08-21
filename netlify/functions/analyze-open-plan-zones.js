@@ -213,8 +213,6 @@ function buildRoomAssignmentText(zones) {
   return lines.join("\n");
 }
 
-module.exports = { analyzeOpenPlanZones, buildRoomAssignmentText, OPEN_PLAN_ZONE_PROMPT, FLEX_ROOM_TYPES };
-
 // ── Netlify handler ──────────────────────────────────────────────────────
 // Called once per Open Plan photo, BEFORE stage-vacant-prompt.js. Returns
 // roomAssignmentText, which index.html passes straight through as the
@@ -229,7 +227,7 @@ module.exports = { analyzeOpenPlanZones, buildRoomAssignmentText, OPEN_PLAN_ZONE
 // Iterate/Enhance-with-AI passes on the same photo -- re-running Vision on
 // every stage call risks the read drifting between iterations of what
 // should be the same room.
-exports.handler = async (event) => {
+async function handler(event) {
   if (event.httpMethod !== "POST") return { statusCode: 405, body: "Method Not Allowed" };
 
   const headers = {
@@ -258,4 +256,17 @@ exports.handler = async (event) => {
     console.error("analyze-open-plan-zones error:", err.message);
     return { statusCode: 500, headers, body: JSON.stringify({ error: err.message, details: err.stack }) };
   }
-};
+}
+
+// Single combined export, at the very end of the file, after everything it
+// references is defined. This is deliberate: module.exports = {...} was
+// previously set earlier in the file, THEN exports.handler = ... was
+// assigned after it -- module.exports = {...} reassigns exports.exports to
+// a brand-new object, decoupling it from the original `exports` reference,
+// so the later exports.handler = ... assignment was silently attaching to
+// an orphaned object nothing ever reads. Netlify's loader does
+// require(...).handler and found nothing, causing
+// "analyze-open-plan-zones.handler is undefined or not exported" in
+// production. Fix: one export statement, one object, handler included in
+// it directly -- no possibility of a second assignment shadowing the first.
+module.exports = { analyzeOpenPlanZones, buildRoomAssignmentText, OPEN_PLAN_ZONE_PROMPT, FLEX_ROOM_TYPES, handler };

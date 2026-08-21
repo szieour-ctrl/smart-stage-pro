@@ -1,261 +1,422 @@
-// analyze-open-plan-zones.js — Vision-based Open Plan zone/anchor reader.
+// spatial-zone-template.js — SHARED MODULE (not a Netlify function endpoint — no exports.handler)
 //
-// Produces the exact "Simple Anchor" text validated by hand this session
-// (Test_3, 2089 Thornecroft, 206 Granite Park, CLEAN_sample, CLEAN_sample7,
-// CLEAN_sample6 — 6/6 correct zone identification against real photos) —
-// for direct substitution into spatial-zone-template.js's
-// {{room_assignment_variables}} slot.
+// v6.3 Spatial Zone Analysis template — replaces the v1 Pass 0-6 Spatial Scene Compiler
+// template. v1's ChatGPT-architected compiler pipeline was scrapped after testing showed
+// prompt bloat/drift; v6.3 is leaner and fixture-anchored instead: Original Image
+// Immutability Lock, a mandatory fixture inventory + contradiction check, and an explicit
+// Fixture-Furniture Contradiction Enforcement hierarchy (Fireplace > Chandelier > Ceiling
+// Fan > Kitchen Fixtures > Furniture) replace v1's four-class Zone Behavior system.
+// Required by both group-spatial-read.js (Multi-Angle Group Stage, if revived) and
+// stage-vacant-prompt.js (single-room Vacant Stage + Clean+Stage step 2), so the exact
+// same template/assembler logic powers every staging prompt in the app — no per-file
+// duplicate copies that can silently drift apart.
 //
-// SCOPE, per this session's finding: Vision's job is ONLY zone + anchor
-// identification. It does NOT reason about circulation, cropping, or
-// furniture placement -- CIRCULATION-ZONE FRAME BEHAVIOR in
-// spatial-zone-template.js already owns that, and GPT Image 2 handles it
-// correctly on its own once a zone is flagged as having no fixture/wall
-// anchor. Vision writing circulation logic was tried and explicitly
-// rejected this session ("That is NOT YOUR JOB, that is the render's").
+// v6.3.2 (July 2026): fixed two v6.3.1 render failures.
+// (1) Chandelier hallucination — added NON-CREATION CHANDELIER RULES hard block: no
+//     chandelier/pendant/overhead fixture may be added unless one exists in the original
+//     photo; style/room-type/aesthetic inference are explicitly invalid grounds.
+// (2) Bar stool placement errors — the expanded seating-face rule set (angle tolerances,
+//     error codes) that was manually patched in as an interim v6.3.1 fix caused the model
+//     to hesitate and omit stools; it has been REMOVED ENTIRELY, not restored. No bar
+//     stool rule of any kind remains in this template.
+// Also added: formal RENDER-PHASE IMMUTABILITY VERIFICATION (RPIV) gate with an explicit
+// checklist and mandatory pass-confirmation statement (previously just a bullet list with
+// no defined pass/fail behavior).
 //
-// Zone set (per the actual Open Plan zone-selection UI, four categories
-// only): Kitchen, Dining Zone, Living Room, Flex Room (user-typed subtype --
-// office, formal dining room, media room, etc.). "Family Room" and "Formal
-// Dining Room" are NOT their own hardcoded zone names -- they are Flex Room
-// instances, distinguished by a typically-present open entrance / pony wall
-// / half-wall pass-through, and by whatever fixture (most commonly a
-// chandelier) suggests their specific type.
+// v6.3.4 (July 2026): root-caused v6.3.3's bar stool failures via 5-image open-plan test
+// set. Every failure occurred when the island back-overhang wasn't clearly visible in the
+// photo and/or conflicted with adjacent circulation zones. Fix: a single, narrow Bar Stool
+// Rule added directly in ZONE IDENTIFICATION RULES — stools ONLY where a countertop
+// overhang is clearly and unambiguously visible; no inference of overhang from open floor
+// clearance. Re-tested on the same 5 images: 100% success. Also, per the fixture hierarchy
+// note that Kitchen Fixtures should define the Kitchen zone boundary only (never bleed into
+// Dining/Living zone identity), "kitchen islands, cabinetry" was removed from the generic
+// ZONE BOUNDARIES cue list, and the RPIV checklist's old "Island seating-face classification
+// locked" line was removed in favor of the more specific rule now living in ZONE
+// IDENTIFICATION RULES.
 //
-// Anchor taxonomy (three types, matching every example validated this
-// session):
-//   1. FIXTURE  -- chandelier, pendant cluster, or fireplace. Locks the zone
-//      directly under/at that fixture, regardless of where the camera is
-//      standing.
-//   2. WALL     -- TWO OR MORE connected walls forming a corner (with or
-//      without windows). This is a structural fact about the room, not
-//      about camera position -- a true two-connected-wall corner is NEVER
-//      described as foreground, even when that corner also happens to be
-//      nearest the camera. Living Room / Flex Room are always WALL-anchored
-//      when this two-wall corner is present.
-//   3. FOREGROUND -- NOT a fallback category. Every open-plan photo has a
-//      foreground, full stop: interiors are typically shot ~4-5ft off the
-//      ground, so the camera is always standing inside SOME zone's nearest
-//      0-4ft. Determining which zone that is comes FIRST, before any
-//      per-zone classification -- see REASONING ORDER in the prompt below.
-//      A foreground zone can stand alone (no fixture, no wall -- most
-//      commonly Dining Zone, "the floater," per this session's finding)
-//      OR combine with a SINGLE wall not already claimed by another zone
-//      (e.g. Living Room anchored to foreground + one window wall -- see
-//      sample7). Two connected walls forming a corner is always WALL type
-//      instead, even for the foreground zone.
+// Confirmed against a clean-text v6.3.4 master prompt on July 5, 2026: the template below
+// is now an exact match. Two lines present in v6.3.2 were confirmed as intentionally
+// dropped in v6.3.4, not a doc-export artifact — "Chandeliers are NEVER inferred from room
+// type, event style, or aesthetic context" and "Preserve Original Image Immutability" (the
+// latter under Mandatory Output Behavior) — and have been removed accordingly.
 //
-// Kitchen is intentionally excluded from the Vision read: cabinetry/island
-// self-identifies the Kitchen zone architecturally, and every test this
-// session confirmed Vision doesn't need to be asked about it.
+// v6.3.5 (Aug 19, 2026): root-caused GPT Image 2 silently dropping listed zones with no
+// fixture anchor (e.g. a Dining Zone with no chandelier present in the original photo).
+// Confirmed via 1340 El Camino Verde Dr: zoneList had 'dining' explicitly checked and
+// correctly passed through (zoneList plumbing in index.html verified clean — this was
+// never a checkbox/data bug), but the render still omitted the dining set. Root cause:
+// instruction imbalance — anchored zones (Living/Dining-with-chandelier) get three
+// reinforcement blocks (anchor rule, contradiction check, RPIV check) while an anchor-less
+// listed zone only had one thin architectural-identification line to compete against all
+// of that fixture-immutability text. Fix: added MANDATORY ZONE COVERAGE — NO SILENT
+// OMISSIONS block directly after the zone list (explicit: fixture anchors resolve WHERE,
+// never WHETHER, a listed zone gets furnished), plus a ZONE COVERAGE VERIFICATION step in
+// OUTPUT REQUIREMENTS mirroring the existing RPIV self-check pattern already used for
+// fixture immutability. No existing rules were removed or reordered.
 //
-// Kitchen is intentionally excluded from the Vision read: cabinetry/island
-// self-identifies the Kitchen zone architecturally, and every test this
-// session confirmed Vision doesn't need to be asked about it.
+// Two variable slots: {{room_assignment_variables}} and the Design DNA block (style,
+// palette, buyer/feeling/staging-level, plus a per-project Furniture Profile drawn from
+// STYLE_FURNITURE_VOCABULARY, plus captured furnishingsDNA continuity when present).
+// The Design DNA placeholder text is unchanged from v1, so the Furniture Vocabulary /
+// DNA continuity system built in the prior session plugs in here without modification.
 //
-// Output shape is deliberately the plain text line that gets inserted at
-// {{room_assignment_variables}} -- not structured JSON that a second step
-// has to reformat. One Vision call, one string, ready to substitute.
+// NOTE: the room-assignment placeholder wording has changed twice now between prompt
+// revisions ("{{room_assignment_variables}}" in v1 vs "{{room_assignment_variables}} go
+// here" in the original template and again in v6.3). assembleSpatialZonePrompt() below
+// uses a regex for this substitution instead of an exact string match, so future wording
+// tweaks to the surrounding text won't silently break the substitution again.
 
-const https = require("https");
+const SPATIAL_ZONE_TEMPLATE = [
+'SPATIAL ZONE ANALYSIS MODE',
+'PRIMARY ROLE: Architectural space-planning analyst specializing in residential interiors.',
+'SECONDARY ROLE: Professional luxury real-estate interior designer, home stager, and architectural photographer.',
+'',
+'ORIGINAL IMAGE IMMUTABILITY LOCK',
+'The original photograph is the controlling source of truth. Before analyzing user intent, zones, anchors, furniture, style, or palette, preserve all permanent architecture and fixtures exactly as photographed.',
+'Do NOT add, remove, relocate, resize, widen, narrow, conceal, merge, soften, duplicate, reinterpret, or modify:',
+'• walls, partial walls, columns, headers, doorways, openings, pass-throughs, alcoves, niches, room separations',
+'• ceilings, soffits, flooring, flooring direction, flooring transitions, trim, baseboards',
+'• windows, doors, sliding doors, vents',
+'• cabinetry, islands, countertops, appliances, fireplaces, built-ins',
+'• chandeliers, pendant lights, recessed lights, sconces, ceiling fans, fixed focal points',
+'Do NOT make any room, rear space, opening, alcove, or adjoining area appear larger, smaller, deeper, wider, more open, more enclosed, or more connected than in the original photograph. If any staging plan requires changing architecture or permanent fixtures, reject that plan and stage less.',
+'IMMUTABILITY WINS over user intent, style, palette, semantic anchors, and furniture placement. LOCK ORIGINAL IMAGE IMMUTABILITY.',
+'',
+'MANDATORY FIXTURE INVENTORY & CONTRADICTION CHECK',
+'Before staging, perform a fixture-inventory audit. List all visible permanent fixtures (cabinetry, chandeliers, fireplaces, ceiling fans, built-ins). Lock these fixtures as immutable.',
+'If any proposed staging action deletes, conceals, duplicates, or adds fixtures, flag a violation: "IMMUTABILITY CONTRADICTION DETECTED." Reject the staging plan and restage using only existing fixtures.',
+'No new chandeliers, cabinets, or architectural features may be created. No existing fixtures may be removed or relocated. All staging must occur within the immutable architectural boundaries.',
+'',
+'RENDER-PHASE IMMUTABILITY VERIFICATION (RPIV)',
+'Before finalizing ANY virtual staging render, compare staged output to the original photograph. Confirm all permanent architectural fixtures remain EXACTLY as photographed:',
+'• Cabinetry',
+'• Partial walls',
+'• Columns, headers, soffits',
+'• Fireplaces',
+'• Chandeliers, pendant lights, recessed lights',
+'• Ceiling fans',
+'• Built-ins',
+'• Flooring direction and transitions',
+'If ANY discrepancy is detected: Flag "RENDER-PHASE IMMUTABILITY VIOLATION." Reject the render. Restage using ONLY the original fixture inventory.',
+'Mandatory render-phase checks:',
+'• Cabinetry count and placement identical',
+'• No removed or concealed partial walls',
+'• No hallucinated chandeliers or duplicated fixtures',
+'• No architectural element altered for composition or symmetry',
+'• No widening, narrowing, or reinterpretation of openings',
+'• Only user-specified rooms and zones staged; all others left vacant',
+'• Design style and palette applied only from the Design Style & Palette block below',
+'Output requirement: State "All permanent fixtures preserved exactly as photographed. AB-723 compliant."',
+'',
+'TASK',
+'Analyze the uploaded room photograph and identify all functional furnishing Rooms and Zones based solely on pre-existing visible architecture, fixtures, openings, windows, cabinetry, fireplaces, built-ins, ceiling features, and circulation paths — before placing any furnishings.',
+'',
+'CAMERA ORIGIN ANALYSIS',
+'Determine the physical location of the camera within the photographed home.',
+'Do NOT assume the camera is standing in a hallway simply because the foreground appears empty.',
+'If the foreground contains a large uninterrupted floor area without permanent architectural barriers, determine whether the camera is positioned inside a functional room whose boundaries extend beyond the visible image.',
+'Possible room types include: Living Room, Dining Zone, Kitchen, Office, Bedroom, Flex Room, Entry.',
+'If the camera is positioned inside a functional room:',
+'• Lock that room.',
+'• Treat the visible foreground as belonging to that room.',
+'• Assume furnishings may begin outside the image frame.',
+'• Preserve realistic room proportions.',
+'• Do NOT compress furnishings into the mid-ground simply because the camera occupies part of the room.',
+'LOCK CAMERA ORIGIN BEFORE CONTINUING.',
+'',
+'ZONE IDENTIFICATION RULES',
+'Identify each functional furnishing zone visible in the image according to architectural definitions:',
+'• Living Room: two or more connected walls',
+'• Formal Dining Room: two or more connected walls',
+'• Dining Zone: zero or one wall, positioned in open space',
+'• Kitchen: cabinets, countertops, appliances, island base cabinets',
+'• Bar Stool Rule: Place stools ONLY on an island face where a countertop overhang is clearly and unambiguously visible in the original photograph. If no overhang is photographically confirmed on any island face, do NOT place stools. Do NOT infer, construct, or assume a seating overhang that is not visible in the original photograph. Open floor clearance adjacent to an island face is NOT evidence of a seating overhang.',
+'• Family Room / Primary Bedroom / Loft / Flex Room: two or more connected walls',
+'• Flex Room examples: Office, Formal Dining Room, Media Room, Play Room, Music Room',
+'• Circulation Zones: Entry = light décor only; Hallway = maintain clear path, no furniture',
+'',
+'ZONE BOUNDARIES',
+'Determine zone boundaries using architectural cues: walls, partial walls, openings, doorways, windows, sliding doors, fireplaces, ceiling changes, chandeliers, pendant lighting, ceiling fans, built-ins, hallways, and circulation paths.',
+'',
+'SPATIAL ACCURACY RULES',
+'Respect the exact perspective, geometry, scale, camera angle, and architectural proportions shown in the original photograph. Zone boundaries must align with actual architectural features.',
+'Always use these zone anchors whenever present:',
+'• Chandelier — LOCKS Dining Zone. If chandelier is pre-existing, lock this as the Dining Zone; place table and chairs centered directly below.',
+'• Fireplace — LOCKS Living Zone. Lock the fireplace wall and connected walls as the Living Zone.',
+'• Ceiling Fan — typically defines and reinforces Living Zones.',
+'',
+'ROOMS AND ZONES TO STAGE — USER SELECTIONS',
+'Your job is to identify, find, and stage ONLY the Rooms and Zones listed below. If a zone is not listed, that area must be left completely vacant.',
+'',
+'Find and stage: {{room_assignment_variables}}',
+'',
+'MANDATORY ZONE COVERAGE — NO SILENT OMISSIONS',
+'Every zone listed above MUST receive appropriate furniture placement. This requirement applies EQUALLY to zones with a fixture anchor (chandelier, fireplace, ceiling fan) and zones with NO fixture anchor.',
+'The absence of a chandelier, fireplace, or other fixture anchor is NEVER grounds to leave a listed zone vacant, sparse, or under-furnished. Fixture anchors are used ONLY to resolve WHERE a zone sits and to settle placement conflicts between zones — they are not a precondition for a listed zone to be furnished at all.',
+'If a listed zone has no fixture anchor, identify its location using the ZONE IDENTIFICATION RULES and ZONE BOUNDARIES above (wall count, open-space position, sightline, adjacency to other identified zones, circulation paths) and furnish it fully to the same standard as an anchored zone.',
+'Treat every zone name in the list above as an independent, non-optional staging requirement. Every listed zone must be furnished at the position given by its anchor instruction, exactly as specified. Do not relocate a zone to a different wall, fixture, or position than the one given because another position seems visually easier, more balanced, or more open to furnish. The anchor is the position, not a suggestion to weigh against your own read of the room.',
+'',
+'CIRCULATION-ZONE FRAME BEHAVIOR',
+'Some zones require open clearance on every side to function -- most commonly a dining or breakfast grouping, which needs room to pull chairs out and walk fully around it. A zone with this requirement is never wall-anchored, and by definition cannot be composed to show its full extent with open space on all sides visible AND remain photographically accurate to a real camera position -- one or the other has to give.',
+'When a circulation-dependent zone anchor places it in the foreground (South frame edge), or at the left (West) or right (East) frame edge, render it exactly as a real photograph taken from this camera position would show it: if the grouping extends beyond what the lens would have captured from here, let it be cropped by that frame edge. Do not compress, shrink, reposition, or reorient the grouping to force the whole thing into frame -- an accurate real estate photograph routinely shows a foreground dining set partially cut off by the frame, and that is the correct, expected result here, not an error to avoid.',
+'Cropping is permitted ONLY at the West, South, and East frame edges -- never at the North (background) edge. There is no camera-position reason a real photograph would cut a zone off at the far/background wall the way it legitimately would near-lens; a zone appearing cropped at the North edge would look like broken architecture, not photographic framing, and must not happen. If a circulation-dependent zone is anchored toward the background of the frame, compose it fully within the visible room instead.',
+'This applies only to circulation-dependent zones (no wall anchor, open space on all sides required). Wall-anchored zones such as a living room seating group should remain fully composed within the frame as normal -- they do not have this clearance requirement and cropping them is not called for.',
+'',
+'NON-CREATION CHANDELIER RULES',
+'Do NOT add any chandelier, pendant cluster, or decorative overhead fixture to the staged render unless one already exists in the original photograph.',
+'Do NOT add a chandelier that does not exist in the original photograph. Existing chandeliers visible in the original photo ARE recognized as zone anchors and ALWAYS lock the Dining Zone directly below them.',
+'If no chandelier is visible in the original photo, none may appear in the render.',
+'',
+'If a chandelier exists in the original photograph:',
+'• It locks the Dining Zone (centered table and chairs directly below)',
+'• It may not be repositioned, resized, duplicated, or removed in the render',
+'• It must not visually block the primary furniture arrangement from camera origin; if so, adjust only camera framing — never the fixture',
+'',
+'FIXTURE–FURNITURE CONTRADICTION ENFORCEMENT',
+'Before placing furniture, perform a mandatory contradiction check between pre-existing architectural fixtures and proposed furniture placement. Permanent fixtures ALWAYS outrank furniture. If furniture placement contradicts fixture-anchored zone identity, reject and flag the contradiction.',
+'',
+'Chandelier Contradictions — A chandelier in open space ALWAYS locks the Dining Zone. Contradiction exists if:',
+'• Sofa or living furniture placed under chandelier',
+'• Dining table not centered under chandelier',
+'• Dining table placed near fireplace or under ceiling fan',
+'→ Flag DINING FIXTURE CONTRADICTION DETECTED → Reject → Reassign → Restage.',
+'',
+'Fireplace Contradictions — A fireplace ALWAYS locks the Living Zone. Contradiction exists if:',
+'• Dining table adjacent to fireplace',
+'• Sofa not oriented toward fireplace',
+'• Living seating placed under chandelier instead of fireplace',
+'→ Flag LIVING FIXTURE CONTRADICTION DETECTED → Reject → Reassign → Restage.',
+'',
+'Ceiling Fan Contradictions — Ceiling fans reinforce Living Zones. Contradiction exists if:',
+'• Dining table placed under ceiling fan',
+'• Living seating placed under chandelier instead of fan',
+'→ Flag CEILING FAN CONTRADICTION DETECTED → Reject → Reassign → Restage.',
+'',
+'Fixture Priority Hierarchy — resolve contradictions in this order:',
+'1. Fireplace',
+'2. Chandelier',
+'3. Ceiling Fan',
+'4. Kitchen Fixtures (island, cabinetry) — define the Kitchen zone boundary only. Kitchen fixtures do NOT lock, define, or influence the Dining Zone or Living Zone. Adjacent zone identity is determined solely by fixture anchors (items 1–3) and wall-count rules.',
+'5. Furniture',
+'Furniture NEVER outranks fixtures.',
+'',
+'When contradiction detected:',
+'• State contradiction explicitly',
+'• Reject incorrect furniture interpretation',
+'• Reclassify zones based only on fixtures',
+'• Restage correctly',
+'• Ignore user intent if conflicting with fixture hierarchy',
+'',
+'DESIGN STYLE & PALETTE',
+'{{all_design_style_&_palette}} variables go here User Selected DNA {{variables}}',
+'',
+'OUTPUT REQUIREMENTS',
+'Do not alter architecture.',
+'ZONE COVERAGE VERIFICATION — Before finalizing the render, confirm every zone named in "Find and stage" above contains appropriate furniture. If any listed zone is empty, sparse, or missing its primary furniture pieces, flag "ZONE COVERAGE VIOLATION," return to that zone, and place furniture using the architectural cues available — even without a fixture anchor — before finalizing.',
+'AB-723 COMPLIANCE — Planning and visualization only. Do not alter, remove, relocate, resize, conceal, or modify any architectural element including walls, windows, doors, cabinetry, fireplaces, flooring, ceilings, lighting fixtures, appliances, or built-in features. All architectural elements must remain exactly as photographed.',
+'State: "All permanent fixtures preserved exactly as photographed. AB-723 compliant."'
+].join('\n');
 
-// Closed set, matching the app's Single Room list minus "Great Room" (Great
-// Room isn't a valid Flex Room subtype -- it's effectively what Living Room
-// already covers in an open-plan context). This is the ONLY list Vision may
-// select flexRoomType from. Free text was tried and explicitly rejected --
-// "user types in a room... blows our controlled naming and potential
-// duplication of rooms" -- so this is now a closed enum, not a suggestion.
-const FLEX_ROOM_TYPES = [
-  "Office", "Formal Dining Room", "Media Room", "Play Room",
-  "Music Room", "Den", "Study Room", "Gym", "Reading Nook",
-];
+const OPEN_PLAN_ZONE_LABELS = { kitchen: 'Kitchen', dining: 'Dining Zone', living: 'Living Room', family: 'Family Room', flex: 'Flex Room' };
 
-function httpsRequest(options, body) {
-  return new Promise((resolve, reject) => {
-    const req = https.request(options, (res) => {
-      const chunks = [];
-      res.on("data", (c) => chunks.push(c));
-      res.on("end", () => {
-        const raw = Buffer.concat(chunks).toString("utf8");
-        try { resolve({ status: res.statusCode, body: JSON.parse(raw) }); }
-        catch (e) { resolve({ status: res.statusCode, body: { raw } }); }
-      });
-    });
-    req.on("error", reject);
-    if (body) req.write(body);
-    req.end();
-  });
+
+const STYLE_LABELS = {
+  'organicmodern':'Organic Modern','transitional':'Transitional','contemporary':'Contemporary',
+  'modern':'Modern','scandinavian':'Scandinavian','minimalist':'Minimalist',
+  'coastal':'Coastal','farmhouse':'Farmhouse','midcenturymodern':'Mid-Century Modern',
+  'industrial':'Industrial','bohemian':'Bohemian','traditional':'Traditional',
+  'japandi':'Japandi','warmminimalist':'Warm Minimalist','luxemodern':'Luxe Modern',
+  'artdeco':'Art Deco','mediterranean':'Mediterranean','rustic':'Rustic',
+  'grandmillennial':'Grand Millennial','wabi_sabi':'Wabi Sabi',
+};
+const PALETTE_TONES = {
+  'Warm Neutrals':    'warm cream, taupe, and honey tones',
+  'Bright Airy':      'soft white, pale sage, and warm wood tones',
+  'Soft Luxury':      'blue, gray, and champagne tones',
+  'Cool Gray':        'cool gray, slate, and white tones',
+  'Earth Tones':      'terracotta, rust, and warm brown tones',
+  'Bold Contrast':    'black, white, and bold accent tones',
+  'Coastal Blue':     'ocean blue, sandy neutral, and white tones',
+  'Sage Green':       'sage green, warm white, and natural wood tones',
+  'Jewel Tones':      'emerald, sapphire, and warm gold tones',
+  'Desert Modern':    'sand, clay, and muted terracotta tones',
+  'Moody Executive':  'charcoal, espresso, cognac leather, and dark walnut tones',
+  'Organic Natural':  'linen, natural oak, matte black accents, and stone tones',
+};
+
+const STYLE_FURNITURE_VOCABULARY = {
+  'Organic Modern': {
+    sofa: [
+      'a curved boucle sofa in warm ivory with rounded bolster arms',
+      'a linen tuxedo-arm sofa in oatmeal with tapered light-wood legs',
+      'a channel-tufted sofa in warm taupe performance fabric',
+    ],
+    coffeeTable: [
+      'a live-edge walnut slab coffee table',
+      'an organic-form white oak coffee table with a sculptural base',
+      'a honed travertine coffee table with rounded edges',
+    ],
+    diningTable: [
+      'a round white oak dining table with a pedestal base',
+      'an organic-edge walnut dining table',
+    ],
+    diningChairs: [
+      'woven rush-seat dining chairs with light wood frames',
+      'curved boucle-upholstered dining chairs',
+    ],
+    accentChair: [
+      'a sculptural rattan accent chair',
+      'a low-profile boucle swivel chair in cream',
+    ],
+    areaRug: [
+      'a jute-blend area rug with subtle texture',
+      'a hand-knotted wool rug in undyed cream tones',
+    ],
+    woodTone: ['warm white oak', 'natural walnut', 'bleached ash'],
+    metalFinish: ['brushed brass', 'matte black', 'warm bronze'],
+    greenery: {
+      small:  ['a small potted snake plant on a side table', 'a trailing pothos in a ceramic pot on a shelf'],
+      medium: ['a mid-height fiddle leaf fig in a woven basket', 'olive branch stems in a ceramic vessel on the console'],
+      large:  ['a large floor fiddle leaf fig in a concrete planter', 'a tall dried pampas arrangement in a floor vase'],
+    },
+  },
+  // 'RH Luxury': { ... }           — not yet seeded, falls through to prior behavior
+  // 'Contemporary': { ... }        — not yet seeded, falls through to prior behavior
+  // 'Japandi': { ... }             — not yet seeded, falls through to prior behavior
+  // 'Transitional': { ... }        — not yet seeded, falls through to prior behavior
+  // 'Coastal California': { ... }  — not yet seeded, falls through to prior behavior
+};
+
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 }
-
-const OPEN_PLAN_ZONE_PROMPT = `You are identifying furnishing zones and their anchors in an open-plan real estate interior photo. This is a classification task, not a design task -- you are not deciding how furniture should be arranged, only where each zone belongs and what anchors it.
-
-Return ONLY valid JSON, no markdown, no explanation.
-
-TASK
-Open Plan photos have at most four possible zones: Kitchen, Dining Zone, Living Room, and Flex Room. Identify which are genuinely present and visible -- do not force a zone that isn't there. Skip Kitchen entirely; it is handled separately and should never appear in your output.
-
-Flex Room covers any additional walled zone that isn't Living Room or Dining Zone. A Flex Room typically (not always) has an open entrance, a third pony wall, or a half-wall pass-through, distinguishing it from Living Room's more fully-open connection to the rest of the space. If a Flex Room is present, select its type from this exact list ONLY: Office, Formal Dining Room, Media Room, Play Room, Music Room, Den, Study Room, Gym, Reading Nook. Never write a type outside this list, and never invent your own phrasing for one that's close but not exact (e.g. do not write "Home Office" -- select "Office"). If none of these fit confidently, leave flexRoomType as an empty string -- the user selects it themselves from a dropdown built from this same list, so guessing wrong is worse than leaving it blank. A chandelier in an enclosed/semi-enclosed Flex Room is a strong signal for "Formal Dining Room."
-
-FIRST, BEFORE CLASSIFYING ANYTHING: determine which zone occupies the foreground of the frame.
-Every open-plan photo has a foreground, full stop -- real estate interiors are typically shot from about 4-5 feet off the ground, meaning the camera itself is standing inside whichever zone occupies the frame's nearest 0-4 feet. This is not a special case that sometimes applies -- some zone in this photo occupies the foreground, always, and identifying which one is your first task, before you classify any zone's anchor type. Hold that answer in mind; it directly resolves ambiguity in the steps below.
-
-For each zone you identify, classify its anchor as exactly ONE of these three types:
-
-1. FIXTURE -- a chandelier, pendant light cluster, or fireplace visible in the photo that this zone is built around. State which fixture and, briefly, where it sits in the frame (e.g. "left of the island, over open floor" or "wall, mid-frame").
-   - A chandelier or pendant cluster over open floor (not over a kitchen island/counter) anchors a Dining Zone.
-   - A fireplace anchors a Living Room or Flex Room.
-
-2. WALL -- TWO OR MORE connected walls forming a corner (state which -- e.g. "fireplace wall and the connected wall with windows", or "wall with two windows near the entry and the connected wall to the right"). This is a structural fact about the room's architecture, not about where the camera is standing -- a true two-connected-wall corner is ALWAYS this type, even if that corner also happens to be nearest the camera (i.e. even if it's also the foreground zone). Living Room and Flex Room are WALL-anchored whenever this two-wall corner is present, regardless of fixture or camera position.
-
-3. FOREGROUND -- used for whichever zone you determined, in your first step above, occupies the frame's foreground. This is not a fallback for zones with nothing else -- it is simply naming the zone the camera is standing in. A foreground zone can stand alone with no wall at all (state only "foreground of the frame" plus brief adjacency if helpful, e.g. "close to the kitchen"), OR it can combine with a SINGLE wall that no other zone has already claimed (e.g. "foreground of the frame, and the wall on the right with a window"). The dividing line versus WALL: ONE wall can appear together with foreground; TWO connected walls forming a corner never can -- that is always WALL type on its own, no foreground language, even for the foreground zone.
-
-REASONING ORDER -- follow this in sequence, do not guess at each zone independently:
-Step 1: Determine which zone occupies the foreground (see above). Hold this answer.
-Step 2: Identify every FIXTURE-anchored zone (a chandelier or pendant cluster over open floor, separate from any kitchen island lighting, anchors Dining Zone; a fireplace anchors Living Room or Flex Room).
-Step 3: Kitchen is excluded entirely from your output -- do not analyze it.
-Step 4: Identify any remaining WALL-anchored zone (two connected walls, not already accounted for by a fixture in Step 2).
-Step 5: Whatever zone from Step 1 (the foreground zone) has not already been fully accounted for by Steps 2 or 4 gets FOREGROUND as part of its anchor, plus any single unclaimed wall present in that same area. In practice, this step is what resolves Dining Zone most reliably: it is the zone most likely to have no fixture and no wall pair of its own, and confirming it occupies the foreground (Step 1) is what identifies it correctly rather than guessing.
-
-RULES
-- Do not reason about circulation, walkways, traffic patterns, or whether a zone "should" be cropped. That is not your task -- only identify the zone and its anchor type.
-- Do not invent an anchor by describing a zone's position relative to another zone (e.g. never say "between the kitchen and living room" -- that is not a real anchor, it depends on correctly reading two other zones first and breaks if either is wrong). Every zone's anchor must be independently identifiable: a fixture, a two-connected-wall corner, or camera position (optionally plus one unclaimed wall).
-- A kitchen island's task lighting (small pendants directly over the island/counter) is NOT a Dining Zone anchor -- only a fixture over OPEN FLOOR, separate from the island, counts.
-- If a chandelier is visible, it always anchors Dining Zone, even if it is not centered in the frame.
-- Wall descriptions should name what's on the wall if relevant (windows, fireplace) but should stay brief -- one clause, not a paragraph.
-
-OUTPUT SHAPE
-Return this exact JSON shape:
-{
-  "zones": [
-    {"zone": "Dining Zone", "anchorType": "FIXTURE", "anchorText": "chandelier, left of the island, over open floor"},
-    {"zone": "Living Room", "anchorType": "WALL", "anchorText": "fireplace wall, and the connected wall with windows"},
-    {"zone": "Flex Room", "flexRoomType": "Formal Dining Room", "anchorType": "FIXTURE", "anchorText": "chandelier, mid-frame"}
-  ]
-}
-
-zone must be exactly one of "Dining Zone", "Living Room", "Flex Room" (never Kitchen). flexRoomType is only used when zone is "Flex Room" -- it must be exactly one of: Office, Formal Dining Room, Media Room, Play Room, Music Room, Den, Study Room, Gym, Reading Nook, or an empty string if none fit confidently. No other value is valid. anchorType must be exactly "FIXTURE", "WALL", or "FOREGROUND". anchorText should read naturally as a short phrase, matching the style of the examples above -- no full sentences, no restating the zone name.`;
-
-async function analyzeOpenPlanZones(base64, mimeType, claudeKey, opts = {}) {
-  const model = opts.model || "claude-haiku-4-5-20251001";
-
-  const payload = JSON.stringify({
-    model,
-    max_tokens: 1024,
-    messages: [{
-      role: "user",
-      content: [
-        {
-          type: "image",
-          source: { type: "base64", media_type: mimeType || "image/jpeg", data: base64 }
-        },
-        { type: "text", text: OPEN_PLAN_ZONE_PROMPT }
-      ]
-    }]
-  });
-
-  const result = await httpsRequest({
-    hostname: "api.anthropic.com",
-    path: "/v1/messages",
-    method: "POST",
-    headers: {
-      "x-api-key": claudeKey,
-      "anthropic-version": "2023-06-01",
-      "content-type": "application/json",
-      "content-length": Buffer.byteLength(payload)
-    }
-  }, payload);
-
-  if (result.status !== 200) {
-    throw new Error("Claude error: " + JSON.stringify(result.body).slice(0, 300));
+function hashStringToSeed(str) {
+  let h = 0;
+  const s = String(str || 'default-seed');
+  for (let i = 0; i < s.length; i++) {
+    h = (Math.imul(31, h) + s.charCodeAt(i)) | 0;
   }
+  return h >>> 0;
+}
 
-  const text = result.body?.content?.[0]?.text || "{}";
-  const clean = text.replace(/```json|```/g, "").trim();
-  const parsed = JSON.parse(clean);
-
+function pickFurnitureProfile(styleLabel, projectSeedStr) {
+  const pool = STYLE_FURNITURE_VOCABULARY[styleLabel];
+  if (!pool) return null;
+  const rand = mulberry32(hashStringToSeed(styleLabel + '::' + (projectSeedStr || 'no-project')));
+  const pick = (arr) => arr[Math.floor(rand() * arr.length)];
   return {
-    raw: parsed,
-    // The actual string to substitute into {{room_assignment_variables}} --
-    // this is the deliverable, everything else is intermediate.
-    roomAssignmentText: buildRoomAssignmentText(parsed.zones || []),
+    sofa: pick(pool.sofa),
+    coffeeTable: pick(pool.coffeeTable),
+    diningTable: pick(pool.diningTable),
+    diningChairs: pick(pool.diningChairs),
+    accentChair: pick(pool.accentChair),
+    areaRug: pick(pool.areaRug),
+    woodTone: pick(pool.woodTone),
+    metalFinish: pick(pool.metalFinish),
   };
 }
 
-// Converts the structured Vision output into the exact plain-text format
-// validated by hand this session -- e.g.:
-//
-//   Kitchen: Anchor: island.
-//   Living Room: Anchor: fireplace wall, and the connected wall with windows. Size the furnishings with circulation appropriate to the available space.
-//   Dining Zone: Anchor: chandelier, left of the island, over open floor.
-//
-// Kitchen line is always injected here (not by Vision -- see prompt notes).
-function buildRoomAssignmentText(zones) {
-  const lines = ["Kitchen: Anchor: island."];
+const ROOM_SIZE_TIER = {
+  'primary bedroom': 'medium', 'bedroom': 'small', 'office': 'small', 'flex room': 'small',
+  'great room': 'large', 'living room': 'medium', 'family room': 'medium',
+  'kitchen-dining': 'large', 'dining room': 'medium', 'loft': 'medium', 'sitting area': 'small',
+};
+function pickGreenery(styleLabel, projectSeedStr, roomName) {
+  const pool = STYLE_FURNITURE_VOCABULARY[styleLabel];
+  if (!pool || !pool.greenery) return null;
+  const tier = ROOM_SIZE_TIER[(roomName || '').toLowerCase().trim()] || 'medium';
+  const options = pool.greenery[tier] || pool.greenery.medium;
+  if (!options || !options.length) return null;
+  const rand = mulberry32(hashStringToSeed(styleLabel + '::' + (projectSeedStr || 'no-project') + '::' + (roomName || '') + '::greenery'));
+  return options[Math.floor(rand() * options.length)];
+}
 
-  for (const z of zones) {
-    if (!z || !z.zone || !z.anchorType) continue;
-    // Defensive: even though the prompt states this as a closed enum,
-    // models can drift. Never let an out-of-list value reach the template --
-    // that's exactly the uncontrolled-naming/duplication problem this
-    // whole enum was built to prevent. Silently fall back to the generic
-    // "Flex Room" label (matching what the UI shows before the user picks
-    // from the dropdown) rather than passing an unrecognized string through.
-    const rawType = z.zone === "Flex Room" ? (z.flexRoomType || "").trim() : "";
-    const validType = FLEX_ROOM_TYPES.includes(rawType) ? rawType : "";
-    const displayName = validType || z.zone;
-    let line = `${displayName}: Anchor: ${z.anchorText || "(unspecified)"}.`;
-    if (z.anchorType === "WALL") {
-      line += " Size the furnishings with circulation appropriate to the available space.";
+function buildRoomAssignmentVariable({ zoneList, flexNote, roomName, isOpenPlan, roomAssignmentText }) {
+  // Vision-produced override (analyze-open-plan-zones.js) -- the rich,
+  // per-zone anchor text validated this session (e.g. "Kitchen: Anchor:
+  // island.\nLiving Room: Anchor: fireplace wall..."). Used verbatim when
+  // present; this is what actually gets zone placement right on the first
+  // pass, versus the plain comma-joined label list below, which was never
+  // enough on its own for anchor-dependent placement.
+  if (isOpenPlan && roomAssignmentText && roomAssignmentText.trim()) {
+    return roomAssignmentText.trim();
+  }
+  if (!isOpenPlan) return roomName || 'this room';
+  if (!zoneList || !zoneList.length) return roomName || 'this room';
+  const names = zoneList.map(z => {
+    const zo = OPEN_PLAN_ZONE_LABELS[z] || z;
+    return (z === 'flex' && flexNote) ? `${flexNote} (Flex Room)` : zo;
+  });
+  return names.join(', ');
+}
+
+function buildDesignDnaVariable({ style, palette, buyerProfile, desiredFeeling, stagingLevel, furnishingsDNA, projectId, roomName }) {
+  const parts = [];
+  if (style)          parts.push('Design Style: ' + style);
+  if (palette)        parts.push('Color Palette: ' + (PALETTE_TONES[palette] || palette));
+  if (buyerProfile)   parts.push('Buyer Profile: ' + buyerProfile);
+  if (desiredFeeling)  parts.push('Desired Feeling: ' + desiredFeeling);
+  if (stagingLevel)    parts.push('Staging Level: ' + stagingLevel);
+  let dnaText = parts.join('. ') + (parts.length ? '.' : '');
+
+  const profile = style ? pickFurnitureProfile(style, projectId) : null;
+  if (profile) {
+    const greenery = pickGreenery(style, projectId, roomName);
+    const profileParts = [
+      'Sofa: ' + profile.sofa + '.',
+      'Coffee table: ' + profile.coffeeTable + '.',
+      'Dining table: ' + profile.diningTable + '.',
+      'Dining chairs: ' + profile.diningChairs + '.',
+      'Accent chair: ' + profile.accentChair + '.',
+      'Area rug: ' + profile.areaRug + '.',
+      'Wood tone: ' + profile.woodTone + '.',
+      'Metal finish: ' + profile.metalFinish + '.',
+    ];
+    if (greenery) profileParts.push('Greenery: ' + greenery + '.');
+    dnaText += '\n\nSPECIFIC FURNISHINGS FOR THIS PROJECT (use these exact pieces and materials — do not substitute generic alternatives, and do not repeat the same fabric or wood species across unrelated pieces): ' + profileParts.join(' ');
+  }
+
+  if (furnishingsDNA) {
+    const f = furnishingsDNA;
+    const furnishingParts = [];
+    if (f.continuityPrompt) furnishingParts.push(f.continuityPrompt);
+    else {
+      if (f.sofa) furnishingParts.push('Sofa: ' + f.sofa + '.');
+      if (f.woodTones) furnishingParts.push('Wood tones: ' + f.woodTones + '.');
+      if (f.metalFinishes) furnishingParts.push('Metal finishes: ' + f.metalFinishes + '.');
+      if (f.colorPalette) furnishingParts.push('Palette: ' + (Array.isArray(f.colorPalette) ? f.colorPalette.join(', ') : f.colorPalette) + '.');
     }
-    lines.push(line);
+    if (furnishingParts.length) {
+      dnaText += '\n\nMATCH ESTABLISHED FURNISHINGS (from a previously staged room in this project): ' + furnishingParts.join(' ');
+    }
   }
-
-  return lines.join("\n");
+  return dnaText;
 }
 
-module.exports = { analyzeOpenPlanZones, buildRoomAssignmentText, OPEN_PLAN_ZONE_PROMPT, FLEX_ROOM_TYPES };
+function assembleSpatialZonePrompt({ zones, dna }) {
+  const roomAssignmentValue = buildRoomAssignmentVariable(zones || {});
+  const designDnaValue = buildDesignDnaVariable({ ...(dna || {}), roomName: (zones || {}).roomName });
+  return SPATIAL_ZONE_TEMPLATE
+    .replace(/\{\{room_assignment_variables\}\}(?: go here)?/, roomAssignmentValue)
+    .replace('{{all_design_style_&_palette}} variables go here User Selected DNA {{variables}}', designDnaValue);
+}
 
-// ── Netlify handler ──────────────────────────────────────────────────────
-// Called once per Open Plan photo, BEFORE stage-vacant-prompt.js. Returns
-// roomAssignmentText, which index.html passes straight through as the
-// roomAssignmentText override on the stage-vacant-prompt.js request --
-// see buildRoomAssignmentVariable() in spatial-zone-template.js, which
-// uses this verbatim instead of auto-building a plain zone-label list.
-//
-// CACHING NOTE (not implemented here -- this handler is stateless, same
-// as analyzeFloorplan in stage-image.js): the caller should cache this
-// result per photoId once computed, the same way zoneList is already
-// cached in SESSION.photoRoomMap. Anchors should stay stable across
-// Iterate/Enhance-with-AI passes on the same photo -- re-running Vision on
-// every stage call risks the read drifting between iterations of what
-// should be the same room.
-exports.handler = async (event) => {
-  if (event.httpMethod !== "POST") return { statusCode: 405, body: "Method Not Allowed" };
-
-  const headers = {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Headers": "Content-Type",
-    "Content-Type": "application/json",
-  };
-
-  try {
-    const claudeKey = process.env.ANTHROPIC_API_KEY;
-    if (!claudeKey) return { statusCode: 500, headers, body: JSON.stringify({ error: "ANTHROPIC_API_KEY not configured" }) };
-
-    const { imageBase64, mimeType, model } = JSON.parse(event.body);
-    if (!imageBase64) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing imageBase64" }) };
-
-    const result = await analyzeOpenPlanZones(imageBase64, mimeType, claudeKey, { model });
-
-    console.log(
-      "analyze-open-plan-zones: " + (result.raw?.zones?.length || 0) + " zone(s) identified -- " +
-      (result.raw?.zones || []).map(z => z.zone + "/" + z.anchorType).join(", ")
-    );
-
-    return { statusCode: 200, headers, body: JSON.stringify(result) };
-
-  } catch (err) {
-    console.error("analyze-open-plan-zones error:", err.message);
-    return { statusCode: 500, headers, body: JSON.stringify({ error: err.message, details: err.stack }) };
-  }
+module.exports = {
+  SPATIAL_ZONE_TEMPLATE,
+  OPEN_PLAN_ZONE_LABELS,
+  STYLE_LABELS,
+  PALETTE_TONES,
+  STYLE_FURNITURE_VOCABULARY,
+  pickFurnitureProfile,
+  pickGreenery,
+  buildRoomAssignmentVariable,
+  buildDesignDnaVariable,
+  assembleSpatialZonePrompt,
 };

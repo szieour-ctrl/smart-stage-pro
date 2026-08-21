@@ -33,7 +33,7 @@ exports.handler = async (event) => {
   try {
     const {
       roomType, designStyle, colorPalette,
-      isOpenPlan, zoneList, flexNote,
+      isOpenPlan, zoneList, flexNote, roomAssignmentText,
       buyerProfile, desiredFeeling, stagingLevel,
       furnishingsDNA, projectId,
     } = JSON.parse(event.body);
@@ -46,6 +46,7 @@ exports.handler = async (event) => {
         flexNote: flexNote || '',
         roomName: roomType,
         isOpenPlan: !!isOpenPlan,
+        roomAssignmentText: roomAssignmentText || '',
       },
       dna: {
         style: STYLE_LABELS[(designStyle || '').toLowerCase().replace(/[^a-z]/g, '')] || designStyle || 'Transitional',
@@ -58,7 +59,7 @@ exports.handler = async (event) => {
       }
     });
 
-    console.log('stage-vacant-prompt: assembled ' + stagingPrompt.length + ' chars for "' + roomType + '"' + (isOpenPlan ? ' (open plan: ' + (zoneList || []).join(',') + ')' : '') + (furnishingsDNA ? ' [with furnishings DNA]' : '') + (projectId ? ' [projectId: ' + projectId + ']' : ' [no projectId — furniture profile will not be deterministic across rooms]'));
+    console.log('stage-vacant-prompt: assembled ' + stagingPrompt.length + ' chars for "' + roomType + '"' + (isOpenPlan ? ' (open plan: ' + (zoneList || []).join(',') + ')' : '') + (furnishingsDNA ? ' [with furnishings DNA]' : '') + (projectId ? ' [projectId: ' + projectId + ']' : ' [no projectId — furniture profile will not be deterministic across rooms]') + (roomAssignmentText ? ' [Vision anchor text used, ' + roomAssignmentText.length + ' chars]' : (isOpenPlan ? ' [NO Vision anchor text — falling back to plain zone list]' : '')));
 
     return {
       statusCode: 200,

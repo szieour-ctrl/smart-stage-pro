@@ -664,8 +664,26 @@ const OPEN_PLAN_ZONES = [
   { key: 'kitchen', label: 'Kitchen' },
   { key: 'dining',  label: 'Dining Zone' },
   { key: 'living',  label: 'Living Room' },
-  { key: 'flex',    label: 'Flex Room', hasFreetext: true },
+  { key: 'flex',    label: 'Flex Room', hasDropdown: true },
 ];
+
+// Flex Room dropdown source: the Single Room list, minus Great Room, minus
+// dividers/the Floor Plan reference row, and minus Living Room/Family Room/
+// Formal Dining Room/Dining Zone/Kitchen -- those already have their own
+// dedicated Open Plan checkboxes above, so offering them again as a "Flex
+// Room" subtype would recreate the exact duplicate-naming problem this
+// dropdown was built to prevent. One source of truth (SINGLE_ROOM_OPTIONS),
+// not a second hand-maintained list -- if a room type is added/removed
+// there, this stays in sync automatically.
+const FLEX_ROOM_EXCLUDED_LABELS = new Set([
+  'Great Room', 'Living Room', 'Family Room', 'Formal Dining Room',
+  'Dining Zone (Informal / Breakfast Nook)', 'Kitchen',
+  'Floor Plan / Reference Only',
+]);
+const FLEX_ROOM_OPTIONS = SINGLE_ROOM_OPTIONS
+  .filter(v => !v.startsWith('──'))
+  .map(v => v.split(' || ')[0].trim())
+  .filter(label => !FLEX_ROOM_EXCLUDED_LABELS.has(label));
 
 // ── Photographic Presets — PRO feature (client-side, mirrors photographic-presets.js) ──
 // DEV NOTE: prompt text lives here (client-visible, shows in the Prompt Review modal)
@@ -2459,8 +2477,11 @@ function renderLbModeBody(){
         ${OPEN_PLAN_ZONES.map(z=>`
           <label class="lb-zone-card ${_lbZones.includes(z.key)?'checked':''}" onclick="event.preventDefault();toggleLbZone('${z.key}')">
             <input type="checkbox" ${_lbZones.includes(z.key)?'checked':''} readonly />
-            <div class="lb-zone-card-name">${z.label}${z.hasFreetext?':':''}</div>
-            ${z.hasFreetext?`<input type="text" class="lb-zone-freetext" placeholder="specify type" value="${(_lbFlexNote||'').replace(/"/g,'&quot;')}" onclick="event.stopPropagation()" oninput="_lbFlexNote=this.value" />`:''}
+            <div class="lb-zone-card-name">${z.label}${z.hasDropdown?':':''}</div>
+            ${z.hasDropdown?`<select class="lb-zone-freetext" onclick="event.stopPropagation()" onchange="_lbFlexNote=this.value">
+              <option value="" ${!_lbFlexNote?'selected':''}>— specify type —</option>
+              ${FLEX_ROOM_OPTIONS.map(opt=>`<option value="${opt.replace(/"/g,'&quot;')}" ${_lbFlexNote===opt?'selected':''}>${opt}</option>`).join('')}
+            </select>`:''}
           </label>`).join('')}
       </div>`;
   } else if(_lbMode==='single'){

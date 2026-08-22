@@ -21,16 +21,21 @@
 //     did.
 //   - CODE'S JOB, NEW: elimination math (mergeRoomAssignment, below). Cross-
 //     reference the user's actual room.zoneList selections against what
-//     Vision found. Exactly one selected zone with no fixture match means
-//     that's where the camera is standing, by elimination -- zero model
-//     guessing required. Two or more unclaimed zones means elimination
-//     can't resolve it either; those zones are still listed (so GPT Image 2
-//     knows to stage them, per ROOMS AND ZONES TO STAGE's "not listed =
-//     vacant" rule) but with no anchor text, handing placement to
-//     spatial-zone-template.js's existing ZONE IDENTIFICATION RULES /
-//     CIRCULATION-ZONE FRAME BEHAVIOR / MANDATORY ZONE COVERAGE -- the
-//     fallback path that's already built and validated for an unanchored
-//     listed zone, no new logic needed downstream.
+//     Vision found. Any selected zone with no fixture match is listed by
+//     name only, no anchor text -- it still gets furnished (per ROOMS AND
+//     ZONES TO STAGE's "not listed = vacant" rule), but placement is left
+//     entirely to spatial-zone-template.js's existing CAMERA ORIGIN
+//     ANALYSIS, ZONE IDENTIFICATION RULES, and CIRCULATION-ZONE FRAME
+//     BEHAVIOR -- all already built and validated for this exact case.
+//     Earlier version of this function asserted "foreground of the frame,
+//     camera position" in code for the single-unclaimed-zone case; removed
+//     Aug 21 same session, confirmed by test: on sample1c.jpg, the claimed
+//     zone's own fixture (a wagon-wheel chandelier) read close to camera,
+//     and the injected foreground text competed with GPT Image 2's own
+//     CAMERA ORIGIN ANALYSIS, producing a real contradiction (Living Room
+//     shoved onto the chandelier, Dining displaced). Removing the forced
+//     line and falling through to the model's own reasoning fixed it
+//     cleanly on both re-tested photos.
 //
 // Kitchen is still never sent to Vision and still always hardcoded --
 // cabinetry/island self-identifies architecturally, confirmed reliable
@@ -108,7 +113,8 @@ const OPEN_PLAN_ZONE_PROMPT = `Look at this real estate interior photo. Identify
 
 - Fireplace -> Living Room
 - Ceiling fan -> Living Room (a fan mounted over general room space, not a chandelier or pendant light -- and not positioned over an open dining area or kitchen island, which are lighting fixtures, not fans)
-- Chandelier or pendant cluster hanging over OPEN FLOOR (not over a kitchen island or counter -- that is task lighting, not a zone anchor) -> Dining Zone, unless the space is an enclosed or semi-enclosed room separate from the main open area, in which case it anchors a Flex Room. If it anchors a Flex Room, select the type from this exact list ONLY: Office, Formal Dining Room, Media Room, Play Room, Music Room, Den, Study Room, Gym, Reading Nook. A chandelier in an enclosed room is a strong signal for "Formal Dining Room." Never invent a type outside this list -- if unsure which type, omit flexRoomType and leave it as an empty string.
+- Chandelier or pendant cluster hanging over OPEN FLOOR -> Dining Zone, unless the space is an enclosed or semi-enclosed room separate from the main open area, in which case it anchors a Flex Room. If it anchors a Flex Room, select the type from this exact list ONLY: Office, Formal Dining Room, Media Room, Play Room, Music Room, Den, Study Room, Gym, Reading Nook. A chandelier in an enclosed room is a strong signal for "Formal Dining Room." Never invent a type outside this list -- if unsure which type, omit flexRoomType and leave it as an empty string.
+  Distinguish a real dining fixture from kitchen island task lighting by MOUNTING, not by how close it appears to the island in the frame. Task lighting hangs on short stems directly above the counter surface itself, tracking the counter's line. A dining fixture -- even one positioned near or beside the island in the frame -- hangs on longer drop rods or chains over open floor space, not over the counter surface. Do not exclude a fixture just because it sits close to the island visually; only exclude it if it is actually mounted low and tight over the counter itself.
 
 For each fixture you find, report the zone, what the fixture is, and where it sits in the frame (e.g. "fireplace, left wall" or "chandelier, center, over open floor").
 
@@ -181,22 +187,30 @@ function displayNameFor(z) {
 
 // ── Elimination merge ────────────────────────────────────────────────────
 // Cross-references the user's actual zoneList selections against Vision's
-// fixture findings. This is where foreground/camera-position gets resolved
-// now -- by code, not by asking the model to reason about it.
+// fixture findings.
 //
-//   0 unclaimed zones  -> nothing to add, every selection has a real anchor
-//   1 unclaimed zone   -> that's where the camera is standing, by
-//                         elimination -- gets "foreground of the frame,
-//                         camera position."
-//   2+ unclaimed zones -> elimination can't resolve which one is actually
-//                         foreground. Do NOT guess in code or ask Vision to
-//                         guess. List those zones by name only, no anchor
-//                         text -- they still appear in "Find and stage" (so
-//                         they get furnished, not left vacant), but with no
-//                         anchor guidance. spatial-zone-template.js's
-//                         existing ZONE IDENTIFICATION RULES and
-//                         CIRCULATION-ZONE FRAME BEHAVIOR already own
-//                         placement for exactly this case.
+//   0 unclaimed zones -> nothing to add, every selection has a real anchor
+//   1+ unclaimed zone -> do NOT assert a foreground claim in code. Tried
+//                        that (see prior version of this function): when a
+//                        fixture-anchored zone's own fixture actually read
+//                        close to camera (sample1c.jpg, wagon-wheel
+//                        chandelier), the injected "foreground of the
+//                        frame, camera position" text competed with GPT
+//                        Image 2's own CAMERA ORIGIN ANALYSIS -- which
+//                        already determines camera position and locks that
+//                        room itself, unprompted -- and produced a genuine
+//                        contradiction: Living Room got shoved onto the
+//                        chandelier, Dining got displaced. Confirmed fix,
+//                        same session: removing the forced foreground line
+//                        and letting the unclaimed zone fall through with
+//                        no anchor text resolved both test photos cleanly.
+//                        Unclaimed zones are still listed by name (so they
+//                        get furnished, not left vacant per ROOMS AND ZONES
+//                        TO STAGE's "not listed = vacant" rule), just with
+//                        no anchor guidance -- CAMERA ORIGIN ANALYSIS,
+//                        ZONE IDENTIFICATION RULES, and CIRCULATION-ZONE
+//                        FRAME BEHAVIOR in spatial-zone-template.js already
+//                        own this case.
 function mergeRoomAssignment(visionZones, zoneList, flexNote) {
   const lines = ["Kitchen: Anchor: island."];
   const list = zoneList || [];
@@ -221,15 +235,9 @@ function mergeRoomAssignment(visionZones, zoneList, flexNote) {
     lines.push(`${displayName}: Anchor: ${s.match.anchorText || "(unspecified)"}.`);
   }
 
-  if (unclaimed.length === 1) {
-    const s = unclaimed[0];
+  for (const s of unclaimed) {
     const displayName = s.key === "flex" && flexNote ? `${flexNote} (Flex Room)` : s.label;
-    lines.push(`${displayName}: Anchor: foreground of the frame, camera position.`);
-  } else if (unclaimed.length >= 2) {
-    for (const s of unclaimed) {
-      const displayName = s.key === "flex" && flexNote ? `${flexNote} (Flex Room)` : s.label;
-      lines.push(`${displayName}.`);
-    }
+    lines.push(`${displayName}.`);
   }
 
   return lines.join("\n");

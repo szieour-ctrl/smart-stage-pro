@@ -310,12 +310,47 @@ Return ONLY a JSON array, one object per frame, in the exact shape below. No pro
 // guidance (images beyond that are downscaled server-side before
 // analysis anyway), so this isn't just squeaking under 8000px, it's the
 // size Claude actually uses regardless of what's sent.
+// MIGRATED (August 2026 — Cloudinary cost/dependency reduction): the
+// original fix (see the still-accurate diagnosis above — Claude's 8000px
+// hard limit vs. this app's up-to-12,000px Final-tier images) used
+// Cloudinary's on-the-fly URL transform to resize without a real
+// download. S3 has no equivalent eager-transformation engine — there's no
+// URL parameter that makes S3 hand back a resized copy — so resizing now
+// genuinely means downloading the bytes and processing them ourselves.
+// Uses `sharp`, already a dependency in this repo for the Smart Correct/
+// Oracle pipeline, so no new dependency. Sends the resized image to
+// Claude as base64 (source:{type:"base64"}) instead of by URL, since
+// there's no longer a URL for the RESIZED version specifically — only the
+// original, oversized one.
+const sharp = require("sharp");
 const CLAUDE_VISION_MAX_DIM = 1568;
-function resizeCloudinaryUrlForVision(url, maxDim) {
-  if (!url || typeof url !== "string") return url;
-  const match = url.match(/^(https?:\/\/res\.cloudinary\.com\/[^/]+\/image\/upload\/)(.*)$/);
-  if (!match) return url; // not a recognizable Cloudinary URL — leave untouched rather than risk breaking it
-  return `${match[1]}w_${maxDim},c_limit,q_auto/${match[2]}`;
+
+function downloadImageBuffer(url) {
+  return new Promise((resolve, reject) => {
+    https.get(url, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        return downloadImageBuffer(res.headers.location).then(resolve, reject);
+      }
+      if (res.statusCode !== 200) {
+        reject(new Error(`HTTP ${res.statusCode} fetching ${url}`));
+        res.resume();
+        return;
+      }
+      const chunks = [];
+      res.on("data", (c) => chunks.push(c));
+      res.on("end", () => resolve(Buffer.concat(chunks)));
+      res.on("error", reject);
+    }).on("error", reject);
+  });
+}
+
+async function fetchAndResizeForVision(url, maxDim) {
+  const original = await downloadImageBuffer(url);
+  const resized = await sharp(original)
+    .resize({ width: maxDim, height: maxDim, fit: "inside", withoutEnlargement: true })
+    .jpeg({ quality: 90 })
+    .toBuffer();
+  return { mediaType: "image/jpeg", base64: resized.toString("base64") };
 }
 
 // ── BUILD THE VISION MESSAGE ───────────────────────────────────────────
@@ -334,16 +369,24 @@ function resizeCloudinaryUrlForVision(url, maxDim) {
 // here since this project calls api.anthropic.com directly) — no need to
 // fetch-then-base64-encode inside the function at all.
 // frame.stagedImageUrl / frame.beforeImageUrl are remote URLs, not paths.
-function buildUserContent(frames) {
+async function buildUserContent(frames) {
+  // Fetch + resize every staged image in parallel — sequential would add
+  // a real network round-trip + Sharp resize per frame on top of an
+  // already timing-sensitive function (see the MAX_TOKENS comment above
+  // re: a 13-photo listing already brushing against real limits).
+  const resized = await Promise.all(
+    frames.map((frame) => fetchAndResizeForVision(frame.stagedImageUrl, CLAUDE_VISION_MAX_DIM))
+  );
+
   const content = [];
   content.push({
     type: "text",
     text: `Here are ${frames.length} staged photos for this listing. Frame IDs and pair information follow each image.`,
   });
-  for (const frame of frames) {
+  frames.forEach((frame, i) => {
     content.push({
       type: "image",
-      source: { type: "url", url: resizeCloudinaryUrlForVision(frame.stagedImageUrl, CLAUDE_VISION_MAX_DIM) },
+      source: { type: "base64", media_type: resized[i].mediaType, data: resized[i].base64 },
     });
     const pairNote = frame.beforeImageUrl
       ? `This frame HAS a real vacant/before pair available.`
@@ -363,7 +406,7 @@ function buildUserContent(frames) {
       type: "text",
       text: `Frame ID: ${frame.frameId}. ${pairNote}${frame.userProvidedRoomLabel ? ` User-provided label: "${frame.userProvidedRoomLabel}".` : ""}${heroNote}`,
     });
-  }
+  });
   content.push({
     type: "text",
     text: "Now return the JSON array as instructed — order, grouping, structure, and motion for every frame.",
@@ -459,7 +502,7 @@ async function generateAutoSelection({ frames, narrationEnabled, hasExteriorEnha
   ));
 
   const systemPrompt = buildSystemPrompt({ narrationEnabled, hasExteriorEnhancement, aiMotionCap });
-  const userContent = buildUserContent(frames);
+  const userContent = await buildUserContent(frames);
   const text = await callClaudeVision(systemPrompt, userContent, anthropicKey);
   const plan = extractJsonArray(text);
 

@@ -22,60 +22,64 @@
 
 const { getStore } = require("@netlify/blobs");
 const https = require("https");
+const { S3Client, PutObjectTaggingCommand } = require("@aws-sdk/client-s3");
 
-// Locks/unlocks the actual Cloudinary asset, not just our own page's
-// reference to it. Hiding an image from compliance-page.js and
-// get-user-listings.js is necessary but not sufficient — if the raw
-// Cloudinary URL is still public, a cached link, a search index, or
-// anyone who saved the direct URL earlier can still open it. Flipping
-// access_mode to "authenticated" makes the CDN itself return 401 for the
-// exact same URL, everywhere, immediately.
-const cloudinary = require("cloudinary").v2;
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key:    process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
+// Locks/unlocks the actual S3 object, not just our own page's reference to
+// it. Hiding an image from compliance-page.js and get-user-listings.js is
+// necessary but not sufficient — if the raw S3 URL is still public, a
+// cached link, a search index, or anyone who saved the direct URL earlier
+// can still open it. This bucket has no per-object ACL (Bucket owner
+// enforced), so instead of a Cloudinary-style access_mode flip, hiding
+// tags the object `hidden=true` — the bucket policy has a matching Deny
+// statement on that tag, so the SAME URL starts 403ing everywhere,
+// immediately, with no redeploy. (See bucket policy's DenyGetIfHiddenTag
+// statement.) Unhiding sets the tag back to "false", which re-enables the
+// existing PublicReadMedia Allow.
+const s3 = new S3Client({
+  region: process.env.S3_REGION,
+  credentials: {
+    accessKeyId: process.env.S3_ACCESS_KEY_ID,
+    secretAccessKey: process.env.S3_SECRET_ACCESS_KEY,
+  },
 });
 
-// Parses a standard (non-authenticated) Cloudinary delivery URL to recover
-// its resource_type and public_id, e.g.:
-//   https://res.cloudinary.com/{cloud}/image/upload/v169.../folder/name.jpg
-// Assumes these stored URLs are plain secure_url values from upload (no
-// transformation segments) — true for how project-manage.js stores them.
+// Parses a stored S3 public URL to recover its object key, e.g.:
+//   https://{bucket}.s3.{region}.amazonaws.com/smart-stage-originals/{projectId}/{id}.jpg
+// Assumes these stored URLs are the plain publicUrl values from upload
+// (no query string) — true for how project-manage.js stores them.
 // Returns null on anything unexpected rather than throwing, since a parse
 // miss must not block the Blobs-side hide from succeeding.
-function parseCloudinaryAsset(url) {
+function parseS3Key(url) {
   if (!url) return null;
   try {
-    const match = url.match(/\/(image|video|raw)\/upload\/(?:v\d+\/)?(.+)\.(\w+)(?:\?.*)?$/);
+    const match = url.match(/^https?:\/\/[^/]+\.amazonaws\.com\/(.+)$/);
     if (!match) return null;
-    const [, resourceType, publicId] = match;
-    return { resourceType, publicId };
+    return decodeURIComponent(match[1]);
   } catch (e) {
     return null;
   }
 }
 
-// Sets access_mode on one Cloudinary asset. Non-fatal by design — same
-// pattern as every other Supabase/Cloudinary side-call in this codebase:
-// the Blobs hidden flag is the authoritative state; this is defense in
-// depth on top of it, and a Cloudinary API hiccup must never block the
-// actual hide/unhide from completing.
-async function setCloudinaryAccess(url, mode) {
-  const parsed = parseCloudinaryAsset(url);
-  if (!parsed) {
-    console.error("hide-image: could not parse Cloudinary public_id from", url);
+// Sets the `hidden` tag on one S3 object. Non-fatal by design — same
+// pattern as every other Supabase/S3 side-call in this codebase: the
+// Blobs hidden flag is the authoritative state; this is defense in depth
+// on top of it, and an S3 API hiccup must never block the actual
+// hide/unhide from completing.
+async function setS3HiddenTag(url, hidden) {
+  const key = parseS3Key(url);
+  if (!key) {
+    console.error("hide-image: could not parse S3 key from", url);
     return { ok: false, url };
   }
   try {
-    await cloudinary.api.update(parsed.publicId, {
-      resource_type: parsed.resourceType,
-      type: "upload",
-      access_mode: mode, // "authenticated" to lock, "public" to restore
-    });
+    await s3.send(new PutObjectTaggingCommand({
+      Bucket: process.env.S3_BUCKET_NAME,
+      Key: key,
+      Tagging: { TagSet: [{ Key: "hidden", Value: hidden ? "true" : "false" }] },
+    }));
     return { ok: true, url };
   } catch (err) {
-    console.error("hide-image: Cloudinary access_mode update failed for", url, "-", err.message);
+    console.error("hide-image: S3 hidden-tag update failed for", url, "-", err.message);
     return { ok: false, url, error: err.message };
   }
 }
@@ -288,27 +292,28 @@ exports.handler = async (event) => {
 
       const nowHide = action === "hide";
 
-      // Lock (or restore) the actual Cloudinary assets — original, staged,
-      // and side-by-side — so the underlying URLs stop resolving publicly
-      // too, not just our own rendering of them. Run in parallel; a failure
-      // on one field must not block the others or the Blobs-side hide.
+      // Tag (or untag) the actual S3 objects — original, staged, and
+      // side-by-side — so the underlying URLs stop resolving publicly
+      // too, not just our own rendering of them. Run in parallel; a
+      // failure on one field must not block the others or the Blobs-side
+      // hide.
       const urlFields = ["originalUrl", "stagedUrl", "sbsUrl"];
-      const cloudinaryResults = await Promise.allSettled(
+      const s3Results = await Promise.allSettled(
         urlFields
           .filter(f => target[f])
-          .map(f => setCloudinaryAccess(target[f], nowHide ? "authenticated" : "public"))
+          .map(f => setS3HiddenTag(target[f], nowHide))
       );
-      const cloudinaryFailures = cloudinaryResults
+      const s3Failures = s3Results
         .map(r => r.status === "fulfilled" ? r.value : { ok: false, error: r.reason?.message })
         .filter(r => !r.ok);
-      if (cloudinaryFailures.length) {
-        console.error("hide-image: Cloudinary lock incomplete for", imageId, "-", JSON.stringify(cloudinaryFailures));
+      if (s3Failures.length) {
+        console.error("hide-image: S3 lock incomplete for", imageId, "-", JSON.stringify(s3Failures));
       }
 
       // Mirror onto the matching staged_images row too — this is the row
       // PRO Plus's video builder actually reads (video-job.js's
       // getFramesForListing() queries staged_images directly, never
-      // Netlify Blobs). Non-fatal: the Blobs flag + Cloudinary lock above
+      // Netlify Blobs). Non-fatal: the Blobs flag + S3 tag lock above
       // are already authoritative for the compliance page and dashboard;
       // this is defense in depth so a hidden image can't be pulled into a
       // video either. Matched by listing_id + the staged image URL, since
@@ -337,7 +342,7 @@ exports.handler = async (event) => {
         at:       new Date().toISOString(),
         by:       authUser.id,
         reason:   reason || null,
-        cloudinaryLockIncomplete: cloudinaryFailures.length > 0 || undefined,
+        s3LockIncomplete: s3Failures.length > 0 || undefined,
       });
 
       project.updatedAt = new Date().toISOString();
@@ -358,7 +363,7 @@ exports.handler = async (event) => {
           success: true,
           imageId,
           hidden: nowHide,
-          cloudinaryLockComplete: cloudinaryFailures.length === 0,
+          s3LockComplete: s3Failures.length === 0,
         })
       };
     }

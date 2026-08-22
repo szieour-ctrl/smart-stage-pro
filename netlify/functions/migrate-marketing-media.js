@@ -93,6 +93,23 @@ function downloadBuffer(url) {
 exports.handler = async (event) => {
   const headers = { "Content-Type": "application/json" };
 
+  // TEMPORARY DIAGNOSTIC — remove once the secret check is confirmed working.
+  // Reports whether the function can see MIGRATION_SECRET at all, and its
+  // length only (never the actual value), so we can tell "env var isn't
+  // propagating to this function" apart from "value typed in the URL
+  // doesn't match" without guessing further.
+  if (event.queryStringParameters?.debug === "1") {
+    return {
+      statusCode: 200, headers,
+      body: JSON.stringify({
+        envVarIsSet: typeof process.env.MIGRATION_SECRET === "string" && process.env.MIGRATION_SECRET.length > 0,
+        envVarLength: process.env.MIGRATION_SECRET ? process.env.MIGRATION_SECRET.length : 0,
+        providedSecretLength: (event.queryStringParameters?.secret || "").length,
+        match: event.queryStringParameters?.secret === process.env.MIGRATION_SECRET,
+      })
+    };
+  }
+
   const providedSecret = event.queryStringParameters?.secret;
   if (!process.env.MIGRATION_SECRET || providedSecret !== process.env.MIGRATION_SECRET) {
     return { statusCode: 403, headers, body: JSON.stringify({ error: "Missing or incorrect ?secret=" }) };

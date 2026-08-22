@@ -1,74 +1,91 @@
-// analyze-open-plan-zones.js — Vision-based Open Plan zone/anchor reader.
+// analyze-open-plan-zones.js — Vision-based Open Plan fixture-anchor reader.
 //
-// Produces the exact "Simple Anchor" text validated by hand this session
-// (Test_3, 2089 Thornecroft, 206 Granite Park, CLEAN_sample, CLEAN_sample7,
-// CLEAN_sample6 — 6/6 correct zone identification against real photos) —
-// for direct substitution into spatial-zone-template.js's
-// {{room_assignment_variables}} slot.
+// REBUILT Aug 21 -- replaces the reasoning-order/taxonomy version. Root cause
+// of that version's failures, confirmed this session on two different
+// models: Haiku filled zones with no real anchor via adjacency guessing
+// ("next to the kitchen" = Living Room); Sonnet went the opposite way and
+// returned 0 zones on photos with an unmissable fireplace and chandelier,
+// most likely because the REASONING ORDER chain gated everything behind
+// resolving camera-position/foreground FIRST -- the one genuinely ambiguous
+// part of this task -- before it would commit to anything, including the
+// easy, unambiguous fixture reads.
 //
-// SCOPE, per this session's finding: Vision's job is ONLY zone + anchor
-// identification. It does NOT reason about circulation, cropping, or
-// furniture placement -- CIRCULATION-ZONE FRAME BEHAVIOR in
-// spatial-zone-template.js already owns that, and GPT Image 2 handles it
-// correctly on its own once a zone is flagged as having no fixture/wall
-// anchor. Vision writing circulation logic was tried and explicitly
-// rejected this session ("That is NOT YOUR JOB, that is the render's").
+// FIX: split the task across the two things actually good at each half.
+//   - VISION'S JOB, NOW: pure fixture inventory. Report only physically
+//     present fixtures it can actually see -- fireplace, ceiling fan,
+//     chandelier/pendant over open floor. No zone-list awareness, no
+//     foreground/camera-position reasoning, no sequencing, no confidence
+//     hedging beyond "don't report a fixture that isn't there." Nothing
+//     asks it to resolve ambiguity, so nothing gives it a reason to bail
+//     out the way the old prompt's "leave blank if not confident" clause
+//     did.
+//   - CODE'S JOB, NEW: elimination math (mergeRoomAssignment, below). Cross-
+//     reference the user's actual room.zoneList selections against what
+//     Vision found. Exactly one selected zone with no fixture match means
+//     that's where the camera is standing, by elimination -- zero model
+//     guessing required. Two or more unclaimed zones means elimination
+//     can't resolve it either; those zones are still listed (so GPT Image 2
+//     knows to stage them, per ROOMS AND ZONES TO STAGE's "not listed =
+//     vacant" rule) but with no anchor text, handing placement to
+//     spatial-zone-template.js's existing ZONE IDENTIFICATION RULES /
+//     CIRCULATION-ZONE FRAME BEHAVIOR / MANDATORY ZONE COVERAGE -- the
+//     fallback path that's already built and validated for an unanchored
+//     listed zone, no new logic needed downstream.
 //
-// Zone set (per the actual Open Plan zone-selection UI, four categories
-// only): Kitchen, Dining Zone, Living Room, Flex Room (user-typed subtype --
-// office, formal dining room, media room, etc.). "Family Room" and "Formal
-// Dining Room" are NOT their own hardcoded zone names -- they are Flex Room
-// instances, distinguished by a typically-present open entrance / pony wall
-// / half-wall pass-through, and by whatever fixture (most commonly a
-// chandelier) suggests their specific type.
+// Kitchen is still never sent to Vision and still always hardcoded --
+// cabinetry/island self-identifies architecturally, confirmed reliable
+// every test this session and prior. Kitchen also counts as permanently
+// "claimed" for the elimination math below (it always has an anchor), so
+// it never enters the unclaimed count.
 //
-// Anchor taxonomy (three types, matching every example validated this
-// session):
-//   1. FIXTURE  -- chandelier, pendant cluster, or fireplace. Locks the zone
-//      directly under/at that fixture, regardless of where the camera is
-//      standing.
-//   2. WALL     -- TWO OR MORE connected walls forming a corner (with or
-//      without windows). This is a structural fact about the room, not
-//      about camera position -- a true two-connected-wall corner is NEVER
-//      described as foreground, even when that corner also happens to be
-//      nearest the camera. Living Room / Flex Room are always WALL-anchored
-//      when this two-wall corner is present.
-//   3. FOREGROUND -- NOT a fallback category. Every open-plan photo has a
-//      foreground, full stop: interiors are typically shot ~4-5ft off the
-//      ground, so the camera is always standing inside SOME zone's nearest
-//      0-4ft. Determining which zone that is comes FIRST, before any
-//      per-zone classification -- see REASONING ORDER in the prompt below.
-//      A foreground zone can stand alone (no fixture, no wall -- most
-//      commonly Dining Zone, "the floater," per this session's finding)
-//      OR combine with a SINGLE wall not already claimed by another zone
-//      (e.g. Living Room anchored to foreground + one window wall -- see
-//      sample7). Two connected walls forming a corner is always WALL type
-//      instead, even for the foreground zone.
+// Living Room anchors (either qualifies independently, neither depends on
+// the other being present):
+//   - Fireplace
+//   - Ceiling fan -- mounted over general room space, not a light fixture,
+//     not positioned over a dining/kitchen area. Added this session per
+//     Sam: "fireplaces are going away... ceiling fans are in rooms and not
+//     over tables" -- newer builds increasingly skip the fireplace, so a
+//     fan-anchored read keeps Living Room detectable without leaning on
+//     the two-connected-walls anchor, which was flagged and deliberately
+//     left out of this rebuild (see sample1a.jpg, prior session -- generic
+//     "two connected walls" was never reliably distinguishable from
+//     ordinary architecture, and that ambiguity was never resolved).
 //
-// Kitchen is intentionally excluded from the Vision read: cabinetry/island
-// self-identifies the Kitchen zone architecturally, and every test this
-// session confirmed Vision doesn't need to be asked about it.
+// Dining Zone / Flex Room anchor:
+//   - Chandelier or pendant cluster over OPEN FLOOR (not over a kitchen
+//     island/counter -- that's task lighting, excluded, same rule as
+//     always). In an enclosed/semi-enclosed room this is a Flex Room
+//     (Formal Dining Room) instead of Dining Zone -- Vision still just
+//     reports the fixture; which label it becomes is still decided the
+//     same way as before (closed FLEX_ROOM_TYPES enum, defensive fallback
+//     if the model drifts outside it).
 //
-// Kitchen is intentionally excluded from the Vision read: cabinetry/island
-// self-identifies the Kitchen zone architecturally, and every test this
-// session confirmed Vision doesn't need to be asked about it.
-//
-// Output shape is deliberately the plain text line that gets inserted at
-// {{room_assignment_variables}} -- not structured JSON that a second step
-// has to reformat. One Vision call, one string, ready to substitute.
+// Explicitly NOT in this version, on purpose: WALL anchor type (two
+// connected walls), FOREGROUND anchor type, and the REASONING ORDER chain.
+// All three are removed, not just reworded -- foreground is now handled by
+// mergeRoomAssignment() below instead of asked of the model at all.
 
 const https = require("https");
 
 // Closed set, matching the app's Single Room list minus "Great Room" (Great
 // Room isn't a valid Flex Room subtype -- it's effectively what Living Room
-// already covers in an open-plan context). This is the ONLY list Vision may
-// select flexRoomType from. Free text was tried and explicitly rejected --
-// "user types in a room... blows our controlled naming and potential
-// duplication of rooms" -- so this is now a closed enum, not a suggestion.
+// already covers in an open-plan context). Free text was tried and
+// explicitly rejected -- "user types in a room... blows our controlled
+// naming and potential duplication of rooms" -- so this stays a closed
+// enum, not a suggestion.
 const FLEX_ROOM_TYPES = [
   "Office", "Formal Dining Room", "Media Room", "Play Room",
   "Music Room", "Den", "Study Room", "Gym", "Reading Nook",
 ];
+
+// zoneList checkbox keys (set in index.html) -> the zone label Vision uses
+// in its JSON output. Kitchen deliberately excluded -- it's never matched
+// against Vision output, it's always claimed by the hardcoded line.
+const ZONE_KEY_TO_LABEL = {
+  dining: "Dining Zone",
+  living: "Living Room",
+  flex: "Flex Room",
+};
 
 function httpsRequest(options, body) {
   return new Promise((resolve, reject) => {
@@ -87,63 +104,30 @@ function httpsRequest(options, body) {
   });
 }
 
-const OPEN_PLAN_ZONE_PROMPT = `You are identifying furnishing zones and their anchors in an open-plan real estate interior photo. This is a classification task, not a design task -- you are not deciding how furniture should be arranged, only where each zone belongs and what anchors it.
+const OPEN_PLAN_ZONE_PROMPT = `Look at this real estate interior photo. Identify these fixtures if present, and which zone each one anchors:
 
-Return ONLY valid JSON, no markdown, no explanation.
+- Fireplace -> Living Room
+- Ceiling fan -> Living Room (a fan mounted over general room space, not a chandelier or pendant light -- and not positioned over an open dining area or kitchen island, which are lighting fixtures, not fans)
+- Chandelier or pendant cluster hanging over OPEN FLOOR (not over a kitchen island or counter -- that is task lighting, not a zone anchor) -> Dining Zone, unless the space is an enclosed or semi-enclosed room separate from the main open area, in which case it anchors a Flex Room. If it anchors a Flex Room, select the type from this exact list ONLY: Office, Formal Dining Room, Media Room, Play Room, Music Room, Den, Study Room, Gym, Reading Nook. A chandelier in an enclosed room is a strong signal for "Formal Dining Room." Never invent a type outside this list -- if unsure which type, omit flexRoomType and leave it as an empty string.
 
-TASK
-Open Plan photos have at most four possible zones: Kitchen, Dining Zone, Living Room, and Flex Room. Identify which are genuinely present and visible -- do not force a zone that isn't there. Skip Kitchen entirely; it is handled separately and should never appear in your output.
+For each fixture you find, report the zone, what the fixture is, and where it sits in the frame (e.g. "fireplace, left wall" or "chandelier, center, over open floor").
 
-Flex Room covers any additional walled zone that isn't Living Room or Dining Zone. A Flex Room typically (not always) has an open entrance, a third pony wall, or a half-wall pass-through, distinguishing it from Living Room's more fully-open connection to the rest of the space. If a Flex Room is present, select its type from this exact list ONLY: Office, Formal Dining Room, Media Room, Play Room, Music Room, Den, Study Room, Gym, Reading Nook. Never write a type outside this list, and never invent your own phrasing for one that's close but not exact (e.g. do not write "Home Office" -- select "Office"). If none of these fit confidently, leave flexRoomType as an empty string -- the user selects it themselves from a dropdown built from this same list, so guessing wrong is worse than leaving it blank. A chandelier in an enclosed/semi-enclosed Flex Room is a strong signal for "Formal Dining Room."
-
-FIRST, BEFORE CLASSIFYING ANYTHING: determine which zone occupies the foreground of the frame.
-Every open-plan photo has a foreground, full stop -- real estate interiors are typically shot from about 4-5 feet off the ground, meaning the camera itself is standing inside whichever zone occupies the frame's nearest 0-4 feet. This is not a special case that sometimes applies -- some zone in this photo occupies the foreground, always, and identifying which one is your first task, before you classify any zone's anchor type. Hold that answer in mind; it directly resolves ambiguity in the steps below.
-
-For each zone you identify, classify its anchor as exactly ONE of these three types:
-
-1. FIXTURE -- a chandelier, pendant light cluster, or fireplace visible in the photo that this zone is built around. State which fixture and, briefly, where it sits in the frame (e.g. "left of the island, over open floor" or "wall, mid-frame").
-   - A chandelier or pendant cluster over open floor (not over a kitchen island/counter) anchors a Dining Zone.
-   - A fireplace anchors a Living Room or Flex Room.
-
-2. WALL -- TWO OR MORE connected walls forming a corner (state which -- e.g. "fireplace wall and the connected wall with windows", or "wall with two windows near the entry and the connected wall to the right"). This is a structural fact about the room's architecture, not about where the camera is standing -- a true two-connected-wall corner is ALWAYS this type, even if that corner also happens to be nearest the camera (i.e. even if it's also the foreground zone). Living Room and Flex Room are WALL-anchored whenever this two-wall corner is present, regardless of fixture or camera position.
-
-3. FOREGROUND -- used for whichever zone you determined, in your first step above, occupies the frame's foreground. This is not a fallback for zones with nothing else -- it is simply naming the zone the camera is standing in. A foreground zone can stand alone with no wall at all (state only "foreground of the frame" plus brief adjacency if helpful, e.g. "close to the kitchen"), OR it can combine with a SINGLE wall that no other zone has already claimed (e.g. "foreground of the frame, and the wall on the right with a window"). The dividing line versus WALL: ONE wall can appear together with foreground; TWO connected walls forming a corner never can -- that is always WALL type on its own, no foreground language, even for the foreground zone.
-
-REASONING ORDER -- follow this in sequence, do not guess at each zone independently:
-Step 1: Determine which zone occupies the foreground (see above). Hold this answer.
-Step 2: Identify every FIXTURE-anchored zone (a chandelier or pendant cluster over open floor, separate from any kitchen island lighting, anchors Dining Zone; a fireplace anchors Living Room or Flex Room).
-Step 3: Kitchen is excluded entirely from your output -- do not analyze it.
-Step 4: Identify any remaining WALL-anchored zone (two connected walls, not already accounted for by a fixture in Step 2).
-Step 5: Whatever zone from Step 1 (the foreground zone) has not already been fully accounted for by Steps 2 or 4 gets FOREGROUND as part of its anchor, plus any single unclaimed wall present in that same area. In practice, this step is what resolves Dining Zone most reliably: it is the zone most likely to have no fixture and no wall pair of its own, and confirming it occupies the foreground (Step 1) is what identifies it correctly rather than guessing.
-
-RULES
-- Do not reason about circulation, walkways, traffic patterns, or whether a zone "should" be cropped. That is not your task -- only identify the zone and its anchor type.
-- Do not invent an anchor by describing a zone's position relative to another zone (e.g. never say "between the kitchen and living room" -- that is not a real anchor, it depends on correctly reading two other zones first and breaks if either is wrong). Every zone's anchor must be independently identifiable: a fixture, a two-connected-wall corner, or camera position (optionally plus one unclaimed wall).
-- A kitchen island's task lighting (small pendants directly over the island/counter) is NOT a Dining Zone anchor -- only a fixture over OPEN FLOOR, separate from the island, counts.
-- If a chandelier is visible, it always anchors Dining Zone, even if it is not centered in the frame.
-- Wall descriptions should name what's on the wall if relevant (windows, fireplace) but should stay brief -- one clause, not a paragraph.
-
-OUTPUT SHAPE
-Return this exact JSON shape:
+Return ONLY this JSON shape, no markdown, no explanation:
 {
   "zones": [
-    {"zone": "Dining Zone", "anchorType": "FIXTURE", "anchorText": "chandelier, left of the island, over open floor"},
-    {"zone": "Living Room", "anchorType": "WALL", "anchorText": "fireplace wall, and the connected wall with windows"},
-    {"zone": "Flex Room", "flexRoomType": "Formal Dining Room", "anchorType": "FIXTURE", "anchorText": "chandelier, mid-frame"}
+    {"zone": "Living Room", "anchorType": "FIXTURE", "anchorText": "fireplace, left wall"},
+    {"zone": "Dining Zone", "anchorType": "FIXTURE", "anchorText": "chandelier, center, over open floor"},
+    {"zone": "Flex Room", "flexRoomType": "Formal Dining Room", "anchorType": "FIXTURE", "anchorText": "chandelier, enclosed room, mid-frame"}
   ]
 }
 
-zone must be exactly one of "Dining Zone", "Living Room", "Flex Room" (never Kitchen). flexRoomType is only used when zone is "Flex Room" -- it must be exactly one of: Office, Formal Dining Room, Media Room, Play Room, Music Room, Den, Study Room, Gym, Reading Nook, or an empty string if none fit confidently. No other value is valid. anchorType must be exactly "FIXTURE", "WALL", or "FOREGROUND". anchorText should read naturally as a short phrase, matching the style of the examples above -- no full sentences, no restating the zone name.`;
+zone must be exactly one of "Living Room", "Dining Zone", "Flex Room" (never Kitchen -- Kitchen is handled separately and must never appear in your output). Only include a zone if you can actually see its fixture, physically present in this specific photo. Do not include a zone because it seems likely to be there, because the room type suggests it, or because a similar photo usually has one -- only report what you actually see. If you do not see a fireplace, ceiling fan, or dining/flex fixture at all, return {"zones": []}. Do not reason about camera position, room layout, or which zone the photo was taken from -- that is not part of this task.`;
 
 async function analyzeOpenPlanZones(base64, mimeType, claudeKey, opts = {}) {
-  // Swapped default from claude-haiku-4-5-20251001 -> claude-sonnet-5 (Aug 21
-  // rewire): sample9.jpg's fireplace anchor was skipped entirely at the
-  // detection stage on Haiku, under both the old prompt and the new
-  // Foreground/Contradiction rewrite -- the same anchor was correctly
-  // resolved by hand under Sonnet. Isolated swap, no other change in this
-  // edit, so any behavior shift is attributable to the model alone (same
-  // discipline as the gpt-image-1 -> gpt-image-2 swap in stage-image.js).
-  // opts.model still overrides if passed by the caller, unchanged.
+  // Default model: claude-sonnet-5 (swapped from claude-haiku-4-5-20251001
+  // Aug 21, same session -- see mergeRoomAssignment below for why the
+  // stripped prompt matters more than the model choice here). opts.model
+  // still overrides if the caller passes one.
   const model = opts.model || "claude-sonnet-5";
 
   const payload = JSON.stringify({
@@ -181,41 +165,71 @@ async function analyzeOpenPlanZones(base64, mimeType, claudeKey, opts = {}) {
   const clean = text.replace(/```json|```/g, "").trim();
   const parsed = JSON.parse(clean);
 
-  return {
-    raw: parsed,
-    // The actual string to substitute into {{room_assignment_variables}} --
-    // this is the deliverable, everything else is intermediate.
-    roomAssignmentText: buildRoomAssignmentText(parsed.zones || []),
-  };
+  return { zones: parsed.zones || [] };
 }
 
-// Converts the structured Vision output into the exact plain-text format
-// validated by hand this session -- e.g.:
-//
-//   Kitchen: Anchor: island.
-//   Living Room: Anchor: fireplace wall, and the connected wall with windows. Size the furnishings with circulation appropriate to the available space.
-//   Dining Zone: Anchor: chandelier, left of the island, over open floor.
-//
-// Kitchen line is always injected here (not by Vision -- see prompt notes).
-function buildRoomAssignmentText(zones) {
-  const lines = ["Kitchen: Anchor: island."];
+// Resolves a Vision-reported zone entry to its display name + validated
+// flexRoomType, same defensive logic as before: never let an out-of-enum
+// flexRoomType value through, even though the prompt states it as closed --
+// models can drift.
+function displayNameFor(z) {
+  if (z.zone !== "Flex Room") return z.zone;
+  const rawType = (z.flexRoomType || "").trim();
+  const validType = FLEX_ROOM_TYPES.includes(rawType) ? rawType : "";
+  return validType || "Flex Room";
+}
 
-  for (const z of zones) {
-    if (!z || !z.zone || !z.anchorType) continue;
-    // Defensive: even though the prompt states this as a closed enum,
-    // models can drift. Never let an out-of-list value reach the template --
-    // that's exactly the uncontrolled-naming/duplication problem this
-    // whole enum was built to prevent. Silently fall back to the generic
-    // "Flex Room" label (matching what the UI shows before the user picks
-    // from the dropdown) rather than passing an unrecognized string through.
-    const rawType = z.zone === "Flex Room" ? (z.flexRoomType || "").trim() : "";
-    const validType = FLEX_ROOM_TYPES.includes(rawType) ? rawType : "";
-    const displayName = validType || z.zone;
-    let line = `${displayName}: Anchor: ${z.anchorText || "(unspecified)"}.`;
-    if (z.anchorType === "WALL") {
-      line += " Size the furnishings with circulation appropriate to the available space.";
+// ── Elimination merge ────────────────────────────────────────────────────
+// Cross-references the user's actual zoneList selections against Vision's
+// fixture findings. This is where foreground/camera-position gets resolved
+// now -- by code, not by asking the model to reason about it.
+//
+//   0 unclaimed zones  -> nothing to add, every selection has a real anchor
+//   1 unclaimed zone   -> that's where the camera is standing, by
+//                         elimination -- gets "foreground of the frame,
+//                         camera position."
+//   2+ unclaimed zones -> elimination can't resolve which one is actually
+//                         foreground. Do NOT guess in code or ask Vision to
+//                         guess. List those zones by name only, no anchor
+//                         text -- they still appear in "Find and stage" (so
+//                         they get furnished, not left vacant), but with no
+//                         anchor guidance. spatial-zone-template.js's
+//                         existing ZONE IDENTIFICATION RULES and
+//                         CIRCULATION-ZONE FRAME BEHAVIOR already own
+//                         placement for exactly this case.
+function mergeRoomAssignment(visionZones, zoneList, flexNote) {
+  const lines = ["Kitchen: Anchor: island."];
+  const list = zoneList || [];
+
+  // Map each non-kitchen selected key to its zone label, and find whether
+  // Vision reported a matching fixture for it.
+  const selections = list
+    .filter((key) => key !== "kitchen")
+    .map((key) => {
+      const label = ZONE_KEY_TO_LABEL[key] || key;
+      const match = (visionZones || []).find((z) => z && z.zone === label);
+      return { key, label, match };
+    });
+
+  const claimed = selections.filter((s) => s.match);
+  const unclaimed = selections.filter((s) => !s.match);
+
+  for (const s of claimed) {
+    const displayName = s.key === "flex"
+      ? (displayNameFor(s.match) === "Flex Room" && flexNote ? `${flexNote} (Flex Room)` : displayNameFor(s.match))
+      : s.label;
+    lines.push(`${displayName}: Anchor: ${s.match.anchorText || "(unspecified)"}.`);
+  }
+
+  if (unclaimed.length === 1) {
+    const s = unclaimed[0];
+    const displayName = s.key === "flex" && flexNote ? `${flexNote} (Flex Room)` : s.label;
+    lines.push(`${displayName}: Anchor: foreground of the frame, camera position.`);
+  } else if (unclaimed.length >= 2) {
+    for (const s of unclaimed) {
+      const displayName = s.key === "flex" && flexNote ? `${flexNote} (Flex Room)` : s.label;
+      lines.push(`${displayName}.`);
     }
-    lines.push(line);
   }
 
   return lines.join("\n");
@@ -223,18 +237,15 @@ function buildRoomAssignmentText(zones) {
 
 // ── Netlify handler ──────────────────────────────────────────────────────
 // Called once per Open Plan photo, BEFORE stage-vacant-prompt.js. Returns
-// roomAssignmentText, which index.html passes straight through as the
-// roomAssignmentText override on the stage-vacant-prompt.js request --
-// see buildRoomAssignmentVariable() in spatial-zone-template.js, which
-// uses this verbatim instead of auto-building a plain zone-label list.
+// roomAssignmentText, fully resolved (including elimination-derived
+// foreground line where applicable) -- ready to pass straight through as
+// the roomAssignmentText override to stage-vacant-prompt.js. No change
+// needed downstream: spatial-zone-template.js's buildRoomAssignmentVariable
+// already uses this verbatim when present.
 //
-// CACHING NOTE (not implemented here -- this handler is stateless, same
-// as analyzeFloorplan in stage-image.js): the caller should cache this
-// result per photoId once computed, the same way zoneList is already
-// cached in SESSION.photoRoomMap. Anchors should stay stable across
-// Iterate/Enhance-with-AI passes on the same photo -- re-running Vision on
-// every stage call risks the read drifting between iterations of what
-// should be the same room.
+// CACHING NOTE (enforced in index.html, not here): cache per photoId once
+// computed, same as before. Anchors should stay stable across
+// Iterate/Enhance-with-AI passes on the same photo.
 async function handler(event) {
   if (event.httpMethod !== "POST") return { statusCode: 405, body: "Method Not Allowed" };
 
@@ -248,17 +259,20 @@ async function handler(event) {
     const claudeKey = process.env.ANTHROPIC_API_KEY;
     if (!claudeKey) return { statusCode: 500, headers, body: JSON.stringify({ error: "ANTHROPIC_API_KEY not configured" }) };
 
-    const { imageBase64, mimeType, model } = JSON.parse(event.body);
+    const { imageBase64, mimeType, model, zoneList, flexNote } = JSON.parse(event.body);
     if (!imageBase64) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing imageBase64" }) };
 
-    const result = await analyzeOpenPlanZones(imageBase64, mimeType, claudeKey, { model });
+    const { zones } = await analyzeOpenPlanZones(imageBase64, mimeType, claudeKey, { model });
+    const roomAssignmentText = mergeRoomAssignment(zones, zoneList, flexNote);
 
     console.log(
-      "analyze-open-plan-zones: " + (result.raw?.zones?.length || 0) + " zone(s) identified -- " +
-      (result.raw?.zones || []).map(z => z.zone + "/" + z.anchorType).join(", ")
+      "analyze-open-plan-zones: " + zones.length + " fixture(s) found -- " +
+      zones.map(z => z.zone + "/" + z.anchorType).join(", ") +
+      " | zoneList=" + JSON.stringify(zoneList || []) +
+      " | resolved=" + JSON.stringify(roomAssignmentText)
     );
 
-    return { statusCode: 200, headers, body: JSON.stringify(result) };
+    return { statusCode: 200, headers, body: JSON.stringify({ zones, roomAssignmentText }) };
 
   } catch (err) {
     console.error("analyze-open-plan-zones error:", err.message);
@@ -267,14 +281,8 @@ async function handler(event) {
 }
 
 // Single combined export, at the very end of the file, after everything it
-// references is defined. This is deliberate: module.exports = {...} was
-// previously set earlier in the file, THEN exports.handler = ... was
-// assigned after it -- module.exports = {...} reassigns exports.exports to
-// a brand-new object, decoupling it from the original `exports` reference,
-// so the later exports.handler = ... assignment was silently attaching to
-// an orphaned object nothing ever reads. Netlify's loader does
-// require(...).handler and found nothing, causing
-// "analyze-open-plan-zones.handler is undefined or not exported" in
-// production. Fix: one export statement, one object, handler included in
-// it directly -- no possibility of a second assignment shadowing the first.
-module.exports = { analyzeOpenPlanZones, buildRoomAssignmentText, OPEN_PLAN_ZONE_PROMPT, FLEX_ROOM_TYPES, handler };
+// references is defined -- deliberate, see prior handler-export bug this
+// session (module.exports reassigned before exports.handler was set,
+// orphaning it). One export statement, one object, no possibility of a
+// second assignment shadowing the first.
+module.exports = { analyzeOpenPlanZones, mergeRoomAssignment, OPEN_PLAN_ZONE_PROMPT, FLEX_ROOM_TYPES, handler };

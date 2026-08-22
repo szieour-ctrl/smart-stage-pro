@@ -4285,16 +4285,12 @@ async function attachFinalToProject(finalBase64, room, orig, enhId) {
   renderRoomQueue();
 
   try {
-    // ARCHITECTURE CHANGE (this session): the image no longer passes
-    // through our own Netlify function at all. upload-staged.js now only
-    // issues a signed Cloudinary upload signature (tiny, fast, can never
-    // hit a payload ceiling since it carries no image data); the browser
-    // uploads the actual bytes DIRECTLY to Cloudinary. A prior fix that
-    // changed how upload-staged.js re-encoded the OUTGOING request to
-    // Cloudinary didn't help, because the real failure was the INCOMING
-    // request from the browser to our own function — confirmed by a real
-    // failed invocation ID that produced no matching log output anywhere,
-    // consistent with a gateway-level rejection before our code ever ran.
+    // ARCHITECTURE: the image no longer passes through our own Netlify
+    // function at all. upload-staged.js issues a presigned S3 PUT URL
+    // (tiny, fast, can never hit a payload ceiling since it carries no
+    // image data); the browser uploads the actual bytes DIRECTLY to S3
+    // via that URL. (Migrated off Cloudinary's equivalent signed-upload
+    // pattern — same shape, different provider.)
     const sigRes = await fetch('/.netlify/functions/upload-staged', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -4303,36 +4299,18 @@ async function attachFinalToProject(finalBase64, room, orig, enhId) {
     const sigRaw = await sigRes.text();
     let sig;
     try { sig = JSON.parse(sigRaw); }
-    catch { throw new Error(`upload-staged (signature) returned a non-JSON response (status ${sigRes.status}): ${sigRaw.slice(0, 200)}`); }
-    if (!sig.signature) throw new Error(sig.error || 'No upload signature returned');
+    catch { throw new Error(`upload-staged (presign) returned a non-JSON response (status ${sigRes.status}): ${sigRaw.slice(0, 200)}`); }
+    if (!sig.uploadUrl) throw new Error(sig.error || 'No upload URL returned');
 
     const imageBlob = base64ToBlob(finalBase64, 'image/jpeg');
-    const formData = new FormData();
-    formData.append('file', imageBlob, 'staged.jpg');
-    formData.append('api_key', sig.apiKey);
-    formData.append('timestamp', sig.timestamp);
-    formData.append('signature', sig.signature);
-    formData.append('folder', sig.folder);
-
-    const uploadRes = await fetch(`https://api.cloudinary.com/v1_1/${sig.cloudName}/image/upload`, {
-      method: 'POST',
-      body: formData,
+    const uploadRes = await fetch(sig.uploadUrl, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'image/jpeg' },
+      body: imageBlob,
     });
-    // Read as text first, THEN try to parse — this is now Cloudinary's own
-    // response. Same defensive parsing as before in case of a network-level
-    // failure reaching Cloudinary directly from the browser.
-    const uploadRaw = await uploadRes.text();
-    let uploadData;
-    try { uploadData = JSON.parse(uploadRaw); }
-    catch { throw new Error(`Cloudinary upload returned a non-JSON response (status ${uploadRes.status}): ${uploadRaw.slice(0, 200)}`); }
-    if (!uploadData.secure_url) {
-      // Show exactly what Cloudinary said, not a generic fallback — this
-      // is the direct-to-Cloudinary upload from the browser, and a bad
-      // signature, folder mismatch, timestamp skew, or credential issue
-      // all produce DIFFERENT Cloudinary error text that we need to see
-      // verbatim to fix the right thing instead of guessing.
-      const cloudErr = uploadData.error?.message || uploadData.error || uploadRaw.slice(0, 300);
-      throw new Error(`Cloudinary rejected the upload (status ${uploadRes.status}): ${cloudErr}`);
+    if (!uploadRes.ok) {
+      const uploadRaw = await uploadRes.text().catch(() => '');
+      throw new Error(`S3 rejected the upload (status ${uploadRes.status}): ${uploadRaw.slice(0, 300)}`);
     }
 
     // Attach to project in Blobs
@@ -4351,7 +4329,7 @@ async function attachFinalToProject(finalBase64, room, orig, enhId) {
           tier: enhId ? 'final-enhanced' : 'final', // quality label — Blobs/compliance-page display only
           mode: dbMode,                              // NEW — the real staged_images.mode value
           originalUrl: orig?.originalUrl || null,
-          stagedUrl: uploadData.secure_url,
+          stagedUrl: sig.publicUrl,
           fileName: orig?.name || '',
         }
       })
@@ -4966,19 +4944,10 @@ async function attachHeroShotToProject(finalBase64, room, shot, shotId) {
   renderRoomQueue();
 
   try {
-    // BUG FIX (this session): this function was still calling upload-staged.js
-    // with the OLD contract (imageBase64 in, publicUrl out). upload-staged.js
-    // was rewritten during the Generate Final pipeline fix to the direct-to-
-    // Cloudinary architecture — it now only signs a request and returns
-    // {cloudName, apiKey, timestamp, signature, folder}, no publicUrl, no
-    // image upload at all. That mismatch meant `uploadData.publicUrl` was
-    // always undefined, this always threw, and because the caller only did
-    // .catch(err => console.warn(...)), every single hero shot final silently
-    // never reached the compliance page — confirmed via direct trace of
-    // both files, matching the exact symptom reported (final generates fine,
-    // never appears on compliance page, no visible error). Same fix pattern
-    // as attachFinalToProject: get signature → FormData direct upload to
-    // Cloudinary from the browser → attach with the real secure_url.
+    // Same S3 presigned-PUT pattern as attachFinalToProject: get a
+    // presigned URL → PUT the bytes directly from the browser → attach
+    // with the real publicUrl. (Previously a Cloudinary signed-upload;
+    // migrated to S3 — see upload-staged.js.)
     const sigRes = await fetch('/.netlify/functions/upload-staged', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -4987,28 +4956,18 @@ async function attachHeroShotToProject(finalBase64, room, shot, shotId) {
     const sigRaw = await sigRes.text();
     let sig;
     try { sig = JSON.parse(sigRaw); }
-    catch { throw new Error(`upload-staged (signature) returned a non-JSON response (status ${sigRes.status}): ${sigRaw.slice(0, 200)}`); }
-    if (!sig.signature) throw new Error(sig.error || 'No upload signature returned');
+    catch { throw new Error(`upload-staged (presign) returned a non-JSON response (status ${sigRes.status}): ${sigRaw.slice(0, 200)}`); }
+    if (!sig.uploadUrl) throw new Error(sig.error || 'No upload URL returned');
 
     const imageBlob = base64ToBlob(finalBase64, 'image/jpeg');
-    const formData = new FormData();
-    formData.append('file', imageBlob, 'hero-shot.jpg');
-    formData.append('api_key', sig.apiKey);
-    formData.append('timestamp', sig.timestamp);
-    formData.append('signature', sig.signature);
-    formData.append('folder', sig.folder);
-
-    const uploadRes = await fetch(`https://api.cloudinary.com/v1_1/${sig.cloudName}/image/upload`, {
-      method: 'POST',
-      body: formData,
+    const uploadRes = await fetch(sig.uploadUrl, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'image/jpeg' },
+      body: imageBlob,
     });
-    const uploadRaw = await uploadRes.text();
-    let uploadData;
-    try { uploadData = JSON.parse(uploadRaw); }
-    catch { throw new Error(`Cloudinary upload returned a non-JSON response (status ${uploadRes.status}): ${uploadRaw.slice(0, 200)}`); }
-    if (!uploadData.secure_url) {
-      const cloudErr = uploadData.error?.message || uploadData.error || uploadRaw.slice(0, 300);
-      throw new Error(`Cloudinary rejected the upload (status ${uploadRes.status}): ${cloudErr}`);
+    if (!uploadRes.ok) {
+      const uploadRaw = await uploadRes.text().catch(() => '');
+      throw new Error(`S3 rejected the upload (status ${uploadRes.status}): ${uploadRaw.slice(0, 300)}`);
     }
 
     const _sbUserForHero = (await getSupabase().auth.getUser()).data?.user;
@@ -5030,7 +4989,7 @@ async function attachHeroShotToProject(finalBase64, room, shot, shotId) {
           tier: 'hero_shot',           // quality label — Blobs/compliance-page display only
           mode: dbMode,                // real staged_images.mode value (constraint-safe)
           originalUrl: orig?.originalUrl || null,  // true camera-ready original, NOT the staged image
-          stagedUrl: uploadData.secure_url,
+          stagedUrl: sig.publicUrl,
           fileName: orig?.name || '',
           // NEW — ground truth captured here, at Generate Final time,
           // where room.roomName and shot.name both exist together. Flows

@@ -11550,7 +11550,7 @@ async function setImageHidden(listingId, projectId, imageId, action, reason){
     });
     const data = await res.json();
     if (!res.ok) { showToast(data.error || (action === 'hide' ? 'Hide failed.' : 'Unhide failed.'), 'error'); return; }
-    if (action === 'hide' && data.cloudinaryLockComplete === false) {
+    if (action === 'hide' && data.s3LockComplete === false) {
       showToast('Hidden from the page, but the underlying image lock may be incomplete — check logs.', 'error');
     } else {
       showToast(action === 'hide' ? '✓ Image hidden from compliance page.' : '✓ Image restored.', 'success');

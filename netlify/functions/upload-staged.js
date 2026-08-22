@@ -8,12 +8,13 @@
 // the browser PUTs the bytes directly to the presigned URL.
 //
 // Input:  { projectId }  — NO image data
-// Output: { uploadUrl, s3Key }
+// Output: { uploadUrl, publicUrl, s3Key }
 //
-// NOTE: staged finals stay PRIVATE by default (no bucket policy opens this
-// prefix, unlike originals). Generating a URL to actually VIEW this image
-// later is part of the delivery/signed-URL migration (hide-image.js,
-// video-job.js, compliance-page.js) — not solved by this function.
+// NOTE: staged finals are PUBLIC by default (bucket policy covers
+// smart-stage-finals/* the same as smart-stage-originals/*) — this
+// matches Cloudinary's prior default behavior. Per-image locking (the
+// "hide this listing" case in hide-image.js) is a separate, later
+// migration — it needs real per-object access control, not solved here.
 
 const crypto = require("crypto");
 const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
@@ -54,11 +55,12 @@ exports.handler = async (event) => {
       new PutObjectCommand({ Bucket: bucket, Key: key, ContentType: "image/jpeg" }),
       { expiresIn: 300 } // 5 minutes to complete the upload
     );
+    const publicUrl = `https://${bucket}.s3.${region}.amazonaws.com/${key}`;
 
     return {
       statusCode: 200,
       headers,
-      body: JSON.stringify({ uploadUrl, s3Key: key }),
+      body: JSON.stringify({ uploadUrl, publicUrl, s3Key: key }),
     };
   } catch (err) {
     console.error("upload-staged (presign) error:", err.message);

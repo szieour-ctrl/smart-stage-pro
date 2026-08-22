@@ -4031,6 +4031,12 @@ async function analyzeOpenPlanZonesForRoom(room, orig) {
       body: JSON.stringify({
         imageBase64: orig.base64,
         mimeType: orig.mimeType,
+        // Aug 21 rebuild: analyze-open-plan-zones.js now resolves foreground
+        // by elimination math (mergeRoomAssignment) instead of asking Vision
+        // to reason about camera position -- it needs the user's actual
+        // zone selections to do that, which weren't being sent before.
+        zoneList: room.zoneList || [],
+        flexNote: room.flexNote || '',
       })
     });
 

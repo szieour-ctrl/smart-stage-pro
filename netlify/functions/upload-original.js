@@ -6,12 +6,13 @@
 // Called ONCE per photo, at the moment the agent uploads the image
 // before any staging begins. The URL travels with the session.
 //
-// Input:  imageBase64, mimeType, listingId (optional slug for organized folders)
-// Output: publicUrl — permanent S3/CloudFront URL of the original
+// Input:  imageBase64, mimeType, projectId (optional slug for organized folders)
+// Output: publicUrl — permanent S3 URL of the original
 //
-// Public access comes from a bucket policy scoped to smart-stage-originals/*,
-// NOT from object ACLs (this bucket has ACLs disabled — Bucket owner enforced).
-// URL format: https://{bucket}.s3.{region}.amazonaws.com/smart-stage-originals/{listingId}/{id}.jpg
+// Public access comes from a bucket policy scoped to smart-stage-originals/*
+// and smart-stage-finals/*, NOT from object ACLs (this bucket has ACLs
+// disabled — Bucket owner enforced).
+// URL format: https://{bucket}.s3.{region}.amazonaws.com/smart-stage-originals/{projectId}/{id}.jpg
 
 const crypto = require("crypto");
 const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
@@ -34,7 +35,7 @@ exports.handler = async (event) => {
   };
 
   try {
-    const { imageBase64, mimeType, listingId } = JSON.parse(event.body || "{}");
+    const { imageBase64, mimeType, projectId } = JSON.parse(event.body || "{}");
     if (!imageBase64) return {
       statusCode: 400, headers,
       body: JSON.stringify({ error: "Missing imageBase64" })
@@ -49,11 +50,11 @@ exports.handler = async (event) => {
 
     const contentType = mimeType || "image/jpeg";
     const ext = contentType.includes("png") ? "png" : "jpg";
-    const folder = listingId ? `smart-stage-originals/${listingId}` : "smart-stage-originals/unfiled";
+    const folder = projectId ? `smart-stage-originals/${projectId}` : "smart-stage-originals/unfiled";
     const key = `${folder}/${crypto.randomUUID()}.${ext}`;
     const buffer = Buffer.from(imageBase64, "base64");
 
-    console.log(`Uploading original to S3 — size: ${Math.round(buffer.length / 1024)}KB listingId: ${listingId || "none"}`);
+    console.log(`Uploading original to S3 — size: ${Math.round(buffer.length / 1024)}KB projectId: ${projectId || "none"}`);
 
     await s3.send(new PutObjectCommand({
       Bucket: bucket,

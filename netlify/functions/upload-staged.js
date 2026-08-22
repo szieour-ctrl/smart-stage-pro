@@ -1,30 +1,31 @@
 // upload-staged.js — Netlify Function
-// Issues a signed Cloudinary upload signature for a staged Final image.
+// Issues a presigned S3 PUT URL for a staged Final image.
 // Called after generateFinal completes, before project-manage add-image.
 //
-// ARCHITECTURE CHANGE (this session — real production failure, not a
-// hypothesis): this function used to receive the full image (imageBase64)
-// and upload it to Cloudinary itself. That put the image through TWO
-// Lambda payload hops — browser → this function (JSON body), then this
-// function → Cloudinary (multipart body) — and a prior fix only addressed
-// the second hop. The actual failure was the FIRST hop: a large final
-// image in the incoming request body can exceed the platform's payload
-// ceiling before this function's own code ever runs at all — confirmed by
-// a real invocation ID from a genuine failure that produced zero matching
-// log output anywhere, consistent with a gateway-level rejection prior to
-// Lambda invocation, not a caught or uncaught error inside our code.
+// Same reason this exists as before: a large final image in the request
+// body can exceed the platform's payload ceiling before this function's
+// own code ever runs. The image never passes through our infrastructure —
+// the browser PUTs the bytes directly to the presigned URL.
 //
-// Fix: the image never passes through this function, or any of our own
-// infrastructure, at all. This function only signs a short-lived Cloudinary
-// upload request; the browser uploads the actual image bytes DIRECTLY to
-// Cloudinary's own endpoint (which accepts far larger payloads than our
-// Lambda ever will). This is Cloudinary's own documented pattern for
-// exactly this situation, not a workaround specific to this codebase.
+// Input:  { projectId }  — NO image data
+// Output: { uploadUrl, s3Key }
 //
-// Input:  { projectId, roomName, tier }  — NO image data
-// Output: { cloudName, apiKey, timestamp, signature, folder }
+// NOTE: staged finals stay PRIVATE by default (no bucket policy opens this
+// prefix, unlike originals). Generating a URL to actually VIEW this image
+// later is part of the delivery/signed-URL migration (hide-image.js,
+// video-job.js, compliance-page.js) — not solved by this function.
 
 const crypto = require("crypto");
+const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
+const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
+
+const s3 = new S3Client({
+  region: process.env.S3_REGION,
+  credentials: {
+    accessKeyId: process.env.S3_ACCESS_KEY_ID,
+    secretAccessKey: process.env.S3_SECRET_ACCESS_KEY,
+  },
+});
 
 exports.handler = async (event) => {
   const headers = {
@@ -38,28 +39,29 @@ exports.handler = async (event) => {
   try {
     const { projectId } = JSON.parse(event.body || "{}");
 
-    const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
-    const apiKey    = process.env.CLOUDINARY_API_KEY;
-    const apiSecret = process.env.CLOUDINARY_API_SECRET;
+    const bucket = process.env.S3_BUCKET_NAME;
+    const region = process.env.S3_REGION;
+    if (!bucket || !region) return {
+      statusCode: 500, headers,
+      body: JSON.stringify({ error: "S3_BUCKET_NAME or S3_REGION not configured" })
+    };
 
-    if (!cloudName) return { statusCode: 500, headers, body: JSON.stringify({ error: "CLOUDINARY_CLOUD_NAME not configured" }) };
-    if (!apiKey || !apiSecret) return { statusCode: 500, headers, body: JSON.stringify({ error: "CLOUDINARY_API_KEY/SECRET not configured — signed upload requires both" }) };
+    const folder = projectId ? `smart-stage-finals/${projectId}` : "smart-stage-finals";
+    const key = `${folder}/${crypto.randomUUID()}.jpg`;
 
-    const folder    = projectId ? `smart-stage-finals/${projectId}` : "smart-stage-finals";
-    const timestamp = Math.floor(Date.now() / 1000).toString();
-
-    // Signature covers exactly the non-file params the browser will send,
-    // alphabetical order, same rule as Cloudinary always requires.
-    const paramsToSign = `folder=${folder}&timestamp=${timestamp}`;
-    const signature = crypto.createHash("sha1").update(paramsToSign + apiSecret).digest("hex");
+    const uploadUrl = await getSignedUrl(
+      s3,
+      new PutObjectCommand({ Bucket: bucket, Key: key, ContentType: "image/jpeg" }),
+      { expiresIn: 300 } // 5 minutes to complete the upload
+    );
 
     return {
       statusCode: 200,
       headers,
-      body: JSON.stringify({ cloudName, apiKey, timestamp, signature, folder }),
+      body: JSON.stringify({ uploadUrl, s3Key: key }),
     };
   } catch (err) {
-    console.error("upload-staged (signature) error:", err.message);
+    console.error("upload-staged (presign) error:", err.message);
     return { statusCode: 500, headers, body: JSON.stringify({ error: err.message }) };
   }
 };

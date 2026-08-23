@@ -99,6 +99,7 @@ exports.handler = async (event) => {
         ContentType: "image/jpeg",
       }));
       thumbnailUrl = `https://${bucket}.s3.${region}.amazonaws.com/${thumbKey}`;
+      console.log(`Thumbnail uploaded: ${thumbnailUrl} (${Math.round(thumbBuffer.length / 1024)}KB)`);
     } catch (thumbErr) {
       console.error("upload-original: thumbnail generation failed (non-fatal):", thumbErr.message);
     }

@@ -297,7 +297,7 @@ exports.handler = async (event) => {
       // too, not just our own rendering of them. Run in parallel; a
       // failure on one field must not block the others or the Blobs-side
       // hide.
-      const urlFields = ["originalUrl", "stagedUrl", "sbsUrl"];
+      const urlFields = ["originalUrl", "stagedUrl", "sbsUrl", "thumbnailUrl"];
       const s3Results = await Promise.allSettled(
         urlFields
           .filter(f => target[f])

@@ -4313,6 +4313,23 @@ async function attachFinalToProject(finalBase64, room, orig, enhId) {
       throw new Error(`S3 rejected the upload (status ${uploadRes.status}): ${uploadRaw.slice(0, 300)}`);
     }
 
+    // Thumbnail for the photo-selection picker grid — non-fatal, a failure
+    // here should never block the actual staged image from attaching.
+    // See generate-thumbnail.js for why this can't happen inline in
+    // upload-staged.js.
+    let thumbnailUrl = null;
+    try {
+      const thumbRes = await fetch('/.netlify/functions/generate-thumbnail', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sourceUrl: sig.publicUrl, projectId: SESSION.projectId })
+      });
+      const thumbData = await thumbRes.json().catch(() => ({}));
+      thumbnailUrl = thumbData.thumbnailUrl || null;
+    } catch (thumbErr) {
+      console.error('Thumbnail generation failed (non-fatal):', thumbErr.message);
+    }
+
     // Attach to project in Blobs
     // userId fix (separate, earlier bug): without this, project-manage.js's
     // addImage() guard (`if (userId && process.env.SUPABASE_URL)`) was
@@ -4330,6 +4347,7 @@ async function attachFinalToProject(finalBase64, room, orig, enhId) {
           mode: dbMode,                              // NEW — the real staged_images.mode value
           originalUrl: orig?.originalUrl || null,
           stagedUrl: sig.publicUrl,
+          thumbnailUrl,
           fileName: orig?.name || '',
         }
       })
@@ -4970,6 +4988,21 @@ async function attachHeroShotToProject(finalBase64, room, shot, shotId) {
       throw new Error(`S3 rejected the upload (status ${uploadRes.status}): ${uploadRaw.slice(0, 300)}`);
     }
 
+    // Thumbnail for the photo-selection picker grid — non-fatal, same as
+    // attachFinalToProject's handling.
+    let thumbnailUrl = null;
+    try {
+      const thumbRes = await fetch('/.netlify/functions/generate-thumbnail', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sourceUrl: sig.publicUrl, projectId: SESSION.projectId })
+      });
+      const thumbData = await thumbRes.json().catch(() => ({}));
+      thumbnailUrl = thumbData.thumbnailUrl || null;
+    } catch (thumbErr) {
+      console.error('Thumbnail generation failed (non-fatal):', thumbErr.message);
+    }
+
     const _sbUserForHero = (await getSupabase().auth.getUser()).data?.user;
     const attachRes = await fetch('/.netlify/functions/project-manage?action=add-image', {
       method: 'POST',
@@ -4990,6 +5023,7 @@ async function attachHeroShotToProject(finalBase64, room, shot, shotId) {
           mode: dbMode,                // real staged_images.mode value (constraint-safe)
           originalUrl: orig?.originalUrl || null,  // true camera-ready original, NOT the staged image
           stagedUrl: sig.publicUrl,
+          thumbnailUrl,
           fileName: orig?.name || '',
           // NEW — ground truth captured here, at Generate Final time,
           // where room.roomName and shot.name both exist together. Flows
@@ -11354,7 +11388,7 @@ function renderDashboard(data, filter, search) {
     if (listing.imageCount === 0) return '';
     const thumbs = listing.thumbnails.slice(0, 4).map(t =>
       t.stagedUrl
-        ? `<div class="db-thumb"><img src="${t.stagedUrl}" alt="${t.roomName}" title="${t.roomName}" loading="lazy"/></div>`
+        ? `<div class="db-thumb"><img src="${t.thumbnailUrl || t.stagedUrl}" alt="${t.roomName}" title="${t.roomName}" loading="lazy"/></div>`
         : `<div class="db-thumb-label">${t.roomName}</div>`
     ).join('');
     const more = listing.imageCount > 4 ? `<div class="db-thumb-label">+${listing.imageCount - 4} more</div>` : '';
@@ -11518,7 +11552,7 @@ function renderListingImagesModal(kind, listingId, projectId, images, address){
 
   const itemsHtml = images.map(img => `
     <div class="lim-item">
-      ${img.stagedUrl ? `<img src="${img.stagedUrl}" alt="${img.roomName||'Room'}" loading="lazy"/>` : `<div style="height:120px;display:flex;align-items:center;justify-content:center;background:var(--warm);color:var(--muted);font-size:0.7rem;">No preview</div>`}
+      ${img.stagedUrl ? `<img src="${img.thumbnailUrl || img.stagedUrl}" alt="${img.roomName||'Room'}" loading="lazy"/>` : `<div style="height:120px;display:flex;align-items:center;justify-content:center;background:var(--warm);color:var(--muted);font-size:0.7rem;">No preview</div>`}
       <div class="lim-item-body">
         <div class="lim-item-room">${img.roomName || 'Room'}</div>
         <div class="lim-item-note">${img.stagedAt ? new Date(img.stagedAt).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : ''}</div>

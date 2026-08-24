@@ -388,6 +388,15 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
 //   - "static" and "auto" have no clip (nothing to preview — no motion).
 //   - pan_zoom / pan_zoom_reveal were built AFTER these clips were
 //     captured, so no sample exists yet for either.
+// MIGRATED (Aug 24, 2026): moved off Cloudinary to S3 as part of the
+// broader Cloudinary→S3 migration (same bucket/pattern as musicGen.js's
+// SUNO_TRACK_LIBRARY). Root cause for the prior Cloudinary breakage on
+// tilt_up / corner_to_corner_drift was never isolated — rather than
+// debug two dead links on a service being decommissioned, the whole map
+// was moved to S3 using the same source clips (re-downloaded from
+// Cloudinary the same day, before this migration).
+const MOTION_PREVIEW_BASE = "https://smart-stage-pro-media-938733852197-us-east-2-an.s3.us-east-2.amazonaws.com/smart-stage-motion-previews";
+
 const PREVIEW_CLIP_URLS = {
   // Kling AI Motion
   //
@@ -400,35 +409,35 @@ const PREVIEW_CLIP_URLS = {
   // won't error, but they no longer represent what the preset actually
   // produces — replace with real LTX-rendered previews once Sam creates
   // them (see his own note: he needs this exact list to go do that).
-  orbit_arc:                    "https://res.cloudinary.com/de18zsi7o/video/upload/v1783606652/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783606651845.mp4",
-  rack_focus:                   "https://res.cloudinary.com/de18zsi7o/video/upload/v1783607175/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783607174918.mp4",
-  fireplace_flicker:            "https://res.cloudinary.com/de18zsi7o/video/upload/v1783610650/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783610649971.mp4",
-  luxury_drift:                 "https://res.cloudinary.com/de18zsi7o/video/upload/v1783613183/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783613182449.mp4",
-  floating_camera_drift:        "https://res.cloudinary.com/de18zsi7o/video/upload/v1783613489/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783613488284.mp4",
-  parallax_push:                "https://res.cloudinary.com/de18zsi7o/video/upload/v1783613786/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783613785931.mp4",
-  cinematic_push:                "https://res.cloudinary.com/de18zsi7o/video/upload/v1783612867/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783612866758.mp4",
-  architectural_glide:          "https://res.cloudinary.com/de18zsi7o/video/upload/v1783614144/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783614143813.mp4",
-  crane_up:                     "https://res.cloudinary.com/de18zsi7o/video/upload/v1783614271/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783614270867.mp4",
-  crane_down:                   "https://res.cloudinary.com/de18zsi7o/video/upload/v1783614849/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783614848626.mp4",
-  room_reveal:                  "https://res.cloudinary.com/de18zsi7o/video/upload/v1783616466/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783616465784.mp4",
-  living_room_ambient:          "https://res.cloudinary.com/de18zsi7o/video/upload/v1783616831/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783616830827.mp4",
-  corner_to_corner_drift:       "https://res.cloudinary.com/de18zsi7o/video/upload/v1783617208/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783617208183.mp4",
-  drone_boom_up:                "https://res.cloudinary.com/de18zsi7o/video/upload/v1783621076/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783621075653.mp4",
-  water_motion:                 "https://res.cloudinary.com/de18zsi7o/video/upload/v1783620786/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783620785616.mp4",
-  outdoor_breeze:                "https://res.cloudinary.com/de18zsi7o/video/upload/v1783644529/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783644528842.mp4",
-  day_to_twilight:               "https://res.cloudinary.com/de18zsi7o/video/upload/v1783643163/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783643162928.mp4",
-  twilight_to_day:               "https://res.cloudinary.com/de18zsi7o/video/upload/v1783643494/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783643494003.mp4",
-  twilight_night_day_timelapse: "https://res.cloudinary.com/de18zsi7o/video/upload/v1783644047/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783644046286.mp4",
+  orbit_arc:                    `${MOTION_PREVIEW_BASE}/orbit_arc.mp4`,
+  rack_focus:                   `${MOTION_PREVIEW_BASE}/rack_focus.mp4`,
+  fireplace_flicker:            `${MOTION_PREVIEW_BASE}/fireplace_flicker.mp4`,
+  luxury_drift:                 `${MOTION_PREVIEW_BASE}/luxury_drift.mp4`,
+  floating_camera_drift:        `${MOTION_PREVIEW_BASE}/floating_camera_drift.mp4`,
+  parallax_push:                `${MOTION_PREVIEW_BASE}/parallax_push.mp4`,
+  cinematic_push:                `${MOTION_PREVIEW_BASE}/cinematic_push.mp4`,
+  architectural_glide:          `${MOTION_PREVIEW_BASE}/architectural_glide.mp4`,
+  crane_up:                     `${MOTION_PREVIEW_BASE}/crane_up.mp4`,
+  crane_down:                   `${MOTION_PREVIEW_BASE}/crane_down.mp4`,
+  room_reveal:                  `${MOTION_PREVIEW_BASE}/room_reveal.mp4`,
+  living_room_ambient:          `${MOTION_PREVIEW_BASE}/living_room_ambient.mp4`,
+  corner_to_corner_drift:       `${MOTION_PREVIEW_BASE}/corner_to_corner_drift.mp4`,
+  drone_boom_up:                `${MOTION_PREVIEW_BASE}/drone_boom_up.mp4`,
+  water_motion:                 `${MOTION_PREVIEW_BASE}/water_motion.mp4`,
+  outdoor_breeze:                `${MOTION_PREVIEW_BASE}/outdoor_breeze.mp4`,
+  day_to_twilight:               `${MOTION_PREVIEW_BASE}/day_to_twilight.mp4`,
+  twilight_to_day:               `${MOTION_PREVIEW_BASE}/twilight_to_day.mp4`,
+  twilight_night_day_timelapse: `${MOTION_PREVIEW_BASE}/twilight_night_day_timelapse.mp4`,
   // Ken Burns
-  push_in:      "https://res.cloudinary.com/de18zsi7o/video/upload/v1783649991/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783649990707.mp4",
-  pull_back:    "https://res.cloudinary.com/de18zsi7o/video/upload/v1783650218/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783650217589.mp4",
-  pan_left:     "https://res.cloudinary.com/de18zsi7o/video/upload/v1783650457/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783650456977.mp4",
-  pan_right:    "https://res.cloudinary.com/de18zsi7o/video/upload/v1783650649/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783650648454.mp4",
-  tilt_up:      "https://res.cloudinary.com/de18zsi7o/video/upload/v1783651131/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783651131078.mp4",
-  tilt_down:    "https://res.cloudinary.com/de18zsi7o/video/upload/v1783653131/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783653130455.mp4",
-  drift:        "https://res.cloudinary.com/de18zsi7o/video/upload/v1783653522/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783653521881.mp4",
-  float:        "https://res.cloudinary.com/de18zsi7o/video/upload/v1783653892/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783653892131.mp4",
-  luxury_parallax: "https://res.cloudinary.com/de18zsi7o/video/upload/v1783654111/smart-stage-pro-plus/szregsolo_234benttreect_062226/video_16x9_1783654110706.mp4",
+  push_in:      `${MOTION_PREVIEW_BASE}/push_in.mp4`,
+  pull_back:    `${MOTION_PREVIEW_BASE}/pull_back.mp4`,
+  pan_left:     `${MOTION_PREVIEW_BASE}/pan_left.mp4`,
+  pan_right:    `${MOTION_PREVIEW_BASE}/pan_right.mp4`,
+  tilt_up:      `${MOTION_PREVIEW_BASE}/tilt_up.mp4`,
+  tilt_down:    `${MOTION_PREVIEW_BASE}/tilt_down.mp4`,
+  drift:        `${MOTION_PREVIEW_BASE}/drift.mp4`,
+  float:        `${MOTION_PREVIEW_BASE}/float.mp4`,
+  luxury_parallax: `${MOTION_PREVIEW_BASE}/luxury_parallax.mp4`,
 };
 
 const KEN_BURNS_PRESETS = {

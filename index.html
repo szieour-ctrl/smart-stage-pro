@@ -1202,6 +1202,103 @@ async function applyVirtuallyStagedBadge(base64Jpeg) {
 }
 
 // ══════════════════════════════════════════
+// DIGITALLY ENHANCED BADGE (Aug 25, 2026)
+// ══════════════════════════════════════════
+// Compliance gap fix: a corrected-only (SSC) image that then goes through
+// Presets/Hero Shot already reached the compliance page correctly (see
+// generateFinal()'s dbMode = 'photo_enhancement' for room.correctedOnly),
+// but the actual photo bytes were being stamped with the "Virtually
+// Staged" badge regardless — nothing was ever staged in that path, so
+// that disclosure was wrong on the image itself. This is that missing
+// second badge.
+//
+// Rendered as canvas text, not a pre-made PNG like Virtually Staged —
+// draws "Digitally Enhanced" in Cormorant Garamond Italic 600, the same
+// font already loaded site-wide via the Google Fonts <link> in <head>
+// (see the top of this file), so it reads as the same visual family as
+// the existing badge without needing a second image asset shipped/
+// maintained alongside it. Same bottom-left position/size math as
+// applyVirtuallyStagedBadge — reuses its 30%-of-width/300-900px-clamp
+// targetWidth and its horizontal/vertical margin formulas exactly, and
+// matches its 350:94 (~3.72:1) aspect ratio so both badges occupy the
+// same footprint at the same canvas size. Font size is solved by
+// measuring the actual text and scaling to fit, since text width (unlike
+// a fixed-aspect image) varies with the string and can't be hardcoded.
+async function applyDigitallyEnhancedBadge(base64Jpeg) {
+  try {
+    // Canvas fillText silently falls back to a default system font if the
+    // webfont isn't actually loaded yet when this runs — unlike regular
+    // DOM text, so this wait is required, not defensive-just-in-case.
+    await document.fonts.load('italic 600 100px "Cormorant Garamond"');
+    await document.fonts.ready;
+
+    const sourceImg = await new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error('Source image failed to load for badging'));
+      img.src = 'data:image/jpeg;base64,' + base64Jpeg;
+    });
+
+    const canvas = document.createElement('canvas');
+    canvas.width = sourceImg.naturalWidth;
+    canvas.height = sourceImg.naturalHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(sourceImg, 0, 0);
+
+    // Same targetWidth formula as applyVirtuallyStagedBadge (see that
+    // function's own comment for why 30%/300-900).
+    const targetWidth = Math.max(300, Math.min(900, Math.round(canvas.width * 0.30)));
+    // Virtually Staged's source PNG is 350x94 — matching that ratio here
+    // keeps both badges the same visual size at the same targetWidth.
+    const targetHeight = Math.round(targetWidth / (350 / 94));
+
+    const text = 'Digitally Enhanced';
+    // Solve for a font size that fills ~92% of targetWidth (small internal
+    // margin, matching the Virtually Staged PNG's own padding around its
+    // glyphs) — start from a proportional guess, measure, then correct.
+    let fontSize = Math.round(targetHeight * 0.62);
+    ctx.font = `italic 600 ${fontSize}px "Cormorant Garamond", Georgia, serif`;
+    const measuredWidth = ctx.measureText(text).width;
+    const desiredWidth = targetWidth * 0.92;
+    if (measuredWidth > 0) {
+      fontSize = Math.round(fontSize * (desiredWidth / measuredWidth));
+      ctx.font = `italic 600 ${fontSize}px "Cormorant Garamond", Georgia, serif`;
+    }
+
+    // Same horizontal/vertical margin formulas as applyVirtuallyStagedBadge
+    // — see that function's comment on why vertical is height-based (PRO
+    // Plus video's 16:9 center-crop clearance) and horizontal is width-based.
+    const horizontalMargin = Math.round(canvas.width * 0.02);
+    const verticalMargin   = Math.round(canvas.height * 0.18);
+    // Vertically centers the text's own glyph height within the same
+    // targetHeight band the image badge would occupy, so the two badges
+    // sit at matching visual heights above the bottom edge.
+    const metrics = ctx.measureText(text);
+    const glyphHeight = (metrics.actualBoundingBoxAscent || fontSize * 0.72) +
+                         (metrics.actualBoundingBoxDescent || fontSize * 0.18);
+    const bandTop = canvas.height - verticalMargin - targetHeight;
+    const baselineX = horizontalMargin + (targetWidth * 0.04);
+    const baselineY = bandTop + (targetHeight + glyphHeight) / 2 -
+                       (metrics.actualBoundingBoxDescent || fontSize * 0.18);
+
+    // Same soft "engraved" look as the Virtually Staged badge: semi-
+    // transparent white fill with a soft dark drop shadow.
+    ctx.textBaseline = 'alphabetic';
+    ctx.shadowColor = 'rgba(0,0,0,0.55)';
+    ctx.shadowBlur = fontSize * 0.08;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = fontSize * 0.05;
+    ctx.fillStyle = 'rgba(255,255,255,0.88)';
+    ctx.fillText(text, baselineX, baselineY);
+
+    return canvas.toDataURL('image/jpeg', 0.95).split(',')[1];
+  } catch (err) {
+    console.error('Digitally Enhanced badge compositing failed (non-fatal, using unbadged image):', err.message);
+    return base64Jpeg;
+  }
+}
+
+// ══════════════════════════════════════════
 // SESSION
 // ══════════════════════════════════════════
 const SESSION = {
@@ -4859,12 +4956,16 @@ async function generateHeroShotFinal(roomId, shotId, qualityChoice) {
     const upData = await upRes.json();
     if (!upRes.ok || !upData.upscaledBase64) throw new Error(upData.error || 'Upscale failed');
 
-    // Same Virtually Staged badge as the main Generate Final flow — hero
-    // shots are their own AI-generated final deliverable (see compliance
-    // fix note below) and go through the same Download-button path, so
-    // they need the same badge applied at the same point for the same
-    // reason.
-    const badgedHeroBase64 = await applyVirtuallyStagedBadge(upData.upscaledBase64);
+    // Same badge logic as the main Generate Final flow — hero shots are
+    // their own AI-generated final deliverable (see compliance fix note
+    // below) and go through the same Download-button path, so they need
+    // the same disclosure applied at the same point for the same reason.
+    // Digitally Enhanced when built from a corrected-only room's draft
+    // (never staged), Virtually Staged otherwise — see Aug 25, 2026 fix
+    // in generateFinal() for the full reasoning.
+    const badgedHeroBase64 = room.correctedOnly
+      ? await applyDigitallyEnhancedBadge(upData.upscaledBase64)
+      : await applyVirtuallyStagedBadge(upData.upscaledBase64);
 
     // ── CREATE PROJECT IF NEEDED (real bug fix — root cause of hero shots
     // never reaching Cloudinary/compliance page at all) ──────────────────
@@ -5529,7 +5630,14 @@ async function generateFinal(roomId,enhId){
     // inherit the same badged bytes — see the utility's own comment block
     // near SESSION for why this replaced badging inside upload-staged.js.
     const orig = SESSION.originals.find(o => o.id === room.originalId);
-    let finalBase64 = await applyVirtuallyStagedBadge(upscaleData.upscaledBase64);
+    // FIX (Aug 25, 2026 — real compliance bug, not cosmetic): a
+    // corrected-only room reaching Generate Final was never staged, so it
+    // must carry "Digitally Enhanced," not "Virtually Staged" — the DB
+    // mode (dbMode above) already got this right; the actual image pixels
+    // didn't, unconditionally, until now.
+    let finalBase64 = room.correctedOnly
+      ? await applyDigitallyEnhancedBadge(upscaleData.upscaledBase64)
+      : await applyVirtuallyStagedBadge(upscaleData.upscaledBase64);
 
     // Upload original to Cloudinary if not already done (needed for compliance page)
     if (orig && !orig.originalUrl && SESSION.projectId) {
@@ -5554,7 +5662,8 @@ async function generateFinal(roomId,enhId){
       }
     }
 
-    console.log(`Generate Final: badged image ${Math.round(finalBase64.length/1024)}KB — Virtually Staged disclosure applied`);
+    const _badgeLabel = room.correctedOnly ? 'Digitally Enhanced' : 'Virtually Staged';
+    console.log(`Generate Final: badged image ${Math.round(finalBase64.length/1024)}KB — ${_badgeLabel} disclosure applied`);
 
     // Store final — clean image
     if(enhId){
@@ -5565,7 +5674,7 @@ async function generateFinal(roomId,enhId){
       room.finalStatus='done';
     }
 
-    showToast(`✓ Final generated at ${scaleFactor}x · MLS-ready with Virtually Staged disclosure.`,'success');
+    showToast(`✓ Final generated at ${scaleFactor}x · MLS-ready with ${_badgeLabel} disclosure.`,'success');
     renderRoomQueue();
 
     // ── UPLOAD STAGED FINAL TO CLOUDINARY + ATTACH TO COMPLIANCE PAGE ────────
@@ -6189,7 +6298,11 @@ function resizeToMatch(room,orig,enhId,storeKey,incomingB64){
         // restage path), same as the main Generate Final flow — needs
         // the same badge, applied before storing. Async, unlike the
         // other branches below, since badge compositing is a Promise.
-        applyVirtuallyStagedBadge(newB64).then(badgedB64 => {
+        // Same correctedOnly branch as generateFinal() (Aug 25, 2026 fix)
+        // — dbMode already treats a corrected-only exterior room as
+        // photo_enhancement regardless of roomMode, so the badge on the
+        // actual pixels needs to agree.
+        (room.correctedOnly ? applyDigitallyEnhancedBadge(newB64) : applyVirtuallyStagedBadge(newB64)).then(badgedB64 => {
           if(enhId){room.extSelections[enhId].finalBase64=badgedB64;room.extSelections[enhId].finalStatus='done';}
           else{room.finalBase64=badgedB64;room.finalStatus='done';}
           resolve();

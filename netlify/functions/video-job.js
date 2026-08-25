@@ -88,77 +88,65 @@ const { applyAutoSelectionPlan } = require("./autoSelect");
 const https = require("https");
 const crypto = require("crypto");
 
-// SCOPED EXCEPTION (July 2026 — signed-delivery security fix): this file
-// otherwise follows the native-https-only rule (no SDK imports), but
-// minting Cloudinary's authenticated-delivery signed URLs uses a specific
-// HMAC/encoding scheme that's easy to get subtly wrong by hand and fails
-// silently (video just won't play, no error surfaced) if it's off by even
-// one byte. Confirmed with Sam this is worth a narrow exception — the
-// Cloudinary SDK is used ONLY for signVideoUrl() below, nowhere else in
-// this file. Every other Cloudinary interaction in this codebase (see
-// upload-staged.js) stays on the native-https signing pattern.
-const cloudinary = require("cloudinary").v2;
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key:    process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
+// MIGRATED (Aug 25, 2026 — Cloudinary→S3 finished-video migration):
+// replaces the Cloudinary SDK exception this file used to carry. S3
+// presigning is native to @aws-sdk/s3-request-presigner (already a
+// dependency elsewhere in this repo, e.g. compliance-page.js's own
+// copy of this same helper) — no equivalent "easy to get subtly wrong
+// by hand" risk the old Cloudinary exception comment warned about, so
+// no special-case native-https requirement here either.
+//
+// job.output_16x9_url / job.output_9x16_url in Supabase now store a
+// raw S3 KEY (e.g. "smart-stage-video-finals/<projectId>/video_16x9_
+// <ts>.mp4"), not a URL — column names are legacy from the Cloudinary
+// era and misleading now, but left as-is to avoid a schema migration
+// as part of this change.
+const { S3Client, GetObjectCommand } = require("@aws-sdk/client-s3");
+const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
+
+const s3 = new S3Client({
+  region: process.env.S3_REGION,
+  credentials: {
+    accessKeyId: process.env.S3_ACCESS_KEY_ID,
+    secretAccessKey: process.env.S3_SECRET_ACCESS_KEY,
+  },
 });
 
-// ── signVideoUrl — mints a short-lived signed URL for an authenticated-
-// type Cloudinary video asset. rawUrl is the stored secure_url from
-// uploadToCloudinary() (Railway side) — it's inert on its own now (401s
-// without a signature), so every consumer needs to pass it through this
-// first. Extracts the public_id + format from the stored URL rather than
-// requiring a schema change to store public_id separately.
+// ── signVideoUrl — mints a short-lived presigned URL for a video stored
+// in the private smart-stage-video-finals/ S3 prefix (NOT covered by the
+// bucket's public-read policy — see s3Upload.js on the Railway side).
+// rawKey is the stored S3 key — it has no working URL on its own (the
+// prefix isn't public), so every consumer needs to pass it through this
+// first, same requirement as the old Cloudinary version.
+//
+// This is the actual mechanism preventing access before payment for the
+// Download flow specifically (see downloadVideoJob below — the debit
+// happens immediately before this is called) — a plain public URL would
+// let someone grab the video without ever being charged. For the other
+// two call sites (getJobStatus, Pabbly delivery email) the video is
+// already paid for by the time this runs; the short expiry there is
+// about limiting exposure/reuse window, not gating payment.
 //
 // expirySeconds: how long the minted URL stays valid — deliberately
 // different per caller (see each call site):
 //   - live preview (getJobStatus):      1 hour
-//   - download response:                24 hours
-//   - compliance page:                  7 days (page itself re-renders
-//                                        fresh on every visit — see
-//                                        compliance-page.js's own
-//                                        Cache-Control: no-store, so this
-//                                        ceiling is a backstop, not the
-//                                        thing actually protecting users
-//                                        from a stale link)
-function signVideoUrl(rawUrl, expirySeconds) {
-  if (!rawUrl) return null;
+//   - download response:                24 hours (the actual payment gate)
+//   - Pabbly delivery email:            30 days (has to survive being
+//                                        opened long after the fact)
+async function signVideoUrl(rawKey, expirySeconds) {
+  if (!rawKey) return null;
   try {
-    // rawUrl looks like:
-    // https://res.cloudinary.com/<cloud>/video/authenticated/[s--sig--/][v<version>/]<public_id>.<ext>
-    //
-    // BUG FIX (found via live test, July 2026): Cloudinary's own default
-    // upload response for type:"authenticated" already includes a
-    // signature segment (s--XXXXXXXX--) so the asset is immediately
-    // fetchable right after upload. The original regex only accounted
-    // for an optional version segment after /authenticated/ — it didn't
-    // know to skip a signature segment first, so that segment got
-    // swallowed into the public_id capture, producing a garbled,
-    // nonexistent resource name. Confirmed via a real test video: the
-    // player rendered (non-empty src) but nothing ever loaded, 0:00
-    // duration, no visible error. Fixed by explicitly skipping an
-    // optional s--...--/ segment before the optional version segment.
-    const match = rawUrl.match(/\/authenticated\/(?:s--[^/]+--\/)?(?:v(\d+)\/)?(.+)\.(\w+)$/);
-    if (!match) {
-      console.error(`signVideoUrl: could not parse public_id out of ${rawUrl}`);
-      return null;
-    }
-    const [, version, publicId, format] = match;
-    return cloudinary.url(publicId, {
-      resource_type: "video",
-      type: "authenticated",
-      format,
-      version: version || undefined,
-      sign_url: true,
-      secure: true,
-      expires_at: Math.floor(Date.now() / 1000) + expirySeconds,
-    });
+    return await getSignedUrl(
+      s3,
+      new GetObjectCommand({ Bucket: process.env.S3_BUCKET_NAME, Key: rawKey }),
+      { expiresIn: expirySeconds }
+    );
   } catch (err) {
-    console.error(`signVideoUrl failed for ${rawUrl}:`, err.message);
+    console.error(`signVideoUrl failed for ${rawKey}:`, err.message);
     return null;
   }
 }
+
 
 // ── SUPABASE HELPER (same pattern as project-manage.js) ──────────────────
 
@@ -1874,14 +1862,18 @@ function triggerPabblyDelivery({ jobId, userId, listingId, output16x9Url, output
       // 30-day signed URLs — this link has to survive being opened long
       // after the fact (email, not a live session), unlike the 1hr/24hr
       // windows used elsewhere in this file.
+      const [signed16x9, signed9x16] = await Promise.all([
+        signVideoUrl(output16x9Url, 60 * 60 * 24 * 30),
+        signVideoUrl(output9x16Url, 60 * 60 * 24 * 30),
+      ]);
       const pabblyUrl = new URL(process.env.PABBLY_VIDEO_DELIVERY_WEBHOOK_URL);
       const pabblyBody = JSON.stringify({
         jobId,
         recipientEmail,
         recipientName,
         propertyAddress: address,
-        output16x9Url: signVideoUrl(output16x9Url, 60 * 60 * 24 * 30),
-        output9x16Url: signVideoUrl(output9x16Url, 60 * 60 * 24 * 30),
+        output16x9Url: signed16x9,
+        output9x16Url: signed9x16,
         deliveredAt: new Date().toISOString(),
       });
       await new Promise((resolve) => {
@@ -1923,10 +1915,14 @@ async function downloadVideoJob({ jobId, userId }) {
   // (not cached) since a re-download request might come well after the
   // first one's 24-hour window expired.
   if (job.credits_charged_at) {
+    const [signed16x9, signed9x16] = await Promise.all([
+      signVideoUrl(job.output_16x9_url, 60 * 60 * 24),
+      signVideoUrl(job.output_9x16_url, 60 * 60 * 24),
+    ]);
     return {
       downloadReady: true,
-      output16x9Url: signVideoUrl(job.output_16x9_url, 60 * 60 * 24),
-      output9x16Url: signVideoUrl(job.output_9x16_url, 60 * 60 * 24),
+      output16x9Url: signed16x9,
+      output9x16Url: signed9x16,
     };
   }
 
@@ -1979,10 +1975,14 @@ async function downloadVideoJob({ jobId, userId }) {
     output9x16Url: job.output_9x16_url,
   });
 
+  const [downloadSigned16x9, downloadSigned9x16] = await Promise.all([
+    signVideoUrl(job.output_16x9_url, 60 * 60 * 24),
+    signVideoUrl(job.output_9x16_url, 60 * 60 * 24),
+  ]);
   return {
     downloadReady: true,
-    output16x9Url: signVideoUrl(job.output_16x9_url, 60 * 60 * 24),
-    output9x16Url: signVideoUrl(job.output_9x16_url, 60 * 60 * 24),
+    output16x9Url: downloadSigned16x9,
+    output9x16Url: downloadSigned9x16,
   };
 }
 
@@ -2090,24 +2090,31 @@ async function getJobStatus(jobId) {
   // assignments, so that decision needs the real result. No watermark —
   // Sam's explicit call, no separate "free draft" tier for video.
   //
-  // CHANGE (July 2026 — signed-delivery security fix): the DB still
-  // stores the raw (now type:authenticated, inert-on-its-own) Cloudinary
-  // URL. What actually goes out over the wire here is a freshly minted
-  // 1-hour signed URL — long enough to cover one real viewing session,
-  // short enough that a URL grabbed out of dev tools or a saved network
-  // log is dead well before it could be reused later. This is what
-  // closes the gap the raw-URL version had without undoing the July 10
-  // decision above: the user still watches the real, full result live.
+  // CHANGE (July 2026 — signed-delivery security fix; storage migrated
+  // Aug 25, 2026 from Cloudinary to S3, mechanism unchanged): the DB
+  // still stores the raw S3 key — it has no working URL on its own (the
+  // prefix isn't public). What actually goes out over the wire here is a
+  // freshly minted 1-hour presigned URL — long enough to cover one real
+  // viewing session, short enough that a URL grabbed out of dev tools or
+  // a saved network log is dead well before it could be reused later.
+  // This is what closes the gap the raw-key version had without undoing
+  // the July 10 decision above: the user still watches the real, full
+  // result live.
   const r = await supabase("GET", "video_jobs", null,
     `?id=eq.${jobId}&select=id,status,thumbnail_url,output_16x9_url,output_9x16_url,credits_used,credits_charged_at,generation_count,kling_images_charged,narration_script,error_message,created_at,completed_at`
   );
   const job = r.data?.[0];
   if (!job) return null;
 
+  const [statusSigned16x9, statusSigned9x16] = await Promise.all([
+    signVideoUrl(job.output_16x9_url, 60 * 60),
+    signVideoUrl(job.output_9x16_url, 60 * 60),
+  ]);
+
   return {
     ...job,
-    output_16x9_url: signVideoUrl(job.output_16x9_url, 60 * 60),
-    output_9x16_url: signVideoUrl(job.output_9x16_url, 60 * 60),
+    output_16x9_url: statusSigned16x9,
+    output_9x16_url: statusSigned9x16,
   };
 }
 

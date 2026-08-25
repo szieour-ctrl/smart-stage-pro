@@ -5,17 +5,20 @@
 const { getStore } = require("@netlify/blobs");
 const https = require("https");
 
-// SCOPED EXCEPTION (July 2026 — signed-delivery security fix): same
-// narrow exception as video-job.js's signVideoUrl — see that file's
-// header comment for the full reasoning. Duplicated here rather than
-// imported as a shared module, matching this codebase's existing pattern
-// of duplicating small cross-function helpers (see video-notify.js's
-// callDebitCredit comment for the precedent).
-const cloudinary = require("cloudinary").v2;
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key:    process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
+// MIGRATED (Aug 25, 2026 — Cloudinary→S3 finished-video migration):
+// replaces the Cloudinary SDK exception this file used to carry, same
+// change as video-job.js's copy of this helper — see that file's header
+// comment for the full reasoning behind duplicating it here rather than
+// sharing a module.
+const { S3Client, GetObjectCommand } = require("@aws-sdk/client-s3");
+const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
+
+const s3 = new S3Client({
+  region: process.env.S3_REGION,
+  credentials: {
+    accessKeyId: process.env.S3_ACCESS_KEY_ID,
+    secretAccessKey: process.env.S3_SECRET_ACCESS_KEY,
+  },
 });
 
 // 7-day ceiling. This page re-renders fresh on every real visit (see
@@ -23,30 +26,20 @@ cloudinary.config({
 // always gets a freshly minted URL — this expiry is a backstop against
 // an edge case (a visitor leaving the tab open for an unusually long
 // single session), not the thing actually keeping links current.
-function signVideoUrl(rawUrl) {
-  if (!rawUrl) return null;
+//
+// rawKey is the stored S3 key (smart-stage-video-finals/ prefix, not
+// covered by the bucket's public-read policy) — no working URL on its
+// own, same requirement as the old Cloudinary version.
+async function signVideoUrl(rawKey) {
+  if (!rawKey) return null;
   try {
-    // BUG FIX (July 2026, same root cause as video-job.js's signVideoUrl —
-    // see that file for the full diagnosis): Cloudinary's authenticated
-    // uploads include a default signature segment (s--XXXXXXXX--) that
-    // this regex now explicitly skips before capturing the public_id.
-    const match = rawUrl.match(/\/authenticated\/(?:s--[^/]+--\/)?(?:v(\d+)\/)?(.+)\.(\w+)$/);
-    if (!match) {
-      console.error(`compliance-page signVideoUrl: could not parse public_id out of ${rawUrl}`);
-      return null;
-    }
-    const [, version, publicId, format] = match;
-    return cloudinary.url(publicId, {
-      resource_type: "video",
-      type: "authenticated",
-      format,
-      version: version || undefined,
-      sign_url: true,
-      secure: true,
-      expires_at: Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 7,
-    });
+    return await getSignedUrl(
+      s3,
+      new GetObjectCommand({ Bucket: process.env.S3_BUCKET_NAME, Key: rawKey }),
+      { expiresIn: 60 * 60 * 24 * 7 }
+    );
   } catch (err) {
-    console.error(`compliance-page signVideoUrl failed for ${rawUrl}:`, err.message);
+    console.error(`compliance-page signVideoUrl failed for ${rawKey}:`, err.message);
     return null;
   }
 }
@@ -106,12 +99,14 @@ async function getDisclosedVideoJobs(projectId) {
       );
       return {
         ...job,
-        // CHANGE (July 2026 — signed-delivery security fix): outputs are
-        // now Cloudinary type:authenticated — the raw stored URL 401s on
-        // its own. Sign here, once, right after fetch, so renderPage()
-        // downstream never has to think about it.
-        output_16x9_url: signVideoUrl(job.output_16x9_url),
-        output_9x16_url: signVideoUrl(job.output_9x16_url),
+        // CHANGE (July 2026 — signed-delivery security fix; storage
+        // migrated Aug 25, 2026 from Cloudinary to S3, mechanism
+        // unchanged): outputs are stored as a private S3 key — the raw
+        // key has no working URL on its own. Sign here, once, right
+        // after fetch, so renderPage() downstream never has to think
+        // about it.
+        output_16x9_url: await signVideoUrl(job.output_16x9_url),
+        output_9x16_url: await signVideoUrl(job.output_9x16_url),
         frames: framesResult.data || [],
       };
     })

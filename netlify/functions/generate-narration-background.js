@@ -1,6 +1,6 @@
 // generate-narration-background.js — Netlify Background Function
 // Generates a narration script (Claude) + speech (ElevenLabs v3) + uploads
-// the result (Cloudinary), and stores it in Netlify Blobs for polling.
+// the result (S3), and stores it in Netlify Blobs for polling.
 //
 // WHY THIS EXISTS (July 2026 postmortem): narration generation was
 // originally built INLINE inside video-job.js's action=create/regenerate —
@@ -190,47 +190,31 @@ function generateNarrationAudio(script, voiceId, apiKey) {
   });
 }
 
-function uploadNarrationToCloudinary(audioBuffer) {
-  return new Promise((resolve, reject) => {
-    const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
-    const apiKey = process.env.CLOUDINARY_API_KEY;
-    const apiSecret = process.env.CLOUDINARY_API_SECRET;
-    if (!cloudName || !apiKey || !apiSecret) {
-      return reject(new Error("Cloudinary env vars not fully configured."));
-    }
+const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
 
-    const dataUrl = `data:audio/mpeg;base64,${audioBuffer.toString("base64")}`;
-    const timestamp = Math.floor(Date.now() / 1000).toString();
-    const folder = "smart-stage-narration";
-    const paramsToSign = `folder=${folder}&timestamp=${timestamp}`;
-    const signature = crypto.createHash("sha1").update(paramsToSign + apiSecret).digest("hex");
+const s3 = new S3Client({
+  region: process.env.S3_REGION,
+  credentials: {
+    accessKeyId: process.env.S3_ACCESS_KEY_ID,
+    secretAccessKey: process.env.S3_SECRET_ACCESS_KEY,
+  },
+});
 
-    const bodyObj = { file: dataUrl, folder, timestamp, api_key: apiKey, signature };
-    const bodyStr = Object.entries(bodyObj)
-      .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
-      .join("&");
-    const bodyBuf = Buffer.from(bodyStr, "utf8");
-
-    const req = https.request({
-      hostname: "api.cloudinary.com",
-      path: `/v1_1/${cloudName}/raw/upload`,
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded", "Content-Length": bodyBuf.length },
-    }, (res) => {
-      const chunks = [];
-      res.on("data", (c) => chunks.push(c));
-      res.on("end", () => {
-        try {
-          const parsed = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-          if (res.statusCode !== 200) reject(new Error(`Cloudinary error: ${parsed?.error?.message}`));
-          else resolve(parsed.secure_url);
-        } catch (e) { reject(new Error("Cloudinary parse error")); }
-      });
-    });
-    req.on("error", reject);
-    req.write(bodyBuf);
-    req.end();
-  });
+// MIGRATED (Aug 25, 2026 — Cloudinary→S3): new smart-stage-narration/
+// prefix — needs adding to the bucket's public-read policy alongside the
+// existing smart-stage-* prefixes before this works. No signing/private
+// treatment needed (matches how the old Cloudinary upload here was a
+// plain, unauthenticated type — this file never had the video-specific
+// payment-gate requirement).
+async function uploadNarrationToS3(audioBuffer) {
+  const key = `smart-stage-narration/${crypto.randomUUID()}.mp3`;
+  await s3.send(new PutObjectCommand({
+    Bucket: process.env.S3_BUCKET_NAME,
+    Key: key,
+    Body: audioBuffer,
+    ContentType: "audio/mpeg",
+  }));
+  return `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.S3_REGION}.amazonaws.com/${key}`;
 }
 
 // ── DURABLE AUDIT TRAIL (new — Netlify background-function logs are a
@@ -356,7 +340,7 @@ exports.handler = async (event) => {
       elevenlabs_likely_charged: true,
     });
 
-    const audioUrl = await uploadNarrationToCloudinary(audioBuffer);
+    const audioUrl = await uploadNarrationToS3(audioBuffer);
     console.log(`Narration job ${narrationJobId}: uploaded to ${audioUrl}`);
     auditRowId = await logAttempt(auditRowId, { stage_reached: STAGE.UPLOADED_COMPLETE });
 

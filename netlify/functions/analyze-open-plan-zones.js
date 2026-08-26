@@ -37,11 +37,15 @@
 //     line and falling through to the model's own reasoning fixed it
 //     cleanly on both re-tested photos.
 //
-// Kitchen is still never sent to Vision and still always hardcoded --
-// cabinetry/island self-identifies architecturally, confirmed reliable
-// every test this session and prior. Kitchen also counts as permanently
-// "claimed" for the elimination math below (it always has an anchor), so
-// it never enters the unclaimed count.
+// Kitchen is still never sent to Vision -- cabinetry/island
+// self-identifies architecturally, confirmed reliable every test this
+// session and prior. FIXED Aug 25: Kitchen is now only included in
+// roomAssignmentText when the user actually selected it in zoneList.
+// Previously it was unconditionally hardcoded regardless of selection,
+// which caused GPT Image 2 to invent a kitchen/island on open-plan photos
+// that had none. Kitchen still never goes through the Vision-match
+// elimination logic below (there's nothing to match against), it's just
+// gated on selection now instead of always present.
 //
 // Living Room anchors (either qualifies independently, neither depends on
 // the other being present):
@@ -84,8 +88,10 @@ const FLEX_ROOM_TYPES = [
 ];
 
 // zoneList checkbox keys (set in index.html) -> the zone label Vision uses
-// in its JSON output. Kitchen deliberately excluded -- it's never matched
-// against Vision output, it's always claimed by the hardcoded line.
+// in its JSON output. Kitchen deliberately excluded from this map -- it's
+// never matched against Vision output, and is now only added to
+// roomAssignmentText when zoneList includes "kitchen" (see
+// mergeRoomAssignment below).
 const ZONE_KEY_TO_LABEL = {
   dining: "Dining Zone",
   living: "Living Room",
@@ -189,7 +195,12 @@ function displayNameFor(z) {
 // Cross-references the user's actual zoneList selections against Vision's
 // fixture findings.
 //
-//   0 unclaimed zones -> nothing to add, every selection has a real anchor
+// Kitchen is handled first and separately, outside this claimed/unclaimed
+// accounting entirely: added with its fixed island anchor only if
+// zoneList includes "kitchen", never sent to Vision either way.
+//
+//   0 unclaimed non-kitchen zones -> nothing to add, every selection has a
+//                        real anchor
 //   1+ unclaimed zone -> do NOT assert a foreground claim in code. Tried
 //                        that (see prior version of this function): when a
 //                        fixture-anchored zone's own fixture actually read
@@ -212,8 +223,8 @@ function displayNameFor(z) {
 //                        FRAME BEHAVIOR in spatial-zone-template.js already
 //                        own this case.
 function mergeRoomAssignment(visionZones, zoneList, flexNote) {
-  const lines = ["Kitchen: Anchor: island."];
   const list = zoneList || [];
+  const lines = list.includes("kitchen") ? ["Kitchen: Anchor: island."] : [];
 
   // Map each non-kitchen selected key to its zone label, and find whether
   // Vision reported a matching fixture for it.

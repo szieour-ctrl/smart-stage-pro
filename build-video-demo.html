@@ -489,7 +489,7 @@ const REVEAL_PRESETS = {
       "cinematic_push", "luxury_drift", "floating_camera_drift", "architectural_glide", "corner_to_corner_drift",
       "orbit_arc", "rack_focus", "drone_boom_up", "crane_up", "crane_down", "parallax_push", "pan_zoom_reveal",
       "living_room_ambient", "fireplace_flicker", "water_motion", "outdoor_breeze",
-      "micro_zoom_out", "micro_dolly_back", "open_plan_reveal",
+      "micro_zoom_out", "micro_dolly_back",
     ],
   },
   luxury_drift: {
@@ -500,7 +500,7 @@ const REVEAL_PRESETS = {
       "luxury_drift", "floating_camera_drift", "architectural_glide", "corner_to_corner_drift",
       "orbit_arc", "drone_boom_up", "crane_up", "crane_down", "pan_zoom_reveal",
       "living_room_ambient", "fireplace_flicker", "water_motion", "outdoor_breeze",
-      "micro_zoom_out", "micro_dolly_back", "open_plan_reveal",
+      "micro_zoom_out", "micro_dolly_back",
     ],
   },
   cinematic_reveal: {
@@ -511,7 +511,7 @@ const REVEAL_PRESETS = {
       "cinematic_push", "luxury_drift", "floating_camera_drift", "architectural_glide", "corner_to_corner_drift",
       "orbit_arc", "rack_focus", "drone_boom_up", "crane_up", "crane_down", "parallax_push", "pan_zoom_reveal",
       "living_room_ambient", "fireplace_flicker", "water_motion", "outdoor_breeze",
-      "micro_zoom_out", "micro_dolly_back", "open_plan_reveal",
+      "micro_zoom_out", "micro_dolly_back",
     ],
   },
 };
@@ -574,7 +574,7 @@ const LTX_PRESETS = {
   pan_zoom_reveal: { label: "Pan + Zoom Reveal", desc: "A lateral pan combined with a gentle push-in, emphasizing more of the space already visible in the photo.", eligibility: "single_or_pair", category: "Camera Movement", openPlanSafe: false },
 
   // ── Ambient Detail ────────────────────────────────────────────────────
-  living_room_ambient: { label: "Living Room Ambient", desc: "Stable frame with subtle ambient motion — curtain sway, plant movement, or fireplace flicker — only for elements already visible.", eligibility: "single_or_pair", category: "Ambient Detail", openPlanSafe: true },
+  living_room_ambient: { label: "Living Room Ambient", desc: "Stable frame with subtle ambient motion — fireplace flicker or ceiling fan rotation — only for elements already visible.", eligibility: "single_or_pair", category: "Ambient Detail", openPlanSafe: true },
   fireplace_flicker: { label: "Fireplace Flicker", desc: "Locked-off shot, existing fireplace flame flickers naturally. Requires a visible fireplace in the photo.", eligibility: "single_or_pair", category: "Ambient Detail", openPlanSafe: true },
   water_motion: { label: "Water Motion", desc: "Locked-off exterior shot, gentle natural ripples across existing water. Requires a visible pool, pond, or water feature.", eligibility: "exterior_only", category: "Ambient Detail", openPlanSafe: false },
   outdoor_breeze: { label: "Outdoor Breeze", desc: "Locked-off exterior shot, subtle breeze through existing trees or landscaping. Requires visible foliage.", eligibility: "exterior_only", category: "Ambient Detail", openPlanSafe: false },
@@ -584,7 +584,6 @@ const LTX_PRESETS = {
   // hallway-safe, restricted TO open-plan (see openPlanOnly above).
   micro_zoom_out: { label: "Micro Zoom-Out", desc: "A gentle outward breathing motion within the existing frame — expands without ever exposing hallway depth, a doorway edge, or any new geometry.", eligibility: "single_or_pair", category: "Open-Plan Only", openPlanSafe: true, openPlanOnly: true },
   micro_dolly_back: { label: "Micro Dolly Back", desc: "A very small straight backward shift, staying fully inside the photographed space — never reveals hallway entrances or new wall planes.", eligibility: "single_or_pair", category: "Open-Plan Only", openPlanSafe: true, openPlanOnly: true },
-  open_plan_reveal: { label: "Open-Plan Reveal", desc: "Gently redistributes emphasis across kitchen, dining, and living zones without ever widening the frame or exposing a hallway or new corner.", eligibility: "single_or_pair", category: "Open-Plan Only", openPlanSafe: true, openPlanOnly: true },
 };
 
 // NOTE: vacant_staged_pair was an earlier placeholder name used before the

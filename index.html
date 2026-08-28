@@ -356,6 +356,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
     <div id="header-smart-correct-badge" class="hidden" style="background:rgba(184,151,90,0.08);border:1px solid rgba(184,151,90,0.4);border-radius:3px;padding:4px 12px;font-size:0.72rem;color:#c8bfb0;letter-spacing:0.04em;white-space:nowrap;" title="Smart Correct™ — every 5 corrections uses 1 Image"></div>
     <div id="header-user-info" class="hidden" style="font-size:0.75rem;color:#c8bfb0;letter-spacing:0.04em;"></div>
     <button id="header-listings-btn" class="hidden btn btn-ghost" style="font-size:0.72rem;padding:5px 14px;color:#c8bfb0;border:1px solid rgba(184,151,90,0.3);border-radius:3px;" onclick="showDashboard()">My Listings</button>
+     <a id="header-gallery-btn" class="hidden btn btn-ghost" style="font-size:0.72rem;padding:5px 14px;color:#c8bfb0;border:1px solid rgba(184,151,90,0.3);border-radius:3px;text-decoration:none;display:inline-block;" href="/gallery.html">Gallery</a>
     <button id="header-getting-started-btn" class="hidden btn btn-ghost" style="font-size:0.72rem;padding:5px 14px;color:#c8bfb0;border:1px solid rgba(184,151,90,0.3);border-radius:3px;" onclick="showGettingStartedModal()">Getting Started</button>
     <button id="header-faq-btn" class="hidden btn btn-ghost" style="font-size:0.72rem;padding:5px 14px;color:#c8bfb0;border:1px solid rgba(184,151,90,0.3);border-radius:3px;" onclick="showFaqModal()">FAQ</button>
     <button id="header-signout-btn" class="hidden btn btn-ghost" style="font-size:0.72rem;padding:5px 12px;color:#c8bfb0;" onclick="signOut()">Sign Out</button>
@@ -7297,6 +7298,8 @@ async function updateHeaderForUser(user, userRec) {
   if (signOutBtn) signOutBtn.classList.remove('hidden');
   const listingsBtn = document.getElementById('header-listings-btn');
   if (listingsBtn) listingsBtn.classList.remove('hidden');
+   const galleryBtn = document.getElementById('header-gallery-btn');
+if (galleryBtn) galleryBtn.classList.remove('hidden');
   const gsBtn = document.getElementById('header-getting-started-btn');
   if (gsBtn) gsBtn.classList.remove('hidden');
   const faqBtn = document.getElementById('header-faq-btn');

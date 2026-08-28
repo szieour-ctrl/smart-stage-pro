@@ -7,15 +7,30 @@
 // appear here — this is a browsing tool for the new naming scheme, not a
 // replacement for the S3 console for old data.
 //
-// Uses the same service-role Supabase access as project-manage.js — kept
-// server-side so the service role key is never exposed to the browser.
+// AUTH + SCOPING (Aug 28, 2026 — added after the first version of this
+// file had NO auth at all and returned every subscriber's listings to
+// anyone with the URL): every request needs a Supabase JWT, and results
+// are scoped exactly the way get-user-listings.js already scopes the
+// subscriber dashboard — solo sees own listings, team_lead sees the team,
+// broker_admin sees the brokerage. Duplicated rather than shared, same
+// per-file convention as the rest of this codebase.
 //
-// action=search-listings  — { q } -> matching listings (address search)
-// action=assets            — { slug } -> all catalog rows for one listing,
-//                             with full public URLs built from the S3
-//                             bucket/region env vars (not stored per-row,
-//                             so a bucket/region change never requires
-//                             touching stored data)
+// PLATFORM_ADMIN_USER_IDS is a NEW, separate mechanism — not a role in
+// the users table. It's a comma-separated list of Supabase user IDs (set
+// as a Netlify env var) that bypasses the team/brokerage scope entirely
+// and sees every subscriber's listings. Deliberately kept out of the
+// database and out of the normal role system: this only exists for Sam's
+// own login, and an env var means it can be changed without a SQL
+// migration and can never leak into the regular per-subscriber
+// permission logic that scopeFilter() below implements for everyone else.
+//
+// action=search-listings  — { q } -> matching listings within the
+//                            caller's scope (address search)
+// action=assets            — { slug } -> catalog rows for one listing,
+//                            WITH an ownership check against the same
+//                            scope before returning anything — a signed-in
+//                            subscriber can't bypass search and pull
+//                            another subscriber's slug directly
 
 const https = require("https");
 
@@ -48,6 +63,63 @@ function supabase(method, table, body, queryParams = "") {
   });
 }
 
+// Same pattern as get-user-listings.js's verifyJWT — validates the bearer
+// token directly against Supabase Auth rather than trusting anything the
+// client claims about itself.
+function verifyJWT(authHeader) {
+  return new Promise((resolve) => {
+    if (!authHeader || !authHeader.startsWith("Bearer ")) { resolve(null); return; }
+    const jwt = authHeader.split(" ")[1];
+    const url = new URL(`${process.env.SUPABASE_URL}/auth/v1/user`);
+    const req = https.request({
+      hostname: url.hostname, path: url.pathname, method: "GET",
+      headers: {
+        "apikey": process.env.SUPABASE_SERVICE_ROLE_KEY,
+        "Authorization": `Bearer ${jwt}`
+      }
+    }, res => {
+      let data = "";
+      res.on("data", c => data += c);
+      res.on("end", () => {
+        try {
+          const parsed = JSON.parse(data);
+          resolve(res.statusCode === 200 && parsed.id ? parsed : null);
+        } catch { resolve(null); }
+      });
+    });
+    req.on("error", () => resolve(null));
+    req.end();
+  });
+}
+
+// Resolves the caller's authorization scope: their role/team/brokerage,
+// and whether they're on the platform-admin allowlist. Returns null if
+// there's no matching users row (mirrors get-user-listings.js's identical
+// "User record not found" case).
+async function getAuthorizedScope(authUser) {
+  const userResult = await supabase("GET", "users", null,
+    `?id=eq.${authUser.id}&select=id,role,team_id,brokerage_id`
+  );
+  const user = userResult.data?.[0];
+  if (!user) return null;
+
+  const adminIds = (process.env.PLATFORM_ADMIN_USER_IDS || "")
+    .split(",").map(s => s.trim()).filter(Boolean);
+  const isPlatformAdmin = adminIds.includes(authUser.id);
+
+  return { user, isPlatformAdmin };
+}
+
+// Same three-tier logic as get-user-listings.js's listingsQuery branches,
+// expressed as a PostgREST filter fragment instead of duplicated per call
+// site. Empty string (platform admin) means no filter — sees everything.
+function scopeFilter({ user, isPlatformAdmin }) {
+  if (isPlatformAdmin) return "";
+  if (user.role === "broker_admin" && user.brokerage_id) return `&brokerage_id=eq.${user.brokerage_id}`;
+  if (user.role === "team_lead" && user.team_id) return `&team_id=eq.${user.team_id}`;
+  return `&user_id=eq.${user.id}`;
+}
+
 function publicUrl(key) {
   if (!key) return null;
   const bucket = process.env.S3_BUCKET_NAME;
@@ -58,7 +130,7 @@ function publicUrl(key) {
 exports.handler = async (event) => {
   const headers = {
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
     "Content-Type": "application/json",
   };
 
@@ -68,14 +140,25 @@ exports.handler = async (event) => {
     return { statusCode: 500, headers, body: JSON.stringify({ error: "SUPABASE_URL not configured" }) };
   }
 
+  const authUser = await verifyJWT(event.headers.authorization || event.headers.Authorization);
+  if (!authUser) {
+    return { statusCode: 401, headers, body: JSON.stringify({ error: "Unauthorized" }) };
+  }
+
+  const scope = await getAuthorizedScope(authUser);
+  if (!scope) {
+    return { statusCode: 404, headers, body: JSON.stringify({ error: "User record not found" }) };
+  }
+  const filter = scopeFilter(scope);
+
   const action = event.queryStringParameters?.action;
 
   try {
     if (action === "search-listings") {
       const q = (event.queryStringParameters?.q || "").trim();
       const query = q
-        ? `?slug=not.is.null&address=ilike.*${encodeURIComponent(q)}*&select=address,slug,project_id,created_at&order=created_at.desc&limit=25`
-        : `?slug=not.is.null&select=address,slug,project_id,created_at&order=created_at.desc&limit=25`;
+        ? `?slug=not.is.null${filter}&address=ilike.*${encodeURIComponent(q)}*&select=address,slug,project_id,created_at&order=created_at.desc&limit=25`
+        : `?slug=not.is.null${filter}&select=address,slug,project_id,created_at&order=created_at.desc&limit=25`;
       const res = await supabase("GET", "listings", null, query);
       if (res.status >= 400) {
         return { statusCode: 500, headers, body: JSON.stringify({ error: "Listing search failed", detail: res.data }) };
@@ -86,6 +169,16 @@ exports.handler = async (event) => {
     if (action === "assets") {
       const slug = event.queryStringParameters?.slug;
       if (!slug) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing slug" }) };
+
+      // Ownership check BEFORE returning anything — without this, a
+      // signed-in subscriber could bypass search-listings entirely by
+      // guessing or being handed another subscriber's slug directly.
+      const ownCheck = await supabase("GET", "listings", null,
+        `?slug=eq.${encodeURIComponent(slug)}${filter}&select=id&limit=1`
+      );
+      if (!ownCheck.data?.[0]) {
+        return { statusCode: 403, headers, body: JSON.stringify({ error: "Not authorized for this listing" }) };
+      }
 
       const res = await supabase("GET", "media_assets", null,
         `?listing_slug=eq.${encodeURIComponent(slug)}&select=room,image_type,s3_key,thumbnail_key,created_at&order=room.asc,image_type.asc,s3_key.asc`

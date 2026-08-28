@@ -401,14 +401,14 @@ const PREVIEW_CLIP_URLS = {
   // Kling AI Motion
   //
   // STALE (July 18, 2026): orbit_arc, rack_focus, parallax_push, crane_up,
-  // crane_down, drone_boom_up, and pan_zoom_reveal (once it gets a clip)
-  // are all Kling-era footage for presets that have since moved to LTX.
-  // The actual rendered look has changed (LTX-safe rewrites deliberately
-  // simulate these motions differently — in-frame drift/parallax instead
-  // of a literal orbit or geometry reveal). These URLs still work and
-  // won't error, but they no longer represent what the preset actually
-  // produces — replace with real LTX-rendered previews once Sam creates
-  // them (see his own note: he needs this exact list to go do that).
+  // crane_down, and drone_boom_up are all Kling-era footage for presets
+  // that have since moved to LTX. The actual rendered look has changed
+  // (LTX-safe rewrites deliberately simulate these motions differently —
+  // in-frame drift/parallax instead of a literal orbit or geometry
+  // reveal). These URLs still work and won't error, but they no longer
+  // represent what the preset actually produces — replace with real
+  // LTX-rendered previews once Sam creates them (see his own note: he
+  // needs this exact list to go do that).
   orbit_arc:                    `${MOTION_PREVIEW_BASE}/orbit_arc.mp4`,
   rack_focus:                   `${MOTION_PREVIEW_BASE}/rack_focus.mp4`,
   fireplace_flicker:            `${MOTION_PREVIEW_BASE}/fireplace_flicker.mp4`,
@@ -428,6 +428,11 @@ const PREVIEW_CLIP_URLS = {
   day_to_twilight:               `${MOTION_PREVIEW_BASE}/day_to_twilight.mp4`,
   twilight_to_day:               `${MOTION_PREVIEW_BASE}/twilight_to_day.mp4`,
   twilight_night_day_timelapse: `${MOTION_PREVIEW_BASE}/twilight_night_day_timelapse.mp4`,
+  day_to_twilight_timelapse:     `${MOTION_PREVIEW_BASE}/day_to_twilight_timelapse.mp4`,
+  twilight_to_day_timelapse:     `${MOTION_PREVIEW_BASE}/twilight_to_day_timelapse.mp4`,
+  pan_zoom_reveal:               `${MOTION_PREVIEW_BASE}/pan_zoom_reveal.mp4`,
+  micro_zoom_out:                `${MOTION_PREVIEW_BASE}/micro_zoom_out.mp4`,
+  micro_dolly_back:              `${MOTION_PREVIEW_BASE}/micro_dolly_back.mp4`,
   // Ken Burns
   push_in:      `${MOTION_PREVIEW_BASE}/push_in.mp4`,
   pull_back:    `${MOTION_PREVIEW_BASE}/pull_back.mp4`,
@@ -438,6 +443,9 @@ const PREVIEW_CLIP_URLS = {
   drift:        `${MOTION_PREVIEW_BASE}/drift.mp4`,
   float:        `${MOTION_PREVIEW_BASE}/float.mp4`,
   luxury_parallax: `${MOTION_PREVIEW_BASE}/luxury_parallax.mp4`,
+  pan_zoom:         `${MOTION_PREVIEW_BASE}/pan_zoom.mp4`,
+  soft_hold:        `${MOTION_PREVIEW_BASE}/soft_hold.mp4`,
+  restrained_push:  `${MOTION_PREVIEW_BASE}/restrained_push.mp4`,
 };
 
 const KEN_BURNS_PRESETS = {
@@ -462,6 +470,14 @@ const KEN_BURNS_PRESETS = {
   // (Output Format buttons + Audio dropdowns never got populated either,
   // since they run after the frame cards in the same function).
   luxury_parallax: { label: "Luxury Parallax", desc: "Ease-in diagonal settle — a soft, elegant finishing move." },
+  // ADDED (this session) — same gap as luxury_parallax above: these 3
+  // exist in motionPresets.js's VALID_PRESETS and are used as real
+  // openerMotion values in assemble.js's REVEAL_PRESETS (soft_hold,
+  // restrained_push), but were never added here. pan_zoom also exists in
+  // motionRenderer.py/VALID_PRESETS but had no dropdown entry either.
+  pan_zoom: { label: "Pan Zoom", desc: "Combined lateral pan with a gentle zoom — more dynamic than a plain pan." },
+  soft_hold: { label: "Soft Hold", desc: "Minimal, restrained motion with a slow settle — used as the Classic and Luxury Reveal opener." },
+  restrained_push: { label: "Restrained Push", desc: "A gentle, controlled push-in — used as the Cinematic Reveal opener." },
 };
 
 // Reveal Presets — mirrors REVEAL_PRESETS in assemble.js exactly (label +

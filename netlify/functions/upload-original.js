@@ -113,8 +113,18 @@ async function lookupListingSlug(projectId) {
     // patch it back so future uploads for this listing skip this branch.
     const derived = slugifyAddress(row.address);
     if (derived) {
-      supabase("PATCH", "listings", { slug: derived }, `?project_id=eq.${encodeURIComponent(projectId)}`)
-        .catch(e => console.error("lookupListingSlug: slug backfill patch failed (non-fatal):", e.message));
+      // AWAITED (Aug 28, 2026 — fixed a real bug, not a hypothesis):
+      // this used to be fire-and-forget (no await, just .catch()). Netlify
+      // Functions can freeze/tear down the execution environment the
+      // moment the handler's response is sent — confirmed directly via
+      // live testing: the patch was silently losing that race almost
+      // every time, so the write frequently never completed. Must be
+      // awaited before this function (and therefore the handler) returns.
+      try {
+        await supabase("PATCH", "listings", { slug: derived }, `?project_id=eq.${encodeURIComponent(projectId)}`);
+      } catch (e) {
+        console.error("lookupListingSlug: slug backfill patch failed (non-fatal):", e.message);
+      }
     }
     return derived || null;
   } catch (err) {
@@ -246,8 +256,13 @@ exports.handler = async (event) => {
       console.log(`Thumbnail uploaded: ${thumbnailUrl} (${Math.round(thumbBuffer.length / 1024)}KB)`);
 
       if (usedReadableKey) {
-        supabase("PATCH", "media_assets", { thumbnail_key: thumbKey }, `?s3_key=eq.${encodeURIComponent(key)}`)
-          .catch(e => console.error("upload-original: thumbnail_key patch failed (non-fatal):", e.message));
+        // AWAITED — see lookupListingSlug's comment above for why this
+        // can't be fire-and-forget in a serverless function.
+        try {
+          await supabase("PATCH", "media_assets", { thumbnail_key: thumbKey }, `?s3_key=eq.${encodeURIComponent(key)}`);
+        } catch (e) {
+          console.error("upload-original: thumbnail_key patch failed (non-fatal):", e.message);
+        }
       }
     } catch (thumbErr) {
       console.error("upload-original: thumbnail generation failed (non-fatal):", thumbErr.message);

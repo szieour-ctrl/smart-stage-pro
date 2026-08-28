@@ -146,8 +146,13 @@ exports.handler = async (event) => {
     const thumbnailUrl = `https://${bucket}.s3.${region}.amazonaws.com/${thumbKey}`;
 
     if (readableSourceKey && process.env.SUPABASE_URL) {
-      supabase("PATCH", "media_assets", { thumbnail_key: thumbKey }, `?s3_key=eq.${encodeURIComponent(sourceKey)}`)
-        .catch(e => console.error("generate-thumbnail: thumbnail_key patch failed (non-fatal):", e.message));
+      // AWAITED — see upload-original.js's lookupListingSlug comment for
+      // why this can't be fire-and-forget in a serverless function.
+      try {
+        await supabase("PATCH", "media_assets", { thumbnail_key: thumbKey }, `?s3_key=eq.${encodeURIComponent(sourceKey)}`);
+      } catch (e) {
+        console.error("generate-thumbnail: thumbnail_key patch failed (non-fatal):", e.message);
+      }
     }
 
     return { statusCode: 200, headers, body: JSON.stringify({ thumbnailUrl }) };

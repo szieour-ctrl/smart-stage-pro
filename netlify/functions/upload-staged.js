@@ -104,8 +104,16 @@ async function lookupListingSlug(projectId) {
 
     const derived = slugifyAddress(row.address);
     if (derived) {
-      supabase("PATCH", "listings", { slug: derived }, `?project_id=eq.${encodeURIComponent(projectId)}`)
-        .catch(e => console.error("lookupListingSlug: slug backfill patch failed (non-fatal):", e.message));
+      // AWAITED (Aug 28, 2026 — fixed a real bug, not a hypothesis): see
+      // upload-original.js's matching lookupListingSlug for the full
+      // explanation — Netlify Functions can tear down before an
+      // un-awaited background write completes, and confirmed via live
+      // testing this was actually happening, not just theoretically possible.
+      try {
+        await supabase("PATCH", "listings", { slug: derived }, `?project_id=eq.${encodeURIComponent(projectId)}`);
+      } catch (e) {
+        console.error("lookupListingSlug: slug backfill patch failed (non-fatal):", e.message);
+      }
     }
     return derived || null;
   } catch (err) {

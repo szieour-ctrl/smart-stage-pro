@@ -3,27 +3,36 @@
 // Uploads the original unaltered listing photo to S3.
 // Returns a permanent public URL used in QR code and disclosure text.
 //
-// Called ONCE per photo, at the moment the agent uploads the image
-// before any staging begins. The URL travels with the session.
+// Called ONCE per photo, lazily — at Generate Final time, not at initial
+// photo-picker upload (confirmed directly in index.html: the only fetch
+// call to this function is inside attachFinalToProject(), guarded by
+// `if (orig && !orig.originalUrl && SESSION.projectId)`). By that point
+// room.roomName is already known and already being sent in the request
+// body — this function just wasn't reading it until now.
 //
-// Input:  imageBase64, mimeType, projectId (optional slug for organized folders)
-// Output: publicUrl, thumbnailUrl — permanent S3 URLs of the original and a
-//         small resized copy for the photo-selection picker grid
+// Input:  imageBase64, mimeType, projectId, roomName
+// Output: publicUrl, thumbnailUrl, s3Key
 //
 // Public access comes from a bucket policy scoped to smart-stage-originals/*,
-// smart-stage-finals/*, and smart-stage-thumbnails/*, NOT from object ACLs
-// (this bucket has ACLs disabled — Bucket owner enforced).
-// URL format: https://{bucket}.s3.{region}.amazonaws.com/smart-stage-originals/{projectId}/{id}.jpg
+// smart-stage-finals/*, listings/*, and smart-stage-thumbnails/*, NOT from
+// object ACLs (this bucket has ACLs disabled — Bucket owner enforced).
 //
-// THUMBNAIL (August 2026 — picker-grid slowness after the S3 migration):
-// Cloudinary's on-the-fly URL transform used to let the app request a small
-// resized copy without a real download; S3 has no equivalent, and the photo
-// picker grid was found to be loading full-resolution originals (up to
-// 12,000px, upscale-image.js's own ceiling) just to render 150px thumbnails.
-// Generated here, once, at upload time — since this function already has
-// the full image bytes in memory, no extra download/round-trip needed.
+// KEY NAMING (Aug 28, 2026 — readable-key migration):
+// When the listing behind projectId has a resolvable slug (new listings,
+// or old ones lazily backfilled by project-manage.js), the key is:
+//   listings/{slug}/originals/{room-slug}-{seq}.{ext}
+// and a matching row is written to Supabase media_assets, making the
+// whole bucket queryable by listing/room/type instead of only browsable
+// by UUID. If Supabase is unreachable or the listing has no slug yet
+// (e.g. SUPABASE_URL not configured, or no listing row at all for this
+// projectId), this falls back to the original UUID scheme so an upload
+// NEVER fails just because the catalog side had a problem:
+//   smart-stage-originals/{projectId}/{uuid}.{ext}
+// Existing objects already written under the old scheme are untouched —
+// this only affects new uploads going forward.
 
 const crypto = require("crypto");
+const https = require("https");
 const sharp = require("sharp");
 const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
 
@@ -37,6 +46,128 @@ const s3 = new S3Client({
 
 const THUMBNAIL_MAX_DIM = 400;
 
+// ── SUPABASE HELPER (same shape as project-manage.js's) ─────────────────────
+
+function supabase(method, table, body, queryParams = "") {
+  return new Promise((resolve, reject) => {
+    const url = new URL(`${process.env.SUPABASE_URL}/rest/v1/${table}${queryParams}`);
+    const bodyStr = body ? JSON.stringify(body) : null;
+    const req = https.request({
+      hostname: url.hostname,
+      path: url.pathname + url.search,
+      method,
+      headers: {
+        "apikey": process.env.SUPABASE_SERVICE_ROLE_KEY,
+        "Authorization": `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
+        "Content-Type": "application/json",
+        "Prefer": "return=representation",
+        ...(bodyStr ? { "Content-Length": Buffer.byteLength(bodyStr) } : {})
+      }
+    }, res => {
+      let data = "";
+      res.on("data", c => data += c);
+      res.on("end", () => {
+        try { resolve({ status: res.statusCode, data: JSON.parse(data || "[]") }); }
+        catch { resolve({ status: res.statusCode, data }); }
+      });
+    });
+    req.on("error", reject);
+    if (bodyStr) req.write(bodyStr);
+    req.end();
+  });
+}
+
+// ── SLUG HELPERS ──────────────────────────────────────────────────────────
+
+function slugifyAddress(address) {
+  return (address || "")
+    .toLowerCase()
+    .replace(/,.*$/, "")          // drop city/state — street address only
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60);
+}
+
+function slugifyRoom(roomName) {
+  return (roomName || "room")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40) || "room";
+}
+
+// Resolves projectId -> listing slug. Returns null (never throws) if
+// Supabase isn't configured, the listing can't be found, or anything else
+// goes wrong — every caller treats null as "use the legacy naming."
+async function lookupListingSlug(projectId) {
+  if (!projectId || !process.env.SUPABASE_URL) return null;
+  try {
+    const res = await supabase("GET", "listings", null,
+      `?project_id=eq.${encodeURIComponent(projectId)}&select=slug,address&limit=1`
+    );
+    const row = res.data?.[0];
+    if (!row) return null;
+    if (row.slug) return row.slug;
+
+    // Listing row predates the slug column — derive one now and best-effort
+    // patch it back so future uploads for this listing skip this branch.
+    const derived = slugifyAddress(row.address);
+    if (derived) {
+      supabase("PATCH", "listings", { slug: derived }, `?project_id=eq.${encodeURIComponent(projectId)}`)
+        .catch(e => console.error("lookupListingSlug: slug backfill patch failed (non-fatal):", e.message));
+    }
+    return derived || null;
+  } catch (err) {
+    console.error("lookupListingSlug error (non-fatal, falling back to legacy naming):", err.message);
+    return null;
+  }
+}
+
+// Reserves a unique, readable S3 key by inserting the media_assets row
+// FIRST (the table's unique constraint on s3_key is what actually
+// prevents a collision) and only handing back the key once that insert
+// succeeds. If two uploads for the same listing+room land at the same
+// moment, the loser of the race just gets bumped to the next sequence
+// number and retries — nothing ever gets silently overwritten in S3.
+// Returns null (never throws) on repeated failure, so the caller can fall
+// back to the legacy UUID key instead of blocking the whole upload.
+async function reserveAssetKey({ listingSlug, room, imageType, ext }) {
+  const roomSlug = slugifyRoom(room);
+  const typeFolder = imageType === "original" ? "originals" : "finals";
+  const baseFolder = `listings/${listingSlug}/${typeFolder}`;
+
+  let seq = 1;
+  try {
+    const countRes = await supabase("GET", "media_assets", null,
+      `?listing_slug=eq.${encodeURIComponent(listingSlug)}&room=eq.${encodeURIComponent(room)}&image_type=eq.${imageType}&select=id`
+    );
+    if (Array.isArray(countRes.data)) seq = countRes.data.length + 1;
+  } catch (err) {
+    console.error("reserveAssetKey: count lookup failed, starting at seq 1 (non-fatal):", err.message);
+  }
+
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const key = `${baseFolder}/${roomSlug}-${String(seq).padStart(2, "0")}.${ext}`;
+    try {
+      const insertRes = await supabase("POST", "media_assets", {
+        listing_slug: listingSlug,
+        room,
+        image_type: imageType,
+        s3_key: key,
+      });
+      if (insertRes.status === 201 || insertRes.status === 200) return key;
+      // Any other status (most likely 409 — unique violation on s3_key,
+      // another upload took this sequence number first) — bump and retry.
+      console.warn(`reserveAssetKey: key ${key} unavailable (status ${insertRes.status}), trying seq ${seq + 1}`);
+    } catch (err) {
+      console.error(`reserveAssetKey: insert attempt failed for ${key} (non-fatal, retrying):`, err.message);
+    }
+    seq++;
+  }
+  console.error(`reserveAssetKey: failed to reserve a key after 5 attempts for ${listingSlug}/${room} — falling back to legacy naming`);
+  return null;
+}
+
 exports.handler = async (event) => {
   if (event.httpMethod !== "POST") return { statusCode: 405, body: "Method Not Allowed" };
 
@@ -47,7 +178,7 @@ exports.handler = async (event) => {
   };
 
   try {
-    const { imageBase64, mimeType, projectId } = JSON.parse(event.body || "{}");
+    const { imageBase64, mimeType, projectId, roomName } = JSON.parse(event.body || "{}");
     if (!imageBase64) return {
       statusCode: 400, headers,
       body: JSON.stringify({ error: "Missing imageBase64" })
@@ -62,12 +193,22 @@ exports.handler = async (event) => {
 
     const contentType = mimeType || "image/jpeg";
     const ext = contentType.includes("png") ? "png" : "jpg";
-    const folder = projectId ? `smart-stage-originals/${projectId}` : "smart-stage-originals/unfiled";
-    const id = crypto.randomUUID();
-    const key = `${folder}/${id}.${ext}`;
     const buffer = Buffer.from(imageBase64, "base64");
 
-    console.log(`Uploading original to S3 — size: ${Math.round(buffer.length / 1024)}KB projectId: ${projectId || "none"}`);
+    // ── Determine key: readable if we can resolve a listing slug, legacy otherwise ──
+    let key = null;
+    let usedReadableKey = false;
+    const listingSlug = await lookupListingSlug(projectId);
+    if (listingSlug) {
+      key = await reserveAssetKey({ listingSlug, room: roomName || "Room", imageType: "original", ext });
+      if (key) usedReadableKey = true;
+    }
+    if (!key) {
+      const folder = projectId ? `smart-stage-originals/${projectId}` : "smart-stage-originals/unfiled";
+      key = `${folder}/${crypto.randomUUID()}.${ext}`;
+    }
+
+    console.log(`Uploading original to S3 — size: ${Math.round(buffer.length / 1024)}KB projectId: ${projectId || "none"} key: ${key}`);
 
     await s3.send(new PutObjectCommand({
       Bucket: bucket,
@@ -90,8 +231,11 @@ exports.handler = async (event) => {
         .resize({ width: THUMBNAIL_MAX_DIM, height: THUMBNAIL_MAX_DIM, fit: "inside", withoutEnlargement: true })
         .jpeg({ quality: 80 })
         .toBuffer();
-      const thumbFolder = projectId ? `smart-stage-thumbnails/${projectId}` : "smart-stage-thumbnails/unfiled";
-      const thumbKey = `${thumbFolder}/${id}.jpg`;
+
+      const thumbKey = usedReadableKey
+        ? key.replace("/originals/", "/thumbnails/")
+        : `${projectId ? `smart-stage-thumbnails/${projectId}` : "smart-stage-thumbnails/unfiled"}/${crypto.randomUUID()}.jpg`;
+
       await s3.send(new PutObjectCommand({
         Bucket: bucket,
         Key: thumbKey,
@@ -100,6 +244,11 @@ exports.handler = async (event) => {
       }));
       thumbnailUrl = `https://${bucket}.s3.${region}.amazonaws.com/${thumbKey}`;
       console.log(`Thumbnail uploaded: ${thumbnailUrl} (${Math.round(thumbBuffer.length / 1024)}KB)`);
+
+      if (usedReadableKey) {
+        supabase("PATCH", "media_assets", { thumbnail_key: thumbKey }, `?s3_key=eq.${encodeURIComponent(key)}`)
+          .catch(e => console.error("upload-original: thumbnail_key patch failed (non-fatal):", e.message));
+      }
     } catch (thumbErr) {
       console.error("upload-original: thumbnail generation failed (non-fatal):", thumbErr.message);
     }

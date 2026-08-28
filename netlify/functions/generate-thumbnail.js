@@ -18,6 +18,17 @@
 // Output: { thumbnailUrl } — null if generation fails (non-fatal by design,
 //         same as upload-original.js's inline version — the picker grid
 //         falls back to the full-res image when this is null)
+//
+// KEY NAMING (Aug 28, 2026 — readable-key migration): if sourceUrl points
+// at a readable key (listings/{slug}/originals|finals/...), the thumbnail
+// reuses the exact same slug/room/sequence, just under a thumbnails/
+// folder — e.g. listings/2089-thornecroft-ln/finals/kitchen-01.jpg becomes
+// listings/2089-thornecroft-ln/thumbnails/kitchen-01.jpg. No new lookup or
+// sequence needed: the source key already encodes everything, so this is
+// a straight folder swap. The corresponding media_assets row (matched by
+// its s3_key, which equals the parsed source key) gets its thumbnail_key
+// filled in, best-effort. Falls back to the legacy random-UUID scheme,
+// unchanged, for any source key that doesn't match the new pattern.
 
 const https = require("https");
 const crypto = require("crypto");
@@ -53,6 +64,44 @@ function downloadBuffer(url) {
   });
 }
 
+// ── SUPABASE HELPER (same shape as project-manage.js's) ─────────────────────
+
+function supabase(method, table, body, queryParams = "") {
+  return new Promise((resolve, reject) => {
+    const url = new URL(`${process.env.SUPABASE_URL}/rest/v1/${table}${queryParams}`);
+    const bodyStr = body ? JSON.stringify(body) : null;
+    const req = https.request({
+      hostname: url.hostname,
+      path: url.pathname + url.search,
+      method,
+      headers: {
+        "apikey": process.env.SUPABASE_SERVICE_ROLE_KEY,
+        "Authorization": `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
+        "Content-Type": "application/json",
+        "Prefer": "return=representation",
+        ...(bodyStr ? { "Content-Length": Buffer.byteLength(bodyStr) } : {})
+      }
+    }, res => {
+      let data = "";
+      res.on("data", c => data += c);
+      res.on("end", () => {
+        try { resolve({ status: res.statusCode, data: JSON.parse(data || "[]") }); }
+        catch { resolve({ status: res.statusCode, data }); }
+      });
+    });
+    req.on("error", reject);
+    if (bodyStr) req.write(bodyStr);
+    req.end();
+  });
+}
+
+// Extracts the S3 key from one of our own public URLs. Returns null for
+// anything that doesn't match (old Cloudinary URLs, external URLs, etc.)
+function keyFromPublicUrl(url, bucket, region) {
+  const prefix = `https://${bucket}.s3.${region}.amazonaws.com/`;
+  return typeof url === "string" && url.startsWith(prefix) ? url.slice(prefix.length) : null;
+}
+
 exports.handler = async (event) => {
   const headers = {
     "Access-Control-Allow-Origin": "*",
@@ -79,8 +128,13 @@ exports.handler = async (event) => {
       .jpeg({ quality: 80 })
       .toBuffer();
 
-    const thumbFolder = projectId ? `smart-stage-thumbnails/${projectId}` : "smart-stage-thumbnails/unfiled";
-    const thumbKey = `${thumbFolder}/${crypto.randomUUID()}.jpg`;
+    const sourceKey = keyFromPublicUrl(sourceUrl, bucket, region);
+    const readableSourceKey = sourceKey && sourceKey.startsWith("listings/") &&
+      (sourceKey.includes("/originals/") || sourceKey.includes("/finals/"));
+
+    const thumbKey = readableSourceKey
+      ? sourceKey.replace("/originals/", "/thumbnails/").replace("/finals/", "/thumbnails/")
+      : `${projectId ? `smart-stage-thumbnails/${projectId}` : "smart-stage-thumbnails/unfiled"}/${crypto.randomUUID()}.jpg`;
 
     await s3.send(new PutObjectCommand({
       Bucket: bucket,
@@ -90,6 +144,11 @@ exports.handler = async (event) => {
     }));
 
     const thumbnailUrl = `https://${bucket}.s3.${region}.amazonaws.com/${thumbKey}`;
+
+    if (readableSourceKey && process.env.SUPABASE_URL) {
+      supabase("PATCH", "media_assets", { thumbnail_key: thumbKey }, `?s3_key=eq.${encodeURIComponent(sourceKey)}`)
+        .catch(e => console.error("generate-thumbnail: thumbnail_key patch failed (non-fatal):", e.message));
+    }
 
     return { statusCode: 200, headers, body: JSON.stringify({ thumbnailUrl }) };
 

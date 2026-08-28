@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Media Gallery — Smart Stage PRO</title>
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&family=DM+Sans:wght@300;400;500;700&display=swap" rel="stylesheet" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.min.js"></script>
 <style>
 :root{--ink:#1a1714;--cream:#f7f4ef;--warm:#e8e0d4;--gold:#b8975a;--gold-light:#d4b87a;--muted:#7a6f63;--danger:#c0392b;--success:#2d6a4f;--border:#ddd5c8;--sky:#3a7ca5;--shadow:0 2px 20px rgba(26,23,20,0.08);}
 *{box-sizing:border-box;}
@@ -12,6 +13,23 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
 .wrap{max-width:1000px;margin:0 auto;padding:32px 20px 80px;}
 h1{font-family:'Cormorant Garamond',serif;font-size:1.8rem;font-weight:400;margin:0 0 4px;}
 .sub{font-size:0.85rem;color:var(--muted);margin-bottom:28px;}
+
+/* ── Login screen ─────────────────────────────────────────── */
+.login-wrap{max-width:380px;margin:80px auto;padding:0 20px;}
+.login-panel{background:#fff;border:1px solid var(--border);border-radius:6px;padding:32px;box-shadow:var(--shadow);}
+.login-title{font-family:'Cormorant Garamond',serif;font-size:1.5rem;margin-bottom:6px;}
+.login-sub{font-size:0.82rem;color:var(--muted);margin-bottom:22px;}
+.login-input{width:100%;border:1px solid var(--border);border-radius:4px;padding:11px 14px;font-family:'DM Sans',sans-serif;font-size:0.9rem;color:var(--ink);background:var(--cream);margin-bottom:12px;}
+.login-input:focus{outline:none;border-color:var(--gold);}
+.login-btn{width:100%;background:var(--ink);color:var(--gold);border:none;border-radius:4px;padding:12px;font-size:0.85rem;font-weight:500;letter-spacing:0.04em;cursor:pointer;}
+.login-btn:hover{opacity:0.9;}
+.login-btn:disabled{opacity:0.5;cursor:default;}
+.login-error{color:var(--danger);font-size:0.8rem;margin-top:12px;}
+
+/* ── Gallery UI ────────────────────────────────────────────── */
+.top-bar{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;}
+.signout-btn{background:none;border:1px solid var(--border);border-radius:3px;padding:6px 14px;font-size:0.75rem;color:var(--muted);cursor:pointer;font-family:inherit;}
+.signout-btn:hover{border-color:var(--gold);color:var(--ink);}
 .search-box{position:relative;margin-bottom:8px;}
 .search-input{width:100%;border:1px solid var(--border);border-radius:4px;padding:12px 16px;font-family:'DM Sans',sans-serif;font-size:0.95rem;color:var(--ink);background:#fff;}
 .search-input:focus{outline:none;border-color:var(--gold);}
@@ -40,9 +58,26 @@ h1{font-family:'Cormorant Garamond',serif;font-size:1.8rem;font-weight:400;margi
 </style>
 </head>
 <body>
-<div class="wrap">
-  <h1>Media Gallery</h1>
-  <div class="sub">Search a listing, click any photo to copy its URL.</div>
+
+<div id="loginScreen" class="login-wrap">
+  <div class="login-panel">
+    <div class="login-title">Media Gallery</div>
+    <div class="login-sub">Sign in with your Smart Stage PRO account.</div>
+    <input id="loginEmail" class="login-input" type="email" placeholder="Email" autocomplete="username" />
+    <input id="loginPassword" class="login-input" type="password" placeholder="Password" autocomplete="current-password" />
+    <button id="loginBtn" class="login-btn">Sign In</button>
+    <div id="loginError" class="login-error" style="display:none;"></div>
+  </div>
+</div>
+
+<div id="app" class="wrap" style="display:none;">
+  <div class="top-bar">
+    <div>
+      <h1>Media Gallery</h1>
+      <div class="sub">Search a listing, click any photo to copy its URL.</div>
+    </div>
+    <button class="signout-btn" id="signoutBtn">Sign Out</button>
+  </div>
 
   <div id="searchArea">
     <div class="search-box">
@@ -61,8 +96,24 @@ h1{font-family:'Cormorant Garamond',serif;font-size:1.8rem;font-weight:400;margi
 
 <script>
 const FN = '/.netlify/functions/media-gallery';
+const SUPABASE_URL = 'https://dnpaenpwdhjmslymgkse.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRucGFlbnB3ZGhqbXNseW1na3NlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA4NjczNTIsImV4cCI6MjA5NjQ0MzM1Mn0.pEdH1YgINYjj8sAutsJJoO8x4VUxTCfIzVbjSu_yBTY';
+
+let _sb = null;
+function getSb() {
+  if (!_sb) _sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  return _sb;
+}
+
 let searchTimer = null;
-let currentSlug = null;
+
+const loginScreen = document.getElementById('loginScreen');
+const appEl = document.getElementById('app');
+const loginEmail = document.getElementById('loginEmail');
+const loginPassword = document.getElementById('loginPassword');
+const loginBtn = document.getElementById('loginBtn');
+const loginError = document.getElementById('loginError');
+const signoutBtn = document.getElementById('signoutBtn');
 
 const searchInput = document.getElementById('searchInput');
 const resultsEl = document.getElementById('results');
@@ -72,6 +123,73 @@ const selectedAddr = document.getElementById('selectedAddr');
 const galleryArea = document.getElementById('galleryArea');
 const changeBtn = document.getElementById('changeBtn');
 
+// ── AUTH ──────────────────────────────────────────────────────────────────
+
+async function initAuth() {
+  const sb = getSb();
+  const { data: { session } } = await sb.auth.getSession();
+  if (session?.user) {
+    showApp();
+  } else {
+    showLogin();
+  }
+  sb.auth.onAuthStateChange((event, session) => {
+    if (event === 'SIGNED_IN' && session?.user) showApp();
+    else if (event === 'SIGNED_OUT') showLogin();
+  });
+}
+
+function showLogin() {
+  loginScreen.style.display = 'block';
+  appEl.style.display = 'none';
+}
+
+function showApp() {
+  loginScreen.style.display = 'none';
+  appEl.style.display = 'block';
+  runSearch('');
+}
+
+async function doLogin() {
+  loginError.style.display = 'none';
+  loginBtn.disabled = true;
+  loginBtn.textContent = 'Signing in...';
+  try {
+    const sb = getSb();
+    const { error } = await sb.auth.signInWithPassword({
+      email: loginEmail.value.trim(),
+      password: loginPassword.value,
+    });
+    if (error) throw error;
+    // onAuthStateChange fires showApp()
+  } catch (err) {
+    loginError.textContent = err.message || 'Sign in failed.';
+    loginError.style.display = 'block';
+  } finally {
+    loginBtn.disabled = false;
+    loginBtn.textContent = 'Sign In';
+  }
+}
+
+loginBtn.addEventListener('click', doLogin);
+loginPassword.addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
+
+signoutBtn.addEventListener('click', async () => {
+  await getSb().auth.signOut();
+});
+
+// Every call to media-gallery.js needs the current session's access token —
+// the function verifies it server-side and scopes results to whoever it
+// belongs to (see media-gallery.js's own comments).
+async function authedFetch(url) {
+  const sb = getSb();
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) { showLogin(); throw new Error('Session expired — please sign in again.'); }
+  return fetch(url, { headers: { 'Authorization': `Bearer ${session.access_token}` } });
+}
+
+// ── SEARCH / GALLERY (unchanged behavior, now via authedFetch) ────────────
+
 searchInput.addEventListener('input', () => {
   clearTimeout(searchTimer);
   const q = searchInput.value.trim();
@@ -80,8 +198,9 @@ searchInput.addEventListener('input', () => {
 
 async function runSearch(q) {
   try {
-    const res = await fetch(`${FN}?action=search-listings&q=${encodeURIComponent(q)}`);
+    const res = await authedFetch(`${FN}?action=search-listings&q=${encodeURIComponent(q)}`);
     const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `Search failed (${res.status})`);
     renderResults(data.listings || []);
   } catch (err) {
     resultsEl.style.display = 'block';
@@ -108,7 +227,6 @@ function renderResults(listings) {
 }
 
 function selectListing(slug, address) {
-  currentSlug = slug;
   searchArea.style.display = 'none';
   resultsEl.style.display = 'none';
   searchInput.value = '';
@@ -118,7 +236,6 @@ function selectListing(slug, address) {
 }
 
 changeBtn.addEventListener('click', () => {
-  currentSlug = null;
   selectedBar.style.display = 'none';
   searchArea.style.display = 'block';
   galleryArea.innerHTML = '';
@@ -128,8 +245,9 @@ changeBtn.addEventListener('click', () => {
 async function loadAssets(slug) {
   galleryArea.innerHTML = `<div class="loading">Loading photos...</div>`;
   try {
-    const res = await fetch(`${FN}?action=assets&slug=${encodeURIComponent(slug)}`);
+    const res = await authedFetch(`${FN}?action=assets&slug=${encodeURIComponent(slug)}`);
     const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `Failed to load photos (${res.status})`);
     renderGallery(data.assets || []);
   } catch (err) {
     galleryArea.innerHTML = `<div class="error-state">Failed to load photos: ${escHtml(err.message)}</div>`;
@@ -142,7 +260,6 @@ function renderGallery(assets) {
     return;
   }
 
-  // Group by room, then by image_type within each room
   const byRoom = {};
   assets.forEach(a => {
     if (!byRoom[a.room]) byRoom[a.room] = {};
@@ -188,7 +305,6 @@ async function copyUrl(el) {
   try {
     await navigator.clipboard.writeText(url);
   } catch {
-    // Clipboard API can fail without HTTPS/permissions — fall back to a manual prompt.
     window.prompt('Copy this URL:', url);
     return;
   }
@@ -202,8 +318,7 @@ function escHtml(s) {
 }
 function escAttr(s) { return escHtml(s); }
 
-// Show a handful of recent listings on load, before any typing.
-runSearch('');
+initAuth();
 </script>
 </body>
 </html>

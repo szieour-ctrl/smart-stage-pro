@@ -86,6 +86,25 @@ function addressHash(address) {
   return crypto.createHash("md5").update(normalized).digest("hex").slice(0, 16);
 }
 
+// NEW (Aug 28, 2026 — readable S3 naming migration): a human-readable slug
+// for the listings row, e.g. "2089 Thornecroft Ln, Roseville, CA" ->
+// "2089-thornecroft-ln". Distinct from generateProjectId()'s output below
+// (that one's a compliance-URL slug with an agent tier + date baked in,
+// e.g. szregsolo_2089thornecroftln_082826) — this one is just the address,
+// meant to be read directly in the S3 console and in Supabase. Same
+// function is duplicated (not imported) in upload-original.js and
+// upload-staged.js, matching this codebase's existing per-file style —
+// they only ever need to derive one as a fallback if a listing row
+// predates this column; the real value is written once, here.
+function slugifyAddress(address) {
+  return (address || "")
+    .toLowerCase()
+    .replace(/,.*$/, "")          // drop city/state — street address only
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60);
+}
+
 function getRoleTier(role) {
   // Maps Supabase role to project ID tier label
   if (role === "team_lead" || role === "team_member") return "team";
@@ -128,12 +147,24 @@ async function lookupProject(address, env) {
     // needs SESSION.listingId exactly as much as a fresh create does (see
     // the matching fix in createProject's existing-project branch above).
     let listingId = null;
+    let slug = null;
     if (process.env.SUPABASE_URL) {
       try {
         const listingLookup = await supabase("GET", "listings", null,
-          `?project_id=eq.${project.projectId}&select=id&limit=1`
+          `?project_id=eq.${project.projectId}&select=id,slug&limit=1`
         );
         listingId = listingLookup.data?.[0]?.id || null;
+        slug = listingLookup.data?.[0]?.slug || null;
+        // Listing predates the slug column — backfill it now so
+        // upload-original.js/upload-staged.js get the readable key on
+        // this listing's very next upload instead of falling back.
+        if (listingId && !slug) {
+          slug = slugifyAddress(project.address);
+          if (slug) {
+            supabase("PATCH", "listings", { slug }, `?project_id=eq.${project.projectId}`)
+              .catch(e => console.error("lookupProject: slug backfill patch failed (non-fatal):", e.message));
+          }
+        }
       } catch (err) {
         console.error("Listing id lookup error (non-fatal):", err.message);
       }
@@ -148,6 +179,7 @@ async function lookupProject(address, env) {
       createdAt:     project.createdAt,
       status:        project.status,
       listingId,
+      slug,
     };
   } catch (err) {
     console.error("lookup error:", err.message);
@@ -173,17 +205,26 @@ async function createProject(address, agentInfo, siteUrl, userId, env) {
     // needs this literal Supabase primary key, NOT proj.projectId (that's a
     // separate text column — see the write below for why these differ).
     let listingId = null;
+    let slug = null;
     if (process.env.SUPABASE_URL) {
       try {
         const listingLookup = await supabase("GET", "listings", null,
-          `?project_id=eq.${proj.projectId}&select=id&limit=1`
+          `?project_id=eq.${proj.projectId}&select=id,slug&limit=1`
         );
         listingId = listingLookup.data?.[0]?.id || null;
+        slug = listingLookup.data?.[0]?.slug || null;
+        if (listingId && !slug) {
+          slug = slugifyAddress(proj.address);
+          if (slug) {
+            supabase("PATCH", "listings", { slug }, `?project_id=eq.${proj.projectId}`)
+              .catch(e => console.error("createProject: slug backfill patch failed (non-fatal):", e.message));
+          }
+        }
       } catch (err) {
         console.error("Listing id lookup error (non-fatal):", err.message);
       }
     }
-    return { created: false, existing: true, projectId: proj.projectId, complianceUrl: proj.complianceUrl, listingId };
+    return { created: false, existing: true, projectId: proj.projectId, complianceUrl: proj.complianceUrl, listingId, slug };
   }
 
   // Determine tier from Supabase user context if userId provided
@@ -219,11 +260,13 @@ async function createProject(address, agentInfo, siteUrl, userId, env) {
 
   // ── Write to Supabase listings table (new) ────────────────────────────────
   let listingId = null;
+  const slug = slugifyAddress(address);
   if (userId && process.env.SUPABASE_URL) {
     try {
       const listingWrite = await supabase("POST", "listings", {
         address,
         project_id:          projectId,
+        slug,
         compliance_page_url: cUrl,
         mls_number:          agentInfo.mlsNumber || null,
         user_id:             userId,
@@ -245,7 +288,7 @@ async function createProject(address, agentInfo, siteUrl, userId, env) {
     }
   }
 
-  return { created: true, projectId, complianceUrl: cUrl, listingId };
+  return { created: true, projectId, complianceUrl: cUrl, listingId, slug };
 }
 
 // ── ACTION: ADD IMAGE ─────────────────────────────────────────────────────────

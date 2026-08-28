@@ -161,8 +161,16 @@ async function lookupProject(address, env) {
         if (listingId && !slug) {
           slug = slugifyAddress(project.address);
           if (slug) {
-            supabase("PATCH", "listings", { slug }, `?project_id=eq.${project.projectId}`)
-              .catch(e => console.error("lookupProject: slug backfill patch failed (non-fatal):", e.message));
+            // AWAITED (Aug 28, 2026 — fixed a real bug, not a hypothesis):
+            // confirmed via live testing that Netlify Functions can tear
+            // down before an un-awaited background write like this one
+            // completes — this same pattern was silently losing the
+            // thumbnail_key patch in upload-original.js almost every time.
+            try {
+              await supabase("PATCH", "listings", { slug }, `?project_id=eq.${project.projectId}`);
+            } catch (e) {
+              console.error("lookupProject: slug backfill patch failed (non-fatal):", e.message);
+            }
           }
         }
       } catch (err) {
@@ -216,8 +224,12 @@ async function createProject(address, agentInfo, siteUrl, userId, env) {
         if (listingId && !slug) {
           slug = slugifyAddress(proj.address);
           if (slug) {
-            supabase("PATCH", "listings", { slug }, `?project_id=eq.${proj.projectId}`)
-              .catch(e => console.error("createProject: slug backfill patch failed (non-fatal):", e.message));
+            // AWAITED — see the matching fix in lookupProject above.
+            try {
+              await supabase("PATCH", "listings", { slug }, `?project_id=eq.${proj.projectId}`);
+            } catch (e) {
+              console.error("createProject: slug backfill patch failed (non-fatal):", e.message);
+            }
           }
         }
       } catch (err) {

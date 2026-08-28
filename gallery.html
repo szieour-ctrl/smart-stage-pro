@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Media Gallery — Smart Stage PRO</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&family=DM+Sans:wght@300;400;500;700&display=swap" rel="stylesheet" />
+<style>
+:root{--ink:#1a1714;--cream:#f7f4ef;--warm:#e8e0d4;--gold:#b8975a;--gold-light:#d4b87a;--muted:#7a6f63;--danger:#c0392b;--success:#2d6a4f;--border:#ddd5c8;--sky:#3a7ca5;--shadow:0 2px 20px rgba(26,23,20,0.08);}
+*{box-sizing:border-box;}
+body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);min-height:100vh;font-size:15px;line-height:1.6;margin:0;}
+.wrap{max-width:1000px;margin:0 auto;padding:32px 20px 80px;}
+h1{font-family:'Cormorant Garamond',serif;font-size:1.8rem;font-weight:400;margin:0 0 4px;}
+.sub{font-size:0.85rem;color:var(--muted);margin-bottom:28px;}
+.search-box{position:relative;margin-bottom:8px;}
+.search-input{width:100%;border:1px solid var(--border);border-radius:4px;padding:12px 16px;font-family:'DM Sans',sans-serif;font-size:0.95rem;color:var(--ink);background:#fff;}
+.search-input:focus{outline:none;border-color:var(--gold);}
+.results{border:1px solid var(--border);border-radius:4px;background:#fff;margin-top:4px;overflow:hidden;box-shadow:var(--shadow);}
+.result-item{padding:12px 16px;cursor:pointer;border-bottom:1px solid var(--border);transition:background 0.15s;}
+.result-item:last-child{border-bottom:none;}
+.result-item:hover{background:var(--warm);}
+.result-addr{font-size:0.9rem;color:var(--ink);}
+.result-meta{font-size:0.72rem;color:var(--muted);margin-top:2px;}
+.selected-bar{display:flex;align-items:center;justify-content:space-between;background:#fff;border:1px solid var(--border);border-radius:4px;padding:14px 18px;margin:20px 0;}
+.selected-addr{font-family:'Cormorant Garamond',serif;font-size:1.25rem;}
+.change-btn{background:none;border:1px solid var(--border);border-radius:3px;padding:6px 14px;font-size:0.75rem;color:var(--muted);cursor:pointer;font-family:inherit;}
+.change-btn:hover{border-color:var(--gold);color:var(--ink);}
+.room-section{margin-bottom:36px;}
+.room-title{font-family:'Cormorant Garamond',serif;font-size:1.2rem;margin-bottom:12px;padding-bottom:6px;border-bottom:1px solid var(--border);}
+.type-label{font-size:0.65rem;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);margin:14px 0 8px;}
+.thumb-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;}
+.thumb-card{cursor:pointer;border-radius:4px;overflow:hidden;border:2px solid transparent;background:var(--warm);transition:border-color 0.15s;position:relative;}
+.thumb-card:hover{border-color:var(--gold);}
+.thumb-card img{width:100%;aspect-ratio:4/3;object-fit:cover;display:block;}
+.thumb-copied{position:absolute;inset:0;background:rgba(45,106,79,0.88);color:#fff;display:flex;align-items:center;justify-content:center;font-size:0.8rem;font-weight:500;opacity:0;pointer-events:none;transition:opacity 0.15s;}
+.thumb-copied.show{opacity:1;}
+.empty-state{color:var(--muted);font-size:0.85rem;padding:40px 0;text-align:center;}
+.loading{color:var(--muted);font-size:0.85rem;padding:20px 0;}
+.error-state{color:var(--danger);font-size:0.85rem;padding:16px 0;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Media Gallery</h1>
+  <div class="sub">Search a listing, click any photo to copy its URL.</div>
+
+  <div id="searchArea">
+    <div class="search-box">
+      <input id="searchInput" class="search-input" type="text" placeholder="Search by address..." autocomplete="off" />
+      <div id="results" class="results" style="display:none;"></div>
+    </div>
+  </div>
+
+  <div id="selectedBar" class="selected-bar" style="display:none;">
+    <div class="selected-addr" id="selectedAddr"></div>
+    <button class="change-btn" id="changeBtn">Change listing</button>
+  </div>
+
+  <div id="galleryArea"></div>
+</div>
+
+<script>
+const FN = '/.netlify/functions/media-gallery';
+let searchTimer = null;
+let currentSlug = null;
+
+const searchInput = document.getElementById('searchInput');
+const resultsEl = document.getElementById('results');
+const searchArea = document.getElementById('searchArea');
+const selectedBar = document.getElementById('selectedBar');
+const selectedAddr = document.getElementById('selectedAddr');
+const galleryArea = document.getElementById('galleryArea');
+const changeBtn = document.getElementById('changeBtn');
+
+searchInput.addEventListener('input', () => {
+  clearTimeout(searchTimer);
+  const q = searchInput.value.trim();
+  searchTimer = setTimeout(() => runSearch(q), 250);
+});
+
+async function runSearch(q) {
+  try {
+    const res = await fetch(`${FN}?action=search-listings&q=${encodeURIComponent(q)}`);
+    const data = await res.json();
+    renderResults(data.listings || []);
+  } catch (err) {
+    resultsEl.style.display = 'block';
+    resultsEl.innerHTML = `<div class="error-state" style="padding:12px 16px;">Search failed: ${escHtml(err.message)}</div>`;
+  }
+}
+
+function renderResults(listings) {
+  if (!listings.length) {
+    resultsEl.style.display = 'block';
+    resultsEl.innerHTML = `<div class="result-item" style="cursor:default;color:var(--muted);">No listings found.</div>`;
+    return;
+  }
+  resultsEl.style.display = 'block';
+  resultsEl.innerHTML = listings.map(l => `
+    <div class="result-item" data-slug="${escAttr(l.slug)}" data-addr="${escAttr(l.address)}">
+      <div class="result-addr">${escHtml(l.address)}</div>
+      <div class="result-meta">${escHtml(new Date(l.created_at).toLocaleDateString())}</div>
+    </div>
+  `).join('');
+  resultsEl.querySelectorAll('.result-item[data-slug]').forEach(el => {
+    el.addEventListener('click', () => selectListing(el.dataset.slug, el.dataset.addr));
+  });
+}
+
+function selectListing(slug, address) {
+  currentSlug = slug;
+  searchArea.style.display = 'none';
+  resultsEl.style.display = 'none';
+  searchInput.value = '';
+  selectedAddr.textContent = address;
+  selectedBar.style.display = 'flex';
+  loadAssets(slug);
+}
+
+changeBtn.addEventListener('click', () => {
+  currentSlug = null;
+  selectedBar.style.display = 'none';
+  searchArea.style.display = 'block';
+  galleryArea.innerHTML = '';
+  searchInput.focus();
+});
+
+async function loadAssets(slug) {
+  galleryArea.innerHTML = `<div class="loading">Loading photos...</div>`;
+  try {
+    const res = await fetch(`${FN}?action=assets&slug=${encodeURIComponent(slug)}`);
+    const data = await res.json();
+    renderGallery(data.assets || []);
+  } catch (err) {
+    galleryArea.innerHTML = `<div class="error-state">Failed to load photos: ${escHtml(err.message)}</div>`;
+  }
+}
+
+function renderGallery(assets) {
+  if (!assets.length) {
+    galleryArea.innerHTML = `<div class="empty-state">No cataloged photos for this listing yet.</div>`;
+    return;
+  }
+
+  // Group by room, then by image_type within each room
+  const byRoom = {};
+  assets.forEach(a => {
+    if (!byRoom[a.room]) byRoom[a.room] = {};
+    if (!byRoom[a.room][a.imageType]) byRoom[a.room][a.imageType] = [];
+    byRoom[a.room][a.imageType].push(a);
+  });
+
+  const typeOrder = ['final', 'original', 'marketing'];
+  const typeLabel = { final: 'Finals', original: 'Originals', marketing: 'Marketing' };
+
+  galleryArea.innerHTML = Object.keys(byRoom).sort().map(room => {
+    const types = byRoom[room];
+    const sections = typeOrder.filter(t => types[t]).map(t => `
+      <div class="type-label">${typeLabel[t]}</div>
+      <div class="thumb-grid">
+        ${types[t].map(a => thumbCardHtml(a)).join('')}
+      </div>
+    `).join('');
+    return `
+      <div class="room-section">
+        <div class="room-title">${escHtml(room)}</div>
+        ${sections}
+      </div>
+    `;
+  }).join('');
+
+  galleryArea.querySelectorAll('.thumb-card[data-url]').forEach(el => {
+    el.addEventListener('click', () => copyUrl(el));
+  });
+}
+
+function thumbCardHtml(a) {
+  return `
+    <div class="thumb-card" data-url="${escAttr(a.url)}">
+      <img src="${escAttr(a.thumbnailUrl)}" alt="${escAttr(a.room)}" loading="lazy" />
+      <div class="thumb-copied">Copied!</div>
+    </div>
+  `;
+}
+
+async function copyUrl(el) {
+  const url = el.dataset.url;
+  try {
+    await navigator.clipboard.writeText(url);
+  } catch {
+    // Clipboard API can fail without HTTPS/permissions — fall back to a manual prompt.
+    window.prompt('Copy this URL:', url);
+    return;
+  }
+  const badge = el.querySelector('.thumb-copied');
+  badge.classList.add('show');
+  setTimeout(() => badge.classList.remove('show'), 1000);
+}
+
+function escHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+function escAttr(s) { return escHtml(s); }
+
+// Show a handful of recent listings on load, before any typing.
+runSearch('');
+</script>
+</body>
+</html>

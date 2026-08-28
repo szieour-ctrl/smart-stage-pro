@@ -4391,7 +4391,7 @@ async function attachFinalToProject(finalBase64, room, orig, enhId) {
     const sigRes = await fetch('/.netlify/functions/upload-staged', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ projectId: SESSION.projectId })
+      body: JSON.stringify({ projectId: SESSION.projectId, roomName: shot.name || 'Hero Shot' })
     });
     const sigRaw = await sigRes.text();
     let sig;
@@ -5070,7 +5070,7 @@ async function attachHeroShotToProject(finalBase64, room, shot, shotId) {
     const sigRes = await fetch('/.netlify/functions/upload-staged', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ projectId: SESSION.projectId })
+      body: JSON.stringify({ projectId: SESSION.projectId, roomName: room.roomName || 'Room' })
     });
     const sigRaw = await sigRes.text();
     let sig;

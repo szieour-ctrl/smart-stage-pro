@@ -37,15 +37,26 @@
 //     line and falling through to the model's own reasoning fixed it
 //     cleanly on both re-tested photos.
 //
-// Kitchen is still never sent to Vision -- cabinetry/island
-// self-identifies architecturally, confirmed reliable every test this
-// session and prior. FIXED Aug 25: Kitchen is now only included in
-// roomAssignmentText when the user actually selected it in zoneList.
-// Previously it was unconditionally hardcoded regardless of selection,
-// which caused GPT Image 2 to invent a kitchen/island on open-plan photos
-// that had none. Kitchen still never goes through the Vision-match
-// elimination logic below (there's nothing to match against), it's just
-// gated on selection now instead of always present.
+// Kitchen island anchor (FIXED Aug 28, 2026 -- real bug, confirmed by Sam
+// in production: an open-plan kitchen with NO island still got staged with
+// one). The Aug 25 fix below only gated the "Kitchen: Anchor: island."
+// line on whether the user selected Kitchen in zoneList -- it did not gate
+// the anchor TEXT itself, which was still hardcoded to "island"
+// unconditionally. So any selected Kitchen got told "Anchor: island,"
+// whether or not the photo actually had one, and GPT Image 2 dutifully
+// built one that wasn't there.
+//
+// Kitchen now goes through Vision like every other zone in this file, but
+// with ONE narrow question: is a freestanding island physically present?
+// Nothing else about the kitchen is asked -- general cabinetry/layout
+// still self-identifies architecturally in spatial-zone-template.js's own
+// zone-boundary logic (confirmed reliable every test this session and
+// prior), same as before this fix. If Vision reports an island, that's the
+// Kitchen anchor, exactly like any other fixture-anchored zone. If Vision
+// reports none, Kitchen falls into the same unclaimed-zone path as
+// Living/Dining/Flex below: listed by name only, no anchor text -- still
+// furnished (per "not listed = vacant"), placement left entirely to
+// spatial-zone-template.js's own zone-boundary and camera-origin logic.
 //
 // Living Room anchors (either qualifies independently, neither depends on
 // the other being present):
@@ -88,11 +99,11 @@ const FLEX_ROOM_TYPES = [
 ];
 
 // zoneList checkbox keys (set in index.html) -> the zone label Vision uses
-// in its JSON output. Kitchen deliberately excluded from this map -- it's
-// never matched against Vision output, and is now only added to
-// roomAssignmentText when zoneList includes "kitchen" (see
-// mergeRoomAssignment below).
+// in its JSON output. Kitchen included as of the Aug 28, 2026 island-anchor
+// fix above -- it now goes through the same claimed/unclaimed matching as
+// every other zone in mergeRoomAssignment below.
 const ZONE_KEY_TO_LABEL = {
+  kitchen: "Kitchen",
   dining: "Dining Zone",
   living: "Living Room",
   flex: "Flex Room",
@@ -121,6 +132,7 @@ const OPEN_PLAN_ZONE_PROMPT = `Look at this real estate interior photo. Identify
 - Ceiling fan -> Living Room (a fan mounted over general room space, not a chandelier or pendant light -- and not positioned over an open dining area or kitchen island, which are lighting fixtures, not fans)
 - Chandelier or pendant cluster hanging over OPEN FLOOR -> Dining Zone, unless the space is an enclosed or semi-enclosed room separate from the main open area, in which case it anchors a Flex Room. If it anchors a Flex Room, select the type from this exact list ONLY: Office, Formal Dining Room, Media Room, Play Room, Music Room, Den, Study Room, Gym, Reading Nook. A chandelier in an enclosed room is a strong signal for "Formal Dining Room." Never invent a type outside this list -- if unsure which type, omit flexRoomType and leave it as an empty string.
   Distinguish a real dining fixture from kitchen island task lighting by MOUNTING, not by how close it appears to the island in the frame. Task lighting hangs on short stems directly above the counter surface itself, tracking the counter's line. A dining fixture -- even one positioned near or beside the island in the frame -- hangs on longer drop rods or chains over open floor space, not over the counter surface. Do not exclude a fixture just because it sits close to the island visually; only exclude it if it is actually mounted low and tight over the counter itself.
+- Freestanding kitchen island -> Kitchen. This is the ONLY thing you are being asked about the kitchen -- not layout, not cabinetry, not appliances, not position, just whether a freestanding island physically exists in this photo. A real island is a separate counter/cabinetry unit with clear floor space on all, or nearly all, sides -- you could walk fully around it. Do NOT report a peninsula (a counter that extends out from the wall or the perimeter counter run and stays physically attached to it on one end) as an island -- a peninsula is not freestanding. If the kitchen has no freestanding island, do NOT report a Kitchen zone at all. Do not guess, do not assume one exists because most kitchens have one, and do not report a peninsula or ordinary perimeter counter as a substitute. Only report Kitchen if you can actually see a freestanding island in this specific photo. For anchorText, just write "island present" -- exact position in the frame is not needed or used for this zone, only whether one exists.
 
 For each fixture you find, report the zone, what the fixture is, and where it sits in the frame (e.g. "fireplace, left wall" or "chandelier, center, over open floor").
 
@@ -129,11 +141,12 @@ Return ONLY this JSON shape, no markdown, no explanation:
   "zones": [
     {"zone": "Living Room", "anchorType": "FIXTURE", "anchorText": "fireplace, left wall"},
     {"zone": "Dining Zone", "anchorType": "FIXTURE", "anchorText": "chandelier, center, over open floor"},
-    {"zone": "Flex Room", "flexRoomType": "Formal Dining Room", "anchorType": "FIXTURE", "anchorText": "chandelier, enclosed room, mid-frame"}
+    {"zone": "Flex Room", "flexRoomType": "Formal Dining Room", "anchorType": "FIXTURE", "anchorText": "chandelier, enclosed room, mid-frame"},
+    {"zone": "Kitchen", "anchorType": "FIXTURE", "anchorText": "island present"}
   ]
 }
 
-zone must be exactly one of "Living Room", "Dining Zone", "Flex Room" (never Kitchen -- Kitchen is handled separately and must never appear in your output). Only include a zone if you can actually see its fixture, physically present in this specific photo. Do not include a zone because it seems likely to be there, because the room type suggests it, or because a similar photo usually has one -- only report what you actually see. If you do not see a fireplace, ceiling fan, or dining/flex fixture at all, return {"zones": []}. Do not reason about camera position, room layout, or which zone the photo was taken from -- that is not part of this task.`;
+zone must be exactly one of "Living Room", "Dining Zone", "Flex Room", "Kitchen". Only include a zone if you can actually see its fixture, physically present in this specific photo. Do not include a zone because it seems likely to be there, because the room type suggests it, or because a similar photo usually has one -- only report what you actually see. If you do not see a fireplace, ceiling fan, dining/flex fixture, or freestanding kitchen island at all, return {"zones": []}. Do not reason about camera position, room layout, or which zone the photo was taken from -- that is not part of this task.`;
 
 async function analyzeOpenPlanZones(base64, mimeType, claudeKey, opts = {}) {
   // Default model: claude-sonnet-5 (swapped from claude-haiku-4-5-20251001
@@ -195,12 +208,15 @@ function displayNameFor(z) {
 // Cross-references the user's actual zoneList selections against Vision's
 // fixture findings.
 //
-// Kitchen is handled first and separately, outside this claimed/unclaimed
-// accounting entirely: added with its fixed island anchor only if
-// zoneList includes "kitchen", never sent to Vision either way.
+// Kitchen goes through this same accounting as of the Aug 28, 2026
+// island-anchor fix (see top-of-file comment) -- it is no longer a special
+// case handled outside this function. If Vision found a freestanding
+// island, Kitchen is "claimed" with that as its anchor, same as any other
+// fixture-anchored zone. If not, it's "unclaimed" -- listed by name with
+// no anchor text, exactly like a Living/Dining/Flex zone with no matching
+// fixture.
 //
-//   0 unclaimed non-kitchen zones -> nothing to add, every selection has a
-//                        real anchor
+//   0 unclaimed zones -> nothing to add, every selection has a real anchor
 //   1+ unclaimed zone -> do NOT assert a foreground claim in code. Tried
 //                        that (see prior version of this function): when a
 //                        fixture-anchored zone's own fixture actually read
@@ -224,17 +240,16 @@ function displayNameFor(z) {
 //                        own this case.
 function mergeRoomAssignment(visionZones, zoneList, flexNote) {
   const list = zoneList || [];
-  const lines = list.includes("kitchen") ? ["Kitchen: Anchor: island."] : [];
+  const lines = [];
 
-  // Map each non-kitchen selected key to its zone label, and find whether
-  // Vision reported a matching fixture for it.
-  const selections = list
-    .filter((key) => key !== "kitchen")
-    .map((key) => {
-      const label = ZONE_KEY_TO_LABEL[key] || key;
-      const match = (visionZones || []).find((z) => z && z.zone === label);
-      return { key, label, match };
-    });
+  // Map each selected key (including kitchen, as of the Aug 28, 2026 fix)
+  // to its zone label, and find whether Vision reported a matching
+  // fixture for it.
+  const selections = list.map((key) => {
+    const label = ZONE_KEY_TO_LABEL[key] || key;
+    const match = (visionZones || []).find((z) => z && z.zone === label);
+    return { key, label, match };
+  });
 
   const claimed = selections.filter((s) => s.match);
   const unclaimed = selections.filter((s) => !s.match);
@@ -243,7 +258,14 @@ function mergeRoomAssignment(visionZones, zoneList, flexNote) {
     const displayName = s.key === "flex"
       ? (displayNameFor(s.match) === "Flex Room" && flexNote ? `${flexNote} (Flex Room)` : displayNameFor(s.match))
       : s.label;
-    lines.push(`${displayName}: Anchor: ${s.match.anchorText || "(unspecified)"}.`);
+    // Kitchen is a fixed "Island" anchor, not whatever wording Vision used
+    // in anchorText -- deliberately ignoring Vision's own text here, not
+    // just deprioritizing it. Sam's call: kitchen position is never
+    // reported or used (see the prompt's "island present" note above), so
+    // this must never drift into a positional phrase no matter what Vision
+    // returns -- only presence/absence matters for this zone.
+    const anchorText = s.key === "kitchen" ? "Island" : (s.match.anchorText || "(unspecified)");
+    lines.push(`${displayName}: Anchor: ${anchorText}.`);
   }
 
   for (const s of unclaimed) {

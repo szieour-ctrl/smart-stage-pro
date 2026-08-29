@@ -144,7 +144,7 @@ function complianceUrl(projectId, siteUrl) {
 
 // ── ACTION: LOOKUP ───────────────────────────────────────────────────────────
 
-async function lookupProject(address, userId, env) {
+async function lookupProject(address, userId, requestedIsProspecting, env) {
   address = cleanAddress(address);
   const store = getProjectStore(env);
   // FIX (Aug 28, 2026 — real bug, per Sam's requirement: each agent login
@@ -178,6 +178,29 @@ async function lookupProject(address, userId, env) {
         listingId = listingLookup.data?.[0]?.id || null;
         slug = listingLookup.data?.[0]?.slug || null;
         isProspecting = listingLookup.data?.[0]?.is_prospecting ?? null;
+        // FIX (Aug 29, 2026 — real bug, confirmed by Sam in production: he
+        // checked the Prospecting box, but the images still landed under
+        // listings/ instead of staging-prospects/). Root cause: this
+        // lookup path is the ONLY path an address takes once it already
+        // exists — index.html's lookupOrCreateProject() never calls
+        // action=create for an address that already exists (see below),
+        // so the prospecting checkbox had nothing to attach to on a
+        // repeat visit. It was silently ignored every time, and this
+        // branch just kept returning whatever is_prospecting the row
+        // already had from whenever it was FIRST created. Fix: sync the
+        // stored flag to whatever was just requested, on every lookup —
+        // only when requestedIsProspecting is an actual boolean (the
+        // property-search flow sends one; the mid-session self-healing
+        // backfill call in continueProject() deliberately does not, so it
+        // can never accidentally flip an established listing's flag).
+        if (listingId && typeof requestedIsProspecting === "boolean" && requestedIsProspecting !== isProspecting) {
+          try {
+            await supabase("PATCH", "listings", { is_prospecting: requestedIsProspecting }, `?id=eq.${listingId}`);
+            isProspecting = requestedIsProspecting;
+          } catch (e) {
+            console.error("lookupProject: is_prospecting sync patch failed (non-fatal):", e.message);
+          }
+        }
         // Listing predates the slug column — backfill it now so
         // upload-original.js/upload-staged.js get the readable key on
         // this listing's very next upload instead of falling back.
@@ -248,6 +271,17 @@ async function createProject(address, agentInfo, siteUrl, userId, isProspecting,
         listingId = listingLookup.data?.[0]?.id || null;
         slug = listingLookup.data?.[0]?.slug || null;
         existingIsProspecting = listingLookup.data?.[0]?.is_prospecting ?? null;
+        // Same sync as lookupProject's Aug 29, 2026 fix above, for the rare
+        // case this race-guard branch is the one that fires (two near-
+        // simultaneous creates for the same brand-new address).
+        if (listingId && typeof isProspecting === "boolean" && isProspecting !== existingIsProspecting) {
+          try {
+            await supabase("PATCH", "listings", { is_prospecting: isProspecting }, `?id=eq.${listingId}`);
+            existingIsProspecting = isProspecting;
+          } catch (e) {
+            console.error("createProject: is_prospecting sync patch failed (non-fatal):", e.message);
+          }
+        }
         if (listingId && !slug) {
           slug = slugifyAddress(proj.address);
           if (slug) {
@@ -530,9 +564,10 @@ exports.handler = async (event) => {
     const body = JSON.parse(event.body || "{}");
 
     if (action === "lookup") {
-      const { address, userId } = body;
+      const { address, userId, isProspecting } = body;
       if (!address) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing address" }) };
-      const result = await lookupProject(address, userId || null, process.env);
+      const requestedIsProspecting = typeof isProspecting === "boolean" ? isProspecting : null;
+      const result = await lookupProject(address, userId || null, requestedIsProspecting, process.env);
       return { statusCode: 200, headers, body: JSON.stringify(result) };
     }
 

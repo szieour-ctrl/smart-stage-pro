@@ -469,6 +469,17 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
       <!-- Autocomplete dropdown -->
       <div id="addr-dropdown" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,0.12);overflow:hidden;margin-bottom:16px;"></div>
 
+      <!-- Prospecting toggle (Aug 28, 2026): a vacant-home prospecting shot
+           sent to the listing agent isn't a signed listing yet — checking
+           this routes its S3 storage to a separate prospecting/ prefix
+           instead of listings/, and labels the project card accordingly.
+           Off by default; only read at project-CREATE time (see
+           createNewProject) since it has no meaning for an existing project. -->
+      <label style="display:flex;align-items:center;gap:8px;margin-bottom:16px;font-size:13px;color:var(--muted);cursor:pointer;">
+        <input type="checkbox" id="prospecting-toggle" style="width:16px;height:16px;">
+        Prospecting (not yet my listing)
+      </label>
+
       <!-- Project status card -->
       <div id="project-card" style="display:none;border:1px solid var(--border);border-radius:6px;padding:20px;background:var(--surface);margin-bottom:20px;">
         <div id="project-card-content"></div>
@@ -1442,10 +1453,17 @@ async function lookupOrCreateProject(address) {
   actions.style.display = 'none';
 
   try {
+    // FIX (Aug 28, 2026): lookup is now scoped by agent (see project-manage.js)
+    // so two different agents staging the same address each get their own
+    // project/listing/compliance page instead of sharing one. Must send the
+    // logged-in agent's userId here, same as createNewProject() already does,
+    // or every lookup falls into the "anon" bucket and never finds it.
+    const session = await getSupabase().auth.getSession();
+    const userId = session?.data?.session?.user?.id || null;
     const res = await fetch('/.netlify/functions/project-manage?action=lookup', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ address }),
+      body: JSON.stringify({ address, userId }),
     });
     const data = await res.json();
 
@@ -1456,12 +1474,13 @@ async function lookupOrCreateProject(address) {
       SESSION.projectAddress = address;
       SESSION.complianceUrl = data.complianceUrl;
       SESSION.projectStatus = 'existing';
+      SESSION.isProspecting = !!data.isProspecting;
 
       cardContent.innerHTML = `
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
-          <span style="font-size:20px;">✅</span>
+          <span style="font-size:20px;">${data.isProspecting ? '🔎' : '✅'}</span>
           <div>
-            <div style="font-weight:500;font-size:14px;color:var(--ink);">Existing Project Found</div>
+            <div style="font-weight:500;font-size:14px;color:var(--ink);">${data.isProspecting ? 'Existing Prospecting Contact Found' : 'Existing Project Found'}</div>
             <div style="font-size:12px;color:var(--muted);">${escHtml(address)}</div>
           </div>
         </div>
@@ -1513,6 +1532,7 @@ async function createNewProject(address) {
   try {
     const session = await getSupabase().auth.getSession();
     const userId = session?.data?.session?.user?.id || null;
+    const isProspecting = !!document.getElementById('prospecting-toggle')?.checked;
     const res = await fetch('/.netlify/functions/project-manage?action=create', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1521,6 +1541,7 @@ async function createNewProject(address) {
         siteUrl: window.location.origin,
         agentInfo: {},
         userId,
+        isProspecting,
       }),
     });
     const data = await res.json();
@@ -1530,6 +1551,7 @@ async function createNewProject(address) {
     SESSION.projectAddress = address;
     SESSION.complianceUrl = data.complianceUrl;
     SESSION.projectStatus = 'new';
+    SESSION.isProspecting = !!data.isProspecting;
     // FIX (real bug, Sam's report: "+ Add More Rooms" button gone).
     // updateSessionButtons() is only ever called once, from
     // confirmMapping() when a batch of rooms first enters the staging
@@ -1545,9 +1567,9 @@ async function createNewProject(address) {
 
     cardContent.innerHTML = `
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
-        <span style="font-size:20px;">✅</span>
+        <span style="font-size:20px;">${data.isProspecting ? '🔎' : '✅'}</span>
         <div>
-          <div style="font-weight:500;font-size:14px;color:var(--ink);">New Project Created</div>
+          <div style="font-weight:500;font-size:14px;color:var(--ink);">${data.isProspecting ? 'Prospecting Contact Created' : 'New Project Created'}</div>
           <div style="font-size:12px;color:var(--muted);">${escHtml(address)}</div>
         </div>
       </div>
@@ -1611,10 +1633,14 @@ function continueProject() {
   // no clue why. Fire-and-forget on purpose — this must never block adding
   // more rooms, which is the actual thing the user asked to do.
   if (!SESSION.listingId && SESSION.projectAddress) {
-    fetch('/.netlify/functions/project-manage?action=lookup', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ address: SESSION.projectAddress }),
+    // userId now required here too — lookup is agent-scoped (Aug 28, 2026 fix).
+    getSupabase().auth.getSession().then(session => {
+      const userId = session?.data?.session?.user?.id || null;
+      return fetch('/.netlify/functions/project-manage?action=lookup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ address: SESSION.projectAddress, userId }),
+      });
     })
       .then(res => res.json())
       .then(data => { if (data.listingId) { SESSION.listingId = data.listingId; updateCreateVideoButton(); } })
@@ -1663,10 +1689,13 @@ function resetPropertySearch() {
   document.getElementById('addr-dropdown').style.display = 'none';
   document.getElementById('project-card').style.display = 'none';
   document.getElementById('property-actions').style.display = 'none';
+  const prospectingToggle = document.getElementById('prospecting-toggle');
+  if (prospectingToggle) prospectingToggle.checked = false;
   SESSION.projectId = null;
   SESSION.projectAddress = null;
   SESSION.complianceUrl = null;
   SESSION.projectStatus = null;
+  SESSION.isProspecting = false;
   _addrPredictions = [];
   _addrSessionToken = null;
 }

@@ -1460,10 +1460,19 @@ async function lookupOrCreateProject(address) {
     // or every lookup falls into the "anon" bucket and never finds it.
     const session = await getSupabase().auth.getSession();
     const userId = session?.data?.session?.user?.id || null;
+    // FIX (Aug 29, 2026 — real bug, confirmed by Sam: checked Prospecting,
+    // images still landed under listings/): action=create only ever fires
+    // for a brand-new address — an address you'd already looked up before
+    // takes the "exists:true" branch below and never touches createNewProject
+    // at all, so the checkbox had nothing to attach to on a repeat visit.
+    // Sending isProspecting on every lookup (not just create) lets
+    // project-manage.js sync an existing listing's flag to whatever's
+    // checked right now, on every visit — see lookupProject's matching fix.
+    const isProspecting = !!document.getElementById('prospecting-toggle')?.checked;
     const res = await fetch('/.netlify/functions/project-manage?action=lookup', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ address, userId }),
+      body: JSON.stringify({ address, userId, isProspecting }),
     });
     const data = await res.json();
 
@@ -1634,6 +1643,11 @@ function continueProject() {
   // more rooms, which is the actual thing the user asked to do.
   if (!SESSION.listingId && SESSION.projectAddress) {
     // userId now required here too — lookup is agent-scoped (Aug 28, 2026 fix).
+    // Deliberately NOT sending isProspecting on this call (Aug 29, 2026 fix
+    // note) — this fires mid-session, off the property-search checkbox
+    // entirely, so it must never assert a flag value one way or the other
+    // and risk flipping an already-established listing's storage location
+    // out from under an in-progress session.
     getSupabase().auth.getSession().then(session => {
       const userId = session?.data?.session?.user?.id || null;
       return fetch('/.netlify/functions/project-manage?action=lookup', {

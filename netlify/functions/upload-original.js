@@ -96,18 +96,20 @@ function slugifyRoom(roomName) {
     .slice(0, 40) || "room";
 }
 
-// Resolves projectId -> listing slug. Returns null (never throws) if
-// Supabase isn't configured, the listing can't be found, or anything else
-// goes wrong — every caller treats null as "use the legacy naming."
+// Resolves projectId -> listing slug + prospecting flag. Returns null
+// (never throws) if Supabase isn't configured, the listing can't be found,
+// or anything else goes wrong — every caller treats null as "use the
+// legacy naming."
 async function lookupListingSlug(projectId) {
   if (!projectId || !process.env.SUPABASE_URL) return null;
   try {
     const res = await supabase("GET", "listings", null,
-      `?project_id=eq.${encodeURIComponent(projectId)}&select=slug,address&limit=1`
+      `?project_id=eq.${encodeURIComponent(projectId)}&select=slug,address,is_prospecting&limit=1`
     );
     const row = res.data?.[0];
     if (!row) return null;
-    if (row.slug) return row.slug;
+    const isProspecting = !!row.is_prospecting;
+    if (row.slug) return { slug: row.slug, isProspecting };
 
     // Listing row predates the slug column — derive one now and best-effort
     // patch it back so future uploads for this listing skip this branch.
@@ -126,7 +128,7 @@ async function lookupListingSlug(projectId) {
         console.error("lookupListingSlug: slug backfill patch failed (non-fatal):", e.message);
       }
     }
-    return derived || null;
+    return derived ? { slug: derived, isProspecting } : null;
   } catch (err) {
     console.error("lookupListingSlug error (non-fatal, falling back to legacy naming):", err.message);
     return null;
@@ -141,10 +143,17 @@ async function lookupListingSlug(projectId) {
 // number and retries — nothing ever gets silently overwritten in S3.
 // Returns null (never throws) on repeated failure, so the caller can fall
 // back to the legacy UUID key instead of blocking the whole upload.
-async function reserveAssetKey({ listingSlug, room, imageType, ext }) {
+//
+// isProspecting (Aug 28, 2026): a prospecting shot (vacant home, single
+// image sent to the listing agent, not yet a signed listing) routes to a
+// separate staging-prospects/ top-level prefix instead of listings/, so it's
+// never mixed into production inventory or the Gallery page, and can carry
+// its own (shorter) S3 lifecycle rule.
+async function reserveAssetKey({ listingSlug, room, imageType, ext, isProspecting }) {
   const roomSlug = slugifyRoom(room);
   const typeFolder = imageType === "original" ? "originals" : "finals";
-  const baseFolder = `listings/${listingSlug}/${typeFolder}`;
+  const rootFolder = isProspecting ? "staging-prospects" : "listings";
+  const baseFolder = `${rootFolder}/${listingSlug}/${typeFolder}`;
 
   let seq = 1;
   try {
@@ -208,9 +217,9 @@ exports.handler = async (event) => {
     // ── Determine key: readable if we can resolve a listing slug, legacy otherwise ──
     let key = null;
     let usedReadableKey = false;
-    const listingSlug = await lookupListingSlug(projectId);
-    if (listingSlug) {
-      key = await reserveAssetKey({ listingSlug, room: roomName || "Room", imageType: "original", ext });
+    const listingInfo = await lookupListingSlug(projectId);
+    if (listingInfo) {
+      key = await reserveAssetKey({ listingSlug: listingInfo.slug, room: roomName || "Room", imageType: "original", ext, isProspecting: listingInfo.isProspecting });
       if (key) usedReadableKey = true;
     }
     if (!key) {

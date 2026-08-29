@@ -113,8 +113,17 @@ function getRoleTier(role) {
 }
 
 function generateProjectId(address, tier = "solo") {
-  // Format: szreg{tier}_{streetaddr}_{MMDDYY}
-  // e.g. szregsolo_201benttreect_060126
+  // Format: szreg{tier}_{streetaddr}_{MMDDYY}_{rand4}
+  // e.g. szregsolo_201benttreect_060126_a3f9
+  // rand4 (Aug 28, 2026 fix): two different agents staging the same
+  // address on the same day at the same tier used to generate the exact
+  // same projectId string — every downstream lookup that resolves a
+  // listing by project_id alone (upload-original.js, upload-staged.js,
+  // addImage's staged_images write, etc.) would then risk matching the
+  // WRONG agent's row via `limit=1`. Appending 4 random base36 chars makes
+  // every projectId effectively unique per creation event, independent of
+  // address/date/tier collisions, so those downstream project_id-only
+  // lookups stay safe without needing to thread userId through all of them.
   const now = new Date();
   const mm  = String(now.getMonth() + 1).padStart(2, "0");
   const dd  = String(now.getDate()).padStart(2, "0");
@@ -124,7 +133,8 @@ function generateProjectId(address, tier = "solo") {
     .replace(/,.*$/, "")
     .replace(/[^a-z0-9]+/g, "")
     .slice(0, 20);
-  return `szreg${tier}_${addrSlug}_${mm}${dd}${yy}`;
+  const rand4 = crypto.randomBytes(3).toString("hex").slice(0, 4);
+  return `szreg${tier}_${addrSlug}_${mm}${dd}${yy}_${rand4}`;
 }
 
 function complianceUrl(projectId, siteUrl) {
@@ -134,10 +144,21 @@ function complianceUrl(projectId, siteUrl) {
 
 // ── ACTION: LOOKUP ───────────────────────────────────────────────────────────
 
-async function lookupProject(address, env) {
+async function lookupProject(address, userId, env) {
   address = cleanAddress(address);
   const store = getProjectStore(env);
-  const key   = "addr_" + addressHash(address);
+  // FIX (Aug 28, 2026 — real bug, per Sam's requirement: each agent login
+  // owns their own listings, full stop): this key used to be address-only
+  // ("addr_" + addressHash), so a second agent looking up an address you'd
+  // already staged found YOUR Blobs record and got attached to your
+  // projectId/listingId instead of starting their own. Scoping the key by
+  // userId means two agents staging the same physical address each get
+  // their own project, their own listing row, and — since compliance URLs
+  // are derived 1:1 from projectId — their own separate compliance page.
+  // "anon" fallback covers the (currently rare/legacy) case of a lookup
+  // with no logged-in session; it deliberately does NOT collide with any
+  // real userId's keyspace.
+  const key = "addr_" + (userId || "anon") + "_" + addressHash(address);
   try {
     const raw = await store.get(key);
     if (!raw) return { exists: false };
@@ -148,13 +169,15 @@ async function lookupProject(address, env) {
     // the matching fix in createProject's existing-project branch above).
     let listingId = null;
     let slug = null;
+    let isProspecting = null;
     if (process.env.SUPABASE_URL) {
       try {
         const listingLookup = await supabase("GET", "listings", null,
-          `?project_id=eq.${project.projectId}&select=id,slug&limit=1`
+          `?project_id=eq.${project.projectId}&select=id,slug,is_prospecting&limit=1`
         );
         listingId = listingLookup.data?.[0]?.id || null;
         slug = listingLookup.data?.[0]?.slug || null;
+        isProspecting = listingLookup.data?.[0]?.is_prospecting ?? null;
         // Listing predates the slug column — backfill it now so
         // upload-original.js/upload-staged.js get the readable key on
         // this listing's very next upload instead of falling back.
@@ -188,6 +211,7 @@ async function lookupProject(address, env) {
       status:        project.status,
       listingId,
       slug,
+      isProspecting,
     };
   } catch (err) {
     console.error("lookup error:", err.message);
@@ -197,10 +221,11 @@ async function lookupProject(address, env) {
 
 // ── ACTION: CREATE ───────────────────────────────────────────────────────────
 
-async function createProject(address, agentInfo, siteUrl, userId, env) {
+async function createProject(address, agentInfo, siteUrl, userId, isProspecting, env) {
   address = cleanAddress(address);
   const store   = getProjectStore(env);
-  const addrKey = "addr_" + addressHash(address);
+  // Scoped by userId — see matching fix + comment in lookupProject above.
+  const addrKey = "addr_" + (userId || "anon") + "_" + addressHash(address);
 
   // Race condition guard
   const existing = await store.get(addrKey);
@@ -214,13 +239,15 @@ async function createProject(address, agentInfo, siteUrl, userId, env) {
     // separate text column — see the write below for why these differ).
     let listingId = null;
     let slug = null;
+    let existingIsProspecting = null;
     if (process.env.SUPABASE_URL) {
       try {
         const listingLookup = await supabase("GET", "listings", null,
-          `?project_id=eq.${proj.projectId}&select=id,slug&limit=1`
+          `?project_id=eq.${proj.projectId}&select=id,slug,is_prospecting&limit=1`
         );
         listingId = listingLookup.data?.[0]?.id || null;
         slug = listingLookup.data?.[0]?.slug || null;
+        existingIsProspecting = listingLookup.data?.[0]?.is_prospecting ?? null;
         if (listingId && !slug) {
           slug = slugifyAddress(proj.address);
           if (slug) {
@@ -236,7 +263,7 @@ async function createProject(address, agentInfo, siteUrl, userId, env) {
         console.error("Listing id lookup error (non-fatal):", err.message);
       }
     }
-    return { created: false, existing: true, projectId: proj.projectId, complianceUrl: proj.complianceUrl, listingId, slug };
+    return { created: false, existing: true, projectId: proj.projectId, complianceUrl: proj.complianceUrl, listingId, slug, isProspecting: existingIsProspecting };
   }
 
   // Determine tier from Supabase user context if userId provided
@@ -268,7 +295,7 @@ async function createProject(address, agentInfo, siteUrl, userId, env) {
   // Write to Netlify Blobs (existing system — do not change)
   await store.set(addrKey, JSON.stringify(project));
   await store.set("pid_" + projectId, JSON.stringify(project));
-  console.log("Project created:", projectId, "tier:", tier, "address:", address);
+  console.log("Project created:", projectId, "tier:", tier, "address:", address, "prospecting:", !!isProspecting);
 
   // ── Write to Supabase listings table (new) ────────────────────────────────
   let listingId = null;
@@ -285,6 +312,13 @@ async function createProject(address, agentInfo, siteUrl, userId, env) {
         team_id:             userContext?.team_id      || null,
         brokerage_id:        userContext?.brokerage_id || null,
         status:              "active",
+        // NEW (prospecting flag, Aug 28 2026): marks a listing created from
+        // a vacant-home prospecting shot rather than a signed listing. Read
+        // downstream by upload-original.js/upload-staged.js to route S3
+        // keys to staging-prospects/<slug>/... instead of listings/<slug>/....
+        // Plain boolean column — flipping it later (once a prospect signs)
+        // is a simple PATCH, no separate "convert" flow needed yet.
+        is_prospecting:       !!isProspecting,
       });
       // NEW: capture the real Supabase id — this is what video-job.js's
       // action=frames/action=create actually need as "listingId". Distinct
@@ -300,7 +334,7 @@ async function createProject(address, agentInfo, siteUrl, userId, env) {
     }
   }
 
-  return { created: true, projectId, complianceUrl: cUrl, listingId, slug };
+  return { created: true, projectId, complianceUrl: cUrl, listingId, slug, isProspecting: !!isProspecting };
 }
 
 // ── ACTION: ADD IMAGE ─────────────────────────────────────────────────────────
@@ -370,7 +404,11 @@ async function addImage(projectId, imageData, userId, ab723Prompt, env) {
     // reader use pidKey as the source of truth (confirmed directly in
     // compliance-page.js), so a rare race on addrKey is secondary-index
     // staleness, not data loss, and doesn't need the same CAS treatment.
-    const addrKey = "addr_" + addressHash(project.address);
+    // Scoped by userId — must match the key scheme in lookupProject/
+    // createProject above, or this secondary index silently falls out of
+    // sync with the primary pidKey record (found this while fixing the
+    // agent-scoping bug: this line still used the old address-only key).
+    const addrKey = "addr_" + (project.userId || "anon") + "_" + addressHash(project.address);
     await store.set(addrKey, updated);
     console.log(
       "Image added to project:", projectId, "room:", imageEntry.roomName,
@@ -407,9 +445,13 @@ async function addImage(projectId, imageData, userId, ab723Prompt, env) {
   // re-adding one here.
   if (userId && process.env.SUPABASE_URL) {
     try {
-      // Find listing ID from Supabase
+      // Find listing ID from Supabase — filtered by user_id too, defense in
+      // depth against any project_id string collision (see rand4 note on
+      // generateProjectId above; this makes collision effectively
+      // impossible going forward, but old rows created before this fix
+      // won't have the suffix, so keep the extra filter).
       const listingResult = await supabase("GET", "listings", null,
-        `?project_id=eq.${projectId}&select=id`
+        `?project_id=eq.${projectId}&user_id=eq.${userId}&select=id`
       );
       const listingId = listingResult.data?.[0]?.id;
 
@@ -488,16 +530,16 @@ exports.handler = async (event) => {
     const body = JSON.parse(event.body || "{}");
 
     if (action === "lookup") {
-      const { address } = body;
+      const { address, userId } = body;
       if (!address) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing address" }) };
-      const result = await lookupProject(address, process.env);
+      const result = await lookupProject(address, userId || null, process.env);
       return { statusCode: 200, headers, body: JSON.stringify(result) };
     }
 
     if (action === "create") {
-      const { address, agentInfo, siteUrl, userId } = body;
+      const { address, agentInfo, siteUrl, userId, isProspecting } = body;
       if (!address) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing address" }) };
-      const result = await createProject(address, agentInfo || {}, siteUrl, userId || null, process.env);
+      const result = await createProject(address, agentInfo || {}, siteUrl, userId || null, !!isProspecting, process.env);
       return { statusCode: 200, headers, body: JSON.stringify(result) };
     }
 

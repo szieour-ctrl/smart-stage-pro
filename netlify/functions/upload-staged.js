@@ -96,11 +96,12 @@ async function lookupListingSlug(projectId) {
   if (!projectId || !process.env.SUPABASE_URL) return null;
   try {
     const res = await supabase("GET", "listings", null,
-      `?project_id=eq.${encodeURIComponent(projectId)}&select=slug,address&limit=1`
+      `?project_id=eq.${encodeURIComponent(projectId)}&select=slug,address,is_prospecting&limit=1`
     );
     const row = res.data?.[0];
     if (!row) return null;
-    if (row.slug) return row.slug;
+    const isProspecting = !!row.is_prospecting;
+    if (row.slug) return { slug: row.slug, isProspecting };
 
     const derived = slugifyAddress(row.address);
     if (derived) {
@@ -115,7 +116,7 @@ async function lookupListingSlug(projectId) {
         console.error("lookupListingSlug: slug backfill patch failed (non-fatal):", e.message);
       }
     }
-    return derived || null;
+    return derived ? { slug: derived, isProspecting } : null;
   } catch (err) {
     console.error("lookupListingSlug error (non-fatal, falling back to legacy naming):", err.message);
     return null;
@@ -124,10 +125,12 @@ async function lookupListingSlug(projectId) {
 
 // Same reserve-by-insert-first pattern as upload-original.js — see that
 // file's comment for why the Supabase insert happens before the S3 write
-// is even attempted.
-async function reserveAssetKey({ listingSlug, room }) {
+// is even attempted. isProspecting routes to staging-prospects/ instead of
+// listings/ — see upload-original.js's reserveAssetKey comment.
+async function reserveAssetKey({ listingSlug, room, isProspecting }) {
   const roomSlug = slugifyRoom(room);
-  const baseFolder = `listings/${listingSlug}/finals`;
+  const rootFolder = isProspecting ? "staging-prospects" : "listings";
+  const baseFolder = `${rootFolder}/${listingSlug}/finals`;
 
   let seq = 1;
   try {
@@ -180,8 +183,8 @@ exports.handler = async (event) => {
 
     let key = null;
     if (roomName) {
-      const listingSlug = await lookupListingSlug(projectId);
-      if (listingSlug) key = await reserveAssetKey({ listingSlug, room: roomName });
+      const listingInfo = await lookupListingSlug(projectId);
+      if (listingInfo) key = await reserveAssetKey({ listingSlug: listingInfo.slug, room: roomName, isProspecting: listingInfo.isProspecting });
     }
     if (!key) {
       const folder = projectId ? `smart-stage-finals/${projectId}` : "smart-stage-finals";

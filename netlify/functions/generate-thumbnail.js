@@ -129,7 +129,12 @@ exports.handler = async (event) => {
       .toBuffer();
 
     const sourceKey = keyFromPublicUrl(sourceUrl, bucket, region);
-    const readableSourceKey = sourceKey && sourceKey.startsWith("listings/") &&
+    // Aug 28, 2026: staging-prospects/ added alongside listings/ as a recognized
+    // readable-key root — prospecting shots get the same slug/room/seq
+    // thumbnail treatment (staging-prospects/<slug>/thumbnails/...) instead of
+    // falling back to the legacy random-UUID naming.
+    const readableSourceKey = sourceKey &&
+      (sourceKey.startsWith("listings/") || sourceKey.startsWith("staging-prospects/")) &&
       (sourceKey.includes("/originals/") || sourceKey.includes("/finals/"));
 
     const thumbKey = readableSourceKey

@@ -99,8 +99,12 @@ async function lookupListingSlug(projectId) {
       `?project_id=eq.${encodeURIComponent(projectId)}&select=slug,address,is_prospecting&limit=1`
     );
     const row = res.data?.[0];
-    if (!row) return null;
+    if (!row) {
+      console.log("upload-staged lookupListingSlug: no listings row found for projectId", projectId);
+      return null;
+    }
     const isProspecting = !!row.is_prospecting;
+    console.log("upload-staged lookupListingSlug: projectId", projectId, "-> slug:", row.slug, "isProspecting:", isProspecting);
     if (row.slug) return { slug: row.slug, isProspecting };
 
     const derived = slugifyAddress(row.address);

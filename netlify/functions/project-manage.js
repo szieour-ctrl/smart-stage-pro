@@ -178,6 +178,24 @@ async function lookupProject(address, userId, requestedIsProspecting, env) {
         listingId = listingLookup.data?.[0]?.id || null;
         slug = listingLookup.data?.[0]?.slug || null;
         isProspecting = listingLookup.data?.[0]?.is_prospecting ?? null;
+        // DIAGNOSTIC (Aug 29, 2026 — Sam still seeing is_prospecting=false
+        // after the sync fix below; this line exists so the next test run
+        // shows in Netlify logs EXACTLY what this function received and
+        // read, instead of guessing blind): if requestedIsProspecting logs
+        // as null/undefined here, the frontend isn't sending it (stale
+        // deploy or checkbox not wired) — the bug is upstream of this
+        // file entirely. If it logs true but currentIsProspecting also
+        // logs true with no PATCH line following, the condition below has
+        // a bug. If it logs true, currentIsProspecting false, and a PATCH
+        // line follows — the sync IS working and the row should update;
+        // if Supabase still shows false after that, check for a second,
+        // OLDER listings row for the same address (e.g. from an earlier
+        // test) that this query isn't matching.
+        console.log(
+          "lookupProject: is_prospecting check — requestedIsProspecting:", requestedIsProspecting,
+          "(type:", typeof requestedIsProspecting, ") currentIsProspecting:", isProspecting,
+          "listingId:", listingId
+        );
         // FIX (Aug 29, 2026 — real bug, confirmed by Sam in production: he
         // checked the Prospecting box, but the images still landed under
         // listings/ instead of staging-prospects/). Root cause: this
@@ -194,8 +212,10 @@ async function lookupProject(address, userId, requestedIsProspecting, env) {
         // backfill call in continueProject() deliberately does not, so it
         // can never accidentally flip an established listing's flag).
         if (listingId && typeof requestedIsProspecting === "boolean" && requestedIsProspecting !== isProspecting) {
+          console.log("lookupProject: syncing is_prospecting ->", requestedIsProspecting, "for listingId", listingId);
           try {
-            await supabase("PATCH", "listings", { is_prospecting: requestedIsProspecting }, `?id=eq.${listingId}`);
+            const patchResult = await supabase("PATCH", "listings", { is_prospecting: requestedIsProspecting }, `?id=eq.${listingId}`);
+            console.log("lookupProject: is_prospecting patch result — status:", patchResult.status, "data:", JSON.stringify(patchResult.data));
             isProspecting = requestedIsProspecting;
           } catch (e) {
             console.error("lookupProject: is_prospecting sync patch failed (non-fatal):", e.message);
@@ -271,12 +291,18 @@ async function createProject(address, agentInfo, siteUrl, userId, isProspecting,
         listingId = listingLookup.data?.[0]?.id || null;
         slug = listingLookup.data?.[0]?.slug || null;
         existingIsProspecting = listingLookup.data?.[0]?.is_prospecting ?? null;
+        console.log(
+          "createProject (race-guard branch): requestedIsProspecting:", isProspecting,
+          "currentIsProspecting:", existingIsProspecting, "listingId:", listingId
+        );
         // Same sync as lookupProject's Aug 29, 2026 fix above, for the rare
         // case this race-guard branch is the one that fires (two near-
         // simultaneous creates for the same brand-new address).
         if (listingId && typeof isProspecting === "boolean" && isProspecting !== existingIsProspecting) {
+          console.log("createProject: syncing is_prospecting ->", isProspecting, "for listingId", listingId);
           try {
-            await supabase("PATCH", "listings", { is_prospecting: isProspecting }, `?id=eq.${listingId}`);
+            const patchResult = await supabase("PATCH", "listings", { is_prospecting: isProspecting }, `?id=eq.${listingId}`);
+            console.log("createProject: is_prospecting patch result — status:", patchResult.status, "data:", JSON.stringify(patchResult.data));
             existingIsProspecting = isProspecting;
           } catch (e) {
             console.error("createProject: is_prospecting sync patch failed (non-fatal):", e.message);
@@ -362,6 +388,11 @@ async function createProject(address, agentInfo, siteUrl, userId, isProspecting,
       // Never returned to the frontend before this change, even though the
       // row itself has always existed the moment a project is created.
       listingId = listingWrite.data?.[0]?.id || null;
+      console.log(
+        "createProject (fresh insert): wrote is_prospecting =", !!isProspecting,
+        "— insert status:", listingWrite.status, "listingId:", listingId,
+        "row returned:", JSON.stringify(listingWrite.data)
+      );
     } catch (err) {
       // Non-fatal — Blobs write already succeeded
       console.error("Supabase listing write error (non-fatal):", err.message);
@@ -566,6 +597,10 @@ exports.handler = async (event) => {
     if (action === "lookup") {
       const { address, userId, isProspecting } = body;
       if (!address) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing address" }) };
+      // DIAGNOSTIC (Aug 29, 2026) — logs the raw request body's isProspecting
+      // value BEFORE any coercion, so a Netlify log can show whether the
+      // frontend sent a real boolean at all, vs undefined/missing entirely.
+      console.log("project-manage lookup: raw body.isProspecting =", body.isProspecting, "(type:", typeof body.isProspecting, ")");
       const requestedIsProspecting = typeof isProspecting === "boolean" ? isProspecting : null;
       const result = await lookupProject(address, userId || null, requestedIsProspecting, process.env);
       return { statusCode: 200, headers, body: JSON.stringify(result) };
@@ -574,6 +609,8 @@ exports.handler = async (event) => {
     if (action === "create") {
       const { address, agentInfo, siteUrl, userId, isProspecting } = body;
       if (!address) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing address" }) };
+      // DIAGNOSTIC (Aug 29, 2026) — same as the lookup action above.
+      console.log("project-manage create: raw body.isProspecting =", body.isProspecting, "(type:", typeof body.isProspecting, ")");
       const result = await createProject(address, agentInfo || {}, siteUrl, userId || null, !!isProspecting, process.env);
       return { statusCode: 200, headers, body: JSON.stringify(result) };
     }

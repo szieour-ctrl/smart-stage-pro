@@ -107,8 +107,18 @@ async function lookupListingSlug(projectId) {
       `?project_id=eq.${encodeURIComponent(projectId)}&select=slug,address,is_prospecting&limit=1`
     );
     const row = res.data?.[0];
-    if (!row) return null;
+    if (!row) {
+      console.log("upload-original lookupListingSlug: no listings row found for projectId", projectId);
+      return null;
+    }
     const isProspecting = !!row.is_prospecting;
+    // DIAGNOSTIC (Aug 29, 2026) — this is the value that actually decides
+    // the S3 folder for THIS upload, read fresh from Supabase right now.
+    // If this logs false while Supabase's own row shows true, projectId
+    // here doesn't match the row you checked (e.g. an older/duplicate row
+    // for the same address). If it logs true, the folder routing below is
+    // correct and the bug is elsewhere.
+    console.log("upload-original lookupListingSlug: projectId", projectId, "-> slug:", row.slug, "isProspecting:", isProspecting);
     if (row.slug) return { slug: row.slug, isProspecting };
 
     // Listing row predates the slug column — derive one now and best-effort

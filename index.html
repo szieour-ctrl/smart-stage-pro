@@ -37,7 +37,8 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
 .progress-fill{height:100%;background:linear-gradient(90deg,var(--gold),var(--gold-light));transition:width 0.4s ease;}
 .intake-step-badge{display:inline-block;background:var(--gold);color:var(--ink);font-size:0.65rem;font-weight:500;letter-spacing:0.1em;text-transform:uppercase;padding:2px 8px;border-radius:2px;margin-bottom:12px;}
 .intake-question{font-family:'Cormorant Garamond',serif;font-size:1.2rem;font-weight:400;color:var(--ink);margin-bottom:16px;line-height:1.4;}
-.option-list{display:flex;flex-direction:column;gap:8px;}
+.option-list{display:grid;grid-template-columns:repeat(2,1fr);gap:8px 12px;}
+@media (max-width:640px){.option-list{grid-template-columns:1fr;}}
 .option-btn{display:flex;align-items:flex-start;gap:12px;background:var(--cream);border:1px solid var(--border);border-radius:4px;padding:12px 16px;cursor:pointer;text-align:left;transition:all 0.15s;font-family:'DM Sans',sans-serif;font-size:0.9rem;color:var(--ink);width:100%;}
 .option-btn:hover{border-color:var(--gold);background:#faf7f2;}
 .option-btn.selected{border-color:var(--gold);background:#faf7f2;box-shadow:inset 3px 0 0 var(--gold);}
@@ -1012,11 +1013,11 @@ const OPENPLAN_ROOMS = ["Great Room","Kitchen","Living Room","Family Room"];
 
 const DECOR8_DESIGN_STYLE = {
   "Organic Modern": "organicmodern",
-  "RH Luxury": "luxemodern",
+  "Luxe Modern": "luxemodern",
   "Contemporary": "contemporary",
   "Japandi": "japandi",
   "Transitional": "transitional",
-  "Coastal California": "coastal",
+  "Coastal": "coastal",
 };
 
 const DECOR8_COLOR_SCHEME = {
@@ -1742,11 +1743,11 @@ const INTAKE_STEPS = [
   ]},
   {key:'style',question:'Choose the overall design style.',options:[
     {letter:'A',label:'Organic Modern',desc:'Warm contemporary with natural woods, layered neutrals.'},
-    {letter:'B',label:'RH Luxury',desc:'High-end styling with oversized furnishings, rich textures.'},
+    {letter:'B',label:'Luxe Modern',desc:'High-end styling with oversized furnishings, rich textures.'},
     {letter:'C',label:'Contemporary',desc:'Clean modern lines, minimal clutter, refined simplicity.'},
     {letter:'D',label:'Japandi',desc:'Minimalist Scandinavian + Japanese design, calm spaces.'},
     {letter:'E',label:'Transitional',desc:'Balanced traditional warmth and modern simplicity.'},
-    {letter:'F',label:'Coastal California',desc:'Light airy interiors, soft neutrals, indoor-outdoor living.'},
+    {letter:'F',label:'Coastal',desc:'Light airy interiors, soft neutrals, indoor-outdoor living.'},
   ]},
   {key:'intensity',question:'How elevated should the staging feel?',options:[
     {letter:'A',label:'Light MLS Staging',desc:'Minimal furniture, maximum realism.'},

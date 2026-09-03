@@ -66,6 +66,24 @@
 // here" in the original template and again in v6.3). assembleSpatialZonePrompt() below
 // uses a regex for this substitution instead of an exact string match, so future wording
 // tweaks to the surrounding text won't silently break the substitution again.
+//
+// v6.3.6 (Sep 2026): style-variety fix, Design DNA layer only — nothing above this note
+// changed. Prospect feedback showed staged renders reading as too similar in styling and
+// furniture within a style. Root cause: STYLE_FURNITURE_VOCABULARY only had a populated
+// entry for Organic Modern; every other selectable style returned null from
+// pickFurnitureProfile() and fell back to label-only prompting with no seeded furniture
+// direction at all. Fix, additive only: (1) seeded STYLE_FURNITURE_VOCABULARY entries for
+// the other 11 styles already present in STYLE_LABELS (Transitional, Contemporary, Luxe
+// Modern, Japandi, Coastal, Mid-Century Modern, Scandinavian, Mediterranean, Farmhouse,
+// Traditional, Art Deco), same shape as the existing Organic Modern entry; (2) reworded the
+// per-project furnishings instruction from "use these exact pieces — do not substitute" to
+// "use as a design vocabulary" so GPT Image 2 has room to vary furniture within a style
+// instead of reproducing one literal recipe every time. No UI change, no new style/palette
+// options exposed, no Smart Style/Smart Palette — every project keeps getting the same
+// deterministic per-project/per-style profile it got before (mulberry32 seeded on
+// styleLabel + projectId, unchanged), just with real vocabulary behind it now for all 12
+// styles instead of 1. Zone/fixture/immutability/circulation/RPIV/AB-723 sections above are
+// untouched.
 
 const SPATIAL_ZONE_TEMPLATE = [
 'SPATIAL ZONE ANALYSIS MODE',
@@ -220,7 +238,6 @@ const SPATIAL_ZONE_TEMPLATE = [
 
 const OPEN_PLAN_ZONE_LABELS = { kitchen: 'Kitchen', dining: 'Dining Zone', living: 'Living Room', family: 'Family Room', flex: 'Flex Room' };
 
-
 const STYLE_LABELS = {
   'organicmodern':'Organic Modern','transitional':'Transitional','contemporary':'Contemporary',
   'modern':'Modern','scandinavian':'Scandinavian','minimalist':'Minimalist',
@@ -281,11 +298,391 @@ const STYLE_FURNITURE_VOCABULARY = {
       large:  ['a large floor fiddle leaf fig in a concrete planter', 'a tall dried pampas arrangement in a floor vase'],
     },
   },
-  // 'RH Luxury': { ... }           — not yet seeded, falls through to prior behavior
-  // 'Contemporary': { ... }        — not yet seeded, falls through to prior behavior
-  // 'Japandi': { ... }             — not yet seeded, falls through to prior behavior
-  // 'Transitional': { ... }        — not yet seeded, falls through to prior behavior
-  // 'Coastal California': { ... }  — not yet seeded, falls through to prior behavior
+  'Transitional': {
+    sofa: [
+      'a tailored track-arm sofa with softly structured upholstery',
+      'a refined shelter-arm sofa with balanced classic proportions',
+      'a clean rolled-arm sofa with restrained traditional detailing',
+    ],
+    coffeeTable: [
+      'a rectangular wood coffee table with refined detailing',
+      'a stone-top coffee table with a simple dark metal base',
+      'an upholstered ottoman-style coffee table with tailored edges',
+    ],
+    diningTable: [
+      'an oval wood dining table with a refined pedestal base',
+      'a rectangular dining table with clean traditional proportions',
+    ],
+    diningChairs: [
+      'upholstered dining chairs with tailored backs and wood legs',
+      'clean-lined wood dining chairs with lightly upholstered seats',
+    ],
+    accentChair: [
+      'a tailored lounge chair with subtle traditional influence',
+      'a compact upholstered barrel chair with refined proportions',
+    ],
+    areaRug: [
+      'a low-contrast patterned wool rug with a timeless motif',
+      'a textured neutral rug with restrained border detail',
+    ],
+    woodTone: ['medium walnut', 'warm oak', 'dark espresso'],
+    metalFinish: ['aged brass', 'polished nickel', 'dark bronze'],
+    greenery: {
+      small: ['a compact leafy plant in a classic ceramic pot'],
+      medium: ['a ficus or olive-style plant in a tailored planter'],
+      large: ['a tall indoor tree in a simple architectural planter'],
+    },
+  },
+  'Contemporary': {
+    sofa: [
+      'a streamlined low-profile sofa with crisp tailored upholstery',
+      'a modular sofa with clean geometry and restrained seams',
+      'a sculptural contemporary sofa with softened square forms',
+    ],
+    coffeeTable: [
+      'a monolithic stone coffee table with clean geometry',
+      'a slim wood-and-metal coffee table with architectural lines',
+      'a nested pair of contemporary round tables in mixed materials',
+    ],
+    diningTable: [
+      'a clean-lined rectangular dining table with an architectural base',
+      'a round dining table with a simple sculptural pedestal',
+    ],
+    diningChairs: [
+      'streamlined upholstered dining chairs with slim profiles',
+      'molded contemporary dining chairs with refined upholstery',
+    ],
+    accentChair: [
+      'a sculptural lounge chair with crisp contemporary geometry',
+      'a low swivel chair with a clean upholstered shell',
+    ],
+    areaRug: [
+      'a tonal wool rug with subtle linear texture',
+      'a low-pile rug with restrained abstract pattern',
+    ],
+    woodTone: ['natural oak', 'smoked oak', 'dark walnut'],
+    metalFinish: ['matte black', 'brushed nickel', 'soft brass'],
+    greenery: {
+      small: ['a simple architectural plant in a minimal pot'],
+      medium: ['a restrained indoor tree in a clean cylindrical planter'],
+      large: ['a tall sculptural plant in a minimal floor planter'],
+    },
+  },
+  'Luxe Modern': {
+    sofa: [
+      'a substantial low-profile sofa with deep tailored cushions',
+      'a large sculptural sofa with premium textured upholstery',
+      'a refined channel-detail sofa with generous proportions',
+    ],
+    coffeeTable: [
+      'a substantial stone coffee table with a sculptural base',
+      'a dark wood coffee table with architectural massing',
+      'a refined mixed-material table combining stone and metal',
+    ],
+    diningTable: [
+      'a substantial dining table with a stone or rich wood top and sculptural base',
+      'an oversized oval dining table with premium material expression',
+    ],
+    diningChairs: [
+      'fully upholstered dining chairs with substantial tailored profiles',
+      'sculptural dining chairs with premium upholstery and refined frames',
+    ],
+    accentChair: [
+      'a substantial sculptural lounge chair in premium upholstery',
+      'a refined swivel chair with deep seat and tailored form',
+    ],
+    areaRug: [
+      'a large hand-knotted rug with subtle tonal depth',
+      'a plush textured rug with understated luxury character',
+    ],
+    woodTone: ['dark walnut', 'smoked oak', 'rich medium oak'],
+    metalFinish: ['brushed brass', 'blackened bronze', 'polished nickel'],
+    greenery: {
+      small: ['a restrained luxury greenery arrangement in a stone or ceramic vessel'],
+      medium: ['a mature indoor tree in a refined architectural planter'],
+      large: ['a tall statement tree in an oversized premium planter'],
+    },
+  },
+  'Japandi': {
+    sofa: [
+      'a low-profile sofa with restrained geometry and natural-fiber upholstery',
+      'a simple tailored sofa with soft minimal detailing',
+      'a compact sculptural sofa with quiet proportions and tactile upholstery',
+    ],
+    coffeeTable: [
+      'a low solid-wood table with simple crafted form',
+      'a stone or wood table with quiet organic geometry',
+      'a minimal pedestal table with natural material expression',
+    ],
+    diningTable: [
+      'a simple solid-wood dining table with restrained crafted form',
+      'a round or oval wood table with quiet joinery-inspired detailing',
+    ],
+    diningChairs: [
+      'minimal wood dining chairs with woven or upholstered seats',
+      'clean crafted chairs with light visual weight and natural texture',
+    ],
+    accentChair: [
+      'a low sculptural wood-frame lounge chair',
+      'a minimal upholstered chair with quiet natural texture',
+    ],
+    areaRug: [
+      'a quiet textured wool rug with minimal pattern',
+      'a flatwoven natural-fiber rug with restrained texture',
+    ],
+    woodTone: ['light natural oak', 'medium warm oak', 'smoked ash'],
+    metalFinish: ['matte black', 'dark bronze', 'restrained brushed metal'],
+    greenery: {
+      small: ['a restrained branch arrangement in a simple ceramic vessel'],
+      medium: ['a sculptural green plant in a minimal natural-material planter'],
+      large: ['a sparse indoor tree with an understated planter'],
+    },
+  },
+  'Coastal': {
+    sofa: [
+      'a relaxed tailored sofa with casual natural-fiber upholstery',
+      'a slipcovered sofa with clean contemporary proportions',
+      'a comfortable track-arm sofa with light visual weight',
+    ],
+    coffeeTable: [
+      'a light wood coffee table with relaxed crafted character',
+      'a woven or wood table with casual West Coast texture',
+      'a pale stone-top table with a simple natural base',
+    ],
+    diningTable: [
+      'a light-toned wood dining table with relaxed proportions',
+      'a round pedestal dining table with casual natural material character',
+    ],
+    diningChairs: [
+      'woven-back dining chairs with clean wood frames',
+      'light upholstered dining chairs with relaxed tailored forms',
+    ],
+    accentChair: [
+      'a woven-frame lounge chair with relaxed upholstery',
+      'a casual upholstered chair with light natural wood details',
+    ],
+    areaRug: [
+      'a textured natural-fiber rug with soft pattern variation',
+      'a light woven rug with relaxed coastal texture',
+    ],
+    woodTone: ['white oak', 'washed oak', 'natural ash'],
+    metalFinish: ['soft brass', 'matte black', 'brushed nickel'],
+    greenery: {
+      small: ['a small leafy plant in a light ceramic pot'],
+      medium: ['a casual olive-style plant in a woven or ceramic planter'],
+      large: ['a tall airy indoor tree in a natural-texture planter'],
+    },
+  },
+  'Mid-Century Modern': {
+    sofa: [
+      'a tailored low sofa with slim arms and tapered wood legs',
+      'a structured sofa with clean 1950s-inspired proportions',
+      'a compact bench-seat sofa with exposed wood base details',
+    ],
+    coffeeTable: [
+      'an oval walnut coffee table with tapered legs',
+      'a sculptural wood coffee table with period-inspired geometry',
+      'a slim glass-and-wood coffee table with architectural lines',
+    ],
+    diningTable: [
+      'a walnut dining table with tapered legs and clean period proportions',
+      'a round wood pedestal table with mid-century architectural character',
+    ],
+    diningChairs: [
+      'wood-frame dining chairs with sculpted backs and upholstered seats',
+      'slim period-inspired dining chairs with tapered legs',
+    ],
+    accentChair: [
+      'a sculptural wood-frame lounge chair with period-inspired upholstery',
+      'a low lounge chair with tapered legs and tailored cushions',
+    ],
+    areaRug: [
+      'a low-pile rug with restrained geometric pattern',
+      'a textured rug with subtle period-inspired abstract design',
+    ],
+    woodTone: ['walnut', 'teak-inspired medium wood', 'warm oak'],
+    metalFinish: ['aged brass', 'matte black', 'brushed steel'],
+    greenery: {
+      small: ['a compact architectural plant in a simple ceramic pot'],
+      medium: ['a rubber plant or similar upright green in a period-appropriate planter'],
+      large: ['a tall sculptural indoor plant in a simple floor planter'],
+    },
+  },
+  'Scandinavian': {
+    sofa: [
+      'a light-profile sofa with simple tailored cushions and slim legs',
+      'a comfortable sofa with soft rounded corners and minimal detailing',
+      'a compact upholstered sofa with clean functional proportions',
+    ],
+    coffeeTable: [
+      'a simple pale wood coffee table with softened corners',
+      'a round light-oak table with functional minimal geometry',
+      'a compact nesting-table set in pale wood and restrained metal',
+    ],
+    diningTable: [
+      'a light wood dining table with simple functional proportions',
+      'a round pale-oak dining table with a clean pedestal or leg base',
+    ],
+    diningChairs: [
+      'simple wood dining chairs with shaped backs and light upholstery',
+      'clean functional chairs with pale wood frames and woven seats',
+    ],
+    accentChair: [
+      'a light wood-frame lounge chair with soft upholstered cushions',
+      'a compact sculptural chair with approachable proportions',
+    ],
+    areaRug: [
+      'a soft wool rug with subtle texture and minimal pattern',
+      'a flatwoven rug with restrained Nordic-inspired geometry',
+    ],
+    woodTone: ['pale oak', 'natural ash', 'light birch'],
+    metalFinish: ['matte black', 'brushed steel', 'soft brass'],
+    greenery: {
+      small: ['a small leafy plant in a simple white or stoneware pot'],
+      medium: ['a restrained green plant in a pale ceramic planter'],
+      large: ['a tall airy plant in a simple light-toned planter'],
+    },
+  },
+  'Mediterranean': {
+    sofa: [
+      'a relaxed sofa with softly sculpted profile and textured upholstery',
+      'a substantial upholstered sofa with rounded Mediterranean-inspired form',
+      'a clean contemporary sofa softened by tactile natural materials',
+    ],
+    coffeeTable: [
+      'a stone or plaster-look coffee table with sculptural geometry',
+      'a warm wood table with substantial handcrafted character',
+      'an organic stone-top table with a simple architectural base',
+    ],
+    diningTable: [
+      'a substantial wood dining table with softly rustic refined character',
+      'a round stone or wood pedestal table with sculptural Mediterranean form',
+    ],
+    diningChairs: [
+      'wood dining chairs with woven seats and refined handcrafted character',
+      'upholstered dining chairs with softly rounded backs and warm material expression',
+    ],
+    accentChair: [
+      'a sculptural lounge chair with woven or textured natural materials',
+      'a rounded upholstered chair with warm handcrafted character',
+    ],
+    areaRug: [
+      'a textured wool rug with subtle old-world pattern influence',
+      'a natural woven rug with warm tactile character',
+    ],
+    woodTone: ['warm oak', 'aged walnut', 'medium natural wood'],
+    metalFinish: ['aged brass', 'dark bronze', 'blackened iron'],
+    greenery: {
+      small: ['an olive branch arrangement in a rustic-refined ceramic vessel'],
+      medium: ['an olive-style tree in a textured planter'],
+      large: ['a tall olive-style tree in a substantial plaster or ceramic planter'],
+    },
+  },
+  'Farmhouse': {
+    sofa: [
+      'a comfortable tailored sofa with relaxed upholstery and clean traditional proportions',
+      'a simple track-arm sofa with casual structured cushions',
+      'a modern slipcovered sofa with restrained farmhouse character',
+    ],
+    coffeeTable: [
+      'a solid wood coffee table with clean handcrafted detailing',
+      'a simple plank-style table with refined rather than distressed finish',
+      'a wood-and-metal coffee table with restrained farmhouse character',
+    ],
+    diningTable: [
+      'a substantial wood dining table with clean farmhouse proportions',
+      'a round wood pedestal table with simple traditional character',
+    ],
+    diningChairs: [
+      'clean spindle-back dining chairs with modern proportions',
+      'upholstered wood-frame chairs with casual tailored character',
+    ],
+    accentChair: [
+      'a comfortable linen-upholstered chair with simple wood details',
+      'a clean wing-inspired chair with restrained traditional form',
+    ],
+    areaRug: [
+      'a textured wool or jute-blend rug with subtle pattern',
+      'a low-contrast vintage-inspired rug with modern restraint',
+    ],
+    woodTone: ['natural oak', 'warm medium wood', 'weathered-look oak without distressing'],
+    metalFinish: ['matte black', 'aged brass', 'dark bronze'],
+    greenery: {
+      small: ['a simple potted herb or leafy plant in a ceramic vessel'],
+      medium: ['a leafy indoor plant in a woven or ceramic planter'],
+      large: ['a tall indoor tree in a simple natural-texture planter'],
+    },
+  },
+  'Traditional': {
+    sofa: [
+      'a tailored sofa with classic proportions and restrained rolled arms',
+      'a refined upholstered sofa with subtle traditional detailing',
+      'a structured sofa with timeless silhouette and elegant upholstery',
+    ],
+    coffeeTable: [
+      'a refined wood coffee table with classic proportions and subtle detailing',
+      'a stone-top table with traditional-inspired base and restrained ornament',
+      'an upholstered ottoman table with tailored classic detailing',
+    ],
+    diningTable: [
+      'a classic wood dining table with refined traditional proportions',
+      'an oval pedestal dining table with elegant restrained detailing',
+    ],
+    diningChairs: [
+      'upholstered dining chairs with classic wood frames and tailored backs',
+      'refined wood dining chairs with restrained traditional detailing',
+    ],
+    accentChair: [
+      'a classic lounge chair with tailored upholstery and refined proportions',
+      'a restrained wing chair with modernized traditional detailing',
+    ],
+    areaRug: [
+      'a wool rug with subtle traditional pattern and controlled contrast',
+      'a refined low-contrast Persian-inspired rug',
+    ],
+    woodTone: ['medium walnut', 'mahogany-toned wood', 'warm dark oak'],
+    metalFinish: ['aged brass', 'polished nickel', 'dark bronze'],
+    greenery: {
+      small: ['a classic leafy plant or floral-greenery arrangement in a refined vessel'],
+      medium: ['a formal indoor plant in a classic ceramic planter'],
+      large: ['a tall indoor tree in an understated traditional planter'],
+    },
+  },
+  'Art Deco': {
+    sofa: [
+      'a tailored sofa with gently curved geometry and refined channel detailing',
+      'a sculptural sofa with elegant 1930s-inspired proportions',
+      'a clean tuxedo sofa with subtle glamorous detailing',
+    ],
+    coffeeTable: [
+      'a geometric stone-and-metal coffee table with refined Deco influence',
+      'a dark wood table with stepped or rounded architectural geometry',
+      'a glass-top table with elegant metal framework and restrained glamour',
+    ],
+    diningTable: [
+      'a round or oval dining table with sculptural geometric base',
+      'a dark wood dining table with polished architectural proportions',
+    ],
+    diningChairs: [
+      'upholstered dining chairs with curved backs and elegant slim profiles',
+      'tailored chairs with subtle channel detail and refined metal or wood accents',
+    ],
+    accentChair: [
+      'a curved lounge chair with refined channel upholstery',
+      'a sculptural barrel chair with restrained Deco influence',
+    ],
+    areaRug: [
+      'a low-pile rug with subtle geometric Deco pattern',
+      'a tonal rug with restrained fan or linear geometry',
+    ],
+    woodTone: ['dark walnut', 'ebonized wood', 'rich medium walnut'],
+    metalFinish: ['brushed brass', 'polished nickel', 'blackened metal'],
+    greenery: {
+      small: ['a sculptural leaf arrangement in a geometric vessel'],
+      medium: ['an architectural plant in a refined metallic or ceramic planter'],
+      large: ['a tall statement plant in an elegant geometric floor planter'],
+    },
+  },
 };
 
 function mulberry32(seed) {
@@ -359,9 +756,9 @@ function buildRoomAssignmentVariable({ zoneList, flexNote, roomName, isOpenPlan,
 
 function buildDesignDnaVariable({ style, palette, buyerProfile, desiredFeeling, stagingLevel, furnishingsDNA, projectId, roomName }) {
   const parts = [];
-  if (style)          parts.push('Design Style: ' + style);
-  if (palette)        parts.push('Color Palette: ' + (PALETTE_TONES[palette] || palette));
-  if (buyerProfile)   parts.push('Buyer Profile: ' + buyerProfile);
+  if (style)           parts.push('Design Style: ' + style);
+  if (palette)         parts.push('Color Palette: ' + (PALETTE_TONES[palette] || palette));
+  if (buyerProfile)    parts.push('Buyer Profile: ' + buyerProfile);
   if (desiredFeeling)  parts.push('Desired Feeling: ' + desiredFeeling);
   if (stagingLevel)    parts.push('Staging Level: ' + stagingLevel);
   let dnaText = parts.join('. ') + (parts.length ? '.' : '');
@@ -370,17 +767,20 @@ function buildDesignDnaVariable({ style, palette, buyerProfile, desiredFeeling, 
   if (profile) {
     const greenery = pickGreenery(style, projectId, roomName);
     const profileParts = [
-      'Sofa: ' + profile.sofa + '.',
-      'Coffee table: ' + profile.coffeeTable + '.',
-      'Dining table: ' + profile.diningTable + '.',
-      'Dining chairs: ' + profile.diningChairs + '.',
-      'Accent chair: ' + profile.accentChair + '.',
-      'Area rug: ' + profile.areaRug + '.',
-      'Wood tone: ' + profile.woodTone + '.',
-      'Metal finish: ' + profile.metalFinish + '.',
+      'Sofa direction: ' + profile.sofa + '.',
+      'Coffee-table direction: ' + profile.coffeeTable + '.',
+      'Dining-table direction: ' + profile.diningTable + '.',
+      'Dining-chair direction: ' + profile.diningChairs + '.',
+      'Accent-chair direction: ' + profile.accentChair + '.',
+      'Area-rug direction: ' + profile.areaRug + '.',
+      'Wood-tone direction: ' + profile.woodTone + '.',
+      'Metal-finish direction: ' + profile.metalFinish + '.',
     ];
-    if (greenery) profileParts.push('Greenery: ' + greenery + '.');
-    dnaText += '\n\nSPECIFIC FURNISHINGS FOR THIS PROJECT (use these exact pieces and materials — do not substitute generic alternatives, and do not repeat the same fabric or wood species across unrelated pieces): ' + profileParts.join(' ');
+    if (greenery) profileParts.push('Greenery direction: ' + greenery + '.');
+    dnaText += '\n\nSTYLE FURNISHINGS DNA FOR THIS PROJECT (use as a design vocabulary, not a literal furniture catalog): ' +
+      'Keep the selected style recognizable, but choose the exact furniture geometry, scale, upholstery, materials, and accessory mix that best fits this specific room and its circulation. ' +
+      'Variation within the style is encouraged. Do not alter permanent architecture or fixed finishes to accommodate the furnishings. ' +
+      profileParts.join(' ');
   }
 
   if (furnishingsDNA) {

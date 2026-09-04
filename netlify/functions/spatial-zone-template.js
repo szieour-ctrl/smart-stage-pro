@@ -67,6 +67,19 @@
 // uses a regex for this substitution instead of an exact string match, so future wording
 // tweaks to the surrounding text won't silently break the substitution again.
 //
+// v6.3.7 (Sep 2026): same "sameness" root cause, different symptom — artwork and
+// decorative props (books, trays, vases, sculptural objects) had zero seeded
+// vocabulary anywhere in the template, so GPT Image 2 had nothing to vary from and
+// defaulted to the same generic wall art / accessories every time. Fix, additive
+// only: added `artwork` and `props` arrays (3 options each) to all 12
+// STYLE_FURNITURE_VOCABULARY entries, and a new pickArtworkAndProps() picker —
+// seeded on style + projectId + roomName, same pattern as pickGreenery(), so
+// artwork/props vary room-to-room within a project (not the same piece staged in
+// every room) while staying deterministic/reproducible per room. Wired into
+// buildDesignDnaVariable() as two more "direction" lines alongside the existing
+// furniture ones; the "design vocabulary, not a literal catalog" framing now
+// explicitly covers artwork/accessories too. No other section changed.
+//
 // v6.3.6 (Sep 2026): style-variety fix, Design DNA layer only — nothing above this note
 // changed. Prospect feedback showed staged renders reading as too similar in styling and
 // furniture within a style. Root cause: STYLE_FURNITURE_VOCABULARY only had a populated
@@ -292,6 +305,16 @@ const STYLE_FURNITURE_VOCABULARY = {
     ],
     woodTone: ['warm white oak', 'natural walnut', 'bleached ash'],
     metalFinish: ['brushed brass', 'matte black', 'warm bronze'],
+    artwork: [
+      'an abstract textured canvas in warm neutral tones',
+      'a large-scale organic-form print in a simple wood frame',
+      'a set of two small abstract earth-tone canvases grouped together',
+    ],
+    props: [
+      'a stack of art books topped with a hand-thrown ceramic object on the coffee table',
+      'a ceramic bowl and a woven-texture tray grouped on the console',
+      'a small collection of organic-form ceramic vessels on a shelf',
+    ],
     greenery: {
       small:  ['a small potted snake plant on a side table', 'a trailing pothos in a ceramic pot on a shelf'],
       medium: ['a mid-height fiddle leaf fig in a woven basket', 'olive branch stems in a ceramic vessel on the console'],
@@ -327,8 +350,17 @@ const STYLE_FURNITURE_VOCABULARY = {
     ],
     woodTone: ['medium walnut', 'warm oak', 'dark espresso'],
     metalFinish: ['aged brass', 'polished nickel', 'dark bronze'],
+    artwork: [
+      'a framed abstract print in muted tones with a classic wood or metal frame',
+      'a botanical or landscape print in a refined frame',
+      'a pair of matching framed prints hung symmetrically',
+    ],
+    props: [
+      'a stack of hardcover books with a small decorative object on the coffee table',
+      'a ceramic or glass vase with simple stems on the console',
+      'a decorative tray with a candle and small object grouped together',
+    ],
     greenery: {
-      small: ['a compact leafy plant in a classic ceramic pot'],
       medium: ['a ficus or olive-style plant in a tailored planter'],
       large: ['a tall indoor tree in a simple architectural planter'],
     },
@@ -362,6 +394,16 @@ const STYLE_FURNITURE_VOCABULARY = {
     ],
     woodTone: ['natural oak', 'smoked oak', 'dark walnut'],
     metalFinish: ['matte black', 'brushed nickel', 'soft brass'],
+    artwork: [
+      'a large-scale abstract canvas in a bold but restrained palette',
+      'a graphic black-and-white photographic print in a slim frame',
+      'an architectural line-art print in a minimal frame',
+    ],
+    props: [
+      'a sculptural ceramic object on the coffee table',
+      'a stack of design books with a geometric sculptural accent',
+      'a simple glass or ceramic vessel with minimal stems',
+    ],
     greenery: {
       small: ['a simple architectural plant in a minimal pot'],
       medium: ['a restrained indoor tree in a clean cylindrical planter'],
@@ -397,6 +439,16 @@ const STYLE_FURNITURE_VOCABULARY = {
     ],
     woodTone: ['dark walnut', 'smoked oak', 'rich medium oak'],
     metalFinish: ['brushed brass', 'blackened bronze', 'polished nickel'],
+    artwork: [
+      'a large abstract canvas with metallic or tonal depth in a substantial frame',
+      'a striking oversized art piece with rich color and texture',
+      'a pair of large-scale abstract prints in premium frames',
+    ],
+    props: [
+      'a stack of coffee-table art books topped with a polished stone or metal sculptural object',
+      'a crystal or polished-stone bowl on the console',
+      'a refined sculptural object paired with a textured vase',
+    ],
     greenery: {
       small: ['a restrained luxury greenery arrangement in a stone or ceramic vessel'],
       medium: ['a mature indoor tree in a refined architectural planter'],
@@ -432,6 +484,16 @@ const STYLE_FURNITURE_VOCABULARY = {
     ],
     woodTone: ['light natural oak', 'medium warm oak', 'smoked ash'],
     metalFinish: ['matte black', 'dark bronze', 'restrained brushed metal'],
+    artwork: [
+      'a single restrained ink-wash or abstract print in a simple wood frame',
+      'a small textile or fiber-art piece in muted natural tones',
+      'a minimal botanical line print in a thin wood frame',
+    ],
+    props: [
+      'a single ceramic vessel with a bare branch on the console',
+      'a small stack of linen-bound books with one quiet object',
+      'a simple stoneware bowl or tray, left mostly empty for negative space',
+    ],
     greenery: {
       small: ['a restrained branch arrangement in a simple ceramic vessel'],
       medium: ['a sculptural green plant in a minimal natural-material planter'],
@@ -467,6 +529,16 @@ const STYLE_FURNITURE_VOCABULARY = {
     ],
     woodTone: ['white oak', 'washed oak', 'natural ash'],
     metalFinish: ['soft brass', 'matte black', 'brushed nickel'],
+    artwork: [
+      'a loose abstract print in soft ocean-inspired tones',
+      'a textured woven wall hanging',
+      'a simple framed botanical or horizon-line print',
+    ],
+    props: [
+      'a woven basket with a stack of linen throws nearby',
+      'a ceramic or glass vessel with dried grasses on the console',
+      'a stack of books with a piece of driftwood-inspired sculptural object',
+    ],
     greenery: {
       small: ['a small leafy plant in a light ceramic pot'],
       medium: ['a casual olive-style plant in a woven or ceramic planter'],
@@ -502,6 +574,16 @@ const STYLE_FURNITURE_VOCABULARY = {
     ],
     woodTone: ['walnut', 'teak-inspired medium wood', 'warm oak'],
     metalFinish: ['aged brass', 'matte black', 'brushed steel'],
+    artwork: [
+      'a bold graphic abstract print in a slim walnut frame',
+      'a period-inspired geometric print',
+      'a starburst or sculptural wall object as an accent piece',
+    ],
+    props: [
+      'a stack of vintage-inspired books with a ceramic sculptural object',
+      'a walnut bowl or tray with a simple sculptural accent',
+      'a ceramic vessel with sculptural dried branches',
+    ],
     greenery: {
       small: ['a compact architectural plant in a simple ceramic pot'],
       medium: ['a rubber plant or similar upright green in a period-appropriate planter'],
@@ -537,6 +619,16 @@ const STYLE_FURNITURE_VOCABULARY = {
     ],
     woodTone: ['pale oak', 'natural ash', 'light birch'],
     metalFinish: ['matte black', 'brushed steel', 'soft brass'],
+    artwork: [
+      'a simple abstract print in soft muted tones with a light wood frame',
+      'a minimal line-art print',
+      'a pair of small matching prints in light frames',
+    ],
+    props: [
+      'a simple ceramic vase with a single stem on the console',
+      'a stack of light-toned books with one small object',
+      'a woven basket or tray kept simple and uncluttered',
+    ],
     greenery: {
       small: ['a small leafy plant in a simple white or stoneware pot'],
       medium: ['a restrained green plant in a pale ceramic planter'],
@@ -572,6 +664,16 @@ const STYLE_FURNITURE_VOCABULARY = {
     ],
     woodTone: ['warm oak', 'aged walnut', 'medium natural wood'],
     metalFinish: ['aged brass', 'dark bronze', 'blackened iron'],
+    artwork: [
+      'a warm abstract print with earthy tones in a simple wood frame',
+      'a textured woven or macrame wall hanging',
+      'a landscape or coastal-inspired print with warm tones',
+    ],
+    props: [
+      'a terracotta or stone vessel with dried branches on the console',
+      'a stack of books with a hand-thrown ceramic object',
+      'a woven tray with a simple decorative bowl',
+    ],
     greenery: {
       small: ['an olive branch arrangement in a rustic-refined ceramic vessel'],
       medium: ['an olive-style tree in a textured planter'],
@@ -607,6 +709,16 @@ const STYLE_FURNITURE_VOCABULARY = {
     ],
     woodTone: ['natural oak', 'warm medium wood', 'weathered-look oak without distressing'],
     metalFinish: ['matte black', 'aged brass', 'dark bronze'],
+    artwork: [
+      'a simple framed botanical or landscape print',
+      'a modern abstract print with a clean simple frame',
+      'a set of small matching prints grouped together',
+    ],
+    props: [
+      'a stack of books with a simple ceramic or galvanized-metal object',
+      'a woven basket or wood tray on the coffee table',
+      'a simple ceramic pitcher or vessel with stems on the console',
+    ],
     greenery: {
       small: ['a simple potted herb or leafy plant in a ceramic vessel'],
       medium: ['a leafy indoor plant in a woven or ceramic planter'],
@@ -642,6 +754,16 @@ const STYLE_FURNITURE_VOCABULARY = {
     ],
     woodTone: ['medium walnut', 'mahogany-toned wood', 'warm dark oak'],
     metalFinish: ['aged brass', 'polished nickel', 'dark bronze'],
+    artwork: [
+      'a classic framed landscape or still-life print',
+      'a refined abstract print in a traditional wood frame',
+      'a pair of matching framed prints hung symmetrically above the sofa',
+    ],
+    props: [
+      'a stack of leather-bound books with a small brass or porcelain object',
+      'a crystal or porcelain vase with simple stems on the console',
+      'a decorative tray with a candle and a small refined object',
+    ],
     greenery: {
       small: ['a classic leafy plant or floral-greenery arrangement in a refined vessel'],
       medium: ['a formal indoor plant in a classic ceramic planter'],
@@ -677,6 +799,16 @@ const STYLE_FURNITURE_VOCABULARY = {
     ],
     woodTone: ['dark walnut', 'ebonized wood', 'rich medium walnut'],
     metalFinish: ['brushed brass', 'polished nickel', 'blackened metal'],
+    artwork: [
+      'a bold geometric abstract print in a polished metal frame',
+      'a striking Deco-inspired graphic print with elegant contrast',
+      'a mirrored or metallic-accented wall art piece',
+    ],
+    props: [
+      'a polished metal or mirrored tray with a sculptural object',
+      'a stack of books with a lacquered or glass sculptural accent',
+      'a crystal or glass vessel with a bold sculptural stem arrangement',
+    ],
     greenery: {
       small: ['a sculptural leaf arrangement in a geometric vessel'],
       medium: ['an architectural plant in a refined metallic or ceramic planter'],
@@ -735,6 +867,14 @@ function pickGreenery(styleLabel, projectSeedStr, roomName) {
   return options[Math.floor(rand() * options.length)];
 }
 
+function pickArtworkAndProps(styleLabel, projectSeedStr, roomName) {
+  const pool = STYLE_FURNITURE_VOCABULARY[styleLabel];
+  if (!pool || !pool.artwork || !pool.props) return null;
+  const rand = mulberry32(hashStringToSeed(styleLabel + '::' + (projectSeedStr || 'no-project') + '::' + (roomName || '') + '::artprops'));
+  const pick = (arr) => arr[Math.floor(rand() * arr.length)];
+  return { artwork: pick(pool.artwork), props: pick(pool.props) };
+}
+
 function buildRoomAssignmentVariable({ zoneList, flexNote, roomName, isOpenPlan, roomAssignmentText }) {
   // Vision-produced override (analyze-open-plan-zones.js) -- the rich,
   // per-zone anchor text validated this session (e.g. "Kitchen: Anchor:
@@ -766,6 +906,7 @@ function buildDesignDnaVariable({ style, palette, buyerProfile, desiredFeeling, 
   const profile = style ? pickFurnitureProfile(style, projectId) : null;
   if (profile) {
     const greenery = pickGreenery(style, projectId, roomName);
+    const artProps = pickArtworkAndProps(style, projectId, roomName);
     const profileParts = [
       'Sofa direction: ' + profile.sofa + '.',
       'Coffee-table direction: ' + profile.coffeeTable + '.',
@@ -777,9 +918,13 @@ function buildDesignDnaVariable({ style, palette, buyerProfile, desiredFeeling, 
       'Metal-finish direction: ' + profile.metalFinish + '.',
     ];
     if (greenery) profileParts.push('Greenery direction: ' + greenery + '.');
+    if (artProps) {
+      profileParts.push('Wall-art direction: ' + artProps.artwork + '.');
+      profileParts.push('Styling-accessories direction: ' + artProps.props + '.');
+    }
     dnaText += '\n\nSTYLE FURNISHINGS DNA FOR THIS PROJECT (use as a design vocabulary, not a literal furniture catalog): ' +
-      'Keep the selected style recognizable, but choose the exact furniture geometry, scale, upholstery, materials, and accessory mix that best fits this specific room and its circulation. ' +
-      'Variation within the style is encouraged. Do not alter permanent architecture or fixed finishes to accommodate the furnishings. ' +
+      'Keep the selected style recognizable, but choose the exact furniture geometry, scale, upholstery, materials, artwork, and accessory mix that best fits this specific room and its circulation. ' +
+      'Variation within the style is encouraged — wall art and styling accessories should differ from room to room, not repeat the same piece throughout the home. Do not alter permanent architecture or fixed finishes to accommodate the furnishings. ' +
       profileParts.join(' ');
   }
 
@@ -816,6 +961,7 @@ module.exports = {
   STYLE_FURNITURE_VOCABULARY,
   pickFurnitureProfile,
   pickGreenery,
+  pickArtworkAndProps,
   buildRoomAssignmentVariable,
   buildDesignDnaVariable,
   assembleSpatialZonePrompt,

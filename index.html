@@ -400,11 +400,11 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
       <div class="pm-room-name" id="pm-room-name">—</div>
       <div class="pm-section-label">Session Parameters</div>
       <div class="pm-meta" id="pm-meta"></div>
-      <div class="pm-section-label">Staging Prompt — Edit Before Approving</div>
+      <div class="pm-section-label">Room Read — Edit Before Approving</div>
       <div class="pm-prompt-wrap">
         <textarea class="pm-prompt" id="pm-prompt" rows="10" spellcheck="false"></textarea>
       </div>
-      <div class="pm-prompt-hint">✏️ <strong>Edit this prompt directly before staging.</strong> The Smart Stage engine analyzed your photo and built this prompt. You can add instructions, remove placement details, or change any element. What you see here is exactly what drives the staging output. Every word influences what gets placed and where. Use the <strong>Stage Without Prompt</strong> button to stage with no text guidance.</div>
+      <div class="pm-prompt-hint">✏️ <strong>Edit the room read directly before staging.</strong> This is what the Smart Stage engine detected in your photo — which zones it found and where it anchored them. Add instructions, fix a misread zone, or remove a placement detail; whatever you leave here is used exactly as written. Your style, palette, and compliance settings from earlier are applied automatically and aren't shown here. Use the <strong>Stage Without Prompt</strong> button to stage with no text guidance.</div>
       <div class="pm-warning" id="pm-open-plan-warning" style="display:none;">⚠ <strong>Open Plan detected.</strong> The Smart Stage engine read this as a multi-zone space. Watch for zone crowding — if the prompt places dining furniture AND living furniture in the same area, delete the placement instructions and keep only style/material descriptions. The engine's native open-plan logic handles zone separation better than text instructions.</div>
       <div class="pm-section-label" style="margin-top:18px;">Staging Engine Payload</div>
       <pre id="pm-api-payload" style="background:#1a1a1a;color:#e8e8e8;padding:14px;border-radius:3px;font-size:0.74rem;line-height:1.6;overflow-x:auto;white-space:pre-wrap;word-break:break-word;margin:0;"></pre>
@@ -447,7 +447,6 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
 </div>
 
 <!-- DEBUG MODAL (separate from #lightbox so the Shot Focus lightbox skeleton is never overwritten) -->
-<div id="debug-modal" class="hidden" style="position:fixed;inset:0;background:rgba(10,8,6,0.92);z-index:9000;display:flex;align-items:center;justify-content:center;padding:20px;"></div>
 
 <div id="app-container" class="hidden">
 <div class="app">
@@ -3253,8 +3252,7 @@ function renderRoomQueue(){
       const downloads=isDone&&room.stagedBase64?`
         <button class="btn btn-outline btn-sm" onclick="downloadOriginal('${room.id}')">↓ Original</button>
         <button class="btn btn-outline btn-sm" onclick="downloadWatermarked('${room.id}','data:image/jpeg;base64,'+getRoomB64('${room.id}','draft'),'DRAFT_'+bName(getOrigName('${room.id}'))+'.jpg','CLEANED + STAGED · DRAFT')">↓ Draft</button>
-        <button class="btn btn-outline btn-sm" onclick="downloadSideBySide('${room.id}',null,'cns')">↓ Side-by-Side</button>${presetActions}
-        <button class="btn btn-ghost btn-sm" onclick="showDecor8Payload('${room.id}')">{ } API Payload</button>`:'';
+        <button class="btn btn-outline btn-sm" onclick="downloadSideBySide('${room.id}',null,'cns')">↓ Side-by-Side</button>${presetActions}`:'';
       // resultHtml: staged image now opens the Refine lightbox (revise tab) on
       // click, and — when a preset has been applied — a third tile shows the
       // preset result, opening the lightbox on the presets tab. Same pattern
@@ -3334,8 +3332,7 @@ function renderRoomQueue(){
         <button class="btn btn-outline btn-sm" onclick="downloadOriginal('${room.id}')">↓ Original</button>
         <button class="btn btn-outline btn-sm" onclick="downloadWatermarked('${room.id}','data:image/jpeg;base64,'+getRoomB64('${room.id}','draft'),'DRAFT_'+bName(getOrigName('${room.id}'))+'.jpg','VIRTUALLY STAGED · DRAFT')">↓ Draft</button>
         <button class="btn btn-outline btn-sm" onclick="downloadSideBySide('${room.id}',null,'draft')">↓ Side-by-Side</button>${presetActions}
-        ${!isAnchor?`<button class="btn btn-ghost btn-sm" onclick="resetRoom('${room.id}')">Re-Stage</button>`:''}
-        <button class="btn btn-ghost btn-sm" onclick="showDecor8Payload('${room.id}')" title="Show exact JSON sent to Decor8 API">{ } API Payload</button>`;
+        ${!isAnchor?`<button class="btn btn-ghost btn-sm" onclick="resetRoom('${room.id}')">Re-Stage</button>`:''}`;
       }
       return '';
     })();
@@ -5382,6 +5379,25 @@ function downscaleForStagingInput(base64, maxLongEdge) {
   });
 }
 
+// Shared revision-prompt wrapper text — same fixed instructions used by
+// iterateRoom(), reStageRoom(), and iterateDeclutter() around the user's own
+// note. Centralized here (previously duplicated 2x) so the visible/hidden
+// split used by the prompt-review modal can't drift from what's actually sent.
+const REVISION_WRAP = {
+  stagedPhoto: {
+    before: 'PRIMARY ROLE: Edit this already-staged photo. Make ONLY the change(s) described below — everything else in the photo (furniture, decor, architecture, lighting, camera angle) must remain exactly as shown.\n\nREQUESTED CHANGE:\n',
+    after: 'Do not re-stage, restyle, or regenerate the room. Do not alter anything not explicitly mentioned above. Preserve all architectural elements exactly as photographed — this image is for MLS listing per California AB 723 §10140.6.',
+  },
+  declutteredPhoto: {
+    before: 'PRIMARY ROLE: Edit this already-decluttered photo. Make ONLY the change(s) described below — everything else (the furniture-free state, architecture, lighting, camera angle) must remain exactly as shown.\n\nREQUESTED CHANGE:\n',
+    after: 'Do not re-declutter or reprocess the whole room. Do not alter anything not explicitly mentioned above. Never invent a shower door, glass enclosure, or panel that wasn\'t in the original photo. Closet hanging rods must match the original count and position exactly. Bathroom vanity cabinetry (upper and lower) must be fully preserved. Windows must stay the exact original size and position — never resize, shift, or convert a window into a door or opening. If a bed is involved, remember it means the ENTIRE bed (frame, headboard, footboard, slats) — not just bedding, and a stripped frame left standing is not a complete removal. This image is prepared per California AB 723 §10140.6 for virtual staging.',
+  },
+};
+function buildRevisionPrompt(kind, note) {
+  const w = REVISION_WRAP[kind];
+  return { before: w.before, after: w.after, visible: note, full: w.before + note + '\n\n' + w.after };
+}
+
 async function iterateRoom(roomId) {
   const note = document.getElementById('iter-' + roomId)?.value?.trim() || '';
   if (!note) { showToast('Enter revision instructions first.', 'error'); return; }
@@ -5400,11 +5416,15 @@ async function iterateRoom(roomId) {
   // Edit-only instruction when a prior staged result exists: GPT2 is looking at the
   // already-staged photo, not the empty room, so it only needs the specific change —
   // not the full original staging prompt (style/palette/zone rules/etc) repeated.
+  const revParts = hasPriorStaged ? buildRevisionPrompt('stagedPhoto', note) : null;
   const revisionPrompt = hasPriorStaged
-    ? 'PRIMARY ROLE: Edit this already-staged photo. Make ONLY the change(s) described below — everything else in the photo (furniture, decor, architecture, lighting, camera angle) must remain exactly as shown.\n\n' +
-      'REQUESTED CHANGE:\n' + note + '\n\n' +
-      'Do not re-stage, restyle, or regenerate the room. Do not alter anything not explicitly mentioned above. Preserve all architectural elements exactly as photographed — this image is for MLS listing per California AB 723 §10140.6.'
+    ? revParts.full
     : room.lastPrompt + '\n\nREVISION — Apply these changes to the staging above. Everything not mentioned stays exactly the same:\n' + note;
+  // What the prompt-review modal shows/hides — always just the note, never
+  // the fixed wrapper or (in the no-prior-staged fallback) the full prior prompt.
+  const revHiddenParts = hasPriorStaged
+    ? { before: revParts.before, after: revParts.after, visible: note }
+    : { before: room.lastPrompt + '\n\nREVISION — Apply these changes to the staging above. Everything not mentioned stays exactly the same:\n', after: '', visible: note };
 
   room.status = 'processing';
   room.promptStatus = 'Re-staging with revision...';
@@ -5418,7 +5438,7 @@ async function iterateRoom(roomId) {
     room.status = 'prompt-review';
     room.promptStatus = '✏️ Review revised prompt before staging...';
     renderRoomQueue();
-    const approvedPrompt = await showPromptModal(room, revisionPrompt);
+    const approvedPrompt = await showPromptModal(room, revisionPrompt, revHiddenParts);
     if (approvedPrompt === null) {
       room.status = 'done'; // Return to done state, not pending
       room.promptStatus = null;
@@ -5485,11 +5505,13 @@ async function reStageRoom(roomId) {
   // room, so it only needs the specific change — not the full original staging prompt
   // (style/palette/zone rules/etc) repeated. Falls back to the old append-to-full-prompt
   // approach if no prior staged image is available for some reason (e.g. legacy state).
+  const revParts = hasPriorStaged ? buildRevisionPrompt('stagedPhoto', note) : null;
   const revisionPrompt = hasPriorStaged
-    ? 'PRIMARY ROLE: Edit this already-staged photo. Make ONLY the change(s) described below — everything else in the photo (furniture, decor, architecture, lighting, camera angle) must remain exactly as shown.\n\n' +
-      'REQUESTED CHANGE:\n' + note + '\n\n' +
-      'Do not re-stage, restyle, or regenerate the room. Do not alter anything not explicitly mentioned above. Preserve all architectural elements exactly as photographed — this image is for MLS listing per California AB 723 §10140.6.'
+    ? revParts.full
     : room.lastPrompt + '\n\nREVISION — Apply these changes to the staging above. Everything not mentioned stays exactly the same:\n' + note;
+  const revHiddenParts = hasPriorStaged
+    ? { before: revParts.before, after: revParts.after, visible: note }
+    : { before: room.lastPrompt + '\n\nREVISION — Apply these changes to the staging above. Everything not mentioned stays exactly the same:\n', after: '', visible: note };
 
   room.status = 'processing';
   room.promptStatus = 'Re-staging with revision...';
@@ -5503,7 +5525,7 @@ async function reStageRoom(roomId) {
     room.status = 'prompt-review';
     room.promptStatus = '✏️ Review revised prompt before staging...';
     renderRoomQueue();
-    const approvedPrompt = await showPromptModal(room, revisionPrompt);
+    const approvedPrompt = await showPromptModal(room, revisionPrompt, revHiddenParts);
     if (approvedPrompt === null) {
       room.status = 'done';
       room.promptStatus = null;
@@ -6079,17 +6101,15 @@ async function iterateDeclutter(roomId) {
 
   const priorCleanBase64 = room.declutteredCleanBase64;
 
-  const revisionPrompt =
-    'PRIMARY ROLE: Edit this already-decluttered photo. Make ONLY the change(s) described below — everything else (the furniture-free state, architecture, lighting, camera angle) must remain exactly as shown.\n\n' +
-    'REQUESTED CHANGE:\n' + note + '\n\n' +
-    'Do not re-declutter or reprocess the whole room. Do not alter anything not explicitly mentioned above. Never invent a shower door, glass enclosure, or panel that wasn\'t in the original photo. Closet hanging rods must match the original count and position exactly. Bathroom vanity cabinetry (upper and lower) must be fully preserved. Windows must stay the exact original size and position — never resize, shift, or convert a window into a door or opening. If a bed is involved, remember it means the ENTIRE bed (frame, headboard, footboard, slats) — not just bedding, and a stripped frame left standing is not a complete removal. This image is prepared per California AB 723 §10140.6 for virtual staging.';
+  const revParts = buildRevisionPrompt('declutteredPhoto', note);
+  const revisionPrompt = revParts.full;
 
   room.status = 'prompt-review';
   room.promptStatus = '✏️ Review revision prompt before re-decluttering...';
   renderRoomQueue();
 
   try {
-    const approvedPrompt = await showPromptModal(room, revisionPrompt);
+    const approvedPrompt = await showPromptModal(room, revisionPrompt, { before: revParts.before, after: revParts.after, visible: note });
     if (approvedPrompt === null) {
       room.status = 'done'; room.promptStatus = null; renderRoomQueue();
       showToast('Revision cancelled.', '');
@@ -6530,78 +6550,6 @@ async function downloadSideBySide(roomId, enhId, tier) {
 function triggerDownload(dataUrl,filename){const a=document.createElement('a');a.href=dataUrl;a.download=filename;a.click();}
 
 // ══════════════════════════════════════════
-// DECOR8 API PAYLOAD DEBUGGER
-// ══════════════════════════════════════════
-let _debugPayloadText = ''; // stored for copy button
-
-function showDecor8Payload(roomId) {
-  const room = SESSION.rooms.find(r => r.id === roomId);
-  if (!room) return;
-  const payload = room.lastDecor8Payload;
-  const prompt = room.lastPrompt;
-
-  // Build display strings safely — no inline JSON in onclick
-  const payloadText = payload ? JSON.stringify(payload, null, 2) : null;
-  _debugPayloadText = payloadText || '';
-
-  const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-
-  // Selected zones banner — shown for Open Plan rooms so the user knows which rooms/zones to look for in the prompt below
-  const zoneBannerHtml = room.isOpenPlan && (room.zoneList||[]).length
-    ? `<div style="background:var(--warm);border:1px solid var(--gold);border-radius:5px;padding:10px 14px;margin-bottom:16px;">
-         <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.06em;color:var(--muted);margin-bottom:4px;">Selected Rooms / Zones for This Image</div>
-         <div style="font-size:0.88rem;color:var(--ink);font-weight:600;">${esc(room.zoneList.map(z=>{
-           const zo=OPEN_PLAN_ZONES.find(o=>o.key===z);
-           const label=zo?.label||z;
-           return z==='flex'&&room.flexNote ? label+' ('+room.flexNote+')' : label;
-         }).join('  +  '))}</div>
-       </div>`
-    : '';
-
-  const payloadHtml = payloadText
-    ? `<div style="color:#666;margin-bottom:4px;font-size:0.7rem;">Staging engine parameters:</div>
-       <pre style="color:#e8e8e8;margin:0;white-space:pre-wrap;word-break:break-word;">${esc(payloadText)}</pre>`
-    : `<div style="color:#aaa;">Payload not captured — re-stage this room to see the payload.</div>`;
-
-  const promptHtml = prompt
-    ? `<div style="font-weight:700;margin-top:20px;margin-bottom:6px;font-size:0.82rem;color:#ccc;border-top:1px solid #333;padding-top:16px;">Custom Prompt (sent to staging engine)</div>
-       <pre style="color:#d4d4d4;margin:0;white-space:pre-wrap;word-break:break-word;font-size:0.74rem;">${esc(prompt)}</pre>`
-    : '';
-
-  const lb = document.getElementById('debug-modal');
-  lb.innerHTML = `
-    <div style="background:#fff;max-width:900px;width:100%;max-height:90vh;display:flex;flex-direction:column;border-radius:6px;overflow:hidden;">
-      <div style="background:var(--ink);padding:16px 24px;display:flex;justify-content:space-between;align-items:center;flex-shrink:0;">
-        <div style="font-family:'Cormorant Garamond',serif;font-size:1.1rem;color:var(--gold);">Decor8 API Debug — ${room.roomName}</div>
-        <button onclick="closeDebugModal()" style="background:none;border:none;font-size:1.2rem;cursor:pointer;color:#888;">✕</button>
-      </div>
-      <div style="overflow-y:auto;flex:1;padding:20px 24px;background:#1a1a1a;">
-        ${zoneBannerHtml}
-        ${payloadHtml}
-        ${promptHtml}
-      </div>
-      <div style="padding:12px 24px;border-top:1px solid #eee;display:flex;gap:8px;background:#fff;flex-shrink:0;">
-        <button class="btn btn-outline btn-sm" onclick="copyDebugPayload()">Copy JSON</button>
-        <button class="btn btn-ghost btn-sm" onclick="closeDebugModal()">Close</button>
-      </div>
-    </div>`;
-  lb.classList.remove('hidden');
-}
-function closeDebugModal(){
-  const m=document.getElementById('debug-modal');
-  m.classList.add('hidden');
-  m.innerHTML='';
-}
-document.getElementById('debug-modal').addEventListener('click',e=>{if(e.target===document.getElementById('debug-modal'))closeDebugModal();});
-
-function copyDebugPayload() {
-  if (!_debugPayloadText) { showToast('No payload to copy', ''); return; }
-  navigator.clipboard.writeText(_debugPayloadText)
-    .then(() => showToast('Payload copied to clipboard', 'success'))
-    .catch(() => showToast('Copy failed — try selecting text manually', ''));
-}
-
-// ══════════════════════════════════════════
 // OPEN PLAN DERIVED ROOM ROUTING
 // ══════════════════════════════════════════
 // Rooms that inherit Living Zone DNA from the staged Open Plan anchor image
@@ -7013,8 +6961,34 @@ async function stageRoomWithPrompt(roomId, promptText) {
 // PROMPT PREVIEW MODAL
 // ══════════════════════════════════════════
 let _promptModalResolve = null;
+let _pmPromptSplit = null; // {isSplit, before, after} for the currently open modal — see splitStagingVisiblePrompt()
 
-function showPromptModal(room, prompt) {
+// Splits an assembled staging prompt into the hidden algorithm boilerplate
+// (immutability lock, fixture rules, RPIV, style/palette DNA, AB-723 output
+// requirements) and the one section worth showing/editing: the Vision room
+// read + user zone selections. Only the SPATIAL_ZONE_TEMPLATE-based staging
+// prompts contain these two markers — revision/declutter/correction prompts
+// don't, so they fall through to isSplit:false and render exactly as before.
+function splitStagingVisiblePrompt(fullPrompt) {
+  const startMarker = 'ROOMS AND ZONES TO STAGE — USER SELECTIONS';
+  const endMarker = 'MANDATORY ZONE COVERAGE — NO SILENT OMISSIONS';
+  const src = fullPrompt || '';
+  const startIdx = src.indexOf(startMarker);
+  const endIdx = src.indexOf(endMarker);
+  if (startIdx === -1 || endIdx === -1 || endIdx <= startIdx) {
+    return { isSplit: false, before: '', after: '', visible: src };
+  }
+  const before = src.slice(0, startIdx);
+  const after = src.slice(endIdx);
+  // Cosmetic only: puts the zone list on its own lines under "Find and
+  // stage:" instead of run-on the same line. Reconstruction below splices
+  // whatever text is in the box back in verbatim, so this doesn't change
+  // what the model actually receives.
+  const visible = src.slice(startIdx, endIdx).replace(/\s+$/, '').replace('Find and stage: ', 'Find and stage: \n\n');
+  return { isSplit: true, before, after, visible };
+}
+
+function showPromptModal(room, prompt, hiddenParts) {
   return new Promise((resolve) => {
     _promptModalResolve = resolve;
     const i = SESSION.intake;
@@ -7039,8 +7013,17 @@ function showPromptModal(room, prompt) {
       .map(m => `<div class="pm-meta-chip"><strong>${m.label}:</strong> ${m.val || '—'}</div>`)
       .join('');
 
-    // Prompt textarea
-    document.getElementById('pm-prompt').value = prompt;
+    // Prompt textarea — show only the part worth reviewing (Vision room read
+    // + zone selections for a staging prompt, or just the note for a
+    // revision) and keep the rest of the assembled text hidden, stitched
+    // back around whatever's left in the box on Approve. Callers that already
+    // know their own before/note/after split (revisions) pass hiddenParts
+    // directly; everything else auto-detects via splitStagingVisiblePrompt().
+    const split = hiddenParts
+      ? { isSplit: true, before: hiddenParts.before || '', after: hiddenParts.after || '', visible: hiddenParts.visible || '' }
+      : splitStagingVisiblePrompt(prompt);
+    _pmPromptSplit = split;
+    document.getElementById('pm-prompt').value = split.isSplit ? split.visible : (prompt || '');
 
     // Open Plan warning
     const warn = document.getElementById('pm-open-plan-warning');
@@ -7085,7 +7068,14 @@ function showPromptModal(room, prompt) {
 }
 
 function approvePromptAndStage() {
-  const edited = document.getElementById('pm-prompt').value.trim();
+  const box = document.getElementById('pm-prompt').value.trim();
+  // Reassemble: hidden algorithm text (before/after) + whatever the user
+  // left in the visible room-read box. Falls back to the raw box contents
+  // for prompt types that weren't split (revision/declutter/correction).
+  const edited = (_pmPromptSplit && _pmPromptSplit.isSplit)
+    ? (_pmPromptSplit.before + box + '\n\n' + _pmPromptSplit.after).trim()
+    : box;
+  _pmPromptSplit = null;
   document.getElementById('prompt-modal').classList.add('hidden');
   if (_promptModalResolve) { _promptModalResolve(edited || ''); _promptModalResolve = null; }
 }
@@ -7108,12 +7098,14 @@ function clearPromptAndStage() {
     } catch(e) {}
   }
   document.getElementById('prompt-modal').classList.add('hidden');
+  _pmPromptSplit = null;
   if (_promptModalResolve) { _promptModalResolve(''); _promptModalResolve = null; }
   showToast('Staging with no custom prompt — engine default style only.', '');
 }
 
 function cancelPromptModal() {
   document.getElementById('prompt-modal').classList.add('hidden');
+  _pmPromptSplit = null;
   if (_promptModalResolve) { _promptModalResolve(null); _promptModalResolve = null; }
 }
 

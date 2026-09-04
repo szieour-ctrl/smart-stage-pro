@@ -1,5 +1,36 @@
 const https = require("https");
 const sharp = require("sharp");
+const heicConvert = require("heic-convert");
+
+// ── HEIC DETECTION + CONVERSION (added this session) ────────────────────────
+// Neither Claude's vision API (analyze-floorplan) nor OpenAI's
+// /v1/images/edits endpoint (staging) accepts HEIC — both need
+// JPEG/PNG/WebP. iPhones default to shooting HEIC, so any photo an agent
+// uploads straight from Photos can arrive here as HEIC.
+//
+// Detection can't rely on mimeType alone: Safari/iOS sometimes sends an
+// empty or generic mimeType (e.g. "application/octet-stream") for HEIC
+// files instead of "image/heic". So this checks the actual file bytes
+// (the ISO-BMFF "ftyp" box + brand) as a fallback, not just the reported
+// mimeType.
+//
+// heic-convert is pure JS (no native binary/libheif dependency), which
+// matters in a Netlify Functions environment where sharp's own HEIC
+// support usually isn't compiled in.
+function isHeic(buffer, mimeType) {
+  if (mimeType && /^image\/(heic|heif)/i.test(mimeType)) return true;
+  if (!buffer || buffer.length < 12) return false;
+  if (buffer.toString("ascii", 4, 8) !== "ftyp") return false;
+  const brand = buffer.toString("ascii", 8, 12).toLowerCase();
+  return ["heic", "heix", "hevc", "hevx", "heim", "heis", "hevm", "hevs", "mif1", "msf1"].includes(brand);
+}
+
+async function convertHeicIfNeeded(buffer, mimeType) {
+  if (!isHeic(buffer, mimeType)) return { buffer, mimeType: mimeType || "image/jpeg", converted: false };
+  console.log("stage-image: HEIC input detected, converting to JPEG before sending to any AI model");
+  const jpegBuffer = await heicConvert({ buffer, format: "JPEG", quality: 0.92 });
+  return { buffer: Buffer.from(jpegBuffer), mimeType: "image/jpeg", converted: true };
+}
 
 // ── Shared HTTPS helper ──────────────────────────────────────────────────────
 function httpsRequest(options, body) {
@@ -155,7 +186,12 @@ exports.handler = async (event) => {
     if (action === "analyze-floorplan") {
       if (!claudeKey) return { statusCode: 500, headers, body: JSON.stringify({ error: "ANTHROPIC_API_KEY not configured" }) };
       const { imageBase64, mimeType } = body;
-      const result = await analyzeFloorplan(imageBase64, mimeType, claudeKey);
+
+      const rawBuffer = Buffer.from(imageBase64, "base64");
+      const { buffer: floorplanBuffer, mimeType: floorplanMime } = await convertHeicIfNeeded(rawBuffer, mimeType);
+      const floorplanBase64 = floorplanBuffer.toString("base64");
+
+      const result = await analyzeFloorplan(floorplanBase64, floorplanMime, claudeKey);
       return { statusCode: 200, headers, body: JSON.stringify(result) };
     }
 
@@ -165,8 +201,9 @@ exports.handler = async (event) => {
     const { imageBase64, mimeType, stagingPrompt, quality } = body;
     if (!imageBase64 || !stagingPrompt) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing imageBase64 or stagingPrompt" }) };
 
-    const imageBuffer = Buffer.from(imageBase64, "base64");
-    const imageMime = mimeType || "image/jpeg";
+    const rawImageBuffer = Buffer.from(imageBase64, "base64");
+    const { buffer: imageBuffer, mimeType: imageMime } = await convertHeicIfNeeded(rawImageBuffer, mimeType);
+
     const outputSize = await pickOutputSize(imageBuffer);
     console.log(`stage-image: requesting OpenAI output size ${outputSize} to match input aspect ratio`);
     const boundary = "----FormBoundary" + Math.random().toString(36).slice(2);

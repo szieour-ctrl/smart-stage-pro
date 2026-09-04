@@ -2423,8 +2423,12 @@ async function finishIntake(){
 function showMappingAnalyzing(){document.getElementById('mapping-body').innerHTML=`<div class="fp-analyzing"><span class="spinner"></span> Analyzing floor plan — identifying rooms and adjacencies...</div>`;}
 async function analyzeFloorplan(fp){
   try{
+    // Size guard — same gap as callDeclutterPromptAPI: a floor plan photo
+    // taken with a phone camera (rather than a builder-provided screenshot)
+    // could carry the same raw-payload risk. See compressImageForUpload().
+    const {base64:readyBase64,mimeType:readyMime}=await compressImageForUpload(fp.base64,fp.mimeType);
     const res=await fetch('/.netlify/functions/stage-image-start',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({action:'analyze-floorplan',imageBase64:fp.base64,mimeType:fp.mimeType})});
+      body:JSON.stringify({action:'analyze-floorplan',imageBase64:readyBase64,mimeType:readyMime})});
     const data=await res.json();
     if(!res.ok||!data.rooms)throw new Error(data.error||'No room data');
     SESSION.floorplanRoomMap=data;showMappingWithFloorplan(data.rooms);
@@ -3877,6 +3881,51 @@ function preCropTo3x2(base64, mimeType) {
   });
 }
 
+// Shared client-side size guard — protects against Netlify's ~6MB request
+// payload limit (base64 inflates raw bytes ~33%, so this caps the source
+// well under that ceiling before it ever leaves the browser).
+//
+// ADDED (this session — real bug, confirmed via a real 413 on a full-res
+// iPhone Photo Library HEIC image sent through Clean + Stage on mobile).
+// Extracted from callStageAPI's inline compression block below, which only
+// ever protected calls that went THROUGH callStageAPI. But Clean + Stage's
+// actual first network call is callDeclutterPromptAPI() (Sonnet reading the
+// room to build a declutter prompt) — that ran on the fully raw orig.base64
+// with zero compression, so a full-res photo (iPhone HEIC commonly runs
+// 3-8MB raw, more after base64 inflation) blew past the payload limit
+// before callStageAPI's own guard ever got a chance to run. Same gap
+// existed in analyzeOpenPlanZonesForRoom() and analyzeFloorplan() — all
+// three now call this same helper.
+async function compressImageForUpload(base64, mimeType, maxDim = 1536, maxKB = 1500) {
+  const rawSizeKB = Math.round((base64.length * 3) / 4 / 1024);
+  if (rawSizeKB <= maxKB) return { base64, mimeType };
+  try {
+    const img = new Image();
+    await new Promise((resolve, reject) => {
+      img.onload = resolve;
+      img.onerror = reject;
+      img.src = `data:${mimeType};base64,${base64}`;
+    });
+    let w = img.naturalWidth, h = img.naturalHeight;
+    if (Math.max(w, h) > maxDim) {
+      const scale = maxDim / Math.max(w, h);
+      w = Math.round(w * scale);
+      h = Math.round(h * scale);
+    }
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.88);
+    const compressedBase64 = dataUrl.split(',')[1];
+    const compressedKB = Math.round((compressedBase64.length * 3) / 4 / 1024);
+    console.log(`Client compress: ${rawSizeKB}KB → ${compressedKB}KB (${img.naturalWidth}x${img.naturalHeight} → ${w}x${h})`);
+    return { base64: compressedBase64, mimeType: 'image/jpeg' };
+  } catch (e) {
+    console.warn('Client compression failed, sending original:', e.message);
+    return { base64, mimeType };
+  }
+}
+
 async function callStageAPI(imageBase64, mimeType, prompt, quality) {
   // Pre-crop to 3:2 before anything else touches this image — see
   // preCropTo3x2() above for why. Every downstream step (compression,
@@ -3886,38 +3935,9 @@ async function callStageAPI(imageBase64, mimeType, prompt, quality) {
   imageBase64 = precropped.base64;
   mimeType = precropped.mimeType;
 
-  // Client-side compression — protects against oversized DSLR exterior photos
-  // Netlify function payload limit is ~6MB; base64 inflates ~33%, so cap source at ~3.5MB
-  let readyBase64 = imageBase64;
-  let readyMime = mimeType;
-  const rawSizeKB = Math.round((imageBase64.length * 3) / 4 / 1024);
-  if (rawSizeKB > 1500) {
-    try {
-      const img = new Image();
-      await new Promise((resolve, reject) => {
-        img.onload = resolve;
-        img.onerror = reject;
-        img.src = `data:${mimeType};base64,${imageBase64}`;
-      });
-      const maxDim = 1536;
-      let w = img.naturalWidth, h = img.naturalHeight;
-      if (Math.max(w, h) > maxDim) {
-        const scale = maxDim / Math.max(w, h);
-        w = Math.round(w * scale);
-        h = Math.round(h * scale);
-      }
-      const canvas = document.createElement('canvas');
-      canvas.width = w; canvas.height = h;
-      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.88);
-      readyBase64 = dataUrl.split(',')[1];
-      readyMime = 'image/jpeg';
-      const compressedKB = Math.round((readyBase64.length * 3) / 4 / 1024);
-      console.log(`Client compress: ${rawSizeKB}KB → ${compressedKB}KB (${img.naturalWidth}x${img.naturalHeight} → ${w}x${h})`);
-    } catch(e) {
-      console.warn('Client compression failed, sending original:', e.message);
-    }
-  }
+  // Client-side compression — protects against oversized DSLR exterior
+  // photos and full-res iPhone photos. See compressImageForUpload() above.
+  const { base64: readyBase64, mimeType: readyMime } = await compressImageForUpload(imageBase64, mimeType);
 
   // Step 1: Fire background job — returns jobId immediately
   const startRes = await fetch('/.netlify/functions/stage-openai', {
@@ -3973,10 +3993,15 @@ async function callStageAPI(imageBase64, mimeType, prompt, quality) {
 // check-declutter-prompt.js — same shape as check-openai, just a
 // different jobId prefix and Blobs store name on the backend.
 async function callDeclutterPromptAPI(imageBase64, mimeType) {
+  // Size guard — see compressImageForUpload() for why this has to run
+  // here too, not just inside callStageAPI. This IS the first network
+  // call in Clean + Stage (see runCleanAndStage), so without it here a
+  // full-res photo 413s before staging's own compression ever runs.
+  const { base64: readyBase64, mimeType: readyMime } = await compressImageForUpload(imageBase64, mimeType);
   const startRes = await fetch('/.netlify/functions/declutter-prompt', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ imageBase64, mimeType })
+    body: JSON.stringify({ imageBase64: readyBase64, mimeType: readyMime })
   });
   if (!startRes.ok) {
     const d = await startRes.json().catch(() => ({}));
@@ -4170,12 +4195,16 @@ async function analyzeOpenPlanZonesForRoom(room, orig) {
   if (room.roomAssignmentText) return room.roomAssignmentText; // cached
 
   try {
+    // Size guard — same gap as callDeclutterPromptAPI: this sent orig.base64
+    // completely raw, so it could 413 on a full-res photo before it ever
+    // reaches Vision. See compressImageForUpload() for the full context.
+    const { base64: readyBase64, mimeType: readyMime } = await compressImageForUpload(orig.base64, orig.mimeType);
     const res = await fetch('/.netlify/functions/analyze-open-plan-zones', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        imageBase64: orig.base64,
-        mimeType: orig.mimeType,
+        imageBase64: readyBase64,
+        mimeType: readyMime,
         // Aug 21 rebuild: analyze-open-plan-zones.js now resolves foreground
         // by elimination math (mergeRoomAssignment) instead of asking Vision
         // to reason about camera position -- it needs the user's actual

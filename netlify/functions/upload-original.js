@@ -30,10 +30,23 @@
 //   smart-stage-originals/{projectId}/{uuid}.{ext}
 // Existing objects already written under the old scheme are untouched —
 // this only affects new uploads going forward.
+//
+// HEIC HANDLING (added this session): the "original unaltered listing
+// photo" this file stores is meant to be viewable everywhere (QR code,
+// MLS disclosure links, agent's own browser) — but HEIC has no native
+// browser decoder outside Safari, and sharp's build here typically has
+// no libheif support, so resize()-based thumbnail generation below would
+// throw on real HEIC bytes. Converting to JPEG up front, before the
+// ext/contentType decision, fixes both that AND a separate mislabeling
+// bug: previously a HEIC upload would fall through the ext ternary to
+// ".jpg" while the actual stored bytes were still HEIC — this made the
+// S3 object's extension lie about its own contents. Uses heic-convert
+// (pure JS) rather than sharp, matching stage-image.js's approach.
 
 const crypto = require("crypto");
 const https = require("https");
 const sharp = require("sharp");
+const heicConvert = require("heic-convert");
 const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
 
 const s3 = new S3Client({
@@ -45,6 +58,26 @@ const s3 = new S3Client({
 });
 
 const THUMBNAIL_MAX_DIM = 400;
+
+// ── HEIC DETECTION + CONVERSION (see file header note) ──────────────────────
+// Same detection logic as stage-image.js: mimeType is checked first, but
+// iPhone/Safari uploads can arrive with an empty or generic mimeType, so
+// the actual file bytes (ISO-BMFF "ftyp" box + brand) are checked as a
+// fallback rather than trusting mimeType alone.
+function isHeic(buffer, mimeType) {
+  if (mimeType && /^image\/(heic|heif)/i.test(mimeType)) return true;
+  if (!buffer || buffer.length < 12) return false;
+  if (buffer.toString("ascii", 4, 8) !== "ftyp") return false;
+  const brand = buffer.toString("ascii", 8, 12).toLowerCase();
+  return ["heic", "heix", "hevc", "hevx", "heim", "heis", "hevm", "hevs", "mif1", "msf1"].includes(brand);
+}
+
+async function convertHeicIfNeeded(buffer, mimeType) {
+  if (!isHeic(buffer, mimeType)) return { buffer, mimeType: mimeType || "image/jpeg", converted: false };
+  console.log("upload-original: HEIC input detected, converting to JPEG before storing");
+  const jpegBuffer = await heicConvert({ buffer, format: "JPEG", quality: 0.92 });
+  return { buffer: Buffer.from(jpegBuffer), mimeType: "image/jpeg", converted: true };
+}
 
 // ── SUPABASE HELPER (same shape as project-manage.js's) ─────────────────────
 
@@ -220,9 +253,13 @@ exports.handler = async (event) => {
       body: JSON.stringify({ error: "S3_BUCKET_NAME or S3_REGION not configured" })
     };
 
-    const contentType = mimeType || "image/jpeg";
+    // HEIC conversion happens FIRST, before contentType/ext are decided —
+    // otherwise a HEIC upload gets mislabeled ".jpg" while still HEIC bytes.
+    const rawBuffer = Buffer.from(imageBase64, "base64");
+    const { buffer, mimeType: resolvedMimeType } = await convertHeicIfNeeded(rawBuffer, mimeType);
+
+    const contentType = resolvedMimeType || "image/jpeg";
     const ext = contentType.includes("png") ? "png" : "jpg";
-    const buffer = Buffer.from(imageBase64, "base64");
 
     // ── Determine key: readable if we can resolve a listing slug, legacy otherwise ──
     let key = null;

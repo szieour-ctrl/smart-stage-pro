@@ -1173,11 +1173,34 @@ async function applyVirtuallyStagedBadge(base64Jpeg) {
       loadVirtuallyStagedBadgeImage(),
     ]);
 
+    // FIX (this session — real bug, confirmed via a real report: Generate
+    // Final completed with a success toast, but the resulting S3 object
+    // was 0 bytes with no error anywhere). Root cause: this canvas was
+    // sized to the source image's FULL native pixel dimensions — fine
+    // for a normal photo, but this runs on the UPSCALED image, and
+    // upscale-image.js's default scale factor is 4x on source photos
+    // this file's own comments describe as routinely 3000-6000px wide.
+    // That's canvases up to ~24,000px wide. iOS Safari (mobile WebKit)
+    // has a hard internal canvas size/memory ceiling, and critically,
+    // exceeding it does NOT throw — canvas.toDataURL() just silently
+    // returns "data:," (an empty data URL). ".split(',')[1]" on that is
+    // undefined, which flowed all the way through as finalBase64, got
+    // "uploaded" as effectively nothing, and S3 dutifully stored 0 bytes
+    // — no exception anywhere in the chain to catch.
+    // Fix: cap the canvas to a safe maximum dimension, scaling the
+    // BADGED OUTPUT down proportionally only when the source actually
+    // exceeds it (most normal-resolution photos are completely
+    // unaffected). 4096px on the long edge is comfortably under known
+    // problematic WebKit thresholds even under memory pressure, and still
+    // well above typical MLS resolution requirements.
+    const MAX_BADGE_DIM = 4096;
+    const srcW = sourceImg.naturalWidth, srcH = sourceImg.naturalHeight;
+    const scale = Math.min(1, MAX_BADGE_DIM / Math.max(srcW, srcH));
     const canvas = document.createElement('canvas');
-    canvas.width = sourceImg.naturalWidth;
-    canvas.height = sourceImg.naturalHeight;
+    canvas.width = Math.round(srcW * scale);
+    canvas.height = Math.round(srcH * scale);
     const ctx = canvas.getContext('2d');
-    ctx.drawImage(sourceImg, 0, 0);
+    ctx.drawImage(sourceImg, 0, 0, canvas.width, canvas.height);
 
     // Composites the badge onto a base64 JPEG, bottom-left, sized
     // proportionally to the image's own width.
@@ -1226,7 +1249,18 @@ async function applyVirtuallyStagedBadge(base64Jpeg) {
     const verticalMargin   = Math.round(canvas.height * 0.18);
     ctx.drawImage(badgeImg, horizontalMargin, canvas.height - targetHeight - verticalMargin, targetWidth, targetHeight);
 
-    return canvas.toDataURL('image/jpeg', 0.95).split(',')[1];
+    const result = canvas.toDataURL('image/jpeg', 0.95).split(',')[1];
+    // Explicit validation — see the fix comment above. A genuine JPEG at
+    // any real resolution is at minimum several KB of base64; anything
+    // this short means toDataURL() silently failed (WebKit canvas limit,
+    // out-of-memory, or otherwise). Throwing here — instead of returning
+    // the bad result — routes this into the catch block below, which
+    // falls back to the pre-badge image (safe: no canvas involved) rather
+    // than silently uploading an empty file with no error anywhere.
+    if (!result || result.length < 1000) {
+      throw new Error(`toDataURL produced an invalid/empty result (length: ${result ? result.length : 0}) — likely a canvas size/memory limit`);
+    }
+    return result;
   } catch (err) {
     console.error('Virtually Staged badge compositing failed (non-fatal, using unbadged image):', err.message);
     return base64Jpeg;
@@ -1271,13 +1305,18 @@ async function applyDigitallyEnhancedBadge(base64Jpeg) {
       img.src = 'data:image/jpeg;base64,' + base64Jpeg;
     });
 
+    // FIX (this session — same real bug as applyVirtuallyStagedBadge, see
+    // that function's comment for the full diagnosis: an oversized canvas
+    // from a 4x-upscaled source photo can silently produce a blank
+    // toDataURL() result on iOS Safari with no exception thrown).
+    const MAX_BADGE_DIM = 4096;
+    const srcW = sourceImg.naturalWidth, srcH = sourceImg.naturalHeight;
+    const scale = Math.min(1, MAX_BADGE_DIM / Math.max(srcW, srcH));
     const canvas = document.createElement('canvas');
-    canvas.width = sourceImg.naturalWidth;
-    canvas.height = sourceImg.naturalHeight;
+    canvas.width = Math.round(srcW * scale);
+    canvas.height = Math.round(srcH * scale);
     const ctx = canvas.getContext('2d');
-    ctx.drawImage(sourceImg, 0, 0);
-
-    // Same targetWidth formula as applyVirtuallyStagedBadge (see that
+    ctx.drawImage(sourceImg, 0, 0, canvas.width, canvas.height);
     // function's own comment for why 30%/300-900).
     const targetWidth = Math.max(300, Math.min(900, Math.round(canvas.width * 0.30)));
     // Virtually Staged's source PNG is 350x94 — matching that ratio here
@@ -1323,7 +1362,12 @@ async function applyDigitallyEnhancedBadge(base64Jpeg) {
     ctx.fillStyle = 'rgba(255,255,255,0.88)';
     ctx.fillText(text, baselineX, baselineY);
 
-    return canvas.toDataURL('image/jpeg', 0.95).split(',')[1];
+    const result = canvas.toDataURL('image/jpeg', 0.95).split(',')[1];
+    // See applyVirtuallyStagedBadge's matching validation comment.
+    if (!result || result.length < 1000) {
+      throw new Error(`toDataURL produced an invalid/empty result (length: ${result ? result.length : 0}) — likely a canvas size/memory limit`);
+    }
+    return result;
   } catch (err) {
     console.error('Digitally Enhanced badge compositing failed (non-fatal, using unbadged image):', err.message);
     return base64Jpeg;

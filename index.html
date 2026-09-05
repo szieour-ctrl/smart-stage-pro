@@ -346,6 +346,25 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
+<script>
+// MOBILE DEBUG CONSOLE (added this session) — lets Sam see real console.log/
+// console.error output and network requests directly on his iPhone, without
+// a Mac or USB Web Inspector. Loads Eruda (a floating on-page dev-console
+// panel) ONLY when the URL has ?debug=1 — real agents/sellers never see it,
+// never pay its load cost, and it can be removed entirely later by just
+// deleting this block.
+// Usage: open the app as normal, but with "?debug=1" added to the URL
+// (e.g. https://smartstagepro.com/?debug=1). A small circular button
+// appears in the corner — tap it, then the "Console" tab to see everything
+// logged, or "Network" to see the actual request/response bodies for calls
+// like upload-original and project-manage.
+if (new URLSearchParams(window.location.search).get('debug') === '1') {
+  var erudaScript = document.createElement('script');
+  erudaScript.src = 'https://cdn.jsdelivr.net/npm/eruda@3.0.1/eruda.min.js';
+  erudaScript.onload = function() { eruda.init(); };
+  document.head.appendChild(erudaScript);
+}
+</script>
 </head>
 <body>
 <div class="compliance-bar" id="compliance-bar-text">California AB 723 §10140.8 Compliance Active — Original uploaded for permanent public URL · QR Code applied to all Final images · MetroList Rule 11.6.1</div>
@@ -5817,7 +5836,7 @@ async function generateFinal(roomId,enhId){
         const uploadData = await uploadRes.json().catch(() => ({}));
         if (uploadRes.ok && uploadData.publicUrl) {
           orig.originalUrl = uploadData.publicUrl;
-          console.log('Original uploaded to Cloudinary:', orig.originalUrl);
+          console.log('Original uploaded to S3:', orig.originalUrl);
         } else {
           const errMsg = uploadData.error || `HTTP ${uploadRes.status}`;
           console.error('upload-original returned no publicUrl:', errMsg);

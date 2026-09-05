@@ -5491,10 +5491,16 @@ function downloadHeroDetailShot(roomId, shotId) {
 // via FormData, bypassing our own Netlify functions entirely for the
 // actual image bytes (see attachFinalToProject).
 function base64ToBlob(base64, mimeType) {
+  // FIX (Sep 2026): previously decoded through an intermediate plain Array
+  // before building the Uint8Array — meaning up to 3 full-size copies of a
+  // large upscaled final existed in memory simultaneously. Desktop has
+  // headroom for that; iOS Safari's tighter per-tab memory ceiling can hard-
+  // crash the page under that load with no catchable error, matching
+  // compliance uploads silently never completing when staged on iPhone.
   const byteChars = atob(base64);
-  const byteNumbers = new Array(byteChars.length);
-  for (let i = 0; i < byteChars.length; i++) byteNumbers[i] = byteChars.charCodeAt(i);
-  return new Blob([new Uint8Array(byteNumbers)], { type: mimeType });
+  const byteArray = new Uint8Array(byteChars.length);
+  for (let i = 0; i < byteChars.length; i++) byteArray[i] = byteChars.charCodeAt(i);
+  return new Blob([byteArray], { type: mimeType });
 }
 
 function downscaleForStagingInput(base64, maxLongEdge) {
@@ -6704,7 +6710,32 @@ async function downloadSideBySide(roomId, enhId, tier) {
     if (btn) { btn.textContent = origText; btn.disabled = false; }
   }
 }
-function triggerDownload(dataUrl,filename){const a=document.createElement('a');a.href=dataUrl;a.download=filename;a.click();}
+function triggerDownload(dataUrl, filename) {
+  // FIX (Sep 2026): iOS Safari doesn't reliably download a raw data: URI via
+  // <a download> — tapping the native prompt's "Download" often does
+  // nothing, leaving the tab on a blank "data:" address (confirmed on
+  // iPhone). Desktop handles data: URIs fine, which is why this was
+  // mobile-only. A Blob + object URL is reliable on both.
+  fetch(dataUrl)
+    .then(res => res.blob())
+    .then(blob => {
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+    })
+    .catch(err => {
+      console.error('triggerDownload: blob conversion failed, falling back to data URI', err);
+      const a = document.createElement('a');
+      a.href = dataUrl;
+      a.download = filename;
+      a.click();
+    });
+}
 
 // ══════════════════════════════════════════
 // OPEN PLAN DERIVED ROOM ROUTING

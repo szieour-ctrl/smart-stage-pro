@@ -64,6 +64,17 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
 .pa-mode-btn:hover{background:var(--warm);}
 .pa-mode-btn.pa-saved{background:var(--success);border-color:var(--success);color:#fff;}
 .pa-mode-btn.pa-saved:hover{background:var(--success);opacity:0.9;}
+/* FIX (Sep 2026): same underlying bug as .mode-toggle below — this row
+   (Open Plan (Multiple Zones) / Single Room / Exterior) has no wrap and
+   no scroll fallback, so "Exterior" gets clipped off-screen on a phone in
+   portrait (confirmed on a real device). Stacks full-width below 480px —
+   "Open Plan (Multiple Zones)" is a long label, so a 2-up grid like the
+   mode-toggle fix would still crowd it; full-width rows are the safer
+   choice here regardless of label length. */
+@media (max-width:480px){
+  .pa-mode-btns{flex-wrap:wrap;}
+  .pa-mode-btn{flex:1 1 100%;text-align:center;}
+}
 .summary-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-top:8px;}
 .summary-chip{background:var(--cream);border:1px solid var(--border);border-radius:3px;padding:8px 12px;}
 .summary-chip-label{font-size:0.65rem;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);}
@@ -138,21 +149,17 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
 .mode-toggle-btn.active-ext{background:var(--sky);color:#fff;}
 .mode-toggle-btn.active-dcl{background:#7c5c3e;color:#fff;}
 .mode-toggle-btn.active-cns{background:#4a6741;color:#fff;}
-/* FIX (Sep 2026): on a phone in portrait, 4 buttons (Stage Vacant /
-   Declutter Only / Clean + Stage / Exterior) don't fit this row's width —
-   flex-shrink:0 + overflow:hidden just clipped the rest with no way to
-   reach them except rotating to landscape (confirmed on a real device).
-   Below 480px: tighten padding/font so most phones fit all four without
-   scrolling, and make the row swipeable as a fallback for anything that
-   still doesn't fit, instead of silently hiding options. Placed AFTER the
-   base .mode-toggle-btn rule above so it actually wins the cascade — a
-   media-query rule earlier in the file than an unconditional rule with
-   the same selector/properties loses, regardless of the condition.
-   (First attempt at this fix had it in the wrong position — this is the
-   corrected placement.) */
+/* FIX (Sep 2026, v2): first attempt tried tightening padding/font and
+   making the row swipeable below 480px — that's technically working
+   (confirmed: cascade order verified correct), but shrinking text isn't
+   enough on some phones to fit all 4 labels, and a scrollable row with no
+   visible scroll indicator isn't discoverable anyway. Switched to a
+   wrapping 2x2 grid instead — every button is always fully visible with
+   no swipe gesture required and no font-size tightrope to tune per
+   device. */
 @media (max-width:480px){
-  .mode-toggle{overflow-x:auto;-webkit-overflow-scrolling:touch;max-width:100%;}
-  .mode-toggle-btn{padding:5px 9px;font-size:0.66rem;flex-shrink:0;white-space:nowrap;}
+  .mode-toggle{flex-wrap:wrap;}
+  .mode-toggle-btn{flex:1 1 50%;text-align:center;}
 }
 .dcl-result-badge{font-size:0.65rem;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;padding:2px 8px;border-radius:2px;}
 .dcl-badge{background:#7c5c3e;color:#fff;}

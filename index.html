@@ -7454,14 +7454,12 @@ function getSupabase() {
 // ── AUTH INIT — runs on page load ────────────────────────────────────────────
 async function initAuth() {
   const sb = getSupabase();
-  const { data: { session } } = await sb.auth.getSession();
-  if (session?.user) {
-    _currentUser = session.user;
-    await handleAuthenticatedUser(session.user);
-  } else {
-    showLandingPage();
-  }
 
+  // FIX (Sep 2026): listener now registered BEFORE the initial session
+  // check, not after. A refresh attempted inside getSession()/getUser()
+  // below can itself fire SIGNED_OUT if the stored refresh token turns out
+  // to be dead — if nothing is listening yet at that moment, the event is
+  // silently missed and the app can be left in a half-authenticated state.
   // Listen for auth state changes (OAuth/magic-link/token refresh)
   // Password login is handled explicitly in submitAuth to avoid double-call
   sb.auth.onAuthStateChange(async (event, session) => {
@@ -7479,6 +7477,44 @@ async function initAuth() {
       hideAppUI();
     }
   });
+
+  const { data: { session } } = await sb.auth.getSession();
+  if (session?.user) {
+    // FIX (Sep 2026 — real incident: a stale/already-rotated Supabase
+    // refresh token stuck in iOS Safari's localStorage caused "Session not
+    // found" 403s on every call, previously only fixable by manually
+    // clearing Safari's site data). getSession() only reads and decodes
+    // local storage — it does NOT confirm with the server that the token
+    // is still valid (Supabase's own docs warn against trusting it for
+    // exactly this reason). getUser() does round-trip to the Auth server.
+    // A suspended-tab reload racing a token refresh is a plausible way
+    // this happens: Supabase refresh tokens are single-use, so if the
+    // rotation completed server-side but the new token didn't finish
+    // writing to storage before iOS killed the backgrounded tab, the copy
+    // left behind is already dead. Verify here and clean up proactively —
+    // an explicit signOut() clears storage the same way a real sign-out
+    // does, so the user just sees a login screen instead of a broken app.
+    // Only treated as a dead session on an actual auth rejection (401/403)
+    // — a network hiccup here must never log someone out, so that case
+    // fails open and proceeds with the cached session, same fail-open
+    // philosophy already used for image decode failures elsewhere in this
+    // file.
+    try {
+      const { error: verifyErr } = await sb.auth.getUser();
+      if (verifyErr && (verifyErr.status === 401 || verifyErr.status === 403)) {
+        console.warn('Stored session rejected by server, signing out cleanly:', verifyErr.message);
+        await sb.auth.signOut();
+        showLandingPage();
+        return;
+      }
+    } catch (netErr) {
+      console.warn('Session verification skipped (network error, proceeding with cached session):', netErr.message);
+    }
+    _currentUser = session.user;
+    await handleAuthenticatedUser(session.user);
+  } else {
+    showLandingPage();
+  }
 }
 
 // Trial length — mirrors debit-credit.js's isTrialExpired exactly (same

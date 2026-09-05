@@ -9,9 +9,17 @@
 :root{--ink:#1a1714;--cream:#f7f4ef;--warm:#e8e0d4;--gold:#b8975a;--gold-light:#d4b87a;--muted:#7a6f63;--danger:#c0392b;--success:#2d6a4f;--border:#ddd5c8;--sky:#3a7ca5;--shadow:0 2px 20px rgba(26,23,20,0.08);}
 *{box-sizing:border-box;margin:0;padding:0;}
 body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);min-height:100vh;font-size:15px;line-height:1.6;}
-.header{background:var(--ink);padding:14px 28px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;box-shadow:0 2px 12px rgba(0,0,0,0.3);}
+.header{background:var(--ink);padding:14px 28px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;box-shadow:0 2px 12px rgba(0,0,0,0.3);flex-wrap:wrap;row-gap:8px;}
 .header-left{display:flex;align-items:center;}
-.header-right{display:flex;align-items:center;gap:12px;}
+.header-right{display:flex;align-items:center;gap:12px;flex-wrap:wrap;row-gap:8px;}
+/* FIX (Sep 2026): same underlying bug as .mode-toggle / .pa-mode-btns —
+   up to 7 items can live in .header-right (2 badges, user info, My
+   Listings, Gallery, Getting Started, FAQ, Sign Out), and none of it
+   wrapped or scrolled on a narrow phone (confirmed: the Smart Correct
+   badge clipped mid-text, everything after it pushed off-screen with no
+   way to reach it). No media query needed — flex-wrap only activates once
+   content actually exceeds the row's width, so this is a no-op on
+   desktop and just wraps gracefully on any narrower screen. */
 .compliance-bar{background:var(--ink);color:var(--gold);font-size:0.7rem;letter-spacing:0.12em;text-transform:uppercase;text-align:center;padding:6px;}
 .app{max-width:980px;margin:0 auto;padding:32px 20px 80px;}
 .panel{background:#fff;border:1px solid var(--border);border-radius:4px;padding:28px 32px;margin-bottom:24px;box-shadow:var(--shadow);}

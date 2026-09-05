@@ -1,14 +1,33 @@
 // download-compliance-zip.js — Netlify Function
-// Generates and streams a ZIP file containing all images for a project
+// Generates a ZIP file containing all images for a project, uploads it to
+// S3, and redirects the browser to a short-lived presigned URL.
 // Called from the compliance page "Download All Images" button
 //
 // Input:  ?projectId=proj_xxx
-// Output: ZIP file download containing originals + staged finals + manifest
+// Output: 302 redirect to a presigned S3 URL for the ZIP
+//
+// FIX (Sep 2026): Netlify Functions (AWS Lambda under the hood) have a
+// hard 6MB response-body ceiling. This used to build the ZIP and return
+// it directly in the function's HTTP response — any project with enough
+// full-res images blew past that ceiling and the download silently did
+// nothing (a plain <a> tap has no error surface to show a failure in).
+// Same root cause and same fix shape as compliance-page.js's video
+// delivery: build/store the large artifact server-side, then hand the
+// browser a redirect to a presigned URL instead of the bytes themselves.
 
 const { getStore } = require("@netlify/blobs");
 const https = require("https");
 const archiver = require("archiver");
-const { PassThrough } = require("stream");
+const { S3Client, PutObjectCommand, GetObjectCommand } = require("@aws-sdk/client-s3");
+const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
+
+const s3 = new S3Client({
+  region: process.env.S3_REGION,
+  credentials: {
+    accessKeyId: process.env.S3_ACCESS_KEY_ID,
+    secretAccessKey: process.env.S3_SECRET_ACCESS_KEY,
+  },
+});
 
 function getProjectStore() {
   return getStore({
@@ -155,15 +174,30 @@ exports.handler = async (event) => {
     const zipBuffer = Buffer.concat(chunks);
     const filename = `SmartStagePRO_Compliance_${addrSlug}_${projectId}.zip`;
 
+    // FIX: upload to S3 instead of returning the bytes in the response.
+    // Lives under smart-stage-scratch/ so it rides the existing 1-2 day
+    // lifecycle-expiry rule on that prefix rather than needing a new one —
+    // this is a disposable, regeneratable artifact, not a permanent asset.
+    const s3Key = `smart-stage-scratch/compliance-zips/${projectId}-${Date.now()}.zip`;
+
+    await s3.send(new PutObjectCommand({
+      Bucket: process.env.S3_BUCKET_NAME,
+      Key: s3Key,
+      Body: zipBuffer,
+      ContentType: "application/zip",
+      ContentDisposition: `attachment; filename="${filename}"`,
+    }));
+
+    const downloadUrl = await getSignedUrl(
+      s3,
+      new GetObjectCommand({ Bucket: process.env.S3_BUCKET_NAME, Key: s3Key }),
+      { expiresIn: 60 * 10 } // 10 minutes — plenty for an immediate redirect+download
+    );
+
     return {
-      statusCode: 200,
-      headers: {
-        "Content-Type": "application/zip",
-        "Content-Disposition": `attachment; filename="${filename}"`,
-        "Content-Length": zipBuffer.length.toString(),
-      },
-      body: zipBuffer.toString("base64"),
-      isBase64Encoded: true,
+      statusCode: 302,
+      headers: { Location: downloadUrl },
+      body: "",
     };
 
   } catch (err) {

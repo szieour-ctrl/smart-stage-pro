@@ -5873,12 +5873,28 @@ async function generateFinal(roomId,enhId){
     // surfaced the same way.
     if (orig && !orig.originalUrl && SESSION.projectId) {
       try {
+        // FIX (Sep 2026): a full native-resolution original (confirmed on a
+        // real 5712x4284 photo) sent raw in this function's JSON body blows
+        // past Netlify's ~6MB payload ceiling — same 413 class of bug as the
+        // old Clean+Stage upload issue, just on a call path that was never
+        // covered by compressImageForUpload(). This is a compliance/legal
+        // disclosure record (the "original unaltered" photo shown on the
+        // public compliance page and included in the ZIP), so it uses a
+        // much higher-fidelity target than the 1536px/1500KB default used
+        // for AI-call inputs — 3000px/4000KB keeps real estate interior
+        // photos comfortably under the payload ceiling while staying sharp
+        // enough to view and zoom. orig.base64 itself is left untouched —
+        // this only affects the copy sent to THIS endpoint; staging input,
+        // resizeToMatch targets, and the Download Original button all keep
+        // using the full native-resolution version.
+        const { base64: origUploadBase64, mimeType: origUploadMime } =
+          await compressImageForUpload(orig.base64, orig.mimeType, 3000, 4000);
         const uploadRes = await fetch('/.netlify/functions/upload-original', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            imageBase64: orig.base64,
-            mimeType: orig.mimeType,
+            imageBase64: origUploadBase64,
+            mimeType: origUploadMime,
             projectId: SESSION.projectId,
             roomName: room.roomName || 'Room',
           })

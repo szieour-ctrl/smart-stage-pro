@@ -133,6 +133,17 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
 .ref-badge{background:#888;color:#fff;font-size:0.58rem;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;padding:2px 7px;border-radius:2px;}
 .room-card-actions{display:flex;gap:6px;flex-wrap:wrap;}
 .mode-toggle{display:flex;gap:0;border:1px solid var(--border);border-radius:3px;overflow:hidden;flex-shrink:0;}
+/* FIX (Sep 2026): on a phone in portrait, 4 buttons (Stage Vacant /
+   Declutter Only / Clean + Stage / Exterior) don't fit this row's width —
+   flex-shrink:0 + overflow:hidden just clipped the rest with no way to
+   reach them except rotating to landscape (confirmed on a real device).
+   Below 480px: tighten padding/font so most phones fit all four without
+   scrolling, and make the row swipeable as a fallback for anything that
+   still doesn't fit, instead of silently hiding options. */
+@media (max-width:480px){
+  .mode-toggle{overflow-x:auto;-webkit-overflow-scrolling:touch;max-width:100%;}
+  .mode-toggle-btn{padding:5px 9px;font-size:0.66rem;flex-shrink:0;white-space:nowrap;}
+}
 .mode-toggle-btn{padding:5px 12px;font-size:0.72rem;font-weight:500;letter-spacing:0.06em;text-transform:uppercase;border:none;cursor:pointer;background:#fff;color:var(--muted);transition:all 0.15s;}
 .mode-toggle-btn.active-int{background:var(--ink);color:#fff;}
 .mode-toggle-btn.active-ext{background:var(--sky);color:#fff;}

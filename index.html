@@ -345,6 +345,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
 .faq-modal-close:hover{color:var(--ink);}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
 </head>
 <body>
 <div class="compliance-bar" id="compliance-bar-text">California AB 723 §10140.8 Compliance Active — Original uploaded for permanent public URL · QR Code applied to all Final images · MetroList Rule 11.6.1</div>
@@ -1784,15 +1785,62 @@ uploadZone.addEventListener('dragover',e=>{e.preventDefault();uploadZone.classLi
 uploadZone.addEventListener('dragleave',()=>uploadZone.classList.remove('drag-over'));
 uploadZone.addEventListener('drop',e=>{e.preventDefault();uploadZone.classList.remove('drag-over');handleFiles([...e.dataTransfer.files]);});
 fileInput.addEventListener('change',()=>handleFiles([...fileInput.files]));
+// HEIC detection at the file level — checked BEFORE any decode is attempted.
+// iOS/Safari sometimes reports an empty or generic file.type for HEIC
+// photos picked from the Photo Library, so extension is checked as a
+// fallback alongside the MIME type.
+function isHeicFile(file){
+  const type=(file.type||'').toLowerCase();
+  if(type.includes('heic')||type.includes('heif'))return true;
+  const name=(file.name||'').toLowerCase();
+  return name.endsWith('.heic')||name.endsWith('.heif');
+}
+
+// ADDED (this session — real bug, confirmed via a real 413 that PERSISTED
+// even after compressImageForUpload was added everywhere raw bytes left
+// the browser). Root cause: that compression helper resizes via <img>/
+// canvas, which requires the browser to natively decode HEIC first — and
+// native HEIC decode support in <img>/canvas is inconsistent across iOS
+// browser contexts. When decode fails, compressImageForUpload's catch
+// block silently falls back to returning the ORIGINAL, full-size HEIC
+// bytes unchanged — so the 413 kept happening with no visible error
+// explaining why.
+// Fix: convert HEIC → JPEG here, at the moment of file selection, using
+// heic2any (a WASM-based decoder that doesn't depend on the browser's own
+// image pipeline at all). Once this runs, SESSION.originals never
+// contains HEIC bytes — every function downstream (compressImageForUpload,
+// preCropTo3x2, callStageAPI, etc.) only ever sees a JPEG, so none of them
+// need their own HEIC-handling logic.
+async function convertHeicToJpegFile(file){
+  try{
+    const convertedBlob=await heic2any({blob:file,toType:'image/jpeg',quality:0.92});
+    const jpegBlob=Array.isArray(convertedBlob)?convertedBlob[0]:convertedBlob;
+    return new File([jpegBlob],file.name.replace(/\.(heic|heif)$/i,'')+'.jpg',{type:'image/jpeg'});
+  }catch(e){
+    console.error('HEIC conversion failed:',e.message);
+    return null;
+  }
+}
+
 function handleFiles(files){
-  const imgs=files.filter(f=>f.type.startsWith('image/'));
+  const imgs=files.filter(f=>f.type.startsWith('image/')||isHeicFile(f));
   if(!imgs.length){showToast('No image files found.','error');return;}
-  imgs.forEach(file=>{
+  imgs.forEach(async file=>{
+    let workingFile=file;
+    if(isHeicFile(file)){
+      showToast('Converting HEIC photo...','');
+      const converted=await convertHeicToJpegFile(file);
+      if(!converted){
+        showToast(`Could not convert "${file.name}" — try exporting it as JPEG from Photos first.`,'error');
+        return;
+      }
+      workingFile=converted;
+    }
     const reader=new FileReader();
     reader.onload=e=>{
       const dataUrl=e.target.result,base64=dataUrl.split(',')[1];
       const id='orig_'+Date.now()+'_'+Math.random().toString(36).slice(2,6);
-      const origObj={id,name:file.name,base64,mimeType:file.type,dataUrl,isFloorplan:false,originalUrl:null,ab723Status:'pending'};
+      const origObj={id,name:workingFile.name,base64,mimeType:workingFile.type,dataUrl,isFloorplan:false,originalUrl:null,ab723Status:'pending'};
       SESSION.originals.push(origObj);
       renderThumb(SESSION.originals[SESSION.originals.length-1]);
       updateUploadUI();
@@ -1803,7 +1851,7 @@ function handleFiles(files){
       // — would fill Cloudinary with images that are never actually posted
       // to MLS and never need a compliance record at all.
     };
-    reader.readAsDataURL(file);
+    reader.readAsDataURL(workingFile);
   });
 }
 
@@ -5742,6 +5790,18 @@ async function generateFinal(roomId,enhId){
       : await applyVirtuallyStagedBadge(upscaleData.upscaledBase64);
 
     // Upload original to Cloudinary if not already done (needed for compliance page)
+    //
+    // FIX (this session — real bug, confirmed from code review after a
+    // real report: Generate Final completed with no error toast, but the
+    // compliance page showed "Original image not available" for both
+    // image sets). Root cause: the old catch{} here only caught network-
+    // level exceptions (DNS failure, connection refused, etc.). If
+    // upload-original.js returned a non-2xx response with a JSON error
+    // body — an S3 or Supabase problem server-side — uploadRes.json()
+    // succeeds without throwing, uploadData.publicUrl is simply
+    // undefined, and the code fell through silently: no toast, no
+    // console error, no compliance record. Now both failure modes are
+    // surfaced the same way.
     if (orig && !orig.originalUrl && SESSION.projectId) {
       try {
         const uploadRes = await fetch('/.netlify/functions/upload-original', {
@@ -5754,13 +5814,18 @@ async function generateFinal(roomId,enhId){
             roomName: room.roomName || 'Room',
           })
         });
-        const uploadData = await uploadRes.json();
-        if (uploadData.publicUrl) {
+        const uploadData = await uploadRes.json().catch(() => ({}));
+        if (uploadRes.ok && uploadData.publicUrl) {
           orig.originalUrl = uploadData.publicUrl;
           console.log('Original uploaded to Cloudinary:', orig.originalUrl);
+        } else {
+          const errMsg = uploadData.error || `HTTP ${uploadRes.status}`;
+          console.error('upload-original returned no publicUrl:', errMsg);
+          showToast(`⚠ Original photo failed to attach to compliance page: ${errMsg}`, 'error');
         }
       } catch (uploadErr) {
-        console.warn('Original upload failed (non-blocking):', uploadErr.message);
+        console.error('Original upload failed (network error):', uploadErr.message);
+        showToast(`⚠ Original photo failed to attach to compliance page: ${uploadErr.message}`, 'error');
       }
     }
 

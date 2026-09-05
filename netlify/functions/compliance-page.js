@@ -210,10 +210,18 @@ function renderPage(project, projectId, videoJobs) {
     </div>`;
     }
 
-    // Fallback — only original or only staged available
+    // FIX (Sep 2026): this fallback only ever checked hasOriginal — if
+    // false, it always rendered "Original image not available" and never
+    // considered hasStaged, so a perfectly good staged final was hidden
+    // any time the original was missing (e.g. the 0-byte-final bug wiping
+    // out only one side of the pair). Now shows whichever image actually
+    // exists, and only falls through to the empty-state message when
+    // neither URL is present.
     const fallbackImg = hasOriginal
       ? `<div style="padding:12px;"><div class="comp-sl-label-before" style="display:inline-block;margin-bottom:8px;padding:4px 10px;border-radius:20px;font-size:10px;font-weight:700;letter-spacing:0.1em;background:rgba(0,0,0,0.08);color:#7a6f63;">ORIGINAL — UNALTERED</div><img src="${img.originalUrl}" alt="Original" style="width:100%;border-radius:4px;" loading="lazy"></div>`
-      : `<div style="padding:40px;text-align:center;color:#b0a090;font-size:13px;">Original image not available</div>`;
+      : hasStaged
+      ? `<div style="padding:12px;"><div class="comp-sl-label-before" style="display:inline-block;margin-bottom:8px;padding:4px 10px;border-radius:20px;font-size:10px;font-weight:700;letter-spacing:0.1em;background:rgba(184,151,90,0.15);color:#b8975a;">VIRTUALLY STAGED</div><img src="${img.stagedUrl}" alt="Virtually staged photo of ${address}" style="width:100%;border-radius:4px;" loading="lazy"></div>`
+      : `<div style="padding:40px;text-align:center;color:#b0a090;font-size:13px;">Image not available</div>`;
 
     return `
     <div class="image-pair">

@@ -7493,10 +7493,23 @@ async function initAuth() {
   // Password login is handled explicitly in submitAuth to avoid double-call
   sb.auth.onAuthStateChange(async (event, session) => {
     if (event === 'SIGNED_IN' && session?.user) {
-      if (!_currentUser || _currentUser.id !== session.user.id) {
-        _currentUser = session.user;
-        await handleAuthenticatedUser(session.user);
-      }
+      // FIX (Sep 2026): previously guarded with
+      // `if (!_currentUser || _currentUser.id !== session.user.id)`, which
+      // skipped handleAuthenticatedUser() — and therefore the header
+      // menu/app re-render — whenever _currentUser already matched the
+      // incoming user. That guard was meant to avoid a redundant re-render
+      // when SIGNED_IN fires twice for an already-loaded user, but it also
+      // silently no-ops a GENUINE sign-in after a background token-refresh
+      // race left this tab signed out without _currentUser ever getting
+      // reset to null first (confirmed real scenario: Gallery opened in a
+      // separate tab races this tab's Supabase client over the same stored
+      // refresh token — whichever refreshes first rotates it, invalidating
+      // the other tab's copy). Net effect: log back in, menu never comes
+      // back. handleAuthenticatedUser() re-runs its own user/ToS/
+      // subscription checks and is safe to call again, so it now always
+      // runs on a real SIGNED_IN with a session.
+      _currentUser = session.user;
+      await handleAuthenticatedUser(session.user);
     } else if (event === 'SIGNED_OUT') {
       _currentUser = null;
       _userRecord = null;
@@ -7695,6 +7708,7 @@ function hideAppUI() {
   document.getElementById('app-container').classList.add('hidden');
   const lb = document.getElementById('header-listings-btn');
   if (lb) lb.classList.add('hidden');
+  document.getElementById('header-gallery-btn')?.classList.add('hidden');
   document.getElementById('header-getting-started-btn')?.classList.add('hidden');
   document.getElementById('header-faq-btn')?.classList.add('hidden');
   document.getElementById('header-user-info')?.classList.add('hidden');

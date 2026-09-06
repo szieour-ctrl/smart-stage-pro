@@ -7538,7 +7538,29 @@ async function initAuth() {
     }
   });
 
-  let session;
+// FIX (Sep 2026): confirmed real incidents where the ONLY working fix was
+// manually deleting the sb-*-auth-token key from localStorage via DevTools
+// — not something a subscriber should ever have to do. This renders a
+// fixed, impossible-to-miss banner directly onto document.body, completely
+// independent of showLandingPage()/the app's own render path, specifically
+// so it still shows up even if something else on the page is broken. The
+// button does exactly the manual fix that has worked every time so far:
+// clear anything Supabase stored (its keys are always prefixed "sb-") and
+// force a real reload.
+function showAuthResetBanner() {
+  if (document.getElementById('auth-reset-banner')) return; // don't stack duplicates
+  const bar = document.createElement('div');
+  bar.id = 'auth-reset-banner';
+  bar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#a03030;color:#fff;font-family:sans-serif;font-size:0.85rem;padding:12px 16px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.3);';
+  bar.innerHTML = `Trouble loading your session. <button id="auth-reset-btn" style="margin-left:10px;background:#fff;color:#a03030;border:none;border-radius:3px;padding:6px 14px;font-size:0.85rem;font-weight:600;cursor:pointer;">Reset & Reload</button>`;
+  document.body.prepend(bar);
+  document.getElementById('auth-reset-btn').addEventListener('click', () => {
+    Object.keys(localStorage).filter(k => k.startsWith('sb-')).forEach(k => localStorage.removeItem(k));
+    window.location.reload();
+  });
+}
+
+let session;
   try {
     const result = await withAuthTimeout(sb.auth.getSession(), 8000, 'getSession()');
     session = result.data.session;
@@ -7548,11 +7570,15 @@ async function initAuth() {
     // gives an explicit "sign in" path back into the app, instead of the
     // page sitting frozen with the compliance bar/header shell visible and
     // nothing else, which previously had no recovery short of clearing
-    // site data or opening an incognito window.
+    // site data or opening an incognito window. showAuthResetBanner() is
+    // the actual one-click fix regardless of whether showLandingPage()
+    // itself renders correctly.
     console.warn('Auth init stalled:', stallErr.message);
+    showAuthResetBanner();
     showLandingPage();
     return;
   }
+
 
   if (session?.user) {
     // FIX (Sep 2026 — real incident: a stale/already-rotated Supabase
@@ -7590,12 +7616,21 @@ async function initAuth() {
       const { error: verifyErr } = await withAuthTimeout(sb.auth.getUser(), 8000, 'getUser()');
       if (verifyErr) {
         console.warn('Stored session rejected by server, signing out cleanly:', verifyErr.name, verifyErr.status, verifyErr.message);
-        await sb.auth.signOut();
+        showAuthResetBanner();
+        await withAuthTimeout(sb.auth.signOut(), 5000, 'signOut()').catch(e => console.warn('signOut() itself stalled/failed — banner button still clears storage manually:', e.message));
         showLandingPage();
         return;
       }
     } catch (netErr) {
+      // Genuine network hiccups are rare here — a timeout on THIS specific
+      // call has, in every real incident so far, turned out to be the
+      // stuck-session case rather than a passing blip. Still failing open
+      // (proceeding with the cached session) rather than forcing a sign-out
+      // — but showing the reset banner too, so if proceeding also stalls
+      // downstream, there's already a visible one-click way out instead of
+      // silence.
       console.warn('Session verification skipped (network error or timeout, proceeding with cached session):', netErr.message);
+      showAuthResetBanner();
     }
     _currentUser = session.user;
     await handleAuthenticatedUser(session.user);

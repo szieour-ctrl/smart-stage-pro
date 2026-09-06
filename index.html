@@ -3748,10 +3748,16 @@ function renderFinalPanel(roomId,enhId){
     const orig=SESSION.originals.find(o=>o.id===room.originalId);
     const target = enhId ? room.extSelections[enhId] : room;
     const attachStatus = target?.complianceAttachStatus;
+    // PROSPECTING (Sep 2026): prospecting shots never reach the compliance
+    // page (see attachFinalToProject) — the status labels here switch to
+    // Gallery language so the copy matches what actually happened.
+    const attachCopy = SESSION.isProspecting
+      ? { pending: 'Saving to Gallery…', success: '✓ Saved to Gallery', failedPrefix: 'Did not save to Gallery' }
+      : { pending: 'Attaching to compliance page…', success: '✓ Added to compliance page', failedPrefix: 'Did not reach the compliance page' };
     const attachNoticeHtml = !SESSION.projectId ? '' :
-      attachStatus === 'pending' ? `<div style="font-size:0.72rem;color:var(--muted);margin-top:6px;">Attaching to compliance page…</div>` :
-      attachStatus === 'success' ? `<div style="font-size:0.72rem;color:var(--success);margin-top:6px;">✓ Added to compliance page</div>` :
-      attachStatus === 'failed' ? `<div style="background:#fdf0ef;border:1px solid #f0c0c0;border-radius:4px;padding:8px 10px;margin-top:8px;font-size:0.75rem;color:#a03030;">⚠ Did not reach the compliance page — ${(target.complianceAttachError||'unknown error').replace(/</g,'&lt;')} <button class="btn btn-outline btn-sm" style="margin-left:6px;padding:2px 8px;" onclick="retryComplianceAttach('${roomId}','${enhId||''}')">↻ Retry</button></div>` :
+      attachStatus === 'pending' ? `<div style="font-size:0.72rem;color:var(--muted);margin-top:6px;">${attachCopy.pending}</div>` :
+      attachStatus === 'success' ? `<div style="font-size:0.72rem;color:var(--success);margin-top:6px;">${attachCopy.success}</div>` :
+      attachStatus === 'failed' ? `<div style="background:#fdf0ef;border:1px solid #f0c0c0;border-radius:4px;padding:8px 10px;margin-top:8px;font-size:0.75rem;color:#a03030;">⚠ ${attachCopy.failedPrefix} — ${(target.complianceAttachError||'unknown error').replace(/</g,'&lt;')} <button class="btn btn-outline btn-sm" style="margin-left:6px;padding:2px 8px;" onclick="retryComplianceAttach('${roomId}','${enhId||''}')">↻ Retry</button></div>` :
       '';
     return `<div class="result-viewer" style="padding:12px 16px;">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><span class="tier-label tier-final">Final — MLS Quality</span>${presetLabel?`<span style="font-size:0.72rem;color:var(--muted);">Includes ${presetLabel} preset</span>`:''}</div>
@@ -4646,38 +4652,51 @@ async function attachFinalToProject(finalBase64, room, orig, enhId) {
       console.error('Thumbnail generation failed (non-fatal):', thumbErr.message);
     }
 
-    // Attach to project in Blobs
-    // userId fix (separate, earlier bug): without this, project-manage.js's
-    // addImage() guard (`if (userId && process.env.SUPABASE_URL)`) was
-    // always false, so the Supabase branch never even attempted to run.
-    const _sbUserForAttach = (await getSupabase().auth.getUser()).data?.user;
-    const attachRes = await fetch('/.netlify/functions/project-manage?action=add-image', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        projectId: SESSION.projectId,
-        userId: _sbUserForAttach?.id || null,
-        imageData: {
-          roomName: room.roomName || 'Room',
-          tier: enhId ? 'final-enhanced' : 'final', // quality label — Blobs/compliance-page display only
-          mode: dbMode,                              // NEW — the real staged_images.mode value
-          originalUrl: orig?.originalUrl || null,
-          stagedUrl: sig.publicUrl,
-          thumbnailUrl,
-          fileName: orig?.name || '',
-        }
-      })
-    });
-    if (!attachRes.ok) {
-      const attachRaw = await attachRes.text();
-      let d;
-      try { d = JSON.parse(attachRaw); } catch { d = {}; }
-      throw new Error(d.error || `add-image failed (status ${attachRes.status}): ${attachRaw.slice(0, 200)}`);
-    }
+    if (SESSION.isProspecting) {
+      // PROSPECTING (Sep 2026): prospecting shots skip the compliance-page
+      // pipeline entirely — no project-manage add-image call, so nothing
+      // is ever written to the Blobs compliance record or shown on a
+      // compliance page/QR for this listing. The S3 upload + media_assets
+      // row above (via upload-staged.js's presign call) are already
+      // everything Gallery needs to find this image later under
+      // staging-prospects/ — nothing else has to happen here.
+      console.log('Prospecting shot uploaded, skipping compliance attach:', sig.publicUrl, 'room:', room.roomName);
+      target.complianceAttachStatus = 'success';
+      showToast(`✓ Staged image saved — find it in Gallery under ${SESSION.projectAddress || SESSION.projectId}`, 'success');
+    } else {
+      // Attach to project in Blobs
+      // userId fix (separate, earlier bug): without this, project-manage.js's
+      // addImage() guard (`if (userId && process.env.SUPABASE_URL)`) was
+      // always false, so the Supabase branch never even attempted to run.
+      const _sbUserForAttach = (await getSupabase().auth.getUser()).data?.user;
+      const attachRes = await fetch('/.netlify/functions/project-manage?action=add-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectId: SESSION.projectId,
+          userId: _sbUserForAttach?.id || null,
+          imageData: {
+            roomName: room.roomName || 'Room',
+            tier: enhId ? 'final-enhanced' : 'final', // quality label — Blobs/compliance-page display only
+            mode: dbMode,                              // NEW — the real staged_images.mode value
+            originalUrl: orig?.originalUrl || null,
+            stagedUrl: sig.publicUrl,
+            thumbnailUrl,
+            fileName: orig?.name || '',
+          }
+        })
+      });
+      if (!attachRes.ok) {
+        const attachRaw = await attachRes.text();
+        let d;
+        try { d = JSON.parse(attachRaw); } catch { d = {}; }
+        throw new Error(d.error || `add-image failed (status ${attachRes.status}): ${attachRaw.slice(0, 200)}`);
+      }
 
-    console.log('Image attached to project:', SESSION.projectId, 'room:', room.roomName);
-    target.complianceAttachStatus = 'success';
-    showToast(`✓ Added to compliance project: ${SESSION.projectAddress || SESSION.projectId}`, 'success');
+      console.log('Image attached to project:', SESSION.projectId, 'room:', room.roomName);
+      target.complianceAttachStatus = 'success';
+      showToast(`✓ Added to compliance project: ${SESSION.projectAddress || SESSION.projectId}`, 'success');
+    }
 
   } catch (err) {
     // Previously this was a silent console.warn only — a failure here meant
@@ -5323,48 +5342,58 @@ async function attachHeroShotToProject(finalBase64, room, shot, shotId) {
       console.error('Thumbnail generation failed (non-fatal):', thumbErr.message);
     }
 
-    const _sbUserForHero = (await getSupabase().auth.getUser()).data?.user;
-    const attachRes = await fetch('/.netlify/functions/project-manage?action=add-image', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        projectId: SESSION.projectId,
-        userId: _sbUserForHero?.id || null,
-        imageData: {
-          // CHANGED (Hero Shot B-Roll tagging): room_type used to hold the
-          // squashed "Room — Shot" composite string, which broke clean
-          // matching downstream (PRO Plus's matchToRoomType() couldn't
-          // match it against a plain category, autoSelect.js had no
-          // reliable ground truth to group on). room_type now holds just
-          // the readable shot name; the room it came from moves to its own
-          // parent_room_label field — see isHeroShot/parentRoomLabel below.
-          roomName: shot.name || 'Hero Shot',
-          tier: 'hero_shot',           // quality label — Blobs/compliance-page display only
-          mode: dbMode,                // real staged_images.mode value (constraint-safe)
-          originalUrl: orig?.originalUrl || null,  // true camera-ready original, NOT the staged image
-          stagedUrl: sig.publicUrl,
-          thumbnailUrl,
-          fileName: orig?.name || '',
-          // NEW — ground truth captured here, at Generate Final time,
-          // where room.roomName and shot.name both exist together. Flows
-          // through staged_images → video-job.js → build-video-demo.html →
-          // autoSelect.js, where parentRoomLabel drives deterministic
-          // room-group merging (not a Claude Vision guess).
-          isHeroShot: true,
-          parentRoomLabel: room.roomName || 'Room',
-        }
-      })
-    });
-    if (!attachRes.ok) {
-      const attachRaw = await attachRes.text();
-      let d;
-      try { d = JSON.parse(attachRaw); } catch { d = {}; }
-      throw new Error(d.error || `add-image failed (status ${attachRes.status}): ${attachRaw.slice(0, 200)}`);
-    }
+    if (SESSION.isProspecting) {
+      // PROSPECTING (Sep 2026): same skip as attachFinalToProject — no
+      // compliance-page/Blobs record for prospecting shots, Gallery is
+      // the only lookup. The S3 upload + media_assets row above already
+      // cover everything Gallery needs.
+      console.log('Prospecting hero shot uploaded, skipping compliance attach:', sig.publicUrl, 'shot:', shot.name);
+      shot.complianceAttachStatus = 'success';
+      showToast(`✓ Hero shot saved — find it in Gallery under ${SESSION.projectAddress || SESSION.projectId}`, 'success');
+    } else {
+      const _sbUserForHero = (await getSupabase().auth.getUser()).data?.user;
+      const attachRes = await fetch('/.netlify/functions/project-manage?action=add-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectId: SESSION.projectId,
+          userId: _sbUserForHero?.id || null,
+          imageData: {
+            // CHANGED (Hero Shot B-Roll tagging): room_type used to hold the
+            // squashed "Room — Shot" composite string, which broke clean
+            // matching downstream (PRO Plus's matchToRoomType() couldn't
+            // match it against a plain category, autoSelect.js had no
+            // reliable ground truth to group on). room_type now holds just
+            // the readable shot name; the room it came from moves to its own
+            // parent_room_label field — see isHeroShot/parentRoomLabel below.
+            roomName: shot.name || 'Hero Shot',
+            tier: 'hero_shot',           // quality label — Blobs/compliance-page display only
+            mode: dbMode,                // real staged_images.mode value (constraint-safe)
+            originalUrl: orig?.originalUrl || null,  // true camera-ready original, NOT the staged image
+            stagedUrl: sig.publicUrl,
+            thumbnailUrl,
+            fileName: orig?.name || '',
+            // NEW — ground truth captured here, at Generate Final time,
+            // where room.roomName and shot.name both exist together. Flows
+            // through staged_images → video-job.js → build-video-demo.html →
+            // autoSelect.js, where parentRoomLabel drives deterministic
+            // room-group merging (not a Claude Vision guess).
+            isHeroShot: true,
+            parentRoomLabel: room.roomName || 'Room',
+          }
+        })
+      });
+      if (!attachRes.ok) {
+        const attachRaw = await attachRes.text();
+        let d;
+        try { d = JSON.parse(attachRaw); } catch { d = {}; }
+        throw new Error(d.error || `add-image failed (status ${attachRes.status}): ${attachRaw.slice(0, 200)}`);
+      }
 
-    console.log('Hero shot attached to project:', SESSION.projectId, 'shot:', shot.name, 'room:', room.roomName);
-    shot.complianceAttachStatus = 'success';
-    showToast(`✓ Hero shot added to compliance project: ${SESSION.projectAddress || SESSION.projectId}`, 'success');
+      console.log('Hero shot attached to project:', SESSION.projectId, 'shot:', shot.name, 'room:', room.roomName);
+      shot.complianceAttachStatus = 'success';
+      showToast(`✓ Hero shot added to compliance project: ${SESSION.projectAddress || SESSION.projectId}`, 'success');
+    }
 
   } catch (err) {
     // Previously silent (console.warn only) — same visibility fix as

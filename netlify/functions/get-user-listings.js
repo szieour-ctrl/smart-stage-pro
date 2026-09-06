@@ -114,13 +114,19 @@ exports.handler = async (event) => {
       "Solo";
 
     // ── Fetch listings from Supabase based on role ────────────────────────
+    // PROSPECTING (Sep 2026): prospecting rows (is_prospecting=true) are
+    // deliberately excluded from every branch below — this dashboard is
+    // "My Listings" for real listings, not a running log of every address
+    // ever prospected. `not.is.true` (rather than `eq.false`) is used so
+    // older rows where is_prospecting is still NULL are treated as regular
+    // listings and still show up, instead of silently disappearing.
     let listingsQuery;
     if (user.role === "broker_admin" && user.brokerage_id) {
-      listingsQuery = `?brokerage_id=eq.${user.brokerage_id}&status=neq.archived&select=id,address,project_id,compliance_page_url,mls_number,status,created_at,updated_at,user_id&order=updated_at.desc.nullsfirst&limit=100`;
+      listingsQuery = `?brokerage_id=eq.${user.brokerage_id}&status=neq.archived&is_prospecting=not.is.true&select=id,address,project_id,compliance_page_url,mls_number,status,created_at,updated_at,user_id&order=updated_at.desc.nullsfirst&limit=100`;
     } else if (user.role === "team_lead" && user.team_id) {
-      listingsQuery = `?team_id=eq.${user.team_id}&status=neq.archived&select=id,address,project_id,compliance_page_url,mls_number,status,created_at,updated_at,user_id&order=updated_at.desc.nullsfirst&limit=100`;
+      listingsQuery = `?team_id=eq.${user.team_id}&status=neq.archived&is_prospecting=not.is.true&select=id,address,project_id,compliance_page_url,mls_number,status,created_at,updated_at,user_id&order=updated_at.desc.nullsfirst&limit=100`;
     } else {
-      listingsQuery = `?user_id=eq.${authUser.id}&status=neq.archived&select=id,address,project_id,compliance_page_url,mls_number,status,created_at,updated_at,user_id&order=updated_at.desc.nullsfirst&limit=100`;
+      listingsQuery = `?user_id=eq.${authUser.id}&status=neq.archived&is_prospecting=not.is.true&select=id,address,project_id,compliance_page_url,mls_number,status,created_at,updated_at,user_id&order=updated_at.desc.nullsfirst&limit=100`;
     }
 
     const listingsResult = await supabase("GET", "listings", null, listingsQuery);

@@ -101,7 +101,22 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 
 let _sb = null;
 function getSb() {
-  if (!_sb) _sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  // FIX (Sep 2026): previously created with default options, meaning this
+  // client shared the EXACT same localStorage key (and therefore the same
+  // cross-tab refresh lock) as index.html's own Supabase client. Opening
+  // Gallery in a second tab meant two independent clients competing over
+  // one single-use refresh token/lock — confirmed real incidents where
+  // this left the app tab stuck indefinitely (getSession() never
+  // resolving) with no recovery short of clearing localStorage by hand.
+  // A separate storageKey makes this page's session fully independent —
+  // it can no longer contend with the app tab's session or lock at all.
+  // Trade-off: Gallery now needs its own one-time sign-in per browser
+  // instead of inheriting the app's session — a small, one-time cost
+  // that's much better than the app tab getting disrupted every time
+  // Gallery happens to be open.
+  if (!_sb) _sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    auth: { storageKey: 'gallery-sb-auth-token' }
+  });
   return _sb;
 }
 

@@ -12151,6 +12151,20 @@ function getCapturedSignupSource() {
 
 // ── INIT ─────────────────────────────────────────────────────────────────────
 showStep('step-property');
+// FIX (Sep 2026): the browser's back/forward cache (bfcache) can restore
+// this page as a frozen snapshot of exactly how it looked the moment the
+// user navigated away (e.g. to /gallery.html and back) — no scripts re-run,
+// initAuth() never fires again, and the header menu can be stuck hidden
+// mid-transition (e.g. right as a SIGNED_OUT was being processed). The
+// 'pageshow' event's persisted flag is true specifically for a bfcache
+// restore (false on a real fresh load, so this never double-fires init).
+// Forcing a real reload is the standard fix — it costs one extra load only
+// on the (uncommon) bfcache-restore path, and guarantees auth state is
+// always freshly checked instead of possibly stale/frozen.
+window.addEventListener('pageshow', (event) => {
+  if (event.persisted) window.location.reload();
+});
+
 initAuth();
 </script>
 <!-- ============================================================

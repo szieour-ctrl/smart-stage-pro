@@ -1553,7 +1553,15 @@ async function lookupOrCreateProject(address) {
     // project/listing/compliance page instead of sharing one. Must send the
     // logged-in agent's userId here, same as createNewProject() already does,
     // or every lookup falls into the "anon" bucket and never finds it.
-    const session = await getSupabase().auth.getSession();
+    // FIX (Sep 7, 2026): this getSession() call had no timeout guard, unlike
+    // initAuth()'s. A stuck cross-tab lock or a Supabase JWT-refresh stall
+    // (see status.supabase.com/incidents/6q5902p2xd9f) left this await
+    // pending forever with no rejection, so the outer catch below never
+    // fired and "Checking for existing project..." stayed on screen with no
+    // network request ever reaching project-manage. withAuthTimeout() makes
+    // a stall reject after 8s instead, which now flows into the existing
+    // catch's "Search error... you may continue without a project" path.
+    const session = await withAuthTimeout(getSupabase().auth.getSession(), 8000, 'getSession()');
     const userId = session?.data?.session?.user?.id || null;
     // FIX (Aug 29, 2026 — real bug, confirmed by Sam: checked Prospecting,
     // images still landed under listings/): action=create only ever fires
@@ -1634,7 +1642,11 @@ async function createNewProject(address) {
   const actions = document.getElementById('property-actions');
 
   try {
-    const session = await getSupabase().auth.getSession();
+    // FIX (Sep 7, 2026): same unguarded getSession() issue as
+    // lookupOrCreateProject() above — wrapped in withAuthTimeout() so a
+    // stuck cross-tab lock or Supabase JWT-refresh stall rejects into this
+    // function's own catch block instead of hanging forever.
+    const session = await withAuthTimeout(getSupabase().auth.getSession(), 8000, 'getSession()');
     const userId = session?.data?.session?.user?.id || null;
     const isProspecting = !!document.getElementById('prospecting-toggle')?.checked;
     const res = await fetch('/.netlify/functions/project-manage?action=create', {

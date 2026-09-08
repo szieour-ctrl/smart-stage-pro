@@ -7613,42 +7613,6 @@ function withAuthTimeout(promise, ms, label) {
 async function initAuth() {
   const sb = getSupabase();
 
-  // FIX (Sep 2026): listener now registered BEFORE the initial session
-  // check, not after. A refresh attempted inside getSession()/getUser()
-  // below can itself fire SIGNED_OUT if the stored refresh token turns out
-  // to be dead — if nothing is listening yet at that moment, the event is
-  // silently missed and the app can be left in a half-authenticated state.
-  // Listen for auth state changes (OAuth/magic-link/token refresh)
-  // Password login is handled explicitly in submitAuth to avoid double-call
-  sb.auth.onAuthStateChange(async (event, session) => {
-    if (event === 'SIGNED_IN' && session?.user) {
-      // FIX (Sep 2026): previously guarded with
-      // `if (!_currentUser || _currentUser.id !== session.user.id)`, which
-      // skipped handleAuthenticatedUser() — and therefore the header
-      // menu/app re-render — whenever _currentUser already matched the
-      // incoming user. That guard was meant to avoid a redundant re-render
-      // when SIGNED_IN fires twice for an already-loaded user, but it also
-      // silently no-ops a GENUINE sign-in after a background token-refresh
-      // race left this tab signed out without _currentUser ever getting
-      // reset to null first (confirmed real scenario: Gallery opened in a
-      // separate tab races this tab's Supabase client over the same stored
-      // refresh token — whichever refreshes first rotates it, invalidating
-      // the other tab's copy). Net effect: log back in, menu never comes
-      // back. handleAuthenticatedUser() re-runs its own user/ToS/
-      // subscription checks and is safe to call again, so it now always
-      // runs on a real SIGNED_IN with a session.
-      _currentUser = session.user;
-      await handleAuthenticatedUser(session.user);
-    } else if (event === 'SIGNED_OUT') {
-      _currentUser = null;
-      _userRecord = null;
-      hideAllAuthModals();
-      hideLandingPage();
-      showLandingPage();
-      hideAppUI();
-    }
-  });
-
 // FIX (Sep 2026): confirmed real incidents where the ONLY working fix was
 // manually deleting the sb-*-auth-token key from localStorage via DevTools
 // — not something a subscriber should ever have to do. This renders a
@@ -7751,6 +7715,49 @@ let session = readStoredSessionDirect();
   } else {
     showLandingPage();
   }
+
+  // TEST (Sep 8, 2026 — incident hypothesis #1, see
+  // INCIDENT-auth-deadlock-sep6-8-2026.md "Open Question"): listener
+  // registration moved back to run AFTER the initial session check
+  // completes, restoring the exact ordering used before the Sep 6 Gallery
+  // session. The Sep 6 change (registering this before the check, on the
+  // theory that a refresh-triggered SIGNED_OUT during the check could
+  // otherwise be missed) is the leading untested hypothesis for the Sep
+  // 6-8 auth deadlock. This is a single-variable revert: nothing else in
+  // this function changed. If the deadlock stops recurring, this ordering
+  // was the trigger. If it still recurs, this can be ruled out and the
+  // other candidates (the getUser() verification call added the same day,
+  // or iOS bfcache/tab-suspension behavior) move up.
+  // Listen for auth state changes (OAuth/magic-link/token refresh)
+  // Password login is handled explicitly in submitAuth to avoid double-call
+  sb.auth.onAuthStateChange(async (event, session) => {
+    if (event === 'SIGNED_IN' && session?.user) {
+      // FIX (Sep 2026): previously guarded with
+      // `if (!_currentUser || _currentUser.id !== session.user.id)`, which
+      // skipped handleAuthenticatedUser() — and therefore the header
+      // menu/app re-render — whenever _currentUser already matched the
+      // incoming user. That guard was meant to avoid a redundant re-render
+      // when SIGNED_IN fires twice for an already-loaded user, but it also
+      // silently no-ops a GENUINE sign-in after a background token-refresh
+      // race left this tab signed out without _currentUser ever getting
+      // reset to null first (confirmed real scenario: Gallery opened in a
+      // separate tab races this tab's Supabase client over the same stored
+      // refresh token — whichever refreshes first rotates it, invalidating
+      // the other tab's copy). Net effect: log back in, menu never comes
+      // back. handleAuthenticatedUser() re-runs its own user/ToS/
+      // subscription checks and is safe to call again, so it now always
+      // runs on a real SIGNED_IN with a session.
+      _currentUser = session.user;
+      await handleAuthenticatedUser(session.user);
+    } else if (event === 'SIGNED_OUT') {
+      _currentUser = null;
+      _userRecord = null;
+      hideAllAuthModals();
+      hideLandingPage();
+      showLandingPage();
+      hideAppUI();
+    }
+  });
 }
 
 // Trial length — mirrors debit-credit.js's isTrialExpired exactly (same

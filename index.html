@@ -12236,7 +12236,48 @@ function renderDashboard(data, filter, search) {
   const content = document.getElementById('db-content');
   if (!content) return;
 
-  const { listings = [], stats = {} } = data;
+  const { stats = {} } = data;
+  const hasTiers = (data.listings || []).some(l => l.tier === 'team') || (data.listings || []).some(l => l.tier === 'brokerage');
+
+  // FIX (Sep 8, 2026 — real bug found live): this used to rebuild the
+  // ENTIRE dashboard — stats, filter buttons, search input, AND every
+  // listing card — via one big content.innerHTML on every keystroke in
+  // the search box (oninput called this directly). That destroys and
+  // recreates the <input> element itself each time; the new element gets
+  // the right value but never focus, so the field only ever accepted one
+  // character before needing a click back in. Fix: the search input and
+  // everything above it are now rendered ONCE here — typing only ever
+  // touches #db-listings-container below via renderListingsOnly(), which
+  // never rebuilds the input itself.
+  content.innerHTML = `
+    <div class="db-stats">
+      <div class="db-stat"><div class="db-stat-val">${stats.totalListings || 0}</div><div class="db-stat-label">Total Listings</div></div>
+      <div class="db-stat"><div class="db-stat-val">${stats.totalImageSets || 0}</div><div class="db-stat-label">Staged Image Sets</div></div>
+      <div class="db-stat"><div class="db-stat-val gold">${stats.creditsRemaining ?? '—'}</div><div class="db-stat-label">Images Remaining</div></div>
+      <div class="db-stat"><div class="db-stat-val" style="font-size:1rem;padding-top:4px;">${stats.plan || 'Solo'} <span style="font-size:0.7rem;color:var(--success);font-weight:500;">· active</span></div><div class="db-stat-label">Subscription</div></div>
+    </div>
+    <div class="db-filters">
+      <button class="db-filter-btn ${filter==='all'?'active':''}" onclick="filterDashboard('all')">All</button>
+      ${hasTiers ? `
+      <button class="db-filter-btn ${filter==='solo'?'active':''}" onclick="filterDashboard('solo')">Solo</button>
+      <button class="db-filter-btn ${filter==='team'?'active':''}" onclick="filterDashboard('team')">Team</button>
+      <button class="db-filter-btn ${filter==='brokerage'?'active':''}" onclick="filterDashboard('brokerage')">Brokerage</button>` : ''}
+      <input class="db-search" placeholder="Search by address…" value="${search}" oninput="searchDashboard(this.value)" />
+    </div>
+    <div id="db-listings-container"></div>`;
+
+  renderListingsOnly(data, filter, search);
+}
+
+// NEW (Sep 8, 2026): the part that actually changes on every keystroke —
+// rebuilds ONLY #db-listings-container, never touches the search input,
+// filter buttons, or stats above it. See renderDashboard()'s comment for
+// the focus-loss bug this replaces.
+function renderListingsOnly(data, filter, search) {
+  const container = document.getElementById('db-listings-container');
+  if (!container) return;
+
+  const { listings = [] } = data;
   const searchLower = (search || '').toLowerCase();
 
   const filtered = listings.filter(l => {
@@ -12244,8 +12285,6 @@ function renderDashboard(data, filter, search) {
     const searchMatch = !searchLower || l.address.toLowerCase().includes(searchLower);
     return tierMatch && searchMatch;
   });
-
-  const hasTiers = listings.some(l => l.tier === 'team') || listings.some(l => l.tier === 'brokerage');
 
   const formatDate = (iso) => {
     if (!iso) return '—';
@@ -12295,35 +12334,28 @@ function renderDashboard(data, filter, search) {
       </div>
     </div>`;
 
-  const listingsHtml = filtered.length === 0
-    ? `<div class="db-empty"><div class="db-empty-icon">🏠</div><div>No listings found${search ? ' matching "' + search + '"' : ''}.</div></div>`
-    : filtered.map(cardHtml).join('');
-
-  content.innerHTML = `
-    <div class="db-stats">
-      <div class="db-stat"><div class="db-stat-val">${stats.totalListings || 0}</div><div class="db-stat-label">Total Listings</div></div>
-      <div class="db-stat"><div class="db-stat-val">${stats.totalImageSets || 0}</div><div class="db-stat-label">Staged Image Sets</div></div>
-      <div class="db-stat"><div class="db-stat-val gold">${stats.creditsRemaining ?? '—'}</div><div class="db-stat-label">Images Remaining</div></div>
-      <div class="db-stat"><div class="db-stat-val" style="font-size:1rem;padding-top:4px;">${stats.plan || 'Solo'} <span style="font-size:0.7rem;color:var(--success);font-weight:500;">· active</span></div><div class="db-stat-label">Subscription</div></div>
-    </div>
-    <div class="db-filters">
-      <button class="db-filter-btn ${filter==='all'?'active':''}" onclick="filterDashboard('all')">All</button>
-      ${hasTiers ? `
-      <button class="db-filter-btn ${filter==='solo'?'active':''}" onclick="filterDashboard('solo')">Solo</button>
-      <button class="db-filter-btn ${filter==='team'?'active':''}" onclick="filterDashboard('team')">Team</button>
-      <button class="db-filter-btn ${filter==='brokerage'?'active':''}" onclick="filterDashboard('brokerage')">Brokerage</button>` : ''}
-      <input class="db-search" placeholder="Search by address…" value="${search}" oninput="filterDashboard('${filter}',this.value)" />
-    </div>
-    <div class="db-listings">${listingsHtml}</div>`;
+  container.innerHTML = filtered.length === 0
+    ? `<div class="db-listings"><div class="db-empty"><div class="db-empty-icon">🏠</div><div>No listings found${search ? ' matching "' + search + '"' : ''}.</div></div></div>`
+    : `<div class="db-listings">${filtered.map(cardHtml).join('')}</div>`;
 }
 
 let _dbFilter = 'all';
 let _dbSearch = '';
 
-function filterDashboard(filter, search) {
+// Filter buttons still do a full re-render — that's a click, not typing,
+// so there's no focus to lose. Search now goes through searchDashboard()
+// below instead, which never touches the input.
+function filterDashboard(filter) {
   _dbFilter = filter !== undefined ? filter : _dbFilter;
-  _dbSearch = search !== undefined ? search : _dbSearch;
   if (_dashboardData) renderDashboard(_dashboardData, _dbFilter, _dbSearch);
+}
+
+// NEW (Sep 8, 2026): what the search input's oninput actually calls now —
+// updates only the listings below it via renderListingsOnly(), leaving the
+// input itself (and its focus/cursor position) completely untouched.
+function searchDashboard(search) {
+  _dbSearch = search !== undefined ? search : _dbSearch;
+  if (_dashboardData) renderListingsOnly(_dashboardData, _dbFilter, _dbSearch);
 }
 
 // ── LISTING IMAGES MODAL — "Hide from Compliance Page" / "Hidden (N) — Review" ──

@@ -7520,9 +7520,27 @@ let _currentUser = null;
 let _userRecord = null;
 let _pendingCheckoutPlan = null;
 
+// FIX (Sep 8, 2026): Supabase's internal cross-tab Web Lock (used to
+// serialize auth calls via navigator.locks) has known, long-standing
+// deadlock bugs in the underlying GoTrue/auth-js library — the lock can be
+// acquired and never released (an "orphaned" or "zombie" lock), after which
+// EVERY subsequent getSession()/getUser()/signIn call hangs forever, with
+// ZERO network activity, even on a completely fresh page load (this is not
+// about stale tokens or stale storage — it happens during lock acquisition
+// itself). See supabase/supabase-js#1594, #2013, and #2111 for the same
+// symptom independently reported by other projects. Quitting the browser
+// only "fixes" it temporarily because that releases the orphaned lock —
+// the same deadlock can recur the next time the same code path runs.
+// This app doesn't rely on Supabase's own lock for cross-tab correctness —
+// Gallery already uses its own separate storageKey (see gallery.html) — so
+// there's nothing to lose by disabling this mechanism entirely.
+const noOpLock = async (name, acquireTimeout, fn) => await fn();
+
 function getSupabase() {
   if (!_supabase) {
-    _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: { lock: noOpLock }
+    });
   }
   return _supabase;
 }

@@ -1864,6 +1864,19 @@ function escHtml(str) {
   return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+// NEW (Sep 8, 2026): extracts the S3 key from a public S3 URL of the form
+// https://{bucket}.s3.{region}.amazonaws.com/{key} — used by the
+// prospecting flow (see attachFinalToProject/attachHeroShotToProject) to
+// pass the exact originalKey to write-prospect-meta.js, so prospect-page.js
+// never has to guess or list S3 for it. Matches the exact publicUrl format
+// both upload-original.js and upload-staged.js build server-side.
+function s3KeyFromUrl(url) {
+  if (!url) return null;
+  const marker = '.amazonaws.com/';
+  const idx = url.indexOf(marker);
+  return idx === -1 ? null : url.slice(idx + marker.length);
+}
+
 // ══════════════════════════════════════════
 // INTAKE
 // ══════════════════════════════════════════
@@ -4721,7 +4734,13 @@ async function attachFinalToProject(finalBase64, room, orig, enhId) {
           await fetch('/.netlify/functions/write-prospect-meta', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ slug: _prospectSlug, address: SESSION.projectAddress || '', siteUrl: window.location.origin })
+            body: JSON.stringify({
+              slug: _prospectSlug,
+              address: SESSION.projectAddress || '',
+              siteUrl: window.location.origin,
+              finalKey: sig.s3Key || null,
+              originalKey: s3KeyFromUrl(orig?.originalUrl),
+            })
           });
           SESSION.prospectPageUrl = `${window.location.origin}/prospect/${_prospectSlug}`;
           updateComplianceBarForProspecting(SESSION.prospectPageUrl);
@@ -5440,7 +5459,13 @@ async function attachHeroShotToProject(finalBase64, room, shot, shotId) {
           await fetch('/.netlify/functions/write-prospect-meta', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ slug: _prospectSlug, address: SESSION.projectAddress || '', siteUrl: window.location.origin })
+            body: JSON.stringify({
+              slug: _prospectSlug,
+              address: SESSION.projectAddress || '',
+              siteUrl: window.location.origin,
+              finalKey: sig.s3Key || null,
+              originalKey: s3KeyFromUrl(orig?.originalUrl),
+            })
           });
           SESSION.prospectPageUrl = `${window.location.origin}/prospect/${_prospectSlug}`;
           updateComplianceBarForProspecting(SESSION.prospectPageUrl);

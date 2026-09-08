@@ -211,12 +211,30 @@ async function lookupProject(address, userId, requestedIsProspecting, env) {
         // property-search flow sends one; the mid-session self-healing
         // backfill call in continueProject() deliberately does not, so it
         // can never accidentally flip an established listing's flag).
-        if (listingId && typeof requestedIsProspecting === "boolean" && requestedIsProspecting !== isProspecting) {
-          console.log("lookupProject: syncing is_prospecting ->", requestedIsProspecting, "for listingId", listingId);
+        //
+        // FIX (Sep 8, 2026 — confirmed real case via Netlify logs): this
+        // used to sync in EITHER direction whenever the requested value
+        // differed from what was stored. Confirmed live: a listing
+        // correctly flagged is_prospecting=true at 10:33 got silently
+        // flipped back to false at 10:38 by an ordinary re-search — the
+        // "New Property Search" flow resets the checkbox as a side
+        // effect, and the very next lookup on the same address read that
+        // reset (unchecked) state as an authoritative signal to undo the
+        // agent's earlier, deliberate choice. Per Sam: prospecting is
+        // permanent and never converts to a real listing — if a
+        // prospected agent actually subscribes, they create their own
+        // real listing under their own account; nothing about this
+        // record should ever change. So this only ever syncs false->true
+        // now (catching the original Aug 29 bug — checkbox checked but
+        // not honored), never true->false — once prospecting, always
+        // prospecting, immune to a later search where the checkbox just
+        // happens to not be checked.
+        if (listingId && requestedIsProspecting === true && isProspecting !== true) {
+          console.log("lookupProject: syncing is_prospecting -> true for listingId", listingId);
           try {
-            const patchResult = await supabase("PATCH", "listings", { is_prospecting: requestedIsProspecting }, `?id=eq.${listingId}`);
+            const patchResult = await supabase("PATCH", "listings", { is_prospecting: true }, `?id=eq.${listingId}`);
             console.log("lookupProject: is_prospecting patch result — status:", patchResult.status, "data:", JSON.stringify(patchResult.data));
-            isProspecting = requestedIsProspecting;
+            isProspecting = true;
           } catch (e) {
             console.error("lookupProject: is_prospecting sync patch failed (non-fatal):", e.message);
           }
@@ -298,12 +316,16 @@ async function createProject(address, agentInfo, siteUrl, userId, isProspecting,
         // Same sync as lookupProject's Aug 29, 2026 fix above, for the rare
         // case this race-guard branch is the one that fires (two near-
         // simultaneous creates for the same brand-new address).
-        if (listingId && typeof isProspecting === "boolean" && isProspecting !== existingIsProspecting) {
-          console.log("createProject: syncing is_prospecting ->", isProspecting, "for listingId", listingId);
+        //
+        // FIX (Sep 8, 2026): one-directional now, matching lookupProject's
+        // fix above — false->true only, never true->false. See that
+        // function's comment for the full incident this closes.
+        if (listingId && isProspecting === true && existingIsProspecting !== true) {
+          console.log("createProject: syncing is_prospecting -> true for listingId", listingId);
           try {
-            const patchResult = await supabase("PATCH", "listings", { is_prospecting: isProspecting }, `?id=eq.${listingId}`);
+            const patchResult = await supabase("PATCH", "listings", { is_prospecting: true }, `?id=eq.${listingId}`);
             console.log("createProject: is_prospecting patch result — status:", patchResult.status, "data:", JSON.stringify(patchResult.data));
-            existingIsProspecting = isProspecting;
+            existingIsProspecting = true;
           } catch (e) {
             console.error("createProject: is_prospecting sync patch failed (non-fatal):", e.message);
           }

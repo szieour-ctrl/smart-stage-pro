@@ -157,7 +157,7 @@
   timeout = 15
 
 [functions."write-prospect-meta"]
-  timeout = 10
+  timeout = 15
 
 [functions."download-compliance-zip"]
   timeout = 60

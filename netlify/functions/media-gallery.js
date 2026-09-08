@@ -155,10 +155,17 @@ exports.handler = async (event) => {
 
   try {
     if (action === "search-listings") {
+      // FIX (Sep 8, 2026): this never excluded prospecting listings —
+      // get-user-listings.js (My Listings) got this filter back when
+      // prospecting was first built, but Gallery's own search never did.
+      // Confirmed live: a prospecting shot was showing up in Gallery
+      // search despite being correctly hidden from My Listings. Per Sam,
+      // prospecting should never appear in Gallery at all — it has its
+      // own page now (see prospect-page.js).
       const q = (event.queryStringParameters?.q || "").trim();
       const query = q
-        ? `?slug=not.is.null${filter}&address=ilike.*${encodeURIComponent(q)}*&select=address,slug,project_id,created_at&order=created_at.desc&limit=25`
-        : `?slug=not.is.null${filter}&select=address,slug,project_id,created_at&order=created_at.desc&limit=25`;
+        ? `?slug=not.is.null${filter}&is_prospecting=not.is.true&address=ilike.*${encodeURIComponent(q)}*&select=address,slug,project_id,created_at&order=created_at.desc&limit=25`
+        : `?slug=not.is.null${filter}&is_prospecting=not.is.true&select=address,slug,project_id,created_at&order=created_at.desc&limit=25`;
       const res = await supabase("GET", "listings", null, query);
       if (res.status >= 400) {
         return { statusCode: 500, headers, body: JSON.stringify({ error: "Listing search failed", detail: res.data }) };
@@ -173,8 +180,10 @@ exports.handler = async (event) => {
       // Ownership check BEFORE returning anything — without this, a
       // signed-in subscriber could bypass search-listings entirely by
       // guessing or being handed another subscriber's slug directly.
+      // Also excludes prospecting (see search-listings fix above) so a
+      // guessed/linked prospecting slug can't be browsed here either.
       const ownCheck = await supabase("GET", "listings", null,
-        `?slug=eq.${encodeURIComponent(slug)}${filter}&select=id&limit=1`
+        `?slug=eq.${encodeURIComponent(slug)}${filter}&is_prospecting=not.is.true&select=id&limit=1`
       );
       if (!ownCheck.data?.[0]) {
         return { statusCode: 403, headers, body: JSON.stringify({ error: "Not authorized for this listing" }) };

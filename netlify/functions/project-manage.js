@@ -257,6 +257,49 @@ async function lookupProject(address, userId, requestedIsProspecting, env) {
             }
           }
         }
+        // FIX (Sep 8, 2026 — same real bug as createProject's race-guard
+        // branch, see that function's comment for the full incident): if
+        // listingId came back null because no Supabase row exists at all
+        // for this project_id, nothing above ever creates one — and since
+        // this lookup path is what EVERY repeat search after the first
+        // hits, a project stuck in this state stays stuck on every single
+        // visit, forever, with upload-original.js/upload-staged.js unable
+        // to resolve a slug and silently falling back to the legacy
+        // projectId-based S3 naming instead of a readable one.
+        if (!listingId && userId) {
+          let backfillTier = "solo";
+          let backfillUserContext = null;
+          try {
+            backfillUserContext = await getSupabaseUserContext(userId);
+            if (backfillUserContext) backfillTier = getRoleTier(backfillUserContext.role);
+          } catch (e) {
+            console.error("lookupProject: could not resolve user context for backfill (non-fatal):", e.message);
+          }
+          const backfillSlug = slugifyAddress(project.address);
+          try {
+            const backfillInsert = await supabase("POST", "listings", {
+              address: project.address,
+              project_id: project.projectId,
+              slug: backfillSlug,
+              compliance_page_url: project.complianceUrl,
+              mls_number: null,
+              user_id: userId,
+              team_id: backfillUserContext?.team_id || null,
+              brokerage_id: backfillUserContext?.brokerage_id || null,
+              status: "active",
+              is_prospecting: requestedIsProspecting === true,
+            });
+            listingId = backfillInsert.data?.[0]?.id || null;
+            slug = backfillSlug;
+            isProspecting = requestedIsProspecting === true;
+            console.log(
+              "lookupProject: backfilled missing listings row for projectId", project.projectId,
+              "— insert status:", backfillInsert.status, "listingId:", listingId, "tier:", backfillTier
+            );
+          } catch (e) {
+            console.error("lookupProject: missing-row backfill insert failed (non-fatal):", e.message);
+          }
+        }
       } catch (err) {
         console.error("Listing id lookup error (non-fatal):", err.message);
       }
@@ -287,6 +330,16 @@ async function createProject(address, agentInfo, siteUrl, userId, isProspecting,
   const store   = getProjectStore(env);
   // Scoped by userId — see matching fix + comment in lookupProject above.
   const addrKey = "addr_" + (userId || "anon") + "_" + addressHash(address);
+
+  // FIX (Sep 8, 2026): moved up from below the race-guard check — the
+  // race-guard branch now needs this too (see the missing-row backfill
+  // fix inside it below), not just the fresh-insert path.
+  let tier = "solo";
+  let userContext = null;
+  if (userId && process.env.SUPABASE_URL) {
+    userContext = await getSupabaseUserContext(userId);
+    if (userContext) tier = getRoleTier(userContext.role);
+  }
 
   // Race condition guard
   const existing = await store.get(addrKey);
@@ -341,19 +394,55 @@ async function createProject(address, agentInfo, siteUrl, userId, isProspecting,
             }
           }
         }
+        // FIX (Sep 8, 2026 — confirmed real case): everything above this
+        // only ever SYNCS FIELDS on an existing Supabase row — if
+        // listingId came back null because no row exists at all (not "a
+        // row with a stale flag", genuinely no row), nothing above ever
+        // creates one. Confirmed live: a Blobs project existed for an
+        // address with zero matching Supabase listings row — every
+        // subsequent search hit this branch, which kept returning
+        // listingId: null forever, and upload-original.js/upload-staged.js
+        // (unable to resolve a slug via that missing row) silently fell
+        // back to the legacy projectId-based S3 naming scheme instead of
+        // the readable slug — the folder name itself was the tell
+        // (szregsolo_..._f840/ instead of a readable address slug). Most
+        // likely original cause: userId was null at the moment this Blobs
+        // project was first created (the fresh-insert path below only
+        // ever attempts the Supabase write `if (userId && ...)`), so the
+        // Blobs write succeeded while the Supabase side never ran at all —
+        // but regardless of how it happened, this branch needs to be able
+        // to recover from it, not just perpetuate the gap on every retry.
+        if (!listingId && userId) {
+          const backfillSlug = slugifyAddress(proj.address);
+          try {
+            const backfillInsert = await supabase("POST", "listings", {
+              address: proj.address,
+              project_id: proj.projectId,
+              slug: backfillSlug,
+              compliance_page_url: proj.complianceUrl,
+              mls_number: agentInfo?.mlsNumber || null,
+              user_id: userId,
+              team_id: userContext?.team_id || null,
+              brokerage_id: userContext?.brokerage_id || null,
+              status: "active",
+              is_prospecting: !!isProspecting,
+            });
+            listingId = backfillInsert.data?.[0]?.id || null;
+            slug = backfillSlug;
+            existingIsProspecting = !!isProspecting;
+            console.log(
+              "createProject (race-guard branch): backfilled missing listings row for projectId", proj.projectId,
+              "— insert status:", backfillInsert.status, "listingId:", listingId
+            );
+          } catch (e) {
+            console.error("createProject: missing-row backfill insert failed (non-fatal):", e.message);
+          }
+        }
       } catch (err) {
         console.error("Listing id lookup error (non-fatal):", err.message);
       }
     }
     return { created: false, existing: true, projectId: proj.projectId, complianceUrl: proj.complianceUrl, listingId, slug, isProspecting: existingIsProspecting };
-  }
-
-  // Determine tier from Supabase user context if userId provided
-  let tier = "solo";
-  let userContext = null;
-  if (userId && process.env.SUPABASE_URL) {
-    userContext = await getSupabaseUserContext(userId);
-    if (userContext) tier = getRoleTier(userContext.role);
   }
 
   const projectId = generateProjectId(address, tier);

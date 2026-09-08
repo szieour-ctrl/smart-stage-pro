@@ -4721,7 +4721,7 @@ async function attachFinalToProject(finalBase64, room, orig, enhId) {
           await fetch('/.netlify/functions/write-prospect-meta', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ slug: _prospectSlug, address: SESSION.projectAddress || '' })
+            body: JSON.stringify({ slug: _prospectSlug, address: SESSION.projectAddress || '', siteUrl: window.location.origin })
           });
           SESSION.prospectPageUrl = `${window.location.origin}/prospect/${_prospectSlug}`;
           updateComplianceBarForProspecting(SESSION.prospectPageUrl);
@@ -5440,7 +5440,7 @@ async function attachHeroShotToProject(finalBase64, room, shot, shotId) {
           await fetch('/.netlify/functions/write-prospect-meta', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ slug: _prospectSlug, address: SESSION.projectAddress || '' })
+            body: JSON.stringify({ slug: _prospectSlug, address: SESSION.projectAddress || '', siteUrl: window.location.origin })
           });
           SESSION.prospectPageUrl = `${window.location.origin}/prospect/${_prospectSlug}`;
           updateComplianceBarForProspecting(SESSION.prospectPageUrl);

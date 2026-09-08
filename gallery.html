@@ -120,6 +120,20 @@ function getSb() {
   return _sb;
 }
 
+// FIX (Sep 7, 2026): the storageKey separation above fixed the cross-tab
+// lock collision with index.html, but getSession()/getUser() calls in this
+// file still had no timeout of their own — a stall from any other cause
+// (e.g. the Supabase JWT-refresh incident, status.supabase.com/incidents/
+// 6q5902p2xd9f) still hung forever with zero feedback. Mirrors index.html's
+// own withAuthTimeout helper — this file has a separate script scope, so
+// it needs its own copy rather than sharing one.
+function withAuthTimeout(promise, ms, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms — possible stuck cross-tab lock`)), ms))
+  ]);
+}
+
 let searchTimer = null;
 
 const loginScreen = document.getElementById('loginScreen');
@@ -142,7 +156,17 @@ const changeBtn = document.getElementById('changeBtn');
 
 async function initAuth() {
   const sb = getSb();
-  const { data: { session } } = await sb.auth.getSession();
+  let session;
+  try {
+    const result = await withAuthTimeout(sb.auth.getSession(), 8000, 'getSession()');
+    session = result.data.session;
+  } catch (stallErr) {
+    // getSession() never resolved — fail into the same path as "no session"
+    // rather than leaving the page frozen with no login screen and no menu.
+    console.warn('Gallery auth init stalled:', stallErr.message);
+    showLogin();
+    return;
+  }
   if (session?.user) {
     showApp();
   } else {
@@ -198,7 +222,17 @@ signoutBtn.addEventListener('click', async () => {
 // belongs to (see media-gallery.js's own comments).
 async function authedFetch(url) {
   const sb = getSb();
-  const { data: { session } } = await sb.auth.getSession();
+  let session;
+  try {
+    const result = await withAuthTimeout(sb.auth.getSession(), 8000, 'getSession()');
+    session = result.data.session;
+  } catch (stallErr) {
+    // Same fail path as the existing !session case below — every caller
+    // already handles this thrown error, so a stall now surfaces the same
+    // way instead of hanging every gallery search/fetch forever.
+    showLogin();
+    throw new Error('Session expired — please sign in again.');
+  }
   if (!session) { showLogin(); throw new Error('Session expired — please sign in again.'); }
   return fetch(url, { headers: { 'Authorization': `Bearer ${session.access_token}` } });
 }

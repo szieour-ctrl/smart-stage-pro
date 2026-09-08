@@ -7520,6 +7520,7 @@ let _supabase = null;
 let _currentUser = null;
 let _userRecord = null;
 let _pendingCheckoutPlan = null;
+let _clientInstanceCount = 0; // how many GoTrueClient instances THIS page has created
 
 // FIX (Sep 8, 2026): Supabase's internal cross-tab Web Lock (used to
 // serialize auth calls via navigator.locks) has known, long-standing
@@ -7537,20 +7538,44 @@ let _pendingCheckoutPlan = null;
 // there's nothing to lose by disabling this mechanism entirely.
 const noOpLock = async (name, acquireTimeout, fn) => await fn();
 
+const AUTH_STORAGE_KEY = 'sb-dnpaenpwdhjmslymgkse-auth-token';
+
 function getSupabase() {
   if (!_supabase) {
-    _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      auth: {
-        lock: noOpLock,
-        // TEMP DIAGNOSTIC (Sep 8, 2026): logs every internal step of
-        // Supabase's own auth code to console — gated behind ?authdebug=1
-        // so it never runs for real users. This is to find exactly where
-        // getSession() is getting stuck internally, since every external
-        // cause (network, lock, token validity, library version) has now
-        // been directly ruled out with evidence. Remove once resolved.
-        debug: new URLSearchParams(window.location.search).get('authdebug') === '1'
-      }
-    });
+    _clientInstanceCount++;
+    const authConfig = {
+      lock: noOpLock,
+      // TEMP DIAGNOSTIC (Sep 8, 2026): logs every internal step of
+      // Supabase's own auth code to console — gated behind ?authdebug=1
+      // so it never runs for real users. This is to find exactly where
+      // getSession() is getting stuck internally, since every external
+      // cause (network, lock, token validity, library version) has now
+      // been directly ruled out with evidence. Remove once resolved.
+      debug: new URLSearchParams(window.location.search).get('authdebug') === '1'
+    };
+    // FIX (Sep 8, 2026): confirmed by reading @supabase/supabase-js's own
+    // source directly — GoTrueClient keeps a static counter of how many
+    // instances have been constructed PER storageKey, for the entire
+    // lifetime of this page's JS runtime (it's on the class itself, never
+    // reset except by an actual page reload). Any instance beyond the
+    // first with a given key logs "Multiple GoTrueClient instances
+    // detected... this should be avoided as it may produce undefined
+    // behavior when used concurrently under the same storage key" — which
+    // is exactly what happened here: signOut()'s stale-client-discard fix
+    // (see signOut() below) makes every sign-out-then-sign-in cycle build
+    // a brand new client, and without this, every one of those reused the
+    // same default key the first client used, silently recreating the
+    // exact same-key-multiple-instances pattern the original Sep 6
+    // Gallery incident was caused by — just within one tab instead of
+    // across two. Only the FIRST client this page ever creates uses the
+    // canonical key (matching what readStoredSessionDirect() below reads
+    // by default, so normal reload persistence is unaffected for the
+    // common case). Every replacement client gets its own suffixed key,
+    // so no two live instances ever share storage.
+    if (_clientInstanceCount > 1) {
+      authConfig.storageKey = `${AUTH_STORAGE_KEY}-r${_clientInstanceCount}`;
+    }
+    _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: authConfig });
   }
   return _supabase;
 }
@@ -7579,7 +7604,22 @@ function getSupabase() {
 // so I can send their ID along" — this is what those actually need.
 function readStoredSessionDirect() {
   try {
-    const raw = localStorage.getItem('sb-dnpaenpwdhjmslymgkse-auth-token');
+    // FIX (Sep 8, 2026): getSupabase() now gives a replacement client (one
+    // built after signOut() discards a stale one) its own suffixed key
+    // instead of the canonical one, to stop it colliding with an orphaned
+    // instance still holding the default key (see getSupabase() above).
+    // That means the live session isn't always sitting under the exact
+    // canonical key anymore — on a reload right after a mid-session
+    // sign-out/sign-in, it'd be under a "-rN" suffix instead. signOut()
+    // already deletes every "sb-"-prefixed key synchronously before a new
+    // sign-in can write one, so in practice at most one of these exists
+    // at a time — scanning for whichever one is actually present finds
+    // the live session either way, canonical or suffixed.
+    const key = Object.keys(localStorage).find(
+      k => k === AUTH_STORAGE_KEY || (k.startsWith(AUTH_STORAGE_KEY + '-r') && /^-r\d+$/.test(k.slice(AUTH_STORAGE_KEY.length)))
+    );
+    if (!key) return null;
+    const raw = localStorage.getItem(key);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (!parsed?.access_token || !parsed?.expires_at) return null;

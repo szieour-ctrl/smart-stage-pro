@@ -7540,6 +7540,25 @@ const noOpLock = async (name, acquireTimeout, fn) => await fn();
 
 const AUTH_STORAGE_KEY = 'sb-dnpaenpwdhjmslymgkse-auth-token';
 
+// FIX (Sep 8, 2026 — confirmed real case, second round): finds whichever
+// key currently holds the live session — the canonical one, or a "-rN"
+// suffixed replacement key left behind by a mid-session sign-out/sign-in
+// cycle (see getSupabase() below). Shared by getSupabase() AND
+// readStoredSessionDirect() so both agree on the SAME key. Confirmed live:
+// without this, readStoredSessionDirect() alone found a session under a
+// suffixed key and the UI believed it was logged in, but a fresh page
+// load's first client (built by getSupabase(), unaware of that key) still
+// bound itself to the canonical key by default — so when initAuth() then
+// called getUser() to verify server-side, that client had no token to
+// send at all from its own point of view, and the server correctly
+// rejected it with AuthSessionMissingError. The UI and the actual client
+// instance have to agree on which key is live, not just the UI.
+function findLiveAuthStorageKey() {
+  return Object.keys(localStorage).find(
+    k => k === AUTH_STORAGE_KEY || (k.startsWith(AUTH_STORAGE_KEY + '-r') && /^-r\d+$/.test(k.slice(AUTH_STORAGE_KEY.length)))
+  ) || null;
+}
+
 function getSupabase() {
   if (!_supabase) {
     _clientInstanceCount++;
@@ -7567,14 +7586,22 @@ function getSupabase() {
     // same default key the first client used, silently recreating the
     // exact same-key-multiple-instances pattern the original Sep 6
     // Gallery incident was caused by — just within one tab instead of
-    // across two. Only the FIRST client this page ever creates uses the
-    // canonical key (matching what readStoredSessionDirect() below reads
-    // by default, so normal reload persistence is unaffected for the
-    // common case). Every replacement client gets its own suffixed key,
-    // so no two live instances ever share storage.
-    if (_clientInstanceCount > 1) {
-      authConfig.storageKey = `${AUTH_STORAGE_KEY}-r${_clientInstanceCount}`;
-    }
+    // across two.
+    //
+    // FIX (Sep 8, 2026 — second round): the FIRST client of a fresh page
+    // load must NOT always default to the canonical key — a previous page
+    // load may have ended on a suffixed replacement key (from a
+    // mid-session sign-out/sign-in), and that's where the real session
+    // actually lives. Adopt whatever findLiveAuthStorageKey() finds; only
+    // fall back to canonical when nothing is stored yet (a genuinely
+    // logged-out visitor, where canonical is simply the sensible default
+    // for a fresh sign-in). A REPLACEMENT client mid-session (2nd+ this
+    // page load) still always gets a brand-new never-used suffix, since
+    // its whole purpose is to avoid colliding with a stale instance that's
+    // still finishing its own call on the currently-live key.
+    authConfig.storageKey = _clientInstanceCount === 1
+      ? (findLiveAuthStorageKey() || AUTH_STORAGE_KEY)
+      : `${AUTH_STORAGE_KEY}-r${_clientInstanceCount}`;
     _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: authConfig });
   }
   return _supabase;
@@ -7604,20 +7631,11 @@ function getSupabase() {
 // so I can send their ID along" — this is what those actually need.
 function readStoredSessionDirect() {
   try {
-    // FIX (Sep 8, 2026): getSupabase() now gives a replacement client (one
-    // built after signOut() discards a stale one) its own suffixed key
-    // instead of the canonical one, to stop it colliding with an orphaned
-    // instance still holding the default key (see getSupabase() above).
-    // That means the live session isn't always sitting under the exact
-    // canonical key anymore — on a reload right after a mid-session
-    // sign-out/sign-in, it'd be under a "-rN" suffix instead. signOut()
-    // already deletes every "sb-"-prefixed key synchronously before a new
-    // sign-in can write one, so in practice at most one of these exists
-    // at a time — scanning for whichever one is actually present finds
-    // the live session either way, canonical or suffixed.
-    const key = Object.keys(localStorage).find(
-      k => k === AUTH_STORAGE_KEY || (k.startsWith(AUTH_STORAGE_KEY + '-r') && /^-r\d+$/.test(k.slice(AUTH_STORAGE_KEY.length)))
-    );
+    // FIX (Sep 8, 2026): uses the same findLiveAuthStorageKey() helper
+    // getSupabase() uses (see above) instead of its own separate scan —
+    // this and the actual client instance now always agree on which key
+    // is live, canonical or a "-rN" suffixed replacement one.
+    const key = findLiveAuthStorageKey();
     if (!key) return null;
     const raw = localStorage.getItem(key);
     if (!raw) return null;

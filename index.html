@@ -1597,6 +1597,12 @@ async function lookupOrCreateProject(address) {
           </div>
         </div>
         <div style="background:var(--bg);border-radius:4px;padding:12px;font-size:12px;line-height:1.9;">
+          ${data.isProspecting ? `
+          <div>📁 Prospecting — stage an image to (re)generate the page</div>
+          <div>📅 Created ${data.createdAt ? new Date(data.createdAt).toLocaleDateString() : 'Unknown'}</div>
+          <div style="margin-top:8px;display:flex;gap:16px;align-items:center;flex-wrap:wrap;">
+            <a href="${window.location.origin}/prospect/${data.slug}" target="_blank" style="color:var(--gold);font-size:11px;">View Prospect Page →</a>
+          </div>` : `
           <div>📁 <strong>${data.imageCount || 0}</strong> staged image set${data.imageCount !== 1 ? 's' : ''} in project</div>
           <div>🔗 QR Code Active · Compliance Page Active</div>
           <div>📅 Created ${data.createdAt ? new Date(data.createdAt).toLocaleDateString() : 'Unknown'}</div>
@@ -1604,7 +1610,7 @@ async function lookupOrCreateProject(address) {
             <a href="${data.complianceUrl}" target="_blank" style="color:var(--gold);font-size:11px;">View Compliance Page →</a>
             <a href="/.netlify/functions/generate-qr?complianceUrl=${encodeURIComponent(data.complianceUrl)}&address=${encodeURIComponent(address)}&projectId=${data.projectId}" download style="color:var(--muted);font-size:11px;">↓ Download Marketing QR</a>
             <a href="/.netlify/functions/generate-closing-card?address=${encodeURIComponent(address)}&projectId=${data.projectId}" download style="color:var(--muted);font-size:11px;">↓ Download Video Closing Card</a>
-          </div>
+          </div>`}
         </div>`;
     } else {
       // Bug fix (Sam, Aug 11): project creation used to be deferred all the
@@ -1690,6 +1696,9 @@ async function createNewProject(address) {
         </div>
       </div>
       <div style="background:var(--bg);border-radius:4px;padding:12px;font-size:12px;line-height:1.9;">
+        ${data.isProspecting ? `
+        <div>🆔 Project ID: <strong>${data.projectId}</strong></div>
+        <div>📋 Stage an image next — your prospect page and QR code generate automatically once it's ready</div>` : `
         <div>🆔 Project ID: <strong>${data.projectId}</strong></div>
         <div>🔗 Compliance URL generated</div>
         <div>📋 QR code will be applied to all Final images</div>
@@ -1697,7 +1706,7 @@ async function createNewProject(address) {
           <a href="${data.complianceUrl}" target="_blank" style="color:var(--gold);font-size:11px;">View Compliance Page →</a>
           <a href="/.netlify/functions/generate-qr?complianceUrl=${encodeURIComponent(data.complianceUrl)}&address=${encodeURIComponent(address)}&projectId=${data.projectId}" download style="color:var(--muted);font-size:11px;">↓ Download Marketing QR</a>
             <a href="/.netlify/functions/generate-closing-card?address=${encodeURIComponent(address)}&projectId=${data.projectId}" download style="color:var(--muted);font-size:11px;">↓ Download Video Closing Card</a>
-        </div>
+        </div>`}
       </div>`;
 
     document.getElementById('property-continue-btn').style.display = 'inline-block';
@@ -1715,9 +1724,33 @@ function continueToUpload() {
   // Update compliance bar with project info
   if (SESSION.projectAddress) {
     const bar = document.getElementById('compliance-bar-text');
-    if (bar) bar.textContent = `AB 723 Compliant · Project: ${SESSION.projectAddress} · QR codes active on all Finals`;
+    // FIX (Sep 8, 2026): this always showed the real-listing AB 723/QR
+    // copy, even for prospecting — where no compliance disclosure applies
+    // and no QR/page exists yet at this point (not until a Final is
+    // generated — see updateComplianceBarForProspecting() below, called
+    // from attachFinalToProject()/attachHeroShotToProject() once one is).
+    if (bar) bar.textContent = SESSION.isProspecting
+      ? `Prospecting · ${SESSION.projectAddress} · stage an image to generate your QR + page`
+      : `AB 723 Compliant · Project: ${SESSION.projectAddress} · QR codes active on all Finals`;
   }
   updateSessionButtons();
+}
+
+// NEW (Sep 8, 2026): called once a prospecting Final actually exists and
+// write-prospect-meta.js has confirmed the page will render — updates the
+// same persistent top bar continueToUpload() sets above, now with the
+// real, working /prospect/{slug} link and a QR download, instead of the
+// "stage an image first" placeholder text. Switches to innerHTML (the bar
+// is a plain div, this is safe) so the link/QR are actually clickable —
+// generate-qr.js is reused as-is here; it only ever needed a target URL,
+// display address, and an id string, all of which a prospect page has.
+function updateComplianceBarForProspecting(prospectUrl) {
+  const bar = document.getElementById('compliance-bar-text');
+  if (!bar || !prospectUrl) return;
+  const slug = prospectUrl.split('/').pop();
+  const qrUrl = `/.netlify/functions/generate-qr?complianceUrl=${encodeURIComponent(prospectUrl)}&address=${encodeURIComponent(SESSION.projectAddress || '')}&projectId=${encodeURIComponent(slug)}`;
+  SESSION.prospectQrUrl = qrUrl;
+  bar.innerHTML = `Prospecting · ${escHtml(SESSION.projectAddress || '')} · <a href="${prospectUrl}" target="_blank" style="color:var(--gold);">View Page →</a> · <a href="${qrUrl}" download style="color:var(--gold);">Download QR ↓</a>`;
 }
 
 // ── SESSION MANAGEMENT ───────────────────────────────────────────────────────
@@ -4671,16 +4704,32 @@ async function attachFinalToProject(finalBase64, room, orig, enhId) {
     }
 
     if (SESSION.isProspecting) {
-      // PROSPECTING (Sep 2026): prospecting shots skip the compliance-page
-      // pipeline entirely — no project-manage add-image call, so nothing
-      // is ever written to the Blobs compliance record or shown on a
-      // compliance page/QR for this listing. The S3 upload + media_assets
-      // row above (via upload-staged.js's presign call) are already
-      // everything Gallery needs to find this image later under
-      // staging-prospects/ — nothing else has to happen here.
-      console.log('Prospecting shot uploaded, skipping compliance attach:', sig.publicUrl, 'room:', room.roomName);
+      // PROSPECTING (Sep 8, 2026 — replaces the Sep 2026 skip-everything
+      // version): still no project-manage add-image call, still nothing
+      // written to Blobs or the compliance-page pipeline — but now writes
+      // a small meta.json into the SAME S3 folder the image just landed
+      // in (staging-prospects/{slug}/meta.json, via write-prospect-meta.js)
+      // so prospect-page.js has an address to show. Slug is derived from
+      // sig.s3Key itself (staging-prospects/{slug}/finals/{file}) rather
+      // than needing a new round-trip — upload-staged.js already resolved
+      // it server-side to build that key.
+      console.log('Prospecting shot uploaded, writing prospect page meta:', sig.publicUrl, 'room:', room.roomName);
       target.complianceAttachStatus = 'success';
-      showToast(`✓ Staged image saved — find it in Gallery under ${SESSION.projectAddress || SESSION.projectId}`, 'success');
+      const _prospectSlug = (sig.s3Key || '').split('/')[1] || null;
+      if (_prospectSlug) {
+        try {
+          await fetch('/.netlify/functions/write-prospect-meta', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ slug: _prospectSlug, address: SESSION.projectAddress || '' })
+          });
+          SESSION.prospectPageUrl = `${window.location.origin}/prospect/${_prospectSlug}`;
+          updateComplianceBarForProspecting(SESSION.prospectPageUrl);
+        } catch (metaErr) {
+          console.error('write-prospect-meta failed (non-fatal, image already saved):', metaErr.message);
+        }
+      }
+      showToast(SESSION.prospectPageUrl ? `✓ Staged — prospect page ready: ${SESSION.prospectPageUrl}` : `✓ Staged image saved to S3 (staging-prospects/)`, 'success');
     } else {
       // Attach to project in Blobs
       // userId fix (separate, earlier bug): without this, project-manage.js's
@@ -5381,13 +5430,25 @@ async function attachHeroShotToProject(finalBase64, room, shot, shotId) {
     }
 
     if (SESSION.isProspecting) {
-      // PROSPECTING (Sep 2026): same skip as attachFinalToProject — no
-      // compliance-page/Blobs record for prospecting shots, Gallery is
-      // the only lookup. The S3 upload + media_assets row above already
-      // cover everything Gallery needs.
-      console.log('Prospecting hero shot uploaded, skipping compliance attach:', sig.publicUrl, 'shot:', shot.name);
+      // PROSPECTING (Sep 8, 2026): same treatment as attachFinalToProject
+      // above — see that function's comment for the full reasoning.
+      console.log('Prospecting hero shot uploaded, writing prospect page meta:', sig.publicUrl, 'shot:', shot.name);
       shot.complianceAttachStatus = 'success';
-      showToast(`✓ Hero shot saved — find it in Gallery under ${SESSION.projectAddress || SESSION.projectId}`, 'success');
+      const _prospectSlug = (sig.s3Key || '').split('/')[1] || null;
+      if (_prospectSlug) {
+        try {
+          await fetch('/.netlify/functions/write-prospect-meta', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ slug: _prospectSlug, address: SESSION.projectAddress || '' })
+          });
+          SESSION.prospectPageUrl = `${window.location.origin}/prospect/${_prospectSlug}`;
+          updateComplianceBarForProspecting(SESSION.prospectPageUrl);
+        } catch (metaErr) {
+          console.error('write-prospect-meta failed (non-fatal, image already saved):', metaErr.message);
+        }
+      }
+      showToast(SESSION.prospectPageUrl ? `✓ Staged — prospect page ready: ${SESSION.prospectPageUrl}` : `✓ Hero shot saved to S3 (staging-prospects/)`, 'success');
     } else {
       const _sbUserForHero = readStoredSessionDirect()?.user;
       const attachRes = await fetch('/.netlify/functions/project-manage?action=add-image', {

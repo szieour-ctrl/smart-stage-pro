@@ -8031,7 +8031,18 @@ async function signOut() {
   // here doesn't affect it — it just stops anything else from reusing it.
   const staleClient = _supabase;
   _supabase = null;
-  withAuthTimeout(staleClient.auth.signOut(), 5000, 'signOut()').catch(e => {
+  // FIX (Sep 8, 2026): explicit { scope: 'local' } — Supabase's own default
+  // is scope:'global', which revokes the refresh token server-side for
+  // EVERY active session on every device, not just this one. Confirmed via
+  // live testing: signing out on one browser was ending a session on a
+  // completely separate one too. 'local' matches how Sign Out works almost
+  // everywhere else (Gmail, Slack, banking apps) and doesn't fight the
+  // mobile+desktop same-listing workflow — a routine sign-out on one
+  // device shouldn't silently kill unrelated work on another. A dedicated
+  // "sign out everywhere" action (for a lost/stolen device) or an
+  // automatic global revoke on password change would be the right places
+  // for 'global', if ever needed — not the everyday Sign Out button.
+  withAuthTimeout(staleClient.auth.signOut({ scope: 'local' }), 5000, 'signOut()').catch(e => {
     console.warn('signOut() itself stalled (known library issue) — cleared locally anyway, and next sign-in already gets a fresh client:', e.message);
   });
   Object.keys(localStorage).filter(k => k.startsWith('sb-')).forEach(k => localStorage.removeItem(k));

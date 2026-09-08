@@ -375,7 +375,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
 .faq-modal-close{background:none;border:none;font-size:1.3rem;color:var(--muted);cursor:pointer;line-height:1;}
 .faq-modal-close:hover{color:var(--ink);}
 </style>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.90.0/dist/umd/supabase.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
 <script>
 // MOBILE DEBUG CONSOLE (added this session) — lets Sam see real console.log/
@@ -1755,7 +1755,12 @@ function continueProject() {
     // entirely, so it must never assert a flag value one way or the other
     // and risk flipping an already-established listing's storage location
     // out from under an in-progress session.
-    getSupabase().auth.getSession().then(session => {
+    // FIX (Sep 7, 2026): wrapped in withAuthTimeout — same unguarded-getSession()
+    // issue as the other fixes in this file. This call's existing .catch(() => {})
+    // only helps once the promise actually rejects; a stall previously just hung
+    // forever with no rejection at all, silently leaving listingId unset (and the
+    // "Add More Rooms"/Create Video button state) with no way to know why.
+    withAuthTimeout(getSupabase().auth.getSession(), 8000, 'getSession()').then(session => {
       const userId = session?.data?.session?.user?.id || null;
       return fetch('/.netlify/functions/project-manage?action=lookup', {
         method: 'POST',
@@ -3607,7 +3612,7 @@ function updateCreateVideoButton(){
 // flow, addressing "no way to go straight to PRO Plus" directly).
 async function openVideoBuilderCore(listingId, projectId){
   if (!listingId) { showToast('This listing has no ID on file yet.', 'error'); return; }
-  const user = (await getSupabase().auth.getUser()).data?.user;
+  const user = (await withAuthTimeout(getSupabase().auth.getUser(), 8000, 'getUser()')).data?.user;
   const params = new URLSearchParams({
     listingId,
     userId: user?.id || '',
@@ -4680,7 +4685,7 @@ async function attachFinalToProject(finalBase64, room, orig, enhId) {
       // userId fix (separate, earlier bug): without this, project-manage.js's
       // addImage() guard (`if (userId && process.env.SUPABASE_URL)`) was
       // always false, so the Supabase branch never even attempted to run.
-      const _sbUserForAttach = (await getSupabase().auth.getUser()).data?.user;
+      const _sbUserForAttach = (await withAuthTimeout(getSupabase().auth.getUser(), 8000, 'getUser()')).data?.user;
       const attachRes = await fetch('/.netlify/functions/project-manage?action=add-image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -5017,7 +5022,17 @@ async function generateDraftCollage(roomId, sourceClean, selectedShots) {
   const room = SESSION.rooms.find(r => r.id === roomId);
   if (!room || selectedShots.length === 0) return;
 
-  const _sbUser = (await getSupabase().auth.getUser()).data?.user;
+  // FIX (Sep 7, 2026): getUser() now wrapped in withAuthTimeout — a stall here
+  // (stuck cross-tab lock or the Supabase JWT-refresh incident) previously hung
+  // this whole function forever with no feedback. On a stall, fail closed with a
+  // clear message rather than silently never generating anything.
+  let _sbUser;
+  try {
+    _sbUser = (await withAuthTimeout(getSupabase().auth.getUser(), 8000, 'getUser()')).data?.user;
+  } catch (stallErr) {
+    showToast('Credit check failed — please try again.', 'error');
+    return;
+  }
   if (_sbUser) {
     const debitRes = await fetch('/.netlify/functions/debit-credit', {
       method: 'POST',
@@ -5177,7 +5192,17 @@ async function generateHeroShotFinal(roomId, shotId, qualityChoice) {
   const scaleMap = { mls: 4, marketing: 6, print: 8 };
   const creditCost = { mls: 1, marketing: 2, print: 3 }[quality] || 1;
 
-  const _sbUser = (await getSupabase().auth.getUser()).data?.user;
+  // FIX (Sep 7, 2026): getUser() now wrapped in withAuthTimeout — a stall here
+  // (stuck cross-tab lock or the Supabase JWT-refresh incident) previously hung
+  // this whole function forever with no feedback. On a stall, fail closed with a
+  // clear message rather than silently never generating anything.
+  let _sbUser;
+  try {
+    _sbUser = (await withAuthTimeout(getSupabase().auth.getUser(), 8000, 'getUser()')).data?.user;
+  } catch (stallErr) {
+    showToast('Credit check failed — please try again.', 'error');
+    return;
+  }
   if (_sbUser) {
     const debitRes = await fetch('/.netlify/functions/debit-credit', {
       method: 'POST',
@@ -5363,7 +5388,7 @@ async function attachHeroShotToProject(finalBase64, room, shot, shotId) {
       shot.complianceAttachStatus = 'success';
       showToast(`✓ Hero shot saved — find it in Gallery under ${SESSION.projectAddress || SESSION.projectId}`, 'success');
     } else {
-      const _sbUserForHero = (await getSupabase().auth.getUser()).data?.user;
+      const _sbUserForHero = (await withAuthTimeout(getSupabase().auth.getUser(), 8000, 'getUser()')).data?.user;
       const attachRes = await fetch('/.netlify/functions/project-manage?action=add-image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -5833,7 +5858,17 @@ async function generateFinal(roomId,enhId){
   const hasPreset = !enhId && !!room.presetCleanBase64;
   const baseCreditCost = { mls: 1, marketing: 2, print: 3 }[qualityChoice] || 1;
   const creditCost = baseCreditCost + (hasPreset ? 1 : 0);
-  const _sbUser = (await getSupabase().auth.getUser()).data?.user;
+  // FIX (Sep 7, 2026): getUser() now wrapped in withAuthTimeout — a stall here
+  // (stuck cross-tab lock or the Supabase JWT-refresh incident) previously hung
+  // this whole function forever with no feedback. On a stall, fail closed with a
+  // clear message rather than silently never generating anything.
+  let _sbUser;
+  try {
+    _sbUser = (await withAuthTimeout(getSupabase().auth.getUser(), 8000, 'getUser()')).data?.user;
+  } catch (stallErr) {
+    showToast('Credit check failed — please try again.', 'error');
+    return;
+  }
   if (_sbUser) {
     const debitRes = await fetch('/.netlify/functions/debit-credit', {
       method: 'POST',
@@ -7485,9 +7520,36 @@ let _currentUser = null;
 let _userRecord = null;
 let _pendingCheckoutPlan = null;
 
+// FIX (Sep 8, 2026): Supabase's internal cross-tab Web Lock (used to
+// serialize auth calls via navigator.locks) has known, long-standing
+// deadlock bugs in the underlying GoTrue/auth-js library — the lock can be
+// acquired and never released (an "orphaned" or "zombie" lock), after which
+// EVERY subsequent getSession()/getUser()/signIn call hangs forever, with
+// ZERO network activity, even on a completely fresh page load (this is not
+// about stale tokens or stale storage — it happens during lock acquisition
+// itself). See supabase/supabase-js#1594, #2013, and #2111 for the same
+// symptom independently reported by other projects. Quitting the browser
+// only "fixes" it temporarily because that releases the orphaned lock —
+// the same deadlock can recur the next time the same code path runs.
+// This app doesn't rely on Supabase's own lock for cross-tab correctness —
+// Gallery already uses its own separate storageKey (see gallery.html) — so
+// there's nothing to lose by disabling this mechanism entirely.
+const noOpLock = async (name, acquireTimeout, fn) => await fn();
+
 function getSupabase() {
   if (!_supabase) {
-    _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: {
+        lock: noOpLock,
+        // TEMP DIAGNOSTIC (Sep 8, 2026): logs every internal step of
+        // Supabase's own auth code to console — gated behind ?authdebug=1
+        // so it never runs for real users. This is to find exactly where
+        // getSession() is getting stuck internally, since every external
+        // cause (network, lock, token validity, library version) has now
+        // been directly ruled out with evidence. Remove once resolved.
+        debug: new URLSearchParams(window.location.search).get('authdebug') === '1'
+      }
+    });
   }
   return _supabase;
 }
@@ -7572,24 +7634,41 @@ function showAuthResetBanner() {
   });
 }
 
-let session;
+// FIX (Sep 8, 2026): getSession() is confirmed, conclusively, to hang
+// forever in production — a raw, unwrapped call to it directly in
+// console, bypassing every layer of this app's own code, never resolved
+// or rejected, ever. This is a genuine bug in the Supabase JS library
+// itself (tested across two very different pinned versions, with its
+// internal lock mechanism fully disabled) — not fixable from this app's
+// side. Filed upstream; not yet fixed as of this writing. Every other
+// possible cause was directly eliminated first: the network is healthy
+// (a raw fetch to the auth server succeeds instantly), no browser lock
+// is held (navigator.locks.query() returns empty), and the stored
+// session itself is valid, well-formed JSON with a real unexpired token.
+//
+// Workaround: getSession() is documented to do nothing but read and
+// parse that same localStorage key — there's no reason a synchronous
+// version of that read should ever hang, since it involves no promise,
+// no lock, and no network call at all. This bypasses the broken method
+// entirely for the one thing it was blocking: the menu never rendering.
+function readStoredSessionDirect() {
   try {
-    const result = await withAuthTimeout(sb.auth.getSession(), 8000, 'getSession()');
-    session = result.data.session;
-  } catch (stallErr) {
-    // getSession() itself never resolved — almost certainly the stuck
-    // cross-tab lock scenario above. Showing the landing page at least
-    // gives an explicit "sign in" path back into the app, instead of the
-    // page sitting frozen with the compliance bar/header shell visible and
-    // nothing else, which previously had no recovery short of clearing
-    // site data or opening an incognito window. showAuthResetBanner() is
-    // the actual one-click fix regardless of whether showLandingPage()
-    // itself renders correctly.
-    console.warn('Auth init stalled:', stallErr.message);
-    showAuthResetBanner();
-    showLandingPage();
-    return;
+    const raw = localStorage.getItem('sb-dnpaenpwdhjmslymgkse-auth-token');
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed?.access_token || !parsed?.expires_at) return null;
+    if (parsed.expires_at * 1000 < Date.now()) return null; // expired — real "not logged in"
+    return parsed; // same shape getSession() would have returned as `.data.session`
+  } catch (e) {
+    console.warn('readStoredSessionDirect() failed to parse stored session:', e.message);
+    return null;
   }
+}
+
+let session = readStoredSessionDirect();
+  // Still attempt the real call in the background, in case a future
+  // library update fixes this — but never block app load on it again.
+  withAuthTimeout(sb.auth.getSession(), 8000, 'getSession()').catch(() => {});
 
 
   if (session?.user) {
@@ -8027,7 +8106,7 @@ async function acceptTos() {
   const btn = document.getElementById('tos-accept-btn');
   if (btn) { btn.textContent = 'Saving...'; btn.disabled = true; }
   try {
-    const { data: { session } } = await getSupabase().auth.getSession();
+    const { data: { session } } = await withAuthTimeout(getSupabase().auth.getSession(), 8000, 'getSession()');
     const jwt = session?.access_token;
     const res = await fetch('/.netlify/functions/accept-terms', {
       method: 'POST',
@@ -8168,7 +8247,7 @@ async function startCheckout(plan) {
   const btn = document.querySelector(`button[onclick="startCheckout('${plan}')"]`);
   if (btn) { btn.textContent = 'Redirecting to checkout...'; btn.disabled = true; }
   try {
-    const { data: { session: stripeSession } } = await getSupabase().auth.getSession();
+    const { data: { session: stripeSession } } = await withAuthTimeout(getSupabase().auth.getSession(), 8000, 'getSession()');
     const jwt = stripeSession?.access_token;
     if (!jwt) {
       showToast('Session expired — please sign in again.', 'error');
@@ -11899,7 +11978,7 @@ async function showDashboard() {
 
 async function loadDashboardData() {
   try {
-    const session = await getSupabase().auth.getSession();
+    const session = await withAuthTimeout(getSupabase().auth.getSession(), 8000, 'getSession()');
     const token = session?.data?.session?.access_token;
     if (!token) { renderDashboardError('Session expired. Please sign in again.'); return; }
 
@@ -12058,8 +12137,16 @@ function closeImagesModal(){
   document.getElementById('listing-images-modal')?.classList.add('hidden');
 }
 async function getDashboardAuthToken(){
-  const session = await getSupabase().auth.getSession();
-  return session?.data?.session?.access_token || null;
+  // FIX (Sep 7, 2026): wrapped in withAuthTimeout. A stall here now returns
+  // null instead of hanging forever — every caller already treats a falsy
+  // token as "Session expired — please sign in again," so this fails into
+  // an existing, correct UX path rather than needing a new one.
+  try {
+    const session = await withAuthTimeout(getSupabase().auth.getSession(), 8000, 'getSession()');
+    return session?.data?.session?.access_token || null;
+  } catch (stallErr) {
+    return null;
+  }
 }
 
 async function openListingImages(listingId, projectId){
@@ -12165,8 +12252,17 @@ async function setImageHidden(listingId, projectId, imageId, action, reason){
 }
 
 async function downloadQR(projectId, address) {
-  const session = await getSupabase().auth.getSession();
-  const token = session?.data?.session?.access_token;
+  // FIX (Sep 7, 2026): wrapped in withAuthTimeout. `token` below is computed
+  // but never actually used in this function (the download link carries no
+  // Authorization header) — so on a stall, this should never block the
+  // download at all, not just fail open with an error message.
+  let token;
+  try {
+    const session = await withAuthTimeout(getSupabase().auth.getSession(), 8000, 'getSession()');
+    token = session?.data?.session?.access_token;
+  } catch (stallErr) {
+    token = null;
+  }
   const siteUrl = window.location.origin;
   const complianceUrl = `${siteUrl}/compliance/${projectId}`;
   const url = `/.netlify/functions/generate-qr?complianceUrl=${encodeURIComponent(complianceUrl)}&address=${encodeURIComponent(address)}&projectId=${encodeURIComponent(projectId)}`;
@@ -12193,7 +12289,7 @@ async function archiveListing(listingId, address) {
   if (!confirmed) return;
 
   try {
-    const session = await getSupabase().auth.getSession();
+    const session = await withAuthTimeout(getSupabase().auth.getSession(), 8000, 'getSession()');
     const token = session?.data?.session?.access_token;
     if (!token) { alert('Session expired. Please sign in again.'); return; }
 

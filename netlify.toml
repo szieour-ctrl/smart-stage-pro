@@ -1,166 +1,276 @@
-// write-prospect-meta.js — Netlify Function
-// NEW (Sep 8, 2026): writes staging-prospects/{slug}/meta.json AND
-// staging-prospects/{slug}/qr.png directly to S3 — everything a prospecting
-// shot needs beyond the images themselves, all living INSIDE the same S3
-// folder as the images (see the screenshot that prompted this: Sam's
-// staging-prospects/ bucket view, one folder per address). No Supabase
-// write, no Netlify Blobs project record — the Supabase `listings` row
-// created earlier in the flow still exists (it's load-bearing for
-// upload-original.js/upload-staged.js's slug + isProspecting resolution —
-// see reserveAssetKey() in those files), but this function and
-// prospect-page.js never read from it. The S3 folder is the single source
-// of truth for everything a prospecting page needs to render.
-//
-// FIX (Sep 8, 2026 — same day, real gap found live): originally this only
-// wrote meta.json. The QR itself was only ever generated on-the-fly as a
-// "Download QR" link in the app's compliance bar during the SAME session —
-// nothing was ever saved. Confirmed live: leave the session, come back
-// later, no way to get the QR back at all — which defeats the whole "2nd
-// touch" point of prospecting. Now generates and saves qr.png here too, so
-// it's sitting in the folder alongside everything else, downloadable any
-// time, matching Sam's "keep everything in staging-prospects/" spec.
-//
-// Deliberately does NOT reuse generate-qr.js's branded canvas — that one
-// has real AB 723 legal disclosure text baked in (correct for an actual
-// listing, wrong here: there's no real transaction on a prospecting shot).
-// This builds its own simpler, marketing-only canvas instead.
-//
-// Input:  POST { slug, address, siteUrl, finalKey, originalKey }
-// Output: { ok: true }
-//
-// Idempotent — called once per Generate Final on a prospecting shot, always
-// overwrites both files. Since the prospect page only ever shows the one
-// most recent staged image (Sam's spec: "The Page will only have 1 staged
-// image"), there's nothing to merge or append — this just reflects current
-// state.
+[build]
+  functions = "netlify/functions"
+  publish = "."
 
-const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
-const QRCode = require("qrcode");
-const sharp = require("sharp");
+[blobs]
+  # Netlify Blobs — used for background staging job result storage
 
-const s3 = new S3Client({
-  region: process.env.S3_REGION,
-  credentials: {
-    accessKeyId: process.env.S3_ACCESS_KEY_ID,
-    secretAccessKey: process.env.S3_SECRET_ACCESS_KEY,
-  },
-});
+[functions]
+  node_bundler = "esbuild"
 
-const QR_PX = 480;
-const CANVAS_W = 900;
-const CANVAS_H = 780;
-const QR_LEFT = (CANVAS_W - QR_PX) / 2;
-const QR_TOP = 60;
+[functions."stage-image"]
+  timeout = 26
 
-function escSVG(str) {
-  return String(str || "")
-    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
+# CHANGE (July 2026 postmortem): removed the timeout=30 override that was
+# here — Netlify hard-caps SYNCHRONOUS functions at 26s regardless of this
+# value, and video-job.js no longer does slow work (Claude/ElevenLabs/
+# Cloudinary) inline anyway now that narration moved to
+# generate-narration-background.js. Back to the platform default.
 
-function splitAddress(address) {
-  const parts = (address || "").split(",");
-  const street = (parts[0] || "").trim();
-  const cityState = parts.slice(1).join(",").replace(/,?\s*USA\s*$/i, "").trim();
-  return { street, cityState };
-}
+[functions."generate-narration-background"]
+  timeout = 900
 
-// Marketing-only canvas — no AB 723 / compliance language, since nothing
-// here represents a real listing or a real disclosure obligation.
-function buildCanvasSVG(address) {
-  const { street, cityState } = splitAddress(address);
-  const QR_BOTTOM = QR_TOP + QR_PX;
+[functions."check-narration"]
+  timeout = 10
 
-  return `<svg width="${CANVAS_W}" height="${CANVAS_H}" xmlns="http://www.w3.org/2000/svg">
-    <rect width="${CANVAS_W}" height="${CANVAS_H}" fill="#f5f0e8"/>
-    <rect width="${CANVAS_W}" height="8" fill="#b8975a"/>
+# NEW (this session) — same fix, same reason, same shape as the narration
+# pair directly above: action=autoSelect (video-job.js) was blowing past
+# Netlify's synchronous timeout on real multi-photo listings (11 photos in
+# testing), surfacing as an HTML timeout page the frontend couldn't parse
+# as JSON. autoSelect-background.js now does the actual Claude Vision call;
+# check-autoSelect.js is a direct copy of check-narration.js's polling
+# pattern, just pointed at the "autoselect-jobs" Blobs store.
+[functions."autoSelect-background"]
+  timeout = 900
 
-    <rect x="${QR_LEFT - 16}" y="${QR_TOP - 16}" width="${QR_PX + 32}" height="${QR_PX + 32}" fill="#e8e0d0" rx="10"/>
-    <rect x="${QR_LEFT - 12}" y="${QR_TOP - 12}" width="${QR_PX + 24}" height="${QR_PX + 24}" fill="#ffffff" rx="8"/>
+[functions."check-autoSelect"]
+  timeout = 10
 
-    <text x="${CANVAS_W / 2}" y="${QR_BOTTOM + 56}" font-family="Arial, sans-serif" font-size="34" font-weight="700" fill="#1a1714" text-anchor="middle">${escSVG(street) || "See This Photo, Staged"}</text>
-    ${cityState ? `<text x="${CANVAS_W / 2}" y="${QR_BOTTOM + 94}" font-family="Arial, sans-serif" font-size="24" font-weight="400" fill="#4a4540" text-anchor="middle">${escSVG(cityState)}</text>` : ""}
+# NEW (this session) — same fix, same reason, same shape as the autoSelect
+# pair directly above: declutter-prompt.js's room analysis was upgraded from
+# Haiku to Sonnet (for AB 723-critical window/shutter accuracy) with a
+# higher max_tokens for the fuller windowInventory requirements. Sonnet's
+# slower generation pushed real duration to 30-35s — past Netlify's
+# synchronous ceiling (10s default, 26s max) — surfacing as the same HTML
+# timeout page the frontend couldn't parse as JSON. declutter-prompt.js is
+# now a thin dispatcher; declutter-prompt-background.js does the actual
+# Sonnet call; check-declutter-prompt.js is the polling endpoint, pointed
+# at the "declutter-jobs" Blobs store. This entry is what was missing after
+# the first deploy — every other background function in this file has an
+# explicit timeout=900 registration, and these two didn't yet.
+[functions."declutter-prompt-background"]
+  timeout = 900
 
-    <line x1="80" y1="${QR_BOTTOM + 118}" x2="${CANVAS_W - 80}" y2="${QR_BOTTOM + 118}" stroke="#b8975a" stroke-width="1.5"/>
+[functions."check-declutter-prompt"]
+  timeout = 10
 
-    <text x="${CANVAS_W / 2}" y="${QR_BOTTOM + 150}" font-family="Arial, sans-serif" font-size="13" font-weight="700" fill="#b8975a" text-anchor="middle" letter-spacing="0.10em">SMART STAGE PRO</text>
-    <text x="${CANVAS_W / 2}" y="${QR_BOTTOM + 178}" font-family="Arial, sans-serif" font-size="16" font-weight="400" fill="#2a2520" text-anchor="middle">Scan to see the before &amp; after</text>
+[functions."stage-image-start"]
+  timeout = 90
 
-    <rect y="${CANVAS_H - 8}" width="${CANVAS_W}" height="8" fill="#b8975a"/>
-  </svg>`;
-}
+[functions."stage-replicate"]
+  timeout = 26
 
-exports.handler = async (event) => {
-  const headers = {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Headers": "Content-Type",
-    "Content-Type": "application/json",
-  };
+[functions."analyze-room"]
+  timeout = 10
 
-  if (event.httpMethod === "OPTIONS") return { statusCode: 200, headers, body: "" };
-  if (event.httpMethod !== "POST") {
-    return { statusCode: 405, headers, body: JSON.stringify({ error: "POST only" }) };
-  }
+[functions."generate-staging-prompt"]
+  timeout = 20
 
-  try {
-    const { slug, address, siteUrl, finalKey, originalKey } = JSON.parse(event.body || "{}");
-    if (!slug) {
-      return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing slug" }) };
-    }
+[functions."stage-decor8"]
+  timeout = 90
 
-    // FIX (Sep 8, 2026): store the exact S3 keys here, at write time, when
-    // the caller already knows them precisely from the upload that just
-    // succeeded — rather than having prospect-page.js try to rediscover
-    // them later via ListObjectsV2Command, which needs a bucket-level
-    // s3:ListBucket permission nothing else in this app ever needed (and
-    // very likely doesn't have — see prospect-page.js's header comment for
-    // the live bug this caused).
-    const meta = {
-      address: address || "",
-      createdAt: new Date().toISOString(),
-      finalKey: finalKey || null,
-      originalKey: originalKey || null,
-    };
+[functions."stage-openai"]
+  timeout = 30
 
-    const prospectUrl = `${siteUrl || process.env.URL || "https://smartstagepro.com"}/prospect/${slug}`;
+# declutter-prompt.js is the thin dispatcher for declutter-prompt-background.js
+# (see the fuller comment above, near that entry) — registered explicitly for
+# the same reason stage-openai is: consistency with the dispatcher/background
+# pairing convention used throughout this file.
+[functions."declutter-prompt"]
+  timeout = 30
 
-    const qrBuffer = await QRCode.toBuffer(prospectUrl, {
-      type: "png",
-      width: QR_PX,
-      margin: 1,
-      color: { dark: "#1a1714", light: "#ffffff" },
-      errorCorrectionLevel: "H",
-    });
+[functions."stage-openai-background"]
+  timeout = 900
 
-    const canvasBuffer = Buffer.from(buildCanvasSVG(address));
+[functions."group-spatial-read-background"]
+  timeout = 900
 
-    const qrPng = await sharp({
-      create: { width: CANVAS_W, height: CANVAS_H, channels: 4, background: { r: 245, g: 240, b: 232, alpha: 1 } }
-    })
-      .composite([
-        { input: canvasBuffer, top: 0, left: 0 },
-        { input: qrBuffer, top: QR_TOP, left: QR_LEFT },
-      ])
-      .png({ compressionLevel: 6 })
-      .toBuffer();
+[functions."check-spatial-read"]
+  timeout = 10
 
-    await Promise.all([
-      s3.send(new PutObjectCommand({
-        Bucket: process.env.S3_BUCKET_NAME,
-        Key: `staging-prospects/${slug}/meta.json`,
-        Body: JSON.stringify(meta, null, 2),
-        ContentType: "application/json",
-      })),
-      s3.send(new PutObjectCommand({
-        Bucket: process.env.S3_BUCKET_NAME,
-        Key: `staging-prospects/${slug}/qr.png`,
-        Body: qrPng,
-        ContentType: "image/png",
-      })),
-    ]);
+[functions."group-spatial-read"]
+  timeout = 900
+[functions."check-openai"]
+  timeout = 10
 
-    return { statusCode: 200, headers, body: JSON.stringify({ ok: true, prospectUrl }) };
-  } catch (err) {
-    console.error("write-prospect-meta error:", err.message);
-    return { statusCode: 500, headers, body: JSON.stringify({ error: err.message }) };
-  }
-};
+[functions."extract-staging-dna"]
+  timeout = 15
+
+# NEW (this session): no entry existed for this function before — it was
+# running on Netlify's default timeout. Current Haiku baseline is ~9.4s
+# (confirmed via real logs); Sonnet upgrade (see detect-hero-shots.js for why)
+# will run slower, so giving real headroom rather than waiting to find the
+# ceiling the hard way, the way declutter-prompt did before this fix existed.
+[functions."detect-hero-shots"]
+  timeout = 60
+
+[functions."serve-image"]
+  timeout = 10
+
+
+[functions."stage-decor8-background"]
+  timeout = 90
+
+[functions."check-decor8"]
+  timeout = 15
+
+[functions."test-remove-objects"]
+  timeout = 26
+
+[functions."remove-objects"]
+  timeout = 30
+
+[functions."upscale-image"]
+  timeout = 60
+  # FIX (Sam's report — 502/OOM on interior Generate Final, exterior
+  # worked fine): confirmed via real Netlify function logs — every
+  # failure hit exactly ~1022MB (the 1024MB default memory ceiling) while
+  # successful runs only needed 278-305MB. This specific interior image's
+  # actual decoded pixel dimensions (not necessarily its compressed file
+  # size, which looked similar to the successful cases) genuinely need
+  # more headroom than the default provides. Sharp/libvips memory usage
+  # scales with the image's real pixel count, not its JPEG file size —
+  # two images can compress to a similar KB size while having very
+  # different native resolutions depending on visual complexity.
+  memory = 3008
+
+[functions."upload-original"]
+  timeout = 20
+
+[functions."ab723-composite"]
+  timeout = 45
+
+
+[functions."property-search"]
+  timeout = 10
+
+[functions."project-manage"]
+  timeout = 15
+
+[functions."upload-staged"]
+  timeout = 30
+
+[functions."compliance-page"]
+  timeout = 15
+
+[functions."prospect-page"]
+  timeout = 15
+
+[functions."write-prospect-meta"]
+  timeout = 15
+
+[functions."download-compliance-zip"]
+  timeout = 60
+
+[functions."debit-credit"]
+  timeout = 10
+
+# Renders the 10-question AB 723 report as a PDF (July 12, 2026 build).
+# external_node_modules is required — pdfkit reads its .afm font-metric
+# files via a relative fs path at runtime, and esbuild's default bundling
+# breaks that path, so pdfkit must ship un-bundled rather than inlined.
+[functions."generate-compliance-pdf"]
+  timeout = 15
+  external_node_modules = ["pdfkit"]
+# ── Domain redirects ─────────────────────────────────────
+# Redirect Netlify subdomain to custom domain (301 permanent)
+# Must be BEFORE path-based redirects so Netlify processes first
+[[redirects]]
+  from   = "https://smart-stage-pro.netlify.app/*"
+  to     = "https://smartstagepro.com/:splat"
+  status = 301
+  force  = true
+
+# Redirect www to apex
+[[redirects]]
+  from   = "https://www.smartstagepro.com/*"
+  to     = "https://smartstagepro.com/:splat"
+  status = 301
+  force  = true
+
+# ── Compliance page routing ──────────────────────────────
+[[redirects]]
+  from = "/compliance/:projectId"
+  to = "/.netlify/functions/compliance-page"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/compliance"
+  to = "/.netlify/functions/compliance-page"
+  status = 200
+  force = true
+
+# ── Prospecting "2nd touch" page routing (Sep 8, 2026) ───
+# Deliberately separate from /compliance — see prospect-page.js's header
+# comment for why this never touches the listings table or Blobs at all.
+[[redirects]]
+  from = "/prospect/:slug"
+  to = "/.netlify/functions/prospect-page"
+  status = 200
+  force = true
+
+# ── Lead-gen landing pages (added July 11, 2026) ─────────
+# Clean subpaths for print/social/email campaigns — actual files are
+# agent-compliance.html and builder-compliance.html at the repo root.
+# Both already call the backend via relative /.netlify/functions/... paths,
+# so no code changes were needed for this to work at these subpaths —
+# only needed if these ever move to a fully separate domain instead.
+[[redirects]]
+  from = "/ab723-check"
+  to = "/agent-compliance.html"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/builders"
+  to = "/builder-compliance.html"
+  status = 200
+  force = true
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options            = "DENY"
+    X-Content-Type-Options     = "nosniff"
+    Referrer-Policy            = "strict-origin-when-cross-origin"
+    Strict-Transport-Security  = "max-age=31536000; includeSubDomains; preload"
+    Permissions-Policy         = "camera=(), microphone=(), geolocation=()"
+
+[context.production.environment]
+  NODE_VERSION = "18"
+
+[functions."generate-qr"]
+  timeout = 20
+
+# ── New functions added June 7, 2026 ─────────────────────
+[functions."exterior-enhancement-prompt"]
+  timeout = 30
+
+[functions."accept-terms"]
+  timeout = 15
+
+[functions."create-checkout-session"]
+  timeout = 20
+
+[functions."stripe-webhook"]
+  timeout = 20
+
+[functions."save-staged-image"]
+  timeout = 20
+
+[functions."get-compliance-data"]
+  timeout = 30
+
+[functions."update-ab723-disclosed"]
+  timeout = 15
+
+[functions."get-user-listings"]
+  timeout = 30
+
+# ── Help Agent added June 10, 2026 ───────────────────────
+[functions."help-agent"]
+  timeout = 30
+
+[functions."help-feedback"]
+  timeout = 10

@@ -25,7 +25,7 @@
 // listing, wrong here: there's no real transaction on a prospecting shot).
 // This builds its own simpler, marketing-only canvas instead.
 //
-// Input:  POST { slug, address, siteUrl }
+// Input:  POST { slug, address, siteUrl, finalKey, originalKey }
 // Output: { ok: true }
 //
 // Idempotent — called once per Generate Final on a prospecting shot, always
@@ -102,14 +102,23 @@ exports.handler = async (event) => {
   }
 
   try {
-    const { slug, address, siteUrl } = JSON.parse(event.body || "{}");
+    const { slug, address, siteUrl, finalKey, originalKey } = JSON.parse(event.body || "{}");
     if (!slug) {
       return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing slug" }) };
     }
 
+    // FIX (Sep 8, 2026): store the exact S3 keys here, at write time, when
+    // the caller already knows them precisely from the upload that just
+    // succeeded — rather than having prospect-page.js try to rediscover
+    // them later via ListObjectsV2Command, which needs a bucket-level
+    // s3:ListBucket permission nothing else in this app ever needed (and
+    // very likely doesn't have — see prospect-page.js's header comment for
+    // the live bug this caused).
     const meta = {
       address: address || "",
       createdAt: new Date().toISOString(),
+      finalKey: finalKey || null,
+      originalKey: originalKey || null,
     };
 
     const prospectUrl = `${siteUrl || process.env.URL || "https://smartstagepro.com"}/prospect/${slug}`;

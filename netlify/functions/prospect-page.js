@@ -21,7 +21,7 @@
 // way listings/ explicitly was, and signing sidesteps the question rather
 // than needing to verify/change bucket policy.
 
-const { S3Client, ListObjectsV2Command, GetObjectCommand } = require("@aws-sdk/client-s3");
+const { S3Client, ListObjectsV2Command, GetObjectCommand, HeadObjectCommand } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 
 const s3 = new S3Client({
@@ -47,6 +47,16 @@ async function signKey(key) {
   return getSignedUrl(s3, new GetObjectCommand({ Bucket: BUCKET, Key: key }), { expiresIn: 60 * 60 * 24 * 7 });
 }
 
+async function signQrIfExists(slug) {
+  const key = `staging-prospects/${slug}/qr.png`;
+  try {
+    await s3.send(new HeadObjectCommand({ Bucket: BUCKET, Key: key }));
+    return signKey(key);
+  } catch {
+    return null; // no qr.png yet — e.g. a prospect created before this fix shipped
+  }
+}
+
 async function readMeta(slug) {
   try {
     const res = await s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: `staging-prospects/${slug}/meta.json` }));
@@ -63,7 +73,7 @@ function escHtml(str) {
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-function renderPage({ slug, address, beforeUrl, afterUrl }) {
+function renderPage({ slug, address, beforeUrl, afterUrl, qrUrl }) {
   const displayAddress = address || "This Property";
   return `<!DOCTYPE html>
 <html lang="en">
@@ -121,7 +131,10 @@ h1{font-family:Georgia,serif;font-weight:400;font-size:1.7rem;text-align:center;
   <div class="pitch">
     <h2>This is what Smart Stage PRO can do for your listings.</h2>
     <p>AI-powered virtual staging, AB 723-compliant disclosure built in, ready in minutes — not days. Every listing gets its own permanent compliance record and QR code, automatically.</p>
-    <a class="cta" href="https://smartstagepro.com/#pricing" target="_blank">See Plans &amp; Pricing →</a>
+    <div style="display:flex;gap:14px;justify-content:center;flex-wrap:wrap;align-items:center;">
+      <a class="cta" href="https://smartstagepro.com/#pricing" target="_blank">See Plans &amp; Pricing →</a>
+      ${qrUrl ? `<a href="${qrUrl}" download="SmartStage_QR_${slug}.png" style="color:var(--muted);font-size:0.82rem;text-decoration:underline;">↓ Download this QR code</a>` : ""}
+    </div>
   </div>
 
   <div class="footer">Smart Stage PRO · smartstagepro.com</div>
@@ -182,15 +195,16 @@ exports.handler = async (event) => {
       return { statusCode: 404, headers: htmlHeaders, body: renderNotFound(slug) };
     }
 
-    const [afterUrl, beforeUrl] = await Promise.all([
+    const [afterUrl, beforeUrl, qrUrl] = await Promise.all([
       signKey(finalKey),
       signKey(originalKey || finalKey), // fall back to the final itself if somehow no original was found — page still renders rather than 404ing
+      signQrIfExists(slug),
     ]);
 
     return {
       statusCode: 200,
       headers: htmlHeaders,
-      body: renderPage({ slug, address: meta.address, beforeUrl, afterUrl }),
+      body: renderPage({ slug, address: meta.address, beforeUrl, afterUrl, qrUrl }),
     };
   } catch (err) {
     console.error("prospect-page error for slug", slug, ":", err.message);

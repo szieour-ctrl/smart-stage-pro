@@ -114,8 +114,17 @@ function getSb() {
   // instead of inheriting the app's session — a small, one-time cost
   // that's much better than the app tab getting disrupted every time
   // Gallery happens to be open.
+  // FIX (Sep 8, 2026): also disable Supabase's internal Web Lock here.
+  // The storageKey separation above stops Gallery and the main app from
+  // contending over the SAME lock, but it doesn't stop Gallery's own
+  // client from deadlocking on ITS OWN internal lock — a known bug in the
+  // underlying auth-js library (supabase/supabase-js#1594, #2013, #2111)
+  // where the lock can be acquired and never released, hanging every
+  // subsequent auth call forever with zero network activity, even on a
+  // fresh page load. See index.html's getSupabase() for the full writeup.
+  const noOpLock = async (name, acquireTimeout, fn) => await fn();
   if (!_sb) _sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-    auth: { storageKey: 'gallery-sb-auth-token' }
+    auth: { storageKey: 'gallery-sb-auth-token', lock: noOpLock }
   });
   return _sb;
 }

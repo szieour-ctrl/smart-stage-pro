@@ -153,6 +153,12 @@
 [functions."compliance-page"]
   timeout = 15
 
+[functions."prospect-page"]
+  timeout = 15
+
+[functions."write-prospect-meta"]
+  timeout = 10
+
 [functions."download-compliance-zip"]
   timeout = 60
 
@@ -192,6 +198,15 @@
 [[redirects]]
   from = "/compliance"
   to = "/.netlify/functions/compliance-page"
+  status = 200
+  force = true
+
+# ── Prospecting "2nd touch" page routing (Sep 8, 2026) ───
+# Deliberately separate from /compliance — see prospect-page.js's header
+# comment for why this never touches the listings table or Blobs at all.
+[[redirects]]
+  from = "/prospect/:slug"
+  to = "/.netlify/functions/prospect-page"
   status = 200
   force = true
 

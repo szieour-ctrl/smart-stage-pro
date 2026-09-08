@@ -21,7 +21,22 @@
 // way listings/ explicitly was, and signing sidesteps the question rather
 // than needing to verify/change bucket policy.
 
-const { S3Client, ListObjectsV2Command, GetObjectCommand, HeadObjectCommand } = require("@aws-sdk/client-s3");
+// FIX (Sep 8, 2026 — real bug found live): originally used
+// ListObjectsV2Command to find the newest file under finals/ and
+// originals/. Confirmed live: this is the ONLY function anywhere in the
+// codebase that ever lists S3 objects — every other function only does
+// Get/Put/Head on a key it already knows deterministically. This app's S3
+// credentials were almost certainly scoped for exactly that (object-level
+// access only, no bucket-level s3:ListBucket) — meaning ListObjectsV2Command
+// was likely throwing AccessDenied, and the catch-all error handler below
+// silently rendered that as the exact same "Page not found" text as a
+// genuinely missing image, masking the real cause entirely. Fixed by
+// removing the need to list anything: write-prospect-meta.js now stores
+// the exact finalKey/originalKey it already knows (from the upload that
+// just succeeded) directly in meta.json, so this function just reads two
+// known keys — same permission profile as everything else in the app.
+
+const { S3Client, GetObjectCommand, HeadObjectCommand } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 
 const s3 = new S3Client({
@@ -33,14 +48,6 @@ const s3 = new S3Client({
 });
 
 const BUCKET = process.env.S3_BUCKET_NAME;
-
-async function findNewestKey(prefix) {
-  const res = await s3.send(new ListObjectsV2Command({ Bucket: BUCKET, Prefix: prefix }));
-  const objects = (res.Contents || []).filter(o => o.Size > 0);
-  if (!objects.length) return null;
-  objects.sort((a, b) => new Date(b.LastModified) - new Date(a.LastModified));
-  return objects[0].Key;
-}
 
 async function signKey(key) {
   if (!key) return null;
@@ -175,6 +182,17 @@ function renderNotFound(slug) {
 <body><div class="box"><h2>Page not found</h2><p style="color:#7a6f63;margin-top:8px;">This prospecting link (${escHtml(slug)}) may have expired or is incorrect.</p></div></body></html>`;
 }
 
+// FIX (Sep 8, 2026): separate page for a genuine server-side error, so it's
+// never confused with a real 404 again the way the old ListObjectsV2-based
+// version's catch-all was. Same visual shell, different message — and the
+// real error is always in the function logs via console.error below either way.
+function renderServerError(slug) {
+  return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Something went wrong</title>
+<style>body{font-family:Arial,sans-serif;background:#f7f4ef;color:#1a1714;display:flex;align-items:center;justify-content:center;min-height:100vh;text-align:center;}
+.box{max-width:420px;padding:32px;}</style></head>
+<body><div class="box"><h2>Something went wrong</h2><p style="color:#7a6f63;margin-top:8px;">This page (${escHtml(slug)}) hit a server error — check Netlify function logs for prospect-page. Not the same as a missing/expired link.</p></div></body></html>`;
+}
+
 exports.handler = async (event) => {
   const pathParts = (event.path || "").split("/").filter(Boolean);
   const slug = pathParts[pathParts.length - 1];
@@ -185,11 +203,12 @@ exports.handler = async (event) => {
   }
 
   try {
-    const [finalKey, originalKey, meta] = await Promise.all([
-      findNewestKey(`staging-prospects/${slug}/finals/`),
-      findNewestKey(`staging-prospects/${slug}/originals/`),
-      readMeta(slug),
-    ]);
+    // FIX (Sep 8, 2026): finalKey/originalKey now come straight from
+    // meta.json — written by write-prospect-meta.js right after the same
+    // upload that already knows both keys exactly. No S3 listing, no
+    // guessing at "newest" — see this file's header comment for why.
+    const meta = await readMeta(slug);
+    const finalKey = meta.finalKey;
 
     if (!finalKey) {
       return { statusCode: 404, headers: htmlHeaders, body: renderNotFound(slug) };
@@ -197,7 +216,7 @@ exports.handler = async (event) => {
 
     const [afterUrl, beforeUrl, qrUrl] = await Promise.all([
       signKey(finalKey),
-      signKey(originalKey || finalKey), // fall back to the final itself if somehow no original was found — page still renders rather than 404ing
+      signKey(meta.originalKey || finalKey), // fall back to the final itself if somehow no original was recorded — page still renders rather than 404ing
       signQrIfExists(slug),
     ]);
 
@@ -208,6 +227,6 @@ exports.handler = async (event) => {
     };
   } catch (err) {
     console.error("prospect-page error for slug", slug, ":", err.message);
-    return { statusCode: 500, headers: htmlHeaders, body: renderNotFound(slug) };
+    return { statusCode: 500, headers: htmlHeaders, body: renderServerError(slug) };
   }
 };

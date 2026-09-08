@@ -7947,8 +7947,35 @@ function hideFaqModal() {
 // The real signOut() call still fires in the background best-effort (it
 // also invalidates the refresh token server-side, which a local-only
 // clear can't do), but nothing user-visible depends on it completing.
+//
+// FIX (Sep 8, 2026 — confirmed real case): the background signOut() call
+// above was left running forever once it hung — a stuck promise can't be
+// cancelled, only abandoned. But getSupabase() caches a single client
+// instance for the whole page (`if (!_supabase) {...}`), so every call
+// after this one — including a fresh login's signInWithPassword() +
+// sb.from() — was reusing that exact same client object, still stuck
+// holding whatever internal lock the orphaned signOut() never released.
+// Confirmed live: sign out (times out, as logged below) → sign back in →
+// signInWithPassword() succeeds, but the very next call, handleAuthenticatedUser()'s
+// sb.from('users')..., hung forever with zero network request ever issued —
+// same client, same wedged lock, no timeout wrapper on that call to catch it.
+// Detaching _supabase immediately (not waiting for the 5s timeout) means
+// the NEXT getSupabase() call — made right away by submitAuth() on the
+// following sign-in — always builds a brand new client with no inherited
+// lock state, instead of risking a reuse of the still-jamming one.
 async function signOut() {
-  withAuthTimeout(getSupabase().auth.signOut(), 5000, 'signOut()').catch(e => console.warn('signOut() itself stalled (known library issue) — cleared locally anyway:', e.message));
+  // Grab the current client and immediately detach it from _supabase —
+  // the lock this call may get stuck on is wedged from the instant
+  // signOut() is invoked, not just once the 5s timeout below elapses, so
+  // waiting for the timeout to null this out would leave a window where a
+  // fast re-login still reuses the not-yet-discarded stuck client. The
+  // orphaned call below keeps its own reference via closure, so detaching
+  // here doesn't affect it — it just stops anything else from reusing it.
+  const staleClient = _supabase;
+  _supabase = null;
+  withAuthTimeout(staleClient.auth.signOut(), 5000, 'signOut()').catch(e => {
+    console.warn('signOut() itself stalled (known library issue) — cleared locally anyway, and next sign-in already gets a fresh client:', e.message);
+  });
   Object.keys(localStorage).filter(k => k.startsWith('sb-')).forEach(k => localStorage.removeItem(k));
   _currentUser = null;
   _userRecord = null;

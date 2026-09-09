@@ -4749,12 +4749,23 @@ async function attachFinalToProject(finalBase64, room, orig, enhId) {
         }
       }
       showToast(SESSION.prospectPageUrl ? `✓ Staged — prospect page ready: ${SESSION.prospectPageUrl}` : `✓ Staged image saved to S3 (staging-prospects/)`, 'success');
-    } else {
-      // Attach to project in Blobs
+    } else {      // Attach to project in Blobs
       // userId fix (separate, earlier bug): without this, project-manage.js's
       // addImage() guard (`if (userId && process.env.SUPABASE_URL)`) was
       // always false, so the Supabase branch never even attempted to run.
-      const _sbUserForAttach = readStoredSessionDirect()?.user;
+      // FIX (Sep 2026 — real bug, confirmed on a real 12-room listing where
+      // 11 rooms silently never reached staged_images): readStoredSessionDirect()
+      // can race the session token still loading/refreshing, especially when
+      // several rooms finalize back-to-back. That used to send userId:null
+      // with no retry and no error — Blobs still succeeded, so this whole
+      // function reported success anyway. Now retries the read once after a
+      // short delay before falling back to null, since the common case is
+      // just "not hydrated yet," not a real logged-out state.
+      let _sbUserForAttach = readStoredSessionDirect()?.user;
+      if (!_sbUserForAttach?.id) {
+        await new Promise(r => setTimeout(r, 300));
+        _sbUserForAttach = readStoredSessionDirect()?.user;
+      }
       const attachRes = await fetch('/.netlify/functions/project-manage?action=add-image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -4772,16 +4783,29 @@ async function attachFinalToProject(finalBase64, room, orig, enhId) {
           }
         })
       });
+      const attachRaw = await attachRes.text();
+      let attachData;
+      try { attachData = JSON.parse(attachRaw); } catch { attachData = {}; }
       if (!attachRes.ok) {
-        const attachRaw = await attachRes.text();
-        let d;
-        try { d = JSON.parse(attachRaw); } catch { d = {}; }
-        throw new Error(d.error || `add-image failed (status ${attachRes.status}): ${attachRaw.slice(0, 200)}`);
+        throw new Error(attachData.error || `add-image failed (status ${attachRes.status}): ${attachRaw.slice(0, 200)}`);
       }
 
       console.log('Image attached to project:', SESSION.projectId, 'room:', room.roomName);
-      target.complianceAttachStatus = 'success';
-      showToast(`✓ Added to compliance project: ${SESSION.projectAddress || SESSION.projectId}`, 'success');
+      // FIX (Sep 2026): addImage() now reports it when the Blobs write
+      // succeeded but the Supabase compliance mirror didn't (e.g. userId
+      // still missing after the retry above, or the insert itself failed).
+      // The image IS saved and safe — but PRO Plus Video won't see it until
+      // this is resolved, so this needs to be visibly different from a
+      // clean success, not swallowed into the same green toast.
+      if (attachData.complianceWarning) {
+        target.complianceAttachStatus = 'warning';
+        target.complianceAttachError = attachData.complianceWarning;
+        console.warn('addImage complianceWarning:', attachData.complianceWarning);
+        showToast(`⚠ "${room.roomName}" saved, but may not appear in PRO Plus Video — ${attachData.complianceWarning}`, 'error');
+      } else {
+        target.complianceAttachStatus = 'success';
+        showToast(`✓ Added to compliance project: ${SESSION.projectAddress || SESSION.projectId}`, 'success');
+      }
     }
 
   } catch (err) {

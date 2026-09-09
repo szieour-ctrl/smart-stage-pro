@@ -619,7 +619,23 @@ async function addImage(projectId, imageData, userId, ab723Prompt, env) {
   // touch credit_ledger again. If a future session wants to consolidate
   // billing logic, do it by removing the debit-credit.js call, not by
   // re-adding one here.
-  if (userId && process.env.SUPABASE_URL) {
+  // FIX (Sep 2026 — real bug: 11 of 12 rooms on a real listing never
+  // reached staged_images, with zero error surfaced anywhere, because
+  // this whole block used to just silently no-op whenever userId was
+  // falsy — most likely a session-token read race on the frontend
+  // finalizing many rooms back-to-back. Blobs still succeeded every
+  // time, so attachFinalToProject() reported "✓ Added to compliance
+  // project" regardless — a false success. This is now tracked into
+  // `complianceWarning` on every failure branch (missing userId,
+  // missing listing row, insert returning no row, thrown exception)
+  // and returned to the frontend instead of only ever reaching a
+  // server log nobody was watching.
+  let complianceWarning = null;
+
+  if (!userId) {
+    complianceWarning = "No userId available — compliance record was not written to Supabase (image is still saved).";
+    console.error("addImage: Supabase write skipped, no userId — projectId:", projectId);
+  } else if (process.env.SUPABASE_URL) {
     try {
       // Find listing ID from Supabase — filtered by user_id too, defense in
       // depth against any project_id string collision (see rand4 note on
@@ -653,6 +669,15 @@ async function addImage(projectId, imageData, userId, ab723Prompt, env) {
           cloudinary_sbs_url:      imageData.sbsUrl       || null,
           credits_used:            0,
           ab723_disclosed:         false,
+          hidden:                  false,
+          // FIX (Sep 2026): explicitly false on insert. This row was never
+          // setting `hidden` at all, so it fell through to whatever the
+          // column default was (NULL) — and getFramesForListing()'s
+          // `hidden=eq.false` filter silently excludes NULL, not just
+          // true, so every normal final was invisible to PRO Plus Video
+          // until manually toggled through hide-image.js once. See
+          // hide-image.js's PATCH path for the only other place this
+          // column is ever written.
           // NEW (Hero Shot B-Roll tagging) — ground truth captured at
           // Generate Final time in index.html, not reconstructed here.
           // is_hero_shot marks this row as a Cinematic Asset Generator
@@ -667,6 +692,7 @@ async function addImage(projectId, imageData, userId, ab723Prompt, env) {
 
         const stagedImageId = imgResult.data?.[0]?.id || null;
         if (!stagedImageId) {
+          complianceWarning = "Compliance record insert returned no row — image is saved but may not appear in PRO Plus Video.";
           console.error(
             "staged_images insert returned no row — status:", imgResult.status,
             "| response:", JSON.stringify(imgResult.data),
@@ -674,10 +700,13 @@ async function addImage(projectId, imageData, userId, ab723Prompt, env) {
           );
         }
       } else {
+        complianceWarning = "No matching listing found in Supabase — compliance record was not written (image is still saved).";
         console.error("addImage: no listing found for projectId — Supabase write skipped:", projectId);
       }
     } catch (err) {
-      // Non-fatal — Blobs write already succeeded
+      // Blobs write already succeeded — this is real, just not fatal to
+      // the image being saved. Still needs to reach the frontend now.
+      complianceWarning = "Supabase compliance write failed: " + err.message;
       console.error("Supabase staged_images write error (non-fatal):", err.message);
     }
   }
@@ -686,6 +715,7 @@ async function addImage(projectId, imageData, userId, ab723Prompt, env) {
     added:      true,
     imageId:    imageEntry.imageId,
     imageCount: project.images.length,
+    complianceWarning,
   };
 }
 

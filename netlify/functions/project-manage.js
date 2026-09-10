@@ -79,9 +79,43 @@ function cleanAddress(address) {
 }
 
 function addressHash(address) {
-  const normalized = address.toLowerCase()
+  // FIX (Sep 10, 2026 — real bug: same physical property got 3 separate
+  // listing rows in one evening, none of them duplicates of each other by
+  // any fault of the user — Google Places returned slightly different
+  // formatted text across searches: "...Sacramento, California" vs
+  // "...Sacramento, CA", and once dropped the "N" directional prefix
+  // entirely ("1619 N Breezy Meadow Dr" vs "1619 Breezy Meadow Dr"). The
+  // old normalization only lowercased/collapsed whitespace/stripped
+  // punctuation — none of which touches a full-state-name-vs-abbreviation
+  // difference or a missing directional token, so each variant hashed to
+  // a completely different key, and lookupProject() found nothing every
+  // time. See Notion decision doc for the full incident.
+  //
+  // Two changes, both matching conventions already established elsewhere
+  // in this file:
+  //   1. Drop city/state/zip entirely before hashing — same "street
+  //      address only" convention slugifyAddress() and generateProjectId()
+  //      above already use. City/state formatting is exactly what varied
+  //      between Google's responses tonight and should never affect
+  //      whether this is "the same project" for one agent.
+  //   2. Normalize a leading directional token (N/North, S/South, E/East,
+  //      W/West) so "1619 N Breezy Meadow Dr" and "1619 North Breezy
+  //      Meadow Dr" — or the same address with the directional dropped by
+  //      a different autocomplete pass — all hash identically.
+  //
+  // Does NOT fix every possible Google Places formatting variance (unit
+  // numbers, "St" vs "Street", etc.) — this addresses the two specific
+  // variations confirmed causing real duplicates. The more complete fix
+  // would key off Google's stable place_id instead of formatted address
+  // text at all, but that requires the frontend to capture and pass
+  // place_id through, which it doesn't currently do — worth a follow-up
+  // if this class of bug recurs with a different formatting variant.
+  const normalized = (address || "")
+    .toLowerCase()
+    .replace(/,.*$/, "")
+    .replace(/^(\d+)\s+(n|north|s|south|e|east|w|west)\b\.?\s*/, "$1 ")
     .replace(/\s+/g, " ")
-    .replace(/[^a-z0-9\s,]/g, "")
+    .replace(/[^a-z0-9\s]/g, "")
     .trim();
   return crypto.createHash("md5").update(normalized).digest("hex").slice(0, 16);
 }

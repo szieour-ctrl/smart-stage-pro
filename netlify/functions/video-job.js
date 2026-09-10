@@ -429,15 +429,19 @@ async function refundKlingPoolFrames(userId, framesToRefund) {
 // Motion Pool credits. All AI movements used will be charged against the
 // credit pool or image balance"). f.useAiMotion means specifically
 // "Kling" — that's load-bearing for Railway's renderPipeline.js dispatch
-// order (frame.useAiMotion routes to Kling FIRST, before the LTX/Reveal/
-// Ken Burns branches even get checked), so it can't be redefined to mean
-// "any AI engine" without breaking that routing. But for BILLING purposes
-// specifically — which is everything in this file, a completely separate
-// runtime from Railway — an LTX-selected frame is just as much a paid AI
-// Motion Pool draw as a Kling one. This helper is the one place that
-// distinction is made, so every billing/eligibility check below agrees
-// with every other one instead of six separate ad-hoc checks drifting
-// out of sync with each other over time.
+// order (frame.useAiMotion routes to Kling FIRST, before the Reveal/Ken
+// Burns branches even get checked), so it can't be redefined without
+// breaking that routing. This helper is the one place every billing/
+// eligibility check below agrees with every other one instead of several
+// separate ad-hoc checks drifting out of sync with each other over time.
+//
+// FULL KLING REVERT (Sep 10, 2026): the f.ltxMotionPreset disjunct that
+// used to live in this function's return is gone — that field no longer
+// exists anywhere in the frame payload (see build-video-demo.html; the
+// standalone AI Motion dropdown has billed as f.useAiMotion since the
+// Sep 9 redirect already, so this was already dead weight for standalone
+// frames specifically, kept only for the Reveal case, which is now
+// removed too since revealEngine drives Reveal billing directly below).
 function usesAiMotion(f) {
   // SIMPLIFIED (July 19, 2026, Sam's explicit correction): billing for a
   // reveal frame is decided ENTIRELY by which engine is active
@@ -454,15 +458,18 @@ function usesAiMotion(f) {
   // silent-default behavior, which is the actual root cause of that
   // render's "0 Images" quote despite the frame clearly being intended
   // as AI Motion. Loud now, same reasoning as that file's fix.
-  if (f.useRevealEffect && f.revealEngine !== "ltx" && f.revealEngine !== "ken_burns") {
+  //
+  // "ltx" → "kling" (Sep 10, 2026 full Kling revert) — see
+  // renderPipeline.js and build-video-demo.html for the matching rename.
+  if (f.useRevealEffect && f.revealEngine !== "kling" && f.revealEngine !== "ken_burns") {
     console.error(
       `[REVEAL ENGINE MISSING — BILLING] frame with useRevealEffect=true has revealEngine="${f.revealEngine}" ` +
-      `(expected "ltx" or "ken_burns"). Billing as Ken Burns (free) by default — if this frame was meant to be ` +
-      `AI Motion, it will neither call LTX nor be charged. Check reveal_engine column/wiring in video-job.js.`
+      `(expected "kling" or "ken_burns"). Billing as Ken Burns (free) by default — if this frame was meant to be ` +
+      `AI Motion, it will neither call Kling nor be charged. Check reveal_engine column/wiring in video-job.js.`
     );
   }
-  const usesAiMotionReveal = !!f.useRevealEffect && f.revealEngine === "ltx";
-  return !!f.useAiMotion || !!f.ltxMotionPreset || usesAiMotionReveal;
+  const usesAiMotionReveal = !!f.useRevealEffect && f.revealEngine === "kling";
+  return !!f.useAiMotion || usesAiMotionReveal;
 }
 
 // applies identically to create AND regenerate. Async now, since it needs
@@ -818,12 +825,18 @@ async function addExternalPhoto({ listingId, userId, imageUrl, roomType, sourceL
 // Railway ever saw the request — a real, silent request-shape mismatch, not
 // a hypothetical one.
 //
-// SYNC FIX (July 9, 2026): room_reveal, living_room_ambient, and
-// corner_to_corner_drift cleared in klingMotion.js after Sam's fal.ai
-// Playground verification — mirrored here for the same reason as above.
+// SYNC FIX (July 9, 2026): pull_back_wide (then still named "room_reveal"),
+// living_room_ambient, and corner_to_corner_drift cleared in klingMotion.js
+// after Sam's fal.ai Playground verification — mirrored here for the same
+// reason as above.
 //
 // SYNC FIX (July 9, 2026, same session): pan_zoom_reveal added to
 // klingMotion.js's allowlist — mirrored here too, same reason.
+//
+// RENAMED (Sep 10, 2026): "room_reveal" → "pull_back_wide" everywhere this
+// preset is referenced, to stop colliding with the unrelated opener+wipe+
+// continuation feature (also historically called "Room Reveal" in the
+// UI) — see klingMotion.js's matching rename comment for the full reason.
 const SINGLE_IMAGE_INTERIOR_ALLOWED_PRESETS = new Set([
   "orbit_arc",
   "rack_focus",
@@ -835,7 +848,7 @@ const SINGLE_IMAGE_INTERIOR_ALLOWED_PRESETS = new Set([
   "architectural_glide",
   "crane_up",
   "crane_down",
-  "room_reveal",
+  "pull_back_wide",
   "living_room_ambient",
   "corner_to_corner_drift",
   "pan_zoom_reveal",
@@ -843,9 +856,10 @@ const SINGLE_IMAGE_INTERIOR_ALLOWED_PRESETS = new Set([
 
 // Presets restricted to open-concept/great-room spaces when used without a
 // known pair — mirrors OPEN_PLAN_ONLY_PRESETS in klingMotion.js. See that
-// file for the full reasoning (room_reveal observed inventing a doorway on
-// a small enclosed room, July 9, 2026).
-const OPEN_PLAN_ONLY_PRESETS = new Set(["room_reveal"]);
+// file for the full reasoning (pull_back_wide observed inventing a doorway
+// on a small enclosed room, July 9, 2026, back when this preset was still
+// named "room_reveal").
+const OPEN_PLAN_ONLY_PRESETS = new Set(["pull_back_wide"]);
 
 function validateAiMotionEligibility(frames) {
   for (const frame of frames) {
@@ -1137,8 +1151,9 @@ async function createVideoJob({ listingId, projectId, userId, frames, formats, m
       add_continuation_motion:       !!f.addContinuationMotion,
       continuation_preset:           f.continuationPreset || null,
       continuation_duration_seconds: f.continuationDurationSeconds || null,
-      // NEW (July 9, 2026) — gates room_reveal to open-concept rooms only.
-      // See is_open_plan_migration.sql for the full reasoning.
+      // NEW (July 9, 2026) — gates pull_back_wide (then "room_reveal") to
+      // open-concept rooms only. See is_open_plan_migration.sql for the
+      // full reasoning.
       is_open_plan:                  !!f.isOpenPlan,
       // NEW (Hero Shot B-Roll tagging) — carries the Cinematic Asset
       // Generator's ground-truth linkage through to Railway. is_hero_shot
@@ -1169,13 +1184,12 @@ async function createVideoJob({ listingId, projectId, userId, frames, formats, m
       // billing gap below — same root cause, same category of bug.
       reveal_preset:                 f.revealPreset || null,
       end_motion:                    f.endMotion || null,
-      // NEW (July 18, 2026) — same missing-field bug as reveal_preset/
-      // end_motion above, for LTX Motion. Without this, an LTX-selected
-      // frame would reach Railway with useAiMotion=false (correct, so it
-      // doesn't wrongly route to Kling) but NO way to tell renderPipeline.js
-      // which LTX preset was actually chosen — the whole feature would be
-      // silently unreachable end-to-end despite being fully wired
-      // everywhere else this session.
+      // FULL KLING REVERT (Sep 10, 2026) — f.ltxMotionPreset no longer
+      // exists in the frame payload (build-video-demo.html never sends
+      // it), so this always writes null now. Column kept as a dead,
+      // harmless field rather than dropped outright — a Supabase schema
+      // change wasn't part of this pass. Safe to drop in a future
+      // migration once nothing reads it.
       ltx_motion_preset:             f.ltxMotionPreset || null,
       // NEW (July 19, 2026) — real, dedicated gating field for reveal
       // frames specifically. THE BILLING/GATING ENFORCEMENT POINT: which
@@ -1184,7 +1198,9 @@ async function createVideoJob({ listingId, projectId, userId, frames, formats, m
       // engine locks AI Motion out completely, AI Motion engine locks
       // standard Ken Burns out completely). Only meaningful when
       // use_reveal_effect is true; null otherwise.
-      reveal_engine:                 f.useRevealEffect ? (f.revealEngine === "ltx" ? "ltx" : "ken_burns") : null,
+      // "ltx" → "kling" (Sep 10, 2026 full Kling revert) — see
+      // renderPipeline.js and build-video-demo.html for the matching rename.
+      reveal_engine:                 f.useRevealEffect ? (f.revealEngine === "kling" ? "kling" : "ken_burns") : null,
     }));
 
     // FIX (July 14, 2026 — real diagnosis gap): this insert was never
@@ -1279,7 +1295,8 @@ async function createVideoJob({ listingId, projectId, userId, frames, formats, m
         continuationDurationSeconds: f.continuation_duration_seconds,
         // NEW (July 9, 2026) — same root cause again: klingMotion.js's
         // enforceScopeRules() checks frame.isOpenPlan directly for the
-        // room_reveal gate. Without forwarding it here, EVERY room_reveal
+        // pull_back_wide gate (named "room_reveal" at the time this was
+        // written). Without forwarding it here, EVERY pull_back_wide
         // request would be wrongly rejected by Railway even after passing
         // this file's own validateAiMotionEligibility() check above —
         // the flag would be silently true at the Netlify layer and
@@ -1292,12 +1309,15 @@ async function createVideoJob({ listingId, projectId, userId, frames, formats, m
         // now existing in the insert above them.
         revealPreset:                f.reveal_preset,
         endMotion:                   f.end_motion,
-        // NEW (July 18, 2026) — same fix, LTX Motion's equivalent of
-        // klingMotionPreset above. Matches renderPipeline.js's dispatch
-        // check exactly: frame.ltxMotionPreset && LTX_MOTION_TEMPLATES[frame.ltxMotionPreset].
+        // FULL KLING REVERT (Sep 10, 2026) — ltxMotionPreset is read back
+        // here but renderPipeline.js no longer has a code path that reads
+        // it (the standalone frame.ltxMotionPreset branch was removed);
+        // this will always be null now. Harmless dead field, kept for the
+        // same reason as the ltx_motion_preset column above.
         ltxMotionPreset:             f.ltx_motion_preset,
-        // NEW (July 19, 2026) — read back for renderPipeline.js's reveal
-        // branch gating check (frame.revealEngine === "ltx").
+        // "ltx" → "kling" (Sep 10, 2026 full Kling revert) — read back for
+        // renderPipeline.js's reveal branch gating check
+        // (frame.revealEngine === "kling").
         revealEngine:                f.reveal_engine,
       })),
     });
@@ -1541,8 +1561,9 @@ async function regenerateVideoJob({ jobId, userId, frames, formats, musicStyle, 
       add_continuation_motion:       !!f.addContinuationMotion,
       continuation_preset:           f.continuationPreset || null,
       continuation_duration_seconds: f.continuationDurationSeconds || null,
-      // NEW (July 9, 2026) — gates room_reveal to open-concept rooms only.
-      // See is_open_plan_migration.sql for the full reasoning.
+      // NEW (July 9, 2026) — gates pull_back_wide (then "room_reveal") to
+      // open-concept rooms only. See is_open_plan_migration.sql for the
+      // full reasoning.
       is_open_plan:                  !!f.isOpenPlan,
       // NEW (Hero Shot B-Roll tagging) — carries the Cinematic Asset
       // Generator's ground-truth linkage through to Railway. is_hero_shot
@@ -1573,13 +1594,12 @@ async function regenerateVideoJob({ jobId, userId, frames, formats, musicStyle, 
       // billing gap below — same root cause, same category of bug.
       reveal_preset:                 f.revealPreset || null,
       end_motion:                    f.endMotion || null,
-      // NEW (July 18, 2026) — same missing-field bug as reveal_preset/
-      // end_motion above, for LTX Motion. Without this, an LTX-selected
-      // frame would reach Railway with useAiMotion=false (correct, so it
-      // doesn't wrongly route to Kling) but NO way to tell renderPipeline.js
-      // which LTX preset was actually chosen — the whole feature would be
-      // silently unreachable end-to-end despite being fully wired
-      // everywhere else this session.
+      // FULL KLING REVERT (Sep 10, 2026) — f.ltxMotionPreset no longer
+      // exists in the frame payload (build-video-demo.html never sends
+      // it), so this always writes null now. Column kept as a dead,
+      // harmless field rather than dropped outright — a Supabase schema
+      // change wasn't part of this pass. Safe to drop in a future
+      // migration once nothing reads it.
       ltx_motion_preset:             f.ltxMotionPreset || null,
       // NEW (July 19, 2026) — real, dedicated gating field for reveal
       // frames specifically. THE BILLING/GATING ENFORCEMENT POINT: which
@@ -1588,7 +1608,9 @@ async function regenerateVideoJob({ jobId, userId, frames, formats, musicStyle, 
       // engine locks AI Motion out completely, AI Motion engine locks
       // standard Ken Burns out completely). Only meaningful when
       // use_reveal_effect is true; null otherwise.
-      reveal_engine:                 f.useRevealEffect ? (f.revealEngine === "ltx" ? "ltx" : "ken_burns") : null,
+      // "ltx" → "kling" (Sep 10, 2026 full Kling revert) — see
+      // renderPipeline.js and build-video-demo.html for the matching rename.
+      reveal_engine:                 f.useRevealEffect ? (f.revealEngine === "kling" ? "kling" : "ken_burns") : null,
     }));
 
     // FIX (July 14, 2026 — real diagnosis gap): this insert was never
@@ -1660,12 +1682,15 @@ async function regenerateVideoJob({ jobId, userId, frames, formats, musicStyle, 
         // now existing in the insert above them.
         revealPreset:                f.reveal_preset,
         endMotion:                   f.end_motion,
-        // NEW (July 18, 2026) — same fix, LTX Motion's equivalent of
-        // klingMotionPreset above. Matches renderPipeline.js's dispatch
-        // check exactly: frame.ltxMotionPreset && LTX_MOTION_TEMPLATES[frame.ltxMotionPreset].
+        // FULL KLING REVERT (Sep 10, 2026) — ltxMotionPreset is read back
+        // here but renderPipeline.js no longer has a code path that reads
+        // it (the standalone frame.ltxMotionPreset branch was removed);
+        // this will always be null now. Harmless dead field, kept for the
+        // same reason as the ltx_motion_preset column above.
         ltxMotionPreset:             f.ltx_motion_preset,
-        // NEW (July 19, 2026) — read back for renderPipeline.js's reveal
-        // branch gating check (frame.revealEngine === "ltx").
+        // "ltx" → "kling" (Sep 10, 2026 full Kling revert) — read back for
+        // renderPipeline.js's reveal branch gating check
+        // (frame.revealEngine === "kling").
         revealEngine:                f.reveal_engine,
       })),
     });

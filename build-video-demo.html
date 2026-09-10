@@ -694,30 +694,67 @@ const ROOM_TYPE_TO_BACKEND = {
   "Front Yard": "exterior",
   "Other": "default",
 };
-
+// ADDED (Sep 9, 2026 — see Notion decision doc "DECISION — Full Kling
+// Migration for AI Motion + Pool Cut to 2/Video"). "AI Motion" (f.motion
+// === "ltx") now dispatches through Kling, not LTX. LTX_PRESETS above is
+// UNCHANGED — every label, description, and eligibility rule in it is
+// still accurate UI content; only the wire format changes.
+//
+// 16 of the 18 LTX preset keys match KLING_MOTION_TEMPLATES exactly (both
+// files' presets were named identically when LTX's versions were written
+// as "LTX-safe rewrites" of the originals) — this mapping is the identity
+// function for those. Only micro_zoom_out and micro_dolly_back have no
+// Kling equivalent, since Kling never needed a two-image crop workaround
+// for hallway safety the way LTX did — both map to room_reveal, which is
+// already open-plan-gated and already carries the strongest
+// anti-hallucination language of any preset in klingMotion.js. Revisit if
+// you want these two to look visually distinct on Kling — right now both
+// send the identical prompt.
+const LTX_TO_KLING_PRESET = {
+  micro_zoom_out: "room_reveal",
+  micro_dolly_back: "room_reveal",
+};
+function resolveKlingPresetFromLtxSelection(ltxPresetKey) {
+  return LTX_TO_KLING_PRESET[ltxPresetKey] || ltxPresetKey;
+}
 // Converts one demo `frame` object into exactly the shape video-job.js's
 // action=quote/action=create expect. Single source of truth so the quote
 // call and the create call can never quietly drift apart from each other.
 function buildRealFrame(f) {
   const roomType = f.isExterior ? "exterior" : (ROOM_TYPE_TO_BACKEND[f.room] || "default");
-  const useAiMotion = f.motion === "kling";
-  // NEW (July 18, 2026) — LTX Motion, a third engine alongside Ken Burns
-  // and Kling. Sent as a SEPARATE field (ltxMotionPreset), not folded
-  // into useAiMotion — renderPipeline.js's dispatch chain checks
-  // frame.useAiMotion FIRST (routes to Kling), so useAiMotion must stay
-  // false here or an LTX selection would incorrectly render via Kling
-  // instead. isKenBurns below is the real "which engine" boolean this
-  // function actually needs — useAiMotion alone was never quite right
-  // for gating Reveal Presets (see the useRevealEffect fix below).
+  // REVERTED (Sep 9, 2026 — see Notion decision doc "DECISION — Full
+  // Kling Migration for AI Motion + Pool Cut to 2/Video"). LTX's
+  // per-preset reliability could not be brought to a production-safe
+  // level even after finding and fixing several real root causes this
+  // session (see decision doc for the full real-render evidence). The
+  // "AI Motion" UI (f.motion === "ltx") now dispatches through Kling.
+  //
+  // isKlingTransformSelection is the ORIGINAL, narrower Kling gate —
+  // renamed from the old `useAiMotion` to make clear it's scoped to true
+  // two-image transformations (Hero Transformation, Exterior Landscape
+  // Transformation) and the day/twilight family ONLY. Kept separate from
+  // the standalone-AI-Motion case below so isHero/isExteriorTransform
+  // further down can't misfire on an LTX-originated preset key (neither
+  // "hero_transformation" nor "exterior_landscape_transformation" exists
+  // in LTX_PRESETS, so this was always safe, but the rename makes the
+  // scope explicit instead of relying on that being true by coincidence).
+  const isKlingTransformSelection = f.motion === "kling";
   const useLtxMotion = f.motion === "ltx";
   const isKenBurns = f.motion === "kenburns";
-  // Room Reveal is reachable from EITHER Ken Burns or AI Motion now —
-  // this is the real gate for it, used both below (which fields get
-  // sent) and nowhere else needs it, so declared right here rather than
-  // buried inside the return object where a `const` statement isn't
-  // even valid syntax (caught by a real syntax check before shipping).
+  // isKenBurnsOrLtx, useRevealEffect, revealPreset, endMotion, and
+  // revealEngine below are ALL UNCHANGED by this revert — Room Reveal's
+  // own "AI Motion" continuation is a separate, larger piece of
+  // dual-namespace architecture (revealEngine / defaultEndMotionForEngine
+  // / REVEAL_PRESETS.allowedEndMotions) not covered by today's fix. It
+  // still routes through LTX exactly as before. Only the STANDALONE
+  // (non-Reveal) "AI Motion" selection is redirected to Kling here.
   const isKenBurnsOrLtx = isKenBurns || useLtxMotion;
-  const isHero = useAiMotion && f.preset === "hero_transformation";
+  // NEW (Sep 9, 2026) — the actual redirect. True only for a standalone
+  // (non-Reveal) "AI Motion" pick, which now needs to look exactly like
+  // an ordinary Kling request by the time it reaches video-job.js.
+  const useStandaloneAiMotionViaKling = useLtxMotion && !f.useRevealEffect;
+  const useAiMotion = isKlingTransformSelection || useStandaloneAiMotionViaKling;
+  const isHero = isKlingTransformSelection && f.preset === "hero_transformation";
   // NEW (July 18, 2026) — Exterior Landscape Transformation needs the
   // identical null-preset treatment as Hero Transformation (see the
   // comment below for why), but is kept as a SEPARATE check from isHero
@@ -726,7 +763,7 @@ function buildRealFrame(f) {
   // an automatic finishing move the way Hero Transformation's does. Don't
   // assume the two presets share every behavior just because they share
   // this one.
-  const isExteriorTransform = useAiMotion && f.preset === "exterior_landscape_transformation";
+  const isExteriorTransform = isKlingTransformSelection && f.preset === "exterior_landscape_transformation";
   // CHANGE (July 14, 2026 — corrected after Sam's real-world testing):
   // originally mapped Hero Transformation to the "cinematic_push" NAMED
   // preset. Checked klingMotion.js directly — that was actively wrong,
@@ -743,7 +780,13 @@ function buildRealFrame(f) {
   // mechanism — klingMotion.js's generic EXTERIOR fallback prompt,
   // triggered the identical way (no preset name + a real pair, this time
   // with isExterior true instead of false).
-  const resolvedPreset = (isHero || isExteriorTransform) ? null : f.preset;
+  //
+  // NEW (Sep 9, 2026): third branch for the standalone-AI-Motion-via-
+  // Kling case — translates the LTX preset key the user actually picked
+  // (f.ltxPreset) into its Kling equivalent via the mapping above.
+  const resolvedPreset = (isHero || isExteriorTransform)
+    ? null
+    : (useStandaloneAiMotionViaKling ? resolveKlingPresetFromLtxSelection(f.ltxPreset) : f.preset);
   return {
     imageUrl:      f.realUrl || f.dataUrl, // realUrl is the uploaded/Cloudinary URL once available — see uploadAsIsPhoto()
     beforeUrl:     f.isBeforeAfter ? f.beforeUrl : undefined,
@@ -759,11 +802,15 @@ function buildRealFrame(f) {
     // exactly as it already was for everything else.
     roomLabel: displayRoomName(f),
     motionPreset:  useAiMotion ? resolvedPreset : (f.kenBurnsPreset || "auto"),
-    // NEW (July 18, 2026) — the LTX equivalent of motionPreset above.
-    // Kept as its own field, matching ltxMotion.js's applyLtxMotion()
-    // and renderPipeline.js's dispatch check (frame.ltxMotionPreset &&
-    // LTX_MOTION_TEMPLATES[frame.ltxMotionPreset]) exactly.
-    ltxMotionPreset: useLtxMotion ? (f.ltxPreset || undefined) : undefined,
+    // CHANGED (Sep 9, 2026) — previously sent for EVERY useLtxMotion
+    // frame, standalone or Reveal. Standalone frames no longer need it —
+    // they're dispatched as ordinary Kling frames via useAiMotion/
+    // motionPreset above. Reveal frames never actually read this field
+    // anyway (renderPipeline.js's reveal branch uses frame.endMotion, not
+    // frame.ltxMotionPreset), so this was always inert for them — kept
+    // here, gated the same way, purely to avoid touching Reveal's
+    // behavior at all in this pass.
+    ltxMotionPreset: (useLtxMotion && f.useRevealEffect) ? (f.ltxPreset || undefined) : undefined,
     isOpenPlan:    f.room === "Open Plan",
     // durationSeconds omitted for every normal frame — motionPresets.js's
     // resolveDuration() already has real per-roomType defaults, and there

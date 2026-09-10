@@ -419,7 +419,13 @@ const PREVIEW_CLIP_URLS = {
   architectural_glide:          `${MOTION_PREVIEW_BASE}/architectural_glide.mp4`,
   crane_up:                     `${MOTION_PREVIEW_BASE}/crane_up.mp4`,
   crane_down:                   `${MOTION_PREVIEW_BASE}/crane_down.mp4`,
-  room_reveal:                  `${MOTION_PREVIEW_BASE}/room_reveal.mp4`,
+  // KEY renamed room_reveal → pull_back_wide (Sep 10, 2026, matches
+  // klingMotion.js's preset rename). URL PATH left pointing at the
+  // existing room_reveal.mp4 asset — that's a hosted file on the CDN/
+  // storage side, not something this rename touches; re-point this once
+  // the actual file is renamed (or re-uploaded under the new name) on
+  // the hosting side, whichever Sam prefers.
+  pull_back_wide:               `${MOTION_PREVIEW_BASE}/room_reveal.mp4`,
   living_room_ambient:          `${MOTION_PREVIEW_BASE}/living_room_ambient.mp4`,
   corner_to_corner_drift:       `${MOTION_PREVIEW_BASE}/corner_to_corner_drift.mp4`,
   drone_boom_up:                `${MOTION_PREVIEW_BASE}/drone_boom_up.mp4`,
@@ -704,15 +710,16 @@ const ROOM_TYPE_TO_BACKEND = {
 // files' presets were named identically when LTX's versions were written
 // as "LTX-safe rewrites" of the originals) — this mapping is the identity
 // function for those. Only micro_zoom_out and micro_dolly_back have no
-// Kling equivalent, since Kling never needed a two-image crop workaround
-// for hallway safety the way LTX did — both map to room_reveal, which is
-// already open-plan-gated and already carries the strongest
-// anti-hallucination language of any preset in klingMotion.js. Revisit if
-// you want these two to look visually distinct on Kling — right now both
-// send the identical prompt.
+// Kling equivalent — both map to pull_back_wide instead (renamed Sep 10,
+// 2026 from "room_reveal" — see klingMotion.js's rename comment; this was
+// the same preset that collided with the unrelated Room Reveal feature
+// name), which is already open-plan-gated and already carries the
+// strongest anti-hallucination language of any preset in klingMotion.js.
+// Revisit if you want these two to look visually distinct on Kling —
+// right now both send the identical prompt.
 const LTX_TO_KLING_PRESET = {
-  micro_zoom_out: "room_reveal",
-  micro_dolly_back: "room_reveal",
+  micro_zoom_out: "pull_back_wide",
+  micro_dolly_back: "pull_back_wide",
 };
 function resolveKlingPresetFromLtxSelection(ltxPresetKey) {
   return LTX_TO_KLING_PRESET[ltxPresetKey] || ltxPresetKey;
@@ -741,13 +748,16 @@ function buildRealFrame(f) {
   const isKlingTransformSelection = f.motion === "kling";
   const useLtxMotion = f.motion === "ltx";
   const isKenBurns = f.motion === "kenburns";
-  // isKenBurnsOrLtx, useRevealEffect, revealPreset, endMotion, and
-  // revealEngine below are ALL UNCHANGED by this revert — Room Reveal's
-  // own "AI Motion" continuation is a separate, larger piece of
-  // dual-namespace architecture (revealEngine / defaultEndMotionForEngine
-  // / REVEAL_PRESETS.allowedEndMotions) not covered by today's fix. It
-  // still routes through LTX exactly as before. Only the STANDALONE
-  // (non-Reveal) "AI Motion" selection is redirected to Kling here.
+  // UPDATED (Sep 10, 2026 — full Kling revert). isKenBurnsOrLtx,
+  // useRevealEffect, revealPreset, and endMotion below are unchanged in
+  // SHAPE — the dual-namespace architecture itself (revealEngine /
+  // defaultEndMotionForEngine / REVEAL_PRESETS.allowedEndMotions) still
+  // works exactly the same way. What changed: revealEngine's actual VALUE
+  // (below) is now "kling" instead of "ltx" when the AI Motion tab is
+  // active, so Room Reveal's continuation renders through Kling too — not
+  // just the standalone (non-Reveal) "AI Motion" selection, which was
+  // redirected first, on Sep 9. As of this change, no reveal frame this
+  // UI can produce routes through LTX at all.
   const isKenBurnsOrLtx = isKenBurns || useLtxMotion;
   // NEW (Sep 9, 2026) — the actual redirect. True only for a standalone
   // (non-Reveal) "AI Motion" pick, which now needs to look exactly like
@@ -802,15 +812,15 @@ function buildRealFrame(f) {
     // exactly as it already was for everything else.
     roomLabel: displayRoomName(f),
     motionPreset:  useAiMotion ? resolvedPreset : (f.kenBurnsPreset || "auto"),
-    // CHANGED (Sep 9, 2026) — previously sent for EVERY useLtxMotion
-    // frame, standalone or Reveal. Standalone frames no longer need it —
-    // they're dispatched as ordinary Kling frames via useAiMotion/
-    // motionPreset above. Reveal frames never actually read this field
-    // anyway (renderPipeline.js's reveal branch uses frame.endMotion, not
-    // frame.ltxMotionPreset), so this was always inert for them — kept
-    // here, gated the same way, purely to avoid touching Reveal's
-    // behavior at all in this pass.
-    ltxMotionPreset: (useLtxMotion && f.useRevealEffect) ? (f.ltxPreset || undefined) : undefined,
+    // REMOVED (Sep 10, 2026 — full Kling revert). ltxMotionPreset used to
+    // be sent here for Reveal frames only (standalone frames stopped
+    // needing it on Sep 9). It was already dead weight even then —
+    // renderPipeline.js's reveal branch has always used frame.endMotion,
+    // never frame.ltxMotionPreset — and now that Reveal's continuation
+    // dispatches through generateKlingRevealContinuation(endMotion, ...)
+    // exactly like the LTX branch it replaces, there's no remaining
+    // reader anywhere in the pipeline. Field dropped entirely rather than
+    // sent-but-unread.
     isOpenPlan:    f.room === "Open Plan",
     // durationSeconds omitted for every normal frame — motionPresets.js's
     // resolveDuration() already has real per-roomType defaults, and there
@@ -869,7 +879,12 @@ function buildRealFrame(f) {
     useRevealEffect: isKenBurnsOrLtx ? !!f.useRevealEffect : false,
     revealPreset: (isKenBurnsOrLtx && f.useRevealEffect) ? (f.revealPreset || "classic_reveal") : undefined,
     endMotion: (isKenBurnsOrLtx && f.useRevealEffect) ? (f.endMotion || defaultEndMotionForEngine(f.revealPreset || "classic_reveal", f.motion)) : undefined,
-    revealEngine: (isKenBurnsOrLtx && f.useRevealEffect) ? (useLtxMotion ? "ltx" : "ken_burns") : undefined,
+    // "ltx" → "kling" (Sep 10, 2026 full Kling revert) — Room Reveal's
+    // "AI Motion" continuation now renders via Kling, matching the
+    // standalone dropdown's engine. useLtxMotion (the variable name) is
+    // left as-is — it still correctly identifies "user picked the AI
+    // Motion tab," which is a UI concept, not a vendor name.
+    revealEngine: (isKenBurnsOrLtx && f.useRevealEffect) ? (useLtxMotion ? "kling" : "ken_burns") : undefined,
   };
 }
 
@@ -884,15 +899,28 @@ function defaultEndMotionFor(presetKey) {
 
 // NEW (July 19, 2026) — same idea as defaultEndMotionFor above, but
 // scoped to one engine's namespace specifically. preset.allowedEndMotions
-// now lists BOTH Ken Burns and LTX names together (the full set this
+// now lists BOTH Ken Burns and AI Motion names together (the full set this
 // reveal identity supports across either engine) — this picks the first
 // one that actually belongs to the requested engine, rather than
 // whatever happens to be first in the combined list regardless of engine.
+//
+// NOTE (Sep 10, 2026 — full Kling revert): the `engine` parameter here is
+// always f.motion's raw value, which stays "ltx" for the AI Motion tab —
+// NOT renamed to "kling", because "kling" is already a DIFFERENT existing
+// tab-id (isKlingTransformSelection / f.motion === "kling", the Hero
+// Transformation + Exterior Landscape Transformation family). Renaming
+// "ltx" to "kling" here would collide with that tab. "ltx" survives
+// purely as an internal UI tab identifier from here on — it no longer
+// means "renders via LTX" anywhere; the actual render engine (Kling) is
+// decided at the wire boundary in buildRealFrame (revealEngine: "kling").
+// isAiMotionName still checks membership in LTX_PRESETS — correct, see
+// that constant's own note: every Reveal-eligible preset key exists in
+// both LTX_PRESETS and KLING_MOTION_TEMPLATES by design.
 function defaultEndMotionForEngine(presetKey, engine) {
   const preset = REVEAL_PRESETS[presetKey];
   if (!preset) return engine === "ltx" ? "cinematic_push" : "push_in";
-  const isLtxName = (key) => !!LTX_PRESETS[key];
-  const match = preset.allowedEndMotions.find(key => engine === "ltx" ? isLtxName(key) : !isLtxName(key));
+  const isAiMotionName = (key) => !!LTX_PRESETS[key];
+  const match = preset.allowedEndMotions.find(key => engine === "ltx" ? isAiMotionName(key) : !isAiMotionName(key));
   return match || preset.allowedEndMotions[0];
 }
 
@@ -1063,7 +1091,14 @@ function applyPlanEntryToFrame(f, entry) {
     f.useRevealEffect = true;
     f.isBeforeAfter = true;
     f.revealPreset = entry.revealPreset || "classic_reveal";
-    f.motion = entry.revealEngine === "ltx" ? "ltx" : "kenburns";
+    // TOLERANT (Sep 10, 2026 — full Kling revert): accepts either "kling"
+    // (the new value, once autoSelect.js is updated to emit it) or the
+    // legacy "ltx" (in case autoSelect.js hasn't been reviewed/updated yet
+    // — see Notion handoff, this backend file wasn't part of this pass).
+    // Same "don't trust upstream data" posture as the rest of this
+    // function — a stale autoSelect.js should still produce a working AI
+    // Motion selection in the UI, not silently degrade to Ken Burns.
+    f.motion = (entry.revealEngine === "ltx" || entry.revealEngine === "kling") ? "ltx" : "kenburns";
     // FIX (this session — Sam's report: reveal end motions were always
     // push_in for Classic/Cinematic Reveal and always drift for Luxury
     // Drift, regardless of what the staged photo actually showed. Root
@@ -1181,7 +1216,14 @@ function motionSignature(f) {
 }
 function planSignatureFor(entry) {
   if (!entry) return null;
-  if (entry.structure === "room_reveal") return `reveal:${entry.revealPreset}:${entry.revealEngine === "ltx" ? "ltx" : "kenburns"}`;
+  // TOLERANT (Sep 10, 2026 — full Kling revert): compares against the
+  // internal "ltx" tab-id (see motionSignature above, f.motion), so this
+  // must normalize entry.revealEngine the same tolerant way
+  // applyPlanEntryToFrame does — accepting either "kling" (new) or the
+  // legacy "ltx", so a plan-vs-frame comparison doesn't spuriously read as
+  // "user overrode the auto-pick" the moment autoSelect.js starts emitting
+  // "kling".
+  if (entry.structure === "room_reveal") return `reveal:${entry.revealPreset}:${(entry.revealEngine === "ltx" || entry.revealEngine === "kling") ? "ltx" : "kenburns"}`;
   if (entry.engine === "kling") return `kling:${entry.klingMotionPreset || "generic"}`;
   if (entry.engine === "ltx") return `ltx:${entry.motionPreset || "none"}`;
   return `kenburns:${entry.motionPreset || "auto"}`;

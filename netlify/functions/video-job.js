@@ -24,8 +24,8 @@ const { applyAutoSelectionPlan } = require("./autoSelect");
 //   - Ken Burns frames: still free at generation, still only cost a flat
 //     1 Image at download (see BASE_VIDEO_COST). Unchanged.
 //   - Kling Motion frames: every subscriber gets a flat MONTHLY pool of
-//     free Kling frames by tier (MONTHLY_KLING_ALLOTMENT: 15 Solo / 36
-//     Team / 120 Brokerage), use-it-or-lose-it — does NOT roll over like
+//     free Kling frames by tier (MONTHLY_KLING_ALLOTMENT: 10 Solo / 24
+//     Team / 80 Brokerage), use-it-or-lose-it — does NOT roll over like
 //     the Image allocation does. This pool is drawn down by EVERY Kling
 //     frame in ANY generation event (action=create OR action=regenerate),
 //     for ANY video that subscriber creates that month, in request order.
@@ -319,11 +319,20 @@ const MAX_FRAMES_PER_JOB = 20;
 // the same listing. A pool scoped to the subscriber/month instead of the
 // video/generation can't be farmed that way — it's one shared bucket
 // regardless of how many videos or listings it's spent across.
+// UPDATED (Sep 11, 2026, Sam's explicit call): 15/36/120 → 10/24/80.
+// Formula: 2 included AI Motion frames × each tier's MONTHLY_VIDEO_LIMIT
+// (Solo 5, Team 12, Brokerage 40) — matches the same reduction from 3 to
+// 2 included AI Motion frames per video applied to autoSelect.js's
+// MAX_AUTO_SELECTED_AI_MOTION_FRAMES and the landing page copy, so the
+// pool total, the per-video default, and what the site promises all agree.
+// This is also the Solo-tier cut first discussed Sep 9 and confirmed
+// still unapplied as of Sep 10 — landing here now, alongside Team/
+// Brokerage moving from a 3-per-video basis to the same 2-per-video basis.
 const MONTHLY_KLING_ALLOTMENT = {
-  individual_agent: 15,   // Solo
-  team_member:      36,   // Team
-  team_lead:        36,   // Team
-  broker_admin:     120,  // Brokerage
+  individual_agent: 10,   // Solo (5 videos/mo × 2)
+  team_member:      24,   // Team (12 videos/mo × 2)
+  team_lead:        24,   // Team (12 videos/mo × 2)
+  broker_admin:     80,   // Brokerage (40 videos/mo × 2)
 };
 // Trial/Demo account allotment (Sam's decision, Aug 16 2026): "1 free video
 // with 1 AI Motion included" — NOT the full Solo allotment a trial user's
@@ -331,7 +340,7 @@ const MONTHLY_KLING_ALLOTMENT = {
 // subscription_status === 'trial', which is orthogonal to role — role stays
 // 'individual_agent' for the whole trial (see seed_trial_credits()), so a
 // role-only lookup would have silently given trial users the full paid
-// Solo quota (5 videos / 15 AI Motion frames) instead of the 1/1 promised
+// Solo quota (5 videos / 10 AI Motion frames) instead of the 1/1 promised
 // on the pricing page.
 const TRIAL_VIDEO_LIMIT = 1;
 const TRIAL_KLING_ALLOTMENT = 1;
@@ -366,7 +375,9 @@ async function getKlingPoolStatus(userId) {
   const userRes = await supabase("GET", "users", null, `?id=eq.${userId}&select=role,subscription_status`);
   const role = userRes.data?.[0]?.role;
   const isTrial = userRes.data?.[0]?.subscription_status === "trial";
-  const limit = isTrial ? TRIAL_KLING_ALLOTMENT : (MONTHLY_KLING_ALLOTMENT[role] ?? 15);
+  // Fallback (unknown/missing role) matches Solo's own allotment, kept in
+  // sync with the Sep 11, 2026 10/24/80 update above.
+  const limit = isTrial ? TRIAL_KLING_ALLOTMENT : (MONTHLY_KLING_ALLOTMENT[role] ?? 10);
 
   const periodStart = currentPeriodStart();
   const usageRes = await supabase("GET", "kling_motion_usage", null,

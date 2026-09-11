@@ -210,7 +210,14 @@ function endMotionsForEngine(revealPreset, engine) {
 // Reveal's continuation running under either engine — including the two
 // bookend positions, since those draw from the exact same pool/plan
 // allotment as any other frame, not a separate budget.
-const MAX_AUTO_SELECTED_AI_MOTION_FRAMES = 3;
+// UPDATED (Sep 11, 2026, Sam's explicit call, same change as
+// video-job.js's MONTHLY_KLING_ALLOTMENT 15/36/120 → 10/24/80): included
+// AI Motion frames per video drops from 3 to 2. The monthly pool totals
+// were derived directly from this number (2 × each tier's video cap), so
+// this constant and the pool totals have to move together or the two
+// would silently disagree about how many frames a video is actually
+// entitled to.
+const MAX_AUTO_SELECTED_AI_MOTION_FRAMES = 2;
 
 // Ken Burns presets Claude may select for a "ken_burns" engine frame — the
 // user-selectable subset of motionPresets.js's VALID_PRESETS. Excludes

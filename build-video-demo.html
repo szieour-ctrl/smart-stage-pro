@@ -437,8 +437,7 @@ const PREVIEW_CLIP_URLS = {
   day_to_twilight_timelapse:     `${MOTION_PREVIEW_BASE}/day_to_twilight_timelapse.mp4`,
   twilight_to_day_timelapse:     `${MOTION_PREVIEW_BASE}/twilight_to_day_timelapse.mp4`,
   pan_zoom_reveal:               `${MOTION_PREVIEW_BASE}/pan_zoom_reveal.mp4`,
-  micro_zoom_out:                `${MOTION_PREVIEW_BASE}/micro_zoom_out.mp4`,
-  micro_dolly_back:              `${MOTION_PREVIEW_BASE}/micro_dolly_back.mp4`,
+  // micro_zoom_out / micro_dolly_back DELETED ([DATE], Sam's explicit call)
   hero_transformation:           `${MOTION_PREVIEW_BASE}/hero_transformation.mp4`,
   exterior_landscape_transformation: `${MOTION_PREVIEW_BASE}/exterior_landscape_transformation.mp4`,
   // Ken Burns
@@ -561,7 +560,6 @@ const REVEAL_PRESETS = {
       "cinematic_push", "luxury_drift", "floating_camera_drift", "architectural_glide", "corner_to_corner_drift",
       "orbit_arc", "rack_focus", "drone_boom_up", "crane_up", "crane_down", "parallax_push", "pan_zoom_reveal",
       "living_room_ambient", "fireplace_flicker", "water_motion", "outdoor_breeze",
-      "micro_zoom_out", "micro_dolly_back",
     ],
   },
   luxury_drift: {
@@ -573,7 +571,6 @@ const REVEAL_PRESETS = {
       "luxury_drift", "floating_camera_drift", "architectural_glide", "corner_to_corner_drift",
       "orbit_arc", "drone_boom_up", "crane_up", "crane_down", "pan_zoom_reveal",
       "living_room_ambient", "fireplace_flicker", "water_motion", "outdoor_breeze",
-      "micro_zoom_out", "micro_dolly_back",
     ],
   },
   cinematic_reveal: {
@@ -585,7 +582,6 @@ const REVEAL_PRESETS = {
       "cinematic_push", "luxury_drift", "floating_camera_drift", "architectural_glide", "corner_to_corner_drift",
       "orbit_arc", "rack_focus", "drone_boom_up", "crane_up", "crane_down", "parallax_push", "pan_zoom_reveal",
       "living_room_ambient", "fireplace_flicker", "water_motion", "outdoor_breeze",
-      "micro_zoom_out", "micro_dolly_back",
     ],
   },
 };
@@ -656,8 +652,7 @@ const LTX_PRESETS = {
   // ── Open-Plan Only ────────────────────────────────────────────────────
   // Batch 3 (July 18, 2026) — LTX_Micro_movement_prompts.docx. Explicitly
   // hallway-safe, restricted TO open-plan (see openPlanOnly above).
-  micro_zoom_out: { label: "Micro Zoom-Out", desc: "A gentle outward breathing motion within the existing frame — expands without ever exposing hallway depth, a doorway edge, or any new geometry.", eligibility: "single_or_pair", category: "Open-Plan Only", openPlanSafe: true, openPlanOnly: true },
-  micro_dolly_back: { label: "Micro Dolly Back", desc: "A very small straight backward shift, staying fully inside the photographed space — never reveals hallway entrances or new wall planes.", eligibility: "single_or_pair", category: "Open-Plan Only", openPlanSafe: true, openPlanOnly: true },
+  // micro_zoom_out / micro_dolly_back DELETED ([DATE], Sam's explicit call)
 };
 
 // NOTE: vacant_staged_pair was an earlier placeholder name used before the
@@ -756,21 +751,17 @@ const ROOM_TYPE_TO_BACKEND = {
 // UNCHANGED — every label, description, and eligibility rule in it is
 // still accurate UI content; only the wire format changes.
 //
-// 16 of the 18 LTX preset keys match KLING_MOTION_TEMPLATES exactly (both
-// files' presets were named identically when LTX's versions were written
-// as "LTX-safe rewrites" of the originals) — this mapping is the identity
-// function for those. Only micro_zoom_out and micro_dolly_back have no
-// Kling equivalent — both map to pull_back_wide instead (renamed Sep 10,
-// 2026 from "room_reveal" — see klingMotion.js's rename comment; this was
-// the same preset that collided with the unrelated Room Reveal feature
-// name), which is already open-plan-gated and already carries the
-// strongest anti-hallucination language of any preset in klingMotion.js.
-// Revisit if you want these two to look visually distinct on Kling —
-// right now both send the identical prompt.
-const LTX_TO_KLING_PRESET = {
-  micro_zoom_out: "pull_back_wide",
-  micro_dolly_back: "pull_back_wide",
-};
+// All 16 remaining LTX preset keys match KLING_MOTION_TEMPLATES exactly
+// (both files' presets were named identically when LTX's versions were
+// written as "LTX-safe rewrites" of the originals) — this mapping is the
+// identity function for all of them now. It used to also cover
+// micro_zoom_out/micro_dolly_back (no Kling equivalent existed for
+// either; both mapped to pull_back_wide instead) — DELETED ([DATE],
+// Sam's explicit call) along with the two LTX presets themselves, so the
+// map below is empty and this function is a pure passthrough today. Kept
+// (rather than removed outright) in case a future preset ever needs a
+// real LTX-name-to-Kling-name substitution again.
+const LTX_TO_KLING_PRESET = {};
 function resolveKlingPresetFromLtxSelection(ltxPresetKey) {
   return LTX_TO_KLING_PRESET[ltxPresetKey] || ltxPresetKey;
 }

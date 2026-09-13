@@ -139,6 +139,33 @@ function slugifyAddress(address) {
     .slice(0, 60);
 }
 
+// NEW (Sep 13, 2026 — per Sam's request): prospecting listings get a
+// date-prefixed slug (`2026-09-13__9540-moss-hill-way`) instead of the
+// plain address slug production listings use, so staging-prospects/
+// folders sort chronologically in the S3 console. This is intentionally
+// separate from slugifyAddress() — production listings keep their
+// existing plain-address slug format untouched.
+//
+// The date comes from the projectId itself, not from Date.now(): every
+// projectId this app generates already embeds its true creation date as
+// MMDDYY (see generateProjectId()'s comment — `szreg{tier}_{streetaddr}_
+// {MMDDYY}_{rand4}`). Using that instead of "now" matters here because
+// this same slug function also runs during backfill, sometimes days after
+// the shot was actually taken (exactly the case that prompted this
+// change — 9540 Moss Hill Way's Sep 13 backfill was for a project
+// actually created earlier). Falls back to today's date only if a
+// projectId somehow doesn't match the expected format.
+function extractProjectDate(projectId) {
+  const m = /_(\d{2})(\d{2})(\d{2})_[a-z0-9]{4}$/i.exec(projectId || "");
+  if (!m) return null;
+  const [, mm, dd, yy] = m;
+  return `20${yy}-${mm}-${dd}`;
+}
+function slugifyProspectAddress(address, projectId) {
+  const datePrefix = extractProjectDate(projectId) || new Date().toISOString().slice(0, 10);
+  return `${datePrefix}__${slugifyAddress(address)}`;
+}
+
 function getRoleTier(role) {
   // Maps Supabase role to project ID tier label
   if (role === "team_lead" || role === "team_member") return "team";
@@ -277,7 +304,9 @@ async function lookupProject(address, userId, requestedIsProspecting, env) {
         // upload-original.js/upload-staged.js get the readable key on
         // this listing's very next upload instead of falling back.
         if (listingId && !slug) {
-          slug = slugifyAddress(project.address);
+          slug = isProspecting === true
+            ? slugifyProspectAddress(project.address, project.projectId)
+            : slugifyAddress(project.address);
           if (slug) {
             // AWAITED (Aug 28, 2026 — fixed a real bug, not a hypothesis):
             // confirmed via live testing that Netlify Functions can tear
@@ -329,7 +358,9 @@ async function lookupProject(address, userId, requestedIsProspecting, env) {
               console.error("lookupProject: could not resolve user context for backfill (non-fatal):", e.message);
             }
           }
-          const backfillSlug = slugifyAddress(project.address);
+          const backfillSlug = requestedIsProspecting === true
+            ? slugifyProspectAddress(project.address, project.projectId)
+            : slugifyAddress(project.address);
           try {
             const backfillInsert = await supabase("POST", "listings", {
               address: project.address,
@@ -438,7 +469,9 @@ async function createProject(address, agentInfo, siteUrl, userId, isProspecting,
           }
         }
         if (listingId && !slug) {
-          slug = slugifyAddress(proj.address);
+          slug = existingIsProspecting === true
+            ? slugifyProspectAddress(proj.address, proj.projectId)
+            : slugifyAddress(proj.address);
           if (slug) {
             // AWAITED — see the matching fix in lookupProject above.
             try {
@@ -477,7 +510,9 @@ async function createProject(address, agentInfo, siteUrl, userId, isProspecting,
         // Supabase row is missing; user_id is simply null when there
         // isn't one.
         if (!listingId) {
-          const backfillSlug = slugifyAddress(proj.address);
+          const backfillSlug = isProspecting === true
+            ? slugifyProspectAddress(proj.address, proj.projectId)
+            : slugifyAddress(proj.address);
           try {
             const backfillInsert = await supabase("POST", "listings", {
               address: proj.address,
@@ -548,7 +583,9 @@ async function createProject(address, agentInfo, siteUrl, userId, isProspecting,
   // whether a userId is present; user_id is simply null when there isn't
   // one.
   let listingId = null;
-  const slug = slugifyAddress(address);
+  const slug = isProspecting === true
+    ? slugifyProspectAddress(address, projectId)
+    : slugifyAddress(address);
   if (process.env.SUPABASE_URL) {
     try {
       const listingWrite = await supabase("POST", "listings", {

@@ -469,6 +469,7 @@ const PREVIEW_CLIP_URLS = {
   push_pan_right:   `${MOTION_PREVIEW_BASE}/push_pan_right.mp4`,
   pan_left_push:    `${MOTION_PREVIEW_BASE}/pan_left_push.mp4`,
   pan_right_push:   `${MOTION_PREVIEW_BASE}/pan_right_push.mp4`,
+  float_pull_back:  `${MOTION_PREVIEW_BASE}/float_pull_back.mp4`,
 };
 
 const KEN_BURNS_PRESETS = {
@@ -517,6 +518,7 @@ const KEN_BURNS_PRESETS = {
   push_pan_right: { label: "Push → Pan Right", desc: "A push toward the room, then a tracking pan right along a sightline." },
   pan_left_push: { label: "Pan Left → Push", desc: "A tracking pan left, then a push forward into the room's main feature." },
   pan_right_push: { label: "Pan Right → Push", desc: "A tracking pan right, then a push forward into the room's main feature." },
+  float_pull_back: { label: "Float → Pull Back", desc: "A brief floating settle, then a full pull-back that opens the room back up." },
 };
 
 // Reveal Presets — mirrors REVEAL_PRESETS in assemble.js exactly (label +
@@ -555,7 +557,7 @@ const REVEAL_PRESETS = {
     label: "Classic Reveal",
     desc: "The room holds, then wipes into the staged version as your chosen End Motion begins.",
     allowedEndMotions: [
-      "push_in", "pan_left", "pan_right", "tilt_up", "tilt_down", "drift", "float", "luxury_parallax",
+      "push_in", "pull_back", "float_pull_back", "pan_left", "pan_right", "tilt_up", "tilt_down", "drift", "float", "luxury_parallax",
       ...COMPOUND_END_MOTIONS,
       "cinematic_push", "luxury_drift", "floating_camera_drift", "architectural_glide", "corner_to_corner_drift",
       "orbit_arc", "rack_focus", "drone_boom_up", "crane_up", "crane_down", "parallax_push", "pan_zoom_reveal",
@@ -566,7 +568,7 @@ const REVEAL_PRESETS = {
     label: "Luxury Drift",
     desc: "The room holds, then reveals center-out into a slow lateral drift across the staged space.",
     allowedEndMotions: [
-      "drift", "pan_left", "pan_right", "float", "luxury_parallax",
+      "drift", "float_pull_back", "pan_left", "pan_right", "float", "luxury_parallax",
       ...COMPOUND_END_MOTIONS,
       "luxury_drift", "floating_camera_drift", "architectural_glide", "corner_to_corner_drift",
       "orbit_arc", "drone_boom_up", "crane_up", "crane_down", "pan_zoom_reveal",
@@ -577,7 +579,7 @@ const REVEAL_PRESETS = {
     label: "Cinematic Reveal",
     desc: "A gentle push begins on the vacant room, wipes into the staged version, and continues pushing forward.",
     allowedEndMotions: [
-      "push_in", "pan_left", "pan_right", "tilt_up", "tilt_down", "drift", "float", "luxury_parallax",
+      "push_in", "pull_back", "float_pull_back", "pan_left", "pan_right", "tilt_up", "tilt_down", "drift", "float", "luxury_parallax",
       ...COMPOUND_END_MOTIONS,
       "cinematic_push", "luxury_drift", "floating_camera_drift", "architectural_glide", "corner_to_corner_drift",
       "orbit_arc", "rack_focus", "drone_boom_up", "crane_up", "crane_down", "parallax_push", "pan_zoom_reveal",

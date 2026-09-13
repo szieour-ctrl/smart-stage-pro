@@ -1,177 +1,543 @@
-// autoSelect.js — Claude Vision auto-selection: room order, grouping, and
-// motion preset for every frame in a video job.
-//
-// BACKGROUND (July 21, 2026 design conversation): today, a user builds a
-// video by hand-picking room order and a motion preset per frame with no
-// guidance on which presets actually suit which rooms, and no visibility
-// into which frames are free (pool-covered) vs. billable until the quote
-// screen. This module replaces that blind process with a single Claude
-// Vision call that proposes a strong, free default — the user can still
-// override anything, but overriding is now an informed, deliberate choice
-// instead of the *only* option.
-//
-// THIS FILE ONLY PRODUCES AND VALIDATES THE PLAN. It does not call
-// ltxMotion.js/klingMotion.js's actual render functions, and it does not
-// touch billing/quote code — those are separate integration passes.
-//
-// ── THE RULES THIS ENCODES (all decided across the July 21 conversation) ──
-//
-// 1. ORDERING: natural walkthrough flow. Two hard constraints, not
-//    negotiable by Claude: (a) a real vacant/staged pair must stay
-//    adjacent to itself — it's one room, shown twice; (b) multiple photos
-//    Claude judges to be the SAME physical room must stay grouped
-//    together, because narration (narrationGen.js's groupContiguousByRoom)
-//    narrates one contiguous room-label run as a single segment. Two
-//    physically different rooms of the same TYPE (e.g. a primary bedroom
-//    in a main house and a casita) must NOT share a group.
-//
-// 2. GROUPING KEY vs. ROOM TYPE: roomType is a category ("primary_bedroom").
-//    roomGroup is the actual grouping/narration key — identical across
-//    every frame Claude judges to be the same physical room, distinct
-//    otherwise. This is what narrationGen.js's groupContiguousByRoom keys
-//    off of (frame.roomLabel in that file). The existing manual "another
-//    view of X" UI control is NOT retired by this feature — it remains a
-//    user override for when Claude's same-room-vs-different-room judgment
-//    is wrong (a real, fallible visual call). Intra-group PLAYBACK order
-//    (groupOrder) is separate again, freely user-editable, no cost/warning
-//    ever attached — it's cosmetic sequencing within an already-decided
-//    group, not a narration or billing decision.
-//
-// 3. BOOKENDS (position 1 and the last position) — Claude's DEFAULT output
-//    for these two positions must be free:
-//      - Position 1: Ken Burns, Front Exterior content preferred if
-//        available (pull_back, approximating a drone boom-up).
-//      - Last position: Ken Burns Exterior by default. EXCEPTION — if
-//        narration is OFF for this video AND a real Exterior Enhancement
-//        pair (a vacant+staged exterior pair the user already built in
-//        Smart Stage PRO) exists and was selected, the free default
-//        becomes the Kling exterior transformation on that pair instead
-//        (still free, still the default — not an override). The logic:
-//        the user already did real work creating that pair in PRO: PRO
-//        PLUS rewards that by making the strongest closer free when it's
-//        available and there's no narration-padding cost concern.
-//    Both bookends run at the plain 6s floor either way (no narration
-//    padding ever applies to a Ken Burns clip, and the Kling exterior
-//    exception only fires when narration is off in the first place).
-//    THIS MODULE ENFORCES THESE TWO DEFAULTS IN CODE — it does not trust
-//    Claude's own compliance, same reasoning as every other scope-
-//    enforcement function in this codebase (isStandaloneEligible,
-//    enforceLtxScopeRules, klingMotion.js's enforceScopeRules): if Claude's
-//    plan violates the bookend default, this module force-corrects it
-//    before returning, rather than surfacing a bad plan or crashing.
-//
-// 4. OVERRIDE COST/WARNING (NOT built in this file — frontend/quote-engine
-//    work, later pass): once a user overrides ANY frame away from what
-//    this module proposed — bookend or not — that's always a real cost
-//    (pool frame becomes billable, or a bookend override adds real
-//    padding-driven infra cost) and always surfaces a risk warning built
-//    from THIS frame's own `reasoning` field, compared against the
-//    preset's `safeWhen` criteria. This file's job ends at producing the
-//    plan and each frame's reasoning text — the warning UI quotes that
-//    reasoning back to the user verbatim when they override.
-//
-// 5. STRUCTURE DECISION: for any frame with a real vacant/staged pair,
-//    Claude also decides whether it's worth the Room Reveal treatment
-//    (opener/wipe/continuation) or should just play as a plain generic
-//    Kling transformation — not every available pair should default to
-//    Room Reveal just because the photos exist.
+// assemble.js — Concatenates motion clips with crossfade transitions,
+// mixes in background music, and renders final output formats.
 
-const https = require("https");
+const path = require("path");
+const fs = require("fs");
+const ffmpeg = require("fluent-ffmpeg");
 
-const MODEL = "claude-sonnet-4-6";
-// CHANGED (this session — real bug, strongly suspected root cause: a
-// 13-photo listing failed after the background function ran a full 80s
-// (nowhere near its own 900s ceiling, so this isn't a timeout — the
-// failure is inside the Claude call/JSON parsing itself). This was
-// flagged as an unconfirmed risk from the very first handoff: MAX_TOKENS
-// was never stress-tested against a large listing. 13 frames' worth of
-// "one or two sentences" of reasoning each (verbose in every real test
-// so far) plausibly exceeded 4096 output tokens, truncating the JSON
-// mid-response — extractJsonArray throws cleanly on that (no closing "]"
-// found), which is exactly the fail-open path this went down. Raised
-// with real headroom rather than a minimal bump, plus the reasoning field
-// itself is now tightened (see its schema comment below) so per-frame
-// cost scales better as listings approach the real max frame count.
-const MAX_TOKENS = 8192;
+const CROSSFADE_DURATION = 0.6; // seconds between clips
 
-// ── LOCAL, DUPLICATED PRESET LISTS ──────────────────────────────────────
-// CORRECTED (July 21, 2026): an earlier draft of this file did
-// `require("./ltxMotion")` and `require("./klingMotion")` to reuse their
-// real scope-enforcement functions (isStandaloneEligible,
-// enforceLtxScopeRules, enforceScopeRules). That's impossible as written —
-// this module has to run as a NETLIFY function (smart-stage-pro repo),
-// since it needs to produce a plan BEFORE the quote screen, using only the
-// remote Cloudinary URLs the frontend already has — nothing local exists
-// at that point. ltxMotion.js/klingMotion.js live in a completely
-// different repo and deployment (Railway, smart-stage-pro-plus-render).
-// Cross-repo require() isn't just impractical here, it's not possible —
-// different filesystems entirely.
+// ── CONCURRENCY-LIMITED MAP (July 14, 2026 — real test failure) ────────
+// Two separate real failures in the same render (a narration frame
+// extraction and a clip normalization) both threw resource-exhaustion-
+// flavored ffmpeg errors ("Resource temporarily unavailable", "Error
+// while opening encoder" on a clip with perfectly clean, even
+// dimensions — ruling out the odd-dimension theory from the prior fix).
+// Both call sites were launching one ffmpeg process PER CLIP, all at
+// once, via unbounded Promise.all — up to 9 simultaneous ffmpeg encodes
+// for a 9-frame job. That's a real, plausible cause of exactly this
+// class of intermittent failure on a resource-constrained container,
+// regardless of which specific resource (CPU, memory, file descriptors)
+// is actually the bottleneck. This caps how many run at once instead of
+// firing all of them simultaneously — processes the rest as slots free
+// up, rather than requiring every clip to fit in memory/CPU at the same
+// instant.
+async function mapWithConcurrencyLimit(items, limit, fn) {
+  const results = new Array(items.length);
+  let cursor = 0;
+  async function worker() {
+    while (cursor < items.length) {
+      const i = cursor++;
+      results[i] = await fn(items[i], i);
+    }
+  }
+  const workers = Array.from({ length: Math.min(limit, items.length) }, worker);
+  await Promise.all(workers);
+  return results;
+}
+const FFMPEG_CONCURRENCY_LIMIT = 3; // conservative default — revisit if Railway's plan tier is confirmed to have more headroom
+
+// NEW (July 14, 2026 — real test failure) — mirrors
+// NARRATION_END_BUFFER_SECONDS in generate-narration-background.js. That
+// file sizes the SCRIPT to roughly fit before this buffer; this constant
+// is the hard enforcement backstop at mix time, against the real, exact
+// video duration rather than an estimate.
+const NARRATION_END_BUFFER_SECONDS = 2;
+
+// ── NORMALIZE CLIP (fixes the real root cause of the xfade crash) ────────
+// CONFIRMED ROOT CAUSE of "Error reinitializing filters! / Failed to
+// inject frame into filter network: Invalid argument" — a real crash from
+// a real test job with 4 clips, 2 sourced from Kling (fal.ai's own output
+// resolution/fps/codec) and 2 from the local Ken Burns fallback (OpenCV/
+// FFmpeg, whatever this codebase already renders at). xfade requires every
+// pair of inputs it chains together to share resolution, frame rate, and
+// pixel format — concatenateClips() never enforced this, so any mix of
+// Kling + Ken Burns clips (or even two Kling clips at different durations/
+// fal.ai output settings) was one mismatch away from crashing the whole
+// render.
 //
-// This is NOT a gap that needs filling by duplicating that enforcement
-// logic here. Railway's renderPipeline.js ALREADY runs isStandaloneEligible/
-// enforceLtxScopeRules/enforceScopeRules on every single frame at render
-// time, completely independent of whether the preset came from
-// auto-selection or a manual user click — that's the existing, proven
-// safety net, and it stays the authoritative one. Duplicating full scope
-// enforcement into a second repo would only create a second copy that can
-// drift out of sync with the real one — exactly the failure mode that
-// caused the klingMotion.js/assemble.js mixup earlier this session.
+// FIX: normalize every clip to identical parameters BEFORE it ever reaches
+// the xfade chain, regardless of source. This is deliberately a fixed
+// target (1920x1080/30fps/yuv420p) rather than "whatever Kling outputs" —
+// Ken Burns clips would still need separate normalization to MATCH
+// whatever Kling's native spec is, so pinning both to one target this
+// codebase controls is no more work and is robust to fal.ai ever changing
+// Kling's default output spec in the future. 1920x1080 matches the final
+// 16:9 output exactly, so this adds no redundant scaling at renderFormat()
+// time for the common case.
+// CHANGE: fps corrected from an initial 30 to 20, to match the EXISTING
+// normalization convention already established in klingMotion.js's own
+// concatTwoClips() (used for the Before/After continuation feature) —
+// confirmed by direct inspection: OUTPUT_W=1920, OUTPUT_H=1080, fps=20,
+// format=yuv420p. Using a different fps here would have meant a
+// continuation-combined clip (already normalized once, at 20fps, inside
+// klingMotion.js) gets silently re-normalized to a SECOND, different fps
+// the moment it reaches assemble.js — wasted re-encoding at best, and a
+// new source of inconsistency at worst if other clips in the same job
+// were normalized to yet a third value. One target, matched across both
+// files, is the actual fix — not just "pick a fixed number and move on."
+const NORMALIZE_WIDTH  = 1920;
+const NORMALIZE_HEIGHT = 1080;
+const NORMALIZE_FPS    = 20;
+
+function normalizeClip(clipPath, workDir, index) {
+  return new Promise(async (resolve, reject) => {
+    const outputPath = path.join(workDir, `normalized_${index}.mp4`);
+
+    // NEW (July 14, 2026 — real test failure) — a real render failed here
+    // with "Error while opening encoder for output stream #0:0 - maybe
+    // incorrect parameters such as bit_rate, rate, width or height" on
+    // clip index 6, with no further detail on WHY. That error message is
+    // FFmpeg's generic catch-all for the encoder rejecting the stream —
+    // it doesn't say what was actually wrong with the source. Rather than
+    // guess, probe the source clip FIRST and log its real properties, so
+    // if this happens again the log states the actual cause (corrupt
+    // file, zero duration, unusual dimensions) instead of a mystery.
+    try {
+      const meta = await new Promise((res, rej) => {
+        ffmpeg.ffprobe(clipPath, (err, data) => err ? rej(err) : res(data));
+      });
+      const videoStream = meta.streams?.find(s => s.codec_type === "video");
+      console.log(`[normalizeClip] clip ${index} (${clipPath}): ${videoStream?.width}x${videoStream?.height}, duration=${meta.format?.duration}, codec=${videoStream?.codec_name}`);
+    } catch (probeErr) {
+      // The clip is likely corrupt/unreadable if even ffprobe can't read
+      // it — this IS useful diagnostic information, log it and continue
+      // to the real normalization attempt below (which will then fail
+      // with its own, now-better-understood error).
+      console.error(`[normalizeClip] clip ${index} (${clipPath}) failed to probe — likely corrupt or incomplete: ${probeErr.message}`);
+    }
+
+    ffmpeg(clipPath)
+      .videoFilters([
+        // Scale to fit within target dimensions preserving aspect ratio,
+        // then pad to exactly the target size — same safe-default pattern
+        // already used in renderFormat() below, applied here instead at
+        // the per-clip stage so xfade never sees a size mismatch.
+        //
+        // FIX (July 14, 2026 — real test failure): added
+        // force_divisible_by=2. Without it, an unusual source aspect
+        // ratio can make force_original_aspect_ratio=decrease compute an
+        // intermediate ODD dimension (e.g. 1919 instead of 1920) —
+        // libx264's yuv420p output requires both dimensions even, and an
+        // odd intermediate size is a well-documented cause of exactly
+        // this "Error while opening encoder" failure. This forces the
+        // scale step itself to only ever produce even numbers, closing
+        // off that failure mode regardless of the source clip's own
+        // aspect ratio.
+        `scale=${NORMALIZE_WIDTH}:${NORMALIZE_HEIGHT}:force_original_aspect_ratio=decrease:force_divisible_by=2`,
+        `pad=${NORMALIZE_WIDTH}:${NORMALIZE_HEIGHT}:(ow-iw)/2:(oh-ih)/2`,
+        `fps=${NORMALIZE_FPS}`,
+      ])
+      .outputOptions(["-pix_fmt", "yuv420p", "-c:v", "libx264", "-preset", "fast"])
+      // Audio is dropped here deliberately — concatenateClips' xfade only
+      // ever operates on [x:v] video streams (see lastLabel/nextLabel
+      // below), and mixAudio() adds the real soundtrack afterward across
+      // the whole concatenated video. Carrying per-clip audio through this
+      // step would be discarded work and a second source of format
+      // mismatches (Kling clips may have audio tracks with different
+      // sample rates than Ken Burns clips, which have none at all).
+      .noAudio()
+      .output(outputPath)
+      .on("end", () => resolve(outputPath))
+      .on("error", (err) => reject(new Error(`Clip normalization failed for ${clipPath} (index ${index}): ${err.message}`)))
+      .run();
+  });
+}
+
+// ── PROBE ACTUAL CLIP DURATION ───────────────────────────────────────────
+// The previous version assumed every clip was exactly 4.5s when calculating
+// crossfade offsets. That assumption was wrong as soon as duration varied
+// even slightly, and caused xfade offsets to be miscalculated — visually
+// "swallowing" earlier clips in the sequence (only the last clip appeared
+// in testing with 2 frames). Probing real duration fixes this at the root.
+
+function probeDuration(clipPath) {
+  return new Promise((resolve, reject) => {
+    ffmpeg.ffprobe(clipPath, (err, metadata) => {
+      if (err) return reject(new Error(`ffprobe failed for ${clipPath}: ${err.message}`));
+      resolve(metadata.format.duration);
+    });
+  });
+}
+
+// NEW (July 16, 2026 — real render error: closing-card append failed with
+// "Error reinitializing filters! ... Invalid argument" on stream #1:0 —
+// a genuine format mismatch, not the old resource-exhaustion signature.
+// No fps was ever explicitly enforced anywhere in this pipeline; the main
+// concatenated video's effective fps just drifts from whatever the
+// original clips + several rounds of xfadeChain re-encoding happen to
+// produce, while a fresh -loop 1 single-image render defaults to
+// whatever ffmpeg's own default is — those two don't reliably match.
+// Probing the real value and forcing the closing card to it explicitly
+// closes that gap instead of assuming a hardcoded number.
+function probeFps(clipPath) {
+  return new Promise((resolve, reject) => {
+    ffmpeg.ffprobe(clipPath, (err, metadata) => {
+      if (err) return reject(new Error(`ffprobe (fps) failed for ${clipPath}: ${err.message}`));
+      const videoStream = (metadata.streams || []).find(s => s.codec_type === "video");
+      const rateStr = videoStream?.r_frame_rate || "30/1";
+      const [num, den] = rateStr.split("/").map(Number);
+      resolve(den ? num / den : 30);
+    });
+  });
+}
+
+// ── COMPUTE CLIP TIMELINE (July 2026 — footage-grounded narration) ──────
+// Extracted from concatenateClips' own offset math below — previously
+// that math only existed inline, computed and discarded per-transition,
+// with no way for anything outside this function to know where a given
+// clip actually lands in the final timeline. Narration generation needs
+// exactly that: a real start time per clip, to extract a representative
+// frame from and to place a narration segment at. Single source of
+// truth — concatenateClips now calls this instead of recomputing the
+// same math a second time in a way that could drift out of sync with it.
+function computeClipTimeline(durations) {
+  const timeline = [];
+  let cumulativeStart = 0;
+  for (let i = 0; i < durations.length; i++) {
+    timeline.push({ startTime: Math.max(0, cumulativeStart), duration: durations[i] });
+    cumulativeStart += durations[i] - CROSSFADE_DURATION;
+  }
+  return timeline;
+}
+
+// Extracts one representative frame from a clip — its own local midpoint,
+// independent of where it lands in the crossfaded final timeline (a
+// crossfade blends the very start/end of adjacent clips, but the middle
+// of any clip is always a clean, representative frame of that room).
+function extractMidpointFrame(clipPath, duration, workDir, index) {
+  return new Promise((resolve, reject) => {
+    const outputPath = path.join(workDir, `narration_frame_${index}.jpg`);
+    const midpoint = Math.max(0.1, duration / 2);
+    ffmpeg(clipPath)
+      .inputOptions([`-ss`, `${midpoint.toFixed(2)}`])
+      .outputOptions(["-vframes", "1", "-q:v", "3"])
+      .output(outputPath)
+      .on("end", () => resolve(outputPath))
+      .on("error", (err) => reject(new Error(`extractMidpointFrame failed for clip ${index}: ${err.message}`)))
+      .run();
+  });
+}
+
+// ── CONCATENATE CLIPS WITH CROSSFADE ─────────────────────────────────────
+// Chains xfade filters across all clips in sequence using REAL probed
+// durations for offset calculation, not an assumed fixed length.
+
+// ── SINGLE XFADE CHAIN ────────────────────────────────────────────────
+// The actual crossfade-chaining logic, extracted so it can run both on a
+// full clip set (small jobs) and on individual batches (large jobs) — see
+// concatenateClips below for why batching exists. Behavior is identical
+// either way: same CROSSFADE_DURATION overlap, same offset math, so
+// total transition count and total overlap time stays consistent
+// regardless of how many ffmpeg invocations it takes to get there —
+// which matters because computeClipTimeline() (used separately, for
+// narration placement in renderPipeline.js) assumes that consistency.
+function xfadeChain(paths, durations, workDir, outputName) {
+  if (paths.length === 1) return Promise.resolve(paths[0]);
+
+  return new Promise((resolve, reject) => {
+    const outputPath = path.join(workDir, outputName);
+    const command = ffmpeg();
+    paths.forEach((clip) => command.input(clip));
+
+    let filterParts = [];
+    let lastLabel = "0:v";
+    let cumulativeOffset = durations[0] - CROSSFADE_DURATION;
+
+    for (let i = 1; i < paths.length; i++) {
+      const nextLabel = `${i}:v`;
+      const outLabel = i === paths.length - 1 ? "outv" : `v${i}`;
+      filterParts.push(
+        `[${lastLabel}][${nextLabel}]xfade=transition=fade:duration=${CROSSFADE_DURATION}:offset=${Math.max(0, cumulativeOffset).toFixed(2)}[${outLabel}]`
+      );
+      lastLabel = outLabel;
+      cumulativeOffset += durations[i] - CROSSFADE_DURATION;
+    }
+
+    // NEW (July 15, 2026 — real render hang, 32+ minutes of total
+    // silence with the process itself still healthy per the memory
+    // logger): nothing previously bounded how long a single xfadeChain
+    // ffmpeg call could run. If the process spawns and then genuinely
+    // never emits 'end' OR 'error' — a real ffmpeg hang, not a crash —
+    // this used to wait forever with zero recourse. XFADE_TIMEOUT_MS
+    // gives it a generous window (this file's own batches are small,
+    // ≤3 clips each) before force-killing the process and failing
+    // cleanly instead of silently consuming Railway resources forever.
+    const XFADE_TIMEOUT_MS = 120000; // 2 minutes — generous for a ≤3-clip batch
+    let settled = false;
+    const timeoutHandle = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      console.error(`[xfadeChain] TIMEOUT after ${XFADE_TIMEOUT_MS}ms — killing hung ffmpeg process for ${outputPath}.`);
+      try { command.kill("SIGKILL"); } catch (err) { /* best-effort */ }
+      reject(new Error(`xfadeChain timed out after ${XFADE_TIMEOUT_MS}ms for ${outputPath} — ffmpeg process spawned but never completed or errored.`));
+    }, XFADE_TIMEOUT_MS);
+
+    command
+      .complexFilter(filterParts)
+      .outputOptions(["-map", "[outv]", "-pix_fmt", "yuv420p"])
+      .output(outputPath)
+      .on("end", async () => {
+        if (settled) return;
+        // FIX (July 15, 2026 — real render failure): ffmpeg's 'end' event
+        // firing means the PROCESS reported success, but on a container
+        // filesystem under I/O load (which a render with several
+        // sequential batch xfadeChain calls definitely has), that can
+        // fire microseconds before the output file is actually durably
+        // visible on disk. Confirmed real: a genuine 2-clip batch's
+        // output (concat_r0_6.mp4) resolved successfully here, then
+        // probeDuration's ffprobe call moments later got "No such file
+        // or directory" on that exact path. This almost certainly
+        // explains the prior silent deaths too — those likely hit this
+        // same race, just before the process-level crash handlers
+        // existed to catch and log the resulting unhandled rejection
+        // instead of the process dying with zero trace.
+        //
+        // Polling a few times with a short delay before giving up gives
+        // the filesystem a moment to catch up rather than trusting the
+        // event's timing blindly.
+        for (let attempt = 0; attempt < 5; attempt++) {
+          if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) {
+            settled = true;
+            clearTimeout(timeoutHandle);
+            resolve(outputPath);
+            return;
+          }
+          await new Promise((r) => setTimeout(r, 200));
+        }
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutHandle);
+        reject(new Error(`xfadeChain reported success but ${outputPath} never became visible on disk after 1s of polling.`));
+      })
+      .on("error", (err) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutHandle);
+        reject(new Error(`Concatenation failed: ${err.message}`));
+      })
+      .run();
+  });
+}
+
+// Keeps any single xfadeChain() call's simultaneous open-input count
+// bounded. CONFIRMED CAUSE (July 15, 2026 — real render failure, 17
+// clips): "Error reinitializing filters! Failed to inject frame into
+// filter network: Resource temporarily unavailable" on the LAST stream
+// of a 17-input complex filter graph — the exact same resource-
+// exhaustion error signature already root-caused once before in this
+// file (see mapWithConcurrencyLimit's header comment), but that earlier
+// fix only covered too many concurrent ffmpeg PROCESSES (normalizeClip,
+// extractMidpointFrame). It never covered this: one single process with
+// 17 simultaneous input STREAMS chained through 16 xfade filters in one
+// complex filter graph. An 11-clip job rendered fine; 17 didn't — a real
+// scaling ceiling, not a one-off.
 //
-// What IS kept here, deliberately minimal: just the preset NAME lists, for
-// an early, cheap sanity check (catch an obviously-invalid preset key
-// before it round-trips all the way to Railway) — not the actual
-// eligibility/scope rules themselves. These are small, low-churn lists;
-// if ltxMotion.js's real list changes, this one needs a matching update —
-// flagged here explicitly so that's not forgotten.
-const VALID_LTX_PRESETS = new Set([
-  "cinematic_push", "rack_focus", "luxury_drift", "architectural_glide",
-  "corner_to_corner_drift", "floating_camera_drift", "parallax_push",
-  "pan_zoom_reveal", "orbit_arc", "crane_up", "crane_down",
-  // FLAGGED, not removed here — "open_plan_reveal" was ALSO deleted from
-  // ltxMotion.js's LTX_MOTION_TEMPLATES in an earlier session (see that
-  // file's own comment on the deletion), independent of today's
-  // micro_zoom_out/micro_dolly_back removal. This entry has been stale
-  // since then; only removing what was explicitly asked for this pass.
-  "open_plan_reveal",
-  "living_room_ambient", "fireplace_flicker", "water_motion", "outdoor_breeze",
-]);
+// LOWERED to 3 (July 15, 2026 — same exact death, second time in a row,
+// now with even longer clips than the first failure — 11.2s padded vs
+// 9.52s last time, same silent cutoff right after the last clip
+// normalizes, right at the transition into concatenation's heaviest
+// phase). Memory graph data was inconclusive on the first failure, but
+// two consecutive identical deaths at growing clip sizes is a strong
+// enough pattern to act on rather than wait for cleaner metrics.
+const XFADE_BATCH_SIZE = 3;
 
-// NEW (this session — real bug found via a live frontend crash: "Cannot
-// read properties of undefined (reading 'allowedEndMotions')"). The three
-// valid Room Reveal identity keys — matches REVEAL_PRESETS' keys exactly
-// in build-video-demo.html and assemble.js. Unlike motionPreset/
-// klingMotionPreset below, revealPreset was never sanity-checked here at
-// all — if Claude's JSON output for revealPreset ever deviated even
-// slightly from one of these three exact strings (casing, using the label
-// instead of the key, anything), nothing caught it before it reached the
-// frontend, where REVEAL_PRESETS[badValue] resolves to undefined and
-// renderRevealPresetControls() crashes immediately trying to read
-// .allowedEndMotions off it — taking down the ENTIRE motion-assignment
-// step with it, since that crash happens mid-way through a single
-// frames.map() call whose failure aborts everything after it in the same
-// render function (format row, audio dropdowns included). Same failure
-// SHAPE as the luxury_parallax bug documented in KEN_BURNS_PRESETS'
-// comment in build-video-demo.html — different missing validation, same
-// "don't trust the model's compliance" lesson.
-const VALID_REVEAL_PRESETS = new Set(["classic_reveal", "luxury_drift", "cinematic_reveal"]);
+// ── CONCATENATE CLIPS (batched) ───────────────────────────────────────
+async function concatenateClips(clipPaths, workDir) {
+  // NEW — normalize every clip BEFORE the single-clip early-return check
+  // too. A single Kling clip still needs to end up at a known, consistent
+  // resolution/fps/pixel format for mixAudio()/renderFormat() downstream,
+  // even though there's no xfade chain to crash with only one clip.
+  //
+  // FIX (July 14, 2026 — real test failure): was Promise.all, unbounded —
+  // see mapWithConcurrencyLimit's header comment for the full reasoning.
+  const normalizedPaths = await mapWithConcurrencyLimit(
+    clipPaths, FFMPEG_CONCURRENCY_LIMIT, (clip, i) => normalizeClip(clip, workDir, i)
+  );
 
-// NEW (this session — real bug, not a prompt-wording issue: Claude was
-// NEVER given a field to choose a Room Reveal's end motion at all. It was
-// 100% computed client-side (build-video-demo.html's
-// defaultEndMotionForEngine) as "whichever motion is first in the allowed
-// list for this preset+engine" — a fixed, deterministic default with zero
-// visual judgment involved, which is exactly why it was always push_in
-// for classic/cinematic reveal and always drift for luxury_drift,
-// regardless of what the STAGED photo actually showed. Mirrors
-// build-video-demo.html's REVEAL_PRESETS[key].allowedEndMotions arrays
-// EXACTLY — kept in sync manually (two different runtimes, no shared
-// import path) rather than computed differently in each place. Used to
-// validate Claude's new revealEndMotion pick below.
-// COMPOUND_END_MOTIONS — the 11 compound Ken Burns presets, added to every
-// Reveal identity's list below (Sam's call: available for Luxury Drift too,
-// overriding its earlier push/tilt exclusion for these NEW names
-// specifically — Luxury Drift's existing atomic exclusion of push_in/
-// tilt_up/tilt_down is otherwise UNCHANGED, only the 11 new keys are added).
+  if (normalizedPaths.length === 1) {
+    return normalizedPaths[0];
+  }
+
+  const durations = await Promise.all(normalizedPaths.map(probeDuration));
+
+  // Small jobs: one chain, same as before, no behavior change.
+  if (normalizedPaths.length <= XFADE_BATCH_SIZE) {
+    return xfadeChain(normalizedPaths, durations, workDir, "concatenated.mp4");
+  }
+
+  // Large jobs: divide-and-conquer. Chain each batch of XFADE_BATCH_SIZE
+  // clips into an intermediate file (bounded input count per ffmpeg
+  // call), probe each intermediate's REAL resulting duration (crossfade
+  // overlap means it's shorter than a naive sum of its inputs), then
+  // repeat on the intermediates. Keeps going until one file remains.
+  //
+  // FIX (July 15, 2026 — real render still failed after the first
+  // batching attempt): batches were being run through
+  // mapWithConcurrencyLimit at FFMPEG_CONCURRENCY_LIMIT=3 — the same
+  // pool used for normalizeClip. That was the wrong reuse. normalizeClip
+  // is one input per process, so 3 concurrent calls = 3 total open
+  // streams, trivial. Each xfadeChain batch call is itself a heavy
+  // multi-stream ffmpeg operation — running 3 of THOSE concurrently
+  // meant up to 3 processes × 6 inputs ≈ 18 simultaneous streams on the
+  // container at once, barely less aggregate load than the original
+  // 20-in-one-process failure this was supposed to fix. Confirmed by a
+  // real render crashing on batch 1 alone (stream #5:0) — under
+  // contention from the other batches starting alongside it. Batches now
+  // run strictly sequentially — one xfadeChain call at a time, nothing
+  // else competing with it. Costs some wall-clock time; that's the right
+  // trade for a step that's failed twice in production.
+  let currentPaths = normalizedPaths;
+  let currentDurations = durations;
+  let round = 0;
+
+  while (currentPaths.length > 1) {
+    const batches = [];
+    for (let i = 0; i < currentPaths.length; i += XFADE_BATCH_SIZE) {
+      batches.push({
+        paths: currentPaths.slice(i, i + XFADE_BATCH_SIZE),
+        durations: currentDurations.slice(i, i + XFADE_BATCH_SIZE),
+      });
+    }
+
+    const batchOutputs = [];
+    for (let i = 0; i < batches.length; i++) {
+      console.log(`[concatenateClips] Round ${round}, batch ${i}/${batches.length - 1} starting (${batches[i].paths.length} clips)...`);
+      const out = await xfadeChain(batches[i].paths, batches[i].durations, workDir, `concat_r${round}_${i}.mp4`);
+      console.log(`[concatenateClips] Round ${round}, batch ${i}/${batches.length - 1} done.`);
+      batchOutputs.push(out);
+    }
+
+    // NEW (July 15, 2026 — same crash, second time in a row, at growing
+    // clip sizes): every normalized clip and every prior round's
+    // intermediate files were sitting on disk for the ENTIRE render with
+    // zero cleanup — a real, growing footprint as clip durations
+    // increased this session (padded clips went from 7.52s to 9.52s to
+    // 11.2s across three consecutive test rounds). currentPaths here are
+    // exactly what THIS round just consumed as input and will never be
+    // read again — safe to delete now that their outputs exist on disk.
+    // Best-effort: a failed cleanup should never crash the render over
+    // something that was only ever a disk-space optimization.
+    // NEW (July 15, 2026 — found while tracing the missing-file bug
+    // above): a batch with a single leftover clip (odd clip counts)
+    // passes that file through unchanged in xfadeChain rather than
+    // creating a new one — so it ends up in BOTH currentPaths (about to
+    // be deleted below) AND batchOutputs (what the NEXT round needs).
+    // Excluding anything that's also a batch output from deletion, so a
+    // passthrough file doesn't get deleted out from under the round that
+    // still needs it.
+    const outputSet = new Set(batchOutputs);
+    for (const consumedPath of currentPaths) {
+      if (outputSet.has(consumedPath)) continue;
+      try { fs.unlinkSync(consumedPath); } catch (err) { /* non-fatal */ }
+    }
+
+    currentDurations = await Promise.all(batchOutputs.map(probeDuration));
+    currentPaths = batchOutputs;
+    round++;
+  }
+
+  // Final result needs to land at the canonical path the rest of the
+  // pipeline (mixAudio, renderFormat) already expects.
+  const finalPath = path.join(workDir, "concatenated.mp4");
+  if (currentPaths[0] !== finalPath) {
+    fs.copyFileSync(currentPaths[0], finalPath);
+  }
+  return finalPath;
+}
+
+// ── REVEAL PRESETS — Ken Burns tier (July 17, 2026) ──────────────────────
+// Replaces the old hardcoded buildBeforeAfterClip(), which produced the
+// exact same wipeleft/0.8s/pull_back+push_in clip regardless of what a
+// user picked — confirmed dead-end from the July 16 handoff ("Reveal
+// presets... never actually implemented. buildBeforeAfterClip() still
+// hardcodes one wipe transition/timing for every preset").
+//
+// Real, fixed 3-phase structure, locked via the reveal-preset spec
+// session (see 06_DECISIONS in Notion):
+//   Phase 1 — Opener (1.5s):       vacant/before image, motionRenderer.py
+//                                  preset from REVEAL_PRESETS[key].openerMotion
+//   Phase 2 — Wipe (0.4s):         ffmpeg xfade between opener and
+//                                  continuation, transition type from
+//                                  REVEAL_PRESETS[key].wipeTransition
+//   Phase 3 — Continuation (4.0s): staged/after image, motionRenderer.py
+//                                  preset = the user's End Motion choice
+// Total clip duration: 1.5 + 4.0 - overlap... see buildRevealClip's own
+// comment for the exact xfade-offset math (wipe duration is TIME SPENT
+// crossfading, not extra time added on top of the two phase durations).
+//
+// pull_back is available as an End Motion on Classic Reveal and Cinematic
+// Reveal ([DATE], Sam's explicit call: Ken Burns is deterministic/flat —
+// no depth-hallucination risk the way Kling has, so the reasoning that
+// gates AI Motion presets doesn't carry over here). Still excluded from
+// Luxury Drift, matching that identity's existing push/tilt exclusion,
+// pending confirmation either way.
+//
+// REAL MECHANICAL NOTE (found while making this change, not yet fixed):
+// pull_back's own math in motionRenderer.py treats whatever start_zoom
+// it's given as the CENTER of its range (max_zoom = start_zoom+0.5,
+// min_zoom = start_zoom-0.5), not the literal starting composition.
+// Since every Reveal continuation starts fresh at start_zoom=1.0
+// (renderPipeline.js hardcodes this for every preset), pull_back as a
+// continuation renders its first frame at 1.5x zoom, easing DOWN to 1.0
+// — a real, visible jump right after the wipe, independent of the
+// opener's own direction. Watch for this on the first real render;
+// worth a motionRenderer.py fix if it reads badly.
+// RAISED from 4.0 to 6.0 (this session — Sam's request: standardize Ken
+// Burns clip duration to match AI Motion/LTX's ~6s continuation, closing
+// the gap that was forcing every Ken Burns segment into a tighter
+// narration budget than an LTX one got for the same room. New total
+// reveal clip length: REVEAL_OPENER_DURATION(1.5) + 6.0 -
+// REVEAL_WIPE_DURATION(0.4) = 7.1s — matches a real LTX reveal clip's
+// observed 7.12s almost exactly. Confirmed via renderPipeline.js's own
+// math (continuationDuration = this constant + any narration padding) —
+// raising it here alone is sufficient; nothing else needs to change for
+// the padding stack to keep working correctly.
+const REVEAL_OPENER_DURATION = 1.5;
+const REVEAL_WIPE_DURATION = 0.4;
+const REVEAL_CONTINUATION_DURATION = 6.0;
+
+// wipeTransition values are real ffmpeg xfade transition names.
+// ASSUMPTION FLAGGED FOR SAM: the locked spec confirms opener motion +
+// End Motion exclusions per preset, but did not lock an exact ffmpeg
+// transition name per preset — these three are my proposed defaults,
+// not yet confirmed. Easy to change, all in one place.
+// NOTE (July 18, 2026; updated Sep 10, 2026 — full Kling revert):
+// allowedEndMotions mixes two different renderers: Ken Burns presets
+// (motionRenderer.py, unchanged names) and Kling presets
+// (klingMotion.js's KLING_MOTION_TEMPLATES — previously LTX Fast presets
+// from ltxMotion.js's LTX_MOTION_TEMPLATES, swapped out entirely as part
+// of the Sep 10 revert). The two namespaces don't collide (confirmed: no
+// shared preset names between the two lists), so renderPipeline.js can
+// dispatch to the right renderer with a single lookup:
+// KLING_MOTION_TEMPLATES[endMotion] existing means Kling, otherwise Ken
+// Burns. Kling additions follow each preset's EXISTING characterological
+// restriction, not just "add everything": luxury_drift already excludes
+// push_in/pull_back/tilt_up/tilt_down (a deliberate lateral-only
+// identity) — its Kling additions exclude cinematic_push for the
+// identical reason (it's a push-in motion). water_motion/outdoor_breeze
+// are exterior-only (enforced at runtime by klingMotion.js's
+// enforceScopeRules, not filtered out of this static list) — the frontend
+// dropdown still needs its own room-type-aware filtering as follow-up UI
+// work, not done in this pass. pull_back_wide (named "room_reveal" until
+// the Sep 10, 2026 rename — see klingMotion.js) is intentionally NOT
+// included anywhere — Sam's call, "NO Open Plan AI Motion right now"
+// (unchanged by the Kling revert — this was a scope decision about the
+// preset itself, not about which engine renders it).
+//
+// REMOVED (Sep 10, 2026): micro_zoom_out and micro_dolly_back, from all
+// three lists below. Both were LTX-only presets with no Kling equivalent
+// — build-video-demo.html's standalone dropdown maps both to Kling's
+// pull_back_wide as a same-visual substitute, but pull_back_wide is
+// excluded from Reveal's End Motion namespace entirely (see above) — so
+// for Reveal specifically, these two are dropped rather than substituted.
+// Compound Ken Burns presets (added [DATE]) — available to every Reveal
+// identity, including Luxury Drift (Sam's explicit call: these 11 NEW
+// names override Luxury Drift's push/pull/tilt exclusion above — that
+// exclusion is otherwise UNCHANGED, push_in/pull_back/tilt_up/tilt_down
+// still stay out of Luxury Drift's list below). Mirrors autoSelect.js's
+// and build-video-demo.html's COMPOUND_END_MOTIONS constant exactly —
+// keep all three in sync.
 const COMPOUND_END_MOTIONS = [
   "soft_push_float_push", "soft_push_float_diagonal",
   "soft_push_float_push_diagonal", "soft_push_float_gentle_diagonal",
@@ -181,901 +547,735 @@ const COMPOUND_END_MOTIONS = [
   "pan_left_push", "pan_right_push",
 ];
 
-const REVEAL_PRESET_END_MOTIONS = {
-  classic_reveal: [
-    "push_in", "pull_back", "float_pull_back", "pan_left", "pan_right", "tilt_up", "tilt_down", "drift", "float", "luxury_parallax",
-    ...COMPOUND_END_MOTIONS,
-    "cinematic_push", "luxury_drift", "floating_camera_drift", "architectural_glide", "corner_to_corner_drift",
-    "orbit_arc", "rack_focus", "drone_boom_up", "crane_up", "crane_down", "parallax_push", "pan_zoom_reveal",
-    "living_room_ambient", "fireplace_flicker", "water_motion", "outdoor_breeze",
-    "open_plan_reveal",
-  ],
-  luxury_drift: [
-    "drift", "float_pull_back", "pan_left", "pan_right", "float", "luxury_parallax",
-    ...COMPOUND_END_MOTIONS,
-    "luxury_drift", "floating_camera_drift", "architectural_glide", "corner_to_corner_drift",
-    "orbit_arc", "drone_boom_up", "crane_up", "crane_down", "pan_zoom_reveal",
-    "living_room_ambient", "fireplace_flicker", "water_motion", "outdoor_breeze",
-    "open_plan_reveal",
-  ],
-  cinematic_reveal: [
-    "push_in", "pull_back", "float_pull_back", "pan_left", "pan_right", "tilt_up", "tilt_down", "drift", "float", "luxury_parallax",
-    ...COMPOUND_END_MOTIONS,
-    "cinematic_push", "luxury_drift", "floating_camera_drift", "architectural_glide", "corner_to_corner_drift",
-    "orbit_arc", "rack_focus", "drone_boom_up", "crane_up", "crane_down", "parallax_push", "pan_zoom_reveal",
-    "living_room_ambient", "fireplace_flicker", "water_motion", "outdoor_breeze",
-    "open_plan_reveal",
-  ],
-};
-
-// Returns the subset of a reveal preset's allowed end motions that
-// actually belong to the requested engine's vocabulary — Ken Burns names
-// for "ken_burns", real LTX preset names for "ltx". Computed from
-// REVEAL_PRESET_END_MOTIONS + VALID_LTX_PRESETS rather than hand-copied a
-// third time, so the two can't drift apart from each other. This is the
-// real "8 movements" Sam's referring to, for classic_reveal/
-// cinematic_reveal's Ken-Burns-filtered subset specifically.
-function endMotionsForEngine(revealPreset, engine) {
-  const all = REVEAL_PRESET_END_MOTIONS[revealPreset] || [];
-  return all.filter((key) => (engine === "ltx" ? VALID_LTX_PRESETS.has(key) : !VALID_LTX_PRESETS.has(key)));
-}
-
-// NEW (this session — Sam's rule, confirmed explicitly): the subscriber's
-// plan includes automatic AI Motion for at most this many frames per
-// video, REGARDLESS of how many real vacant/staged pairs exist or how
-// many the pool could technically still cover. This is a plan-inclusion
-// limit, not the same thing as the monthly pool balance (kling_motion_
-// usage) — the real cap applied is whichever is SMALLER: this constant,
-// or however many pool frames the subscriber actually has left this
-// period. Counts EVERY AI-motion-consuming pick uniformly — standalone
-// AI Motion (ltx), standalone AI Transformations (kling), and a Room
-// Reveal's continuation running under either engine — including the two
-// bookend positions, since those draw from the exact same pool/plan
-// allotment as any other frame, not a separate budget.
-// UPDATED (Sep 11, 2026, Sam's explicit call, same change as
-// video-job.js's MONTHLY_KLING_ALLOTMENT 15/36/120 → 10/24/80): included
-// AI Motion frames per video drops from 3 to 2. The monthly pool totals
-// were derived directly from this number (2 × each tier's video cap), so
-// this constant and the pool totals have to move together or the two
-// would silently disagree about how many frames a video is actually
-// entitled to.
-const MAX_AUTO_SELECTED_AI_MOTION_FRAMES = 2;
-
-// Ken Burns presets Claude may select for a "ken_burns" engine frame — the
-// user-selectable subset of motionPresets.js's VALID_PRESETS. Excludes
-// "luxury_parallax" (Kling-continuation-only, never a standalone pick) and
-// "soft_hold"/"restrained_push" (Room Reveal opener-only, set automatically
-// by the reveal machinery itself, never chosen directly here).
-const KEN_BURNS_SELECTABLE_PRESETS = new Set([
-  "push_in", "pull_back", "pan_left", "pan_right",
-  "tilt_up", "tilt_down", "drift", "pan_zoom", "float", "static",
-]);
-
-// Compound Ken Burns presets (added [DATE] — promoted from R&D, real
-// motionRenderer.py curves as of the same date). Each is a single 2-3
-// phase move whose DOMINANT phase (the final beat, or the second of a
-// two-phase preset) reads as the same visual anchor as its atomic
-// counterpart below — that mapping is what buildSystemPrompt's compound
-// guidance is built on, so keep this comment in sync with that text if
-// either changes.
-//
-// Deliberately a SEPARATE set from KEN_BURNS_SELECTABLE_PRESETS, not
-// merged into it: room-tier eligibility (see buildSystemPrompt) differs
-// between the atomic and compound families, and validateAndSanitizePlan
-// needs to check "is this a legal Ken Burns pick at all" independently of
-// "which family does it belong to" — merging them here would lose that
-// distinction downstream.
-const COMPOUND_KEN_BURNS_PRESETS = new Set([
-  "soft_push_float_push", "soft_push_float_diagonal",
-  "soft_push_float_push_diagonal", "soft_push_float_gentle_diagonal",
-  "soft_push_float_strong_push",
-  "push_tilt_up", "push_tilt_down",
-  "push_pan_left", "push_pan_right",
-  "pan_left_push", "pan_right_push",
-  // Added [DATE], Sam's design — Float, then a full pull-back settle.
-  // Resolves to pull_back's own anchor (see mapping comment below), not
-  // one of the push_in/drift/tilt/pan anchors the other 11 use.
-  "float_pull_back",
-]);
-
-// Dominant-anchor mapping — each compound resolves to the SAME visual
-// anchor as one of the atomic presets (Sam's rule: the final ramp / second
-// motion is what a compound "reads as"). Used only to build the prompt
-// text below; not consulted at validation time.
-//   push_in anchor      → soft_push_float_push, soft_push_float_strong_push,
-//                          pan_left_push, pan_right_push
-//   drift anchor        → soft_push_float_diagonal, soft_push_float_push_diagonal,
-//                          soft_push_float_gentle_diagonal
-//   tilt_up anchor      → push_tilt_up
-//   tilt_down anchor    → push_tilt_down
-//   pan_left anchor     → push_pan_left
-//   pan_right anchor    → push_pan_right
-//   pull_back anchor    → float_pull_back (a floating settle before the
-//                         same open-reveal anchor pull_back itself uses)
-
-// Every Ken Burns pick Claude may legally make (atomic + compound) — used
-// for validateAndSanitizePlan's ken_burns check below, so a compound pick
-// doesn't get incorrectly cleared as "not a real preset name."
-const KEN_BURNS_ALL_SELECTABLE_PRESETS = new Set([
-  ...KEN_BURNS_SELECTABLE_PRESETS,
-  ...COMPOUND_KEN_BURNS_PRESETS,
-]);
-
-// ── SYSTEM PROMPT ──────────────────────────────────────────────────────
-// Kept as a template function (not a flat string) because the bookend
-// section genuinely depends on narrationEnabled/hasExteriorEnhancement —
-// see rule 3 above. Everything else is static.
-function buildSystemPrompt({ narrationEnabled, hasExteriorEnhancement, aiMotionCap }) {
-  // Compound Ken Burns guidance (added [DATE]) — shared between the
-  // Room Reveal continuation branch and the standalone branch below,
-  // since Sam confirmed these are available in both contexts identically.
-  // Anchor mapping matches COMPOUND_KEN_BURNS_PRESETS's header comment
-  // exactly — keep the two in sync if either changes. Room-tier list
-  // reuses the SAME category structure as the Ordering section above
-  // (front exterior / Open Plan / hero living spaces / Office-Flex /
-  // Primary Bedroom+Bath / closing exterior = compound-eligible;
-  // secondary bedrooms, secondary bathrooms, utility/laundry = never).
-  const compoundKenBurnsGuidance = `    Ken Burns also offers COMPOUND presets — two or three motion phases in one continuous shot, ending on the same visual anchor as an atomic preset above but with more presence. Resolve by anchor: push_in anchor → soft_push_float_push (reserve soft_push_float_strong_push for the single most dramatic room in this listing, not a repeatable default) or pan_left_push / pan_right_push (when the room's strongest sightline enters from a pan before landing on the anchor); drift anchor → soft_push_float_diagonal, soft_push_float_push_diagonal, or soft_push_float_gentle_diagonal, scaled to how dramatic the diagonal actually is; tilt_up anchor → push_tilt_up; tilt_down anchor → push_tilt_down; pan_left anchor → push_pan_left; pan_right anchor → push_pan_right; pull_back anchor (a wide, open reveal — great rooms, open-plan living spaces, large primary suites) → float_pull_back, which adds a brief floating settle before the same pull-back-and-open feel.
-    Compounds are reserved for rooms that can carry the extra motion: front exterior, Open Plan/multi-room lifestyle spaces, Kitchen/Living/Dining and other hero spaces, Office/Flex, Primary Bedroom, Primary Bathroom, and the single strongest closing exterior/backyard shot — the same category tier used in the Ordering section above. Never use a compound for a secondary bedroom, secondary bathroom, or utility/laundry room — the plain atomic preset for that same anchor is the better, calmer choice there, every time. If a room doesn't clearly fall in a compound-eligible category, default to the atomic preset.`;
-
-  return `You are planning the shot order and camera motion for a real estate walkthrough video. You will see every staged photo for this listing, one at a time, each labeled with a frame ID. Some frames have a real vacant/before photo of the same room available — those will be marked explicitly.
-
-## Your job, per frame
-For each photo, identify:
-- roomType: a plain category (e.g. "kitchen", "primary_bedroom", "exterior_front", "exterior_backyard").
-- roomGroup: a grouping key. Set this IDENTICALLY across every frame you judge to be the SAME physical room (e.g. three angles of one kitchen), and DIFFERENTLY for two rooms that merely share a type (e.g. a primary bedroom in a main house vs. a casita — same roomType, must NOT share roomGroup). Getting this right matters: frames sharing a roomGroup get narrated as one continuous segment, so a wrong merge or wrong split directly breaks the narration script.
-- visualAnchor: the single clearest visual feature a camera-motion preset could key off — an island, a fireplace, a chandelier, a hallway sightline, a rug, whatever is genuinely the most prominent thing in this specific photo. Be concrete and specific, not generic.
-
-## Ordering
-Produce a natural walkthrough sequence, following this category priority — front exterior first, then the home's strongest lifestyle/hero spaces, then private spaces, then the closing exterior shot:
-1. Exterior front (if present).
-2. Open Plan / multi-room lifestyle spaces — these lead the interior tour, before any single room.
-3. Kitchen, Living Room, Dining Room, and other hero living/lifestyle spaces.
-4. Office / Flex / other specialty spaces.
-5. Primary Bedroom, then Primary Bathroom.
-6. Secondary Bedrooms, then Secondary Bathrooms / Utility.
-7. Strongest available exterior/backyard shot, last.
-This category order is a hard constraint, same weight as the two below it — categories 2-6 must not interleave (e.g. Office must never land after a bedroom just because a bedroom photo "felt" like it belonged earlier; category 4 always precedes category 5 and 6, full stop). Your judgment applies WITHIN a category only — deciding which specific photo leads when a category has several (e.g. which of two hero living-space shots goes first), never whether a category as a whole jumps the queue. Two further hard constraints:
-1. A real vacant/staged pair must stay adjacent to itself.
-2. Frames sharing a roomGroup must stay contiguous — never split a room's photos apart with a different room in between.
-3. A frame marked HERO SHOT in its notes is a detail crop of an existing room, not a new room. Set its roomGroup to match the parent room's roomGroup and place it immediately adjacent to that room's own frame(s) — treat it as a supporting cutaway within that room's segment, not a new stop on the tour. (A deterministic pass after your plan is generated will correct roomGroup for these automatically if you miss it, but getting placement/order right yourself keeps the video from re-shuffling frames it didn't expect.)
-
-## Structure and motion, per frame
-First decide structure:
-- If a frame has a real vacant/before pair: this frame should almost always be Room Reveal, not a plain transformation. This isn't primarily a stylistic choice — the brief unstaged frame plus the "Virtually Staged" wipe satisfies a real digital-alteration disclosure, the video equivalent of the original-adjacent-to-staged requirement California law, NAR, and MLS associations already require for photos. A real pair playing as an undisclosed plain transformation is the outcome to avoid, not the default. Reserve plain "standalone" transformation for a pair ONLY in a genuine edge case — e.g. a near-duplicate angle of a room that already got its own Room Reveal elsewhere in this listing, where a second reveal of the same room would feel redundant. Room Reveal is the default; skipping it is the rare exception, not the other way around.
-  - Pick one of "classic_reveal", "luxury_drift", "cinematic_reveal" — and VARY this choice across the different Room Reveal frames in this listing rather than repeating the same one throughout. Judge these as a set that will be watched in sequence, not scored independently; a listing where every reveal uses the same preset reads as repetitive even if each individual pick was defensible on its own.
-  - Pick the continuation engine: "ken_burns" (free, deterministic) or "ltx" (real AI Motion, billable — subject to the frame budget below). Most reveals should continue on Ken Burns; reserve the LTX continuation for the handful of frames that most deserve the paid upgrade.
-  - Pick revealEndMotion by reading the STAGED (after) photo's own visual content — the SAME anchor-matching judgment you'd use for a standalone pick below, not a generic "whatever this preset defaults to" choice. This matters: leaving it to a fixed per-preset default is the exact bug that made every Classic/Cinematic Reveal end on push_in and every Luxury Drift end on drift regardless of what the room actually looked like — the point of this field is that it varies with the photo.
-    - If the continuation engine is "ken_burns": match the STAGED photo's real anchor the same way as a standalone Ken Burns pick — real ceiling/chandelier/fan detail → tilt_up; a hero floor/rug/tilework → tilt_down; a strong lateral sightline (hallway, counter run) → pan_left or pan_right; a corner-to-window or corner-to-patio diagonal → drift; a wide MLS-style shot with no obvious directional feature → float or pan_zoom; a room where stillness reads better than any motion → static; a genuinely high-end/luxury finish → luxury_parallax.
-${compoundKenBurnsGuidance}
-    Only pick from: ${[...KEN_BURNS_SELECTABLE_PRESETS, ...COMPOUND_KEN_BURNS_PRESETS].join(", ")}, luxury_parallax.
-    - If the continuation engine is "ltx": pick a specific LTX preset key whose real-world use case genuinely matches the STAGED photo, same judgment as a standalone LTX pick. Only pick from: ${[...VALID_LTX_PRESETS].join(", ")}.
-    - VARY this choice across the different Room Reveal frames in this listing, same reasoning as the reveal preset itself above — judge these as a set watched in sequence, not scored independently.
-  - If truly not Room Reveal (the rare edge-case exception above): engine is "kling", klingMotionPreset is null (this resolves to the generic interior or exterior transformation automatically — do not invent a preset name here).
-- If no pair at all (a single image with nothing to disclose): decide "ken_burns" or "ltx", picking the specific best-matching motion the same way as always.
-  - If "ltx": pick a specific preset key whose real-world use case genuinely matches what you see in THIS photo — do not default everything to the same preset. Only pick from: ${[...VALID_LTX_PRESETS].join(", ")}.
-  - If "ken_burns": pick a specific preset key matching the visual anchor — do not default everything to the same generic move. Match the anchor to the motion: real ceiling/chandelier/fan detail → tilt_up; a hero floor/rug/tilework → tilt_down; a strong lateral sightline (hallway, counter run) → pan_left or pan_right; a corner-to-window or corner-to-patio diagonal → drift; a wide MLS-style shot with no obvious directional feature → float or pan_zoom; a room where stillness reads better than any motion → static.
-${compoundKenBurnsGuidance}
-    Only pick from: ${[...KEN_BURNS_SELECTABLE_PRESETS, ...COMPOUND_KEN_BURNS_PRESETS].join(", ")}.
-
-## Bookend rule — position 1 and the last position
-${narrationEnabled
-  ? `Narration is ON for this video. Position 1 MUST be Ken Burns (prefer Front Exterior content, pull_back motion, if a front exterior photo exists). The LAST position MUST be Ken Burns Exterior (prefer a backyard/exterior photo). Do not select any AI Motion engine for either of these two positions under any circumstance.`
-  : hasExteriorEnhancement
-  ? `Narration is OFF for this video, and a real Exterior Enhancement pair (vacant+staged exterior) exists and was selected. Position 1 MUST be Ken Burns (prefer Front Exterior content, pull_back motion). The LAST position should be the Kling exterior transformation using that Exterior Enhancement pair (engine "kling", klingMotionPreset null, plain transformation — not Room Reveal) as the strongest available closer. If for some reason that pair doesn't correspond to the last frame in your chosen order, move it there.`
-  : `Narration is OFF for this video, with no Exterior Enhancement pair available. Position 1 MUST be Ken Burns (prefer Front Exterior content, pull_back motion). The LAST position MUST be Ken Burns Exterior (prefer a backyard/exterior photo).`}
-
-## AI Motion frame budget
-You may select AI Motion or AI Transformations (including a Room Reveal's continuation running under either engine) for AT MOST ${aiMotionCap} frames total across this entire video — this includes the bookends if either of them lands on AI Motion under the exception rules above, not a separate allotment. This is a hard cap: the subscriber's plan only includes automatic AI Motion for ${aiMotionCap} frames per video, regardless of how many real vacant/staged pairs exist. Choose your ${aiMotionCap} STRONGEST opportunities — the frames where a real pair and a genuinely compelling visual anchor coincide — rather than assigning it to every frame that merely qualifies. Every frame you don't select for AI Motion still needs a real Ken Burns pick; don't leave weaker candidates without a placement, just place them under Ken Burns instead. A downstream system will still enforce this cap even if you exceed it, but a plan that already respects it needs no correction and better reflects your own judgment of which ${aiMotionCap} rooms deserve it most.
-
-## Output
-Return ONLY a JSON array, one object per frame, in the exact shape below. No prose before or after, no markdown fences.
-[
-  {
-    "frameId": "...",
-    "position": 1,
-    "roomType": "...",
-    "roomGroup": "...",
-    "groupOrder": 0,
-    "visualAnchor": "...",
-    "structure": "standalone" | "room_reveal",
-    "revealPreset": "classic_reveal" | "luxury_drift" | "cinematic_reveal" | null,
-    "revealEngine": "ken_burns" | "ltx" | null,
-    "revealEndMotion": "<a real Ken Burns or LTX preset key, matching whichever engine revealEngine is>" | null,
-    "engine": "ken_burns" | "ltx" | "kling" | null,
-    "motionPreset": "<a real LTX preset key>" | null,
-    "klingMotionPreset": null,
-    "confidence": "high" | "medium-high" | "medium",
-    "reasoning": "ONE concise sentence (aim for under 25 words) naming the specific visual feature that makes this choice the right (or safe) one for THIS photo. Long, multi-clause explanations cost real output budget across a full listing — say the one thing that matters, not everything you noticed."
-  }
-]`;
-}
-
-// FIX (this session — real failure, confirmed via console: Claude's API
-// rejected the request outright with "At least one of the image
-// dimensions exceed max allowed size: 8000 pixels"). frame.stagedImageUrl
-// points at the full Cloudinary asset — for a Final-tier image that can
-// be up to 12,000px on the long edge (upscale-image.js's own
-// MAX_OUTPUT_LONG_EDGE), a limit chosen for print/MLS quality with no
-// awareness of Claude's separate 8000px vision ceiling. The two limits
-// were never reconciled against each other until this failure surfaced.
-// Fix: resize via Cloudinary's own on-the-fly URL transformation — no new
-// endpoint, no re-upload, Cloudinary generates and caches the resized
-// version automatically. 1568px matches Anthropic's own documented
-// guidance (images beyond that are downscaled server-side before
-// analysis anyway), so this isn't just squeaking under 8000px, it's the
-// size Claude actually uses regardless of what's sent.
-// MIGRATED (August 2026 — Cloudinary cost/dependency reduction): the
-// original fix (see the still-accurate diagnosis above — Claude's 8000px
-// hard limit vs. this app's up-to-12,000px Final-tier images) used
-// Cloudinary's on-the-fly URL transform to resize without a real
-// download. S3 has no equivalent eager-transformation engine — there's no
-// URL parameter that makes S3 hand back a resized copy — so resizing now
-// genuinely means downloading the bytes and processing them ourselves.
-// Uses `sharp`, already a dependency in this repo for the Smart Correct/
-// Oracle pipeline, so no new dependency. Sends the resized image to
-// Claude as base64 (source:{type:"base64"}) instead of by URL, since
-// there's no longer a URL for the RESIZED version specifically — only the
-// original, oversized one.
-const sharp = require("sharp");
-const CLAUDE_VISION_MAX_DIM = 1568;
-
-function downloadImageBuffer(url) {
-  return new Promise((resolve, reject) => {
-    https.get(url, (res) => {
-      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        return downloadImageBuffer(res.headers.location).then(resolve, reject);
-      }
-      if (res.statusCode !== 200) {
-        reject(new Error(`HTTP ${res.statusCode} fetching ${url}`));
-        res.resume();
-        return;
-      }
-      const chunks = [];
-      res.on("data", (c) => chunks.push(c));
-      res.on("end", () => resolve(Buffer.concat(chunks)));
-      res.on("error", reject);
-    }).on("error", reject);
-  });
-}
-
-async function fetchAndResizeForVision(url, maxDim) {
-  const original = await downloadImageBuffer(url);
-  const resized = await sharp(original)
-    .resize({ width: maxDim, height: maxDim, fit: "inside", withoutEnlargement: true })
-    .jpeg({ quality: 90 })
-    .toBuffer();
-  return { mediaType: "image/jpeg", base64: resized.toString("base64") };
-}
-
-// ── BUILD THE VISION MESSAGE ───────────────────────────────────────────
-// Images sent by URL, NOT as local base64 files. CORRECTED (July 21, 2026)
-// — an earlier draft matched narrationGen.js's local-file/base64
-// convention, which is wrong for THIS module specifically. narrationGen.js
-// legitimately runs on Railway, after frames are already downloaded
-// locally, because it analyzes rendered clip output. Auto-selection has
-// to run at a completely different point: BEFORE the quote screen, in the
-// browser/Netlify layer, so the user can see the proposed plan and cost
-// before committing to anything — at that point nothing exists locally
-// anywhere, only the remote Cloudinary URLs the frontend already has
-// (f.realUrl in build-video-demo.html). Confirmed the Anthropic Messages
-// API supports `source: {type: "url", url: ...}` directly on the
-// standard API (not Bedrock/Vertex, which only take base64 — irrelevant
-// here since this project calls api.anthropic.com directly) — no need to
-// fetch-then-base64-encode inside the function at all.
-// frame.stagedImageUrl / frame.beforeImageUrl are remote URLs, not paths.
-async function buildUserContent(frames) {
-  // Fetch + resize every staged image in parallel — sequential would add
-  // a real network round-trip + Sharp resize per frame on top of an
-  // already timing-sensitive function (see the MAX_TOKENS comment above
-  // re: a 13-photo listing already brushing against real limits).
-  const resized = await Promise.all(
-    frames.map((frame) => fetchAndResizeForVision(frame.stagedImageUrl, CLAUDE_VISION_MAX_DIM))
-  );
-
-  const content = [];
-  content.push({
-    type: "text",
-    text: `Here are ${frames.length} staged photos for this listing. Frame IDs and pair information follow each image.`,
-  });
-  frames.forEach((frame, i) => {
-    content.push({
-      type: "image",
-      source: { type: "base64", media_type: resized[i].mediaType, data: resized[i].base64 },
-    });
-    const pairNote = frame.beforeImageUrl
-      ? `This frame HAS a real vacant/before pair available.`
-      : `This frame has NO before pair — single image only.`;
-    // NEW (Hero Shot B-Roll tagging) — tells Claude this frame is a detail
-    // crop of an already-staged room, not a new room. This informs YOUR
-    // ordering/anchor/motion judgment (place it near its parent room, treat
-    // it as a cutaway, don't give it Room Reveal structure). It does NOT
-    // need to get the roomGroup exactly right on its own — a deterministic
-    // code pass after your plan comes back force-corrects roomGroup to
-    // match the parent room whenever that parent's own frame is also in
-    // this batch, using the real parentRoomLabel value, not a guess.
-    const heroNote = frame.isHeroShot
-      ? ` HERO SHOT: this is a detail/B-roll crop from the room "${frame.parentRoomLabel || "unknown"}" — not a separate room. Place it adjacent to that room's own frame if it's in this batch, and treat it as a supporting cutaway (never Room Reveal structure). It still needs its own complete plan entry, same as every other frame — a real, specific motionPreset chosen from its actual visual content, not a generic placeholder and not an entry you skip.`
-      : "";
-    content.push({
-      type: "text",
-      text: `Frame ID: ${frame.frameId}. ${pairNote}${frame.userProvidedRoomLabel ? ` User-provided label: "${frame.userProvidedRoomLabel}".` : ""}${heroNote}`,
-    });
-  });
-  content.push({
-    type: "text",
-    text: "Now return the JSON array as instructed — order, grouping, structure, and motion for every frame.",
-  });
-  return content;
-}
-
-// ── ROBUST JSON EXTRACTION ──────────────────────────────────────────────
-// Same fix as narrationGen.js's July 21 parse bug: never assume the whole
-// trimmed response IS the array. A vision call reasoning through "is this
-// the same room as frame 3 or a different one?" has even more reason to
-// think out loud before answering than the narration script call did —
-// don't re-learn that lesson a second time in a second file.
-function extractJsonArray(text) {
-  const cleaned = text.trim().replace(/^```(json)?/i, "").replace(/```$/, "").trim();
-  const start = cleaned.indexOf("[");
-  const end = cleaned.lastIndexOf("]");
-  if (start === -1 || end === -1 || end < start) {
-    throw new Error(`No JSON array found in auto-selection response. Raw: ${cleaned.slice(0, 500)}`);
-  }
-  return JSON.parse(cleaned.slice(start, end + 1));
-}
-
-// ── THE CLAUDE CALL ─────────────────────────────────────────────────────
-// Raw https.request to api.anthropic.com — this codebase never uses the
-// @anthropic-ai/sdk package anywhere (confirmed against narrationGen.js),
-// so this matches that convention rather than introducing a new dependency.
-function callClaudeVision(systemPrompt, userContent, anthropicKey) {
-  return new Promise((resolve, reject) => {
-    const bodyStr = JSON.stringify({
-      model: MODEL,
-      max_tokens: MAX_TOKENS,
-      system: systemPrompt,
-      messages: [{ role: "user", content: userContent }],
-    });
-
-    const req = https.request({
-      hostname: "api.anthropic.com",
-      path: "/v1/messages",
-      method: "POST",
-      headers: {
-        "x-api-key": anthropicKey,
-        "anthropic-version": "2023-06-01",
-        "Content-Type": "application/json",
-        "Content-Length": Buffer.byteLength(bodyStr),
-      },
-    }, (res) => {
-      let data = "";
-      res.on("data", (c) => (data += c));
-      res.on("end", () => {
-        try {
-          const parsed = JSON.parse(data);
-          const text = parsed?.content?.find((b) => b.type === "text")?.text;
-          if (!text) return reject(new Error(`Auto-selection call returned no text content: ${data.slice(0, 300)}`));
-          // NEW (this session) — a 13-photo listing failed with only a
-          // generic "no JSON array found" error, leaving real uncertainty
-          // about whether it was actually a max_tokens truncation (raised
-          // MAX_TOKENS above to fix that) or something else entirely.
-          // Checking stop_reason directly removes that ambiguity for any
-          // future occurrence — no more guessing from circumstantial
-          // evidence (frame count, verbosity) after the fact.
-          if (parsed.stop_reason === "max_tokens") {
-            console.error(
-              `[AUTO-SELECT] Response was cut off at max_tokens (${MAX_TOKENS}) — this WILL fail JSON parsing. If this recurs, MAX_TOKENS needs raising further or the reasoning field needs trimming more aggressively.`
-            );
-          }
-          resolve(text);
-        } catch (err) {
-          reject(new Error(`Auto-selection response parse error: ${err.message}. Raw: ${data.slice(0, 500)}`));
-        }
-      });
-    });
-    req.on("error", reject);
-    req.write(bodyStr);
-    req.end();
-  });
-}
-
-async function generateAutoSelection({ frames, narrationEnabled, hasExteriorEnhancement, anthropicKey, poolRemaining }) {
-  if (!frames || frames.length === 0) {
-    throw new Error("generateAutoSelection: no frames provided");
-  }
-
-  // NEW (this session) — effective cap is whichever is SMALLER: the
-  // subscriber's plan-inclusion max (MAX_AUTO_SELECTED_AI_MOTION_FRAMES),
-  // or however many pool frames they actually have left this period. If
-  // poolRemaining wasn't provided (e.g. the balance lookup upstream
-  // failed), fail toward the safe/conservative side — the plan max, not
-  // unlimited — rather than silently assuming plenty of pool room exists.
-  const aiMotionCap = Math.max(0, Math.min(
-    MAX_AUTO_SELECTED_AI_MOTION_FRAMES,
-    typeof poolRemaining === "number" ? poolRemaining : MAX_AUTO_SELECTED_AI_MOTION_FRAMES
-  ));
-
-  const systemPrompt = buildSystemPrompt({ narrationEnabled, hasExteriorEnhancement, aiMotionCap });
-  const userContent = await buildUserContent(frames);
-  const text = await callClaudeVision(systemPrompt, userContent, anthropicKey);
-  const plan = extractJsonArray(text);
-
-  if (plan.length !== frames.length) {
-    console.error(
-      `[AUTO-SELECT MISMATCH] Claude returned ${plan.length} plan entries, expected ${frames.length}. ` +
-      `enforceAutoSelectionRules will identify which frames are missing/duplicated by frameId (not array position) and backfill anything omitted with a safe Ken Burns default.`
-    );
-  }
-
-  const enforced = enforceAutoSelectionRules(plan, frames, { narrationEnabled, hasExteriorEnhancement });
-  const grouped = applyHeroShotGrouping(enforced, frames);
-  // Re-run AFTER reordering: applyHeroShotGrouping can move array elements
-  // (splice a hero shot next to its parent group), which stales the
-  // `position` field every entry already has, and — in the rare case a
-  // hero shot's move touched index 0 or the last index — could silently
-  // undo the bookend guarantees enforceAutoSelectionRules just verified.
-  // Safe to re-run: same frameIds, no duplicates/omissions introduced by
-  // reordering, so dedup is a no-op here and this only renumbers position
-  // + re-checks the two bookend slots against the corrected order.
-  const reboundaried = enforceAutoSelectionRules(grouped, frames, { narrationEnabled, hasExteriorEnhancement });
-  return enforceAiMotionPoolCap(reboundaried, aiMotionCap);
-}
-
-// ── HERO SHOT / B-ROLL GROUPING — DETERMINISTIC CORRECTION ─────────────
-// Claude is asked (system prompt rule 3) to set a hero shot's roomGroup to
-// match its parent room's, but this is enforced here regardless of what it
-// actually did — same "loud, never silent" force-correction posture as
-// enforceAutoSelectionRules above, not a duplicate of Claude's judgment.
-// Ground truth is frame.parentRoomLabel — the literal room.roomName set in
-// Smart Stage PRO at Generate Final time, not a Vision guess — matched
-// against every OTHER frame's userProvidedRoomLabel in this same batch
-// (the closest existing stable room-identity string already flowing
-// through this pipeline; see build-video-demo.html's matchToRoomType()).
-// If no frame in this batch carries a matching label, the hero shot has no
-// parent to join here — it keeps whatever standalone roomGroup Claude gave
-// it, no correction, no error logged, since that's the expected shape
-// whenever a hero shot is included without its source room's own photo in
-// the same video (narrationGen.js's word-budget fix handles that case).
-function applyHeroShotGrouping(plan, frames) {
-  const frameById = new Map(frames.map((f) => [f.frameId, f]));
-
-  const roomGroupByLabel = new Map();
-  for (const entry of plan) {
-    const frame = frameById.get(entry.frameId);
-    if (!frame || frame.isHeroShot) continue;
-    const label = (frame.userProvidedRoomLabel || "").trim().toLowerCase();
-    if (label) roomGroupByLabel.set(label, entry.roomGroup);
-  }
-
-  for (const entry of plan) {
-    const frame = frameById.get(entry.frameId);
-    if (!frame || !frame.isHeroShot || !frame.parentRoomLabel) continue;
-    const parentGroup = roomGroupByLabel.get(frame.parentRoomLabel.trim().toLowerCase());
-    if (parentGroup && entry.roomGroup !== parentGroup) {
-      console.error(
-        `[AUTO-SELECT] Hero shot "${entry.frameId}" (parent room "${frame.parentRoomLabel}") had roomGroup="${entry.roomGroup}" — force-correcting to match its parent's roomGroup="${parentGroup}" so narrationGen.js merges them into one segment. Deterministic from parentRoomLabel, not left to Claude's own judgment.`
-      );
-      entry.roomGroup = parentGroup;
-    }
-  }
-
-  // FIX (real bug, Sam's report: narration described a scene prematurely,
-  // sequence off by a couple clips). Correcting roomGroup's STRING value
-  // above is not sufficient on its own — narrationGen.js's
-  // groupContiguousByRoom() only merges CONTIGUOUS matching labels in
-  // final sequence order. If Claude placed a hero shot somewhere other
-  // than immediately next to its parent room's own frame(s) (nothing
-  // forced it to place it there — the system prompt only asked nicely),
-  // force-matching the label produces two separate, non-adjacent segments
-  // that happen to share a name, not one merged segment. Claude's
-  // narration call sees the same room label appear twice in its group
-  // list and gets confused about what's already been described vs. what's
-  // still ahead — exactly the "described prematurely, sequence off"
-  // symptom. This physically moves each such hero shot to sit immediately
-  // after the last frame currently in its parent's group.
-  const toMove = [];
-  const kept = [];
-  for (const entry of plan) {
-    const frame = frameById.get(entry.frameId);
-    const parentGroup = (frame?.isHeroShot && frame.parentRoomLabel)
-      ? roomGroupByLabel.get(frame.parentRoomLabel.trim().toLowerCase())
-      : null;
-    if (parentGroup) {
-      toMove.push({ entry, parentGroup });
-    } else {
-      kept.push(entry);
-    }
-  }
-
-  if (toMove.length > 0) {
-    for (const { entry, parentGroup } of toMove) {
-      let insertAt = -1;
-      for (let i = kept.length - 1; i >= 0; i--) {
-        if (kept[i].roomGroup === parentGroup) { insertAt = i; break; }
-      }
-      if (insertAt === -1) {
-        // Parent group vanished from `kept` somehow — shouldn't happen,
-        // it was derived from this same plan. Append rather than lose the
-        // frame from the video entirely.
-        console.error(`[AUTO-SELECT] Hero shot "${entry.frameId}": expected parent roomGroup="${parentGroup}" not found while repositioning — appending at the end instead of losing the frame.`);
-        kept.push(entry);
-      } else {
-        console.error(`[AUTO-SELECT] Hero shot "${entry.frameId}" repositioned to sit immediately after its parent's group (roomGroup="${parentGroup}") — was not contiguous with it in Claude's original order.`);
-        kept.splice(insertAt + 1, 0, entry);
-      }
-    }
-  }
-
-  return kept;
-}
-
-// ── HARD ENFORCEMENT ────────────────────────────────────────────────────
-// Per this file's header: Claude's plan is a proposal, not a trusted
-// output. Every rule that has a real cost/compliance implication gets
-// checked and force-corrected here — same "don't trust the model's
-// compliance" posture as the rest of this codebase (e.g. narrationGen.js's
-// silent-skip fix), scoped to what's actually checkable from THIS repo
-// (bookend defaults, preset name sanity) — real eligibility/scope
-// enforcement (isStandaloneEligible, enforceLtxScopeRules, klingMotion.js's
-// enforceScopeRules) lives on Railway and is out of reach here; see the
-// VALID_LTX_PRESETS comment above for why that's not duplicated. A
-// force-correction here should be loud (console.error), never silent —
-// the exact lesson narrationGen.js's silent-skip bug taught.
-function enforceAutoSelectionRules(rawPlan, frames, { narrationEnabled, hasExteriorEnhancement }) {
-  // FIXED (this session — real bug, confirmed from a live test: reasoning
-  // text and room labels were correct for the photo Claude actually
-  // analyzed, but attached to a DIFFERENT frame whenever Claude reordered
-  // anything, producing exactly what Sam reported — "images don't match
-  // the labels"). The old logic here re-keyed entry.frameId to
-  // frames[i].frameId — i.e. whichever frame occupied array position i in
-  // the ORIGINAL INPUT order — copied from narrationGen.js's July 21 fix.
-  // That's correct THERE because narrationGen.js never reorders, only
-  // annotates frames in place; array position and original input position
-  // are always the same thing in that file. Auto-select's entire purpose
-  // is to REORDER frames, so the moment Claude's output array legitimately
-  // differs from input order (the normal, desired case, not an edge case),
-  // the old logic silently reattached one photo's real analysis to a
-  // completely different photo's frameId.
+const REVEAL_PRESETS = {
+  // FINAL MODEL (July 19, 2026, Sam's explicit correction after two
+  // wrong attempts — no more drift): there is no 4th preset. There are
+  // exactly 3 reveal identities, same fixed Ken Burns opener + wipe each,
+  // used under EITHER engine. What changes between engines is ONLY the
+  // End Motion (continuation) — Ken Burns names when the clip's engine is
+  // Ken Burns, Kling names when it's AI Motion (renamed from LTX names as
+  // part of the Sep 10, 2026 full Kling revert). Billing is decided by the
+  // engine alone (frame.motion), never by which specific preset or End
+  // Motion was picked — see video-job.js's usesAiMotion() and
+  // renderPipeline.js's reveal branch for where that's actually enforced.
   //
-  // Correct fix: trust Claude's own echoed frameId as the identity link —
-  // that's literally what it's for, and buildUserContent() explicitly
-  // labels each image with it. Validate against the real set of frameIds
-  // sent (catches a hallucinated/malformed ID) rather than assuming
-  // position encodes identity. Final walkthrough ORDER comes from the
-  // plan array's order itself (same as applyAutoSelectionPlan/
-  // applyAutoSelectionPlanClient already assume — both iterate the plan
-  // array in order and push in that order), not from any position field.
-  const validFrameIds = new Set(frames.map((f) => f.frameId));
-  const seenFrameIds = new Set();
-  const deduped = [];
-  for (const entry of rawPlan) {
-    if (!validFrameIds.has(entry.frameId)) {
-      console.error(
-        `[AUTO-SELECT] Dropping plan entry with frameId "${entry.frameId}" — doesn't match any frame actually sent. (This is what the old position-based re-keying was silently papering over, by reattaching this entry's content to a real but WRONG frame instead of dropping it — the actual bug this fix addresses.)`
-      );
-      continue;
-    }
-    if (seenFrameIds.has(entry.frameId)) {
-      console.error(`[AUTO-SELECT] Dropping duplicate plan entry for frameId "${entry.frameId}" — already seen once in this plan.`);
-      continue;
-    }
-    seenFrameIds.add(entry.frameId);
-    deduped.push(entry);
-  }
-
-  // Claude omitting a frame entirely is different from a bad/duplicate ID
-  // — that frame still needs to be IN the video somewhere. Append with a
-  // safe, loud, Ken Burns default rather than silently dropping it.
-  for (const f of frames) {
-    if (!seenFrameIds.has(f.frameId)) {
-      console.error(
-        `[AUTO-SELECT] Frame "${f.frameId}" is missing from Claude's plan entirely — appending it at the end with a safe Ken Burns default rather than silently dropping it from the video.`
-      );
-      deduped.push({
-        frameId: f.frameId,
-        roomType: f.userProvidedRoomLabel || "unknown",
-        roomGroup: f.userProvidedRoomLabel || f.frameId,
-        groupOrder: 0,
-        visualAnchor: "",
-        structure: "standalone",
-        revealPreset: null,
-        revealEngine: null,
-        engine: "ken_burns",
-        motionPreset: null,
-        klingMotionPreset: null,
-        confidence: "low",
-        reasoning: "Auto-added — Claude's plan omitted this frame entirely.",
-      });
-    }
-  }
-
-  const plan = deduped.map((entry, i) => ({ ...entry, position: i + 1 }));
-
-  const first = plan[0];
-  const last = plan[plan.length - 1];
-
-  // ── BOOKEND RULE 1: position 1 is always Ken Burns, no exceptions ────
-  if (first) {
-    const violatesBookend1 = first.structure === "room_reveal"
-      ? first.revealEngine !== "ken_burns"
-      : first.engine !== "ken_burns";
-    if (violatesBookend1) {
-      console.error(
-        `[AUTO-SELECT] Position 1 violated the bookend default (was engine="${first.engine}", revealEngine="${first.revealEngine}") — force-correcting to Ken Burns. This default is never optional; only an explicit user override may change it, and that happens downstream of this module, not here.`
-      );
-      first.engine = "ken_burns";
-      first.motionPreset = null;
-      first.klingMotionPreset = null;
-      if (first.structure === "room_reveal") { first.revealEngine = "ken_burns"; first.revealEndMotion = null; }
-    }
-    // NEW (this session — Sam's request: deterministic, consistent
-    // wording here, not Claude's own varying paraphrase of the rule).
-    // Set every time, whether or not a correction was needed above — the
-    // RULE itself is fixed regardless of photo content, so the stated
-    // reason for it shouldn't vary either. Claude still owns which
-    // SPECIFIC Ken Burns preset was picked (visual-anchor judgment) —
-    // this only fixes the wording of WHY the engine itself is Ken Burns.
-    first.reasoning = "Bookend rule: the opening shot is always Ken Burns on the front exterior, regardless of visual content — this default is fixed, not a per-photo judgment call.";
-  }
-
-  // ── BOOKEND RULE 2: last position, conditional default ───────────────
-  if (last) {
-    const isKlingExteriorTransformation =
-      last.engine === "kling" && !last.klingMotionPreset && last.structure !== "room_reveal";
-    const exteriorExceptionApplies = !narrationEnabled && hasExteriorEnhancement;
-
-    if (!exteriorExceptionApplies) {
-      // Must be Ken Burns.
-      const violatesBookendLast = last.structure === "room_reveal"
-        ? last.revealEngine !== "ken_burns"
-        : last.engine !== "ken_burns";
-      if (violatesBookendLast) {
-        console.error(
-          `[AUTO-SELECT] Last position violated the bookend default (narrationEnabled=${narrationEnabled}, hasExteriorEnhancement=${hasExteriorEnhancement} — exception does not apply) — force-correcting to Ken Burns Exterior.`
-        );
-        last.engine = "ken_burns";
-        last.motionPreset = null;
-        last.klingMotionPreset = null;
-        if (last.structure === "room_reveal") { last.revealEngine = "ken_burns"; last.revealEndMotion = null; }
-      }
-      // NEW (this session) — same deterministic-wording treatment as
-      // position 1, set unconditionally regardless of whether a
-      // correction was actually needed.
-      last.reasoning = "Bookend rule: the closing shot is always Ken Burns, regardless of visual content — this default is fixed, not a per-photo judgment call.";
-    } else if (last.engine !== "ken_burns" && !isKlingExteriorTransformation) {
-      // Exception applies (narration off + real exterior enhancement pair),
-      // but Claude picked neither Ken Burns nor the specific exterior
-      // transformation it was told to prefer — correct to the intended
-      // free default rather than leave an unexpected engine/preset here.
-      console.error(
-        `[AUTO-SELECT] Last position: exterior-enhancement exception applies but Claude picked engine="${last.engine}"/preset="${last.motionPreset || last.klingMotionPreset}" instead of the generic Kling exterior transformation — force-correcting.`
-      );
-      last.engine = "kling";
-      last.motionPreset = null;
-      last.klingMotionPreset = null;
-      last.structure = "standalone";
-      last.reasoning = "Narration is off and a real Exterior Enhancement pair is available — using the earned free exterior transformation closer.";
-    } else {
-      // NEW (this session) — exception applies AND Claude already
-      // complied correctly on its own; still set the same clean, fixed
-      // wording rather than leaving whatever Claude happened to phrase.
-      last.reasoning = "Narration is off and a real Exterior Enhancement pair is available — using the earned free exterior transformation closer.";
-    }
-  }
-
-  // ── ROOM-GROUP CONSISTENCY for before/after pairs ────────────────────
-  // A pair is one physical room shown twice — if Claude somehow gave the
-  // paired frame's own before/after halves different roomGroup values
-  // (shouldn't happen given they're presented as one frame, but this is a
-  // Claude output, not a guarantee), that's a data-integrity problem for
-  // narration grouping. Not expected to fire often; logged loudly if it does.
-  // (Left as a detection/log point rather than a silent merge — a
-  // structural mismatch here is significant enough to want a human to see it.)
-
-  // ── LIGHTWEIGHT SANITY CHECKS ONLY ────────────────────────────────────
-  // Deliberately NOT re-running the real scope rules here (isStandaloneEligible's
-  // confidence floor, enforceLtxScopeRules' exterior/open-plan gates,
-  // klingMotion.js's known-pair-or-exterior requirement) — see this file's
-  // header comment on VALID_LTX_PRESETS for why: those live in a different
-  // repo/deployment (Railway) that this Netlify-side module can't reach,
-  // and duplicating them here would just create a second copy that can
-  // drift out of sync with the real one. Railway's renderPipeline.js
-  // already runs that exact enforcement on every single frame at render
-  // time, regardless of whether the pick came from auto-selection or a
-  // manual click, and already degrades gracefully to Ken Burns when a
-  // pick fails (see renderPipeline.js's "Rejected standalone use of..."
-  // fallback) — that's the real, authoritative safety net, unchanged by
-  // this feature. All this loop does is catch an obviously-misspelled or
-  // hallucinated preset NAME early and cheaply, before it round-trips all
-  // the way to a render job.
-  for (const entry of plan) {
-    // Checks against the COMBINED atomic+compound set (KEN_BURNS_ALL_
-    // SELECTABLE_PRESETS) — using the atomic-only set here would clear
-    // every legal compound pick as "not a real preset name."
-    if (entry.engine === "ken_burns" && entry.motionPreset && !KEN_BURNS_ALL_SELECTABLE_PRESETS.has(entry.motionPreset)) {
-      console.error(
-        `[AUTO-SELECT] Frame ${entry.frameId}: Ken Burns pick "${entry.motionPreset}" isn't a real preset name — clearing to let the render pipeline default to "auto".`
-      );
-      entry.motionPreset = null;
-    }
-    if (entry.engine === "ltx" && entry.motionPreset && !VALID_LTX_PRESETS.has(entry.motionPreset)) {
-      console.error(
-        `[AUTO-SELECT] Frame ${entry.frameId}: LTX pick "${entry.motionPreset}" isn't a real preset name — degrading to Ken Burns "auto". (Real eligibility/scope rules — confidence floor, exterior/open-plan gates — are enforced authoritatively on Railway at render time, not here.)`
-      );
-      entry.engine = "ken_burns";
-      entry.motionPreset = null;
-    }
-    // NEW (this session — see VALID_REVEAL_PRESETS' header comment for the
-    // real crash this prevents). Only checked when structure is actually
-    // room_reveal — a standalone frame's revealPreset field is expected to
-    // be null/absent and shouldn't trigger a false-positive correction.
-    if (entry.structure === "room_reveal" && entry.revealPreset && !VALID_REVEAL_PRESETS.has(entry.revealPreset)) {
-      console.error(
-        `[AUTO-SELECT] Frame ${entry.frameId}: reveal pick "${entry.revealPreset}" isn't a real preset name — force-correcting to "classic_reveal" rather than letting it reach the frontend, where an unresolvable key crashes the entire motion-assignment step (confirmed: REVEAL_PRESETS[badValue] is undefined, and renderRevealPresetControls() reads .allowedEndMotions off it unguarded).`
-      );
-      entry.revealPreset = "classic_reveal";
-    }
-    // NEW (this session — Sam's report: reveal end motions were always
-    // push_in/drift regardless of the photo, root cause being that
-    // Claude was never given this field to begin with. Now that it is,
-    // validate it the same defensive way as every other preset field —
-    // if Claude's pick doesn't actually belong to this preset+engine
-    // combo's allowed set, clear it to null rather than let a bad value
-    // reach the frontend. A null here isn't a failure state: build-video-
-    // demo.html's defaultEndMotionForEngine already provides a safe
-    // (if generic) fallback for exactly this case.
-    if (entry.structure === "room_reveal" && entry.revealEndMotion) {
-      const allowed = endMotionsForEngine(entry.revealPreset, entry.revealEngine);
-      if (!allowed.includes(entry.revealEndMotion)) {
-        console.error(
-          `[AUTO-SELECT] Frame ${entry.frameId}: reveal end motion "${entry.revealEndMotion}" isn't valid for ${entry.revealPreset}/${entry.revealEngine} — clearing to let the frontend's generic default apply instead.`
-        );
-        entry.revealEndMotion = null;
-      }
-    }
-  }
-
-  return plan;
-}
-
-// ── AI MOTION POOL CAP ────────────────────────────────────────────────
-// Hard-enforces MAX_AUTO_SELECTED_AI_MOTION_FRAMES (or the real, smaller
-// pool balance) regardless of what the prompt asked for — same "don't
-// trust the model's compliance" posture as every other rule in this file.
-// Downgrades the LOWEST-confidence AI-motion picks first, preserving a
-// Room Reveal's identity/preset when downgrading it (just switches its
-// continuation engine to Ken Burns — the reveal story survives, only the
-// paid engine choice changes), and touches the two bookend positions
-// last, since an AI-motion bookend only exists via a deliberate, rare
-// exception (see BOOKEND RULE 2) and shouldn't be sacrificed before every
-// ordinary interior pick has already been tried.
-const CONFIDENCE_RANK = { "high": 3, "medium-high": 2, "medium": 1, "low": 0 };
-
-function usesAiMotion(entry) {
-  if (entry.structure === "room_reveal") return entry.revealEngine === "ltx";
-  return entry.engine === "kling" || entry.engine === "ltx";
-}
-
-function downgradeToKenBurns(entry) {
-  if (entry.structure === "room_reveal") {
-    entry.revealEngine = "ken_burns";
-    entry.revealEndMotion = null;
-  } else {
-    entry.engine = "ken_burns";
-    entry.klingMotionPreset = null;
-  }
-  entry.motionPreset = null;
-  entry.reasoning = (entry.reasoning ? entry.reasoning + " " : "") +
-    `(Downgraded to Ken Burns — the plan only includes automatic AI Motion for ${MAX_AUTO_SELECTED_AI_MOTION_FRAMES} frames per video, and this was not among the strongest picks once the pool balance was applied.)`;
-}
-
-function enforceAiMotionPoolCap(plan, cap) {
-  const aiMotionEntries = plan.filter(usesAiMotion);
-  if (aiMotionEntries.length <= cap) return plan; // already within budget, nothing to do
-
-  console.error(
-    `[AUTO-SELECT] Plan selected ${aiMotionEntries.length} AI Motion frames, over the cap of ${cap} — downgrading the lowest-confidence excess picks to Ken Burns.`
-  );
-
-  const isBookend = (entry) => entry === plan[0] || entry === plan[plan.length - 1];
-  const interior = aiMotionEntries.filter((e) => !isBookend(e));
-  const bookends = aiMotionEntries.filter(isBookend);
-
-  // Lowest confidence first within each group — interior picks are all
-  // fair game equally, sorted purely by how sure Claude was; bookends are
-  // a last resort, only touched if downgrading every interior pick still
-  // isn't enough (only possible when the pool balance itself is under 1).
-  const byConfidenceAscending = (a, b) => (CONFIDENCE_RANK[a.confidence] ?? 1) - (CONFIDENCE_RANK[b.confidence] ?? 1);
-  interior.sort(byConfidenceAscending);
-  bookends.sort(byConfidenceAscending);
-
-  let excess = aiMotionEntries.length - cap;
-  for (const entry of [...interior, ...bookends]) {
-    if (excess <= 0) break;
-    downgradeToKenBurns(entry);
-    excess--;
-  }
-
-  return plan;
-}
-
-
-// Maps a plan (from generateAutoSelection, or a user-edited version of one)
-// onto the EXACT frame fields renderPipeline.js's existing per-frame
-// dispatch already reads — useAiMotion, useRevealEffect, isBeforeAfter,
-// beforeLocalPath, revealPreset, revealEngine, klingMotionPreset,
-// ltxMotionPreset, motionPreset, roomLabel. Deliberately does NOT change
-// renderPipeline.js's dispatch logic itself (the if/else chain on
-// frame.useAiMotion / frame.useRevealEffect / frame.ltxMotionPreset stays
-// exactly as-is) — this function's whole job is populating those same
-// fields correctly ahead of time, whether they came from auto-selection or
-// from a user's manual override of specific frames.
-//
-// IMPORTANT: this also REORDERS the frames array into the plan's position
-// order. Order is part of what auto-selection decides (adjacency/grouping
-// constraints), so the plan's order must become the real frame order, not
-// just an annotation layered on top of whatever order frames arrived in.
-//
-// roomLabel mapping: plan.roomGroup becomes frame.roomLabel directly — that
-// field is narrationGen.js's actual grouping key (groupContiguousByRoom
-// merges strictly on `prior.roomLabel === roomLabel`), not just a display
-// name. Auto-selection's guarantee that same-roomGroup frames are placed
-// CONTIGUOUSLY is what makes this actually merge correctly downstream —
-// identical labels alone are not sufficient if the frames aren't adjacent.
-function applyAutoSelectionPlan(localFrames, plan) {
-  const frameById = new Map(localFrames.map((f) => [f.frameId, f]));
-
-  const ordered = plan.map((entry) => {
-    const frame = frameById.get(entry.frameId);
-    if (!frame) {
-      throw new Error(`applyAutoSelectionPlan: plan entry references unknown frameId "${entry.frameId}"`);
-    }
-
-    const updated = { ...frame, roomLabel: entry.roomGroup, groupOrder: entry.groupOrder ?? 0 };
-
-    if (entry.structure === "room_reveal") {
-      updated.useRevealEffect = true;
-      updated.isBeforeAfter = true;
-      updated.useAiMotion = false;
-      updated.ltxMotionPreset = undefined;
-      updated.klingMotionPreset = undefined;
-      updated.revealPreset = entry.revealPreset || "classic_reveal";
-      updated.revealEngine = entry.revealEngine === "ltx" ? "ltx" : "ken_burns";
-      // frame.endMotion intentionally left as whatever it already was (or
-      // unset) — renderPipeline.js's existing clamp/fallback
-      // (preset.allowedEndMotions.includes(...) → "push_in" fallback)
-      // already handles this; auto-selection doesn't pick a specific end
-      // motion within a reveal preset, only the continuation ENGINE.
-    } else {
-      updated.useRevealEffect = false;
-      if (entry.engine === "kling") {
-        updated.useAiMotion = true;
-        updated.ltxMotionPreset = undefined;
-        updated.klingMotionPreset = entry.klingMotionPreset || undefined; // undefined = generic known-pair fallback (Hero/Exterior Transformation)
-      } else if (entry.engine === "ltx") {
-        updated.useAiMotion = false;
-        updated.klingMotionPreset = undefined;
-        updated.ltxMotionPreset = entry.motionPreset || undefined;
-      } else {
-        // ken_burns
-        updated.useAiMotion = false;
-        updated.ltxMotionPreset = undefined;
-        updated.klingMotionPreset = undefined;
-        updated.motionPreset = entry.motionPreset || "auto";
-      }
-    }
-
-    return updated;
-  });
-
-  return ordered;
-}
-
-module.exports = {
-  generateAutoSelection,
-  enforceAutoSelectionRules,
-  enforceAiMotionPoolCap,
-  buildSystemPrompt,
-  applyAutoSelectionPlan,
+  // allowedEndMotions below therefore lists BOTH namespaces together —
+  // this is the full set of continuations this preset identity supports
+  // across either engine, not something shown all at once. The frontend
+  // filters to just the Ken-Burns-named entries or just the Kling-named
+  // entries depending on which engine tab is active (build-video-demo.html);
+  // renderPipeline.js dispatches on the actual chosen endMotion's
+  // namespace (KLING_MOTION_TEMPLATES[endMotion] existing means Kling),
+  // which naturally agrees with whatever the filtered UI could have sent.
+  classic_reveal: {
+    label: "Classic Reveal",
+    openerMotion: "soft_hold",
+    wipeTransition: "wipeleft",
+    allowedEndMotions: [
+      "push_in", "pull_back", "float_pull_back", "pan_left", "pan_right", "tilt_up", "tilt_down", "drift", "float", "luxury_parallax",
+      ...COMPOUND_END_MOTIONS,
+      "cinematic_push", "luxury_drift", "floating_camera_drift", "architectural_glide", "corner_to_corner_drift",
+      "orbit_arc", "rack_focus", "drone_boom_up", "crane_up", "crane_down", "parallax_push", "pan_zoom_reveal",
+      "living_room_ambient", "fireplace_flicker", "water_motion", "outdoor_breeze",
+    ],
+  },
+  luxury_drift: {
+    label: "Luxury Drift",
+    openerMotion: "soft_hold",
+    // "circleopen" reads as a center-out reveal rather than a directional
+    // wipe — matches the "elegant lateral drift" identity better than a
+    // hard-left wipe would.
+    wipeTransition: "circleopen",
+    allowedEndMotions: [
+      "drift", "float_pull_back", "pan_left", "pan_right", "float", "luxury_parallax",
+      ...COMPOUND_END_MOTIONS,
+      // Push-in-feeling motions (Ken Burns push_in/pull_back/tilt_up/
+      // tilt_down, Kling cinematic_push/rack_focus) deliberately excluded
+      // on both namespaces — this preset's identity is purely lateral.
+      // The 11 compounds above, and float_pull_back, are the deliberate
+      // exceptions (Sam's call) despite several containing a push phase.
+      "luxury_drift", "floating_camera_drift", "architectural_glide", "corner_to_corner_drift",
+      "orbit_arc", "drone_boom_up", "crane_up", "crane_down", "pan_zoom_reveal",
+      "living_room_ambient", "fireplace_flicker", "water_motion", "outdoor_breeze",
+    ],
+  },
+  cinematic_reveal: {
+    label: "Cinematic Reveal",
+    openerMotion: "restrained_push",
+    // "smoothleft" (softer falloff than wipeleft) to differentiate from
+    // Classic Reveal's harder wipe, and to match the gentler continuous-
+    // push feel of a restrained_push opener.
+    wipeTransition: "smoothleft",
+    allowedEndMotions: [
+      "push_in", "pull_back", "float_pull_back", "pan_left", "pan_right", "tilt_up", "tilt_down", "drift", "float", "luxury_parallax",
+      ...COMPOUND_END_MOTIONS,
+      "cinematic_push", "luxury_drift", "floating_camera_drift", "architectural_glide", "corner_to_corner_drift",
+      "orbit_arc", "rack_focus", "drone_boom_up", "crane_up", "crane_down", "parallax_push", "pan_zoom_reveal",
+      "living_room_ambient", "fireplace_flicker", "water_motion", "outdoor_breeze",
+    ],
+  },
 };
+
+// beforeClipPath is always a pre-rendered motionRenderer.py Ken Burns
+// clip, at REVEAL_OPENER_DURATION using the preset's openerMotion.
+// afterClipPath, at continuationDurationOverride (or
+// REVEAL_CONTINUATION_DURATION if omitted), is EITHER another
+// motionRenderer.py clip (Ken Burns continuation) OR a raw fal.ai Kling
+// download (AI Motion continuation, via klingMotion.js's
+// generateKlingRevealContinuation) — this function no longer assumes
+// which, since both are normalized to identical format internally before
+// the wipe (see the fix inside, Sep 11, 2026). This function ONLY does
+// the wipe compositing; it does not call motionRenderer.py or Kling
+// itself, so the caller (renderPipeline.js) controls exactly what source
+// images/clips and durations went into each phase.
+//
+// continuationDurationOverride (July 18, 2026) — lets renderPipeline.js's
+// intro/outro narration padding (+5s on the last clip) actually reach a
+// Reveal Preset's continuation phase. Without this, a padded reveal clip
+// silently rendered at the bare fixed duration anyway — confirmed as the
+// real cause of a narration cutoff on a real render (see renderPipeline.js's
+// padding-block comment for the full diagnosis). The xfade `offset` math
+// doesn't need to change for this — offset only depends on opener/wipe
+// durations, both still fixed, since it's measured from the start of the
+// FIRST input regardless of how long the second input's trimmed clip is.
+function buildRevealClip(beforeClipPath, afterClipPath, presetKey, workDir, outputName, continuationDurationOverride) {
+  return new Promise(async (resolve, reject) => {
+    const preset = REVEAL_PRESETS[presetKey];
+    if (!preset) {
+      reject(new Error(`buildRevealClip: unknown reveal preset "${presetKey}"`));
+      return;
+    }
+    const outputPath = path.join(workDir, outputName);
+    const continuationDuration = continuationDurationOverride || REVEAL_CONTINUATION_DURATION;
+
+    // FIX (Sep 11, 2026 — real render failure, confirmed from a live job's
+    // log: "Error reinitializing filters! / Failed to inject frame into
+    // filter network: Invalid argument"). This is the EXACT same crash
+    // signature normalizeClip's own header comment already diagnosed and
+    // fixed for concatenateClips()/xfadeChain() on July 14, 2026 — xfade
+    // requires every pair of inputs it chains to share resolution, frame
+    // rate, and pixel format, and this function's xfade call below never
+    // enforced that. It went unnoticed here specifically because until
+    // today's full Kling revert, this function's afterClipPath was always
+    // either a motionRenderer.py Ken Burns clip (same format as
+    // beforeClipPath by construction) or an LTX-generated clip that
+    // apparently happened to come back at a compatible format. Kling's
+    // raw fal.ai output does not — same root cause as the July 14 crash,
+    // just reappearing in a code path that was never given the fix that
+    // already exists elsewhere in this same file.
+    //
+    // Reuses normalizeClip() directly rather than re-deriving a second
+    // copy of the same scale/pad/fps/pixel-format logic — same "don't
+    // duplicate what already exists" principle this codebase repeats
+    // throughout. Named indices (not plain numbers) since workDir is
+    // shared across every frame AND with concatenateClips()'s own
+    // normalizeClip(clip, workDir, i) calls on the SAME job — a numeric
+    // index here could silently collide with and overwrite an unrelated
+    // clip's normalized output from elsewhere in the same render.
+    const baseName = path.basename(outputName, path.extname(outputName));
+    let normalizedBefore, normalizedAfter;
+    try {
+      [normalizedBefore, normalizedAfter] = await Promise.all([
+        normalizeClip(beforeClipPath, workDir, `${baseName}_reveal_opener`),
+        normalizeClip(afterClipPath, workDir, `${baseName}_reveal_continuation`),
+      ]);
+    } catch (err) {
+      reject(new Error(`Reveal Preset "${presetKey}" clip normalization failed before the wipe could even run: ${err.message}`));
+      return;
+    }
+
+    // xfade's `offset` is measured from the start of the FIRST input and
+    // marks where the crossfade begins — so offset = openerDuration - wipeDuration
+    // means the crossfade starts wipeDuration seconds before the opener
+    // clip ends, and finishes exactly as the opener clip's trimmed length
+    // runs out. Total output duration = openerDuration + continuationDuration - wipeDuration
+    // (the wipe is time SHARED between the two phases, not added on top).
+    const offset = REVEAL_OPENER_DURATION - REVEAL_WIPE_DURATION;
+
+    ffmpeg()
+      .input(normalizedBefore)
+      .input(normalizedAfter)
+      .complexFilter([
+        `[0:v]trim=duration=${REVEAL_OPENER_DURATION},setpts=PTS-STARTPTS[opener]`,
+        `[1:v]trim=duration=${continuationDuration},setpts=PTS-STARTPTS[continuation]`,
+        `[opener][continuation]xfade=transition=${preset.wipeTransition}:duration=${REVEAL_WIPE_DURATION}:offset=${offset}[out]`,
+      ])
+      .outputOptions(["-map", "[out]", "-pix_fmt", "yuv420p"])
+      .output(outputPath)
+      .on("end", () => resolve(outputPath))
+      .on("error", (err) => reject(new Error(`Reveal Preset "${presetKey}" wipe failed: ${err.message}`)))
+      .run();
+  });
+}
+
+// ── MIX AUDIO — music + optional narration segments ────────────────────
+//
+// CHANGE (July 14, 2026 — footage-grounded narration rebuild): REPLACES
+// the single continuous narrationPath model. Narration is now generated
+// as separate segments, one per room/clip, each with its own real start
+// time in the final timeline (computed via computeClipTimeline — see its
+// header comment). Each segment gets adelay'd to its real position, all
+// segments are mixed together into one combined narration stream, THEN
+// that combined stream goes through the same sidechain-ducking-against-
+// music approach as before. narrationSegments is an array of
+// { audioPath, startTime } — empty/absent means music-only, same as the
+// old narrationPath being absent.
+//
+// knownVideoDuration (new, July 17, 2026): assembleVideo now computes the
+// real final duration from known values (see its header comment for the
+// full race-condition reasoning) and passes it here explicitly, rather
+// than this function re-probing videoPath itself via ffprobe on a file
+// that may have just been written moments earlier. Falls back to probing
+// if omitted, so this stays safe to call directly (e.g. future tooling,
+// tests) without always needing a caller to compute it first.
+
+function mixAudio(videoPath, musicPath, workDir, narrationSegments, knownVideoDuration) {
+  return new Promise(async (resolve, reject) => {
+    try {
+      const outputPath = path.join(workDir, "with_music.mp4");
+      const videoDuration = knownVideoDuration != null ? knownVideoDuration : await probeDuration(videoPath);
+      const musicDuration = await probeDuration(musicPath);
+      const fadeOutStart = Math.max(0, videoDuration - 1.5);
+      const hasNarration = narrationSegments && narrationSegments.length > 0;
+
+      // FIX (July 17, 2026 — third attempt at the same underlying bug):
+      // music_fitted.mp3 is shorter than the real final videoDuration
+      // (closing card + real per-clip duration variance both add time
+      // AFTER music is generated in renderPipeline.js Step 2), so it
+      // needs to be extended to cover the whole video. Two prior attempts
+      // both failed on real renders: the `aloop` FILTER mishandles a
+      // partial final loop on compressed audio; `-stream_loop` on the
+      // INPUT then also produced dead silence on a real test — and
+      // musicGen.js confirms music_fitted.mp3 has no baked-in silence at
+      // all (fitTrackToDuration always loops+trims to a fully-packed
+      // file), which rules out the "silent tail" theory the second fix
+      // was chasing. Root cause of the stream_loop failure is unconfirmed
+      // (possibly a version-specific quirk combining -stream_loop with
+      // -filter_complex on this container's ffmpeg build), but rather
+      // than debug that further, this switches to plain `concat` —
+      // the exact same filter xfadeChain already uses reliably for every
+      // clip transition in this codebase all session. The music file is
+      // added as N separate inputs (enough copies to cover videoDuration)
+      // and concatenated explicitly in the filtergraph, then atrim cuts
+      // it to the exact needed length. No input-level looping involved.
+      const musicCopies = Math.max(1, Math.ceil(videoDuration / musicDuration));
+
+      const command = ffmpeg().input(videoPath);
+      for (let i = 0; i < musicCopies; i++) {
+        command.input(musicPath);
+      }
+      // Music occupies input indices 1..musicCopies; narration (if any)
+      // starts right after.
+      const narrationStartIndex = 1 + musicCopies;
+
+      let filterParts;
+      const musicInputLabels = [];
+      for (let i = 0; i < musicCopies; i++) {
+        musicInputLabels.push(`[${i + 1}:a]`);
+      }
+      // Single copy needs no concat at all — just alias it directly so
+      // the rest of the graph can always reference [music_looped]
+      // uniformly regardless of how many copies were needed.
+      const musicLoopedFilter =
+        musicCopies === 1
+          ? `[1:a]anull[music_looped]`
+          : `${musicInputLabels.join("")}concat=n=${musicCopies}:v=0:a=1[music_looped]`;
+
+      if (hasNarration) {
+        narrationSegments.forEach((seg) => command.input(seg.audioPath));
+
+        filterParts = [
+          musicLoopedFilter,
+          // FIX #2 (Sam's feedback, real render — still too loud): 0.35
+          // wasn't enough headroom. Dropping further to 0.2, and
+          // tightening the sidechain ducking itself (lower threshold =
+          // engages more easily, higher ratio = ducks harder once
+          // engaged) so music is genuinely a soft bed under narration,
+          // not competing with it.
+          `[music_looped]atrim=0:${videoDuration.toFixed(2)},asetpts=PTS-STARTPTS,afade=t=in:st=0:d=1,afade=t=out:st=${fadeOutStart.toFixed(2)}:d=1.5,volume=0.35[music_faded]`,
+        ];
+
+        // Each segment: fade in/out on its OWN local timeline (0..its own
+        // duration), THEN adelay shifts the whole faded clip to its real
+        // position in the final video. Order matters — afade's st= values
+        // are relative to the stream's own start, so they have to be
+        // applied before the stream gets shifted forward.
+        //
+        // NEW (July 14, 2026 — Sam's speed-correction suggestion): each
+        // segment is ALSO hard-capped (atrim) at the real gap before the
+        // next segment starts. narrationGen.js already corrects for this
+        // by regenerating a too-long segment at a faster ElevenLabs
+        // `speed` — but that correction is clamped to ElevenLabs' real
+        // 0.7–1.2 range, so a segment whose natural length wildly exceeds
+        // its window even at max speed could still theoretically overrun.
+        // This is the backstop that guarantees no audible overlap between
+        // adjacent room narrations regardless — defense in depth, not the
+        // primary fix.
+        const delayedLabels = [];
+        narrationSegments.forEach((seg, i) => {
+          const inputIndex = narrationStartIndex + i; // 0=video, 1..musicCopies=music, rest=narration segments
+          const delayMs = Math.round(seg.startTime * 1000);
+          const label = `narr_${i}`;
+          const nextSeg = narrationSegments[i + 1];
+          const capDuration = nextSeg ? Math.max(0.1, nextSeg.startTime - seg.startTime) : seg.duration;
+          const fadeOutAt = Math.max(0, Math.min(seg.duration, capDuration) - 0.4);
+          filterParts.push(
+            `[${inputIndex}:a]afade=t=in:st=0:d=0.3,atrim=end=${capDuration.toFixed(2)},afade=t=out:st=${fadeOutAt.toFixed(2)}:d=0.4,adelay=${delayMs}|${delayMs}[${label}]`
+          );
+          delayedLabels.push(`[${label}]`);
+        });
+
+        // Combine all per-room segments onto the shared timeline into one
+        // narration stream — each already sits at its correct offset via
+        // adelay above, so amix here is just summing them, not blending
+        // overlapping speech (segments shouldn't overlap in practice,
+        // since they're spaced by real, non-overlapping clip positions).
+        filterParts.push(
+          `${delayedLabels.join("")}amix=inputs=${narrationSegments.length}:duration=longest:dropout_transition=0[narration_mixed]`
+        );
+
+        // FIX #4 (Sam's feedback, real render — "narration is barely
+        // heard" after the loudnorm-removal fix): removing loudnorm from
+        // the COMBINED mix was correct — it was undoing the music
+        // balance work. But that also removed the only thing that was
+        // guaranteeing narration ITSELF sat at a strong, consistent
+        // level regardless of what ElevenLabs happened to output raw.
+        // With nothing boosting narration up, the whole mix could end up
+        // too quiet overall even with music correctly balanced under it.
+        // Normalizing HERE — narration alone, before it ever touches
+        // music — fixes that without reintroducing the original bug:
+        // this loudnorm only ever sees narration, so it has no way to
+        // rebalance music back up the way normalizing the combined mix
+        // did.
+        filterParts.push(`[narration_mixed]loudnorm=I=-16:TP=-1.5:LRA=11[narration_all]`);
+
+        // Defensive cap — same reasoning as the single-track version this
+        // replaces: even with real per-clip timestamps, guarantee nothing
+        // plays into the final buffer before the video ends.
+        //
+        // FIX (July 18, 2026 — real render, Sam's report: "music stops
+        // with narration, and there's still 2s of dead space"): this used
+        // to atrim+asplit WITHOUT padding, then rely on the final
+        // amix=duration=longest below to extend the mix out to match
+        // music_ducked's full length. In practice, amix's duration=longest
+        // isn't reliably extending past the point where the SHORTER input
+        // (this narration stream, intentionally short by narrationEndCap)
+        // ends — a known real-world FFmpeg quirk, not just a theoretical
+        // one. The old apad(whole_dur=videoDuration) at the very end of
+        // this function (see below) was padding the ALREADY-truncated
+        // mix out to the right total length — with silence, not
+        // continued music, since by then the real music content inside
+        // the mix was already gone. That's exactly the reported bug:
+        // music dying early, then dead air filling the rest, instead of
+        // narration-free music genuinely continuing through the reserved
+        // end buffer. Padding narration to the FULL videoDuration HERE —
+        // before it ever reaches sidechaincompress or the final amix —
+        // makes both audio streams provably the same length going in, so
+        // neither filter's own duration-matching behavior can truncate
+        // anything early regardless of how reliable that behavior is.
+        const narrationEndCap = Math.max(0, videoDuration - NARRATION_END_BUFFER_SECONDS);
+        filterParts.push(`[narration_all]atrim=end=${narrationEndCap.toFixed(2)},apad=whole_dur=${videoDuration.toFixed(2)},asplit=2[narration_for_sidechain][narration_for_mix]`);
+
+        filterParts.push(
+          `[music_faded][narration_for_sidechain]sidechaincompress=threshold=0.03:ratio=10:attack=5:release=300[music_ducked]`,
+          `[music_ducked][narration_for_mix]amix=inputs=2:duration=longest:dropout_transition=2[premix]`,
+          // FIX #3 (Sam's feedback, real render — still no noticeable
+          // volume change despite two real upstream fixes): loudnorm
+          // here was normalizing the COMBINED mix's overall integrated
+          // loudness to -16 LUFS, with zero awareness of the internal
+          // music/narration balance everything upstream was carefully
+          // tuning. If hitting that target meant boosting music's
+          // relative contribution back up, loudnorm would do exactly
+          // that — silently undoing the volume=0.2 + sidechain ducking
+          // work above. Replaced with alimiter, which only prevents
+          // clipping (a safety ceiling) and does nothing to re-balance
+          // the mix — so the upstream tuning actually survives to the
+          // final output now.
+          `[premix]alimiter=limit=0.95[audio_out]`,
+        );
+      } else {
+        filterParts = [
+          musicLoopedFilter,
+          // Same concat-based extension as the narration branch above —
+          // music needs to cover the real full videoDuration (including
+          // any closing card), not just its own original fitted length.
+          `[music_looped]atrim=0:${videoDuration.toFixed(2)},asetpts=PTS-STARTPTS,afade=t=in:st=0:d=1,afade=t=out:st=${fadeOutStart.toFixed(2)}:d=1.5,volume=0.6[music_faded]`,
+          `[music_faded]loudnorm=I=-16:TP=-1.5:LRA=11[audio_out]`,
+        ];
+      }
+
+      // FIX (July 17, 2026 — real render, closing card silently truncated):
+      // videoPath here is probed AFTER assembleVideo's optional closing-card
+      // step, so videoDuration already reflects the full video INCLUDING the
+      // appended card. But [audio_out] above (music via amix duration=longest,
+      // or narration) only ever spans the ORIGINAL clip timeline — music's own
+      // length comes from generateMusic({durationSeconds: totalDuration}) back
+      // in renderPipeline.js Step 2, computed before the closing card exists,
+      // and narration never extends past its own last segment + buffer either.
+      // The old "-shortest" output flag then truncated the OUTPUT to whichever
+      // mapped stream was shorter — which was always the audio, landing almost
+      // exactly at the end of narration/buffer and silently cutting off the
+      // entire closing card that had already rendered fine on the video track.
+      // Explicitly padding audio with silence out to the real video duration
+      // means -shortest (kept below as a defensive rounding backstop, not the
+      // active truncation mechanism) has nothing left to cut.
+      filterParts.push(`[audio_out]apad=whole_dur=${videoDuration.toFixed(2)}[audio_out_padded]`);
+
+      command
+        .complexFilter(filterParts)
+        .outputOptions(["-map", "0:v", "-map", "[audio_out_padded]", "-c:v", "copy", "-c:a", "aac", "-shortest"])
+        .output(outputPath)
+        .on("end", () => resolve(outputPath))
+        .on("error", (err) => reject(new Error(`Audio mix failed: ${err.message}`)))
+        .run();
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+
+// ── RENDER FORMAT (16:9 master, 9:16 reframe) ────────────────────────────
+
+function renderFormat(inputPath, dimensions, workDir, outputName) {
+  return new Promise((resolve, reject) => {
+    const outputPath = path.join(workDir, outputName);
+    const [w, h] = dimensions.split("x");
+
+    // 9:16 reframe crops to center — smart subject-aware cropping is a
+    // Phase 2B refinement; center crop is the correct safe default for v1.
+    const filter =
+      dimensions === "1080x1920"
+        ? `crop=ih*9/16:ih,scale=${w}:${h}`
+        : `scale=${w}:${h}:force_original_aspect_ratio=decrease,pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2`;
+
+    ffmpeg(inputPath)
+      .videoFilters(filter)
+      .outputOptions(["-c:a", "copy", "-movflags", "+faststart"])
+      .output(outputPath)
+      .on("end", () => resolve(outputPath))
+      .on("error", (err) => reject(new Error(`Format render failed (${dimensions}): ${err.message}`)))
+      .run();
+  });
+}
+
+// ── ENTRY POINT ────────────────────────────────────────────────────────
+
+// ── CLOSING CARD (Sam's idea, built July 15, 2026) ──────────────────────
+// Text fades in the instant narration's LAST spoken word actually ends
+// (not the clip's nominal duration — the real, possibly speed-corrected
+// end timestamp, passed in from renderPipeline.js), holds through the
+// video's own natural tail. That tail already exists by design: mixAudio
+// reserves NARRATION_END_BUFFER_SECONDS (2s) of narration-free video at
+// the very end specifically so speech never gets cut off by the video
+// ending — this reuses that exact same reserved window rather than
+// adding new video length on top of it.
+//
+// Background is the LAST frame's real source still (not a video-
+// extracted frame) at reduced opacity, overlaid on whatever's already
+// playing at that point in the timeline (the tail of the last clip's own
+// motion) rather than a hard cut to a static image — reads as the shot
+// settling into a closing card, not an abrupt swap.
+//
+// Gracefully skipped (returns the input path unchanged) if timing
+// doesn't make sense — e.g. narration ran long enough that there's no
+// real tail left to show a card in. A closing card is a nice-to-have;
+// it should never be the reason a render fails.
+function escapeDrawtext(text) {
+  // ffmpeg drawtext treats \ : ' as filter-syntax-significant — escape
+  // them so an address with an apostrophe or a colon doesn't break the
+  // filter graph or get silently mangled.
+  return text.replace(/\\/g, "\\\\\\\\").replace(/:/g, "\\:").replace(/'/g, "\u2019");
+}
+
+// ── CLOSING CARD (Sam's idea, rebuilt July 16, 2026; revived + restyled
+// this session) ─────────────────────────────────────────────────────
+// REPLACES the live-overlay version entirely, which hung THREE separate
+// times despite three different targeted fixes (duration cap, font
+// family, no font at all) — the last fix (removing the font parameter)
+// still hung with total silence for the full 60s timeout, which rules
+// out font as the cause and points at something structural in blending
+// a looped image live with ongoing video via overlay.
+//
+// New approach: render the closing card as its own small, completely
+// standalone clip — a single still image, no loop-duration ambiguity, no
+// second video stream to reconcile via overlay/shortest — using the same
+// kind of simple one-input render every normal clip in this pipeline
+// already does successfully. Then APPEND it using xfadeChain, the exact
+// same proven concatenation machinery that's handled every other
+// transition in this video without issue all session. Reuses working
+// code instead of patching the same fragile filter graph a fourth time.
+//
+// REVIVED (this session): this whole system existed and even had
+// assembleVideo's own call-site logic ready, but was never actually
+// invoked — renderPipeline.js never passed a closingCard object in. Now
+// it is (see renderPipeline.js Step 4), using the actual last room
+// photo as the background instead of a placeholder.
+//
+// RESTYLED (this session, Sam's explicit ask): was a flat whole-frame
+// darken (eq=brightness=-0.28) — replaced with a real stacked-band
+// gradient (see buildGradientBandFilters) so the photo reads through
+// clearly outside the text band instead of the entire frame dimming.
+// Text color is now configurable (END_FRAME_TEXT_COLOR), not hardcoded
+// white. Duration cut from 4.0s to 2.5s per Sam's "2-3s max."
+const CLOSING_CARD_DURATION_SECONDS = 2.5;
+const CLOSING_CARD_FADE_SECONDS = 0.5;
+const CLOSING_CARD_TEXT_COLOR = process.env.END_FRAME_TEXT_COLOR || "white";
+const CLOSING_CARD_GRADIENT_STEPS = 16;
+const CLOSING_CARD_GRADIENT_PEAK_ALPHA = 0.55;
+const CLOSING_CARD_BAND_Y_START_FRAC = 0.35;
+const CLOSING_CARD_BAND_HEIGHT_FRAC = 0.30;
+
+// Same stacked-band soft-fade approach as endFrame.js's overlay builder —
+// ffmpeg has no simple single-filter "soft gradient box," and N thin
+// bands with a half-cosine alpha curve is a plain, well-understood
+// primitive rather than a fragile geq expression. Kept local to this
+// function (not imported from endFrame.js) since this file has no
+// dependency on that one and the two are simple enough not to warrant a
+// shared module for four lines of math.
+function buildCardGradientFilters(bandY, bandH, inputLabel) {
+  const filters = [];
+  let prevLabel = inputLabel;
+  for (let i = 0; i < CLOSING_CARD_GRADIENT_STEPS; i++) {
+    const sliceY = bandY + Math.round((bandH * i) / CLOSING_CARD_GRADIENT_STEPS);
+    const sliceH = Math.ceil(bandH / CLOSING_CARD_GRADIENT_STEPS) + 1;
+    const posInBand = (i + 0.5) / CLOSING_CARD_GRADIENT_STEPS;
+    const alpha = (CLOSING_CARD_GRADIENT_PEAK_ALPHA * (1 - Math.cos(posInBand * Math.PI * 2))) / 2;
+    const alphaClamped = Math.max(0, Math.min(CLOSING_CARD_GRADIENT_PEAK_ALPHA, alpha)).toFixed(3);
+    const outLabel = `cg${i}`;
+    filters.push(`[${prevLabel}]drawbox=x=0:y=${sliceY}:w=1920:h=${sliceH}:color=black@${alphaClamped}:t=fill[${outLabel}]`);
+    prevLabel = outLabel;
+  }
+  return { filters, outLabel: prevLabel };
+}
+
+function renderClosingCardClip(stillImagePath, addressLine, ctaLine, workDir, fps) {
+  return new Promise((resolve, reject) => {
+    const outputPath = path.join(workDir, "closing_card.mp4");
+    const command = ffmpeg()
+      .input(stillImagePath)
+      // Single input, fixed finite duration from the start — no second
+      // stream, no "shortest" semantics to get wrong. This is the same
+      // -loop 1 -t pattern that already works correctly everywhere else
+      // in this codebase; the old version's bug was never this pattern
+      // itself, it was combining it with a live overlay onto a SECOND,
+      // independently-timed video stream.
+      .inputOptions(["-loop", "1", "-t", CLOSING_CARD_DURATION_SECONDS.toFixed(2)]);
+
+    // Text fades in over the first CLOSING_CARD_FADE_SECONDS of this
+    // card's own timeline, then holds for the rest — no dependency on
+    // narration timing at all anymore, since the card only ever starts
+    // after the main video (narration + its buffer) has already ended.
+    const alphaExpr = `min(1,t/${CLOSING_CARD_FADE_SECONDS})`;
+    const bandY = Math.round(1080 * CLOSING_CARD_BAND_Y_START_FRAC);
+    const bandH = Math.round(1080 * CLOSING_CARD_BAND_HEIGHT_FRAC);
+
+    // scale+crop handles native-resolution source photos correctly
+    // regardless of their real dimensions (this part was already right
+    // in the original build) — the fix this session is everything after
+    // it: a real gradient instead of a flat darken.
+    const { filters: gradientFilters, outLabel: gradientOut } = buildCardGradientFilters(bandY, bandH, "scaled");
+    const filterParts = [
+      `[0:v]scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080[scaled]`,
+      ...gradientFilters,
+    ];
+
+    // FIX (July 17, 2026 — real render, first card ever seen on screen):
+    // was one drawtext with address + CTA jammed into a single line at a
+    // single fontsize (54) — Sam's real screenshot showed it cramped and
+    // hard to read. drawtext doesn't handle multi-line text reliably in
+    // one call, so this is two separate stacked drawtext filters instead:
+    // address (if present) smaller, above center; CTA larger, below
+    // center — CTA is the action we actually want taken, so it gets the
+    // visual weight. Degrades gracefully to a single centered CTA line
+    // (old single-line layout) when there's no address at all.
+    if (addressLine) {
+      filterParts.push(
+        `[${gradientOut}]drawtext=text='${escapeDrawtext(addressLine)}':fontcolor=${CLOSING_CARD_TEXT_COLOR}:fontsize=42:borderw=2:bordercolor=black@0.6:x=(w-text_w)/2:y=(h/2)-60:alpha='${alphaExpr}'[with_addr]`,
+        `[with_addr]drawtext=text='${escapeDrawtext(ctaLine)}':fontcolor=${CLOSING_CARD_TEXT_COLOR}:fontsize=68:borderw=3:bordercolor=black@0.6:x=(w-text_w)/2:y=(h/2)+10:alpha='${alphaExpr}'[outv]`
+      );
+    } else {
+      filterParts.push(
+        `[${gradientOut}]drawtext=text='${escapeDrawtext(ctaLine)}':fontcolor=${CLOSING_CARD_TEXT_COLOR}:fontsize=68:borderw=3:bordercolor=black@0.6:x=(w-text_w)/2:y=(h-text_h)/2:alpha='${alphaExpr}'[outv]`
+      );
+    }
+
+    // Standalone single-image render — much simpler than the old
+    // overlay version, so 30s is generous rather than needing the full
+    // 60s the old, more complex filter graph was given.
+    const CLOSING_CARD_TIMEOUT_MS = 30000;
+    let settled = false;
+    const timeoutHandle = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      console.warn(`[renderClosingCardClip] TIMEOUT after ${CLOSING_CARD_TIMEOUT_MS}ms — killing process, proceeding without closing card.`);
+      try { command.kill("SIGKILL"); } catch (err) { /* best-effort */ }
+      reject(new Error("Closing card render timed out"));
+    }, CLOSING_CARD_TIMEOUT_MS);
+
+    command
+      .complexFilter(filterParts)
+      .outputOptions(["-map", "[outv]", "-r", fps.toFixed(3), "-pix_fmt", "yuv420p"])
+      .output(outputPath)
+      .on("end", () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutHandle);
+        resolve(outputPath);
+      })
+      .on("error", (err) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutHandle);
+        reject(new Error(`Closing card render failed: ${err.message}`));
+      })
+      .run();
+  });
+}
+
+// ── CLOSING CARD AUDIO (decoupled from the main mix, July 17, 2026) ──────
+// REPLACES four straight failed attempts to extend/loop the MAIN mix's
+// audio to cover the card (aloop filter, -stream_loop input, multi-input
+// concat loop, then an analytically-computed duration to dodge a probe
+// race) — each change produced literally no observable difference across
+// real tests, and Sam confirmed the deciding fact: the card audio/music
+// was fine BEFORE the closing card existed at all; adding the card is
+// what broke the LAST MOTION CLIP's own audio, not just the card's.
+// That means the bug was never really about which looping technique
+// extends the audio, or which duration number targets it — it's that
+// folding the card into the SAME big mixAudio filter graph as a moving
+// target kept perturbing something in a working system. Rather than
+// hunt for a fifth fix inside that shared graph, this decouples the two
+// concerns entirely: mixAudio runs on the ORIGINAL video only, exactly
+// as it did before the closing card existed (zero behavior change to the
+// part that was already proven working) — then the card gets appended
+// afterward, in total isolation, with its own small independent music
+// stinger rather than being threaded through the main mix's timing math
+// at all. Costs a slightly-less-than-perfectly-continuous fade across
+// the boundary (main mix's own natural fade-out, then a fresh fade-in on
+// the stinger) in exchange for the main video's audio being structurally
+// unable to regress from the card's presence ever again.
+const CARD_AUDIO_FADE_IN_SECONDS = 0.6;
+const CARD_AUDIO_FADE_OUT_SECONDS = 1.2;
+const CARD_AUDIO_VOLUME = 0.3;
+
+function buildCardAudioStinger(musicPath, workDir) {
+  return new Promise((resolve, reject) => {
+    const outputPath = path.join(workDir, "card_audio.mp3");
+    ffmpeg(musicPath)
+      .setDuration(CLOSING_CARD_DURATION_SECONDS)
+      .audioFilters([
+        `afade=t=in:st=0:d=${CARD_AUDIO_FADE_IN_SECONDS}`,
+        `afade=t=out:st=${(CLOSING_CARD_DURATION_SECONDS - CARD_AUDIO_FADE_OUT_SECONDS).toFixed(2)}:d=${CARD_AUDIO_FADE_OUT_SECONDS}`,
+        `volume=${CARD_AUDIO_VOLUME}`,
+      ])
+      .audioCodec("libmp3lame")
+      .output(outputPath)
+      .on("end", () => resolve(outputPath))
+      .on("error", (err) => reject(new Error(`Card audio stinger failed: ${err.message}`)))
+      .run();
+  });
+}
+
+// mainPath already has final mixed audio (music + narration) muxed in —
+// this appends the visual card via the same proven xfade transition, and
+// concats the card's own short stinger onto the end of the main audio
+// track. No dependency on the main track's internal duration/fade math
+// at all; the two audio pieces are simply placed back to back.
+function appendClosingCardWithAudio(mainPath, closingCard, musicPath, workDir) {
+  return new Promise(async (resolve, reject) => {
+    try {
+      const outputPath = path.join(workDir, "with_closing_card.mp4");
+      const mainDuration = await probeDuration(mainPath);
+      const fps = await probeFps(mainPath);
+      const cardPath = await renderClosingCardClip(closingCard.stillImagePath, closingCard.addressLine, closingCard.ctaLine, workDir, fps);
+      const cardAudioPath = await buildCardAudioStinger(musicPath, workDir);
+
+      const command = ffmpeg().input(mainPath).input(cardPath).input(cardAudioPath);
+      const xfadeOffset = Math.max(0, mainDuration - CROSSFADE_DURATION);
+      const filterParts = [
+        `[0:v][1:v]xfade=transition=fade:duration=${CROSSFADE_DURATION}:offset=${xfadeOffset.toFixed(2)}[outv]`,
+        `[0:a][2:a]concat=n=2:v=0:a=1[outa]`,
+      ];
+
+      const CARD_APPEND_TIMEOUT_MS = 60000;
+      let settled = false;
+      const timeoutHandle = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        console.warn(`[appendClosingCardWithAudio] TIMEOUT after ${CARD_APPEND_TIMEOUT_MS}ms — killing process, proceeding without closing card.`);
+        try { command.kill("SIGKILL"); } catch (err) { /* best-effort */ }
+        reject(new Error("Closing card append timed out"));
+      }, CARD_APPEND_TIMEOUT_MS);
+
+      command
+        .complexFilter(filterParts)
+        .outputOptions(["-map", "[outv]", "-map", "[outa]", "-c:v", "libx264", "-c:a", "aac", "-pix_fmt", "yuv420p"])
+        .output(outputPath)
+        .on("end", () => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeoutHandle);
+          resolve(outputPath);
+        })
+        .on("error", (err) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeoutHandle);
+          reject(new Error(`Closing card append failed: ${err.message}`));
+        })
+        .run();
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+
+async function assembleVideo({ clipPaths, musicPath, narrationSegments, formats, workDir, closingCard }) {
+  let concatenated = await concatenateClips(clipPaths, workDir);
+
+  // CHANGE (July 17, 2026 — see appendClosingCardWithAudio's header
+  // comment above for the full reasoning): mixAudio now runs on the
+  // ORIGINAL video only, exactly as it did before the closing card ever
+  // existed — no card-extended duration threaded through it, no special
+  // casing here at all. This is a deliberate return to the last known-
+  // good state for the main video's audio.
+  let withMusic = await mixAudio(concatenated, musicPath, workDir, narrationSegments || []);
+
+  // Closing card is appended AFTER audio mixing now, as a fully separate,
+  // isolated step with its own independent audio stinger — see
+  // appendClosingCardWithAudio's header comment for why. Wrapped in
+  // try/catch: a closing card is a nice-to-have, never the reason a
+  // render fails.
+  // FIXED (August 2026 — real bug found via a real render: end frame +
+  // music fade silently never appeared on a narration-off render, with no
+  // log line explaining why). This used to also require
+  // `narrationSegments && narrationSegments.length > 0` — but
+  // appendClosingCardWithAudio (above) never actually reads
+  // narrationSegments at all; it works purely off mainPath's already-
+  // mixed audio (narration or not) and musicPath for its own independent
+  // stinger. The narration check was an unnecessary, incorrect gate — the
+  // closing card and its music fade should appear whenever the flag/
+  // address/frame checks upstream in renderPipeline.js already passed,
+  // regardless of whether narration happens to be on for this render.
+  if (closingCard) {
+    try {
+      console.log("[assembleVideo] Appending closing card with music stinger...");
+      withMusic = await appendClosingCardWithAudio(withMusic, closingCard, musicPath, workDir);
+    } catch (err) {
+      console.warn(`Closing card skipped (non-fatal, video proceeds without it): ${err.message}`);
+    }
+  }
+
+  const outputs = {};
+
+  if (formats.includes("16x9")) {
+    outputs["16x9"] = await renderFormat(withMusic, "1920x1080", workDir, "output_16x9.mp4");
+  }
+  if (formats.includes("9x16")) {
+    outputs["9x16"] = await renderFormat(withMusic, "1080x1920", workDir, "output_9x16.mp4");
+  }
+
+  return outputs;
+}
+
+module.exports = { assembleVideo, buildRevealClip, REVEAL_PRESETS, REVEAL_OPENER_DURATION, REVEAL_WIPE_DURATION, REVEAL_CONTINUATION_DURATION, concatenateClips, mixAudio, renderFormat, computeClipTimeline, extractMidpointFrame, probeDuration, mapWithConcurrencyLimit, FFMPEG_CONCURRENCY_LIMIT, NARRATION_END_BUFFER_SECONDS };

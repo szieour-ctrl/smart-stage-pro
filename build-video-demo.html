@@ -454,6 +454,22 @@ const PREVIEW_CLIP_URLS = {
   pan_zoom:         `${MOTION_PREVIEW_BASE}/pan_zoom.mp4`,
   soft_hold:        `${MOTION_PREVIEW_BASE}/soft_hold.mp4`,
   restrained_push:  `${MOTION_PREVIEW_BASE}/restrained_push.mp4`,
+  // Compound Ken Burns presets (added [DATE]) — promoted from R&D.
+  // These filenames don't exist in the S3 bucket yet; upload them (same
+  // smart-stage-motion-previews/ prefix, same naming convention as every
+  // other key above) before this ships, or the dropdown will show a
+  // broken preview for all 11.
+  soft_push_float_push:            `${MOTION_PREVIEW_BASE}/soft_push_float_push.mp4`,
+  soft_push_float_diagonal:        `${MOTION_PREVIEW_BASE}/soft_push_float_diagonal.mp4`,
+  soft_push_float_push_diagonal:   `${MOTION_PREVIEW_BASE}/soft_push_float_push_diagonal.mp4`,
+  soft_push_float_gentle_diagonal: `${MOTION_PREVIEW_BASE}/soft_push_float_gentle_diagonal.mp4`,
+  soft_push_float_strong_push:     `${MOTION_PREVIEW_BASE}/soft_push_float_strong_push.mp4`,
+  push_tilt_up:     `${MOTION_PREVIEW_BASE}/push_tilt_up.mp4`,
+  push_tilt_down:   `${MOTION_PREVIEW_BASE}/push_tilt_down.mp4`,
+  push_pan_left:    `${MOTION_PREVIEW_BASE}/push_pan_left.mp4`,
+  push_pan_right:   `${MOTION_PREVIEW_BASE}/push_pan_right.mp4`,
+  pan_left_push:    `${MOTION_PREVIEW_BASE}/pan_left_push.mp4`,
+  pan_right_push:   `${MOTION_PREVIEW_BASE}/pan_right_push.mp4`,
 };
 
 const KEN_BURNS_PRESETS = {
@@ -486,6 +502,22 @@ const KEN_BURNS_PRESETS = {
   pan_zoom: { label: "Pan Zoom", desc: "Combined lateral pan with a gentle zoom — more dynamic than a plain pan." },
   soft_hold: { label: "Soft Hold", desc: "Minimal, restrained motion with a slow settle — used as the Classic and Luxury Reveal opener." },
   restrained_push: { label: "Restrained Push", desc: "A gentle, controlled push-in — used as the Cinematic Reveal opener." },
+  // Compound Ken Burns presets (added [DATE]) — promoted from R&D. Reserved
+  // for Open Plan/hero-tier rooms; a plain atomic move is the better
+  // choice for secondary bedrooms, secondary bathrooms, and utility/
+  // laundry rooms (Sam's rule — see autoSelect.js's compoundKenBurnsGuidance
+  // for the exact room-tier list this mirrors).
+  soft_push_float_push: { label: "Soft Push → Float → Push", desc: "A gentle push settles into a brief float, then finishes on a stronger push toward the room's main feature." },
+  soft_push_float_diagonal: { label: "Soft Push → Float → Diagonal", desc: "A gentle push settles into a float, then closes on a diagonal sweep toward a window or corner." },
+  soft_push_float_push_diagonal: { label: "Soft Push → Float → Push Diagonal", desc: "A gentle push settles into a float, then closes on a stronger diagonal push toward a window or corner." },
+  soft_push_float_gentle_diagonal: { label: "Soft Push → Float → Gentle Diagonal", desc: "A gentle push settles into a float, then closes on the softest version of the diagonal sweep." },
+  soft_push_float_strong_push: { label: "Soft Push → Float → Strong Push", desc: "A gentle push settles into a float, then finishes on the strongest push — reserve for the single most dramatic room in a listing." },
+  push_tilt_up: { label: "Push → Tilt Up", desc: "A push toward the room, then a rising tilt up to a ceiling, chandelier, or high window." },
+  push_tilt_down: { label: "Push → Tilt Down", desc: "A push toward the room, then a tilt down to flooring, a rug, or tilework." },
+  push_pan_left: { label: "Push → Pan Left", desc: "A push toward the room, then a tracking pan left along a sightline." },
+  push_pan_right: { label: "Push → Pan Right", desc: "A push toward the room, then a tracking pan right along a sightline." },
+  pan_left_push: { label: "Pan Left → Push", desc: "A tracking pan left, then a push forward into the room's main feature." },
+  pan_right_push: { label: "Pan Right → Push", desc: "A tracking pan right, then a push forward into the room's main feature." },
 };
 
 // Reveal Presets — mirrors REVEAL_PRESETS in assemble.js exactly (label +
@@ -504,12 +536,28 @@ const KEN_BURNS_PRESETS = {
 //
 // No Duration control here on purpose — durations are fixed per-phase
 // (opener 1.5s / wipe 0.4s / continuation 4.0s), not user-selectable.
+// Compound Ken Burns presets (added [DATE]) — available to every Reveal
+// identity, including Luxury Drift (Sam's explicit call: these 11 NEW
+// names override Luxury Drift's earlier push/tilt exclusion; that
+// exclusion is otherwise UNCHANGED — push_in/tilt_up/tilt_down still stay
+// out of Luxury Drift's list below). Mirrors autoSelect.js's
+// COMPOUND_END_MOTIONS constant exactly — keep both in sync.
+const COMPOUND_END_MOTIONS = [
+  "soft_push_float_push", "soft_push_float_diagonal",
+  "soft_push_float_push_diagonal", "soft_push_float_gentle_diagonal",
+  "soft_push_float_strong_push",
+  "push_tilt_up", "push_tilt_down",
+  "push_pan_left", "push_pan_right",
+  "pan_left_push", "pan_right_push",
+];
+
 const REVEAL_PRESETS = {
   classic_reveal: {
     label: "Classic Reveal",
     desc: "The room holds, then wipes into the staged version as your chosen End Motion begins.",
     allowedEndMotions: [
       "push_in", "pan_left", "pan_right", "tilt_up", "tilt_down", "drift", "float", "luxury_parallax",
+      ...COMPOUND_END_MOTIONS,
       "cinematic_push", "luxury_drift", "floating_camera_drift", "architectural_glide", "corner_to_corner_drift",
       "orbit_arc", "rack_focus", "drone_boom_up", "crane_up", "crane_down", "parallax_push", "pan_zoom_reveal",
       "living_room_ambient", "fireplace_flicker", "water_motion", "outdoor_breeze",
@@ -521,6 +569,7 @@ const REVEAL_PRESETS = {
     desc: "The room holds, then reveals center-out into a slow lateral drift across the staged space.",
     allowedEndMotions: [
       "drift", "pan_left", "pan_right", "float", "luxury_parallax",
+      ...COMPOUND_END_MOTIONS,
       "luxury_drift", "floating_camera_drift", "architectural_glide", "corner_to_corner_drift",
       "orbit_arc", "drone_boom_up", "crane_up", "crane_down", "pan_zoom_reveal",
       "living_room_ambient", "fireplace_flicker", "water_motion", "outdoor_breeze",
@@ -532,6 +581,7 @@ const REVEAL_PRESETS = {
     desc: "A gentle push begins on the vacant room, wipes into the staged version, and continues pushing forward.",
     allowedEndMotions: [
       "push_in", "pan_left", "pan_right", "tilt_up", "tilt_down", "drift", "float", "luxury_parallax",
+      ...COMPOUND_END_MOTIONS,
       "cinematic_push", "luxury_drift", "floating_camera_drift", "architectural_glide", "corner_to_corner_drift",
       "orbit_arc", "rack_focus", "drone_boom_up", "crane_up", "crane_down", "parallax_push", "pan_zoom_reveal",
       "living_room_ambient", "fireplace_flicker", "water_motion", "outdoor_breeze",

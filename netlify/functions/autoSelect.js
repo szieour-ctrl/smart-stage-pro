@@ -127,7 +127,12 @@ const VALID_LTX_PRESETS = new Set([
   "cinematic_push", "rack_focus", "luxury_drift", "architectural_glide",
   "corner_to_corner_drift", "floating_camera_drift", "parallax_push",
   "pan_zoom_reveal", "orbit_arc", "crane_up", "crane_down",
-  "micro_zoom_out", "micro_dolly_back", "open_plan_reveal",
+  // FLAGGED, not removed here — "open_plan_reveal" was ALSO deleted from
+  // ltxMotion.js's LTX_MOTION_TEMPLATES in an earlier session (see that
+  // file's own comment on the deletion), independent of today's
+  // micro_zoom_out/micro_dolly_back removal. This entry has been stale
+  // since then; only removing what was explicitly asked for this pass.
+  "open_plan_reveal",
   "living_room_ambient", "fireplace_flicker", "water_motion", "outdoor_breeze",
 ]);
 
@@ -183,7 +188,7 @@ const REVEAL_PRESET_END_MOTIONS = {
     "cinematic_push", "luxury_drift", "floating_camera_drift", "architectural_glide", "corner_to_corner_drift",
     "orbit_arc", "rack_focus", "drone_boom_up", "crane_up", "crane_down", "parallax_push", "pan_zoom_reveal",
     "living_room_ambient", "fireplace_flicker", "water_motion", "outdoor_breeze",
-    "micro_zoom_out", "micro_dolly_back", "open_plan_reveal",
+    "open_plan_reveal",
   ],
   luxury_drift: [
     "drift", "pan_left", "pan_right", "float", "luxury_parallax",
@@ -191,7 +196,7 @@ const REVEAL_PRESET_END_MOTIONS = {
     "luxury_drift", "floating_camera_drift", "architectural_glide", "corner_to_corner_drift",
     "orbit_arc", "drone_boom_up", "crane_up", "crane_down", "pan_zoom_reveal",
     "living_room_ambient", "fireplace_flicker", "water_motion", "outdoor_breeze",
-    "micro_zoom_out", "micro_dolly_back", "open_plan_reveal",
+    "open_plan_reveal",
   ],
   cinematic_reveal: [
     "push_in", "pan_left", "pan_right", "tilt_up", "tilt_down", "drift", "float", "luxury_parallax",
@@ -199,7 +204,7 @@ const REVEAL_PRESET_END_MOTIONS = {
     "cinematic_push", "luxury_drift", "floating_camera_drift", "architectural_glide", "corner_to_corner_drift",
     "orbit_arc", "rack_focus", "drone_boom_up", "crane_up", "crane_down", "parallax_push", "pan_zoom_reveal",
     "living_room_ambient", "fireplace_flicker", "water_motion", "outdoor_breeze",
-    "micro_zoom_out", "micro_dolly_back", "open_plan_reveal",
+    "open_plan_reveal",
   ],
 };
 

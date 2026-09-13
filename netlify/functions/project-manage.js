@@ -300,14 +300,34 @@ async function lookupProject(address, userId, requestedIsProspecting, env) {
         // visit, forever, with upload-original.js/upload-staged.js unable
         // to resolve a slug and silently falling back to the legacy
         // projectId-based S3 naming instead of a readable one.
-        if (!listingId && userId) {
+        //
+        // FIX (Sep 13, 2026 — real bug, confirmed live for prospecting):
+        // this backfill used to require `userId` truthy before it would
+        // even attempt the insert. Confirmed via S3 console: prospecting
+        // addresses (9540 Moss Hill Way, 9912 Carico Way) have their
+        // original/final images sitting in smart-stage-originals/{projectId}/
+        // and smart-stage-finals/{projectId}/ — the legacy fallback — instead
+        // of staging-prospects/{slug}/, because this branch never ran for
+        // them (no listings row ever existed to read is_prospecting/slug
+        // from), so upload-original.js/upload-staged.js's lookupListingSlug()
+        // found nothing and fell back to legacy naming every time. A
+        // prospecting session frequently has no logged-in userId to begin
+        // with — that's the normal case, not an edge case — so gating the
+        // ONE thing that makes is_prospecting/slug resolvable behind userId
+        // guaranteed this exact failure for prospecting. The row must exist
+        // regardless of whether userId is present; user_id on the row is
+        // simply null when there isn't one (matches how addImage() and
+        // other callers already treat a null userId elsewhere in this file).
+        if (!listingId) {
           let backfillTier = "solo";
           let backfillUserContext = null;
-          try {
-            backfillUserContext = await getSupabaseUserContext(userId);
-            if (backfillUserContext) backfillTier = getRoleTier(backfillUserContext.role);
-          } catch (e) {
-            console.error("lookupProject: could not resolve user context for backfill (non-fatal):", e.message);
+          if (userId) {
+            try {
+              backfillUserContext = await getSupabaseUserContext(userId);
+              if (backfillUserContext) backfillTier = getRoleTier(backfillUserContext.role);
+            } catch (e) {
+              console.error("lookupProject: could not resolve user context for backfill (non-fatal):", e.message);
+            }
           }
           const backfillSlug = slugifyAddress(project.address);
           try {
@@ -317,7 +337,7 @@ async function lookupProject(address, userId, requestedIsProspecting, env) {
               slug: backfillSlug,
               compliance_page_url: project.complianceUrl,
               mls_number: null,
-              user_id: userId,
+              user_id: userId || null,
               team_id: backfillUserContext?.team_id || null,
               brokerage_id: backfillUserContext?.brokerage_id || null,
               status: "active",
@@ -446,7 +466,17 @@ async function createProject(address, agentInfo, siteUrl, userId, isProspecting,
         // Blobs write succeeded while the Supabase side never ran at all —
         // but regardless of how it happened, this branch needs to be able
         // to recover from it, not just perpetuate the gap on every retry.
-        if (!listingId && userId) {
+        //
+        // FIX (Sep 13, 2026 — real bug, confirmed live for prospecting):
+        // dropped the `&& userId` half of this gate, same as the matching
+        // fix in lookupProject() above — see that comment for the full
+        // incident (prospecting images landing in smart-stage-originals/
+        // and smart-stage-finals/ instead of staging-prospects/ because a
+        // userId-less prospecting session could never get this far). The
+        // row now always gets created once a Blobs project exists but its
+        // Supabase row is missing; user_id is simply null when there
+        // isn't one.
+        if (!listingId) {
           const backfillSlug = slugifyAddress(proj.address);
           try {
             const backfillInsert = await supabase("POST", "listings", {
@@ -455,7 +485,7 @@ async function createProject(address, agentInfo, siteUrl, userId, isProspecting,
               slug: backfillSlug,
               compliance_page_url: proj.complianceUrl,
               mls_number: agentInfo?.mlsNumber || null,
-              user_id: userId,
+              user_id: userId || null,
               team_id: userContext?.team_id || null,
               brokerage_id: userContext?.brokerage_id || null,
               status: "active",
@@ -503,9 +533,23 @@ async function createProject(address, agentInfo, siteUrl, userId, isProspecting,
   console.log("Project created:", projectId, "tier:", tier, "address:", address, "prospecting:", !!isProspecting);
 
   // ── Write to Supabase listings table (new) ────────────────────────────────
+  // FIX (Sep 13, 2026 — real bug, confirmed live for prospecting): this used
+  // to require `userId` truthy before writing the row at all. A prospecting
+  // session frequently runs with no logged-in userId, and this fresh-insert
+  // path is what EVERY brand-new address hits first — so for prospecting,
+  // no listings row was ever created here, upload-original.js/upload-staged.js
+  // could never resolve is_prospecting or a slug for it, and both files'
+  // documented fallback (legacy `smart-stage-originals/{projectId}` /
+  // `smart-stage-finals/{projectId}` naming) silently took over, landing the
+  // actual image bytes in production storage instead of staging-prospects/.
+  // Confirmed in S3 for 9540 Moss Hill Way and 9912 Carico Way. Same fix
+  // applied to the two backfill branches above (lookupProject and this
+  // function's race-guard branch) — the row must exist regardless of
+  // whether a userId is present; user_id is simply null when there isn't
+  // one.
   let listingId = null;
   const slug = slugifyAddress(address);
-  if (userId && process.env.SUPABASE_URL) {
+  if (process.env.SUPABASE_URL) {
     try {
       const listingWrite = await supabase("POST", "listings", {
         address,

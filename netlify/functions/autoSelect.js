@@ -162,9 +162,24 @@ const VALID_REVEAL_PRESETS = new Set(["classic_reveal", "luxury_drift", "cinemat
 // EXACTLY — kept in sync manually (two different runtimes, no shared
 // import path) rather than computed differently in each place. Used to
 // validate Claude's new revealEndMotion pick below.
+// COMPOUND_END_MOTIONS — the 11 compound Ken Burns presets, added to every
+// Reveal identity's list below (Sam's call: available for Luxury Drift too,
+// overriding its earlier push/tilt exclusion for these NEW names
+// specifically — Luxury Drift's existing atomic exclusion of push_in/
+// tilt_up/tilt_down is otherwise UNCHANGED, only the 11 new keys are added).
+const COMPOUND_END_MOTIONS = [
+  "soft_push_float_push", "soft_push_float_diagonal",
+  "soft_push_float_push_diagonal", "soft_push_float_gentle_diagonal",
+  "soft_push_float_strong_push",
+  "push_tilt_up", "push_tilt_down",
+  "push_pan_left", "push_pan_right",
+  "pan_left_push", "pan_right_push",
+];
+
 const REVEAL_PRESET_END_MOTIONS = {
   classic_reveal: [
     "push_in", "pan_left", "pan_right", "tilt_up", "tilt_down", "drift", "float", "luxury_parallax",
+    ...COMPOUND_END_MOTIONS,
     "cinematic_push", "luxury_drift", "floating_camera_drift", "architectural_glide", "corner_to_corner_drift",
     "orbit_arc", "rack_focus", "drone_boom_up", "crane_up", "crane_down", "parallax_push", "pan_zoom_reveal",
     "living_room_ambient", "fireplace_flicker", "water_motion", "outdoor_breeze",
@@ -172,6 +187,7 @@ const REVEAL_PRESET_END_MOTIONS = {
   ],
   luxury_drift: [
     "drift", "pan_left", "pan_right", "float", "luxury_parallax",
+    ...COMPOUND_END_MOTIONS,
     "luxury_drift", "floating_camera_drift", "architectural_glide", "corner_to_corner_drift",
     "orbit_arc", "drone_boom_up", "crane_up", "crane_down", "pan_zoom_reveal",
     "living_room_ambient", "fireplace_flicker", "water_motion", "outdoor_breeze",
@@ -179,6 +195,7 @@ const REVEAL_PRESET_END_MOTIONS = {
   ],
   cinematic_reveal: [
     "push_in", "pan_left", "pan_right", "tilt_up", "tilt_down", "drift", "float", "luxury_parallax",
+    ...COMPOUND_END_MOTIONS,
     "cinematic_push", "luxury_drift", "floating_camera_drift", "architectural_glide", "corner_to_corner_drift",
     "orbit_arc", "rack_focus", "drone_boom_up", "crane_up", "crane_down", "parallax_push", "pan_zoom_reveal",
     "living_room_ambient", "fireplace_flicker", "water_motion", "outdoor_breeze",
@@ -229,11 +246,67 @@ const KEN_BURNS_SELECTABLE_PRESETS = new Set([
   "tilt_up", "tilt_down", "drift", "pan_zoom", "float", "static",
 ]);
 
+// Compound Ken Burns presets (added [DATE] — promoted from R&D, real
+// motionRenderer.py curves as of the same date). Each is a single 2-3
+// phase move whose DOMINANT phase (the final beat, or the second of a
+// two-phase preset) reads as the same visual anchor as its atomic
+// counterpart below — that mapping is what buildSystemPrompt's compound
+// guidance is built on, so keep this comment in sync with that text if
+// either changes.
+//
+// Deliberately a SEPARATE set from KEN_BURNS_SELECTABLE_PRESETS, not
+// merged into it: room-tier eligibility (see buildSystemPrompt) differs
+// between the atomic and compound families, and validateAndSanitizePlan
+// needs to check "is this a legal Ken Burns pick at all" independently of
+// "which family does it belong to" — merging them here would lose that
+// distinction downstream.
+const COMPOUND_KEN_BURNS_PRESETS = new Set([
+  "soft_push_float_push", "soft_push_float_diagonal",
+  "soft_push_float_push_diagonal", "soft_push_float_gentle_diagonal",
+  "soft_push_float_strong_push",
+  "push_tilt_up", "push_tilt_down",
+  "push_pan_left", "push_pan_right",
+  "pan_left_push", "pan_right_push",
+]);
+
+// Dominant-anchor mapping — each compound resolves to the SAME visual
+// anchor as one of the atomic presets (Sam's rule: the final ramp / second
+// motion is what a compound "reads as"). Used only to build the prompt
+// text below; not consulted at validation time.
+//   push_in anchor      → soft_push_float_push, soft_push_float_strong_push,
+//                          pan_left_push, pan_right_push
+//   drift anchor        → soft_push_float_diagonal, soft_push_float_push_diagonal,
+//                          soft_push_float_gentle_diagonal
+//   tilt_up anchor      → push_tilt_up
+//   tilt_down anchor    → push_tilt_down
+//   pan_left anchor     → push_pan_left
+//   pan_right anchor    → push_pan_right
+
+// Every Ken Burns pick Claude may legally make (atomic + compound) — used
+// for validateAndSanitizePlan's ken_burns check below, so a compound pick
+// doesn't get incorrectly cleared as "not a real preset name."
+const KEN_BURNS_ALL_SELECTABLE_PRESETS = new Set([
+  ...KEN_BURNS_SELECTABLE_PRESETS,
+  ...COMPOUND_KEN_BURNS_PRESETS,
+]);
+
 // ── SYSTEM PROMPT ──────────────────────────────────────────────────────
 // Kept as a template function (not a flat string) because the bookend
 // section genuinely depends on narrationEnabled/hasExteriorEnhancement —
 // see rule 3 above. Everything else is static.
 function buildSystemPrompt({ narrationEnabled, hasExteriorEnhancement, aiMotionCap }) {
+  // Compound Ken Burns guidance (added [DATE]) — shared between the
+  // Room Reveal continuation branch and the standalone branch below,
+  // since Sam confirmed these are available in both contexts identically.
+  // Anchor mapping matches COMPOUND_KEN_BURNS_PRESETS's header comment
+  // exactly — keep the two in sync if either changes. Room-tier list
+  // reuses the SAME category structure as the Ordering section above
+  // (front exterior / Open Plan / hero living spaces / Office-Flex /
+  // Primary Bedroom+Bath / closing exterior = compound-eligible;
+  // secondary bedrooms, secondary bathrooms, utility/laundry = never).
+  const compoundKenBurnsGuidance = `    Ken Burns also offers COMPOUND presets — two or three motion phases in one continuous shot, ending on the same visual anchor as an atomic preset above but with more presence. Resolve by anchor: push_in anchor → soft_push_float_push (reserve soft_push_float_strong_push for the single most dramatic room in this listing, not a repeatable default) or pan_left_push / pan_right_push (when the room's strongest sightline enters from a pan before landing on the anchor); drift anchor → soft_push_float_diagonal, soft_push_float_push_diagonal, or soft_push_float_gentle_diagonal, scaled to how dramatic the diagonal actually is; tilt_up anchor → push_tilt_up; tilt_down anchor → push_tilt_down; pan_left anchor → push_pan_left; pan_right anchor → push_pan_right.
+    Compounds are reserved for rooms that can carry the extra motion: front exterior, Open Plan/multi-room lifestyle spaces, Kitchen/Living/Dining and other hero spaces, Office/Flex, Primary Bedroom, Primary Bathroom, and the single strongest closing exterior/backyard shot — the same category tier used in the Ordering section above. Never use a compound for a secondary bedroom, secondary bathroom, or utility/laundry room — the plain atomic preset for that same anchor is the better, calmer choice there, every time. If a room doesn't clearly fall in a compound-eligible category, default to the atomic preset.`;
+
   return `You are planning the shot order and camera motion for a real estate walkthrough video. You will see every staged photo for this listing, one at a time, each labeled with a frame ID. Some frames have a real vacant/before photo of the same room available — those will be marked explicitly.
 
 ## Your job, per frame
@@ -262,13 +335,17 @@ First decide structure:
   - Pick one of "classic_reveal", "luxury_drift", "cinematic_reveal" — and VARY this choice across the different Room Reveal frames in this listing rather than repeating the same one throughout. Judge these as a set that will be watched in sequence, not scored independently; a listing where every reveal uses the same preset reads as repetitive even if each individual pick was defensible on its own.
   - Pick the continuation engine: "ken_burns" (free, deterministic) or "ltx" (real AI Motion, billable — subject to the frame budget below). Most reveals should continue on Ken Burns; reserve the LTX continuation for the handful of frames that most deserve the paid upgrade.
   - Pick revealEndMotion by reading the STAGED (after) photo's own visual content — the SAME anchor-matching judgment you'd use for a standalone pick below, not a generic "whatever this preset defaults to" choice. This matters: leaving it to a fixed per-preset default is the exact bug that made every Classic/Cinematic Reveal end on push_in and every Luxury Drift end on drift regardless of what the room actually looked like — the point of this field is that it varies with the photo.
-    - If the continuation engine is "ken_burns": match the STAGED photo's real anchor the same way as a standalone Ken Burns pick — real ceiling/chandelier/fan detail → tilt_up; a hero floor/rug/tilework → tilt_down; a strong lateral sightline (hallway, counter run) → pan_left or pan_right; a corner-to-window or corner-to-patio diagonal → drift; a wide MLS-style shot with no obvious directional feature → float or pan_zoom; a room where stillness reads better than any motion → static; a genuinely high-end/luxury finish → luxury_parallax. Only pick from: ${[...KEN_BURNS_SELECTABLE_PRESETS].join(", ")}, luxury_parallax.
+    - If the continuation engine is "ken_burns": match the STAGED photo's real anchor the same way as a standalone Ken Burns pick — real ceiling/chandelier/fan detail → tilt_up; a hero floor/rug/tilework → tilt_down; a strong lateral sightline (hallway, counter run) → pan_left or pan_right; a corner-to-window or corner-to-patio diagonal → drift; a wide MLS-style shot with no obvious directional feature → float or pan_zoom; a room where stillness reads better than any motion → static; a genuinely high-end/luxury finish → luxury_parallax.
+${compoundKenBurnsGuidance}
+    Only pick from: ${[...KEN_BURNS_SELECTABLE_PRESETS, ...COMPOUND_KEN_BURNS_PRESETS].join(", ")}, luxury_parallax.
     - If the continuation engine is "ltx": pick a specific LTX preset key whose real-world use case genuinely matches the STAGED photo, same judgment as a standalone LTX pick. Only pick from: ${[...VALID_LTX_PRESETS].join(", ")}.
     - VARY this choice across the different Room Reveal frames in this listing, same reasoning as the reveal preset itself above — judge these as a set watched in sequence, not scored independently.
   - If truly not Room Reveal (the rare edge-case exception above): engine is "kling", klingMotionPreset is null (this resolves to the generic interior or exterior transformation automatically — do not invent a preset name here).
 - If no pair at all (a single image with nothing to disclose): decide "ken_burns" or "ltx", picking the specific best-matching motion the same way as always.
   - If "ltx": pick a specific preset key whose real-world use case genuinely matches what you see in THIS photo — do not default everything to the same preset. Only pick from: ${[...VALID_LTX_PRESETS].join(", ")}.
-  - If "ken_burns": pick a specific preset key matching the visual anchor — do not default everything to the same generic move. Only pick from: ${[...KEN_BURNS_SELECTABLE_PRESETS].join(", ")}. Match the anchor to the motion: real ceiling/chandelier/fan detail → tilt_up; a hero floor/rug/tilework → tilt_down; a strong lateral sightline (hallway, counter run) → pan_left or pan_right; a corner-to-window or corner-to-patio diagonal → drift; a wide MLS-style shot with no obvious directional feature → float or pan_zoom; a room where stillness reads better than any motion → static.
+  - If "ken_burns": pick a specific preset key matching the visual anchor — do not default everything to the same generic move. Match the anchor to the motion: real ceiling/chandelier/fan detail → tilt_up; a hero floor/rug/tilework → tilt_down; a strong lateral sightline (hallway, counter run) → pan_left or pan_right; a corner-to-window or corner-to-patio diagonal → drift; a wide MLS-style shot with no obvious directional feature → float or pan_zoom; a room where stillness reads better than any motion → static.
+${compoundKenBurnsGuidance}
+    Only pick from: ${[...KEN_BURNS_SELECTABLE_PRESETS, ...COMPOUND_KEN_BURNS_PRESETS].join(", ")}.
 
 ## Bookend rule — position 1 and the last position
 ${narrationEnabled
@@ -802,7 +879,10 @@ function enforceAutoSelectionRules(rawPlan, frames, { narrationEnabled, hasExter
   // hallucinated preset NAME early and cheaply, before it round-trips all
   // the way to a render job.
   for (const entry of plan) {
-    if (entry.engine === "ken_burns" && entry.motionPreset && !KEN_BURNS_SELECTABLE_PRESETS.has(entry.motionPreset)) {
+    // Checks against the COMBINED atomic+compound set (KEN_BURNS_ALL_
+    // SELECTABLE_PRESETS) — using the atomic-only set here would clear
+    // every legal compound pick as "not a real preset name."
+    if (entry.engine === "ken_burns" && entry.motionPreset && !KEN_BURNS_ALL_SELECTABLE_PRESETS.has(entry.motionPreset)) {
       console.error(
         `[AUTO-SELECT] Frame ${entry.frameId}: Ken Burns pick "${entry.motionPreset}" isn't a real preset name — clearing to let the render pipeline default to "auto".`
       );

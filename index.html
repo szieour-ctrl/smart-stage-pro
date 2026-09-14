@@ -12140,8 +12140,19 @@ function hideLandingPage() {
 }
 
 function landingStartCheckout(plan) {
-  _pendingCheckoutPlan = plan;
   hideLandingPage();
+  if (_currentUser) {
+    // Already signed in (e.g. demo/trial account upgrading) — skip the
+    // signup modal entirely and go straight to Stripe checkout, same as
+    // the in-app startCheckout() path. Without this check, an already-
+    // authenticated user submitting the Create Account form against their
+    // own existing email triggers Supabase's repeated-signup response
+    // (fake success, no session), which silently drops _pendingCheckoutPlan
+    // and never reaches ToS/payment.
+    startCheckout(plan);
+    return;
+  }
+  _pendingCheckoutPlan = plan;
   showAuthModal('signup');
 }
 

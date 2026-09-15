@@ -8284,8 +8284,20 @@ async function submitAuth(mode) {
       const { data, error } = await sb.auth.signUp({ email, password, options: { data: { full_name: name } } });
       if (error) throw error;
       if (data?.user && !data.session) {
-        // Email confirmation required
-        showAuthSuccess('Check your email to confirm your account, then sign in.');
+        // Email confirmation required — OR this could be an existing,
+        // already-confirmed account (e.g. a trial user re-entering their
+        // own email to upgrade). Supabase deliberately returns the same
+        // shape for both cases (an anti-enumeration measure: the client is
+        // never told whether an email is already registered), so this
+        // message can't say which one actually happened. Giving both a
+        // path forward here — instead of only "check your email" — is what
+        // makes an existing user's stalled upgrade attempt recoverable
+        // instead of a silent dead end with no email arriving.
+        showAuthSuccess(`
+          If this is a new account, check your email to confirm it, then sign in.<br><br>
+          Already have an account with this email? No new email is sent for security reasons —
+          <a href="#" onclick="showAuthModal('login'); return false;" style="color:var(--gold);text-decoration:underline;">sign in instead</a>.
+        `);
         return;
       }
       // Signup with immediate session (email confirm OFF) — proceed directly

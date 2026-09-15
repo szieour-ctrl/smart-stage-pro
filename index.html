@@ -7632,6 +7632,36 @@ let _userRecord = null;
 let _pendingCheckoutPlan = null;
 let _clientInstanceCount = 0; // how many GoTrueClient instances THIS page has created
 
+// FIX (Sep 15, 2026): _pendingCheckoutPlan alone only lives in memory, so it
+// was silently lost every time a signup required email confirmation — the
+// confirmation link is a full page reload/navigation (via /verify), which
+// resets every JS variable back to its initial value before
+// handleAuthenticatedUser() ever gets a chance to read it. Net effect: a
+// brand-new user who clicked "Get Started" on Solo/Team/Brokerage always
+// landed in the plain free-trial dashboard instead of Stripe checkout,
+// regardless of which plan they picked. localStorage survives a full page
+// reload (same origin), so the intended plan is saved here at the same
+// moment _pendingCheckoutPlan is set, and restored from here — once, then
+// cleared — during the post-confirmation session check.
+const PENDING_PLAN_STORAGE_KEY = 'ssp_pending_checkout_plan';
+function savePendingCheckoutPlan(plan) {
+  _pendingCheckoutPlan = plan;
+  try { localStorage.setItem(PENDING_PLAN_STORAGE_KEY, plan); } catch (e) { /* storage unavailable — in-memory value still set for same-page flows */ }
+}
+function consumePendingCheckoutPlan() {
+  if (_pendingCheckoutPlan) {
+    const plan = _pendingCheckoutPlan;
+    _pendingCheckoutPlan = null;
+    try { localStorage.removeItem(PENDING_PLAN_STORAGE_KEY); } catch (e) {}
+    return plan;
+  }
+  try {
+    const stored = localStorage.getItem(PENDING_PLAN_STORAGE_KEY);
+    if (stored) localStorage.removeItem(PENDING_PLAN_STORAGE_KEY);
+    return stored || null;
+  } catch (e) { return null; }
+}
+
 // FIX (Sep 8, 2026): Supabase's internal cross-tab Web Lock (used to
 // serialize auth calls via navigator.locks) has known, long-standing
 // deadlock bugs in the underlying GoTrue/auth-js library — the lock can be
@@ -7966,6 +7996,21 @@ async function handleAuthenticatedUser(user) {
   // Check subscription status — must be explicitly active OR have free trial credits
   const status = userRec.subscription_status;
   if (status !== 'active') {
+    // If the user explicitly picked a plan (Solo/Team/Brokerage) before
+    // signing up, that intent wins over the free trial — checked BEFORE
+    // trial-expired/trial-credit logic below, since a brand-new signup
+    // always has a fresh trial balance and would otherwise always win the
+    // race and silently strand the user on the free trial instead of
+    // checkout. consumePendingCheckoutPlan() also checks localStorage, so
+    // this still fires correctly after a signup that required email
+    // confirmation (a full page reload, which clears the in-memory
+    // _pendingCheckoutPlan variable on its own).
+    const pendingPlan = consumePendingCheckoutPlan();
+    if (pendingPlan) {
+      showPricingPage(user, userRec);
+      setTimeout(() => startCheckout(pendingPlan), 300);
+      return;
+    }
     // Expired trial blocks unconditionally, BEFORE the credit-balance
     // check below — a trial user can easily still be sitting on unused
     // Images past 30 days, and unused balance was never meant to extend
@@ -7991,14 +8036,6 @@ async function handleAuthenticatedUser(user) {
     if (trialBalance > 0) {
       // Free trial user with remaining images — allow into app
       await showMainApp(user, userRec);
-      return;
-    }
-    // If user came from a pricing page subscribe click, go straight to checkout
-    if (_pendingCheckoutPlan) {
-      const plan = _pendingCheckoutPlan;
-      _pendingCheckoutPlan = null;
-      showPricingPage(user, userRec);
-      setTimeout(() => startCheckout(plan), 300);
       return;
     }
     showPricingPage(user, userRec);
@@ -8494,7 +8531,7 @@ function showPricingPage(user, userRec, reason) {
 
 async function startCheckout(plan) {
   if (!_currentUser) {
-    _pendingCheckoutPlan = plan;
+    savePendingCheckoutPlan(plan);
     showAuthModal('signup');
     return;
   }
@@ -12152,7 +12189,7 @@ function landingStartCheckout(plan) {
     startCheckout(plan);
     return;
   }
-  _pendingCheckoutPlan = plan;
+  savePendingCheckoutPlan(plan);
   showAuthModal('signup');
 }
 

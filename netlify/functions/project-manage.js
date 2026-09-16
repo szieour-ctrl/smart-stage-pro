@@ -45,6 +45,49 @@ function supabase(method, table, body, queryParams = "") {
   });
 }
 
+// FIX (Sep 16, 2026 — real bug, confirmed live for 11625 Tortuguero Way):
+// every place in this file that inserts a `listings` row used to be a
+// single, unretried POST wrapped in try/catch that logged and moved on.
+// One transient failure meant the row simply never existed — and since
+// upload-original.js/upload-staged.js's lookupListingSlug() only ever
+// receives a projectId (no address, no is_prospecting) with nothing to
+// backfill from, that single miss cascaded into legacy S3 naming for the
+// whole shot. A one-off insert failure is far more likely to be transient
+// (a network blip, a brief Supabase hiccup) than a real, retry-proof
+// error, so this retries a few times — same spirit as reserveAssetKey's
+// retry loop elsewhere in this codebase — before giving up. Returns
+// { listingId, status } on success, or { listingId: null, lastError } if
+// every attempt failed; never throws, matching how callers already treat
+// this as non-fatal (the Netlify Blobs write is the one that must not fail).
+async function insertListingWithRetry(payload, label) {
+  const MAX_ATTEMPTS = 3;
+  let lastError = null;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      const res = await supabase("POST", "listings", payload);
+      const listingId = res.data?.[0]?.id || null;
+      console.log(
+        `${label}: insert attempt ${attempt}/${MAX_ATTEMPTS} — status:`, res.status,
+        "listingId:", listingId, "row returned:", JSON.stringify(res.data)
+      );
+      if (listingId) return { listingId, status: res.status };
+      lastError = new Error(`insert returned no listingId (status ${res.status})`);
+    } catch (err) {
+      lastError = err;
+      console.error(`${label}: insert attempt ${attempt}/${MAX_ATTEMPTS} failed:`, err.message);
+    }
+    if (attempt < MAX_ATTEMPTS) {
+      await new Promise(resolve => setTimeout(resolve, attempt * 300));
+    }
+  }
+  console.error(
+    `${label}: FAILED after ${MAX_ATTEMPTS} attempts — no listings row exists for project_id ` +
+    `${payload.project_id}. Downstream uploads will use legacy naming until this is backfilled. Last error:`,
+    lastError.message
+  );
+  return { listingId: null, lastError };
+}
+
 async function getSupabaseUserContext(userId) {
   if (!userId || !process.env.SUPABASE_URL) return null;
   const r = await supabase("GET", "users", null,
@@ -185,10 +228,27 @@ function generateProjectId(address, tier = "solo") {
   // every projectId effectively unique per creation event, independent of
   // address/date/tier collisions, so those downstream project_id-only
   // lookups stay safe without needing to thread userId through all of them.
+  //
+  // FIX (Sep 16, 2026 — real bug, confirmed against live Supabase
+  // timestamps): now.getMonth()/getDate()/getFullYear() read the SERVER's
+  // clock, which for Netlify Functions is UTC — not Sam's Pacific
+  // timezone. Any project created after 5pm Pacific has already crossed
+  // into the next UTC day, so it got tomorrow's date baked into its
+  // projectId — and, via extractProjectDate() below, into the
+  // staging-prospects/ folder's date prefix too. Confirmed live for 4
+  // separate prospecting shots (1710 Russell Way, 7333 Bonita Way, 10001
+  // Alpine Gold Way, 815 El Capitan Court), all created in the evening
+  // Pacific and all showing a folder date one day ahead of the real local
+  // date. Fixed by formatting explicitly in America/Los_Angeles rather
+  // than relying on the server's own local clock.
   const now = new Date();
-  const mm  = String(now.getMonth() + 1).padStart(2, "0");
-  const dd  = String(now.getDate()).padStart(2, "0");
-  const yy  = String(now.getFullYear()).slice(2);
+  const pacificParts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Los_Angeles",
+    year: "2-digit", month: "2-digit", day: "2-digit",
+  }).formatToParts(now).reduce((acc, p) => { acc[p.type] = p.value; return acc; }, {});
+  const mm = pacificParts.month;
+  const dd = pacificParts.day;
+  const yy = pacificParts.year;
   const addrSlug = (address || "")
     .toLowerCase()
     .replace(/,.*$/, "")
@@ -361,28 +421,22 @@ async function lookupProject(address, userId, requestedIsProspecting, env) {
           const backfillSlug = requestedIsProspecting === true
             ? slugifyProspectAddress(project.address, project.projectId)
             : slugifyAddress(project.address);
-          try {
-            const backfillInsert = await supabase("POST", "listings", {
-              address: project.address,
-              project_id: project.projectId,
-              slug: backfillSlug,
-              compliance_page_url: project.complianceUrl,
-              mls_number: null,
-              user_id: userId || null,
-              team_id: backfillUserContext?.team_id || null,
-              brokerage_id: backfillUserContext?.brokerage_id || null,
-              status: "active",
-              is_prospecting: requestedIsProspecting === true,
-            });
-            listingId = backfillInsert.data?.[0]?.id || null;
+          const result = await insertListingWithRetry({
+            address: project.address,
+            project_id: project.projectId,
+            slug: backfillSlug,
+            compliance_page_url: project.complianceUrl,
+            mls_number: null,
+            user_id: userId || null,
+            team_id: backfillUserContext?.team_id || null,
+            brokerage_id: backfillUserContext?.brokerage_id || null,
+            status: "active",
+            is_prospecting: requestedIsProspecting === true,
+          }, "lookupProject (missing-row backfill)");
+          listingId = result.listingId;
+          if (listingId) {
             slug = backfillSlug;
             isProspecting = requestedIsProspecting === true;
-            console.log(
-              "lookupProject: backfilled missing listings row for projectId", project.projectId,
-              "— insert status:", backfillInsert.status, "listingId:", listingId, "tier:", backfillTier
-            );
-          } catch (e) {
-            console.error("lookupProject: missing-row backfill insert failed (non-fatal):", e.message);
           }
         }
       } catch (err) {
@@ -513,28 +567,22 @@ async function createProject(address, agentInfo, siteUrl, userId, isProspecting,
           const backfillSlug = isProspecting === true
             ? slugifyProspectAddress(proj.address, proj.projectId)
             : slugifyAddress(proj.address);
-          try {
-            const backfillInsert = await supabase("POST", "listings", {
-              address: proj.address,
-              project_id: proj.projectId,
-              slug: backfillSlug,
-              compliance_page_url: proj.complianceUrl,
-              mls_number: agentInfo?.mlsNumber || null,
-              user_id: userId || null,
-              team_id: userContext?.team_id || null,
-              brokerage_id: userContext?.brokerage_id || null,
-              status: "active",
-              is_prospecting: !!isProspecting,
-            });
-            listingId = backfillInsert.data?.[0]?.id || null;
+          const result = await insertListingWithRetry({
+            address: proj.address,
+            project_id: proj.projectId,
+            slug: backfillSlug,
+            compliance_page_url: proj.complianceUrl,
+            mls_number: agentInfo?.mlsNumber || null,
+            user_id: userId || null,
+            team_id: userContext?.team_id || null,
+            brokerage_id: userContext?.brokerage_id || null,
+            status: "active",
+            is_prospecting: !!isProspecting,
+          }, "createProject (race-guard branch backfill)");
+          listingId = result.listingId;
+          if (listingId) {
             slug = backfillSlug;
             existingIsProspecting = !!isProspecting;
-            console.log(
-              "createProject (race-guard branch): backfilled missing listings row for projectId", proj.projectId,
-              "— insert status:", backfillInsert.status, "listingId:", listingId
-            );
-          } catch (e) {
-            console.error("createProject: missing-row backfill insert failed (non-fatal):", e.message);
           }
         }
       } catch (err) {
@@ -587,42 +635,45 @@ async function createProject(address, agentInfo, siteUrl, userId, isProspecting,
     ? slugifyProspectAddress(address, projectId)
     : slugifyAddress(address);
   if (process.env.SUPABASE_URL) {
-    try {
-      const listingWrite = await supabase("POST", "listings", {
-        address,
-        project_id:          projectId,
-        slug,
-        compliance_page_url: cUrl,
-        mls_number:          agentInfo.mlsNumber || null,
-        user_id:             userId,
-        team_id:             userContext?.team_id      || null,
-        brokerage_id:        userContext?.brokerage_id || null,
-        status:              "active",
-        // NEW (prospecting flag, Aug 28 2026): marks a listing created from
-        // a vacant-home prospecting shot rather than a signed listing. Read
-        // downstream by upload-original.js/upload-staged.js to route S3
-        // keys to staging-prospects/<slug>/... instead of listings/<slug>/....
-        // Plain boolean column — flipping it later (once a prospect signs)
-        // is a simple PATCH, no separate "convert" flow needed yet.
-        is_prospecting:       !!isProspecting,
-      });
-      // NEW: capture the real Supabase id — this is what video-job.js's
-      // action=frames/action=create actually need as "listingId". Distinct
-      // from projectId (the human-readable compliance slug above) — the two
-      // are different columns on this same row, confirmed against
-      // get-user-listings.js's explicit `select=id,...,project_id,...`.
-      // Never returned to the frontend before this change, even though the
-      // row itself has always existed the moment a project is created.
-      listingId = listingWrite.data?.[0]?.id || null;
-      console.log(
-        "createProject (fresh insert): wrote is_prospecting =", !!isProspecting,
-        "— insert status:", listingWrite.status, "listingId:", listingId,
-        "row returned:", JSON.stringify(listingWrite.data)
-      );
-    } catch (err) {
-      // Non-fatal — Blobs write already succeeded
-      console.error("Supabase listing write error (non-fatal):", err.message);
-    }
+    // FIX (Sep 16, 2026 — real bug, confirmed live for 11625 Tortuguero
+    // Way): this used to be a single, unretried POST — a catch swallowed
+    // any failure as "non-fatal" on the theory that the Blobs write
+    // already succeeded and this write is best-effort. In practice, a
+    // single failed attempt here means NO listings row ever exists for
+    // this project — lookupListingSlug() in upload-original.js/
+    // upload-staged.js then has nothing to find (it only receives a
+    // projectId, no address/isProspecting to backfill with), so it falls
+    // back to the legacy smart-stage-originals/smart-stage-finals/
+    // naming, and write-prospect-meta.js's slug-from-s3Key parsing on the
+    // frontend misreads the resulting fallback key, scattering one
+    // prospecting shot's files across three unrelated S3 locations. See
+    // insertListingWithRetry() above for why this now retries.
+    const result = await insertListingWithRetry({
+      address,
+      project_id:          projectId,
+      slug,
+      compliance_page_url: cUrl,
+      mls_number:          agentInfo.mlsNumber || null,
+      user_id:             userId,
+      team_id:             userContext?.team_id      || null,
+      brokerage_id:        userContext?.brokerage_id || null,
+      status:              "active",
+      // NEW (prospecting flag, Aug 28 2026): marks a listing created from
+      // a vacant-home prospecting shot rather than a signed listing. Read
+      // downstream by upload-original.js/upload-staged.js to route S3
+      // keys to staging-prospects/<slug>/... instead of listings/<slug>/....
+      // Plain boolean column — flipping it later (once a prospect signs)
+      // is a simple PATCH, no separate "convert" flow needed yet.
+      is_prospecting:       !!isProspecting,
+    }, "createProject (fresh insert)");
+    // NEW: capture the real Supabase id — this is what video-job.js's
+    // action=frames/action=create actually need as "listingId". Distinct
+    // from projectId (the human-readable compliance slug above) — the two
+    // are different columns on this same row, confirmed against
+    // get-user-listings.js's explicit `select=id,...,project_id,...`.
+    // Never returned to the frontend before this change, even though the
+    // row itself has always existed the moment a project is created.
+    listingId = result.listingId;
   }
 
   return { created: true, projectId, complianceUrl: cUrl, listingId, slug, isProspecting: !!isProspecting };

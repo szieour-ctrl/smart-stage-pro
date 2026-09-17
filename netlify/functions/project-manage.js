@@ -1,5 +1,5 @@
 // project-manage.js — Netlify Function
-// Handles: project lookup, project creation, image attachment
+// Handles: project lookup, project creation, image attachment — LISTINGS ONLY.
 // Routes via ?action= parameter
 //
 // action=lookup    — check if project exists for address
@@ -9,6 +9,25 @@
 // Supabase integration: createProject writes to listings table,
 // addImage writes to staged_images table and debits credits.
 // userId is required in body for create and add-image actions.
+//
+// PIPELINE SEPARATION (Sep 16, 2026): this file used to also handle
+// Prospecting via an `isProspecting` flag threaded through nearly every
+// function here — lookup/create branching on it, a one-directional
+// false->true sync rule, a separate date-prefixed slug format, etc. That
+// flag-on-Listings design was the direct cause of a real, live incident:
+// searching an address with the Prospecting checkbox unchecked still
+// surfaced an existing Prospecting contact for that address, because both
+// shared the exact same Blobs key and the exact same `listings` row —
+// there was no way for the same address to independently be BOTH a
+// permanent Marketing contact and a real Listing under the same account.
+// Per Sam: Prospecting exists to convert an AGENT into a subscriber, not
+// to convert a PROPERTY into a listing — the two were never the same kind
+// of thing and should never have shared a table. Prospecting now lives
+// entirely in marketing-manage.js, its own `prospects` table, and its own
+// Netlify Blobs store — this file no longer knows Prospecting exists.
+// Existing `listings` rows with is_prospecting=true from before this
+// migration are left untouched (out of scope, historical data) — nothing
+// here reads or writes that column anymore.
 
 const { getStore } = require("@netlify/blobs");
 const crypto = require("crypto");
@@ -50,15 +69,15 @@ function supabase(method, table, body, queryParams = "") {
 // single, unretried POST wrapped in try/catch that logged and moved on.
 // One transient failure meant the row simply never existed — and since
 // upload-original.js/upload-staged.js's lookupListingSlug() only ever
-// receives a projectId (no address, no is_prospecting) with nothing to
-// backfill from, that single miss cascaded into legacy S3 naming for the
-// whole shot. A one-off insert failure is far more likely to be transient
-// (a network blip, a brief Supabase hiccup) than a real, retry-proof
-// error, so this retries a few times — same spirit as reserveAssetKey's
-// retry loop elsewhere in this codebase — before giving up. Returns
-// { listingId, status } on success, or { listingId: null, lastError } if
-// every attempt failed; never throws, matching how callers already treat
-// this as non-fatal (the Netlify Blobs write is the one that must not fail).
+// receives a projectId (no address) with nothing to backfill from, that
+// single miss cascaded into legacy S3 naming for the whole shot. A one-off
+// insert failure is far more likely to be transient (a network blip, a
+// brief Supabase hiccup) than a real, retry-proof error, so this retries a
+// few times — same spirit as reserveAssetKey's retry loop elsewhere in
+// this codebase — before giving up. Returns { listingId, status } on
+// success, or { listingId: null, lastError } if every attempt failed;
+// never throws, matching how callers already treat this as non-fatal (the
+// Netlify Blobs write is the one that must not fail).
 async function insertListingWithRetry(payload, label) {
   const MAX_ATTEMPTS = 3;
   let lastError = null;
@@ -182,33 +201,6 @@ function slugifyAddress(address) {
     .slice(0, 60);
 }
 
-// NEW (Sep 13, 2026 — per Sam's request): prospecting listings get a
-// date-prefixed slug (`2026-09-13__9540-moss-hill-way`) instead of the
-// plain address slug production listings use, so staging-prospects/
-// folders sort chronologically in the S3 console. This is intentionally
-// separate from slugifyAddress() — production listings keep their
-// existing plain-address slug format untouched.
-//
-// The date comes from the projectId itself, not from Date.now(): every
-// projectId this app generates already embeds its true creation date as
-// MMDDYY (see generateProjectId()'s comment — `szreg{tier}_{streetaddr}_
-// {MMDDYY}_{rand4}`). Using that instead of "now" matters here because
-// this same slug function also runs during backfill, sometimes days after
-// the shot was actually taken (exactly the case that prompted this
-// change — 9540 Moss Hill Way's Sep 13 backfill was for a project
-// actually created earlier). Falls back to today's date only if a
-// projectId somehow doesn't match the expected format.
-function extractProjectDate(projectId) {
-  const m = /_(\d{2})(\d{2})(\d{2})_[a-z0-9]{4}$/i.exec(projectId || "");
-  if (!m) return null;
-  const [, mm, dd, yy] = m;
-  return `20${yy}-${mm}-${dd}`;
-}
-function slugifyProspectAddress(address, projectId) {
-  const datePrefix = extractProjectDate(projectId) || new Date().toISOString().slice(0, 10);
-  return `${datePrefix}__${slugifyAddress(address)}`;
-}
-
 function getRoleTier(role) {
   // Maps Supabase role to project ID tier label
   if (role === "team_lead" || role === "team_member") return "team";
@@ -234,13 +226,8 @@ function generateProjectId(address, tier = "solo") {
   // clock, which for Netlify Functions is UTC — not Sam's Pacific
   // timezone. Any project created after 5pm Pacific has already crossed
   // into the next UTC day, so it got tomorrow's date baked into its
-  // projectId — and, via extractProjectDate() below, into the
-  // staging-prospects/ folder's date prefix too. Confirmed live for 4
-  // separate prospecting shots (1710 Russell Way, 7333 Bonita Way, 10001
-  // Alpine Gold Way, 815 El Capitan Court), all created in the evening
-  // Pacific and all showing a folder date one day ahead of the real local
-  // date. Fixed by formatting explicitly in America/Los_Angeles rather
-  // than relying on the server's own local clock.
+  // projectId. Fixed by formatting explicitly in America/Los_Angeles
+  // rather than relying on the server's own local clock.
   const now = new Date();
   const pacificParts = new Intl.DateTimeFormat("en-US", {
     timeZone: "America/Los_Angeles",
@@ -265,7 +252,7 @@ function complianceUrl(projectId, siteUrl) {
 
 // ── ACTION: LOOKUP ───────────────────────────────────────────────────────────
 
-async function lookupProject(address, userId, requestedIsProspecting, env) {
+async function lookupProject(address, userId, env) {
   address = cleanAddress(address);
   const store = getProjectStore(env);
   // FIX (Aug 28, 2026 — real bug, per Sam's requirement: each agent login
@@ -290,89 +277,22 @@ async function lookupProject(address, userId, requestedIsProspecting, env) {
     // the matching fix in createProject's existing-project branch above).
     let listingId = null;
     let slug = null;
-    let isProspecting = null;
     if (process.env.SUPABASE_URL) {
       try {
         const listingLookup = await supabase("GET", "listings", null,
-          `?project_id=eq.${project.projectId}&select=id,slug,is_prospecting&limit=1`
+          `?project_id=eq.${project.projectId}&select=id,slug&limit=1`
         );
         listingId = listingLookup.data?.[0]?.id || null;
         slug = listingLookup.data?.[0]?.slug || null;
-        isProspecting = listingLookup.data?.[0]?.is_prospecting ?? null;
-        // DIAGNOSTIC (Aug 29, 2026 — Sam still seeing is_prospecting=false
-        // after the sync fix below; this line exists so the next test run
-        // shows in Netlify logs EXACTLY what this function received and
-        // read, instead of guessing blind): if requestedIsProspecting logs
-        // as null/undefined here, the frontend isn't sending it (stale
-        // deploy or checkbox not wired) — the bug is upstream of this
-        // file entirely. If it logs true but currentIsProspecting also
-        // logs true with no PATCH line following, the condition below has
-        // a bug. If it logs true, currentIsProspecting false, and a PATCH
-        // line follows — the sync IS working and the row should update;
-        // if Supabase still shows false after that, check for a second,
-        // OLDER listings row for the same address (e.g. from an earlier
-        // test) that this query isn't matching.
-        console.log(
-          "lookupProject: is_prospecting check — requestedIsProspecting:", requestedIsProspecting,
-          "(type:", typeof requestedIsProspecting, ") currentIsProspecting:", isProspecting,
-          "listingId:", listingId
-        );
-        // FIX (Aug 29, 2026 — real bug, confirmed by Sam in production: he
-        // checked the Prospecting box, but the images still landed under
-        // listings/ instead of staging-prospects/). Root cause: this
-        // lookup path is the ONLY path an address takes once it already
-        // exists — index.html's lookupOrCreateProject() never calls
-        // action=create for an address that already exists (see below),
-        // so the prospecting checkbox had nothing to attach to on a
-        // repeat visit. It was silently ignored every time, and this
-        // branch just kept returning whatever is_prospecting the row
-        // already had from whenever it was FIRST created. Fix: sync the
-        // stored flag to whatever was just requested, on every lookup —
-        // only when requestedIsProspecting is an actual boolean (the
-        // property-search flow sends one; the mid-session self-healing
-        // backfill call in continueProject() deliberately does not, so it
-        // can never accidentally flip an established listing's flag).
-        //
-        // FIX (Sep 8, 2026 — confirmed real case via Netlify logs): this
-        // used to sync in EITHER direction whenever the requested value
-        // differed from what was stored. Confirmed live: a listing
-        // correctly flagged is_prospecting=true at 10:33 got silently
-        // flipped back to false at 10:38 by an ordinary re-search — the
-        // "New Property Search" flow resets the checkbox as a side
-        // effect, and the very next lookup on the same address read that
-        // reset (unchecked) state as an authoritative signal to undo the
-        // agent's earlier, deliberate choice. Per Sam: prospecting is
-        // permanent and never converts to a real listing — if a
-        // prospected agent actually subscribes, they create their own
-        // real listing under their own account; nothing about this
-        // record should ever change. So this only ever syncs false->true
-        // now (catching the original Aug 29 bug — checkbox checked but
-        // not honored), never true->false — once prospecting, always
-        // prospecting, immune to a later search where the checkbox just
-        // happens to not be checked.
-        if (listingId && requestedIsProspecting === true && isProspecting !== true) {
-          console.log("lookupProject: syncing is_prospecting -> true for listingId", listingId);
-          try {
-            const patchResult = await supabase("PATCH", "listings", { is_prospecting: true }, `?id=eq.${listingId}`);
-            console.log("lookupProject: is_prospecting patch result — status:", patchResult.status, "data:", JSON.stringify(patchResult.data));
-            isProspecting = true;
-          } catch (e) {
-            console.error("lookupProject: is_prospecting sync patch failed (non-fatal):", e.message);
-          }
-        }
-        // Listing predates the slug column — backfill it now so
-        // upload-original.js/upload-staged.js get the readable key on
-        // this listing's very next upload instead of falling back.
+
+        // Listing predates the slug column — derive one now and best-effort
+        // patch it back so future uploads for this listing skip this branch.
         if (listingId && !slug) {
-          slug = isProspecting === true
-            ? slugifyProspectAddress(project.address, project.projectId)
-            : slugifyAddress(project.address);
+          slug = slugifyAddress(project.address);
           if (slug) {
             // AWAITED (Aug 28, 2026 — fixed a real bug, not a hypothesis):
             // confirmed via live testing that Netlify Functions can tear
-            // down before an un-awaited background write like this one
-            // completes — this same pattern was silently losing the
-            // thumbnail_key patch in upload-original.js almost every time.
+            // down before an un-awaited background write completes.
             try {
               await supabase("PATCH", "listings", { slug }, `?project_id=eq.${project.projectId}`);
             } catch (e) {
@@ -380,33 +300,13 @@ async function lookupProject(address, userId, requestedIsProspecting, env) {
             }
           }
         }
-        // FIX (Sep 8, 2026 — same real bug as createProject's race-guard
-        // branch, see that function's comment for the full incident): if
-        // listingId came back null because no Supabase row exists at all
-        // for this project_id, nothing above ever creates one — and since
-        // this lookup path is what EVERY repeat search after the first
-        // hits, a project stuck in this state stays stuck on every single
-        // visit, forever, with upload-original.js/upload-staged.js unable
-        // to resolve a slug and silently falling back to the legacy
-        // projectId-based S3 naming instead of a readable one.
-        //
-        // FIX (Sep 13, 2026 — real bug, confirmed live for prospecting):
-        // this backfill used to require `userId` truthy before it would
-        // even attempt the insert. Confirmed via S3 console: prospecting
-        // addresses (9540 Moss Hill Way, 9912 Carico Way) have their
-        // original/final images sitting in smart-stage-originals/{projectId}/
-        // and smart-stage-finals/{projectId}/ — the legacy fallback — instead
-        // of staging-prospects/{slug}/, because this branch never ran for
-        // them (no listings row ever existed to read is_prospecting/slug
-        // from), so upload-original.js/upload-staged.js's lookupListingSlug()
-        // found nothing and fell back to legacy naming every time. A
-        // prospecting session frequently has no logged-in userId to begin
-        // with — that's the normal case, not an edge case — so gating the
-        // ONE thing that makes is_prospecting/slug resolvable behind userId
-        // guaranteed this exact failure for prospecting. The row must exist
-        // regardless of whether userId is present; user_id on the row is
-        // simply null when there isn't one (matches how addImage() and
-        // other callers already treat a null userId elsewhere in this file).
+        // FIX (Sep 8, 2026): if listingId came back null because no
+        // Supabase row exists at all for this project_id, nothing above
+        // ever creates one — and since this lookup path is what EVERY
+        // repeat search after the first hits, a project stuck in this
+        // state stays stuck on every single visit, forever, with
+        // upload-original.js/upload-staged.js unable to resolve a slug
+        // and silently falling back to legacy projectId-based S3 naming.
         if (!listingId) {
           let backfillTier = "solo";
           let backfillUserContext = null;
@@ -418,9 +318,7 @@ async function lookupProject(address, userId, requestedIsProspecting, env) {
               console.error("lookupProject: could not resolve user context for backfill (non-fatal):", e.message);
             }
           }
-          const backfillSlug = requestedIsProspecting === true
-            ? slugifyProspectAddress(project.address, project.projectId)
-            : slugifyAddress(project.address);
+          const backfillSlug = slugifyAddress(project.address);
           const result = await insertListingWithRetry({
             address: project.address,
             project_id: project.projectId,
@@ -431,13 +329,9 @@ async function lookupProject(address, userId, requestedIsProspecting, env) {
             team_id: backfillUserContext?.team_id || null,
             brokerage_id: backfillUserContext?.brokerage_id || null,
             status: "active",
-            is_prospecting: requestedIsProspecting === true,
           }, "lookupProject (missing-row backfill)");
           listingId = result.listingId;
-          if (listingId) {
-            slug = backfillSlug;
-            isProspecting = requestedIsProspecting === true;
-          }
+          if (listingId) slug = backfillSlug;
         }
       } catch (err) {
         console.error("Listing id lookup error (non-fatal):", err.message);
@@ -454,7 +348,6 @@ async function lookupProject(address, userId, requestedIsProspecting, env) {
       status:        project.status,
       listingId,
       slug,
-      isProspecting,
     };
   } catch (err) {
     console.error("lookup error:", err.message);
@@ -464,15 +357,12 @@ async function lookupProject(address, userId, requestedIsProspecting, env) {
 
 // ── ACTION: CREATE ───────────────────────────────────────────────────────────
 
-async function createProject(address, agentInfo, siteUrl, userId, isProspecting, env) {
+async function createProject(address, agentInfo, siteUrl, userId, env) {
   address = cleanAddress(address);
   const store   = getProjectStore(env);
   // Scoped by userId — see matching fix + comment in lookupProject above.
   const addrKey = "addr_" + (userId || "anon") + "_" + addressHash(address);
 
-  // FIX (Sep 8, 2026): moved up from below the race-guard check — the
-  // race-guard branch now needs this too (see the missing-row backfill
-  // fix inside it below), not just the fresh-insert path.
   let tier = "solo";
   let userContext = null;
   if (userId && process.env.SUPABASE_URL) {
@@ -492,42 +382,17 @@ async function createProject(address, agentInfo, siteUrl, userId, isProspecting,
     // separate text column — see the write below for why these differ).
     let listingId = null;
     let slug = null;
-    let existingIsProspecting = null;
     if (process.env.SUPABASE_URL) {
       try {
         const listingLookup = await supabase("GET", "listings", null,
-          `?project_id=eq.${proj.projectId}&select=id,slug,is_prospecting&limit=1`
+          `?project_id=eq.${proj.projectId}&select=id,slug&limit=1`
         );
         listingId = listingLookup.data?.[0]?.id || null;
         slug = listingLookup.data?.[0]?.slug || null;
-        existingIsProspecting = listingLookup.data?.[0]?.is_prospecting ?? null;
-        console.log(
-          "createProject (race-guard branch): requestedIsProspecting:", isProspecting,
-          "currentIsProspecting:", existingIsProspecting, "listingId:", listingId
-        );
-        // Same sync as lookupProject's Aug 29, 2026 fix above, for the rare
-        // case this race-guard branch is the one that fires (two near-
-        // simultaneous creates for the same brand-new address).
-        //
-        // FIX (Sep 8, 2026): one-directional now, matching lookupProject's
-        // fix above — false->true only, never true->false. See that
-        // function's comment for the full incident this closes.
-        if (listingId && isProspecting === true && existingIsProspecting !== true) {
-          console.log("createProject: syncing is_prospecting -> true for listingId", listingId);
-          try {
-            const patchResult = await supabase("PATCH", "listings", { is_prospecting: true }, `?id=eq.${listingId}`);
-            console.log("createProject: is_prospecting patch result — status:", patchResult.status, "data:", JSON.stringify(patchResult.data));
-            existingIsProspecting = true;
-          } catch (e) {
-            console.error("createProject: is_prospecting sync patch failed (non-fatal):", e.message);
-          }
-        }
+
         if (listingId && !slug) {
-          slug = existingIsProspecting === true
-            ? slugifyProspectAddress(proj.address, proj.projectId)
-            : slugifyAddress(proj.address);
+          slug = slugifyAddress(proj.address);
           if (slug) {
-            // AWAITED — see the matching fix in lookupProject above.
             try {
               await supabase("PATCH", "listings", { slug }, `?project_id=eq.${proj.projectId}`);
             } catch (e) {
@@ -535,38 +400,11 @@ async function createProject(address, agentInfo, siteUrl, userId, isProspecting,
             }
           }
         }
-        // FIX (Sep 8, 2026 — confirmed real case): everything above this
-        // only ever SYNCS FIELDS on an existing Supabase row — if
-        // listingId came back null because no row exists at all (not "a
-        // row with a stale flag", genuinely no row), nothing above ever
-        // creates one. Confirmed live: a Blobs project existed for an
-        // address with zero matching Supabase listings row — every
-        // subsequent search hit this branch, which kept returning
-        // listingId: null forever, and upload-original.js/upload-staged.js
-        // (unable to resolve a slug via that missing row) silently fell
-        // back to the legacy projectId-based S3 naming scheme instead of
-        // the readable slug — the folder name itself was the tell
-        // (szregsolo_..._f840/ instead of a readable address slug). Most
-        // likely original cause: userId was null at the moment this Blobs
-        // project was first created (the fresh-insert path below only
-        // ever attempts the Supabase write `if (userId && ...)`), so the
-        // Blobs write succeeded while the Supabase side never ran at all —
-        // but regardless of how it happened, this branch needs to be able
-        // to recover from it, not just perpetuate the gap on every retry.
-        //
-        // FIX (Sep 13, 2026 — real bug, confirmed live for prospecting):
-        // dropped the `&& userId` half of this gate, same as the matching
-        // fix in lookupProject() above — see that comment for the full
-        // incident (prospecting images landing in smart-stage-originals/
-        // and smart-stage-finals/ instead of staging-prospects/ because a
-        // userId-less prospecting session could never get this far). The
-        // row now always gets created once a Blobs project exists but its
-        // Supabase row is missing; user_id is simply null when there
-        // isn't one.
+        // FIX (Sep 8, 2026): if listingId came back null because no row
+        // exists at all (not "a row with stale data", genuinely no row),
+        // create one now rather than perpetuating the gap on every retry.
         if (!listingId) {
-          const backfillSlug = isProspecting === true
-            ? slugifyProspectAddress(proj.address, proj.projectId)
-            : slugifyAddress(proj.address);
+          const backfillSlug = slugifyAddress(proj.address);
           const result = await insertListingWithRetry({
             address: proj.address,
             project_id: proj.projectId,
@@ -577,19 +415,15 @@ async function createProject(address, agentInfo, siteUrl, userId, isProspecting,
             team_id: userContext?.team_id || null,
             brokerage_id: userContext?.brokerage_id || null,
             status: "active",
-            is_prospecting: !!isProspecting,
           }, "createProject (race-guard branch backfill)");
           listingId = result.listingId;
-          if (listingId) {
-            slug = backfillSlug;
-            existingIsProspecting = !!isProspecting;
-          }
+          if (listingId) slug = backfillSlug;
         }
       } catch (err) {
         console.error("Listing id lookup error (non-fatal):", err.message);
       }
     }
-    return { created: false, existing: true, projectId: proj.projectId, complianceUrl: proj.complianceUrl, listingId, slug, isProspecting: existingIsProspecting };
+    return { created: false, existing: true, projectId: proj.projectId, complianceUrl: proj.complianceUrl, listingId, slug };
   }
 
   const projectId = generateProjectId(address, tier);
@@ -613,27 +447,11 @@ async function createProject(address, agentInfo, siteUrl, userId, isProspecting,
   // Write to Netlify Blobs (existing system — do not change)
   await store.set(addrKey, JSON.stringify(project));
   await store.set("pid_" + projectId, JSON.stringify(project));
-  console.log("Project created:", projectId, "tier:", tier, "address:", address, "prospecting:", !!isProspecting);
+  console.log("Project created:", projectId, "tier:", tier, "address:", address);
 
-  // ── Write to Supabase listings table (new) ────────────────────────────────
-  // FIX (Sep 13, 2026 — real bug, confirmed live for prospecting): this used
-  // to require `userId` truthy before writing the row at all. A prospecting
-  // session frequently runs with no logged-in userId, and this fresh-insert
-  // path is what EVERY brand-new address hits first — so for prospecting,
-  // no listings row was ever created here, upload-original.js/upload-staged.js
-  // could never resolve is_prospecting or a slug for it, and both files'
-  // documented fallback (legacy `smart-stage-originals/{projectId}` /
-  // `smart-stage-finals/{projectId}` naming) silently took over, landing the
-  // actual image bytes in production storage instead of staging-prospects/.
-  // Confirmed in S3 for 9540 Moss Hill Way and 9912 Carico Way. Same fix
-  // applied to the two backfill branches above (lookupProject and this
-  // function's race-guard branch) — the row must exist regardless of
-  // whether a userId is present; user_id is simply null when there isn't
-  // one.
+  // ── Write to Supabase listings table ──────────────────────────────────
   let listingId = null;
-  const slug = isProspecting === true
-    ? slugifyProspectAddress(address, projectId)
-    : slugifyAddress(address);
+  const slug = slugifyAddress(address);
   if (process.env.SUPABASE_URL) {
     // FIX (Sep 16, 2026 — real bug, confirmed live for 11625 Tortuguero
     // Way): this used to be a single, unretried POST — a catch swallowed
@@ -641,12 +459,8 @@ async function createProject(address, agentInfo, siteUrl, userId, isProspecting,
     // already succeeded and this write is best-effort. In practice, a
     // single failed attempt here means NO listings row ever exists for
     // this project — lookupListingSlug() in upload-original.js/
-    // upload-staged.js then has nothing to find (it only receives a
-    // projectId, no address/isProspecting to backfill with), so it falls
-    // back to the legacy smart-stage-originals/smart-stage-finals/
-    // naming, and write-prospect-meta.js's slug-from-s3Key parsing on the
-    // frontend misreads the resulting fallback key, scattering one
-    // prospecting shot's files across three unrelated S3 locations. See
+    // upload-staged.js then has nothing to find, so it falls back to the
+    // legacy smart-stage-originals/smart-stage-finals/ naming. See
     // insertListingWithRetry() above for why this now retries.
     const result = await insertListingWithRetry({
       address,
@@ -658,25 +472,15 @@ async function createProject(address, agentInfo, siteUrl, userId, isProspecting,
       team_id:             userContext?.team_id      || null,
       brokerage_id:        userContext?.brokerage_id || null,
       status:              "active",
-      // NEW (prospecting flag, Aug 28 2026): marks a listing created from
-      // a vacant-home prospecting shot rather than a signed listing. Read
-      // downstream by upload-original.js/upload-staged.js to route S3
-      // keys to staging-prospects/<slug>/... instead of listings/<slug>/....
-      // Plain boolean column — flipping it later (once a prospect signs)
-      // is a simple PATCH, no separate "convert" flow needed yet.
-      is_prospecting:       !!isProspecting,
     }, "createProject (fresh insert)");
     // NEW: capture the real Supabase id — this is what video-job.js's
     // action=frames/action=create actually need as "listingId". Distinct
     // from projectId (the human-readable compliance slug above) — the two
-    // are different columns on this same row, confirmed against
-    // get-user-listings.js's explicit `select=id,...,project_id,...`.
-    // Never returned to the frontend before this change, even though the
-    // row itself has always existed the moment a project is created.
+    // are different columns on this same row.
     listingId = result.listingId;
   }
 
-  return { created: true, projectId, complianceUrl: cUrl, listingId, slug, isProspecting: !!isProspecting };
+  return { created: true, projectId, complianceUrl: cUrl, listingId, slug };
 }
 
 // ── ACTION: ADD IMAGE ─────────────────────────────────────────────────────────
@@ -748,8 +552,7 @@ async function addImage(projectId, imageData, userId, ab723Prompt, env) {
     // staleness, not data loss, and doesn't need the same CAS treatment.
     // Scoped by userId — must match the key scheme in lookupProject/
     // createProject above, or this secondary index silently falls out of
-    // sync with the primary pidKey record (found this while fixing the
-    // agent-scoping bug: this line still used the old address-only key).
+    // sync with the primary pidKey record.
     const addrKey = "addr_" + (project.userId || "anon") + "_" + addressHash(project.address);
     await store.set(addrKey, updated);
     console.log(
@@ -902,23 +705,16 @@ exports.handler = async (event) => {
     const body = JSON.parse(event.body || "{}");
 
     if (action === "lookup") {
-      const { address, userId, isProspecting } = body;
+      const { address, userId } = body;
       if (!address) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing address" }) };
-      // DIAGNOSTIC (Aug 29, 2026) — logs the raw request body's isProspecting
-      // value BEFORE any coercion, so a Netlify log can show whether the
-      // frontend sent a real boolean at all, vs undefined/missing entirely.
-      console.log("project-manage lookup: raw body.isProspecting =", body.isProspecting, "(type:", typeof body.isProspecting, ")");
-      const requestedIsProspecting = typeof isProspecting === "boolean" ? isProspecting : null;
-      const result = await lookupProject(address, userId || null, requestedIsProspecting, process.env);
+      const result = await lookupProject(address, userId || null, process.env);
       return { statusCode: 200, headers, body: JSON.stringify(result) };
     }
 
     if (action === "create") {
-      const { address, agentInfo, siteUrl, userId, isProspecting } = body;
+      const { address, agentInfo, siteUrl, userId } = body;
       if (!address) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing address" }) };
-      // DIAGNOSTIC (Aug 29, 2026) — same as the lookup action above.
-      console.log("project-manage create: raw body.isProspecting =", body.isProspecting, "(type:", typeof body.isProspecting, ")");
-      const result = await createProject(address, agentInfo || {}, siteUrl, userId || null, !!isProspecting, process.env);
+      const result = await createProject(address, agentInfo || {}, siteUrl, userId || null, process.env);
       return { statusCode: 200, headers, body: JSON.stringify(result) };
     }
 

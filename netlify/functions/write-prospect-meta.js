@@ -4,12 +4,26 @@
 // shot needs beyond the images themselves, all living INSIDE the same S3
 // folder as the images (see the screenshot that prompted this: Sam's
 // staging-prospects/ bucket view, one folder per address). No Supabase
-// write, no Netlify Blobs project record — the Supabase `listings` row
-// created earlier in the flow still exists (it's load-bearing for
-// upload-original.js/upload-staged.js's slug + isProspecting resolution —
-// see reserveAssetKey() in those files), but this function and
-// prospect-page.js never read from it. The S3 folder is the single source
-// of truth for everything a prospecting page needs to render.
+// write, no Netlify Blobs project record from THIS file — a Supabase row
+// for the prospecting project does exist (created earlier in the flow —
+// see marketing-manage.js), but this function and prospect-page.js never
+// read from or write to it. The S3 folder is the single source of truth
+// for everything a prospecting page needs to render.
+//
+// CORRECTION (Sep 16, 2026 — pipeline separation): this comment
+// previously said the load-bearing Supabase row lived in the `listings`
+// table, load-bearing for upload-original.js/upload-staged.js's slug +
+// isProspecting resolution. That was accurate on Sep 8 but is no longer
+// true — Prospecting now has its own standalone `prospects` table, own
+// Blobs store, and own function (marketing-manage.js), fully separate
+// from Listings; a prospecting project never creates a `listings` row at
+// all anymore, and slug resolution for uploads now goes through
+// upload-original.js/upload-staged.js's lookupProspectSlug() against
+// `prospects` instead. This file's own behavior is unaffected either way
+// — it has never queried any Supabase table, and the `slug` this file
+// operates on comes straight from the S3 key the frontend already parsed,
+// same as before. Correction is purely so the comment doesn't point a
+// future debugging session at the wrong table.
 //
 // FIX (Sep 8, 2026 — same day, real gap found live): originally this only
 // wrote meta.json. The QR itself was only ever generated on-the-fly as a

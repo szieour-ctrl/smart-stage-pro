@@ -5,12 +5,23 @@
 // Deliberately NOT built on compliance-page.js's Netlify Blobs + Supabase
 // `listings` machinery — per Sam's spec, this needs to be fully
 // self-contained under S3's staging-prospects/{slug}/ folder, with nothing
-// written to or read from the `listings` table for rendering, so a
+// written to or read from any Supabase table for rendering, so a
 // prospecting shot can never end up in My Listings or Gallery no matter
-// what this page does. The Supabase `listings` row still exists for a
-// prospecting project (it's load-bearing for slug/isProspecting resolution
-// in upload-original.js/upload-staged.js — see reserveAssetKey() there),
-// but this function never queries it.
+// what this page does. A Supabase row for a prospecting project does
+// exist elsewhere (it's load-bearing for slug resolution in
+// upload-original.js/upload-staged.js's lookupProspectSlug() — see that
+// function there), but this function never queries it.
+//
+// CORRECTION (Sep 16, 2026 — pipeline separation): this comment
+// previously said the load-bearing row lived in the `listings` table.
+// That was true when this file was written (Sep 8) but is no longer
+// accurate — Prospecting now has its own standalone `prospects` table,
+// its own Netlify Blobs store, and its own Netlify Function
+// (marketing-manage.js), completely separate from Listings. A prospecting
+// project never creates a `listings` row at all anymore. This file's own
+// behavior is unaffected either way, since it has never queried any
+// Supabase table — this correction is purely so the comment doesn't send
+// a future debugging session looking in the wrong table.
 //
 // Content, per Sam: exactly one staged image, the same before/after slider
 // used on the marketing homepage (same CSS/JS, copied here since this is a

@@ -1570,28 +1570,30 @@ async function lookupOrCreateProject(address) {
     const session = requireLiveSession();
     if (!session) return;
     const userId = session.user.id;
-    // FIX (Aug 29, 2026 — real bug, confirmed by Sam: checked Prospecting,
-    // images still landed under listings/): action=create only ever fires
-    // for a brand-new address — an address you'd already looked up before
-    // takes the "exists:true" branch below and never touches createNewProject
-    // at all, so the checkbox had nothing to attach to on a repeat visit.
-    // Sending isProspecting on every lookup (not just create) lets
-    // project-manage.js sync an existing listing's flag to whatever's
-    // checked right now, on every visit — see lookupProject's matching fix.
+    // FIX (Sep 16, 2026 — pipeline separation): Prospecting is no longer a
+    // flag threaded through project-manage.js — it's its own function
+    // (marketing-manage.js), its own Supabase table (prospects), and its
+    // own Blobs store. The checkbox now decides which ENDPOINT gets
+    // called, full stop — not a body parameter one shared endpoint has to
+    // branch on internally. This directly closes the incident where an
+    // unchecked search still surfaced an existing Prospecting contact for
+    // the address: that could only happen because both pipelines shared
+    // one key in one table. They no longer share anything.
     const isProspecting = !!document.getElementById('prospecting-toggle')?.checked;
-    const res = await fetch('/.netlify/functions/project-manage?action=lookup', {
+    const endpoint = isProspecting ? 'marketing-manage' : 'project-manage';
+    const res = await fetch(`/.netlify/functions/${endpoint}?action=lookup`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ address, userId, isProspecting }),
+      body: JSON.stringify({ address, userId }),
     });
     const data = await res.json();
 
     if (data.exists) {
       // Project found
       SESSION.projectId = data.projectId;
-      SESSION.listingId = data.listingId;
+      SESSION.listingId = data.listingId || null;
       SESSION.projectAddress = address;
-      SESSION.complianceUrl = data.complianceUrl;
+      SESSION.complianceUrl = data.complianceUrl || null;
       SESSION.projectStatus = 'existing';
       SESSION.isProspecting = !!data.isProspecting;
 
@@ -1665,8 +1667,14 @@ async function createNewProject(address) {
     const session = requireLiveSession();
     if (!session) return;
     const userId = session.user.id;
+    // FIX (Sep 16, 2026 — pipeline separation): same endpoint-level branch
+    // as lookupOrCreateProject() above — see that function's comment.
+    // marketing-manage.js requires userId as a hard precondition (never
+    // `userId || null`), since a request reaching it with no valid session
+    // means the auth guard above already should have stopped this.
     const isProspecting = !!document.getElementById('prospecting-toggle')?.checked;
-    const res = await fetch('/.netlify/functions/project-manage?action=create', {
+    const endpoint = isProspecting ? 'marketing-manage' : 'project-manage';
+    const res = await fetch(`/.netlify/functions/${endpoint}?action=create`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1674,15 +1682,14 @@ async function createNewProject(address) {
         siteUrl: window.location.origin,
         agentInfo: {},
         userId,
-        isProspecting,
       }),
     });
     const data = await res.json();
 
     SESSION.projectId = data.projectId;
-    SESSION.listingId = data.listingId;
+    SESSION.listingId = data.listingId || null;
     SESSION.projectAddress = address;
-    SESSION.complianceUrl = data.complianceUrl;
+    SESSION.complianceUrl = data.complianceUrl || null;
     SESSION.projectStatus = 'new';
     SESSION.isProspecting = !!data.isProspecting;
     // FIX (real bug, Sam's report: "+ Add More Rooms" button gone).
@@ -1792,13 +1799,15 @@ function continueProject() {
   // browser tab's lifetime, with "+ Create Video" just never appearing and
   // no clue why. Fire-and-forget on purpose — this must never block adding
   // more rooms, which is the actual thing the user asked to do.
-  if (!SESSION.listingId && SESSION.projectAddress) {
+  // FIX (Sep 16, 2026 — pipeline separation): this backfill only makes
+  // sense for Listings — listingId/Create Video have no Prospecting
+  // equivalent at all (no compliance page, no video pipeline for
+  // Marketing). Guarding on !SESSION.isProspecting skips a network call
+  // that would previously just harmlessly no-op (project-manage.js's own
+  // Blobs store never contained a Prospecting project in the first
+  // place), rather than fixing any actual incorrect behavior.
+  if (!SESSION.isProspecting && !SESSION.listingId && SESSION.projectAddress) {
     // userId now required here too — lookup is agent-scoped (Aug 28, 2026 fix).
-    // Deliberately NOT sending isProspecting on this call (Aug 29, 2026 fix
-    // note) — this fires mid-session, off the property-search checkbox
-    // entirely, so it must never assert a flag value one way or the other
-    // and risk flipping an already-established listing's storage location
-    // out from under an in-progress session.
     // FIX (Sep 7, 2026): wrapped in withAuthTimeout — same unguarded-getSession()
     // issue as the other fixes in this file. This call's existing .catch(() => {})
     // only helps once the promise actually rejects; a stall previously just hung
@@ -4710,21 +4719,28 @@ async function attachFinalToProject(finalBase64, room, orig, enhId) {
       throw new Error(`S3 rejected the upload (status ${uploadRes.status}): ${uploadRaw.slice(0, 300)}`);
     }
 
-    // Thumbnail for the photo-selection picker grid — non-fatal, a failure
-    // here should never block the actual staged image from attaching.
-    // See generate-thumbnail.js for why this can't happen inline in
-    // upload-staged.js.
+    // Thumbnail for the photo-selection picker grid — LISTINGS ONLY.
+    // FIX (Sep 16, 2026 — pipeline separation): Prospecting now skips this
+    // call entirely rather than generating and discarding a thumbnail
+    // nothing consumes — Gallery already excludes Prospecting, and
+    // Sam/team pull full-res URLs directly for the GPT/Pabbly workflow.
+    // This also removes Prospecting from the originals/finals
+    // thumbnail-collision bug class entirely, since there's no shared
+    // sequence-numbering scheme left for two uploads to collide on. Skips
+    // an S3 write and a Netlify function invocation per staged image.
     let thumbnailUrl = null;
-    try {
-      const thumbRes = await fetch('/.netlify/functions/generate-thumbnail', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sourceUrl: sig.publicUrl, projectId: SESSION.projectId })
-      });
-      const thumbData = await thumbRes.json().catch(() => ({}));
-      thumbnailUrl = thumbData.thumbnailUrl || null;
-    } catch (thumbErr) {
-      console.error('Thumbnail generation failed (non-fatal):', thumbErr.message);
+    if (!SESSION.isProspecting) {
+      try {
+        const thumbRes = await fetch('/.netlify/functions/generate-thumbnail', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sourceUrl: sig.publicUrl, projectId: SESSION.projectId })
+        });
+        const thumbData = await thumbRes.json().catch(() => ({}));
+        thumbnailUrl = thumbData.thumbnailUrl || null;
+      } catch (thumbErr) {
+        console.error('Thumbnail generation failed (non-fatal):', thumbErr.message);
+      }
     }
 
     if (SESSION.isProspecting) {
@@ -5468,19 +5484,22 @@ async function attachHeroShotToProject(finalBase64, room, shot, shotId) {
       throw new Error(`S3 rejected the upload (status ${uploadRes.status}): ${uploadRaw.slice(0, 300)}`);
     }
 
-    // Thumbnail for the photo-selection picker grid — non-fatal, same as
-    // attachFinalToProject's handling.
+    // Thumbnail for the photo-selection picker grid — LISTINGS ONLY, same
+    // treatment as attachFinalToProject's handling above (see that
+    // function's Sep 16, 2026 comment for the full reasoning).
     let thumbnailUrl = null;
-    try {
-      const thumbRes = await fetch('/.netlify/functions/generate-thumbnail', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sourceUrl: sig.publicUrl, projectId: SESSION.projectId })
-      });
-      const thumbData = await thumbRes.json().catch(() => ({}));
-      thumbnailUrl = thumbData.thumbnailUrl || null;
-    } catch (thumbErr) {
-      console.error('Thumbnail generation failed (non-fatal):', thumbErr.message);
+    if (!SESSION.isProspecting) {
+      try {
+        const thumbRes = await fetch('/.netlify/functions/generate-thumbnail', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sourceUrl: sig.publicUrl, projectId: SESSION.projectId })
+        });
+        const thumbData = await thumbRes.json().catch(() => ({}));
+        thumbnailUrl = thumbData.thumbnailUrl || null;
+      } catch (thumbErr) {
+        console.error('Thumbnail generation failed (non-fatal):', thumbErr.message);
+      }
     }
 
     if (SESSION.isProspecting) {

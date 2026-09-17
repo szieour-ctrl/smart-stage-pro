@@ -23,12 +23,34 @@
 // at a readable key (listings/{slug}/originals|finals/...), the thumbnail
 // reuses the exact same slug/room/sequence, just under a thumbnails/
 // folder — e.g. listings/2089-thornecroft-ln/finals/kitchen-01.jpg becomes
-// listings/2089-thornecroft-ln/thumbnails/kitchen-01.jpg. No new lookup or
-// sequence needed: the source key already encodes everything, so this is
-// a straight folder swap. The corresponding media_assets row (matched by
-// its s3_key, which equals the parsed source key) gets its thumbnail_key
-// filled in, best-effort. Falls back to the legacy random-UUID scheme,
-// unchanged, for any source key that doesn't match the new pattern.
+// listings/2089-thornecroft-ln/thumbnails/finals/kitchen-01.jpg. No new
+// lookup or sequence needed: the source key already encodes everything,
+// this is a straight folder swap. The corresponding media_assets row
+// (matched by its s3_key, which equals the parsed source key) gets its
+// thumbnail_key filled in, best-effort. Falls back to the legacy
+// random-UUID scheme, unchanged, for any source key that doesn't match
+// the new pattern.
+//
+// FIX (Sep 16, 2026 — confirmed real collision, not a hypothesis): the
+// thumbnail key used to collapse BOTH "/originals/" and "/finals/" down
+// to the exact same "/thumbnails/" folder. Since seq numbers are counted
+// independently per image_type (see upload-original.js/upload-staged.js's
+// reserveAssetKey), a room's original and final each start at seq 1
+// independently — the ordinary case, not an edge case, is exactly one of
+// each per room. That meant both types computed the IDENTICAL thumbnail
+// key (e.g. listings/{slug}/thumbnails/bedroom-2-01.jpg), and since the
+// final is always generated after its original, its thumbnail write
+// silently overwrote the original's — while the original's own
+// media_assets row still pointed at that same path string, now containing
+// the wrong image. Confirmed live: Gallery showed the staged image under
+// "Originals" while the click-to-copy URL (a separate field, untouched)
+// was still correct — the full-res original file itself was never
+// touched, only its derived thumbnail. Preserving the type segment
+// (thumbnails/originals/... vs thumbnails/finals/...) instead of
+// collapsing it makes the two paths structurally incapable of colliding,
+// regardless of matching sequence numbers. Only affects NEW uploads going
+// forward — existing thumbnail_key values already in Supabase are
+// untouched by this change and need a separate backfill pass.
 
 const https = require("https");
 const crypto = require("crypto");
@@ -137,8 +159,11 @@ exports.handler = async (event) => {
       (sourceKey.startsWith("listings/") || sourceKey.startsWith("staging-prospects/")) &&
       (sourceKey.includes("/originals/") || sourceKey.includes("/finals/"));
 
+    // FIX (Sep 16, 2026) — see file header comment for the full collision
+    // explanation. Preserves whichever of "originals"/"finals" matched,
+    // instead of collapsing both into the same "/thumbnails/" folder.
     const thumbKey = readableSourceKey
-      ? sourceKey.replace("/originals/", "/thumbnails/").replace("/finals/", "/thumbnails/")
+      ? sourceKey.replace(/\/(originals|finals)\//, "/thumbnails/$1/")
       : `${projectId ? `smart-stage-thumbnails/${projectId}` : "smart-stage-thumbnails/unfiled"}/${crypto.randomUUID()}.jpg`;
 
     await s3.send(new PutObjectCommand({

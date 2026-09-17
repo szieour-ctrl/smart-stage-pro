@@ -1561,8 +1561,15 @@ async function lookupOrCreateProject(address) {
     // network request ever reaching project-manage. withAuthTimeout() makes
     // a stall reject after 8s instead, which now flows into the existing
     // catch's "Search error... you may continue without a project" path.
-    const session = readStoredSessionDirect(); // FIX (Sep 8, 2026): direct read — see readStoredSessionDirect() writeup
-    const userId = session?.user?.id || null;
+    // FIX (Sep 16, 2026 — auth guard): was `readStoredSessionDirect()` +
+    // `session?.user?.id || null`, which proceeded even when null — see
+    // requireLiveSession()'s own comment for the full incident. A null
+    // return here means the session was already invalid and signOut()
+    // has already fired; stop immediately rather than continuing with a
+    // dead search.
+    const session = requireLiveSession();
+    if (!session) return;
+    const userId = session.user.id;
     // FIX (Aug 29, 2026 — real bug, confirmed by Sam: checked Prospecting,
     // images still landed under listings/): action=create only ever fires
     // for a brand-new address — an address you'd already looked up before
@@ -1652,8 +1659,12 @@ async function createNewProject(address) {
     // lookupOrCreateProject() above — wrapped in withAuthTimeout() so a
     // stuck cross-tab lock or Supabase JWT-refresh stall rejects into this
     // function's own catch block instead of hanging forever.
-    const session = readStoredSessionDirect(); // FIX (Sep 8, 2026): direct read — see readStoredSessionDirect() writeup
-    const userId = session?.user?.id || null;
+    // FIX (Sep 16, 2026 — auth guard): same fix as lookupOrCreateProject()
+    // above — see requireLiveSession()'s comment for the full incident
+    // this closes (the NOT NULL constraint failure on listings.user_id).
+    const session = requireLiveSession();
+    if (!session) return;
+    const userId = session.user.id;
     const isProspecting = !!document.getElementById('prospecting-toggle')?.checked;
     const res = await fetch('/.netlify/functions/project-manage?action=create', {
       method: 'POST',
@@ -7551,11 +7562,21 @@ function resetSession(){
   SESSION.anchorImageUrl=null;
   SESSION.stagingDNA=null;
   SESSION.openPlanRoomId=null;
+  SESSION.openRoomId=null;
   // Clear project — force property search on next session
   SESSION.projectId=null;
+  SESSION.listingId=null;
   SESSION.projectAddress=null;
   SESSION.complianceUrl=null;
   SESSION.projectStatus=null;
+  SESSION.isProspecting=false;
+  SESSION.prospectQrUrl=null;
+  // Multi-angle group session state
+  SESSION.groupMode=false;
+  SESSION.groupImages=[];
+  SESSION.groupSpatialPlan=null;
+  SESSION.groupPrompts=[];
+  SESSION.groupType='openplan';
   document.getElementById('thumb-grid').innerHTML='';
   document.getElementById('upload-actions').classList.add('hidden');
   fileInput.value='';
@@ -7618,6 +7639,47 @@ function updateFinalLabel(roomId, enhId) {
   if (note) note.textContent = hasPreset
     ? `Uses ${totalCost} staged images from your plan (includes +1 for Photographic Preset)`
     : `Uses ${totalCost} staged image${totalCost>1?'s':''} from your plan`;
+}
+
+// ══════════════════════════════════════════
+// IDLE / INACTIVITY AUTO-LOGOUT (Sep 16, 2026)
+// ══════════════════════════════════════════
+// Separate mechanism from requireLiveSession() above — that one only
+// catches a token that's ALREADY dead at the moment of a specific action
+// (create/lookup). This one proactively signs the user out after real
+// inactivity, independent of whether their token would still validate.
+// Per Sam's decision: no warning modal, no "are you still there?" prompt
+// — a hard cutoff straight to signOut(), same treatment as discovering an
+// expired token. One clock for the whole tab, started once a real session
+// is confirmed (see initAuth()) and stopped on sign-out (see signOut()).
+const IDLE_LIMIT_MS = 45 * 60 * 1000; // 45 minutes
+let _lastActivityAt = Date.now();
+let _idleCheckHandle = null;
+
+function _markActivity() { _lastActivityAt = Date.now(); }
+
+function startIdleTimer() {
+  if (_idleCheckHandle) return; // already running — don't stack a second interval
+  _lastActivityAt = Date.now();
+  ['click', 'keydown', 'touchstart'].forEach(evt =>
+    document.addEventListener(evt, _markActivity, { passive: true })
+  );
+  _idleCheckHandle = setInterval(() => {
+    if (Date.now() - _lastActivityAt > IDLE_LIMIT_MS) {
+      console.warn('Idle timeout reached (45 min of inactivity) — signing out.');
+      signOut();
+    }
+  }, 60 * 1000); // checking once a minute is plenty — no need for finer granularity
+}
+
+function stopIdleTimer() {
+  if (_idleCheckHandle) {
+    clearInterval(_idleCheckHandle);
+    _idleCheckHandle = null;
+  }
+  ['click', 'keydown', 'touchstart'].forEach(evt =>
+    document.removeEventListener(evt, _markActivity)
+  );
 }
 
 // ══════════════════════════════════════════
@@ -7789,6 +7851,35 @@ function readStoredSessionDirect() {
   }
 }
 
+// FIX (Sep 16, 2026 — auth guard): readStoredSessionDirect() above already
+// correctly detects an expired token and returns null — but until now,
+// nothing that CALLED it ever checked for that null before proceeding.
+// lookupOrCreateProject() and createNewProject() were reading userId as
+// `session?.user?.id || null` and sending the request anyway, even when
+// null. Root-caused Sep 16, 2026: a dead token silently sent userId:null
+// into project-manage.js, which failed the listings.user_id NOT NULL
+// constraint in Supabase — while project-manage.js still returned
+// created:true, so the frontend showed a false "Prospecting Contact
+// Created" success message while no listings row actually existed.
+// Since login is mandatory to use this app at all, a null userId at this
+// point is never legitimate — it always means the stored token expired
+// (or a background refresh silently failed) sometime after page load.
+// Per Sam's decision: don't warn and let the user decide whether to
+// continue — hard log out immediately, exactly like the Sign Out button,
+// so there's nothing stale left to track down and the only next step is
+// a fresh login. Every call site that needs "the current user's id, or
+// stop entirely if there isn't a valid one" should go through this
+// instead of reading readStoredSessionDirect() directly.
+function requireLiveSession() {
+  const session = readStoredSessionDirect();
+  if (!session?.user?.id) {
+    console.warn('requireLiveSession: no valid session (missing or expired token) — forcing sign-out before this action could send a null userId.');
+    signOut();
+    return null;
+  }
+  return session;
+}
+
 // ── AUTH INIT — runs on page load ────────────────────────────────────────────
 // FIX (Sep 2026): guards initAuth() against hanging forever. Supabase
 // clients use the browser's Web Locks API so two tabs never refresh the
@@ -7910,6 +8001,7 @@ let session = readStoredSessionDirect();
     }
     _currentUser = session.user;
     await handleAuthenticatedUser(session.user);
+    startIdleTimer();
   } else {
     showLandingPage();
   }
@@ -7947,9 +8039,11 @@ let session = readStoredSessionDirect();
       // runs on a real SIGNED_IN with a session.
       _currentUser = session.user;
       await handleAuthenticatedUser(session.user);
+      startIdleTimer(); // no-op if already running — see its own guard
     } else if (event === 'SIGNED_OUT') {
       _currentUser = null;
       _userRecord = null;
+      stopIdleTimer();
       hideAllAuthModals();
       hideLandingPage();
       showLandingPage();
@@ -8195,6 +8289,14 @@ async function signOut() {
   Object.keys(localStorage).filter(k => k.startsWith('sb-')).forEach(k => localStorage.removeItem(k));
   _currentUser = null;
   _userRecord = null;
+  // FIX (Sep 16, 2026): SESSION was never cleared on sign-out at all — a
+  // stale in-memory project/room state from the signed-out agent could
+  // still be sitting there if a different agent signed into the same tab
+  // afterward without a full page reload (shared-computer scenario).
+  // Reuses resetSession() — the same function "+ New Session" already
+  // calls — rather than duplicating its field list here.
+  resetSession();
+  stopIdleTimer();
   hideAllAuthModals();
   hideAppUI();
   hideLandingPage();

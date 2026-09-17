@@ -7,6 +7,27 @@
 //
 // Input:  GET with Authorization header
 // Output: { listings: [...], stats: { totalListings, totalImageSets, creditsRemaining, subscriptionStatus, plan } }
+//
+// FIX (Sep 16, 2026 — confirmed real, not a hypothesis): a property search
+// creates a real `listings` row and a real `compliance_page_url` the
+// moment the address is looked up (see index.html's createNewProject() —
+// this is deliberate, per Sam's Aug 11 requirement: Create Video needs a
+// projectId "after property address lookup / create property id," full
+// stop, independent of whether staging ever happens). That's still
+// correct and unchanged here. The problem was this dashboard passing
+// `compliance_page_url` straight through as `complianceUrl` regardless of
+// whether anything was ever actually staged — so a listing that was only
+// ever searched, never staged, showed up on My Listings claiming "✓ QR
+// active · ✓ Compliance page active" alongside 3 other genuinely
+// unstaged Bent Tree Ct properties. The row and its Blobs project are
+// still created eagerly and are still fully reachable via a repeat
+// Property Search (lookupProject() finds them by address+userId exactly
+// as before, unaffected by this change) — they just don't clutter this
+// dashboard LIST until something real exists. A listing that WAS staged
+// and later had every image hidden (see hide-image.js) is a different,
+// legitimate case and must still show — so the exclusion checks BOTH
+// visible and hidden image counts, not just the visible one, and only
+// drops a listing when neither has ever been non-zero.
 
 const { getStore } = require("@netlify/blobs");
 const https = require("https");
@@ -185,16 +206,30 @@ exports.handler = async (event) => {
       };
     }));
 
+    // FIX (Sep 16, 2026) — see file header comment for the full
+    // explanation. A listing that has NEVER had anything staged into it
+    // (no visible images AND no hidden ones — i.e. it was only ever
+    // property-searched, never staged) is excluded from what the
+    // dashboard displays. The underlying listings row, project_id, and
+    // compliance_page_url are untouched by this — Create Video and a
+    // repeat Property Search both keep working exactly as before, this
+    // only changes what shows up as a card on this page.
+    const displayable = enriched.filter(l => l.imageCount > 0 || l.hiddenCount > 0);
+
     // ── Stats ─────────────────────────────────────────────────────────────
-    const totalImageSets = enriched.reduce((sum, l) => sum + l.imageCount, 0);
+    // Derived from `displayable`, not `enriched` — so the "Total Listings"
+    // and "Staged Image Sets" counts on the dashboard match what's
+    // actually shown, rather than including never-staged rows the user
+    // can no longer even see on this page.
+    const totalImageSets = displayable.reduce((sum, l) => sum + l.imageCount, 0);
 
     return {
       statusCode: 200,
       headers,
       body: JSON.stringify({
-        listings: enriched,
+        listings: displayable,
         stats: {
-          totalListings:      enriched.length,
+          totalListings:      displayable.length,
           totalImageSets,
           creditsRemaining,
           subscriptionStatus: user.subscription_status,

@@ -12,11 +12,11 @@
 // Output: { uploadUrl, publicUrl, s3Key }
 //
 // NOTE: staged finals are PUBLIC by default (bucket policy covers
-// smart-stage-finals/*, listings/*, and smart-stage-thumbnails/* the same
-// way) — this matches Cloudinary's prior default behavior. Per-image
-// locking (the "hide this listing" case in hide-image.js) is a separate,
-// later migration — it needs real per-object access control, not solved
-// here.
+// smart-stage-finals/*, listings/*, staging-prospects/*, and
+// smart-stage-thumbnails/* the same way) — this matches Cloudinary's
+// prior default behavior. Per-image locking (the "hide this listing"
+// case in hide-image.js) is a separate, later migration — it needs real
+// per-object access control, not solved here.
 //
 // KEY NAMING (Aug 28, 2026 — readable-key migration):
 // roomName is a NEW input — both call sites in index.html already have
@@ -28,6 +28,14 @@
 // UUID scheme (unchanged) if Supabase isn't configured, the listing has
 // no slug, or roomName is missing — a presign request should never fail
 // just because the catalog side had a problem.
+//
+// PIPELINE SEPARATION (Sep 16, 2026): mirrors the identical change in
+// upload-original.js — see that file's header comment for the full
+// reasoning. If projectId doesn't resolve to a Listing, this now tries
+// the new lookupProspectSlug() sibling (querying the `prospects` table)
+// before falling back to legacy naming. A Prospecting final lands in the
+// same flat staging-prospects/{slug}/ folder as its original, meta.json,
+// and qr.png — no media_assets row, no originals/finals subfolder split.
 
 const crypto = require("crypto");
 const https = require("https");
@@ -92,49 +100,76 @@ function slugifyRoom(roomName) {
     .slice(0, 40) || "room";
 }
 
+// Mirrors upload-original.js's identical helper — see that file's comment.
+function slugifyProspectAddress(address, projectId) {
+  const m = /_(\d{2})(\d{2})(\d{2})_[a-z0-9]{4}$/i.exec(projectId || "");
+  const datePrefix = m ? `20${m[3]}-${m[1]}-${m[2]}` : new Date().toISOString().slice(0, 10);
+  return `${datePrefix}__${slugifyAddress(address)}`;
+}
+
 async function lookupListingSlug(projectId) {
   if (!projectId || !process.env.SUPABASE_URL) return null;
   try {
     const res = await supabase("GET", "listings", null,
-      `?project_id=eq.${encodeURIComponent(projectId)}&select=slug,address,is_prospecting&limit=1`
+      `?project_id=eq.${encodeURIComponent(projectId)}&select=slug,address&limit=1`
     );
     const row = res.data?.[0];
-    if (!row) {
-      console.log("upload-staged lookupListingSlug: no listings row found for projectId", projectId);
-      return null;
-    }
-    const isProspecting = !!row.is_prospecting;
-    console.log("upload-staged lookupListingSlug: projectId", projectId, "-> slug:", row.slug, "isProspecting:", isProspecting);
-    if (row.slug) return { slug: row.slug, isProspecting };
+    if (!row) return null;
+    if (row.slug) return { slug: row.slug };
 
     const derived = slugifyAddress(row.address);
     if (derived) {
       // AWAITED (Aug 28, 2026 — fixed a real bug, not a hypothesis): see
       // upload-original.js's matching lookupListingSlug for the full
       // explanation — Netlify Functions can tear down before an
-      // un-awaited background write completes, and confirmed via live
-      // testing this was actually happening, not just theoretically possible.
+      // un-awaited background write like this one completes.
       try {
         await supabase("PATCH", "listings", { slug: derived }, `?project_id=eq.${encodeURIComponent(projectId)}`);
       } catch (e) {
         console.error("lookupListingSlug: slug backfill patch failed (non-fatal):", e.message);
       }
     }
-    return derived ? { slug: derived, isProspecting } : null;
+    return derived ? { slug: derived } : null;
   } catch (err) {
-    console.error("lookupListingSlug error (non-fatal, falling back to legacy naming):", err.message);
+    console.error("lookupListingSlug error (non-fatal, trying prospects next):", err.message);
+    return null;
+  }
+}
+
+// NEW (Sep 16, 2026 — pipeline separation): see upload-original.js's
+// identical sibling for the full reasoning.
+async function lookupProspectSlug(projectId) {
+  if (!projectId || !process.env.SUPABASE_URL) return null;
+  try {
+    const res = await supabase("GET", "prospects", null,
+      `?project_id=eq.${encodeURIComponent(projectId)}&select=slug,address&limit=1`
+    );
+    const row = res.data?.[0];
+    if (!row) return null;
+    if (row.slug) return { slug: row.slug };
+
+    const derived = slugifyProspectAddress(row.address, projectId);
+    if (derived) {
+      try {
+        await supabase("PATCH", "prospects", { slug: derived }, `?project_id=eq.${encodeURIComponent(projectId)}`);
+      } catch (e) {
+        console.error("lookupProspectSlug: slug backfill patch failed (non-fatal):", e.message);
+      }
+    }
+    return derived ? { slug: derived } : null;
+  } catch (err) {
+    console.error("lookupProspectSlug error (non-fatal, falling back to legacy naming):", err.message);
     return null;
   }
 }
 
 // Same reserve-by-insert-first pattern as upload-original.js — see that
 // file's comment for why the Supabase insert happens before the S3 write
-// is even attempted. isProspecting routes to staging-prospects/ instead of
-// listings/ — see upload-original.js's reserveAssetKey comment.
-async function reserveAssetKey({ listingSlug, room, isProspecting }) {
+// is even attempted. LISTINGS ONLY as of Sep 16, 2026 — Prospecting uses
+// prospectAssetKey() below instead, which never touches media_assets.
+async function reserveAssetKey({ listingSlug, room }) {
   const roomSlug = slugifyRoom(room);
-  const rootFolder = isProspecting ? "staging-prospects" : "listings";
-  const baseFolder = `${rootFolder}/${listingSlug}/finals`;
+  const baseFolder = `listings/${listingSlug}/finals`;
 
   let seq = 1;
   try {
@@ -166,6 +201,15 @@ async function reserveAssetKey({ listingSlug, room, isProspecting }) {
   return null;
 }
 
+// NEW (Sep 16, 2026): mirrors upload-original.js's prospectAssetKey() —
+// see that file's comment for the full reasoning. "staged" prefix instead
+// of "original", same flat folder.
+function prospectAssetKey({ slug, room }) {
+  const roomSlug = slugifyRoom(room);
+  const rand = crypto.randomBytes(3).toString("hex").slice(0, 6);
+  return `staging-prospects/${slug}/staged-${roomSlug}-${rand}.jpg`;
+}
+
 exports.handler = async (event) => {
   const headers = {
     "Access-Control-Allow-Origin": "*",
@@ -185,10 +229,16 @@ exports.handler = async (event) => {
       body: JSON.stringify({ error: "S3_BUCKET_NAME or S3_REGION not configured" })
     };
 
+    // ── Determine key: Listing, then Prospect, then legacy fallback ────────
     let key = null;
     if (roomName) {
       const listingInfo = await lookupListingSlug(projectId);
-      if (listingInfo) key = await reserveAssetKey({ listingSlug: listingInfo.slug, room: roomName, isProspecting: listingInfo.isProspecting });
+      if (listingInfo) {
+        key = await reserveAssetKey({ listingSlug: listingInfo.slug, room: roomName });
+      } else {
+        const prospectInfo = await lookupProspectSlug(projectId);
+        if (prospectInfo) key = prospectAssetKey({ slug: prospectInfo.slug, room: roomName });
+      }
     }
     if (!key) {
       const folder = projectId ? `smart-stage-finals/${projectId}` : "smart-stage-finals";

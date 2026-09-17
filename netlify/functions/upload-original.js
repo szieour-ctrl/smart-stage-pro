@@ -14,8 +14,8 @@
 // Output: publicUrl, thumbnailUrl, s3Key
 //
 // Public access comes from a bucket policy scoped to smart-stage-originals/*,
-// smart-stage-finals/*, listings/*, and smart-stage-thumbnails/*, NOT from
-// object ACLs (this bucket has ACLs disabled — Bucket owner enforced).
+// smart-stage-finals/*, listings/*, and smart-stage-thumbnails/* the same
+// way (this bucket has ACLs disabled — Bucket owner enforced).
 //
 // KEY NAMING (Aug 28, 2026 — readable-key migration):
 // When the listing behind projectId has a resolvable slug (new listings,
@@ -42,6 +42,24 @@
 // ".jpg" while the actual stored bytes were still HEIC — this made the
 // S3 object's extension lie about its own contents. Uses heic-convert
 // (pure JS) rather than sharp, matching stage-image.js's approach.
+//
+// FIX (Sep 16, 2026 — thumbnail collision, confirmed real, not a
+// hypothesis): this file's inline thumbKey used to collapse "/originals/"
+// down to a flat "/thumbnails/" folder. generate-thumbnail.js (the
+// equivalent step for staged finals) did the exact same collapse for
+// "/finals/" — and because seq numbers are counted independently per
+// image_type, a room's original and final each start at seq 1 on their
+// own, so the ordinary case of exactly one original + one final per room
+// produced the IDENTICAL thumbnail key from both files. The final's write
+// always lands second (finals are generated after their original), so it
+// silently overwrote the original's thumbnail file in S3, while the
+// original's own media_assets row kept pointing at that same path string
+// — now containing the wrong image. Confirmed live: Gallery showed the
+// staged image under "Originals" while the click-to-copy URL (untouched)
+// was still correct. Preserving the type segment (thumbnails/originals/...
+// vs thumbnails/finals/...) makes the two paths structurally incapable of
+// colliding. Only affects NEW uploads — existing thumbnail_key values
+// already in Supabase need a separate backfill pass.
 
 const crypto = require("crypto");
 const https = require("https");
@@ -298,8 +316,12 @@ exports.handler = async (event) => {
         .jpeg({ quality: 80 })
         .toBuffer();
 
+      // FIX (Sep 16, 2026) — see file header comment for the full
+      // collision explanation. Preserves the "originals" segment instead
+      // of collapsing it to a flat "/thumbnails/" folder, matching the
+      // equivalent fix in generate-thumbnail.js for finals.
       const thumbKey = usedReadableKey
-        ? key.replace("/originals/", "/thumbnails/")
+        ? key.replace(/\/(originals|finals)\//, "/thumbnails/$1/")
         : `${projectId ? `smart-stage-thumbnails/${projectId}` : "smart-stage-thumbnails/unfiled"}/${crypto.randomUUID()}.jpg`;
 
       await s3.send(new PutObjectCommand({

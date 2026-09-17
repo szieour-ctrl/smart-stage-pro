@@ -14,8 +14,9 @@
 // Output: publicUrl, thumbnailUrl, s3Key
 //
 // Public access comes from a bucket policy scoped to smart-stage-originals/*,
-// smart-stage-finals/*, listings/*, and smart-stage-thumbnails/* the same
-// way (this bucket has ACLs disabled — Bucket owner enforced).
+// smart-stage-finals/*, listings/*, staging-prospects/*, and
+// smart-stage-thumbnails/* (this bucket has ACLs disabled — Bucket owner
+// enforced).
 //
 // KEY NAMING (Aug 28, 2026 — readable-key migration):
 // When the listing behind projectId has a resolvable slug (new listings,
@@ -23,13 +24,29 @@
 //   listings/{slug}/originals/{room-slug}-{seq}.{ext}
 // and a matching row is written to Supabase media_assets, making the
 // whole bucket queryable by listing/room/type instead of only browsable
-// by UUID. If Supabase is unreachable or the listing has no slug yet
-// (e.g. SUPABASE_URL not configured, or no listing row at all for this
-// projectId), this falls back to the original UUID scheme so an upload
-// NEVER fails just because the catalog side had a problem:
+// by UUID. If Supabase is unreachable or the listing has no slug yet, this
+// falls back to the original UUID scheme so an upload NEVER fails just
+// because the catalog side had a problem:
 //   smart-stage-originals/{projectId}/{uuid}.{ext}
 // Existing objects already written under the old scheme are untouched —
 // this only affects new uploads going forward.
+//
+// PIPELINE SEPARATION (Sep 16, 2026): Prospecting no longer lives in the
+// `listings` table at all — see marketing-manage.js and the new
+// `prospects` table. This file now tries lookupListingSlug() first, and
+// only if that finds nothing does it try the new lookupProspectSlug()
+// sibling below. A prospecting upload gets its own, much simpler
+// treatment per Sam's explicit direction: "all data, images, and meta can
+// be written and saved in the same folder" — one flat folder per
+// prospect (staging-prospects/{slug}/), no originals/finals subfolder
+// split, no media_assets row (that catalog exists for Gallery browsing,
+// which already excludes Prospecting entirely — see media-gallery.js),
+// and no thumbnail generation (nothing consumes a resized prospecting
+// thumbnail; Sam/team pull full-res URLs directly). Skipping the whole
+// media_assets/thumbnail mechanism for this pipeline also means it can
+// never repeat the Sep 16 originals/finals thumbnail-collision bug —
+// there's no shared sequence-numbering scheme left for two uploads to
+// collide on.
 //
 // HEIC HANDLING (added this session): the "original unaltered listing
 // photo" this file stores is meant to be viewable everywhere (QR code,
@@ -39,27 +56,21 @@
 // throw on real HEIC bytes. Converting to JPEG up front, before the
 // ext/contentType decision, fixes both that AND a separate mislabeling
 // bug: previously a HEIC upload would fall through the ext ternary to
-// ".jpg" while the actual stored bytes were still HEIC — this made the
-// S3 object's extension lie about its own contents. Uses heic-convert
+// ".jpg" while the actual stored bytes were still HEIC. Uses heic-convert
 // (pure JS) rather than sharp, matching stage-image.js's approach.
 //
-// FIX (Sep 16, 2026 — thumbnail collision, confirmed real, not a
-// hypothesis): this file's inline thumbKey used to collapse "/originals/"
-// down to a flat "/thumbnails/" folder. generate-thumbnail.js (the
-// equivalent step for staged finals) did the exact same collapse for
-// "/finals/" — and because seq numbers are counted independently per
-// image_type, a room's original and final each start at seq 1 on their
-// own, so the ordinary case of exactly one original + one final per room
-// produced the IDENTICAL thumbnail key from both files. The final's write
-// always lands second (finals are generated after their original), so it
-// silently overwrote the original's thumbnail file in S3, while the
-// original's own media_assets row kept pointing at that same path string
-// — now containing the wrong image. Confirmed live: Gallery showed the
-// staged image under "Originals" while the click-to-copy URL (untouched)
-// was still correct. Preserving the type segment (thumbnails/originals/...
-// vs thumbnails/finals/...) makes the two paths structurally incapable of
-// colliding. Only affects NEW uploads — existing thumbnail_key values
-// already in Supabase need a separate backfill pass.
+// THUMBNAIL COLLISION FIX (Sep 16, 2026 — Listings path only, see the
+// header comment above for why Prospecting skips thumbnails entirely):
+// the inline thumbKey used to collapse "/originals/" down to a flat
+// "/thumbnails/" folder — generate-thumbnail.js did the same collapse for
+// "/finals/" — and since seq numbers are counted independently per
+// image_type, a room's original and final each started at seq 1
+// independently, so the ordinary case of one original + one final per
+// room produced the IDENTICAL thumbnail key from both files. The final's
+// write always landed second and silently overwrote the original's
+// thumbnail. Preserving the type segment (thumbnails/originals/... vs
+// thumbnails/finals/...) makes the two paths structurally incapable of
+// colliding.
 
 const crypto = require("crypto");
 const https = require("https");
@@ -78,10 +89,6 @@ const s3 = new S3Client({
 const THUMBNAIL_MAX_DIM = 400;
 
 // ── HEIC DETECTION + CONVERSION (see file header note) ──────────────────────
-// Same detection logic as stage-image.js: mimeType is checked first, but
-// iPhone/Safari uploads can arrive with an empty or generic mimeType, so
-// the actual file bytes (ISO-BMFF "ftyp" box + brand) are checked as a
-// fallback rather than trusting mimeType alone.
 function isHeic(buffer, mimeType) {
   if (mimeType && /^image\/(heic|heif)/i.test(mimeType)) return true;
   if (!buffer || buffer.length < 12) return false;
@@ -147,74 +154,100 @@ function slugifyRoom(roomName) {
     .slice(0, 40) || "room";
 }
 
-// Resolves projectId -> listing slug + prospecting flag. Returns null
-// (never throws) if Supabase isn't configured, the listing can't be found,
-// or anything else goes wrong — every caller treats null as "use the
-// legacy naming."
+// Date-prefixed slug for a prospect predating the slug column — mirrors
+// marketing-manage.js's slugifyProspectAddress(). Tries to recover the
+// TRUE creation date from the projectId itself (format:
+// prospect_{addr}_{MMDDYY}_{rand4}) rather than defaulting to today's
+// date, for the same reason project-manage.js's old extractProjectDate()
+// did: this can run days after the shot was actually taken.
+function slugifyProspectAddress(address, projectId) {
+  const m = /_(\d{2})(\d{2})(\d{2})_[a-z0-9]{4}$/i.exec(projectId || "");
+  const datePrefix = m ? `20${m[3]}-${m[1]}-${m[2]}` : new Date().toISOString().slice(0, 10);
+  return `${datePrefix}__${slugifyAddress(address)}`;
+}
+
+// Resolves projectId -> listing slug. Returns null (never throws) if
+// Supabase isn't configured, no listings row matches, or anything else
+// goes wrong — callers treat null as "try lookupProspectSlug() next, then
+// legacy naming as a last resort."
 async function lookupListingSlug(projectId) {
   if (!projectId || !process.env.SUPABASE_URL) return null;
   try {
     const res = await supabase("GET", "listings", null,
-      `?project_id=eq.${encodeURIComponent(projectId)}&select=slug,address,is_prospecting&limit=1`
+      `?project_id=eq.${encodeURIComponent(projectId)}&select=slug,address&limit=1`
     );
     const row = res.data?.[0];
-    if (!row) {
-      console.log("upload-original lookupListingSlug: no listings row found for projectId", projectId);
-      return null;
-    }
-    const isProspecting = !!row.is_prospecting;
-    // DIAGNOSTIC (Aug 29, 2026) — this is the value that actually decides
-    // the S3 folder for THIS upload, read fresh from Supabase right now.
-    // If this logs false while Supabase's own row shows true, projectId
-    // here doesn't match the row you checked (e.g. an older/duplicate row
-    // for the same address). If it logs true, the folder routing below is
-    // correct and the bug is elsewhere.
-    console.log("upload-original lookupListingSlug: projectId", projectId, "-> slug:", row.slug, "isProspecting:", isProspecting);
-    if (row.slug) return { slug: row.slug, isProspecting };
+    if (!row) return null;
+    if (row.slug) return { slug: row.slug };
 
-    // Listing row predates the slug column — derive one now and best-effort
-    // patch it back so future uploads for this listing skip this branch.
     const derived = slugifyAddress(row.address);
     if (derived) {
       // AWAITED (Aug 28, 2026 — fixed a real bug, not a hypothesis):
-      // this used to be fire-and-forget (no await, just .catch()). Netlify
-      // Functions can freeze/tear down the execution environment the
-      // moment the handler's response is sent — confirmed directly via
-      // live testing: the patch was silently losing that race almost
-      // every time, so the write frequently never completed. Must be
-      // awaited before this function (and therefore the handler) returns.
+      // Netlify Functions can freeze/tear down the execution environment
+      // the moment the handler's response is sent — this must be awaited
+      // before this function (and therefore the handler) returns.
       try {
         await supabase("PATCH", "listings", { slug: derived }, `?project_id=eq.${encodeURIComponent(projectId)}`);
       } catch (e) {
         console.error("lookupListingSlug: slug backfill patch failed (non-fatal):", e.message);
       }
     }
-    return derived ? { slug: derived, isProspecting } : null;
+    return derived ? { slug: derived } : null;
   } catch (err) {
-    console.error("lookupListingSlug error (non-fatal, falling back to legacy naming):", err.message);
+    console.error("lookupListingSlug error (non-fatal, trying prospects next):", err.message);
     return null;
   }
 }
 
-// Reserves a unique, readable S3 key by inserting the media_assets row
-// FIRST (the table's unique constraint on s3_key is what actually
-// prevents a collision) and only handing back the key once that insert
-// succeeds. If two uploads for the same listing+room land at the same
-// moment, the loser of the race just gets bumped to the next sequence
-// number and retries — nothing ever gets silently overwritten in S3.
-// Returns null (never throws) on repeated failure, so the caller can fall
-// back to the legacy UUID key instead of blocking the whole upload.
+// NEW (Sep 16, 2026 — pipeline separation): the Marketing-side sibling of
+// lookupListingSlug() above, querying the new `prospects` table instead
+// of `listings`. Only ever reached when lookupListingSlug() found
+// nothing — a projectId is either a Listing's or a Prospect's, never
+// both, so trying the second table is cheap and only happens once per
+// upload.
+async function lookupProspectSlug(projectId) {
+  if (!projectId || !process.env.SUPABASE_URL) return null;
+  try {
+    const res = await supabase("GET", "prospects", null,
+      `?project_id=eq.${encodeURIComponent(projectId)}&select=slug,address&limit=1`
+    );
+    const row = res.data?.[0];
+    if (!row) return null;
+    if (row.slug) return { slug: row.slug };
+
+    const derived = slugifyProspectAddress(row.address, projectId);
+    if (derived) {
+      try {
+        await supabase("PATCH", "prospects", { slug: derived }, `?project_id=eq.${encodeURIComponent(projectId)}`);
+      } catch (e) {
+        console.error("lookupProspectSlug: slug backfill patch failed (non-fatal):", e.message);
+      }
+    }
+    return derived ? { slug: derived } : null;
+  } catch (err) {
+    console.error("lookupProspectSlug error (non-fatal, falling back to legacy naming):", err.message);
+    return null;
+  }
+}
+
+// Reserves a unique, readable S3 key for a LISTING by inserting the
+// media_assets row FIRST (the table's unique constraint on s3_key is what
+// actually prevents a collision) and only handing back the key once that
+// insert succeeds. If two uploads for the same listing+room land at the
+// same moment, the loser of the race just gets bumped to the next
+// sequence number and retries — nothing ever gets silently overwritten in
+// S3. Returns null (never throws) on repeated failure, so the caller can
+// fall back to the legacy UUID key instead of blocking the whole upload.
 //
-// isProspecting (Aug 28, 2026): a prospecting shot (vacant home, single
-// image sent to the listing agent, not yet a signed listing) routes to a
-// separate staging-prospects/ top-level prefix instead of listings/, so it's
-// never mixed into production inventory or the Gallery page, and can carry
-// its own (shorter) S3 lifecycle rule.
-async function reserveAssetKey({ listingSlug, room, imageType, ext, isProspecting }) {
+// LISTINGS ONLY (Sep 16, 2026): this used to also handle Prospecting via
+// an isProspecting flag routing to a separate staging-prospects/ root.
+// Prospecting now has its own, much simpler key function below
+// (prospectAssetKey) that never touches media_assets at all — see file
+// header for why.
+async function reserveAssetKey({ listingSlug, room, imageType, ext }) {
   const roomSlug = slugifyRoom(room);
   const typeFolder = imageType === "original" ? "originals" : "finals";
-  const rootFolder = isProspecting ? "staging-prospects" : "listings";
-  const baseFolder = `${rootFolder}/${listingSlug}/${typeFolder}`;
+  const baseFolder = `listings/${listingSlug}/${typeFolder}`;
 
   let seq = 1;
   try {
@@ -236,8 +269,6 @@ async function reserveAssetKey({ listingSlug, room, imageType, ext, isProspectin
         s3_key: key,
       });
       if (insertRes.status === 201 || insertRes.status === 200) return key;
-      // Any other status (most likely 409 — unique violation on s3_key,
-      // another upload took this sequence number first) — bump and retry.
       console.warn(`reserveAssetKey: key ${key} unavailable (status ${insertRes.status}), trying seq ${seq + 1}`);
     } catch (err) {
       console.error(`reserveAssetKey: insert attempt failed for ${key} (non-fatal, retrying):`, err.message);
@@ -246,6 +277,26 @@ async function reserveAssetKey({ listingSlug, room, imageType, ext, isProspectin
   }
   console.error(`reserveAssetKey: failed to reserve a key after 5 attempts for ${listingSlug}/${room} — falling back to legacy naming`);
   return null;
+}
+
+// NEW (Sep 16, 2026): the Prospecting/Marketing equivalent of
+// reserveAssetKey() above — deliberately much simpler, per Sam's
+// direction that Marketing has no compliance/disclosure ordering
+// requirements at all. No media_assets row, no sequence counting, no
+// Supabase round-trip before the key is usable — a random suffix is
+// enough to avoid a same-room collision without needing to ask anything
+// first, and no ordering guarantee is needed since nothing displays these
+// images in a numbered sequence the way a Listing's Room Staging Queue
+// does. Flat folder, one level: staging-prospects/{slug}/original-{room}-{rand}.{ext}
+// or staging-prospects/{slug}/staged-{room}-{rand}.jpg — meta.json and
+// qr.png (written by write-prospect-meta.js/generate-qr.js) already land
+// in this exact same folder, satisfying "all data, images, and meta...
+// in the same folder" literally.
+function prospectAssetKey({ slug, room, imageType, ext }) {
+  const roomSlug = slugifyRoom(room);
+  const typePrefix = imageType === "original" ? "original" : "staged";
+  const rand = crypto.randomBytes(3).toString("hex").slice(0, 6);
+  return `staging-prospects/${slug}/${typePrefix}-${roomSlug}-${rand}.${ext}`;
 }
 
 exports.handler = async (event) => {
@@ -279,13 +330,21 @@ exports.handler = async (event) => {
     const contentType = resolvedMimeType || "image/jpeg";
     const ext = contentType.includes("png") ? "png" : "jpg";
 
-    // ── Determine key: readable if we can resolve a listing slug, legacy otherwise ──
+    // ── Determine key: Listing, then Prospect, then legacy fallback ────────
     let key = null;
     let usedReadableKey = false;
+    let isProspectUpload = false;
+
     const listingInfo = await lookupListingSlug(projectId);
     if (listingInfo) {
-      key = await reserveAssetKey({ listingSlug: listingInfo.slug, room: roomName || "Room", imageType: "original", ext, isProspecting: listingInfo.isProspecting });
+      key = await reserveAssetKey({ listingSlug: listingInfo.slug, room: roomName || "Room", imageType: "original", ext });
       if (key) usedReadableKey = true;
+    } else {
+      const prospectInfo = await lookupProspectSlug(projectId);
+      if (prospectInfo) {
+        key = prospectAssetKey({ slug: prospectInfo.slug, room: roomName || "Room", imageType: "original", ext });
+        isProspectUpload = true;
+      }
     }
     if (!key) {
       const folder = projectId ? `smart-stage-originals/${projectId}` : "smart-stage-originals/unfiled";
@@ -306,52 +365,55 @@ exports.handler = async (event) => {
     const publicUrl = `https://${bucket}.s3.${region}.amazonaws.com/${key}`;
     console.log(`S3 upload complete: ${publicUrl}`);
 
-    // Thumbnail — non-fatal if it fails. A missing thumbnail should never
-    // block the actual upload from succeeding; the picker grid falls back
-    // to the full-res URL when thumbnailUrl is absent (see index.html).
+    // Thumbnail — LISTINGS ONLY. See file header for why Prospecting
+    // skips this entirely. A missing thumbnail should never block the
+    // actual upload from succeeding either way; the picker grid falls
+    // back to the full-res URL when thumbnailUrl is absent (see index.html).
     let thumbnailUrl = null;
-    try {
-      const thumbBuffer = await sharp(buffer)
-        .resize({ width: THUMBNAIL_MAX_DIM, height: THUMBNAIL_MAX_DIM, fit: "inside", withoutEnlargement: true })
-        .jpeg({ quality: 80 })
-        .toBuffer();
+    if (!isProspectUpload) {
+      try {
+        const thumbBuffer = await sharp(buffer)
+          .resize({ width: THUMBNAIL_MAX_DIM, height: THUMBNAIL_MAX_DIM, fit: "inside", withoutEnlargement: true })
+          .jpeg({ quality: 80 })
+          .toBuffer();
 
-      // FIX (Sep 16, 2026) — see file header comment for the full
-      // collision explanation. Preserves the "originals" segment instead
-      // of collapsing it to a flat "/thumbnails/" folder, matching the
-      // equivalent fix in generate-thumbnail.js for finals.
-      const thumbKey = usedReadableKey
-        ? key.replace(/\/(originals|finals)\//, "/thumbnails/$1/")
-        : `${projectId ? `smart-stage-thumbnails/${projectId}` : "smart-stage-thumbnails/unfiled"}/${crypto.randomUUID()}.jpg`;
+        // FIX (Sep 16, 2026) — see file header comment for the full
+        // collision explanation. Preserves the "originals" segment
+        // instead of collapsing it to a flat "/thumbnails/" folder,
+        // matching the equivalent fix in generate-thumbnail.js for finals.
+        const thumbKey = usedReadableKey
+          ? key.replace(/\/(originals|finals)\//, "/thumbnails/$1/")
+          : `${projectId ? `smart-stage-thumbnails/${projectId}` : "smart-stage-thumbnails/unfiled"}/${crypto.randomUUID()}.jpg`;
 
-      await s3.send(new PutObjectCommand({
-        Bucket: bucket,
-        Key: thumbKey,
-        Body: thumbBuffer,
-        ContentType: "image/jpeg",
-      }));
-      thumbnailUrl = `https://${bucket}.s3.${region}.amazonaws.com/${thumbKey}`;
-      console.log(`Thumbnail uploaded: ${thumbnailUrl} (${Math.round(thumbBuffer.length / 1024)}KB)`);
+        await s3.send(new PutObjectCommand({
+          Bucket: bucket,
+          Key: thumbKey,
+          Body: thumbBuffer,
+          ContentType: "image/jpeg",
+        }));
+        thumbnailUrl = `https://${bucket}.s3.${region}.amazonaws.com/${thumbKey}`;
+        console.log(`Thumbnail uploaded: ${thumbnailUrl} (${Math.round(thumbBuffer.length / 1024)}KB)`);
 
-      if (usedReadableKey) {
-        // AWAITED — see lookupListingSlug's comment above for why this
-        // can't be fire-and-forget in a serverless function.
-        try {
-          await supabase("PATCH", "media_assets", { thumbnail_key: thumbKey }, `?s3_key=eq.${encodeURIComponent(key)}`);
-        } catch (e) {
-          console.error("upload-original: thumbnail_key patch failed (non-fatal):", e.message);
+        if (usedReadableKey) {
+          // AWAITED — see lookupListingSlug's comment above for why this
+          // can't be fire-and-forget in a serverless function.
+          try {
+            await supabase("PATCH", "media_assets", { thumbnail_key: thumbKey }, `?s3_key=eq.${encodeURIComponent(key)}`);
+          } catch (e) {
+            console.error("upload-original: thumbnail_key patch failed (non-fatal):", e.message);
+          }
         }
+      } catch (thumbErr) {
+        console.error("upload-original: thumbnail generation failed (non-fatal):", thumbErr.message);
       }
-    } catch (thumbErr) {
-      console.error("upload-original: thumbnail generation failed (non-fatal):", thumbErr.message);
     }
 
     return {
       statusCode: 200,
       headers,
       body: JSON.stringify({
-        publicUrl,     // permanent public URL — used in QR code
-        thumbnailUrl,  // small resized copy for the picker grid — may be null
+        publicUrl,     // permanent public URL — used in QR code (Listings) or the GPT/Pabbly pull (Prospecting)
+        thumbnailUrl,  // small resized copy for the picker grid — null for Prospecting, and may be null for Listings on failure
         s3Key: key,    // stored for future deletion/access-mode changes
       }),
     };

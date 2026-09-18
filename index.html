@@ -12486,6 +12486,7 @@ function renderDashboard(data, filter, search) {
       <span style="font-size:0.68rem;color:var(--muted);letter-spacing:0.06em;text-transform:uppercase;">Status:</span>
       <button class="db-filter-btn ${_dbStatusFilter==='all'?'active':''}" onclick="filterDashboardStatus('all')">All</button>
       ${STATUS_FILTER_ORDER.map(s => `<button class="db-filter-btn ${_dbStatusFilter===s?'active':''}" onclick="filterDashboardStatus('${s}')">${LISTING_STATUS_META[s].label}</button>`).join('')}
+      <button class="db-filter-btn ${_dbStatusFilter==='archived'?'active':''}" onclick="filterDashboardStatus('archived')" style="color:#5c5650;">Archived</button>
       <select class="db-search" style="flex:0 0 auto;min-width:170px;" onchange="sortDashboard(this.value)">
         <option value="updated" ${_dbSort==='updated'?'selected':''}>Sort: Last Updated</option>
         <option value="address" ${_dbSort==='address'?'selected':''}>Sort: Address A–Z</option>
@@ -12510,10 +12511,11 @@ const LISTING_STATUS_META = {
   marketing: { label: 'Marketing',  cls: 'db-status-marketing' },
 };
 // Archiving is a separate `hidden` flag now, not a status (Sep 18, 2026
-// correction) — see archive-listing.js's header comment for why. A
-// hidden listing stays out of every status tab by default; typing in the
-// dashboard search bar searches every listing regardless of status or
-// hidden, since get-user-listings.js returns everything to the frontend.
+// correction) — see archive-listing.js's header comment for why. Default
+// tabs (All/Active/.../Marketing) hide archived listings; the dedicated
+// "Archived" tab (rendered separately, just below) shows every hidden
+// listing regardless of its real status — for browsing without knowing
+// the address. A search still bypasses all of this and finds anything.
 const STATUS_FILTER_ORDER = ['active', 'pending', 'sold', 'canceled', 'expired', 'marketing'];
 // Only these four statuses may be archived — Active/Pending listings
 // carry real disclosure and public marketing and must move to one of
@@ -12531,14 +12533,22 @@ function renderListingsOnly(data, filter, search) {
   const filtered = listings.filter(l => {
     const status = l.status || 'active';
     const tierMatch = filter === 'all' || l.tier === filter;
-    const statusMatch = _dbStatusFilter === 'all' || status === _dbStatusFilter;
-    // A hidden (archived) listing stays out of every tab by default,
-    // regardless of which status tab is selected — but a search reveals
-    // it, same behavior as before, just driven by `hidden` now instead of
-    // a fake "archived" status.
-    const hiddenMatch = searchLower ? true : !l.hidden;
     const searchMatch = !searchLower || l.address.toLowerCase().includes(searchLower);
-    return tierMatch && statusMatch && hiddenMatch && searchMatch;
+
+    // A search bypasses the status tab and the hidden flag entirely —
+    // typing an address always finds it, on any status tab, archived or
+    // not.
+    if (searchLower) return tierMatch && searchMatch;
+
+    // Dedicated "Archived" tab: every hidden listing, regardless of what
+    // its real underlying status is — browsing without needing to know
+    // the address. Not a real status (LISTING_STATUS_META has no
+    // 'archived' entry) — handled here directly against the hidden flag.
+    if (_dbStatusFilter === 'archived') return tierMatch && l.hidden === true;
+
+    const statusMatch = _dbStatusFilter === 'all' || status === _dbStatusFilter;
+    const hiddenMatch = !l.hidden;
+    return tierMatch && statusMatch && hiddenMatch;
   });
 
   const sorted = [...filtered].sort((a, b) => {

@@ -12491,7 +12491,6 @@ function renderDashboard(data, filter, search) {
         <option value="address" ${_dbSort==='address'?'selected':''}>Sort: Address A–Z</option>
         <option value="status" ${_dbSort==='status'?'selected':''}>Sort: Status</option>
       </select>
-      <button class="db-filter-btn" style="margin-left:auto;color:#5c5650;" onclick="openArchivedListings()">Archived — Review</button>
     </div>
     <div id="db-listings-container"></div>`;
 
@@ -12511,11 +12510,11 @@ const LISTING_STATUS_META = {
   marketing: { label: 'Marketing',  cls: 'db-status-marketing' },
   archived:  { label: 'Archived',   cls: 'db-status-archived' },
 };
-// Archived is deliberately excluded from this list — get-user-listings.js
-// never returns archived rows at all (status=neq.archived), so there's
-// nothing in the loaded dataset for an "Archived" filter button to show.
-// It gets its own separate review flow instead (openArchivedListings()).
-const STATUS_FILTER_ORDER = ['active', 'pending', 'sold', 'canceled', 'expired', 'marketing'];
+// Archived stays out of the default "All" view, same as before — but a
+// non-empty search now searches every status, archived included, since
+// get-user-listings.js returns archived rows too (see its Sep 18 fix).
+// Selecting the Archived tab explicitly always shows only archived.
+const STATUS_FILTER_ORDER = ['active', 'pending', 'sold', 'canceled', 'expired', 'marketing', 'archived'];
 
 function renderListingsOnly(data, filter, search) {
   const container = document.getElementById('db-listings-container');
@@ -12525,8 +12524,11 @@ function renderListingsOnly(data, filter, search) {
   const searchLower = (search || '').toLowerCase();
 
   const filtered = listings.filter(l => {
+    const status = l.status || 'active';
     const tierMatch = filter === 'all' || l.tier === filter;
-    const statusMatch = _dbStatusFilter === 'all' || (l.status || 'active') === _dbStatusFilter;
+    const statusMatch = _dbStatusFilter === 'all'
+      ? (searchLower ? true : status !== 'archived')
+      : status === _dbStatusFilter;
     const searchMatch = !searchLower || l.address.toLowerCase().includes(searchLower);
     return tierMatch && statusMatch && searchMatch;
   });
@@ -12884,62 +12886,15 @@ async function submitStatusChange(listingId){
   }
 }
 
-// ── ARCHIVED LISTINGS — dashboard-level review, mirrors the per-listing
-// "Hidden (N) — Review" pattern but for whole listings, not images. Reuses
-// the #listing-images-modal box (ensureImagesModal()) since the styling is
-// identical — this just renders listings instead of images into it.
-async function openArchivedListings(){
-  ensureImagesModal();
-  const modal = document.getElementById('listing-images-modal');
-  const content = document.getElementById('lim-content');
-  content.innerHTML = `<div class="lim-title">Archived Listings</div><div class="lim-sub">Loading…</div>`;
-  modal.classList.remove('hidden');
-  try {
-    const token = await getDashboardAuthToken();
-    if (!token) { content.innerHTML = `<div class="lim-title">Archived Listings</div><div class="lim-sub">Session expired — please sign in again.</div>`; return; }
-    const res = await fetch(`/.netlify/functions/archive-listing?action=list-by-status&status=archived`, {
-      headers: { 'Authorization': 'Bearer ' + token }
-    });
-    const data = await res.json();
-    if (!res.ok) { content.innerHTML = `<div class="lim-title">Archived Listings</div><div class="lim-sub">${data.error || 'Could not load archived listings.'}</div>`; return; }
-    renderArchivedListingsModal(data.listings || []);
-  } catch (err) {
-    content.innerHTML = `<div class="lim-title">Archived Listings</div><div class="lim-sub">Error: ${err.message}</div>`;
-  }
-}
-function renderArchivedListingsModal(listings){
-  const content = document.getElementById('lim-content');
-  const sub = 'Hidden from My Listings — nothing is deleted, the compliance page stays live. Restore any listing below.';
-  if (!listings.length) {
-    content.innerHTML = `<div class="lim-title">Archived Listings</div><div class="lim-sub">${sub}</div><div class="lim-empty">No archived listings.</div>`;
-    return;
-  }
-  const itemsHtml = listings.map(l => `
-    <div class="lim-item" style="padding:12px 14px;">
-      <div class="lim-item-room" style="margin-bottom:2px;">${l.address}</div>
-      <div class="lim-item-note" style="margin-bottom:10px;">Archived ${l.archivedAt ? new Date(l.archivedAt).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : ''}</div>
-      <button class="lim-item-btn unhide" onclick="restoreArchivedListing('${l.id}')">Restore to Active</button>
-    </div>`).join('');
-  content.innerHTML = `<div class="lim-title">Archived Listings</div><div class="lim-sub">${sub}</div><div class="lim-grid">${itemsHtml}</div>`;
-}
-async function restoreArchivedListing(listingId){
-  const token = await getDashboardAuthToken();
-  if (!token) { showToast('Session expired — please sign in again.', 'error'); return; }
-  try {
-    const res = await fetch('/.netlify/functions/archive-listing', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-      body: JSON.stringify({ listingId, status: 'active', reason: 'Restored from archive' })
-    });
-    const data = await res.json();
-    if (!res.ok) { showToast(data.error || 'Restore failed.', 'error'); return; }
-    showToast('✓ Listing restored to Active.', 'success');
-    await openArchivedListings();
-    loadDashboardData();
-  } catch (err) {
-    showToast('Restore failed: ' + err.message, 'error');
-  }
-}
+// Note: there used to be a separate "Archived Listings" review modal here
+// (openArchivedListings/renderArchivedListingsModal/restoreArchivedListing).
+// Retired Sep 18, 2026 — it existed only because get-user-listings.js used
+// to exclude archived rows from the main dataset entirely, which is also
+// what broke address search for archived listings. Now that the backend
+// returns every status (see get-user-listings.js's Sep 18 fix),
+// "Archived" is just another entry in STATUS_FILTER_ORDER, and restoring
+// a listing is the same "Change Status" button every other card already
+// has — no separate flow needed.
 
 // ── SIGNUP SOURCE CAPTURE (Aug 16, 2026) ────────────────────────────────────
 // Captures ?src= from the landing URL (e.g. from a prospecting email's

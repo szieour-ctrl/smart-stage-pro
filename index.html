@@ -12395,7 +12395,6 @@ async function showDashboard() {
     .db-status-sold { background:rgba(45,106,79,0.12); color:#1a5c3a; border:1px solid rgba(45,106,79,0.3); }
     .db-status-canceled { background:rgba(192,57,43,0.1); color:#c0392b; border:1px solid rgba(192,57,43,0.25); }
     .db-status-expired { background:rgba(92,86,80,0.12); color:#5c5650; border:1px solid rgba(92,86,80,0.28); }
-    .db-status-withdrawn { background:rgba(211,132,45,0.12); color:#a05a1e; border:1px solid rgba(211,132,45,0.3); }
     .db-status-archived { background:rgba(92,86,80,0.1); color:#5c5650; border:1px solid rgba(92,86,80,0.25); }
     .sm-box { position:relative; background:#fff; border-radius:8px; max-width:420px; width:100%; padding:26px 28px; font-family:'DM Sans',sans-serif; }
     .sm-title { font-family:'Cormorant Garamond',serif; font-size:1.3rem; font-weight:400; color:var(--ink); margin-bottom:4px; }
@@ -12505,19 +12504,18 @@ function renderDashboard(data, filter, search) {
 // the focus-loss bug this replaces.
 const LISTING_STATUS_META = {
   active:    { label: 'Active',     cls: 'db-status-active' },
-  marketing: { label: 'Marketing',  cls: 'db-status-marketing' },
   pending:   { label: 'Pending',    cls: 'db-status-pending' },
   sold:      { label: 'Sold',       cls: 'db-status-sold' },
   canceled:  { label: 'Canceled',   cls: 'db-status-canceled' },
   expired:   { label: 'Expired',    cls: 'db-status-expired' },
-  withdrawn: { label: 'Withdrawn',  cls: 'db-status-withdrawn' },
+  marketing: { label: 'Marketing',  cls: 'db-status-marketing' },
   archived:  { label: 'Archived',   cls: 'db-status-archived' },
 };
 // Archived is deliberately excluded from this list — get-user-listings.js
 // never returns archived rows at all (status=neq.archived), so there's
 // nothing in the loaded dataset for an "Archived" filter button to show.
 // It gets its own separate review flow instead (openArchivedListings()).
-const STATUS_FILTER_ORDER = ['active', 'marketing', 'pending', 'sold', 'canceled', 'expired', 'withdrawn'];
+const STATUS_FILTER_ORDER = ['active', 'pending', 'sold', 'canceled', 'expired', 'marketing'];
 
 function renderListingsOnly(data, filter, search) {
   const container = document.getElementById('db-listings-container');
@@ -12591,7 +12589,7 @@ function renderListingsOnly(data, filter, search) {
         ${l.hiddenCount ? `<button class="db-action-btn" style="color:#8a6d3b;border-color:#e8d5a8;" onclick="openHiddenImages('${l.id}','${l.projectId}')" title="Images pulled from public view — not deleted, review separately">Hidden (${l.hiddenCount}) — Review</button>` : ''}
         <button class="db-action-btn" onclick="openVideoBuilderFor('${l.id}','${l.projectId || ''}')">+ Create Video</button>
         <button class="db-action-btn primary" onclick="hideDashboard()">Continue Staging →</button>
-        <button class="db-action-btn" onclick="openStatusModal('${l.id}','${l.address.replace(/'/g,'').replace(/"/g,'')}','${l.status || 'active'}')" title="Set Active, Marketing, Pending, Sold, Canceled, Expired, Withdrawn, or Archived">Change Status</button>
+        <button class="db-action-btn" onclick="openStatusModal('${l.id}','${l.address.replace(/'/g,'').replace(/"/g,'')}','${l.status || 'active'}')" title="Set Active, Pending, Sold, Canceled, Expired, Marketing, or Archived">Change Status</button>
       </div>
     </div>`;
 
@@ -12818,7 +12816,7 @@ function hideDashboard() {
 
 // ── STATUS MODAL — "Change Status" (replaces the old one-click Archive) ───
 // Covers the full lifecycle: active, marketing, pending, sold, canceled,
-// expired, withdrawn, archived. Archive is just one of the eight options
+// expired, marketing, archived. Archive is just one of the seven options
 // now, not a separate confirm()-gated action — same reasoning-prompt
 // pattern as hide-image.js's per-image hide, not a browser confirm().
 function ensureStatusModal(){

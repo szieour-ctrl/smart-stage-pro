@@ -12395,7 +12395,7 @@ async function showDashboard() {
     .db-status-sold { background:rgba(45,106,79,0.12); color:#1a5c3a; border:1px solid rgba(45,106,79,0.3); }
     .db-status-canceled { background:rgba(192,57,43,0.1); color:#c0392b; border:1px solid rgba(192,57,43,0.25); }
     .db-status-expired { background:rgba(92,86,80,0.12); color:#5c5650; border:1px solid rgba(92,86,80,0.28); }
-    .db-status-archived { background:rgba(92,86,80,0.1); color:#5c5650; border:1px solid rgba(92,86,80,0.25); }
+    .db-archived-badge { font-size:0.6rem; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; padding:3px 10px; border-radius:20px; white-space:nowrap; flex-shrink:0; margin-right:6px; background:rgba(92,86,80,0.1); color:#5c5650; border:1px solid rgba(92,86,80,0.25); }
     .sm-box { position:relative; background:#fff; border-radius:8px; max-width:420px; width:100%; padding:26px 28px; font-family:'DM Sans',sans-serif; }
     .sm-title { font-family:'Cormorant Garamond',serif; font-size:1.3rem; font-weight:400; color:var(--ink); margin-bottom:4px; }
     .sm-sub { font-size:0.75rem; color:var(--muted); margin-bottom:18px; line-height:1.5; }
@@ -12508,13 +12508,18 @@ const LISTING_STATUS_META = {
   canceled:  { label: 'Canceled',   cls: 'db-status-canceled' },
   expired:   { label: 'Expired',    cls: 'db-status-expired' },
   marketing: { label: 'Marketing',  cls: 'db-status-marketing' },
-  archived:  { label: 'Archived',   cls: 'db-status-archived' },
 };
-// Archived stays out of the default "All" view, same as before — but a
-// non-empty search now searches every status, archived included, since
-// get-user-listings.js returns archived rows too (see its Sep 18 fix).
-// Selecting the Archived tab explicitly always shows only archived.
-const STATUS_FILTER_ORDER = ['active', 'pending', 'sold', 'canceled', 'expired', 'marketing', 'archived'];
+// Archiving is a separate `hidden` flag now, not a status (Sep 18, 2026
+// correction) — see archive-listing.js's header comment for why. A
+// hidden listing stays out of every status tab by default; typing in the
+// dashboard search bar searches every listing regardless of status or
+// hidden, since get-user-listings.js returns everything to the frontend.
+const STATUS_FILTER_ORDER = ['active', 'pending', 'sold', 'canceled', 'expired', 'marketing'];
+// Only these four statuses may be archived — Active/Pending listings
+// carry real disclosure and public marketing and must move to one of
+// these first. Mirrors archive-listing.js's ARCHIVABLE_FROM exactly;
+// enforced server-side too, this is just what drives the UI.
+const ARCHIVABLE_FROM = ['sold', 'canceled', 'expired', 'marketing'];
 
 function renderListingsOnly(data, filter, search) {
   const container = document.getElementById('db-listings-container');
@@ -12526,11 +12531,14 @@ function renderListingsOnly(data, filter, search) {
   const filtered = listings.filter(l => {
     const status = l.status || 'active';
     const tierMatch = filter === 'all' || l.tier === filter;
-    const statusMatch = _dbStatusFilter === 'all'
-      ? (searchLower ? true : status !== 'archived')
-      : status === _dbStatusFilter;
+    const statusMatch = _dbStatusFilter === 'all' || status === _dbStatusFilter;
+    // A hidden (archived) listing stays out of every tab by default,
+    // regardless of which status tab is selected — but a search reveals
+    // it, same behavior as before, just driven by `hidden` now instead of
+    // a fake "archived" status.
+    const hiddenMatch = searchLower ? true : !l.hidden;
     const searchMatch = !searchLower || l.address.toLowerCase().includes(searchLower);
-    return tierMatch && statusMatch && searchMatch;
+    return tierMatch && statusMatch && hiddenMatch && searchMatch;
   });
 
   const sorted = [...filtered].sort((a, b) => {
@@ -12566,13 +12574,14 @@ function renderListingsOnly(data, filter, search) {
   };
 
   const cardHtml = (l) => `
-    <div class="db-card" data-project-id="${l.projectId}" data-tier="${l.tier}" data-status="${l.status || 'active'}">
+    <div class="db-card" data-project-id="${l.projectId}" data-tier="${l.tier}" data-status="${l.status || 'active'}" data-hidden="${!!l.hidden}">
       <div class="db-card-top">
         <div>
           <div class="db-card-addr">${l.address}</div>
           <div class="db-card-pid">${l.projectId || ''}</div>
         </div>
         <div style="display:flex;align-items:center;">
+          ${l.hidden ? '<span class="db-archived-badge">Archived</span>' : ''}
           ${statusBadge(l.status)}
           ${tierBadge(l.tier)}
         </div>
@@ -12591,7 +12600,12 @@ function renderListingsOnly(data, filter, search) {
         ${l.hiddenCount ? `<button class="db-action-btn" style="color:#8a6d3b;border-color:#e8d5a8;" onclick="openHiddenImages('${l.id}','${l.projectId}')" title="Images pulled from public view — not deleted, review separately">Hidden (${l.hiddenCount}) — Review</button>` : ''}
         <button class="db-action-btn" onclick="openVideoBuilderFor('${l.id}','${l.projectId || ''}')">+ Create Video</button>
         <button class="db-action-btn primary" onclick="hideDashboard()">Continue Staging →</button>
-        <button class="db-action-btn" onclick="openStatusModal('${l.id}','${l.address.replace(/'/g,'').replace(/"/g,'')}','${l.status || 'active'}')" title="Set Active, Pending, Sold, Canceled, Expired, Marketing, or Archived">Change Status</button>
+        <button class="db-action-btn" onclick="openStatusModal('${l.id}','${l.address.replace(/'/g,'').replace(/"/g,'')}','${l.status || 'active'}')" title="Set Active, Pending, Sold, Canceled, Expired, or Marketing">Change Status</button>
+        ${l.hidden
+          ? `<button class="db-action-btn" style="color:#1a5c3a;border-color:rgba(45,106,79,0.3);" onclick="restoreListing('${l.id}','${l.address.replace(/'/g,'').replace(/"/g,'')}')">Restore</button>`
+          : (ARCHIVABLE_FROM.includes(l.status || 'active')
+              ? `<button class="db-action-btn" style="color:#8a6d3b;border-color:#e8d5a8;" onclick="archiveListing('${l.id}','${l.address.replace(/'/g,'').replace(/"/g,'')}')" title="Hides from your dashboard — compliance page stays active">Archive</button>`
+              : '')}
       </div>
     </div>`;
 
@@ -12816,11 +12830,12 @@ function hideDashboard() {
   _dbSearch = '';
 }
 
-// ── STATUS MODAL — "Change Status" (replaces the old one-click Archive) ───
-// Covers the full lifecycle: active, marketing, pending, sold, canceled,
-// expired, marketing, archived. Archive is just one of the seven options
-// now, not a separate confirm()-gated action — same reasoning-prompt
-// pattern as hide-image.js's per-image hide, not a browser confirm().
+// ── STATUS MODAL — "Change Status" ────────────────────────────────────────
+// Sets ONLY the real lifecycle status (active/pending/sold/canceled/
+// expired/marketing). Archiving is a completely separate action now (see
+// archiveListing()/restoreListing() below) — Archive doesn't appear in
+// this dropdown at all, per Sam's correction: archiving a Sold listing
+// must never overwrite the fact that it was Sold.
 function ensureStatusModal(){
   if (document.getElementById('status-modal')) return;
   const modal = document.createElement('div');
@@ -12886,15 +12901,37 @@ async function submitStatusChange(listingId){
   }
 }
 
-// Note: there used to be a separate "Archived Listings" review modal here
-// (openArchivedListings/renderArchivedListingsModal/restoreArchivedListing).
-// Retired Sep 18, 2026 — it existed only because get-user-listings.js used
-// to exclude archived rows from the main dataset entirely, which is also
-// what broke address search for archived listings. Now that the backend
-// returns every status (see get-user-listings.js's Sep 18 fix),
-// "Archived" is just another entry in STATUS_FILTER_ORDER, and restoring
-// a listing is the same "Change Status" button every other card already
-// has — no separate flow needed.
+// ── ARCHIVE / RESTORE — the separate hide flag, not a status. Same
+// reasoning-prompt pattern as hide-image.js: archiving asks for an
+// optional reason, restoring doesn't (nothing to explain about undoing a
+// hide). The "Archive" button only ever renders on Sold/Canceled/Expired/
+// Marketing cards (see cardHtml()) — enforced again server-side in
+// archive-listing.js regardless of what this sends.
+async function archiveListing(listingId, address){
+  const reason = window.prompt(`Archive "${address}"? This hides it from your dashboard — the compliance page stays permanently active per AB 723. Optional reason:`) ;
+  if (reason === null) return; // cancelled
+  await setListingHidden(listingId, true, reason || null);
+}
+async function restoreListing(listingId, address){
+  await setListingHidden(listingId, false, null);
+}
+async function setListingHidden(listingId, hidden, reason){
+  const token = await getDashboardAuthToken();
+  if (!token) { showToast('Session expired — please sign in again.', 'error'); return; }
+  try {
+    const res = await fetch('/.netlify/functions/archive-listing?action=set-hidden', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify({ listingId, hidden, reason })
+    });
+    const data = await res.json();
+    if (!res.ok) { showToast(data.error || (hidden ? 'Archive failed.' : 'Restore failed.'), 'error'); return; }
+    showToast(hidden ? '✓ Listing archived.' : '✓ Listing restored.', 'success');
+    loadDashboardData();
+  } catch (err) {
+    showToast((hidden ? 'Archive' : 'Restore') + ' failed: ' + err.message, 'error');
+  }
+}
 
 // ── SIGNUP SOURCE CAPTURE (Aug 16, 2026) ────────────────────────────────────
 // Captures ?src= from the landing URL (e.g. from a prospecting email's

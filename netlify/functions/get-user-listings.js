@@ -28,6 +28,19 @@
 // legitimate case and must still show — so the exclusion checks BOTH
 // visible and hidden image counts, not just the visible one, and only
 // drops a listing when neither has ever been non-zero.
+//
+// FIX (Sep 18, 2026 — real bug found live): this used to exclude
+// status='archived' rows at the SQL level (`status=neq.archived`). That
+// broke address search — an archived listing could never be found no
+// matter what was typed, since it never even reached the frontend. Fixed
+// by dropping that filter here: EVERY listing (any status) is now
+// returned to the frontend, and archived-hiding moved to the dashboard's
+// display logic instead (renderListingsOnly() in index.html) — which can
+// tell the difference between "hide archived by default" and "the user
+// is searching for something, so search everything." Stats below still
+// exclude archived, so "Total Listings"/"Staged Image Sets" continue to
+// reflect what's actually active on the dashboard, not everything ever
+// archived.
 
 const { getStore } = require("@netlify/blobs");
 const https = require("https");
@@ -141,13 +154,17 @@ exports.handler = async (event) => {
     // ever prospected. `not.is.true` (rather than `eq.false`) is used so
     // older rows where is_prospecting is still NULL are treated as regular
     // listings and still show up, instead of silently disappearing.
+    //
+    // STATUS (Sep 18, 2026): no longer filters on `status` at all here —
+    // see file header. Every status, including archived, comes back; the
+    // dashboard decides what to show by default vs. what a search reveals.
     let listingsQuery;
     if (user.role === "broker_admin" && user.brokerage_id) {
-      listingsQuery = `?brokerage_id=eq.${user.brokerage_id}&status=neq.archived&is_prospecting=not.is.true&select=id,address,project_id,compliance_page_url,mls_number,status,created_at,updated_at,user_id&order=updated_at.desc.nullsfirst&limit=100`;
+      listingsQuery = `?brokerage_id=eq.${user.brokerage_id}&is_prospecting=not.is.true&select=id,address,project_id,compliance_page_url,mls_number,status,created_at,updated_at,user_id&order=updated_at.desc.nullsfirst&limit=100`;
     } else if (user.role === "team_lead" && user.team_id) {
-      listingsQuery = `?team_id=eq.${user.team_id}&status=neq.archived&is_prospecting=not.is.true&select=id,address,project_id,compliance_page_url,mls_number,status,created_at,updated_at,user_id&order=updated_at.desc.nullsfirst&limit=100`;
+      listingsQuery = `?team_id=eq.${user.team_id}&is_prospecting=not.is.true&select=id,address,project_id,compliance_page_url,mls_number,status,created_at,updated_at,user_id&order=updated_at.desc.nullsfirst&limit=100`;
     } else {
-      listingsQuery = `?user_id=eq.${authUser.id}&status=neq.archived&is_prospecting=not.is.true&select=id,address,project_id,compliance_page_url,mls_number,status,created_at,updated_at,user_id&order=updated_at.desc.nullsfirst&limit=100`;
+      listingsQuery = `?user_id=eq.${authUser.id}&is_prospecting=not.is.true&select=id,address,project_id,compliance_page_url,mls_number,status,created_at,updated_at,user_id&order=updated_at.desc.nullsfirst&limit=100`;
     }
 
     const listingsResult = await supabase("GET", "listings", null, listingsQuery);
@@ -217,11 +234,12 @@ exports.handler = async (event) => {
     const displayable = enriched.filter(l => l.imageCount > 0 || l.hiddenCount > 0);
 
     // ── Stats ─────────────────────────────────────────────────────────────
-    // Derived from `displayable`, not `enriched` — so the "Total Listings"
-    // and "Staged Image Sets" counts on the dashboard match what's
-    // actually shown, rather than including never-staged rows the user
-    // can no longer even see on this page.
-    const totalImageSets = displayable.reduce((sum, l) => sum + l.imageCount, 0);
+    // Derived from displayable EXCLUDING archived — an archived listing is
+    // returned in `listings` below (so search/the Archived filter tab can
+    // find it) but shouldn't inflate "Total Listings"/"Staged Image Sets,"
+    // which are meant to reflect what's actually active on the dashboard.
+    const statsBasis = displayable.filter(l => l.status !== "archived");
+    const totalImageSets = statsBasis.reduce((sum, l) => sum + l.imageCount, 0);
 
     return {
       statusCode: 200,
@@ -229,7 +247,7 @@ exports.handler = async (event) => {
       body: JSON.stringify({
         listings: displayable,
         stats: {
-          totalListings:      displayable.length,
+          totalListings:      statsBasis.length,
           totalImageSets,
           creditsRemaining,
           subscriptionStatus: user.subscription_status,

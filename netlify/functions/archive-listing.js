@@ -25,14 +25,13 @@
 // listing, unlike every other listing-scoped function in this codebase.
 // That gap is closed here.
 //
-// Routes via ?action= (GET) or plain POST (defaults to "set-status"):
-//   POST ?action=set-status (or no action) — body { listingId, status, reason? }
-//   GET  ?action=list-by-status&status=archived — for the "Archived
-//        Listings" review view; returns every listing at that status the
-//        caller can see, same role scoping as get-user-listings.js. Works
-//        for any status, not just archived, in case that's ever useful.
+// Route: POST body { listingId, status, reason? } — no ?action= param
+// needed anymore (the old list-by-status GET route was retired Sep 18,
+// 2026 — see index.html's comment on the removed Archived Listings modal:
+// get-user-listings.js now returns every status, including archived, so
+// there's no need for a separate endpoint just to see them).
 //
-// Requires Authorization: Bearer <supabase jwt> for all actions.
+// Requires Authorization: Bearer <supabase jwt>.
 
 const https = require("https");
 
@@ -126,53 +125,6 @@ exports.handler = async (event) => {
   const action = event.queryStringParameters?.action || "set-status";
 
   try {
-    // ── LIST BY STATUS — for the "Archived Listings" review view ──────────
-    if (action === "list-by-status") {
-      if (event.httpMethod !== "GET") return { statusCode: 405, headers, body: JSON.stringify({ error: "Method Not Allowed" }) };
-
-      const status = event.queryStringParameters?.status;
-      if (!status || !VALID_STATUSES.includes(status)) {
-        return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing or invalid status" }) };
-      }
-
-      const userResult = await supabase("GET", "users", null,
-        `?id=eq.${authUser.id}&select=id,role,team_id,brokerage_id`
-      );
-      const user = userResult.data?.[0];
-      if (!user) return { statusCode: 404, headers, body: JSON.stringify({ error: "User record not found" }) };
-
-      // Same role-scoped visibility as get-user-listings.js.
-      let listingsQuery;
-      if (user.role === "broker_admin" && user.brokerage_id) {
-        listingsQuery = `?brokerage_id=eq.${user.brokerage_id}&status=eq.${status}&select=id,address,project_id,compliance_page_url,status,status_history,updated_at&order=updated_at.desc.nullsfirst&limit=100`;
-      } else if (user.role === "team_lead" && user.team_id) {
-        listingsQuery = `?team_id=eq.${user.team_id}&status=eq.${status}&select=id,address,project_id,compliance_page_url,status,status_history,updated_at&order=updated_at.desc.nullsfirst&limit=100`;
-      } else {
-        listingsQuery = `?user_id=eq.${authUser.id}&status=eq.${status}&select=id,address,project_id,compliance_page_url,status,status_history,updated_at&order=updated_at.desc.nullsfirst&limit=100`;
-      }
-
-      const result = await supabase("GET", "listings", null, listingsQuery);
-      const rows = Array.isArray(result.data) ? result.data : [];
-
-      return {
-        statusCode: 200, headers,
-        body: JSON.stringify({
-          status,
-          listings: rows.map(l => ({
-            id:            l.id,
-            address:       l.address,
-            projectId:     l.project_id,
-            complianceUrl: l.compliance_page_url,
-            status:        l.status,
-            // updated_at doubles as "when this status was set" — accurate
-            // here specifically because this list is already scoped to one
-            // status, so the most recent update IS the transition into it.
-            archivedAt:    l.updated_at,
-            statusHistory: l.status_history || [],
-          })),
-        })
-      };
-    }
 
     // ── SET STATUS ─────────────────────────────────────────────────────────
     if (action === "set-status") {

@@ -1,41 +1,46 @@
 // archive-listing.js — Netlify Function
-// Smart Stage PRO™ — full listing status lifecycle, not just archive/restore
+// Smart Stage PRO™ — listing status (six real lifecycle stages) and
+// archiving (a hide flag) are two separate, independent concerns.
 //
-// Originally a one-way soft-delete (status: 'active' -> 'archived'). Extended
-// Sep 18, 2026 into the general status setter for a listing's whole
-// lifecycle: active, marketing, pending, sold, canceled, expired, archived. Kept the existing `status` column rather than adding a parallel
-// `hidden` boolean — `status` was single-purpose (only 'active'/'archived'
-// ever touched it, confirmed by inventory of every listing.status reference
-// in index.html/get-user-listings.js) so there was no real risk of two
-// flags disagreeing, and every place that already filters on
-// `status=neq.archived` (get-user-listings.js) keeps working with zero
-// changes — only 'archived' is ever excluded from My Listings; every other
-// status (including the new ones) stays visible by default.
+// STATUS holds exactly six real values: active, pending, sold, canceled,
+// expired, marketing. There is no "archived" status — archiving something
+// never touches status at all. This exists because the first version of
+// this feature (earlier today) made "archived" a seventh status value,
+// which meant archiving a Sold listing silently overwrote and lost the
+// fact that it had been Sold. Split apart per Sam's explicit correction:
+// a Sold/Canceled/Expired/Marketing listing that gets archived is STILL
+// that status underneath — archiving only ever changes visibility.
 //
-// Every status change is optionally reasoned and appended to status_history
-// (jsonb column — see listings-status-history-migration.sql) — same shape
-// as hide-image.js's per-image hiddenHistory: { action, fromStatus, status,
-// at, by, reason }.
+// HIDDEN is that visibility flag (mirrors staged_images.hidden /
+// hide-image.js exactly). Business rule (Sam's, Sep 18 2026): a listing
+// can only be archived (hidden=true) from Sold, Canceled, Expired, or
+// Marketing — Active/Pending listings carry real disclosure and public
+// marketing and must be moved to one of those four first. Enforced here
+// server-side, not just in the UI dropdown, same reasoning as every other
+// access/business rule in this codebase (a client-only rule isn't a rule).
+// Unhiding (hidden=false) has no such restriction — you can always restore
+// a listing to visibility.
+//
+// Each action keeps its own audit trail: status_history for real lifecycle
+// changes, hidden_history for archive/restore — kept separate so a hide
+// event never gets mixed in with a real status transition. Both mirror
+// hide-image.js's hiddenHistory shape (action/at/by/reason).
 //
 // Access mirrors get-user-listings.js / hide-image.js's role model: an
-// owner can change their own listing's status; a team_lead can act on any
+// owner can act on their own listing; a team_lead can act on any
 // same-team listing; a broker_admin can act on any listing in the
-// brokerage. FIX (Sep 18, 2026): the original archive-only version checked
-// user_id only — a team_lead/broker_admin could not archive a teammate's
-// listing, unlike every other listing-scoped function in this codebase.
-// That gap is closed here.
+// brokerage.
 //
-// Route: POST body { listingId, status, reason? } — no ?action= param
-// needed anymore (the old list-by-status GET route was retired Sep 18,
-// 2026 — see index.html's comment on the removed Archived Listings modal:
-// get-user-listings.js now returns every status, including archived, so
-// there's no need for a separate endpoint just to see them).
+// Routes via ?action= (GET) or plain POST (defaults to "set-status"):
+//   POST ?action=set-status (or no action) — body { listingId, status, reason? }
+//   POST ?action=set-hidden              — body { listingId, hidden, reason? }
 //
 // Requires Authorization: Bearer <supabase jwt>.
 
 const https = require("https");
 
-const VALID_STATUSES = ["active", "marketing", "pending", "sold", "canceled", "expired", "archived"];
+const VALID_STATUSES = ["active", "pending", "sold", "canceled", "expired", "marketing"];
+const ARCHIVABLE_FROM = ["sold", "canceled", "expired", "marketing"];
 
 function supabase(method, table, body, queryParams = "") {
   return new Promise((resolve, reject) => {
@@ -96,7 +101,7 @@ async function checkAccess(listingId, authUser) {
   if (!user) return { error: "User record not found", status: 404 };
 
   const listingResult = await supabase("GET", "listings", null,
-    `?id=eq.${listingId}&select=id,user_id,team_id,brokerage_id,address,status,status_history`
+    `?id=eq.${listingId}&select=id,user_id,team_id,brokerage_id,address,status,status_history,hidden,hidden_history`
   );
   const listing = listingResult.data?.[0];
   if (!listing) return { error: "Listing not found", status: 404 };
@@ -125,8 +130,8 @@ exports.handler = async (event) => {
   const action = event.queryStringParameters?.action || "set-status";
 
   try {
-
-    // ── SET STATUS ─────────────────────────────────────────────────────────
+    // ── SET STATUS — one of the six real lifecycle values. Never touches
+    // `hidden` — a hidden listing keeps whatever status it's given here. ──
     if (action === "set-status") {
       if (event.httpMethod !== "POST") return { statusCode: 405, headers, body: JSON.stringify({ error: "Method Not Allowed" }) };
 
@@ -176,6 +181,68 @@ exports.handler = async (event) => {
       return {
         statusCode: 200, headers,
         body: JSON.stringify({ success: true, listingId, status })
+      };
+    }
+
+    // ── SET HIDDEN — archive (hidden=true) or restore (hidden=false).
+    // Archiving is gated server-side on the listing's CURRENT status;
+    // restoring is never gated. ────────────────────────────────────────────
+    if (action === "set-hidden") {
+      if (event.httpMethod !== "POST") return { statusCode: 405, headers, body: JSON.stringify({ error: "Method Not Allowed" }) };
+
+      let body;
+      try { body = JSON.parse(event.body || "{}"); }
+      catch { return { statusCode: 400, headers, body: JSON.stringify({ error: "Invalid JSON" }) }; }
+
+      const { listingId, hidden, reason } = body;
+      if (!listingId) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing listingId" }) };
+      if (typeof hidden !== "boolean") return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing or invalid hidden (must be true or false)" }) };
+
+      const access = await checkAccess(listingId, authUser);
+      if (access.error) return { statusCode: access.status, headers, body: JSON.stringify({ error: access.error }) };
+
+      const { listing } = access;
+
+      // Server-side enforcement of Sam's business rule — checked against
+      // the listing's status as it stands right now in the database, not
+      // whatever the client claims. Only applies when archiving; restoring
+      // is always allowed.
+      if (hidden && !ARCHIVABLE_FROM.includes(listing.status)) {
+        return {
+          statusCode: 400, headers,
+          body: JSON.stringify({
+            error: `Cannot archive a listing while it's "${listing.status}." Move it to Sold, Canceled, Expired, or Marketing first — Active and Pending listings carry real disclosure and public marketing.`
+          })
+        };
+      }
+
+      // Idempotent, same as hide-image.js.
+      const history = Array.isArray(listing.hidden_history) ? listing.hidden_history : [];
+      history.push({
+        action: hidden ? "hidden" : "unhidden",
+        at:     new Date().toISOString(),
+        by:     authUser.id,
+        reason: reason || null,
+      });
+
+      const result = await supabase("PATCH", "listings",
+        { hidden, hidden_history: history, updated_at: new Date().toISOString() },
+        `?id=eq.${listingId}`
+      );
+
+      if (result.status !== 200 && result.status !== 204) {
+        console.error("Hidden change failed:", result.status, result.data);
+        return { statusCode: 500, headers, body: JSON.stringify({ error: "Archive/restore failed" }) };
+      }
+
+      console.log(
+        (hidden ? "Archived" : "Restored"), "listing", listingId, listing.address,
+        "(status:", listing.status + ")", "by", authUser.id, reason ? ("— reason: " + reason) : ""
+      );
+
+      return {
+        statusCode: 200, headers,
+        body: JSON.stringify({ success: true, listingId, hidden })
       };
     }
 

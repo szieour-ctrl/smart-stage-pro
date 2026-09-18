@@ -12388,6 +12388,24 @@ async function showDashboard() {
     .db-empty { text-align:center; padding:60px 24px; color:var(--muted); }
     .db-empty-icon { font-size:2.5rem; margin-bottom:16px; opacity:0.4; }
     .db-error { background:#fff0f0; border:1px solid #f0c0c0; border-radius:4px; padding:16px 20px; color:#c0392b; font-size:0.82rem; margin-bottom:20px; }
+    .db-status-badge { font-size:0.6rem; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; padding:3px 10px; border-radius:20px; white-space:nowrap; flex-shrink:0; margin-right:6px; }
+    .db-status-active { background:rgba(120,113,105,0.1); color:#5c5650; border:1px solid rgba(120,113,105,0.25); }
+    .db-status-marketing { background:rgba(74,133,168,0.12); color:#2d5f80; border:1px solid rgba(74,133,168,0.3); }
+    .db-status-pending { background:rgba(184,151,90,0.15); color:#8a6d3b; border:1px solid rgba(184,151,90,0.35); }
+    .db-status-sold { background:rgba(45,106,79,0.12); color:#1a5c3a; border:1px solid rgba(45,106,79,0.3); }
+    .db-status-canceled { background:rgba(192,57,43,0.1); color:#c0392b; border:1px solid rgba(192,57,43,0.25); }
+    .db-status-expired { background:rgba(92,86,80,0.12); color:#5c5650; border:1px solid rgba(92,86,80,0.28); }
+    .db-status-withdrawn { background:rgba(211,132,45,0.12); color:#a05a1e; border:1px solid rgba(211,132,45,0.3); }
+    .db-status-archived { background:rgba(92,86,80,0.1); color:#5c5650; border:1px solid rgba(92,86,80,0.25); }
+    .sm-box { position:relative; background:#fff; border-radius:8px; max-width:420px; width:100%; padding:26px 28px; font-family:'DM Sans',sans-serif; }
+    .sm-title { font-family:'Cormorant Garamond',serif; font-size:1.3rem; font-weight:400; color:var(--ink); margin-bottom:4px; }
+    .sm-sub { font-size:0.75rem; color:var(--muted); margin-bottom:18px; line-height:1.5; }
+    .sm-label { font-size:0.68rem; color:var(--muted); letter-spacing:0.06em; text-transform:uppercase; margin-bottom:6px; display:block; }
+    .sm-select, .sm-textarea { width:100%; border:1px solid var(--border); border-radius:4px; padding:8px 12px; font-size:0.85rem; font-family:'DM Sans',sans-serif; color:var(--ink); outline:none; margin-bottom:16px; box-sizing:border-box; }
+    .sm-select:focus, .sm-textarea:focus { border-color:var(--gold); }
+    .sm-textarea { resize:vertical; min-height:60px; }
+    .sm-actions { display:flex; gap:10px; justify-content:flex-end; }
+    .sm-close { position:absolute; top:14px; right:16px; background:none; border:none; font-size:1.1rem; cursor:pointer; color:var(--muted); }
   </style>
   <div class="db-container">
     <div class="db-header">
@@ -12465,6 +12483,17 @@ function renderDashboard(data, filter, search) {
       <button class="db-filter-btn ${filter==='brokerage'?'active':''}" onclick="filterDashboard('brokerage')">Brokerage</button>` : ''}
       <input class="db-search" placeholder="Search by address…" value="${search}" oninput="searchDashboard(this.value)" />
     </div>
+    <div class="db-filters">
+      <span style="font-size:0.68rem;color:var(--muted);letter-spacing:0.06em;text-transform:uppercase;">Status:</span>
+      <button class="db-filter-btn ${_dbStatusFilter==='all'?'active':''}" onclick="filterDashboardStatus('all')">All</button>
+      ${STATUS_FILTER_ORDER.map(s => `<button class="db-filter-btn ${_dbStatusFilter===s?'active':''}" onclick="filterDashboardStatus('${s}')">${LISTING_STATUS_META[s].label}</button>`).join('')}
+      <select class="db-search" style="flex:0 0 auto;min-width:170px;" onchange="sortDashboard(this.value)">
+        <option value="updated" ${_dbSort==='updated'?'selected':''}>Sort: Last Updated</option>
+        <option value="address" ${_dbSort==='address'?'selected':''}>Sort: Address A–Z</option>
+        <option value="status" ${_dbSort==='status'?'selected':''}>Sort: Status</option>
+      </select>
+      <button class="db-filter-btn" style="margin-left:auto;color:#5c5650;" onclick="openArchivedListings()">Archived — Review</button>
+    </div>
     <div id="db-listings-container"></div>`;
 
   renderListingsOnly(data, filter, search);
@@ -12474,6 +12503,22 @@ function renderDashboard(data, filter, search) {
 // rebuilds ONLY #db-listings-container, never touches the search input,
 // filter buttons, or stats above it. See renderDashboard()'s comment for
 // the focus-loss bug this replaces.
+const LISTING_STATUS_META = {
+  active:    { label: 'Active',     cls: 'db-status-active' },
+  marketing: { label: 'Marketing',  cls: 'db-status-marketing' },
+  pending:   { label: 'Pending',    cls: 'db-status-pending' },
+  sold:      { label: 'Sold',       cls: 'db-status-sold' },
+  canceled:  { label: 'Canceled',   cls: 'db-status-canceled' },
+  expired:   { label: 'Expired',    cls: 'db-status-expired' },
+  withdrawn: { label: 'Withdrawn',  cls: 'db-status-withdrawn' },
+  archived:  { label: 'Archived',   cls: 'db-status-archived' },
+};
+// Archived is deliberately excluded from this list — get-user-listings.js
+// never returns archived rows at all (status=neq.archived), so there's
+// nothing in the loaded dataset for an "Archived" filter button to show.
+// It gets its own separate review flow instead (openArchivedListings()).
+const STATUS_FILTER_ORDER = ['active', 'marketing', 'pending', 'sold', 'canceled', 'expired', 'withdrawn'];
+
 function renderListingsOnly(data, filter, search) {
   const container = document.getElementById('db-listings-container');
   if (!container) return;
@@ -12483,8 +12528,15 @@ function renderListingsOnly(data, filter, search) {
 
   const filtered = listings.filter(l => {
     const tierMatch = filter === 'all' || l.tier === filter;
+    const statusMatch = _dbStatusFilter === 'all' || (l.status || 'active') === _dbStatusFilter;
     const searchMatch = !searchLower || l.address.toLowerCase().includes(searchLower);
-    return tierMatch && searchMatch;
+    return tierMatch && statusMatch && searchMatch;
+  });
+
+  const sorted = [...filtered].sort((a, b) => {
+    if (_dbSort === 'address') return a.address.localeCompare(b.address);
+    if (_dbSort === 'status') return (a.status || 'active').localeCompare(b.status || 'active');
+    return new Date(b.lastStaged || b.createdAt || 0) - new Date(a.lastStaged || a.createdAt || 0);
   });
 
   const formatDate = (iso) => {
@@ -12495,6 +12547,11 @@ function renderListingsOnly(data, filter, search) {
   const tierBadge = (tier) => {
     const cls = tier === 'brokerage' ? 'db-tier-brokerage' : tier === 'team' ? 'db-tier-team' : 'db-tier-solo';
     return `<span class="db-tier-badge ${cls}">${tier.toUpperCase()}</span>`;
+  };
+
+  const statusBadge = (status) => {
+    const meta = LISTING_STATUS_META[status] || LISTING_STATUS_META.active;
+    return `<span class="db-status-badge ${meta.cls}">${meta.label}</span>`;
   };
 
   const thumbsHtml = (listing) => {
@@ -12509,13 +12566,16 @@ function renderListingsOnly(data, filter, search) {
   };
 
   const cardHtml = (l) => `
-    <div class="db-card" data-project-id="${l.projectId}" data-tier="${l.tier}">
+    <div class="db-card" data-project-id="${l.projectId}" data-tier="${l.tier}" data-status="${l.status || 'active'}">
       <div class="db-card-top">
         <div>
           <div class="db-card-addr">${l.address}</div>
           <div class="db-card-pid">${l.projectId || ''}</div>
         </div>
-        ${tierBadge(l.tier)}
+        <div style="display:flex;align-items:center;">
+          ${statusBadge(l.status)}
+          ${tierBadge(l.tier)}
+        </div>
       </div>
       <div class="db-card-meta">
         <span>${l.imageCount} staged image set${l.imageCount !== 1 ? 's' : ''}${l.imageCount > 0 ? ' · auto-saved' : ''}</span>
@@ -12531,17 +12591,30 @@ function renderListingsOnly(data, filter, search) {
         ${l.hiddenCount ? `<button class="db-action-btn" style="color:#8a6d3b;border-color:#e8d5a8;" onclick="openHiddenImages('${l.id}','${l.projectId}')" title="Images pulled from public view — not deleted, review separately">Hidden (${l.hiddenCount}) — Review</button>` : ''}
         <button class="db-action-btn" onclick="openVideoBuilderFor('${l.id}','${l.projectId || ''}')">+ Create Video</button>
         <button class="db-action-btn primary" onclick="hideDashboard()">Continue Staging →</button>
-        <button class="db-action-btn danger" onclick="archiveListing('${l.id}','${l.address.replace(/'/g,'').replace(/"/g,'')}')" title="Hide from dashboard — compliance page stays active">Archive</button>
+        <button class="db-action-btn" onclick="openStatusModal('${l.id}','${l.address.replace(/'/g,'').replace(/"/g,'')}','${l.status || 'active'}')" title="Set Active, Marketing, Pending, Sold, Canceled, Expired, Withdrawn, or Archived">Change Status</button>
       </div>
     </div>`;
 
-  container.innerHTML = filtered.length === 0
+  container.innerHTML = sorted.length === 0
     ? `<div class="db-listings"><div class="db-empty"><div class="db-empty-icon">🏠</div><div>No listings found${search ? ' matching "' + search + '"' : ''}.</div></div></div>`
-    : `<div class="db-listings">${filtered.map(cardHtml).join('')}</div>`;
+    : `<div class="db-listings">${sorted.map(cardHtml).join('')}</div>`;
 }
 
 let _dbFilter = 'all';
 let _dbSearch = '';
+let _dbStatusFilter = 'all';
+let _dbSort = 'updated';
+
+// Click and select events, not per-keystroke — full renderDashboard() is
+// fine here, same as filterDashboard() already does; no focus to lose.
+function filterDashboardStatus(status) {
+  _dbStatusFilter = status !== undefined ? status : _dbStatusFilter;
+  if (_dashboardData) renderDashboard(_dashboardData, _dbFilter, _dbSearch);
+}
+function sortDashboard(sort) {
+  _dbSort = sort !== undefined ? sort : _dbSort;
+  if (_dashboardData) renderDashboard(_dashboardData, _dbFilter, _dbSearch);
+}
 
 // Filter buttons still do a full re-render — that's a click, not typing,
 // so there's no focus to lose. Search now goes through searchDashboard()
@@ -12743,38 +12816,130 @@ function hideDashboard() {
   _dbSearch = '';
 }
 
-async function archiveListing(listingId, address) {
-  const confirmed = confirm(
-    'Archive "' + address + '"?\n\n' +
-    'This will hide the listing from your dashboard. ' +
-    'The compliance page remains permanently active per California AB 723 requirements.'
-  );
-  if (!confirmed) return;
-
+// ── STATUS MODAL — "Change Status" (replaces the old one-click Archive) ───
+// Covers the full lifecycle: active, marketing, pending, sold, canceled,
+// expired, withdrawn, archived. Archive is just one of the eight options
+// now, not a separate confirm()-gated action — same reasoning-prompt
+// pattern as hide-image.js's per-image hide, not a browser confirm().
+function ensureStatusModal(){
+  if (document.getElementById('status-modal')) return;
+  const modal = document.createElement('div');
+  modal.id = 'status-modal';
+  modal.className = 'hidden';
+  modal.innerHTML = `
+    <style>
+      #status-modal { position:fixed; inset:0; background:rgba(20,18,16,0.55); z-index:9100; display:flex; align-items:center; justify-content:center; padding:20px; }
+      #status-modal.hidden { display:none; }
+    </style>
+    <div class="sm-box">
+      <button class="sm-close" onclick="closeStatusModal()">✕</button>
+      <div id="sm-content"></div>
+    </div>`;
+  document.body.appendChild(modal);
+}
+function closeStatusModal(){
+  document.getElementById('status-modal')?.classList.add('hidden');
+}
+function openStatusModal(listingId, address, currentStatus){
+  ensureStatusModal();
+  const modal = document.getElementById('status-modal');
+  const content = document.getElementById('sm-content');
+  const cur = currentStatus || 'active';
+  const options = Object.keys(LISTING_STATUS_META).map(s =>
+    `<option value="${s}" ${s === cur ? 'selected' : ''}>${LISTING_STATUS_META[s].label}</option>`
+  ).join('');
+  content.innerHTML = `
+    <div class="sm-title">Change Status</div>
+    <div class="sm-sub">${address}. The compliance page stays permanently active regardless of status, per AB 723.</div>
+    <label class="sm-label">New Status</label>
+    <select id="sm-status-select" class="sm-select">${options}</select>
+    <label class="sm-label">Reason (optional)</label>
+    <textarea id="sm-reason" class="sm-textarea" placeholder='e.g. "Sold 9/18, closed escrow"'></textarea>
+    <div class="sm-actions">
+      <button class="db-action-btn" onclick="closeStatusModal()">Cancel</button>
+      <button class="db-action-btn primary" onclick="submitStatusChange('${listingId}')">Save</button>
+    </div>`;
+  modal.classList.remove('hidden');
+}
+async function submitStatusChange(listingId){
+  const status = document.getElementById('sm-status-select')?.value;
+  const reason = document.getElementById('sm-reason')?.value?.trim() || null;
+  if (!status) return;
+  const token = await getDashboardAuthToken();
+  if (!token) { showToast('Session expired — please sign in again.', 'error'); return; }
   try {
-    const session = readStoredSessionDirect();
-    const token = session?.access_token;
-    if (!token) { alert('Session expired. Please sign in again.'); return; }
-
     const res = await fetch('/.netlify/functions/archive-listing', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + token
-      },
-      body: JSON.stringify({ listingId })
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify({ listingId, status, reason })
     });
-
-    if (!res.ok) throw new Error('Archive failed: ' + res.status);
-
-    // Remove card from dashboard without full reload
-    if (_dashboardData) {
-      _dashboardData.listings = _dashboardData.listings.filter(l => l.id !== listingId);
-      _dashboardData.stats.totalListings = _dashboardData.listings.length;
-      renderDashboard(_dashboardData, _dbFilter, _dbSearch);
-    }
+    const data = await res.json();
+    if (!res.ok) { showToast(data.error || 'Status change failed.', 'error'); return; }
+    closeStatusModal();
+    showToast(`✓ Status set to ${LISTING_STATUS_META[status]?.label || status}.`, 'success');
+    // Re-pull rather than patch in place — archiving in particular removes
+    // the listing from what get-user-listings.js returns at all, and the
+    // simplest correct handling for every status is just refetching.
+    loadDashboardData();
   } catch (err) {
-    alert('Archive failed: ' + err.message);
+    showToast('Status change failed: ' + err.message, 'error');
+  }
+}
+
+// ── ARCHIVED LISTINGS — dashboard-level review, mirrors the per-listing
+// "Hidden (N) — Review" pattern but for whole listings, not images. Reuses
+// the #listing-images-modal box (ensureImagesModal()) since the styling is
+// identical — this just renders listings instead of images into it.
+async function openArchivedListings(){
+  ensureImagesModal();
+  const modal = document.getElementById('listing-images-modal');
+  const content = document.getElementById('lim-content');
+  content.innerHTML = `<div class="lim-title">Archived Listings</div><div class="lim-sub">Loading…</div>`;
+  modal.classList.remove('hidden');
+  try {
+    const token = await getDashboardAuthToken();
+    if (!token) { content.innerHTML = `<div class="lim-title">Archived Listings</div><div class="lim-sub">Session expired — please sign in again.</div>`; return; }
+    const res = await fetch(`/.netlify/functions/archive-listing?action=list-by-status&status=archived`, {
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+    const data = await res.json();
+    if (!res.ok) { content.innerHTML = `<div class="lim-title">Archived Listings</div><div class="lim-sub">${data.error || 'Could not load archived listings.'}</div>`; return; }
+    renderArchivedListingsModal(data.listings || []);
+  } catch (err) {
+    content.innerHTML = `<div class="lim-title">Archived Listings</div><div class="lim-sub">Error: ${err.message}</div>`;
+  }
+}
+function renderArchivedListingsModal(listings){
+  const content = document.getElementById('lim-content');
+  const sub = 'Hidden from My Listings — nothing is deleted, the compliance page stays live. Restore any listing below.';
+  if (!listings.length) {
+    content.innerHTML = `<div class="lim-title">Archived Listings</div><div class="lim-sub">${sub}</div><div class="lim-empty">No archived listings.</div>`;
+    return;
+  }
+  const itemsHtml = listings.map(l => `
+    <div class="lim-item" style="padding:12px 14px;">
+      <div class="lim-item-room" style="margin-bottom:2px;">${l.address}</div>
+      <div class="lim-item-note" style="margin-bottom:10px;">Archived ${l.archivedAt ? new Date(l.archivedAt).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : ''}</div>
+      <button class="lim-item-btn unhide" onclick="restoreArchivedListing('${l.id}')">Restore to Active</button>
+    </div>`).join('');
+  content.innerHTML = `<div class="lim-title">Archived Listings</div><div class="lim-sub">${sub}</div><div class="lim-grid">${itemsHtml}</div>`;
+}
+async function restoreArchivedListing(listingId){
+  const token = await getDashboardAuthToken();
+  if (!token) { showToast('Session expired — please sign in again.', 'error'); return; }
+  try {
+    const res = await fetch('/.netlify/functions/archive-listing', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify({ listingId, status: 'active', reason: 'Restored from archive' })
+    });
+    const data = await res.json();
+    if (!res.ok) { showToast(data.error || 'Restore failed.', 'error'); return; }
+    showToast('✓ Listing restored to Active.', 'success');
+    await openArchivedListings();
+    loadDashboardData();
+  } catch (err) {
+    showToast('Restore failed: ' + err.message, 'error');
   }
 }
 

@@ -29,18 +29,19 @@
 // visible and hidden image counts, not just the visible one, and only
 // drops a listing when neither has ever been non-zero.
 //
-// FIX (Sep 18, 2026 — real bug found live): this used to exclude
-// status='archived' rows at the SQL level (`status=neq.archived`). That
-// broke address search — an archived listing could never be found no
-// matter what was typed, since it never even reached the frontend. Fixed
-// by dropping that filter here: EVERY listing (any status) is now
-// returned to the frontend, and archived-hiding moved to the dashboard's
-// display logic instead (renderListingsOnly() in index.html) — which can
-// tell the difference between "hide archived by default" and "the user
-// is searching for something, so search everything." Stats below still
-// exclude archived, so "Total Listings"/"Staged Image Sets" continue to
-// reflect what's actually active on the dashboard, not everything ever
-// archived.
+// FIX (Sep 18, 2026 — real bug found live): this originally excluded
+// status='archived' rows at the SQL level. That broke address search — an
+// archived listing could never be found no matter what was typed, since
+// it never reached the frontend at all. Superseded same day by a bigger
+// correction: "archived" was never really a status, it's a visibility
+// flag (see archive-listing.js) — so status now holds only six real
+// values and never gets overwritten by archiving, and this query filters
+// on neither status nor `hidden`. EVERY listing comes back to the
+// frontend regardless; the dashboard's display logic (renderListingsOnly()
+// in index.html) decides what's shown by default vs. what a search
+// reveals. Stats below still exclude hidden listings, so "Total
+// Listings"/"Staged Image Sets" reflect what's actually visible on the
+// dashboard, not everything ever archived.
 
 const { getStore } = require("@netlify/blobs");
 const https = require("https");
@@ -155,16 +156,19 @@ exports.handler = async (event) => {
     // older rows where is_prospecting is still NULL are treated as regular
     // listings and still show up, instead of silently disappearing.
     //
-    // STATUS (Sep 18, 2026): no longer filters on `status` at all here —
-    // see file header. Every status, including archived, comes back; the
-    // dashboard decides what to show by default vs. what a search reveals.
+    // STATUS/HIDDEN (Sep 18, 2026): status holds only the six real
+    // lifecycle values now; `hidden` is the separate archive flag (see
+    // archive-listing.js). No filter on either here — every listing comes
+    // back regardless of status or hidden, same reasoning as the Sep 18
+    // fix above: the dashboard's display logic decides what's shown by
+    // default vs. what a search reveals, not this query.
     let listingsQuery;
     if (user.role === "broker_admin" && user.brokerage_id) {
-      listingsQuery = `?brokerage_id=eq.${user.brokerage_id}&is_prospecting=not.is.true&select=id,address,project_id,compliance_page_url,mls_number,status,created_at,updated_at,user_id&order=updated_at.desc.nullsfirst&limit=100`;
+      listingsQuery = `?brokerage_id=eq.${user.brokerage_id}&is_prospecting=not.is.true&select=id,address,project_id,compliance_page_url,mls_number,status,hidden,created_at,updated_at,user_id&order=updated_at.desc.nullsfirst&limit=100`;
     } else if (user.role === "team_lead" && user.team_id) {
-      listingsQuery = `?team_id=eq.${user.team_id}&is_prospecting=not.is.true&select=id,address,project_id,compliance_page_url,mls_number,status,created_at,updated_at,user_id&order=updated_at.desc.nullsfirst&limit=100`;
+      listingsQuery = `?team_id=eq.${user.team_id}&is_prospecting=not.is.true&select=id,address,project_id,compliance_page_url,mls_number,status,hidden,created_at,updated_at,user_id&order=updated_at.desc.nullsfirst&limit=100`;
     } else {
-      listingsQuery = `?user_id=eq.${authUser.id}&is_prospecting=not.is.true&select=id,address,project_id,compliance_page_url,mls_number,status,created_at,updated_at,user_id&order=updated_at.desc.nullsfirst&limit=100`;
+      listingsQuery = `?user_id=eq.${authUser.id}&is_prospecting=not.is.true&select=id,address,project_id,compliance_page_url,mls_number,status,hidden,created_at,updated_at,user_id&order=updated_at.desc.nullsfirst&limit=100`;
     }
 
     const listingsResult = await supabase("GET", "listings", null, listingsQuery);
@@ -211,6 +215,7 @@ exports.handler = async (event) => {
         complianceUrl:  listing.compliance_page_url,
         mlsNumber:      listing.mls_number || null,
         status:         listing.status || "active",
+        hidden:         listing.hidden || false,
         createdAt:      listing.created_at,
         lastStaged:     lastStaged,
         imageCount,
@@ -234,11 +239,13 @@ exports.handler = async (event) => {
     const displayable = enriched.filter(l => l.imageCount > 0 || l.hiddenCount > 0);
 
     // ── Stats ─────────────────────────────────────────────────────────────
-    // Derived from displayable EXCLUDING archived — an archived listing is
-    // returned in `listings` below (so search/the Archived filter tab can
-    // find it) but shouldn't inflate "Total Listings"/"Staged Image Sets,"
-    // which are meant to reflect what's actually active on the dashboard.
-    const statsBasis = displayable.filter(l => l.status !== "archived");
+    // Derived from displayable EXCLUDING hidden (archived) listings — a
+    // hidden listing is returned in `listings` below (so search/the
+    // Change Status flow can still reach it) but shouldn't inflate "Total
+    // Listings"/"Staged Image Sets," which reflect what's actually
+    // visible on the dashboard by default. Archiving no longer changes
+    // `status`, so this checks `hidden` directly rather than a status value.
+    const statsBasis = displayable.filter(l => !l.hidden);
     const totalImageSets = statsBasis.reduce((sum, l) => sum + l.imageCount, 0);
 
     return {

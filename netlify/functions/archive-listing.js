@@ -3,8 +3,7 @@
 //
 // Originally a one-way soft-delete (status: 'active' -> 'archived'). Extended
 // Sep 18, 2026 into the general status setter for a listing's whole
-// lifecycle: active, marketing, pending, sold, canceled, expired, withdrawn,
-// archived. Kept the existing `status` column rather than adding a parallel
+// lifecycle: active, marketing, pending, sold, canceled, expired, archived. Kept the existing `status` column rather than adding a parallel
 // `hidden` boolean — `status` was single-purpose (only 'active'/'archived'
 // ever touched it, confirmed by inventory of every listing.status reference
 // in index.html/get-user-listings.js) so there was no real risk of two
@@ -37,7 +36,7 @@
 
 const https = require("https");
 
-const VALID_STATUSES = ["active", "marketing", "pending", "sold", "canceled", "expired", "withdrawn", "archived"];
+const VALID_STATUSES = ["active", "marketing", "pending", "sold", "canceled", "expired", "archived"];
 
 function supabase(method, table, body, queryParams = "") {
   return new Promise((resolve, reject) => {

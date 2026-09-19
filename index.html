@@ -12964,7 +12964,18 @@ async function setListingHidden(listingId, hidden, reason){
 function getCapturedSignupSource() {
   try { return sessionStorage.getItem('ssp_signup_source') || null; } catch (e) { return null; }
 }
-
+// ── AUTO-OPEN SIGNUP FROM QR/LINK (?signup=1) ───────────────────────────────
+// Lets an external link or QR code jump straight to the Create Account
+// modal instead of landing on the hero page and requiring a click.
+(function autoOpenSignupFromParam() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('signup') === '1') {
+    document.addEventListener('DOMContentLoaded', () => {
+      hideLandingPage();
+      showAuthModal('signup');
+    });
+  }
+})();
 // ── INIT ─────────────────────────────────────────────────────────────────────
 showStep('step-property');
 // FIX (Sep 2026): the browser's back/forward cache (bfcache) can restore

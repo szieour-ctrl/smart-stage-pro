@@ -27,15 +27,46 @@ const s3 = new S3Client({
 // an edge case (a visitor leaving the tab open for an unusually long
 // single session), not the thing actually keeping links current.
 //
+// NEW (Sep 21, 2026 — real bug: NoSuchKey on compliance page video tour,
+// same fix applied to video-job.js's copy of this helper): some
+// video_jobs rows (from the Aug 22-23 Cloudinary→S3 migration backfill,
+// confirmed via AWS CLI head-object — the objects themselves migrated
+// fine) had their output_16x9_url/output_9x16_url column written as a
+// full S3 URL instead of the bare key this column is supposed to hold.
+// Passed straight into GetObjectCommand's Key, a full URL string doesn't
+// match any real object, and got doubled into the bucket base URL again
+// by the presign step downstream — producing a NoSuchKey error whose Key
+// was the whole URL, twice. This normalizes any full URL (S3 or
+// otherwise) back down to a bare key before signing, so both this
+// legacy-row case and true bare-key rows sign correctly, with no
+// Supabase cleanup required.
+function normalizeS3Key(rawKey) {
+  if (!rawKey) return rawKey;
+  if (rawKey.startsWith("http://") || rawKey.startsWith("https://")) {
+    try {
+      const u = new URL(rawKey);
+      let key = decodeURIComponent(u.pathname.replace(/^\//, ""));
+      if (key.startsWith("http://") || key.startsWith("https://")) {
+        key = normalizeS3Key(key); // handles the doubled case
+      }
+      return key;
+    } catch {
+      return rawKey;
+    }
+  }
+  return rawKey;
+}
+
 // rawKey is the stored S3 key (smart-stage-video-finals/ prefix, not
 // covered by the bucket's public-read policy) — no working URL on its
 // own, same requirement as the old Cloudinary version.
 async function signVideoUrl(rawKey) {
   if (!rawKey) return null;
+  const key = normalizeS3Key(rawKey);
   try {
     return await getSignedUrl(
       s3,
-      new GetObjectCommand({ Bucket: process.env.S3_BUCKET_NAME, Key: rawKey }),
+      new GetObjectCommand({ Bucket: process.env.S3_BUCKET_NAME, Key: key }),
       { expiresIn: 60 * 60 * 24 * 7 }
     );
   } catch (err) {

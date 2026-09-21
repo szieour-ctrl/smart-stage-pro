@@ -127,6 +127,35 @@ const s3 = new S3Client({
 // already paid for by the time this runs; the short expiry there is
 // about limiting exposure/reuse window, not gating payment.
 //
+// NEW (Sep 21, 2026 — real bug: NoSuchKey on compliance page + gallery):
+// some video_jobs rows (from the Aug 22-23 Cloudinary→S3 migration
+// backfill, confirmed via AWS CLI head-object — the objects themselves
+// migrated fine) had their output_16x9_url/output_9x16_url column
+// written as a full S3 URL instead of the bare key this column is
+// supposed to hold. Passed straight into GetObjectCommand's Key, a full
+// URL string doesn't match any real object, and got doubled into the
+// bucket base URL again by the presign step downstream — producing a
+// NoSuchKey error whose Key was the whole URL, twice. This normalizes
+// any full URL (S3 or otherwise) back down to a bare key before signing,
+// so both this legacy-row case and true bare-key rows sign correctly,
+// with no Supabase cleanup required.
+function normalizeS3Key(rawKey) {
+  if (!rawKey) return rawKey;
+  if (rawKey.startsWith("http://") || rawKey.startsWith("https://")) {
+    try {
+      const u = new URL(rawKey);
+      let key = decodeURIComponent(u.pathname.replace(/^\//, ""));
+      if (key.startsWith("http://") || key.startsWith("https://")) {
+        key = normalizeS3Key(key); // handles the doubled case
+      }
+      return key;
+    } catch {
+      return rawKey;
+    }
+  }
+  return rawKey;
+}
+
 // expirySeconds: how long the minted URL stays valid — deliberately
 // different per caller (see each call site):
 //   - live preview (getJobStatus):      1 hour
@@ -135,10 +164,11 @@ const s3 = new S3Client({
 //                                        opened long after the fact)
 async function signVideoUrl(rawKey, expirySeconds) {
   if (!rawKey) return null;
+  const key = normalizeS3Key(rawKey);
   try {
     return await getSignedUrl(
       s3,
-      new GetObjectCommand({ Bucket: process.env.S3_BUCKET_NAME, Key: rawKey }),
+      new GetObjectCommand({ Bucket: process.env.S3_BUCKET_NAME, Key: key }),
       { expiresIn: expirySeconds }
     );
   } catch (err) {

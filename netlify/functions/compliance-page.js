@@ -1,5 +1,6 @@
 // compliance-page.js — Netlify Function
-// Serves the permanent AB 723 §10140.8 compliance page for a property project
+// Serves the AB 723 §10140.8 compliance page for a property project.
+// Live while the owner's subscription is active + 30 days after it ends (ToS §6).
 // URL: /compliance/{projectId}
 
 const { getStore } = require("@netlify/blobs");
@@ -144,6 +145,30 @@ async function getDisclosedVideoJobs(projectId) {
   );
 
   return jobsWithFrames;
+}
+
+// ── 30-day post-cancellation window (ToS §6, Sep 22, 2026) ────────────────
+// A compliance page stays live while its owner's subscription is active and
+// for 30 days after the paid period ends (users.data_expires_at, stamped by
+// stripe-webhook.js). After that the page is taken offline with a 410 notice
+// — the underlying records are NOT deleted (3-year private retention), and a
+// resubscribe clears data_expires_at, which brings the page straight back.
+// Fails OPEN: if the owner lookup errors or the listing/user can't be found,
+// the page renders normally. Only a positively confirmed expired
+// cancellation takes a page down.
+async function isComplianceWindowClosed(projectId) {
+  try {
+    const l = await supabaseGet("listings", `?project_id=eq.${encodeURIComponent(projectId)}&select=user_id&limit=1`);
+    const ownerId = l.data?.[0]?.user_id;
+    if (!ownerId) return false;
+    const u = await supabaseGet("users", `?id=eq.${ownerId}&select=subscription_status,data_expires_at`);
+    const owner = u.data?.[0];
+    if (!owner || owner.subscription_status !== "cancelled" || !owner.data_expires_at) return false;
+    return new Date(owner.data_expires_at).getTime() < Date.now();
+  } catch (e) {
+    console.warn("compliance window check failed (failing open):", e.message);
+    return false;
+  }
 }
 
 function getProjectStore() {
@@ -537,6 +562,22 @@ ${videoTourSections}
 </html>`;
 }
 
+function renderNoLongerAvailable() {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>Compliance Record No Longer Available — Smart Stage PRO™</title>
+<style>body{font-family:Arial,sans-serif;background:#f5f3f0;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:20px;box-sizing:border-box;}
+.box{background:#fff;padding:40px;border-radius:8px;text-align:center;max-width:440px;}
+h2{color:#1a1714;margin-bottom:12px;}p{color:#7a6f63;font-size:14px;line-height:1.6;}</style>
+</head><body>
+<div class="box">
+  <h2>Record No Longer Publicly Available</h2>
+  <p>The public AB 723 compliance page for this property is no longer available. For the original, unaltered listing photos, please contact the listing agent.</p>
+  <p style="margin-top:16px;font-size:12px;color:#b0a090;">Smart Stage PRO™</p>
+</div>
+</body></html>`;
+}
+
 function renderNotFound(projectId) {
   return `<!DOCTYPE html>
 <html lang="en">
@@ -596,6 +637,10 @@ exports.handler = async (event) => {
     }
 
     const project = JSON.parse(raw);
+
+    if (await isComplianceWindowClosed(projectId)) {
+      return { statusCode: 410, headers: htmlHeaders, body: renderNoLongerAvailable() };
+    }
 
     // Video data comes from Supabase, a separate system from the Blobs
     // project record. If this fails for any reason (Supabase down, env

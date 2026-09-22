@@ -398,7 +398,7 @@ if (new URLSearchParams(window.location.search).get('debug') === '1') {
 </script>
 </head>
 <body>
-<div class="compliance-bar" id="compliance-bar-text">California AB 723 §10140.8 Compliance Active — Original uploaded for permanent public URL · QR Code applied to all Final images · MetroList Rule 11.6.1</div>
+<div class="compliance-bar" id="compliance-bar-text">California AB 723 §10140.8 Compliance Active — Original uploaded for public compliance URL · QR Code applied to all Final images · MetroList Rule 11.6.1</div>
 <header class="header">
   <div class="header-left" style="display:flex;align-items:center;gap:14px;">
     <img src="https://smart-stage-pro-media-938733852197-us-east-2-an.s3.us-east-2.amazonaws.com/smart-stage-marketing/Smart_Stage_PRO_Logo_zciwlo.png" alt="Smart Stage PRO™" style="height:44px;width:auto;display:block;" />
@@ -411,6 +411,7 @@ if (new URLSearchParams(window.location.search).get('debug') === '1') {
      <a id="header-gallery-btn" class="hidden btn btn-ghost" style="font-size:0.72rem;padding:5px 14px;color:#c8bfb0;border:1px solid rgba(184,151,90,0.3);border-radius:3px;text-decoration:none;display:inline-block;" href="/gallery.html" target="_blank" rel="noopener">Gallery</a>
     <button id="header-getting-started-btn" class="hidden btn btn-ghost" style="font-size:0.72rem;padding:5px 14px;color:#c8bfb0;border:1px solid rgba(184,151,90,0.3);border-radius:3px;" onclick="showGettingStartedModal()">Getting Started</button>
     <button id="header-faq-btn" class="hidden btn btn-ghost" style="font-size:0.72rem;padding:5px 14px;color:#c8bfb0;border:1px solid rgba(184,151,90,0.3);border-radius:3px;" onclick="showFaqModal()">FAQ</button>
+    <button id="header-billing-btn" class="hidden btn btn-ghost" style="font-size:0.72rem;padding:5px 14px;color:#c8bfb0;border:1px solid rgba(184,151,90,0.3);border-radius:3px;" onclick="showBillingModal()">Billing</button>
     <button id="header-signout-btn" class="hidden btn btn-ghost" style="font-size:0.72rem;padding:5px 12px;color:#c8bfb0;" onclick="signOut()">Sign Out</button>
   </div>
 </header>
@@ -543,7 +544,7 @@ if (new URLSearchParams(window.location.search).get('debug') === '1') {
       </div>
 
       <p style="margin-top:24px;font-size:11px;color:var(--muted);text-align:center;">
-        Address search powered by Google Maps · Each address creates a permanent AB 723 compliance page
+        Address search powered by Google Maps · Each address creates an AB 723 compliance page
       </p>
     </div>
   </div>
@@ -8077,6 +8078,13 @@ let session = readStoredSessionDirect();
 // shared module system between it and the Netlify functions — see
 // debit-credit.js's own comment for the full "why created_at" reasoning.
 const TRIAL_LENGTH_MS = 30 * 24 * 60 * 60 * 1000;
+
+// Terms of Service version currently shown in the ToS modal. Bumping this
+// re-prompts every existing user to accept on their next sign-in (see the
+// ToS check in handleAuthenticatedUser). 2.0 (Sep 2026): cancellation terms —
+// compliance pages stay live 30 days after the paid period ends, credits
+// forfeited, 30-day ZIP export window.
+const CURRENT_TERMS_VERSION = '2.0';
 function isTrialExpired(createdAt) {
   if (!createdAt) return false;
   return (Date.now() - new Date(createdAt).getTime()) > TRIAL_LENGTH_MS;
@@ -8101,62 +8109,96 @@ async function handleAuthenticatedUser(user) {
   }
 
   // Check ToS acceptance
-  if (!userRec.terms_accepted_at) {
+  if (!userRec.terms_accepted_at || userRec.terms_version !== CURRENT_TERMS_VERSION) {
     showTosModal(user);
     return;
   }
 
-  // Check subscription status — must be explicitly active OR have free trial credits
+  // Check subscription status.
+  // REWRITE (Sep 22, 2026): the old trial check read balance_after from the
+  // user's single 'signup_trial' ledger row — a snapshot from signup (always
+  // 10), not the current balance — and ran for EVERY non-active status, so a
+  // cancelled user sailed straight into the app. Each status now has its own
+  // explicit branch, and the trial branch reads the real current balance.
   const status = userRec.subscription_status;
-  if (status !== 'active') {
-    // If the user explicitly picked a plan (Solo/Team/Brokerage) before
-    // signing up, that intent wins over the free trial — checked BEFORE
-    // trial-expired/trial-credit logic below, since a brand-new signup
-    // always has a fresh trial balance and would otherwise always win the
-    // race and silently strand the user on the free trial instead of
-    // checkout. consumePendingCheckoutPlan() also checks localStorage, so
-    // this still fires correctly after a signup that required email
-    // confirmation (a full page reload, which clears the in-memory
-    // _pendingCheckoutPlan variable on its own).
-    const pendingPlan = consumePendingCheckoutPlan();
-    if (pendingPlan) {
-      showPricingPage(user, userRec);
-      setTimeout(() => startCheckout(pendingPlan), 300);
-      return;
+
+  if (status === 'active') {
+    await showMainApp(user, userRec);
+    if (userRec.cancel_at) {
+      showToast(`Your subscription is set to end ${fmtBillingDate(userRec.cancel_at)}. You can undo this from Billing.`, '');
     }
-    // Expired trial blocks unconditionally, BEFORE the credit-balance
-    // check below — a trial user can easily still be sitting on unused
-    // Images past 30 days, and unused balance was never meant to extend
-    // access past the promised window. Mirrors debit-credit.js's
-    // identical check, which is what actually protects Generate Final /
-    // Kling / video download / Smart Correct — this one just gives an
-    // expired trial user a clean redirect instead of a raw error the
-    // first time they try to spend an Image.
-    if (status === 'trial' && isTrialExpired(userRec.created_at)) {
-      showPricingPage(user, userRec, 'trial_expired');
-      return;
-    }
-    // Check if user has free trial credits
-    const sb = getSupabase();
-    const { data: trialCredits } = await sb
-      .from('credit_ledger')
-      .select('balance_after')
-      .eq('user_id', user.id)
-      .eq('reason', 'signup_trial')
-      .order('created_at', { ascending: false })
-      .limit(1);
-    const trialBalance = trialCredits?.[0]?.balance_after ?? 0;
-    if (trialBalance > 0) {
-      // Free trial user with remaining images — allow into app
-      await showMainApp(user, userRec);
-      return;
-    }
+    return;
+  }
+
+  // Stripe is still retrying the card — keep access (server-side
+  // debit-credit.js decides what can actually be spent) and point them at
+  // Billing. Never route past_due to the pricing page: subscribing again
+  // there would create a second subscription on the same customer.
+  if (status === 'past_due') {
+    await showMainApp(user, userRec);
+    showToast('Your last payment failed — open Billing to update your card.', 'error');
+    return;
+  }
+
+  // Returning from Stripe Checkout before the webhook has flipped status to
+  // active — the pricing page's own checkout=success poll handles this.
+  if (new URLSearchParams(window.location.search).get('checkout') === 'success') {
     showPricingPage(user, userRec);
     return;
   }
 
-  // Active subscriber — show tool
-  await showMainApp(user, userRec);
+  // If the user explicitly picked a plan (Solo/Team/Brokerage) before
+  // signing up, that intent wins over the free trial — checked BEFORE
+  // trial-expired/trial-credit logic below, since a brand-new signup
+  // always has a fresh trial balance and would otherwise always win the
+  // race and silently strand the user on the free trial instead of
+  // checkout. consumePendingCheckoutPlan() also checks localStorage, so
+  // this still fires correctly after a signup that required email
+  // confirmation (a full page reload, which clears the in-memory
+  // _pendingCheckoutPlan variable on its own).
+  const pendingPlan = consumePendingCheckoutPlan();
+  if (pendingPlan) {
+    showPricingPage(user, userRec);
+    setTimeout(() => startCheckout(pendingPlan), 300);
+    return;
+  }
+
+  // Cancelled: paid period is over. For 30 days (data_expires_at, set by
+  // stripe-webhook.js on customer.subscription.deleted) they get the
+  // account-closed screen — ZIP export + resubscribe. After that, pricing only.
+  if (status === 'cancelled') {
+    const expiresAt = userRec.data_expires_at ? new Date(userRec.data_expires_at) : null;
+    if (expiresAt && expiresAt > new Date()) {
+      showAccountClosedPage(user, userRec);
+    } else {
+      showPricingPage(user, userRec);
+    }
+    return;
+  }
+
+  // Trial. Expired trial blocks unconditionally, BEFORE the balance check —
+  // unused balance was never meant to extend access past the promised
+  // window. Mirrors debit-credit.js's identical check.
+  if (status === 'trial' || !status) {
+    if (isTrialExpired(userRec.created_at)) {
+      showPricingPage(user, userRec, 'trial_expired');
+      return;
+    }
+    const sb = getSupabase();
+    const { data: lastRow } = await sb
+      .from('credit_ledger')
+      .select('balance_after')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+      .limit(1);
+    const currentBalance = lastRow?.[0]?.balance_after ?? 0;
+    if (currentBalance > 0) {
+      await showMainApp(user, userRec);
+      return;
+    }
+  }
+
+  showPricingPage(user, userRec);
 }
 
 // ── HEADER UPDATE ────────────────────────────────────────────────────────────
@@ -8178,6 +8220,7 @@ if (galleryBtn) galleryBtn.classList.remove('hidden');
   if (gsBtn) gsBtn.classList.remove('hidden');
   const faqBtn = document.getElementById('header-faq-btn');
   if (faqBtn) faqBtn.classList.remove('hidden');
+  document.getElementById('header-billing-btn')?.classList.remove('hidden');
 
   // Load credit balance from Supabase
   if (creditBadge && userRec) {
@@ -8218,6 +8261,7 @@ async function refreshSmartCorrectUsageChip() {
 // ── SHOW MAIN APP ────────────────────────────────────────────────────────────
 async function showMainApp(user, userRec) {
   hideAllAuthModals();
+  document.getElementById('account-closed-page')?.remove();
   document.getElementById('app-container').classList.remove('hidden');
   await updateHeaderForUser(user, userRec);
   showStep('step-property');
@@ -8230,6 +8274,10 @@ function hideAppUI() {
   document.getElementById('header-gallery-btn')?.classList.add('hidden');
   document.getElementById('header-getting-started-btn')?.classList.add('hidden');
   document.getElementById('header-faq-btn')?.classList.add('hidden');
+  document.getElementById('header-billing-btn')?.classList.add('hidden');
+  document.getElementById('account-closed-page')?.remove();
+  document.getElementById('billing-modal')?.remove();
+  stopAccountExportPolling();
   document.getElementById('header-user-info')?.classList.add('hidden');
   document.getElementById('header-signout-btn')?.classList.add('hidden');
   document.getElementById('header-credit-badge')?.classList.add('hidden');
@@ -8481,13 +8529,13 @@ function showTosModal(user) {
         </div>
       </div>
       <div id="tos-scroll" style="overflow-y:auto;flex:1;padding:24px 28px;font-size:0.82rem;color:var(--ink);line-height:1.7;" onscroll="checkTosScroll()">
-        <p style="margin-bottom:14px;"><strong>Smart Stage PRO™ Terms of Service</strong><br>Effective date: June 2026</p>
-        <p style="margin-bottom:10px;"><strong>1. AB 723 Compliance</strong><br>All staged images generated through this platform include mandatory disclosure overlays and are stored with permanent compliance records per California AB 723 §10140.8. You agree to use all staged images in compliance with California real estate disclosure laws, MetroList Rule 11.6.1, and applicable MLS rules. Staged images must be clearly labeled as virtually staged in all MLS and public marketing materials.</p>
+        <p style="margin-bottom:14px;"><strong>Smart Stage PRO™ Terms of Service</strong><br>Effective date: September 2026 · Version 2.0</p>
+        <p style="margin-bottom:10px;"><strong>1. AB 723 Compliance</strong><br>All staged images generated through this platform include mandatory disclosure overlays and are stored with compliance records per California AB 723 §10140.8. Each compliance record includes a public compliance page, which remains live while your subscription is active and for 30 days after your paid subscription period ends (see Section 6). You agree to use all staged images in compliance with California real estate disclosure laws, MetroList Rule 11.6.1, and applicable MLS rules. Staged images must be clearly labeled as virtually staged in all MLS and public marketing materials.</p>
         <p style="margin-bottom:10px;"><strong>2. Staged Image Credits</strong><br>Your subscription includes a monthly allocation of staged images, shared across Smart Stage PRO and Smart Stage PRO Plus. Unused credits roll over for up to 3 months from the month they were allocated, after which they expire. Overage usage is billed at published rates. One platform credit equals one staged image generation or one photo used as a video frame.</p>
         <p style="margin-bottom:10px;"><strong>3. Permitted Use</strong><br>Smart Stage PRO™ is licensed for use by licensed California real estate professionals for legitimate listing marketing purposes. You may not resell, redistribute, or sublicense access to this platform.</p>
-        <p style="margin-bottom:10px;"><strong>4. Image Ownership &amp; License</strong><br>You retain ownership of all original listing photographs you upload. By uploading images, you represent and warrant that you own them or hold all rights, licenses, and permissions necessary to upload and process them on this platform, and you are solely responsible for obtaining any permissions required from photographers, brokers, property owners, or other rights holders before uploading.<br><br>Staged images generated by the platform are licensed to you for real estate marketing use. You grant Smart Stage PRO™ a limited, non-exclusive license to process uploaded content for the purpose of providing the platform's services — including staging, image enhancement, AI-assisted rendering, video generation, and compliance documentation — including the right to transmit and sublicense uploaded content to the third-party service providers used to deliver the platform (see our Privacy Policy for the current list).<br><br>This license is revocable upon account cancellation, except that it survives — and remains irrevocable — as to content already incorporated into a published AB 723 compliance record. The platform retains the right to store original and staged images for AB 723 compliance purposes for a minimum of three years, regardless of subscription status, as required by California law.</p>
+        <p style="margin-bottom:10px;"><strong>4. Image Ownership &amp; License</strong><br>You retain ownership of all original listing photographs you upload. By uploading images, you represent and warrant that you own them or hold all rights, licenses, and permissions necessary to upload and process them on this platform, and you are solely responsible for obtaining any permissions required from photographers, brokers, property owners, or other rights holders before uploading.<br><br>Staged images generated by the platform are licensed to you for real estate marketing use. You grant Smart Stage PRO™ a limited, non-exclusive license to process uploaded content for the purpose of providing the platform's services — including staging, image enhancement, AI-assisted rendering, video generation, and compliance documentation — including the right to transmit and sublicense uploaded content to the third-party service providers used to deliver the platform (see our Privacy Policy for the current list).<br><br>This license is revocable upon account cancellation, except that it survives — and remains irrevocable — as to content already incorporated into a published AB 723 compliance record. The platform retains the right to store original and staged images for AB 723 compliance purposes for a minimum of three years, regardless of subscription status, as required by California law. Records retained after a public compliance page is taken offline (see Section 6) are stored privately and are not publicly accessible.</p>
         <p style="margin-bottom:10px;"><strong>5. Privacy &amp; Data</strong><br>Property addresses, agent information, and staged images are stored securely and used solely to provide platform services and maintain AB 723 compliance records. We do not sell your data.</p>
-        <p style="margin-bottom:10px;"><strong>6. Subscription &amp; Billing</strong><br>Subscriptions are billed monthly or annually. You may cancel at any time; access continues through the end of the paid period. Refunds are not provided for partial months.</p>
+        <p style="margin-bottom:10px;"><strong>6. Subscription &amp; Billing</strong><br>Subscriptions are billed monthly or annually. You may cancel at any time from the Billing menu in your account; access continues through the end of the paid period. Refunds are not provided for partial months.<br><br>When your paid period ends: (a) staging, correction, and video tools are no longer available; (b) all unused and rolled-over staged image credits are forfeited; (c) your public compliance pages remain live for 30 days, after which they are taken offline and replaced with a notice that the record is no longer publicly available; and (d) during those same 30 days you may sign in and download a ZIP file of the original and staged images for all of your listings. If a listing that uses a compliance page link or QR code is still active on an MLS or in other public marketing, you are responsible for replacing that link before the 30-day period ends. Resubscribing restores your compliance pages.</p>
         <p style="margin-bottom:10px;"><strong>7. Limitation of Liability &amp; Indemnification</strong><br>Smart Stage PRO™ is provided as-is. We are not responsible for MLS violations, disclosure errors, or regulatory penalties arising from your use of staged images. You are solely responsible for compliance with all applicable real estate laws and MLS rules.<br><br>You agree to indemnify, defend, and hold harmless Smart Stage PRO™ and its officers, employees, and service providers from and against any claims, damages, liabilities, costs, and expenses (including reasonable attorneys' fees) arising out of or related to: (a) your uploaded content, including any claim that it infringes a third party's copyright, trademark, privacy, or other rights; (b) your breach of the representations and warranties in Section 4; or (c) your violation of any applicable law, MLS rule, or disclosure requirement in connection with your use of the platform.</p>
         <p style="margin-bottom:20px;"><strong>8. Changes to Terms</strong><br>We may update these terms with 30 days notice. Continued use constitutes acceptance.</p>
         <p style="font-size:0.75rem;color:var(--muted);">Smart Stage PRO™ · support@smartstagepro.com</p>
@@ -8538,7 +8586,7 @@ async function acceptTos() {
         'Content-Type': 'application/json',
         ...(jwt ? { 'Authorization': 'Bearer ' + jwt } : {}),
       },
-      body: JSON.stringify({ userId: _currentUser?.id, signupSource: getCapturedSignupSource() }),
+      body: JSON.stringify({ userId: _currentUser?.id, signupSource: getCapturedSignupSource(), termsVersion: CURRENT_TERMS_VERSION }),
     });
     // Proceed regardless — if DB write fails, terms_accepted_at may already be set via SQL
     // Brief pause to allow DB trigger to seed free trial credits
@@ -8549,6 +8597,254 @@ async function acceptTos() {
     if (btn) { btn.textContent = 'Accept & Continue →'; btn.disabled = false; checkTosReady(); }
     showToast('Could not save acceptance: ' + err.message, 'error');
   }
+}
+
+// ══════════════════════════════════════════
+// BILLING, CANCELLATION & ACCOUNT EXPORT (Sep 22, 2026)
+// ══════════════════════════════════════════
+// Cancellation itself happens in Stripe's hosted Customer Portal
+// (create-portal-session.js) — cancel at period end. stripe-webhook.js
+// records cancel_at when it's scheduled, then cancelled_at + data_expires_at
+// (paid period end + 30 days) when the subscription actually ends.
+// The ZIP export covers real listings only (never prospects) and runs in a
+// background function because a whole account is far past the 6MB
+// synchronous response ceiling.
+
+// Flip to true once export-account-zip-background.js and
+// export-account-status.js are deployed. Until then the export UI falls back
+// to "email support" so no button points at a function that doesn't exist.
+const ACCOUNT_EXPORT_ENABLED = false;
+
+function exportSectionHtml(buttonClass) {
+  if (!ACCOUNT_EXPORT_ENABLED) {
+    return `<p style="font-size:0.78rem;color:var(--muted);line-height:1.5;">To get a ZIP of all your listing images, email <a href="mailto:support@smartstagepro.com" style="color:var(--gold);">support@smartstagepro.com</a> from your account email.</p>`;
+  }
+  return `<button id="export-zip-btn" class="btn ${buttonClass}" style="width:100%;justify-content:center;${buttonClass === 'btn-ghost' ? 'border:1px solid var(--gold);' : ''}" onclick="startAccountExport()">Build ZIP</button>
+        <div id="export-status-line" style="font-size:0.78rem;color:var(--muted);margin-top:10px;line-height:1.5;"></div>`;
+}
+
+function fmtBillingDate(iso) {
+  if (!iso) return '';
+  try {
+    return new Date(iso).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+  } catch { return ''; }
+}
+
+// Small status label for the dashboard "Subscription" stat.
+function subscriptionStatusChip() {
+  const rec = _userRecord || {};
+  if (rec.subscription_status === 'past_due') {
+    return '<span style="font-size:0.7rem;color:#c0392b;font-weight:500;">· payment failed</span>';
+  }
+  if (rec.subscription_status === 'active' && rec.cancel_at) {
+    return `<span style="font-size:0.7rem;color:var(--muted);font-weight:500;">· ends ${escHtml(fmtBillingDate(rec.cancel_at))}</span>`;
+  }
+  if (rec.subscription_status === 'trial') {
+    return '<span style="font-size:0.7rem;color:var(--muted);font-weight:500;">· trial</span>';
+  }
+  return '<span style="font-size:0.7rem;color:var(--success);font-weight:500;">· active</span>';
+}
+
+function billingJwtOrSignOut() {
+  const session = readStoredSessionDirect();
+  const jwt = session?.access_token;
+  if (!jwt) {
+    showToast('Session expired — please sign in again.', 'error');
+    signOut();
+    return null;
+  }
+  return jwt;
+}
+
+// ── Stripe Customer Portal ────────────────────────────────
+async function openBillingPortal(btn) {
+  const jwt = billingJwtOrSignOut();
+  if (!jwt) return;
+  const originalText = btn?.textContent;
+  if (btn) { btn.textContent = 'Opening Stripe…'; btn.disabled = true; }
+  try {
+    const res = await fetch('/.netlify/functions/create-portal-session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + jwt },
+      body: JSON.stringify({}),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.url) throw new Error(data.error || `HTTP ${res.status}`);
+    window.location.href = data.url;
+  } catch (err) {
+    showToast('Could not open billing: ' + err.message, 'error');
+    if (btn) { btn.textContent = originalText; btn.disabled = false; }
+  }
+}
+
+// ── Billing modal (header "Billing" button) ───────────────
+function showBillingModal() {
+  document.getElementById('billing-modal')?.remove();
+  const rec = _userRecord || {};
+  const hasStripe = !!rec.stripe_customer_id;
+
+  let statusLine = 'Your subscription is active.';
+  if (rec.subscription_status === 'trial') statusLine = 'You are on the free trial.';
+  if (rec.subscription_status === 'past_due') statusLine = 'Your last payment failed. Update your card to keep your account active.';
+  if (rec.subscription_status === 'active' && rec.cancel_at) {
+    statusLine = `Your subscription is set to end ${escHtml(fmtBillingDate(rec.cancel_at))}. You can undo the cancellation in Stripe before then.`;
+  }
+
+  const modal = document.createElement('div');
+  modal.id = 'billing-modal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(26,23,20,0.6);z-index:960;display:flex;align-items:center;justify-content:center;padding:20px;';
+  modal.innerHTML = `
+    <div style="background:var(--cream);border-radius:6px;max-width:460px;width:100%;padding:28px;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;">
+        <div style="font-family:'Cormorant Garamond',serif;font-size:1.5rem;color:var(--ink);">Billing</div>
+        <button onclick="document.getElementById('billing-modal')?.remove()" style="background:none;border:none;font-size:1.2rem;color:var(--muted);cursor:pointer;">✕</button>
+      </div>
+      <p style="font-size:0.85rem;color:var(--ink);line-height:1.6;margin-bottom:18px;">${statusLine}</p>
+      ${hasStripe ? `
+        <button class="btn btn-primary" style="width:100%;justify-content:center;margin-bottom:8px;" onclick="openBillingPortal(this)">Manage or cancel subscription →</button>
+        <p style="font-size:0.72rem;color:var(--muted);line-height:1.5;margin-bottom:20px;">Opens Stripe's secure billing page — update your card, view invoices, or cancel. Cancelling keeps your access through the end of the paid period.</p>
+      ` : `
+        <p style="font-size:0.78rem;color:var(--muted);line-height:1.5;margin-bottom:20px;">No paid subscription on this account yet.</p>
+      `}
+      <div style="border-top:1px solid var(--border);padding-top:18px;">
+        <div style="font-size:0.85rem;font-weight:600;color:var(--ink);margin-bottom:6px;">Download all my listing images</div>
+        <p style="font-size:0.75rem;color:var(--muted);line-height:1.5;margin-bottom:12px;">One ZIP with the original and staged images for every listing in your account. Large accounts can take a few minutes to build.</p>
+        ${exportSectionHtml('btn-ghost')}
+      </div>
+    </div>`;
+  modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+  document.body.appendChild(modal);
+}
+
+// ── Account-closed screen (cancelled, inside 30-day window) ──
+function showAccountClosedPage(user, userRec) {
+  hideAllAuthModals();
+  hideAppUI();
+  document.getElementById('account-closed-page')?.remove();
+
+  const endedOn   = fmtBillingDate(userRec.cancelled_at);
+  const expiresOn = fmtBillingDate(userRec.data_expires_at);
+  const hasStripe = !!userRec.stripe_customer_id;
+
+  const page = document.createElement('div');
+  page.id = 'account-closed-page';
+  page.style.cssText = 'min-height:100vh;background:var(--cream);padding:48px 20px 80px;';
+  page.innerHTML = `
+    <div style="max-width:620px;margin:0 auto;">
+      <h1 style="font-family:'Cormorant Garamond',serif;font-size:2rem;color:var(--ink);margin-bottom:8px;">Your subscription has ended</h1>
+      <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin-bottom:24px;">
+        ${endedOn ? `Your paid access ended on ${escHtml(endedOn)}. ` : ''}Your public compliance pages stay live until <strong style="color:var(--ink);">${escHtml(expiresOn)}</strong>, then they go offline.
+      </p>
+
+      <div style="background:rgba(192,57,43,0.06);border:1px solid rgba(192,57,43,0.3);border-radius:4px;padding:14px 16px;margin-bottom:24px;">
+        <div style="font-size:0.85rem;font-weight:600;color:#c0392b;margin-bottom:4px;">Listings still on MLS?</div>
+        <div style="font-size:0.8rem;color:var(--ink);line-height:1.6;">If any listing still uses a Smart Stage PRO compliance link or QR code, replace it before ${escHtml(expiresOn)}. After that date the link will no longer show the original photos.</div>
+      </div>
+
+      <div style="background:#fff;border:1px solid var(--border);border-radius:4px;padding:20px;margin-bottom:24px;">
+        <div style="font-size:0.95rem;font-weight:600;color:var(--ink);margin-bottom:6px;">Download all my listing images</div>
+        <p style="font-size:0.8rem;color:var(--muted);line-height:1.5;margin-bottom:14px;">One ZIP with the original and staged images for every listing in your account. Available until ${escHtml(expiresOn)}.</p>
+        ${exportSectionHtml('btn-primary')}
+      </div>
+
+      <div style="background:#fff;border:1px solid var(--border);border-radius:4px;padding:20px;margin-bottom:24px;">
+        <div style="font-size:0.95rem;font-weight:600;color:var(--ink);margin-bottom:6px;">Come back anytime</div>
+        <p style="font-size:0.8rem;color:var(--muted);line-height:1.5;margin-bottom:14px;">Resubscribing restores your compliance pages and staging tools.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button onclick="startCheckout('solo')" class="btn btn-ghost" style="flex:1;min-width:140px;justify-content:center;border:1px solid var(--gold);">Subscribe — Solo →</button>
+          <button onclick="startCheckout('team')" class="btn btn-ghost" style="flex:1;min-width:140px;justify-content:center;border:1px solid var(--gold);">Subscribe — Team →</button>
+          <button onclick="startCheckout('brokerage')" class="btn btn-ghost" style="flex:1;min-width:140px;justify-content:center;border:1px solid var(--gold);">Subscribe — Brokerage →</button>
+        </div>
+      </div>
+
+      <p style="font-size:0.8rem;color:var(--muted);text-align:center;">
+        ${hasStripe ? `<button onclick="openBillingPortal(this)" style="background:none;border:none;color:var(--gold);cursor:pointer;font-size:0.8rem;text-decoration:underline;">Invoices &amp; billing history</button> · ` : ''}
+        Signed in as ${escHtml(userRec.full_name || user.email)} ·
+        <button onclick="signOut()" style="background:none;border:none;color:var(--gold);cursor:pointer;font-size:0.8rem;text-decoration:underline;">Sign out</button>
+      </p>
+    </div>`;
+  document.body.appendChild(page);
+}
+
+// ── Account export: start background build, poll for result ──
+let _exportPollTimer = null;
+function stopAccountExportPolling() {
+  if (_exportPollTimer) { clearTimeout(_exportPollTimer); _exportPollTimer = null; }
+}
+
+async function startAccountExport() {
+  if (!ACCOUNT_EXPORT_ENABLED) return;
+  const btn = document.getElementById('export-zip-btn');
+  const line = document.getElementById('export-status-line');
+  const jwt = billingJwtOrSignOut();
+  if (!jwt) return;
+  stopAccountExportPolling();
+
+  const jobId = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(36).slice(2));
+  if (btn) { btn.disabled = true; btn.textContent = 'Building ZIP…'; }
+  if (line) line.textContent = 'Gathering your listing images. You can keep this page open — this usually takes a minute or two.';
+
+  try {
+    // Background functions return 202 immediately and keep running.
+    const res = await fetch('/.netlify/functions/export-account-zip-background', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + jwt },
+      body: JSON.stringify({ jobId }),
+    });
+    if (res.status !== 202 && !res.ok) throw new Error(`HTTP ${res.status}`);
+  } catch (err) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Build ZIP'; }
+    if (line) line.textContent = 'Could not start the export: ' + err.message;
+    return;
+  }
+
+  const startedAt = Date.now();
+  const MAX_WAIT_MS = 16 * 60 * 1000; // background functions cap at 15 min
+
+  const poll = async () => {
+    const pollJwt = readStoredSessionDirect()?.access_token;
+    if (!pollJwt) { stopAccountExportPolling(); signOut(); return; }
+    try {
+      const r = await fetch(`/.netlify/functions/export-account-status?jobId=${encodeURIComponent(jobId)}`, {
+        headers: { 'Authorization': 'Bearer ' + pollJwt },
+        cache: 'no-store',
+      });
+      const data = await r.json().catch(() => ({}));
+      if (data.status === 'ready' && data.url) {
+        stopAccountExportPolling();
+        if (btn) { btn.disabled = false; btn.textContent = 'Build a new ZIP'; }
+        if (line) {
+          line.innerHTML = `Ready — ${Number(data.imageCount || 0)} images from ${Number(data.listingCount || 0)} listings. ` +
+            `<a href="${escHtml(data.url)}" style="color:var(--gold);font-weight:600;">Download ZIP</a> (link expires in 1 hour)`;
+        }
+        return;
+      }
+      if (data.status === 'empty') {
+        stopAccountExportPolling();
+        if (btn) { btn.disabled = false; btn.textContent = 'Build ZIP'; }
+        if (line) line.textContent = 'No listing images were found on this account.';
+        return;
+      }
+      if (data.status === 'failed') {
+        stopAccountExportPolling();
+        if (btn) { btn.disabled = false; btn.textContent = 'Try again'; }
+        if (line) line.textContent = 'The export failed. Please try again, or contact support@smartstagepro.com.';
+        return;
+      }
+      if (data.status === 'building' && data.progress && line) {
+        line.textContent = `Building… ${Number(data.progress.done || 0)} of ${Number(data.progress.total || 0)} images added.`;
+      }
+    } catch { /* transient — keep polling */ }
+
+    if (Date.now() - startedAt > MAX_WAIT_MS) {
+      stopAccountExportPolling();
+      if (btn) { btn.disabled = false; btn.textContent = 'Try again'; }
+      if (line) line.textContent = 'The export is taking longer than expected. Please try again, or contact support@smartstagepro.com.';
+      return;
+    }
+    _exportPollTimer = setTimeout(poll, 5000);
+  };
+  _exportPollTimer = setTimeout(poll, 4000);
 }
 
 // ══════════════════════════════════════════
@@ -9565,9 +9861,9 @@ const FAQ_CONTENT = [
       { q: "Is virtual staging legal in California?", a: "Yes, under California AB 723 §10140.8, as long as staged images are properly disclosed. Smart Stage PRO builds that disclosure into every staged image automatically — you don't have to create it yourself." },
       { q: "Do I have to disclose that a photo was staged?", a: "Yes. Every virtually staged MLS image must be disclosed as digitally altered, and the original unaltered photo has to be available alongside it — not just linked, but included in the listing itself." },
       { q: "What exactly do I need to upload to MLS?", a: "Both the clean staged image and the original unaltered photo, ideally placed next to each other in the photo gallery — then answer \"Yes\" to the digital alteration disclosure question. Smart Stage PRO generates everything you need for this; it doesn't submit to the MLS on your behalf." },
-      { q: "What's the QR code / compliance page, and do I have to use it?", a: "Every staged image gets a permanent compliance page with the original, the staged version, your agent/brokerage info, and the AB 723 disclosure. Copy that page's URL into MLS public comments, or add the QR code to the photo gallery — whichever your MLS accepts." },
+      { q: "What's the QR code / compliance page, and do I have to use it?", a: "Every staged image gets a compliance page with the original, the staged version, your agent/brokerage info, and the AB 723 disclosure. Copy that page's URL into MLS public comments, or add the QR code to the photo gallery — whichever your MLS accepts." },
       { q: "Does AI Motion video need the same disclosure as a staged photo?", a: "No — you don't have to do anything extra. But Smart Stage PRO automatically attaches the exact same AB 723 disclosure and compliance page to every AI Motion video that it attaches to any staged image, for your records." },
-      { q: "What happens to my compliance pages if I cancel my subscription?", a: "They stay live for a minimum of 30 days after cancellation. Compliance pages can never be deleted — only archived, which just hides them from your dashboard. You can also download a ZIP of your listing's photos and compliance documents at any time." },
+      { q: "What happens to my compliance pages if I cancel my subscription?", a: "They stay live for 30 days after your paid period ends, then they go offline. The underlying records are still retained privately for 3 years, and resubscribing brings the pages back. While your account is active, compliance pages can't be deleted — only archived, which just hides them from your dashboard. You can download a ZIP of all your listing photos any time from Billing, including during those 30 days. If a listing is still active on MLS when you cancel, replace its compliance link before the 30 days are up." },
       { q: "How long are my records kept?", a: "A minimum of 3 years, per California DRE requirements." }
     ]
   },
@@ -9580,7 +9876,7 @@ const FAQ_CONTENT = [
       { q: "How is Smart Correct billed differently from staging?", a: "Much more cheaply — every 5 photos corrected costs 1 Image, not 1 photo = 1 Image. It's a running lifetime count that never resets, so partial batches always carry forward. Downloading a corrected photo is always free." },
       { q: "What happens if I run out of images mid-month?", a: "You can buy an overage pack immediately, or upgrade your plan. Overage pricing: Solo $25/20 images, Team $45/50 images, Brokerage $75/100 images. Overage images don't roll over — they expire at the end of the current billing period." },
       { q: "Can I add more agents to my Team/Brokerage plan later?", a: "Yes — Team supports up to 3 agents, Brokerage is unlimited. All agents under a plan share the same monthly image allocation." },
-      { q: "Is there a contract, or can I cancel anytime?", a: "No contracts, cancel anytime. Your plan stays active through the end of the paid period; unused rollover images are forfeited on cancellation, but compliance pages and 3-year record retention continue regardless." }
+      { q: "Is there a contract, or can I cancel anytime?", a: "No contracts, cancel anytime from Billing. Your plan stays active through the end of the paid period. After that, unused rollover images are forfeited and your compliance pages stay live for 30 more days before going offline. Records are still retained privately for 3 years." }
     ]
   },
   {
@@ -11939,12 +12235,12 @@ function showLandingPage() {
     <div class="cd-callout">
       <div>
         <div class="cd-callout-eyebrow">Every Listing, Documented</div>
-        <h3 class="cd-callout-title">A permanent, searchable compliance record for every listing you publish.</h3>
+        <h3 class="cd-callout-title">A searchable compliance record for every listing you publish.</h3>
         <p class="cd-callout-text">Every finished listing gets its own disclosure page automatically — no extra step, nothing to remember before you publish to MLS.</p>
         <ul class="cd-callout-list">
           <li>One QR code linked to the property listing, tying back to the original, unedited photo and the Virtually Staged image</li>
           <li>Instantly download the QR code with the property address, ready to publish in the listing photo gallery</li>
-          <li>Permanent public URL — the record stays live for the compliance retention period, not just while the listing is active</li>
+          <li>Public URL — the record stays live for as long as your subscription is active (plus 30 days after it ends), not just while the listing is active</li>
           <li>Instant "Copy for MLS Notes" tab that generates the required URL and disclosure verbiage to paste into public comments</li>
           <li>Built to California AB 723 §10140.8, NAR guidelines, and MetroList Rule 11.6.1</li>
           <li>Searchable by address across every listing in your account, team, or brokerage</li>
@@ -12472,7 +12768,7 @@ function renderDashboard(data, filter, search) {
       <div class="db-stat"><div class="db-stat-val">${stats.totalListings || 0}</div><div class="db-stat-label">Total Listings</div></div>
       <div class="db-stat"><div class="db-stat-val">${stats.totalImageSets || 0}</div><div class="db-stat-label">Staged Image Sets</div></div>
       <div class="db-stat"><div class="db-stat-val gold">${stats.creditsRemaining ?? '—'}</div><div class="db-stat-label">Images Remaining</div></div>
-      <div class="db-stat"><div class="db-stat-val" style="font-size:1rem;padding-top:4px;">${stats.plan || 'Solo'} <span style="font-size:0.7rem;color:var(--success);font-weight:500;">· active</span></div><div class="db-stat-label">Subscription</div></div>
+      <div class="db-stat"><div class="db-stat-val" style="font-size:1rem;padding-top:4px;">${stats.plan || 'Solo'} ${subscriptionStatusChip()}</div><div class="db-stat-label">Subscription</div></div>
     </div>
     <div class="db-filters">
       <button class="db-filter-btn ${filter==='all'?'active':''}" onclick="filterDashboard('all')">All</button>
@@ -12875,7 +13171,7 @@ function openStatusModal(listingId, address, currentStatus){
   ).join('');
   content.innerHTML = `
     <div class="sm-title">Change Status</div>
-    <div class="sm-sub">${address}. The compliance page stays permanently active regardless of status, per AB 723.</div>
+    <div class="sm-sub">${address}. The compliance page stays live regardless of listing status.</div>
     <label class="sm-label">New Status</label>
     <select id="sm-status-select" class="sm-select">${options}</select>
     <label class="sm-label">Reason (optional)</label>
@@ -12918,7 +13214,7 @@ async function submitStatusChange(listingId){
 // Marketing cards (see cardHtml()) — enforced again server-side in
 // archive-listing.js regardless of what this sends.
 async function archiveListing(listingId, address){
-  const reason = window.prompt(`Archive "${address}"? This hides it from your dashboard — the compliance page stays permanently active per AB 723. Optional reason:`) ;
+  const reason = window.prompt(`Archive "${address}"? This hides it from your dashboard — the compliance page stays live. Optional reason:`) ;
   if (reason === null) return; // cancelled
   await setListingHidden(listingId, true, reason || null);
 }

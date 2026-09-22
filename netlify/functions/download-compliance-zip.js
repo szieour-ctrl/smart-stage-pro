@@ -29,6 +29,52 @@ const s3 = new S3Client({
   },
 });
 
+function supabaseGet(table, queryParams = "") {
+  return new Promise((resolve, reject) => {
+    const url = new URL(`${process.env.SUPABASE_URL}/rest/v1/${table}${queryParams}`);
+    const req = https.request({
+      hostname: url.hostname, path: url.pathname + url.search, method: "GET",
+      headers: {
+        apikey: process.env.SUPABASE_SERVICE_ROLE_KEY,
+        Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
+      },
+    }, (res) => {
+      let data = "";
+      res.on("data", (c) => (data += c));
+      res.on("end", () => {
+        try { resolve({ status: res.statusCode, data: JSON.parse(data || "[]") }); }
+        catch { resolve({ status: res.statusCode, data: [] }); }
+      });
+    });
+    req.on("error", reject);
+    req.end();
+  });
+}
+
+// ── 30-day post-cancellation window (ToS §6, Sep 22, 2026) ────────────────
+// A compliance page stays live while its owner's subscription is active and
+// for 30 days after the paid period ends (users.data_expires_at, stamped by
+// stripe-webhook.js). After that the page is taken offline with a 410 notice
+// — the underlying records are NOT deleted (3-year private retention), and a
+// resubscribe clears data_expires_at, which brings the page straight back.
+// Fails OPEN: if the owner lookup errors or the listing/user can't be found,
+// the page renders normally. Only a positively confirmed expired
+// cancellation takes a page down.
+async function isComplianceWindowClosed(projectId) {
+  try {
+    const l = await supabaseGet("listings", `?project_id=eq.${encodeURIComponent(projectId)}&select=user_id&limit=1`);
+    const ownerId = l.data?.[0]?.user_id;
+    if (!ownerId) return false;
+    const u = await supabaseGet("users", `?id=eq.${ownerId}&select=subscription_status,data_expires_at`);
+    const owner = u.data?.[0];
+    if (!owner || owner.subscription_status !== "cancelled" || !owner.data_expires_at) return false;
+    return new Date(owner.data_expires_at).getTime() < Date.now();
+  } catch (e) {
+    console.warn("compliance window check failed (failing open):", e.message);
+    return false;
+  }
+}
+
 function getProjectStore() {
   return getStore({
     name: "smart-stage-projects",
@@ -124,6 +170,12 @@ exports.handler = async (event) => {
     if (!raw) return { statusCode: 404, body: "Project not found" };
 
     const project = JSON.parse(raw);
+
+    // Same 30-day rule as the compliance page itself — once the page is
+    // offline, its public ZIP download goes with it.
+    if (await isComplianceWindowClosed(projectId)) {
+      return { statusCode: 410, headers: { "Content-Type": "text/plain" }, body: "This compliance record is no longer publicly available." };
+    }
     // Soft-hidden images (see hide-image.js) must never leak through this
     // path either — the compliance page hides them, but this ZIP endpoint
     // iterated project.images directly and had no hidden check at all.

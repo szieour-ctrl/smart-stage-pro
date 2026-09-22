@@ -637,6 +637,48 @@ if (new URLSearchParams(window.location.search).get('debug') === '1') {
 <div id="toast"></div>
 
 <script>
+// ── PASSWORD RECOVERY LINK CAPTURE (Sep 22, 2026) ────────────────────────────
+// The reset email's link lands back here as
+//   https://smartstagepro.com/#access_token=…&refresh_token=…&type=recovery
+// Nothing in the app handled that, so the link just showed the landing page.
+// This runs FIRST, before the Supabase client is ever created, and strips the
+// tokens out of the URL so the library can't auto-sign-in with them in the
+// background (it would otherwise drop the user into the app — or, if another
+// account was already signed in on this browser, leave that one showing).
+// The new password is then set with a direct call to the Auth API
+// (PUT /auth/v1/user) using the recovery token — no dependence on the
+// library's session/lock machinery, which has hung in this app before.
+// Link errors (expired/already-used links come back as #error=…) are
+// captured the same way so the user sees a real message.
+window.__pwRecovery = null;
+window.__authLinkError = null;
+(function capturePasswordRecoveryLink() {
+  try {
+    const hash = window.location.hash ? window.location.hash.slice(1) : '';
+    if (!hash) return;
+    const hp = new URLSearchParams(hash);
+    let handled = false;
+    if (hp.get('type') === 'recovery' && hp.get('access_token')) {
+      const accessToken = hp.get('access_token');
+      let email = '';
+      try {
+        const payload = JSON.parse(atob(accessToken.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+        email = payload.email || '';
+      } catch {}
+      window.__pwRecovery = { accessToken, email };
+      handled = true;
+    } else if (hp.get('error') || hp.get('error_code')) {
+      window.__authLinkError = (hp.get('error_description') || hp.get('error') || 'This link is invalid or has expired.').replace(/\+/g, ' ');
+      handled = true;
+    }
+    if (handled) {
+      history.replaceState(null, '', window.location.pathname + window.location.search);
+    }
+  } catch (e) {
+    console.warn('Recovery link capture failed:', e.message);
+  }
+})();
+
 // ══════════════════════════════════════════
 // CONSTANTS
 // ══════════════════════════════════════════
@@ -8503,6 +8545,114 @@ async function showForgotPassword() {
   showAuthSuccess('Password reset email sent. Check your inbox.');
 }
 
+// ── SET NEW PASSWORD (from a reset-email link) ─────────────────────────────
+function showPasswordRecoveryModal() {
+  const rec = window.__pwRecovery;
+  if (!rec) return;
+  document.getElementById('pw-recovery-modal')?.remove();
+  const modal = document.createElement('div');
+  modal.id = 'pw-recovery-modal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(10,8,6,0.96);z-index:9600;display:flex;align-items:center;justify-content:center;padding:20px;';
+  const inputStyle = 'width:100%;padding:11px 14px;border:1px solid var(--border);border-radius:3px;font-size:0.9rem;font-family:inherit;color:var(--ink);';
+  const labelStyle = 'font-size:0.75rem;font-weight:500;color:var(--muted);display:block;margin-bottom:5px;letter-spacing:0.04em;text-transform:uppercase;';
+  modal.innerHTML = `
+    <div style="background:#fff;border-radius:6px;overflow:hidden;max-width:420px;width:100%;box-shadow:0 8px 40px rgba(0,0,0,0.4);">
+      <div style="background:var(--ink);padding:24px 32px;text-align:center;">
+        <div style="font-size:0.72rem;color:#c8bfb0;letter-spacing:0.12em;text-transform:uppercase;">Smart Stage PRO™</div>
+        <div style="font-family:'Cormorant Garamond',serif;font-size:1.6rem;color:var(--gold);margin-top:6px;">Set a new password</div>
+      </div>
+      <div style="padding:28px 32px;">
+        ${rec.email ? `<p style="font-size:0.85rem;color:var(--muted);margin-bottom:16px;">For <strong style="color:var(--ink);">${escHtml(rec.email)}</strong></p>` : ''}
+        <div id="pw-recovery-error" style="display:none;background:#fef0ef;border:1px solid #f5c6c3;border-radius:3px;padding:10px 14px;font-size:0.8rem;color:var(--danger);margin-bottom:16px;"></div>
+        <div style="margin-bottom:14px;">
+          <label style="${labelStyle}">New password</label>
+          <input id="pw-recovery-new" type="password" autocomplete="new-password" placeholder="At least 8 characters" style="${inputStyle}" />
+        </div>
+        <div style="margin-bottom:20px;">
+          <label style="${labelStyle}">Confirm new password</label>
+          <input id="pw-recovery-confirm" type="password" autocomplete="new-password" placeholder="Type it again" style="${inputStyle}" onkeydown="if(event.key==='Enter')submitPasswordRecovery()" />
+        </div>
+        <button id="pw-recovery-btn" onclick="submitPasswordRecovery()" style="width:100%;padding:13px;background:var(--gold);color:var(--ink);border:none;border-radius:3px;font-size:0.85rem;font-weight:600;letter-spacing:0.06em;cursor:pointer;text-transform:uppercase;">Save new password</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  setTimeout(() => document.getElementById('pw-recovery-new')?.focus(), 50);
+}
+
+async function submitPasswordRecovery() {
+  const rec = window.__pwRecovery;
+  const errEl = document.getElementById('pw-recovery-error');
+  const btn = document.getElementById('pw-recovery-btn');
+  const showErr = (msg) => { if (errEl) { errEl.textContent = msg; errEl.style.display = 'block'; } };
+  const pw = document.getElementById('pw-recovery-new')?.value || '';
+  const confirmPw = document.getElementById('pw-recovery-confirm')?.value || '';
+  if (!rec) { showErr('This reset link is no longer active. Request a new one from Sign In.'); return; }
+  if (pw.length < 8) { showErr('Use at least 8 characters.'); return; }
+  if (pw !== confirmPw) { showErr('The two passwords don\'t match.'); return; }
+
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+  try {
+    const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+      method: 'PUT',
+      headers: {
+        'apikey': SUPABASE_ANON_KEY,
+        'Authorization': 'Bearer ' + rec.accessToken,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ password: pw })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const code = data.error_code || data.code || '';
+      if (res.status === 401 || res.status === 403) throw new Error('This reset link has expired. Close this and use "Forgot password" again.');
+      if (code === 'same_password') throw new Error('Choose a password different from your old one.');
+      throw new Error(data.msg || data.message || data.error_description || `Could not update password (HTTP ${res.status}).`);
+    }
+    // Success. Clear any Supabase session stored in this browser (the same
+    // cleanup the auth-reset banner uses — keys are always "sb-"-prefixed)
+    // so the next load starts signed out, then reload into the normal
+    // sign-in flow with the email pre-filled.
+    try {
+      Object.keys(localStorage).filter(k => k.startsWith('sb-')).forEach(k => localStorage.removeItem(k));
+    } catch {}
+    try { sessionStorage.setItem('ssp_pw_reset_done', rec.email || '1'); } catch {}
+    window.__pwRecovery = null;
+    window.location.replace(window.location.pathname + window.location.search);
+  } catch (err) {
+    showErr(err.message);
+    if (btn) { btn.disabled = false; btn.textContent = 'Save new password'; }
+  }
+}
+
+// After a successful reset (or a bad/expired email link), open Sign In with
+// a clear message instead of leaving the user on the landing page guessing.
+function showPostAuthLinkMessage() {
+  let doneEmail = null;
+  try { doneEmail = sessionStorage.getItem('ssp_pw_reset_done'); sessionStorage.removeItem('ssp_pw_reset_done'); } catch {}
+  const linkError = window.__authLinkError;
+  if (!doneEmail && !linkError) return;
+  window.__authLinkError = null;
+  if (typeof hideLandingPage === 'function') hideLandingPage();
+  showAuthModal('login');
+  if (doneEmail && doneEmail !== '1') {
+    const emailEl = document.getElementById('auth-email');
+    if (emailEl) emailEl.value = doneEmail;
+    setTimeout(() => document.getElementById('auth-password')?.focus(), 50);
+  }
+  const el = document.getElementById('auth-error');
+  if (el) {
+    if (doneEmail) {
+      el.textContent = 'Password updated. Sign in with your new password.';
+      el.style.background = 'rgba(46,125,50,0.08)';
+      el.style.borderColor = 'rgba(46,125,50,0.35)';
+      el.style.color = 'var(--success)';
+    } else {
+      el.textContent = linkError + ' Request a new link below.';
+    }
+    el.style.display = 'block';
+  }
+}
+
 function hideAllAuthModals() {
   document.getElementById('auth-modal')?.remove();
   document.getElementById('tos-modal')?.remove();
@@ -13288,7 +13438,18 @@ window.addEventListener('pageshow', (event) => {
   if (event.persisted) window.location.reload();
 });
 
-initAuth();
+if (window.__pwRecovery) {
+  // Reset-password link: show only the landing page + the set-password
+  // modal. Normal session restore is skipped on purpose so no other stored
+  // account can load underneath it.
+  showLandingPage();
+  showPasswordRecoveryModal();
+} else {
+  Promise.resolve(initAuth()).finally(() => {
+    // Only if nobody ended up signed in (landing/login state).
+    if (!_currentUser) showPostAuthLinkMessage();
+  });
+}
 </script>
 <!-- ============================================================
      SMART STAGE PRO™ — HELP AGENT WIDGET

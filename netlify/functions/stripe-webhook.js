@@ -3,12 +3,32 @@
 // Handles: checkout.session.completed, invoice.paid,
 //          customer.subscription.deleted, customer.subscription.updated
 // No SDK — native HTTPS + Node.js built-in crypto for signature verification
+//
+// Sep 22, 2026 — cancellation support + credit-grant fixes:
+//  • subscription.updated records a scheduled cancellation (users.cancel_at)
+//    so the app can show "ends <date>". Cancelling in the Stripe portal keeps
+//    status 'active' until the paid period actually ends.
+//  • subscription.deleted (paid period over) stamps cancelled_at and
+//    data_expires_at = cancelled_at + 30 days (ToS §6: compliance pages stay
+//    live, and the ZIP export stays available, for 30 days), and forfeits the
+//    remaining credit balance with an 'adjustment' ledger row.
+//  • Both handlers match on the SUBSCRIPTION id, not just the customer id, so
+//    a late event for an old subscription can't cancel a newer one after a
+//    resubscribe.
+//  • invoice.paid skips the first invoice (billing_reason
+//    'subscription_create') — checkout.session.completed already granted
+//    those credits. Confirmed live: this double-granted before.
+//  • Every credit grant is idempotent on stripe_payment_id, so Stripe
+//    retries/resends can't add credits twice. Confirmed live: one checkout
+//    session had been credited 9 times.
+//  • Stripe statuses the users table's CHECK constraint doesn't allow
+//    (incomplete, paused, …) are no longer written raw — previously that
+//    PATCH failed silently.
 
 const https  = require('https');
 const crypto = require('crypto');
 
 // ── Credit allotments per plan ────────────────────────────
-// MUST match create-checkout-session.js
 // 1 platform credit = 1 staged image
 // Must match subscription allotments: Solo 50, Team 125, Brokerage 400
 const PLAN_CREDITS = {
@@ -17,24 +37,33 @@ const PLAN_CREDITS = {
   brokerage:  400
 };
 
+// ToS §6 — compliance pages + ZIP export stay available this long after the
+// paid period ends. compliance-page.js enforces it via users.data_expires_at.
+const POST_CANCEL_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+
 function getRoleFromPlan(plan) {
   return { solo: 'individual_agent', team: 'team_lead', brokerage: 'broker_admin' }[plan] || 'individual_agent';
 }
 
 // ── Stripe webhook signature verification ─────────────────
-// Uses Node built-in crypto — no Stripe SDK needed
+// Uses Node built-in crypto — no Stripe SDK needed. Accepts any of the v1
+// signatures in the header (Stripe sends more than one while a signing
+// secret is being rolled).
 function verifyStripeSignature(rawBody, sigHeader, secret) {
   try {
     const parts     = sigHeader.split(',');
-    const timestamp = parts.find(p => p.startsWith('t=')).replace('t=', '');
-    const sig       = parts.find(p => p.startsWith('v1=')).replace('v1=', '');
+    const timestamp = parts.find(p => p.startsWith('t=')).slice(2);
+    const sigs      = parts.filter(p => p.startsWith('v1=')).map(p => p.slice(3));
+    if (!timestamp || !sigs.length) return false;
     // Reject webhooks older than 5 minutes
-    if (Math.abs(Date.now() / 1000 - parseInt(timestamp)) > 300) return false;
-    const expected  = crypto
-      .createHmac('sha256', secret)
-      .update(`${timestamp}.${rawBody}`)
-      .digest('hex');
-    return crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected));
+    if (Math.abs(Date.now() / 1000 - parseInt(timestamp, 10)) > 300) return false;
+    const expected = Buffer.from(
+      crypto.createHmac('sha256', secret).update(`${timestamp}.${rawBody}`).digest('hex')
+    );
+    return sigs.some(sig => {
+      const b = Buffer.from(sig);
+      return b.length === expected.length && crypto.timingSafeEqual(b, expected);
+    });
   } catch { return false; }
 }
 
@@ -58,14 +87,26 @@ function db(method, table, body, queryParams = '') {
       let data = '';
       res.on('data', c => data += c);
       res.on('end', () => {
-        try { resolve({ status: res.statusCode, data: JSON.parse(data || '[]') }); }
-        catch { resolve({ status: res.statusCode, data }); }
+        let parsed;
+        try { parsed = JSON.parse(data || '[]'); } catch { parsed = data; }
+        if (res.statusCode >= 300) {
+          console.error(`stripe-webhook: db ${method} ${table}${queryParams} → ${res.statusCode}`, typeof parsed === 'string' ? parsed.slice(0, 300) : JSON.stringify(parsed).slice(0, 300));
+        }
+        resolve({ status: res.statusCode, data: parsed });
       });
     });
     req.on('error', reject);
     if (bodyStr) req.write(bodyStr);
     req.end();
   });
+}
+
+// Throws on a failed write, so the handler returns 500 and Stripe retries.
+// Safe to retry: every credit grant below is idempotent.
+async function dbStrict(method, table, body, queryParams = '') {
+  const r = await db(method, table, body, queryParams);
+  if (r.status >= 300) throw new Error(`db ${method} ${table} failed with ${r.status}`);
+  return r;
 }
 
 async function getCurrentBalance(userId) {
@@ -76,13 +117,20 @@ async function getCurrentBalance(userId) {
   return r.data?.[0]?.balance_after ?? 0;
 }
 
+async function alreadyCredited(stripePaymentId) {
+  if (!stripePaymentId) return false;
+  const r = await db('GET', 'credit_ledger', null,
+    `?stripe_payment_id=eq.${encodeURIComponent(stripePaymentId)}&type=eq.monthly_allotment&select=id&limit=1`);
+  return Array.isArray(r.data) && r.data.length > 0;
+}
+
 // ── EVENT: checkout.session.completed ────────────────────
 // Fires when user completes payment. Creates subscription record + initial credits.
 async function onCheckoutComplete(session) {
   const userId         = session.metadata?.user_id;
   const plan           = session.metadata?.plan || 'solo';
   const role           = getRoleFromPlan(plan);
-  const credits        = PLAN_CREDITS[plan];
+  const credits        = PLAN_CREDITS[plan] || PLAN_CREDITS.solo;
   const customerId     = session.customer;
   const subscriptionId = session.subscription;
   const teamName       = session.metadata?.team_name       || null;
@@ -90,53 +138,60 @@ async function onCheckoutComplete(session) {
 
   if (!userId) { console.error('stripe-webhook: no user_id in session metadata'); return; }
 
-  // 1. Update user subscription status and role
-  await db('PATCH', `users?id=eq.${userId}`, {
+  // 1. Update user subscription status and role. Clearing the cancellation
+  //    fields makes a resubscribe restore compliance pages immediately.
+  await dbStrict('PATCH', `users?id=eq.${userId}`, {
     stripe_customer_id:      customerId,
     stripe_subscription_id:  subscriptionId,
     subscription_status:     'active',
-    role
+    role,
+    cancel_at:               null,
+    cancelled_at:            null,
+    data_expires_at:         null
   });
 
-  // 2. Add initial credit allotment to ledger
-  const balance = await getCurrentBalance(userId);
-  await db('POST', 'credit_ledger', {
-    user_id:           userId,
-    type:              'monthly_allotment',
-    amount:            credits,
-    balance_after:     balance + credits,
-    stripe_payment_id: session.id,
-    description:       `Initial ${plan} plan — ${credits} credits`
-  });
-
-  // 3. Create team record (team plan)
-  if (plan === 'team') {
-    const teamResult = await db('POST', 'teams', {
-      name:                   teamName || 'My Team',
-      team_lead_id:           userId,
-      stripe_customer_id:     customerId,
-      stripe_subscription_id: subscriptionId,
-      subscription_status:    'active'
+  // 2. Add initial credit allotment to ledger (once per checkout session)
+  if (await alreadyCredited(session.id)) {
+    console.log(`stripe-webhook: checkout ${session.id} already credited — skipping grant`);
+  } else {
+    const balance = await getCurrentBalance(userId);
+    await dbStrict('POST', 'credit_ledger', {
+      user_id:           userId,
+      type:              'monthly_allotment',
+      reason:            'subscription_start',
+      amount:            credits,
+      balance_after:     balance + credits,
+      stripe_payment_id: session.id,
+      description:       `Initial ${plan} plan — ${credits} credits`
     });
-    const teamId = teamResult.data?.[0]?.id;
-    if (teamId) {
-      await db('PATCH', `users?id=eq.${userId}`, { team_id: teamId });
-    }
   }
 
-  // 4. Create brokerage record (brokerage plan)
-  if (plan === 'brokerage') {
-    const brokerageResult = await db('POST', 'brokerages', {
-      name:                   brokerageName || 'My Brokerage',
-      admin_user_id:          userId,
-      stripe_customer_id:     customerId,
-      stripe_subscription_id: subscriptionId,
-      subscription_status:    'active'
-    });
-    const brokerageId = brokerageResult.data?.[0]?.id;
-    if (brokerageId) {
-      await db('PATCH', `users?id=eq.${userId}`, { brokerage_id: brokerageId });
+  // 3. Team plan — reuse this lead's existing team on resubscribe
+  if (plan === 'team') {
+    const existing = await db('GET', 'teams', null, `?team_lead_id=eq.${userId}&select=id&limit=1`);
+    let teamId = existing.data?.[0]?.id;
+    const teamFields = { stripe_customer_id: customerId, stripe_subscription_id: subscriptionId, subscription_status: 'active' };
+    if (teamId) {
+      await db('PATCH', `teams?id=eq.${teamId}`, teamFields);
+    } else {
+      const teamResult = await db('POST', 'teams', { name: teamName || 'My Team', team_lead_id: userId, ...teamFields });
+      teamId = teamResult.data?.[0]?.id;
     }
+    if (teamId) await db('PATCH', `users?id=eq.${userId}`, { team_id: teamId });
+  }
+
+  // 4. Brokerage plan — reuse this admin's existing brokerage on resubscribe
+  if (plan === 'brokerage') {
+    const existing = await db('GET', 'brokerages', null, `?admin_user_id=eq.${userId}&select=id&limit=1`);
+    let brokerageId = existing.data?.[0]?.id;
+    const bFields = { stripe_customer_id: customerId, stripe_subscription_id: subscriptionId, subscription_status: 'active' };
+    if (brokerageId) {
+      await db('PATCH', `brokerages?id=eq.${brokerageId}`, bFields);
+    } else {
+      const bResult = await db('POST', 'brokerages', { name: brokerageName || 'My Brokerage', admin_user_id: userId, ...bFields });
+      brokerageId = bResult.data?.[0]?.id;
+    }
+    if (brokerageId) await db('PATCH', `users?id=eq.${userId}`, { brokerage_id: brokerageId });
   }
 
   console.log(`stripe-webhook: checkout complete — user ${userId}, plan ${plan}, +${credits} credits`);
@@ -145,9 +200,20 @@ async function onCheckoutComplete(session) {
 // ── EVENT: invoice.paid ───────────────────────────────────
 // Fires on monthly renewal. Adds monthly credit allotment.
 async function onInvoicePaid(invoice) {
-  const customerId = invoice.customer;
+  // The first invoice of a new subscription is already covered by
+  // checkout.session.completed's initial grant.
+  if (invoice.billing_reason === 'subscription_create') {
+    console.log(`stripe-webhook: invoice ${invoice.id} is the first invoice — credits granted at checkout, skipping`);
+    return;
+  }
+  // Only regular renewals grant a monthly allotment (not proration or
+  // manual invoices).
+  if (invoice.billing_reason !== 'subscription_cycle') {
+    console.log(`stripe-webhook: invoice ${invoice.id} (${invoice.billing_reason}) is not a renewal — skipping`);
+    return;
+  }
 
-  // Find user by Stripe customer ID
+  const customerId = invoice.customer;
   const userResult = await db('GET', 'users',
     null,
     `?stripe_customer_id=eq.${customerId}&select=id,role,stripe_subscription_id`
@@ -155,46 +221,102 @@ async function onInvoicePaid(invoice) {
   const user = userResult.data?.[0];
   if (!user) { console.error(`stripe-webhook: invoice.paid — no user found for customer ${customerId}`); return; }
 
-  // Determine plan from subscription metadata
+  if (await alreadyCredited(invoice.id)) {
+    console.log(`stripe-webhook: invoice ${invoice.id} already credited — skipping`);
+    return;
+  }
+
   const plan    = await getPlanFromSubscriptionId(user.stripe_subscription_id) || 'solo';
-  const credits = PLAN_CREDITS[plan];
+  const credits = PLAN_CREDITS[plan] || PLAN_CREDITS.solo;
   const balance = await getCurrentBalance(user.id);
 
-  await db('POST', 'credit_ledger', {
+  await dbStrict('POST', 'credit_ledger', {
     user_id:           user.id,
     type:              'monthly_allotment',
+    reason:            'subscription_renewal',
     amount:            credits,
     balance_after:     balance + credits,
     stripe_payment_id: invoice.id,
     description:       `Monthly renewal — ${plan} plan — ${credits} credits`
   });
 
-  // Ensure subscription_status is active (catches reactivations)
+  // Ensure subscription_status is active (catches recovery from past_due)
   await db('PATCH', `users?id=eq.${user.id}`, { subscription_status: 'active' });
 
   console.log(`stripe-webhook: invoice paid — user ${user.id}, plan ${plan}, +${credits} credits`);
 }
 
 // ── EVENT: customer.subscription.deleted ─────────────────
+// Fires when the subscription actually ends (end of the paid period for a
+// portal cancellation, or immediately if cancelled from the Stripe dashboard).
 async function onSubscriptionDeleted(subscription) {
-  const customerId = subscription.customer;
-  await db('PATCH', `users?stripe_customer_id=eq.${customerId}`, {
+  const subId = subscription.id;
+  const userResult = await db('GET', 'users', null,
+    `?stripe_subscription_id=eq.${subId}&select=id`);
+  const user = userResult.data?.[0];
+  if (!user) {
+    // Either an old subscription the user has already replaced, or a retry
+    // of an event we already processed (stripe_subscription_id is nulled below).
+    console.log(`stripe-webhook: subscription.deleted ${subId} — no user currently on it, nothing to do`);
+    return;
+  }
+
+  const endedMs      = subscription.ended_at ? subscription.ended_at * 1000 : Date.now();
+  const cancelledAt  = new Date(endedMs).toISOString();
+  const dataExpires  = new Date(endedMs + POST_CANCEL_WINDOW_MS).toISOString();
+
+  // Forfeit the remaining balance (ToS §6 / FAQ). Done before the status
+  // flip so a failure here returns 500 and Stripe retries the whole event.
+  const balance = await getCurrentBalance(user.id);
+  if (balance > 0) {
+    await dbStrict('POST', 'credit_ledger', {
+      user_id:           user.id,
+      type:              'adjustment',
+      reason:            'cancellation_forfeit',
+      amount:            -balance,
+      balance_after:     0,
+      stripe_payment_id: subId,
+      description:       `Subscription ended — ${balance} unused credits forfeited`
+    });
+  }
+
+  await dbStrict('PATCH', `users?id=eq.${user.id}`, {
     subscription_status:    'cancelled',
-    stripe_subscription_id: null
+    stripe_subscription_id: null,
+    cancel_at:              null,
+    cancelled_at:           cancelledAt,
+    data_expires_at:        dataExpires
   });
-  await db('PATCH', `teams?stripe_customer_id=eq.${customerId}`,      { subscription_status: 'cancelled' });
-  await db('PATCH', `brokerages?stripe_customer_id=eq.${customerId}`, { subscription_status: 'cancelled' });
-  console.log(`stripe-webhook: subscription deleted — customer ${customerId}`);
+  await db('PATCH', `teams?stripe_subscription_id=eq.${subId}`,      { subscription_status: 'cancelled' });
+  await db('PATCH', `brokerages?stripe_subscription_id=eq.${subId}`, { subscription_status: 'cancelled' });
+
+  console.log(`stripe-webhook: subscription ended — user ${user.id}, forfeited ${balance}, compliance pages until ${dataExpires}`);
 }
 
 // ── EVENT: customer.subscription.updated ─────────────────
+// Portal cancellation lands here first: status stays 'active' and Stripe
+// sets cancel_at (+ cancel_at_period_end). Undoing it in the portal clears
+// cancel_at, which clears ours too.
 async function onSubscriptionUpdated(subscription) {
-  const customerId = subscription.customer;
-  const newStatus  = subscription.status;
-  const statusMap  = { active: 'active', past_due: 'past_due', canceled: 'cancelled', unpaid: 'past_due' };
-  await db('PATCH', `users?stripe_customer_id=eq.${customerId}`, {
-    subscription_status: statusMap[newStatus] || newStatus
-  });
+  const subId = subscription.id;
+  const statusMap = {
+    active:   'active',
+    trialing: 'active',
+    past_due: 'past_due',
+    unpaid:   'past_due',
+    canceled: 'cancelled'   // final state is handled by subscription.deleted
+  };
+  const fields = {
+    cancel_at: subscription.cancel_at ? new Date(subscription.cancel_at * 1000).toISOString() : null
+  };
+  const mapped = statusMap[subscription.status];
+  if (mapped && mapped !== 'cancelled') fields.subscription_status = mapped;
+  // incomplete / incomplete_expired / paused: leave status alone — those
+  // values aren't allowed by users_subscription_status_check.
+
+  const r = await dbStrict('PATCH', `users?stripe_subscription_id=eq.${subId}`, fields);
+  const n = Array.isArray(r.data) ? r.data.length : 0;
+  console.log(`stripe-webhook: subscription.updated ${subId} — status ${subscription.status}, cancel_at ${fields.cancel_at}, ${n} user row(s) updated`);
 }
 
 // ── Retrieve plan from Stripe subscription ────────────────
@@ -234,20 +356,25 @@ exports.handler = async function(event) {
     return { statusCode: 405, body: 'Method Not Allowed' };
   }
 
-  const sigHeader     = event.headers['stripe-signature'];
+  const sigHeader     = event.headers['stripe-signature'] || event.headers['Stripe-Signature'];
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
   if (!sigHeader || !webhookSecret) {
     return { statusCode: 400, body: JSON.stringify({ error: 'Missing signature or webhook secret' }) };
   }
 
-  if (!verifyStripeSignature(event.body, sigHeader, webhookSecret)) {
+  // Signature must be checked against the exact raw bytes Stripe sent.
+  const rawBody = event.isBase64Encoded
+    ? Buffer.from(event.body || '', 'base64').toString('utf8')
+    : (event.body || '');
+
+  if (!verifyStripeSignature(rawBody, sigHeader, webhookSecret)) {
     console.error('stripe-webhook: signature verification failed');
     return { statusCode: 400, body: JSON.stringify({ error: 'Invalid Stripe signature' }) };
   }
 
   let stripeEvent;
-  try { stripeEvent = JSON.parse(event.body); }
+  try { stripeEvent = JSON.parse(rawBody); }
   catch { return { statusCode: 400, body: JSON.stringify({ error: 'Invalid JSON' }) }; }
 
   try {

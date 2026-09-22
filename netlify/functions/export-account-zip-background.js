@@ -27,7 +27,18 @@
 // per-listing compliance ZIPs. The user can rebuild any time.
 
 const https    = require("https");
-const archiver = require("archiver");
+// archiver v8 (current "latest") is ESM-only and exports classes
+// ({ ZipArchive, … }) instead of the old archiver("zip", opts) factory —
+// requiring it the old way gives "archiver is not a function". This works
+// with v5/v6/v7 (factory) and v8 (class), whichever the repo resolves to.
+const archiverMod = require("archiver");
+function createZipArchive(opts) {
+  if (typeof archiverMod === "function") return archiverMod("zip", opts);
+  if (typeof archiverMod.default === "function") return archiverMod.default("zip", opts);
+  const Zip = archiverMod.ZipArchive || archiverMod.default?.ZipArchive;
+  if (Zip) return new Zip(opts);
+  throw new Error("Unsupported archiver module shape: " + Object.keys(archiverMod).join(","));
+}
 const { getStore } = require("@netlify/blobs");
 const {
   S3Client, CreateMultipartUploadCommand, UploadPartCommand,
@@ -147,7 +158,7 @@ async function buildZipToS3({ key, filename, produce }) {
     ContentDisposition: `attachment; filename="${filename}"`,
   }));
 
-  const archive = archiver("zip", { store: true });
+  const archive = createZipArchive({ store: true });
   const parts = [];
   let partNumber = 1;
   let pending = [];

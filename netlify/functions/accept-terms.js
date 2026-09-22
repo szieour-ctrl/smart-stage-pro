@@ -20,12 +20,11 @@ function supabaseQuery(method, table, body, queryParams = '') {
         ...(bodyStr ? { 'Content-Length': Buffer.byteLength(bodyStr) } : {})
       }
     };
-    console.log('supabaseQuery:', method, urlStr, 'key prefix:', process.env.SUPABASE_SERVICE_ROLE_KEY?.slice(0,20));
     const req = https.request(options, res => {
       let data = '';
       res.on('data', c => data += c);
       res.on('end', () => {
-        console.log('supabaseQuery response status:', res.statusCode, 'body:', data.slice(0, 200));
+        console.log('supabaseQuery response status:', res.statusCode);
         try { resolve({ status: res.statusCode, data: JSON.parse(data || '[]') }); }
         catch { resolve({ status: res.statusCode, data }); }
       });
@@ -54,7 +53,7 @@ function verifyJWT(authHeader) {
       let data = '';
       res.on('data', c => data += c);
       res.on('end', () => {
-        console.log('verifyJWT status:', res.statusCode, 'body:', data.slice(0,100));
+        console.log('verifyJWT status:', res.statusCode);
         try {
           const parsed = JSON.parse(data);
           resolve(res.statusCode === 200 && parsed.id ? parsed : null);
@@ -71,9 +70,6 @@ exports.handler = async function(event) {
     return { statusCode: 405, body: 'Method Not Allowed' };
   }
 
-  console.log('SUPABASE_URL:', process.env.SUPABASE_URL);
-  console.log('SERVICE_ROLE_KEY prefix:', process.env.SUPABASE_SERVICE_ROLE_KEY?.slice(0,20));
-
   const authUser = await verifyJWT(event.headers.authorization || event.headers.Authorization);
   if (!authUser) {
     console.log('verifyJWT failed — returning 401');
@@ -86,7 +82,10 @@ exports.handler = async function(event) {
   try { body = JSON.parse(event.body); }
   catch { return { statusCode: 400, body: JSON.stringify({ error: 'Invalid JSON' }) }; }
 
-  const { termsVersion = '1.0' } = body;
+  // Version string from the ToS modal (index.html CURRENT_TERMS_VERSION).
+  // Kept short and plain so nothing odd gets written into the record.
+  const rawVersion = typeof body.termsVersion === 'string' ? body.termsVersion : '1.0';
+  const termsVersion = /^[0-9A-Za-z.\-]{1,16}$/.test(rawVersion) ? rawVersion : '1.0';
   const userId = authUser.id;
 
   const clientIp =
@@ -104,7 +103,7 @@ exports.handler = async function(event) {
     }
   );
 
-  console.log('PATCH result:', result.status, JSON.stringify(result.data));
+  console.log('PATCH result:', result.status);
 
   if (result.status !== 200 && result.status !== 204) {
     console.error('Supabase PATCH failed:', result.status, result.data);

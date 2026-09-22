@@ -17,7 +17,18 @@
 
 const { getStore } = require("@netlify/blobs");
 const https = require("https");
-const archiver = require("archiver");
+// archiver v8 (current "latest") is ESM-only and exports classes
+// ({ ZipArchive, … }) instead of the old archiver("zip", opts) factory —
+// requiring it the old way gives "archiver is not a function". This works
+// with v5/v6/v7 (factory) and v8 (class), whichever the repo resolves to.
+const archiverMod = require("archiver");
+function createZipArchive(opts) {
+  if (typeof archiverMod === "function") return archiverMod("zip", opts);
+  if (typeof archiverMod.default === "function") return archiverMod.default("zip", opts);
+  const Zip = archiverMod.ZipArchive || archiverMod.default?.ZipArchive;
+  if (Zip) return new Zip(opts);
+  throw new Error("Unsupported archiver module shape: " + Object.keys(archiverMod).join(","));
+}
 const { S3Client, PutObjectCommand, GetObjectCommand } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 
@@ -185,7 +196,7 @@ exports.handler = async (event) => {
     const addrSlug = safeFilename(project.address);
 
     // Build ZIP in memory
-    const archive = archiver("zip", { zlib: { level: 6 } });
+    const archive = createZipArchive({ zlib: { level: 6 } });
     const chunks = [];
 
     archive.on("data", chunk => chunks.push(chunk));

@@ -17,6 +17,22 @@
 // anyone reading this file next.
 const { applyAutoSelectionPlan } = require("./autoSelect");
 //
+// ── Sep 24, 2026 — Trial + Listing Package ──────────────────────────────
+//   - Trial is Ken Burns only: TRIAL_KLING_ALLOTMENT is 0 AND create/
+//     regenerate reject any AI Motion frame for a trial account
+//     (ai_motion_not_in_trial). Previously a trial user could buy extra
+//     AI Motion frames at 5 Images each.
+//   - Listing Package ($59): each package adds 1 included video (free at
+//     download, via the same trial_video_free flag) and 2 AI Motion frames.
+//     Package pools are LIFETIME, not monthly — stored in the same
+//     kling_motion_usage / video_quota_usage tables under a fixed
+//     period_start of 1970-01-01 (LIFETIME_PERIOD).
+//   - create/regenerate refuse accounts whose trial or package window has
+//     ended (no_active_subscription). Free pool frames and included videos
+//     never reach debit-credit.js, so this has to be checked here too.
+//   - callDebitCredit sends INTERNAL_API_KEY (debit-credit.js now requires
+//     it for server-to-server calls, and for every refund).
+//
 // ── KLING MOTION POOL MODEL (July 13, 2026 — REPLACES the old
 // generation-count-gated "first 3 Kling frames free on generation #1
 // only" rule) ─────────────────────────────────────────────────────────
@@ -268,6 +284,7 @@ function callDebitCredit(userId, cost, reason, isRefund = false) {
       headers: {
         "Content-Type":   "application/json",
         "Content-Length": Buffer.byteLength(bodyStr),
+        "x-internal-key": process.env.INTERNAL_API_KEY || "",
       }
     }, res => {
       let data = "";
@@ -372,8 +389,76 @@ const MONTHLY_KLING_ALLOTMENT = {
 // role-only lookup would have silently given trial users the full paid
 // Solo quota (5 videos / 10 AI Motion frames) instead of the 1/1 promised
 // on the pricing page.
+// CHANGE (Sep 24, 2026): trial is now 1 free video, Ken Burns only — no AI
+// Motion at all (see the trial block in createVideoJob/regenerateVideoJob).
 const TRIAL_VIDEO_LIMIT = 1;
-const TRIAL_KLING_ALLOTMENT = 1;
+const TRIAL_KLING_ALLOTMENT = 0;
+
+// Listing Package ($59) — per package purchased, lifetime (not monthly).
+const PACKAGE_VIDEOS_PER_PACKAGE = 1;
+const PACKAGE_KLING_PER_PACKAGE  = 2;
+const LIFETIME_PERIOD = "1970-01-01"; // period_start used for package pools
+const TRIAL_LENGTH_MS = 30 * 24 * 60 * 60 * 1000;
+
+// One read of everything plan-related, used by the pool/quota/access
+// checks below. packageCount/firstPackageAt only matter for 'package'.
+async function getPlanContext(userId) {
+  const userRes = await supabase("GET", "users", null,
+    `?id=eq.${userId}&select=role,subscription_status,created_at,package_access_expires_at`);
+  const u = userRes.data?.[0] || {};
+  const status = u.subscription_status || null;
+  const isTrial = status === "trial";
+  const isPackage = status === "package";
+
+  let packageCount = 0;
+  let firstPackageAt = null;
+  if (isPackage) {
+    const pk = await supabase("GET", "listing_packages", null,
+      `?user_id=eq.${userId}&select=purchased_at&order=purchased_at.asc`);
+    const rows = Array.isArray(pk.data) ? pk.data : [];
+    packageCount = rows.length;
+    firstPackageAt = rows[0]?.purchased_at || null;
+  }
+
+  let accessOk;
+  if (status === "active" || status === "past_due") accessOk = true;
+  else if (isTrial) accessOk = !u.created_at || (Date.now() - new Date(u.created_at).getTime()) <= TRIAL_LENGTH_MS;
+  else if (isPackage) accessOk = !!u.package_access_expires_at && new Date(u.package_access_expires_at).getTime() > Date.now();
+  else accessOk = false;
+
+  return { role: u.role, status, isTrial, isPackage, packageCount, firstPackageAt, accessOk };
+}
+
+// Which period row a pool/quota reads and writes for this plan.
+function poolPeriodFor(ctx) {
+  return ctx.isPackage ? LIFETIME_PERIOD : currentPeriodStart();
+}
+
+// Is this new video one of the plan's included (free-at-download) videos?
+// Trial: first video this period. Package: fewer included videos used since
+// the first package purchase than packages bought.
+async function isIncludedFreeVideo(userId, ctx, quotaBefore) {
+  if (ctx.isTrial) return quotaBefore.used === 0;
+  if (ctx.isPackage && ctx.packageCount > 0 && ctx.firstPackageAt) {
+    const r = await supabase("GET", "video_jobs", null,
+      `?user_id=eq.${userId}&trial_video_free=eq.true&created_at=gte.${encodeURIComponent(ctx.firstPackageAt)}&select=id`);
+    const used = Array.isArray(r.data) ? r.data.length : 0;
+    return used < ctx.packageCount * PACKAGE_VIDEOS_PER_PACKAGE;
+  }
+  return false;
+}
+
+// Shared create/regenerate gate: window still open, and no AI Motion on trial.
+function planGateError(ctx, frames) {
+  if (!ctx.accessOk) return { error: "no_active_subscription" };
+  if (ctx.isTrial && frames.some(usesAiMotion)) {
+    return {
+      error: "ai_motion_not_in_trial",
+      message: "AI Motion isn't included in the free trial — switch these frames to Ken Burns, or get a Listing Package or subscription to use AI Motion.",
+    };
+  }
+  return null;
+}
 const KLING_IMAGE_COST_PER_FRAME = 5; // every Kling frame once the monthly pool is exhausted, no exceptions
 
 // Per-frame cost for the DOWNLOAD-TIME charge only. Kling frames are
@@ -401,15 +486,15 @@ const PER_FRAME_COST = {
 // One row per user per month, same shape as video_quota_usage. Not yet
 // created — add via migration before this ships.
 
-async function getKlingPoolStatus(userId) {
-  const userRes = await supabase("GET", "users", null, `?id=eq.${userId}&select=role,subscription_status`);
-  const role = userRes.data?.[0]?.role;
-  const isTrial = userRes.data?.[0]?.subscription_status === "trial";
+async function getKlingPoolStatus(userId, ctxIn = null) {
+  const ctx = ctxIn || await getPlanContext(userId);
   // Fallback (unknown/missing role) matches Solo's own allotment, kept in
   // sync with the Sep 11, 2026 10/24/80 update above.
-  const limit = isTrial ? TRIAL_KLING_ALLOTMENT : (MONTHLY_KLING_ALLOTMENT[role] ?? 10);
+  const limit = ctx.isTrial   ? TRIAL_KLING_ALLOTMENT
+              : ctx.isPackage ? ctx.packageCount * PACKAGE_KLING_PER_PACKAGE
+              : (MONTHLY_KLING_ALLOTMENT[ctx.role] ?? 10);
 
-  const periodStart = currentPeriodStart();
+  const periodStart = poolPeriodFor(ctx);
   const usageRes = await supabase("GET", "kling_motion_usage", null,
     `?user_id=eq.${userId}&period_start=eq.${periodStart}&select=frames_used`
   );
@@ -425,7 +510,7 @@ async function getKlingPoolStatus(userId) {
 // consumeVideoQuotaSlot.
 async function consumeKlingPoolFrames(userId, framesToConsume) {
   if (!framesToConsume || framesToConsume <= 0) return;
-  const periodStart = currentPeriodStart();
+  const periodStart = poolPeriodFor(await getPlanContext(userId));
   const existingRes = await supabase("GET", "kling_motion_usage", null,
     `?user_id=eq.${userId}&period_start=eq.${periodStart}&select=id,frames_used`
   );
@@ -452,7 +537,7 @@ async function consumeKlingPoolFrames(userId, framesToConsume) {
 // for free from callDebitCredit's isRefund path.
 async function refundKlingPoolFrames(userId, framesToRefund) {
   if (!framesToRefund || framesToRefund <= 0) return;
-  const periodStart = currentPeriodStart();
+  const periodStart = poolPeriodFor(await getPlanContext(userId));
   const existingRes = await supabase("GET", "kling_motion_usage", null,
     `?user_id=eq.${userId}&period_start=eq.${periodStart}&select=id,frames_used`
   );
@@ -1026,7 +1111,13 @@ async function createVideoJob({ listingId, projectId, userId, frames, formats, m
   // it can show "video #6 of 5 included" type messaging) — it no longer
   // gates anything. consumeVideoQuotaSlot below still runs unconditionally
   // after a successful create, so the used/limit numbers stay accurate.
-  const quotaBefore = await checkVideoQuota(userId);
+  // Sep 24, 2026: trial/package window + trial Ken-Burns-only gate —
+  // before anything is charged, created, or dispatched.
+  const planCtx = await getPlanContext(userId);
+  const gateErr = planGateError(planCtx, frames);
+  if (gateErr) return gateErr;
+
+  const quotaBefore = await checkVideoQuota(userId, planCtx);
 
   // CHANGE (July 13, 2026): replaces the old generationCount-gated free-3
   // model entirely. Every Kling frame in this generation draws from the
@@ -1091,7 +1182,8 @@ async function createVideoJob({ listingId, projectId, userId, frames, formats, m
   // in this codebase (see quotaBefore's July 13 comment above), so nothing
   // else stops a trial user from creating a 2nd video. Decided once, here,
   // and persisted on the row — see trial_video_free's migration comment.
-  const isFreeTrialVideo = quotaBefore.used === 0 && await isTrialUser(userId);
+  // Sep 24, 2026: also covers the Listing Package's included video(s).
+  const isFreeTrialVideo = await isIncludedFreeVideo(userId, planCtx, quotaBefore);
 
   // From here on, if Images were charged above, they are SPENT — see the
   // header comment and Image Economy v2 §3: generation-time Kling charges
@@ -1487,6 +1579,10 @@ async function regenerateVideoJob({ jobId, userId, frames, formats, musicStyle, 
   validateAiMotionEligibility(frames);
   validateFormatChoiceForAiMotion(frames, formats);
 
+  // Sep 24, 2026: same plan gate as createVideoJob.
+  const regenGateErr = planGateError(await getPlanContext(userId), frames);
+  if (regenGateErr) return regenGateErr;
+
   const nextGenerationCount = (existing.generation_count || 1) + 1;
 
   // CHANGE (July 13, 2026): same pool-aware charge calculation as
@@ -1840,13 +1936,13 @@ function currentPeriodStart() {
 // is no longer read by createVideoJob as a gate — see comment above. Does
 // NOT increment anything — see consumeVideoQuotaSlot for the actual
 // decrement.
-async function checkVideoQuota(userId) {
-  const userRes = await supabase("GET", "users", null, `?id=eq.${userId}&select=role,subscription_status`);
-  const role = userRes.data?.[0]?.role;
-  const isTrial = userRes.data?.[0]?.subscription_status === "trial";
-  const limit = isTrial ? TRIAL_VIDEO_LIMIT : (MONTHLY_VIDEO_LIMIT[role] ?? 5);
+async function checkVideoQuota(userId, ctxIn = null) {
+  const ctx = ctxIn || await getPlanContext(userId);
+  const limit = ctx.isTrial   ? TRIAL_VIDEO_LIMIT
+              : ctx.isPackage ? ctx.packageCount * PACKAGE_VIDEOS_PER_PACKAGE
+              : (MONTHLY_VIDEO_LIMIT[ctx.role] ?? 5);
 
-  const periodStart = currentPeriodStart();
+  const periodStart = poolPeriodFor(ctx);
   const usageRes = await supabase("GET", "video_quota_usage", null,
     `?user_id=eq.${userId}&period_start=eq.${periodStart}&select=videos_downloaded`
   );
@@ -1861,7 +1957,7 @@ async function checkVideoQuota(userId) {
 // this month. Called only after every other download condition (status
 // complete, not already charged, Image debit succeeded) has passed.
 async function consumeVideoQuotaSlot(userId) {
-  const periodStart = currentPeriodStart();
+  const periodStart = poolPeriodFor(await getPlanContext(userId));
   const existingRes = await supabase("GET", "video_quota_usage", null,
     `?user_id=eq.${userId}&period_start=eq.${periodStart}&select=id,videos_downloaded`
   );
@@ -2220,13 +2316,16 @@ exports.handler = async (event) => {
       // rather than re-deriving the used/limit math a second time; this call
       // is read-only (checkVideoQuota never mutates), so it's safe to call
       // from a GET-style balance check with no side effects.
-      const quota = await checkVideoQuota(userId);
-      const klingPool = await getKlingPoolStatus(userId);
+      const planCtx = await getPlanContext(userId);
+      const quota = await checkVideoQuota(userId, planCtx);
+      const klingPool = await getKlingPoolStatus(userId, planCtx);
       return {
         statusCode: 200,
         headers,
         body: JSON.stringify({
           balance: currentBalance,
+          planStatus:      planCtx.status,
+          aiMotionAllowed: !planCtx.isTrial,
           videoQuotaUsed:  quota.used,
           videoQuotaLimit: quota.limit,
           klingPoolUsed:   klingPool.used,
@@ -2348,6 +2447,7 @@ exports.handler = async (event) => {
       const CREATE_STATUS_CODES = {
         insufficient_credits:   402,
         no_active_subscription: 402,
+        ai_motion_not_in_trial: 403,
         dispatch_failed:        500,
       };
       const statusCode = result.error ? (CREATE_STATUS_CODES[result.error] || 500) : 200;
@@ -2372,6 +2472,7 @@ exports.handler = async (event) => {
         forbidden:                403,
         insufficient_credits:     402,
         no_active_subscription:  402,
+        ai_motion_not_in_trial:  403,
         dispatch_failed:          500,
       };
       const statusCode = result.error ? (REGENERATE_STATUS_CODES[result.error] || 500) : 200;

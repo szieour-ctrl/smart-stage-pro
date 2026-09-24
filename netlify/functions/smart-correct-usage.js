@@ -30,7 +30,35 @@
 // double-charged. See increment_smart_correct_usage / commit_smart_correct_
 // charge in Supabase for the atomic halves of this.
 
+// CHANGE (Sep 24, 2026 — security): every action now requires the caller's
+// Supabase JWT and acts ONLY on that user. userId used to come straight from
+// the query string / body with no login check, so anyone could advance (and
+// be billed on) someone else's counter. The debit call to debit-credit.js
+// now carries INTERNAL_API_KEY, which debit-credit.js requires for
+// server-to-server calls.
+
 const https = require("https");
+
+function verifyJWT(authHeader) {
+  return new Promise((resolve) => {
+    if (!authHeader || !authHeader.startsWith("Bearer ")) { resolve(null); return; }
+    const jwt = authHeader.split(" ")[1];
+    const url = new URL(`${process.env.SUPABASE_URL}/auth/v1/user`);
+    const req = https.request({
+      hostname: url.hostname, path: url.pathname, method: "GET",
+      headers: { apikey: process.env.SUPABASE_SERVICE_ROLE_KEY, Authorization: `Bearer ${jwt}` },
+    }, (res) => {
+      let data = "";
+      res.on("data", (c) => (data += c));
+      res.on("end", () => {
+        try { const p = JSON.parse(data); resolve(res.statusCode === 200 && p.id ? p : null); }
+        catch { resolve(null); }
+      });
+    });
+    req.on("error", () => resolve(null));
+    req.end();
+  });
+}
 
 function supabase(method, path, body) {
   return new Promise((resolve, reject) => {
@@ -75,6 +103,7 @@ function callDebitCredit(userId, cost, reason) {
       headers: {
         "Content-Type":   "application/json",
         "Content-Length": Buffer.byteLength(bodyStr),
+        "x-internal-key": process.env.INTERNAL_API_KEY || "",
       },
     }, res => {
       let data = "";
@@ -100,16 +129,27 @@ async function getCurrentBalance(userId) {
 exports.handler = async (event) => {
   const headers = {
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
     "Content-Type": "application/json",
   };
 
   if (event.httpMethod === "OPTIONS") return { statusCode: 200, headers, body: "" };
 
+  // Every action acts only on the signed-in user. A userId param/body field
+  // is still accepted for backward compatibility but must match the token.
+  const authUser = await verifyJWT(event.headers.authorization || event.headers.Authorization);
+  if (!authUser) return { statusCode: 401, headers, body: JSON.stringify({ error: "Unauthorized" }) };
+  const claimedUserId = event.httpMethod === "GET"
+    ? event.queryStringParameters?.userId
+    : (() => { try { return JSON.parse(event.body || "{}").userId; } catch { return undefined; } })();
+  if (claimedUserId && claimedUserId !== authUser.id) {
+    return { statusCode: 403, headers, body: JSON.stringify({ error: "Forbidden" }) };
+  }
+
   try {
     // ── QUOTE (read-only, pre-flight block check) ─────────────────────────
     if (event.httpMethod === "GET" && event.queryStringParameters?.action === "quote") {
-      const userId = event.queryStringParameters?.userId;
+      const userId = authUser.id;
       const count = parseInt(event.queryStringParameters?.count, 10);
       if (!userId || !Number.isFinite(count) || count < 1) {
         return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing userId or count" }) };
@@ -141,7 +181,7 @@ exports.handler = async (event) => {
 
     // ── STATUS (read-only, for the header chip — no prospective batch) ────
     if (event.httpMethod === "GET" && event.queryStringParameters?.action === "status") {
-      const userId = event.queryStringParameters?.userId;
+      const userId = authUser.id;
       if (!userId) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing userId" }) };
 
       const quoteRes = await supabase("POST", "rpc/quote_smart_correct_charge", {
@@ -165,7 +205,8 @@ exports.handler = async (event) => {
 
     // ── COMMIT (called after a batch actually completes) ─────────────────
     if (event.httpMethod === "POST") {
-      const { userId, correctionsCompleted } = JSON.parse(event.body || "{}");
+      const { correctionsCompleted } = JSON.parse(event.body || "{}");
+      const userId = authUser.id;
       const count = parseInt(correctionsCompleted, 10);
       if (!userId || !Number.isFinite(count) || count < 1) {
         return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing userId or correctionsCompleted" }) };

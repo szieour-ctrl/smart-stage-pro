@@ -82,6 +82,10 @@ function callDebitCredit(userId, cost, reason, isRefund = true) {
       headers: {
         "Content-Type":   "application/json",
         "Content-Length": Buffer.byteLength(bodyStr),
+        // Sep 24, 2026: debit-credit.js only accepts refunds from server
+        // callers that present INTERNAL_API_KEY — without this header every
+        // refund below would be rejected with 403.
+        "x-internal-key": process.env.INTERNAL_API_KEY || "",
       }
     }, res => {
       let data = "";

@@ -47,6 +47,14 @@
 // just succeeded) directly in meta.json, so this function just reads two
 // known keys — same permission profile as everything else in the app.
 
+// CHANGE (Sep 24, 2026 — Sam's spec update): shows EVERY staged image for
+// the address (e.g. an interior and an exterior), each as its own
+// before/after slider with its room name, like a normal compliance page.
+// Reads meta.json's `pairs` array (written by write-prospect-meta.js);
+// older meta.json files with only finalKey/originalKey still render as a
+// single slider. The "Content, per Sam: exactly one staged image" note
+// above is superseded.
+
 const { S3Client, GetObjectCommand, HeadObjectCommand } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 
@@ -86,13 +94,39 @@ async function readMeta(slug) {
   }
 }
 
+function pairsFromMeta(meta) {
+  if (Array.isArray(meta.pairs) && meta.pairs.length) return meta.pairs.filter(p => p && p.finalKey);
+  if (meta.finalKey) return [{ finalKey: meta.finalKey, originalKey: meta.originalKey || null, roomName: null }];
+  return [];
+}
+
 function escHtml(str) {
   return String(str || "")
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-function renderPage({ slug, address, beforeUrl, afterUrl, qrUrl }) {
+function sliderHtml(p) {
+  const room = p.roomName ? " " + escHtml(p.roomName) : "";
+  return `
+  <section class="shot">
+    ${p.roomName ? `<div class="shot-label">${escHtml(p.roomName)}</div>` : ""}
+    <div class="slider-container" data-slider>
+      <img class="sl-after" src="${p.afterUrl}" alt="Staged${room}" draggable="false" />
+      <div class="sl-before-wrap">
+        <img class="sl-before" src="${p.beforeUrl}" alt="Original${room}" draggable="false" />
+      </div>
+      <span class="sl-label before-label">Original</span>
+      <span class="sl-label after-label">Smart Stage PRO Final</span>
+      <div class="sl-divider"><div class="sl-handle">
+        <svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg"><circle cx="20" cy="20" r="19" fill="#1a1714" stroke="#b8975a" stroke-width="1.5"/><polyline points="16,13 9,20 16,27" fill="none" stroke="#b8975a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><polyline points="24,13 31,20 24,27" fill="none" stroke="#b8975a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div></div>
+    </div>
+  </section>`;
+}
+
+function renderPage({ slug, address, shots, qrUrl }) {
   const displayAddress = address || "This Property";
+  const multi = shots.length > 1;
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -119,7 +153,10 @@ h1{font-family:Georgia,serif;font-weight:400;font-size:1.7rem;text-align:center;
 .sl-label{position:absolute;top:12px;font-size:0.62rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;padding:5px 9px;border-radius:2px;z-index:2;pointer-events:none;background:rgba(26,23,20,0.8);color:var(--cream);}
 .sl-label.before-label{left:12px;}
 .sl-label.after-label{right:12px;background:var(--gold);color:var(--ink);}
-.pitch{background:#fff;border:1px solid var(--border);border-radius:6px;padding:26px 28px;margin-top:28px;box-shadow:var(--shadow);text-align:center;}
+.shot{margin-bottom:26px;}
+.shot-label{font-size:0.72rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);font-weight:700;margin-bottom:8px;}
+.hint{text-align:center;color:var(--muted);font-size:0.78rem;margin:-14px 0 18px;}
+.pitch{background:#fff;border:1px solid var(--border);border-radius:6px;padding:26px 28px;margin-top:8px;box-shadow:var(--shadow);text-align:center;}
 .pitch h2{font-family:Georgia,serif;font-weight:400;font-size:1.25rem;margin-bottom:10px;}
 .pitch p{color:var(--muted);font-size:0.92rem;margin-bottom:18px;}
 .cta{display:inline-block;background:var(--gold);color:var(--ink);font-weight:600;font-size:0.85rem;letter-spacing:0.02em;padding:12px 28px;border-radius:4px;text-decoration:none;transition:background 0.15s ease;}
@@ -131,20 +168,11 @@ h1{font-family:Georgia,serif;font-weight:400;font-size:1.7rem;text-align:center;
 <div class="wrap">
   <div class="brand">SMART STAGE <b>PRO</b></div>
   <div class="eyebrow">Before &amp; After</div>
-  <h1>See What This Photo Could Look Like</h1>
+  <h1>${multi ? "See What This Home Could Look Like" : "See What This Photo Could Look Like"}</h1>
   <div class="address">${escHtml(displayAddress)}</div>
 
-  <div class="slider-container" data-slider>
-    <img class="sl-after" src="${afterUrl}" alt="Staged" draggable="false" />
-    <div class="sl-before-wrap">
-      <img class="sl-before" src="${beforeUrl}" alt="Original" draggable="false" />
-    </div>
-    <span class="sl-label before-label">Original</span>
-    <span class="sl-label after-label">Smart Stage PRO Final</span>
-    <div class="sl-divider"><div class="sl-handle">
-      <svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg"><circle cx="20" cy="20" r="19" fill="#1a1714" stroke="#b8975a" stroke-width="1.5"/><polyline points="16,13 9,20 16,27" fill="none" stroke="#b8975a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><polyline points="24,13 31,20 24,27" fill="none" stroke="#b8975a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-    </div></div>
-  </div>
+  ${multi ? `<div class="hint">Drag each slider to compare</div>` : ""}
+  ${shots.map(sliderHtml).join("")}
 
   <div class="pitch">
     <h2>This is what Smart Stage PRO can do for your listings.</h2>
@@ -159,27 +187,25 @@ h1{font-family:Georgia,serif;font-weight:400;font-size:1.7rem;text-align:center;
 </div>
 <script>
 (function(){
-  var container = document.querySelector('.slider-container[data-slider]');
-  if (!container) return;
-  var beforeWrap = container.querySelector('.sl-before-wrap');
-  var divider = container.querySelector('.sl-divider');
-  var isDragging = false;
-  function setPosition(pct){
+  var active = null;
+  function setPosition(c, pct){
     pct = Math.max(2, Math.min(98, pct));
-    beforeWrap.style.width = pct + '%';
-    divider.style.left = pct + '%';
+    c.querySelector('.sl-before-wrap').style.width = pct + '%';
+    c.querySelector('.sl-divider').style.left = pct + '%';
   }
-  function getPct(clientX){
-    var rect = container.getBoundingClientRect();
+  function getPct(c, clientX){
+    var rect = c.getBoundingClientRect();
     return ((clientX - rect.left) / rect.width) * 100;
   }
-  container.addEventListener('mousedown', function(e){ isDragging = true; setPosition(getPct(e.clientX)); e.preventDefault(); });
-  window.addEventListener('mousemove', function(e){ if (isDragging) setPosition(getPct(e.clientX)); });
-  window.addEventListener('mouseup', function(){ isDragging = false; });
-  container.addEventListener('touchstart', function(e){ isDragging = true; setPosition(getPct(e.touches[0].clientX)); e.preventDefault(); }, { passive: false });
-  window.addEventListener('touchmove', function(e){ if (isDragging) setPosition(getPct(e.touches[0].clientX)); }, { passive: true });
-  window.addEventListener('touchend', function(){ isDragging = false; });
-  setPosition(50);
+  document.querySelectorAll('.slider-container[data-slider]').forEach(function(c){
+    c.addEventListener('mousedown', function(e){ active = c; setPosition(c, getPct(c, e.clientX)); e.preventDefault(); });
+    c.addEventListener('touchstart', function(e){ active = c; setPosition(c, getPct(c, e.touches[0].clientX)); e.preventDefault(); }, { passive: false });
+    setPosition(c, 50);
+  });
+  window.addEventListener('mousemove', function(e){ if (active) setPosition(active, getPct(active, e.clientX)); });
+  window.addEventListener('mouseup', function(){ active = null; });
+  window.addEventListener('touchmove', function(e){ if (active) setPosition(active, getPct(active, e.touches[0].clientX)); }, { passive: true });
+  window.addEventListener('touchend', function(){ active = null; });
 })();
 </script>
 </body>
@@ -219,22 +245,25 @@ exports.handler = async (event) => {
     // upload that already knows both keys exactly. No S3 listing, no
     // guessing at "newest" — see this file's header comment for why.
     const meta = await readMeta(slug);
-    const finalKey = meta.finalKey;
+    const pairs = pairsFromMeta(meta);
 
-    if (!finalKey) {
+    if (!pairs.length) {
       return { statusCode: 404, headers: htmlHeaders, body: renderNotFound(slug) };
     }
 
-    const [afterUrl, beforeUrl, qrUrl] = await Promise.all([
-      signKey(finalKey),
-      signKey(meta.originalKey || finalKey), // fall back to the final itself if somehow no original was recorded — page still renders rather than 404ing
+    const [shots, qrUrl] = await Promise.all([
+      Promise.all(pairs.map(async (p) => ({
+        roomName: p.roomName || null,
+        afterUrl: await signKey(p.finalKey),
+        beforeUrl: await signKey(p.originalKey || p.finalKey), // no original recorded → show the final on both sides rather than 404
+      }))),
       signQrIfExists(slug),
     ]);
 
     return {
       statusCode: 200,
       headers: htmlHeaders,
-      body: renderPage({ slug, address: meta.address, beforeUrl, afterUrl, qrUrl }),
+      body: renderPage({ slug, address: meta.address, shots, qrUrl }),
     };
   } catch (err) {
     console.error("prospect-page error for slug", slug, ":", err.message);

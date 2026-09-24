@@ -14,7 +14,24 @@
 // never be blocked by "insufficient balance" — that's nonsensical for a
 // credit) and writes a positive ledger entry instead of a negative one.
 
-const https = require('https');
+// CHANGE (Sep 24, 2026 — security + Listing Package):
+//  • AUTH. This function used to trust whatever userId the request body
+//    carried, with no login check — and the isRefund path skips the balance
+//    check and ADDS Images, so anyone signed in could mint unlimited Images
+//    for themselves with one request. Now:
+//      - browser callers must send their Supabase JWT (Authorization:
+//        Bearer …) and it must belong to body.userId;
+//      - server callers (video-job.js, smart-correct-usage.js) send the
+//        shared secret INTERNAL_API_KEY in the x-internal-key header;
+//      - isRefund is accepted ONLY from server callers.
+//  • ACCESS. Each account status has an explicit rule (spendAccess below).
+//    The old check read balance_after from the 'signup_trial' ledger row —
+//    a signup snapshot, not the real balance — for every non-active status.
+//    New: 'package' (the $59 Listing Package) spends while
+//    users.package_access_expires_at is in the future.
+
+const https  = require('https');
+const crypto = require('crypto');
 
 const SUPABASE_URL    = process.env.SUPABASE_URL;
 const SERVICE_KEY     = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -71,6 +88,58 @@ function isTrialExpired(createdAt) {
   return (Date.now() - new Date(createdAt).getTime()) > TRIAL_LENGTH_MS;
 }
 
+// Who may spend Images right now. Refunds bypass this (see handler).
+function spendAccess(u) {
+  switch (u.subscription_status) {
+    case 'active':
+    case 'past_due':   // Stripe is still retrying the card — access is kept
+      return { ok: true };
+    case 'trial':
+      return isTrialExpired(u.created_at)
+        ? { ok: false, body: { error: 'Free trial has ended', code: 'NO_SUB', trialExpired: true } }
+        : { ok: true };
+    case 'package': {
+      const until = u.package_access_expires_at ? new Date(u.package_access_expires_at).getTime() : 0;
+      return until > Date.now()
+        ? { ok: true }
+        : { ok: false, body: { error: 'Listing Package access has ended', code: 'NO_SUB', packageExpired: true } };
+    }
+    default:
+      return { ok: false, body: { error: 'No active subscription', code: 'NO_SUB' } };
+  }
+}
+
+// ── Caller authentication ─────────────────────────────────
+function isInternalCaller(event) {
+  const expected = process.env.INTERNAL_API_KEY;
+  const got = event.headers?.['x-internal-key'] || event.headers?.['X-Internal-Key'];
+  if (!expected || !got) return false;
+  const a = Buffer.from(String(got));
+  const b = Buffer.from(String(expected));
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+function verifyJWT(authHeader) {
+  return new Promise((resolve) => {
+    if (!authHeader || !authHeader.startsWith('Bearer ')) { resolve(null); return; }
+    const jwt = authHeader.split(' ')[1];
+    const url = new URL(`${SUPABASE_URL}/auth/v1/user`);
+    const req = https.request({
+      hostname: url.hostname, path: url.pathname, method: 'GET',
+      headers: { 'apikey': SERVICE_KEY, 'Authorization': `Bearer ${jwt}` },
+    }, res => {
+      let data = '';
+      res.on('data', c => data += c);
+      res.on('end', () => {
+        try { const p = JSON.parse(data); resolve(res.statusCode === 200 && p.id ? p : null); }
+        catch { resolve(null); }
+      });
+    });
+    req.on('error', () => resolve(null));
+    req.end();
+  });
+}
+
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: JSON.stringify({ error: 'Method not allowed' }) };
@@ -96,63 +165,56 @@ exports.handler = async (event) => {
     return { statusCode: 400, body: JSON.stringify({ error: 'Missing userId or cost' }) };
   }
 
+  // Auth — see header comment. Server callers use the internal key; the
+  // browser must prove it is the user being charged. Refunds are
+  // server-only, full stop.
+  const internal = isInternalCaller(event);
+  if (!internal) {
+    if (isRefund) {
+      return { statusCode: 403, body: JSON.stringify({ error: 'Refunds are server-only' }) };
+    }
+    const authUser = await verifyJWT(event.headers?.authorization || event.headers?.Authorization);
+    if (!authUser) {
+      return { statusCode: 401, body: JSON.stringify({ error: 'Unauthorized', code: 'UNAUTHORIZED' }) };
+    }
+    if (authUser.id !== userId) {
+      return { statusCode: 403, body: JSON.stringify({ error: 'Forbidden' }) };
+    }
+  }
+
   try {
     // 1. Get current balance — most recent ledger entry
     const ledgerRes = await sbRequest('GET',
       `/rest/v1/credit_ledger?user_id=eq.${userId}&order=created_at.desc&limit=1&select=balance_after`
     );
 
-    // 2. Get user role + team for tier allocation and ledger attribution.
-    // CHANGE (Image Economy v2): added team_id to this existing query — no
-    // new round-trip, just one more column. Needed so video/Kling spend
-    // can be attributed to a team for team-admin spend rollups (existing
-    // image-staging debits never populated this; see ledger insert below
-    // for why that path is intentionally left unchanged).
-    // CHANGE (Aug 16, 2026): added created_at — see isTrialExpired above.
+    // 2. Get user role + team for tier allocation and ledger attribution,
+    // plus the fields spendAccess() needs.
     const userRes = await sbRequest('GET',
-      `/rest/v1/users?id=eq.${userId}&select=role,subscription_status,team_id,created_at&limit=1`
+      `/rest/v1/users?id=eq.${userId}&select=role,subscription_status,team_id,created_at,package_access_expires_at&limit=1`
     );
 
     const userRec = Array.isArray(userRes.body) ? userRes.body[0] : null;
 
-    // Hard block — must be active subscriber OR have free trial credits
     if (!userRec) {
       return {
         statusCode: 402,
         body: JSON.stringify({ error: 'No active subscription', code: 'NO_SUB' }),
       };
     }
-    if (userRec.subscription_status !== 'active') {
-      // Expired trial blocks unconditionally — checked BEFORE the trial
-      // credit balance below, since a trial user can easily still be
-      // sitting on unused Images past 30 days (10 Images is more than
-      // most agents burn through in a month of light use) and unused
-      // balance was never meant to extend access past the promised
-      // window. Same NO_SUB response as "never had a subscription" —
-      // from the frontend's perspective these are the same dead end.
-      if (userRec.subscription_status === 'trial' && isTrialExpired(userRec.created_at)) {
-        return {
-          statusCode: 402,
-          body: JSON.stringify({ error: 'Free trial has ended', code: 'NO_SUB', trialExpired: true }),
-        };
-      }
-      // Check for free trial credits before blocking
-      const trialRes = await sbRequest('GET',
-        `/rest/v1/credit_ledger?user_id=eq.${userId}&reason=eq.signup_trial&order=created_at.desc&limit=1&select=balance_after`
-      );
-      const trialBalance = Array.isArray(trialRes.body) && trialRes.body.length > 0
-        ? trialRes.body[0].balance_after : 0;
-      if (trialBalance <= 0) {
-        return {
-          statusCode: 402,
-          body: JSON.stringify({ error: 'No active subscription', code: 'NO_SUB' }),
-        };
-      }
+
+    // Refunds (server-only, platform failures) are never blocked by
+    // account status — the user was charged for something that never ran.
+    if (!isRefund) {
+      const access = spendAccess(userRec);
+      if (!access.ok) return { statusCode: 402, body: JSON.stringify(access.body) };
     }
 
+    // No ledger rows at all: only a legacy active subscriber could be in
+    // that state (trial/package/subscription grants always write a row).
     const currentBalance = Array.isArray(ledgerRes.body) && ledgerRes.body.length > 0
       ? ledgerRes.body[0].balance_after
-      : (TIER_ALLOCATION[userRec.role] ?? 50); // First ever — use full allocation
+      : (userRec.subscription_status === 'active' ? (TIER_ALLOCATION[userRec.role] ?? 50) : 0);
 
     // 3. Check sufficient balance — SKIPPED for refunds. A refund credits
     // Images back; there's no version of "insufficient balance" that makes

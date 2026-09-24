@@ -1692,9 +1692,7 @@ async function lookupOrCreateProject(address) {
     actions.style.display = 'flex';
 
   } catch (err) {
-    cardContent.innerHTML = `<div style="color:#c0392b;font-size:13px;">⚠ Search error: ${escHtml(err.message)} — you may continue without a project.</div>`;
-    document.getElementById('property-continue-btn').style.display = 'inline-block';
-    actions.style.display = 'flex';
+    showPropertySearchError(err, 'Search error');
   }
 }
 
@@ -1812,10 +1810,49 @@ async function createNewProject(address) {
     actions.style.display = 'flex';
 
   } catch (err) {
-    cardContent.innerHTML = `<div style="color:#c0392b;font-size:13px;">⚠ Could not create project: ${escHtml(err.message)} — you may continue without a project.</div>`;
-    document.getElementById('property-continue-btn').style.display = 'inline-block';
-    actions.style.display = 'flex';
+    showPropertySearchError(err, 'Could not create project');
   }
+}
+
+// FIX (Sep 24, 2026 — Sam's report on 4810 Cabrillo Way): a slow
+// marketing-manage lookup ran past Netlify's synchronous timeout, Netlify
+// answered with its own HTML error page, and res.json() threw the raw
+// "Unexpected token '<' ... is not valid JSON" message at the user — then
+// offered "continue without a project." The same search succeeded on retry.
+//   1. A non-JSON response now reads as "server didn't respond, try again"
+//      instead of a parser error.
+//   2. Prospecting never offers "continue without a project": with no
+//      prospect record, staged images have no staging-prospects/ folder
+//      to land in — the same class of fallback-storage bug root-caused on
+//      Sep 16. The agent has to search again (Clear Search stays visible).
+//   Listings keep their existing "continue without a project" behavior.
+function showPropertySearchError(err, label) {
+  const cardContent = document.getElementById('project-card-content');
+  const actions = document.getElementById('property-actions');
+  const cont = document.getElementById('property-continue-btn');
+  const isProspecting = !!document.getElementById('prospecting-toggle')?.checked;
+  const msg = err && err.message ? err.message : String(err);
+  const serverNoReply = (err && err.name === 'SyntaxError') || /not valid JSON|Unexpected token/i.test(msg);
+  const detail = serverNoReply
+    ? 'The server didn\'t respond in time. Please run the search again.'
+    : `${label}: ${escHtml(msg)}`;
+
+  if (isProspecting) {
+    // Drop any project left over from an earlier search in this session so
+    // nothing can attach to the wrong address. Listings are left untouched
+    // on purpose: their 'pending-create' status is what lets Generate Final
+    // retry project creation later (see the "CREATE PROJECT IF NEEDED" blocks).
+    SESSION.projectId = null;
+    SESSION.listingId = null;
+    SESSION.complianceUrl = null;
+    SESSION.projectStatus = null;
+    if (cardContent) cardContent.innerHTML = `<div style="color:#c0392b;font-size:13px;">⚠ ${detail} Prospecting needs a saved prospect record before staging, so you can't continue until the search succeeds.</div>`;
+    if (cont) cont.style.display = 'none';
+  } else {
+    if (cardContent) cardContent.innerHTML = `<div style="color:#c0392b;font-size:13px;">⚠ ${detail} — you may continue without a project.</div>`;
+    if (cont) cont.style.display = 'inline-block';
+  }
+  if (actions) actions.style.display = 'flex';
 }
 
 function continueToUpload() {

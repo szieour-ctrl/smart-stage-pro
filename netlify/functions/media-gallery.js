@@ -170,7 +170,34 @@ exports.handler = async (event) => {
       if (res.status >= 400) {
         return { statusCode: 500, headers, body: JSON.stringify({ error: "Listing search failed", detail: res.data }) };
       }
-      return { statusCode: 200, headers, body: JSON.stringify({ listings: res.data || [] }) };
+      const listings = Array.isArray(res.data) ? res.data : [];
+
+      // NEW (Sep 24, 2026 — Gallery redesign): cover photo + counts per
+      // listing, so the Gallery can show cards instead of a text list. One
+      // extra query for all returned slugs (never per listing). Only the
+      // slugs this caller is already scoped to are looked up.
+      const slugs = [...new Set(listings.map(l => l.slug).filter(Boolean))];
+      const stats = {};
+      if (slugs.length) {
+        const inList = slugs.map(s => `"${s.replace(/"/g, "")}"`).join(",");
+        const a = await supabase("GET", "media_assets", null,
+          `?listing_slug=in.(${encodeURIComponent(inList)})&select=listing_slug,image_type,thumbnail_key,s3_key,created_at&order=created_at.desc`);
+        for (const row of (Array.isArray(a.data) ? a.data : [])) {
+          const st = stats[row.listing_slug] || (stats[row.listing_slug] = { finals: 0, originals: 0, cover: null, fallback: null });
+          if (row.image_type === "final") {
+            st.finals++;
+            if (!st.cover) st.cover = publicUrl(row.thumbnail_key) || publicUrl(row.s3_key);
+          } else if (row.image_type === "original") {
+            st.originals++;
+            if (!st.fallback) st.fallback = publicUrl(row.thumbnail_key) || publicUrl(row.s3_key);
+          }
+        }
+      }
+      const out = listings.map(l => {
+        const st = stats[l.slug] || {};
+        return { ...l, finals: st.finals || 0, originals: st.originals || 0, coverUrl: st.cover || st.fallback || null };
+      });
+      return { statusCode: 200, headers, body: JSON.stringify({ listings: out }) };
     }
 
     if (action === "assets") {

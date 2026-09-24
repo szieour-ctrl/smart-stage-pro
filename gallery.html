@@ -5,7 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Media Gallery — Smart Stage PRO</title>
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&family=DM+Sans:wght@300;400;500;700&display=swap" rel="stylesheet" />
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.90.0/dist/umd/supabase.min.js"></script>
 <style>
 :root{--ink:#1a1714;--ink-2:#241f1a;--cream:#f7f4ef;--warm:#e8e0d4;--gold:#b8975a;--gold-light:#d4b87a;--muted:#7a6f63;--danger:#c0392b;--success:#2d6a4f;--border:#ddd5c8;--shadow:0 2px 20px rgba(26,23,20,0.08);--shadow-lg:0 18px 40px rgba(26,23,20,0.16);}
 *{box-sizing:border-box;}
@@ -15,8 +14,8 @@ button{font-family:inherit;}
 
 /* ── Top bar (matches the app header) ─────────────────────── */
 .nav{background:var(--ink);color:#c8bfb0;position:sticky;top:0;z-index:20;box-shadow:0 1px 0 rgba(184,151,90,0.25);}
-.nav-inner{max-width:1240px;margin:0 auto;padding:12px 24px;display:flex;align-items:center;gap:18px;}
-.nav-logo{height:38px;width:auto;display:block;}
+.nav-inner{max-width:1240px;margin:0 auto;padding:7px 24px;display:flex;align-items:center;gap:18px;}
+.nav-logo{height:34px;width:auto;display:block;}
 .nav-title{font-family:'Cormorant Garamond',serif;color:var(--gold-light);font-size:1.25rem;font-weight:400;letter-spacing:0.02em;padding-left:18px;border-left:1px solid rgba(184,151,90,0.3);}
 .nav-spacer{flex:1;}
 .nav-chip{font-size:0.72rem;color:#c8bfb0;border:1px solid rgba(184,151,90,0.3);border-radius:3px;padding:6px 12px;white-space:nowrap;max-width:260px;overflow:hidden;text-overflow:ellipsis;}
@@ -24,16 +23,17 @@ button{font-family:inherit;}
 .nav-btn:hover{border-color:var(--gold);color:var(--gold-light);}
 
 /* ── Hero ─────────────────────────────────────────────────── */
-.hero{background:linear-gradient(180deg,var(--ink) 0%,var(--ink-2) 100%);color:var(--cream);padding:46px 0 70px;}
+.hero{background:linear-gradient(180deg,var(--ink) 0%,var(--ink-2) 100%);color:var(--cream);padding:14px 0 40px;}
 .hero-inner{max-width:1240px;margin:0 auto;padding:0 24px;}
-.eyebrow{font-size:0.68rem;letter-spacing:0.16em;text-transform:uppercase;color:var(--gold);font-weight:600;margin-bottom:10px;}
-.hero h1{font-family:'Cormorant Garamond',serif;font-weight:300;font-size:2.8rem;line-height:1.08;margin:0 0 10px;}
+.eyebrow{font-size:0.62rem;letter-spacing:0.16em;text-transform:uppercase;color:var(--gold);font-weight:600;margin-bottom:2px;}
+.hero-row{display:flex;align-items:center;gap:32px;}
+.hero h1{font-family:'Cormorant Garamond',serif;font-weight:300;font-size:2rem;line-height:1.1;margin:0;white-space:nowrap;}
 .hero h1 em{color:var(--gold-light);font-style:italic;}
-.hero p{color:#b9ae9f;font-size:0.92rem;max-width:620px;margin:0;}
-.search-wrap{max-width:1240px;margin:-30px auto 0;padding:0 24px;position:relative;z-index:5;}
+.hero p{color:#b9ae9f;font-size:0.8rem;line-height:1.5;max-width:520px;margin:0;padding-left:32px;border-left:1px solid rgba(184,151,90,0.3);}
+.search-wrap{max-width:1240px;margin:-26px auto 0;padding:0 24px;position:relative;z-index:5;}
 .search{display:flex;align-items:center;gap:12px;background:#fff;border:1px solid var(--border);border-radius:10px;padding:6px 8px 6px 18px;box-shadow:var(--shadow-lg);}
 .search svg{flex-shrink:0;color:var(--gold);}
-.search input{flex:1;border:none;outline:none;font-family:inherit;font-size:1rem;padding:12px 0;color:var(--ink);background:transparent;min-width:0;}
+.search input{flex:1;border:none;outline:none;font-family:inherit;font-size:0.95rem;padding:9px 0;color:var(--ink);background:transparent;min-width:0;}
 .search .count{font-size:0.72rem;color:var(--muted);white-space:nowrap;padding-right:10px;}
 
 /* ── Listing cards ────────────────────────────────────────── */
@@ -124,8 +124,10 @@ button{font-family:inherit;}
 
 @media (max-width:720px){
   .nav-title,.nav-chip{display:none;}
-  .hero{padding:34px 0 60px;}
-  .hero h1{font-size:2.1rem;}
+  .hero{padding:12px 0 38px;}
+  .hero-row{display:block;}
+  .hero h1{font-size:1.6rem;white-space:normal;}
+  .hero p{display:none;}
   .detail-addr{font-size:1.7rem;}
   .tiles{grid-template-columns:repeat(2,1fr);gap:10px;}
   .tile-over{opacity:1;background:linear-gradient(180deg,rgba(26,23,20,0) 55%,rgba(26,23,20,0.75) 100%);}
@@ -135,18 +137,14 @@ button{font-family:inherit;}
 </head>
 <body>
 
-<!-- LOGIN -->
+<!-- SIGNED OUT (Sep 24, 2026: the Gallery uses the app's own sign-in) -->
 <div id="loginScreen" class="login-page" style="display:none;">
   <div class="login-panel">
     <div class="login-band"><img src="https://smart-stage-pro-media-938733852197-us-east-2-an.s3.us-east-2.amazonaws.com/smart-stage-marketing/Smart_Stage_PRO_Logo_zciwlo.png" alt="Smart Stage PRO™" /></div>
     <div class="login-body">
       <h1 class="login-title">Media Gallery</h1>
-      <div class="login-sub">Sign in with your Smart Stage PRO account.</div>
-      <div id="loginNote" class="login-note" style="display:none;"></div>
-      <input id="loginEmail" class="login-input" type="email" placeholder="Email" autocomplete="username" />
-      <input id="loginPassword" class="login-input" type="password" placeholder="Password" autocomplete="current-password" />
-      <button id="loginBtn" class="login-btn">Sign In</button>
-      <div id="loginError" class="login-error" style="display:none;"></div>
+      <div class="login-sub">The Gallery uses your Smart Stage PRO sign-in. Sign in to the app, then come back to this tab — it updates on its own.</div>
+      <button class="login-btn" id="openAppBtn">Open Smart Stage PRO →</button>
     </div>
   </div>
 </div>
@@ -159,8 +157,7 @@ button{font-family:inherit;}
       <div class="nav-title">Media Gallery</div>
       <div class="nav-spacer"></div>
       <div class="nav-chip" id="signedInAs"></div>
-      <a class="nav-btn" href="/">Back to app</a>
-      <button class="nav-btn" id="signoutBtn">Sign out</button>
+      <a class="nav-btn" href="/" id="backToAppBtn">← Back to app</a>
     </div>
   </nav>
 
@@ -169,8 +166,10 @@ button{font-family:inherit;}
     <header class="hero">
       <div class="hero-inner">
         <div class="eyebrow">Your listing media</div>
+        <div class="hero-row">
         <h1>Every photo, <em>ready to share.</em></h1>
         <p>Originals and staged finals for each listing, organized by room. Click any photo to copy its link for MLS, email, or social.</p>
+        </div>
       </div>
     </header>
     <div class="search-wrap">
@@ -226,60 +225,10 @@ const FN = '/.netlify/functions/media-gallery';
 const SUPABASE_URL = 'https://dnpaenpwdhjmslymgkse.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRucGFlbnB3ZGhqbXNseW1na3NlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA4NjczNTIsImV4cCI6MjA5NjQ0MzM1Mn0.pEdH1YgINYjj8sAutsJJoO8x4VUxTCfIzVbjSu_yBTY';
 
-let _sb = null;
-function getSb() {
-  // FIX (Sep 2026): previously created with default options, meaning this
-  // client shared the EXACT same localStorage key (and therefore the same
-  // cross-tab refresh lock) as index.html's own Supabase client. Opening
-  // Gallery in a second tab meant two independent clients competing over
-  // one single-use refresh token/lock — confirmed real incidents where
-  // this left the app tab stuck indefinitely (getSession() never
-  // resolving) with no recovery short of clearing localStorage by hand.
-  // A separate storageKey makes this page's session fully independent —
-  // it can no longer contend with the app tab's session or lock at all.
-  // Trade-off: Gallery now needs its own one-time sign-in per browser
-  // instead of inheriting the app's session — a small, one-time cost
-  // that's much better than the app tab getting disrupted every time
-  // Gallery happens to be open.
-  // FIX (Sep 8, 2026): also disable Supabase's internal Web Lock here.
-  // The storageKey separation above stops Gallery and the main app from
-  // contending over the SAME lock, but it doesn't stop Gallery's own
-  // client from deadlocking on ITS OWN internal lock — a known bug in the
-  // underlying auth-js library (supabase/supabase-js#1594, #2013, #2111)
-  // where the lock can be acquired and never released, hanging every
-  // subsequent auth call forever with zero network activity, even on a
-  // fresh page load. See index.html's getSupabase() for the full writeup.
-  const noOpLock = async (name, acquireTimeout, fn) => await fn();
-  if (!_sb) _sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-    auth: { storageKey: 'gallery-sb-auth-token', lock: noOpLock }
-  });
-  return _sb;
-}
-
-// FIX (Sep 7, 2026): the storageKey separation above fixed the cross-tab
-// lock collision with index.html, but getSession()/getUser() calls in this
-// file still had no timeout of their own — a stall from any other cause
-// (e.g. the Supabase JWT-refresh incident, status.supabase.com/incidents/
-// 6q5902p2xd9f) still hung forever with zero feedback. Mirrors index.html's
-// own withAuthTimeout helper — this file has a separate script scope, so
-// it needs its own copy rather than sharing one.
-function withAuthTimeout(promise, ms, label) {
-  return Promise.race([
-    promise,
-    new Promise((_, reject) => setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms — possible stuck cross-tab lock`)), ms))
-  ]);
-}
-
-
 let searchTimer = null;
 
 const loginScreen = document.getElementById('loginScreen');
 const appEl = document.getElementById('app');
-const loginEmail = document.getElementById('loginEmail');
-const loginPassword = document.getElementById('loginPassword');
-const loginBtn = document.getElementById('loginBtn');
-const loginError = document.getElementById('loginError');
-const signoutBtn = document.getElementById('signoutBtn');
 
 const searchInput = document.getElementById('searchInput');
 const cardsEl = document.getElementById('cards');
@@ -288,91 +237,62 @@ const listView = document.getElementById('listView');
 const detailView = document.getElementById('detailView');
 const galleryArea = document.getElementById('galleryArea');
 
-// ── AUTH ──────────────────────────────────────────────────────────────────
+// ── AUTH (rewritten Sep 24, 2026) ─────────────────────────────────────────
+// History: this page first shared the app's Supabase client storage key —
+// two clients refreshing one token in two tabs deadlocked the app tab
+// (Sep 6–8). The fix was a SEPARATE Gallery login, which caused the next
+// two problems: a second sign-in, and a Gallery that could sit on a
+// different account than the app.
+//
+// Now the Gallery has no Supabase client and no login of its own. It only
+// READS the app's saved session from localStorage and sends that access
+// token to media-gallery.js. It never refreshes or writes the token, so it
+// can't contend with the app for it — the original deadlock can't recur —
+// and it is always on exactly the account the app is on. While the app is
+// open, the app keeps the token fresh; if the app signs out (or the token
+// lapses with the app closed), this page shows "Open Smart Stage PRO".
+const APP_AUTH_KEY = 'sb-dnpaenpwdhjmslymgkse-auth-token';
+window.name = 'ssp-gallery';
+try { localStorage.removeItem('gallery-sb-auth-token'); } catch (e) {} // old separate Gallery login
 
-// FIX (Sep 24, 2026): this page keeps its OWN session (storageKey
-// 'gallery-sb-auth-token'), separate from the main app. Before this fix it
-// never checked which account that was, so a Gallery tab could keep showing
-// the account someone signed into here earlier (e.g. demo@) while the main
-// app was signed in as a different user — it looked exactly like a data
-// leak. media-gallery.js was always scoping correctly to whoever THIS page
-// was signed in as. Now:
-//   - the signed-in account is always shown at the top;
-//   - if the main app (same browser) is signed in as a different user, this
-//     page signs itself out and asks for that account instead.
-function mainAppUser() {
+function readAppSession() {
+  let best = null;
   try {
     for (const k of Object.keys(localStorage)) {
-      if (k === 'gallery-sb-auth-token') continue;
-      if (!/^sb-.*-auth-token(-r\d+)?$/.test(k)) continue;
-      const parsed = JSON.parse(localStorage.getItem(k) || 'null');
-      if (!parsed?.access_token || !parsed?.user?.id) continue;
-      if (parsed.expires_at && parsed.expires_at * 1000 < Date.now()) continue;
-      return { id: parsed.user.id, email: parsed.user.email || '' };
+      if (k !== APP_AUTH_KEY && !(k.startsWith(APP_AUTH_KEY + '-r') && /^-r\d+$/.test(k.slice(APP_AUTH_KEY.length)))) continue;
+      const p = JSON.parse(localStorage.getItem(k) || 'null');
+      if (!p?.access_token || !p?.user?.id || !p?.expires_at) continue;
+      if (p.expires_at * 1000 < Date.now() + 30000) continue; // expired or about to
+      if (!best || p.expires_at > best.expires_at) best = p;
     }
-  } catch (e) { /* storage unreadable — skip the check */ }
-  return null;
+  } catch (e) { /* unreadable storage → treated as signed out */ }
+  return best;
 }
 
-// Returns true if the Gallery session was dropped for belonging to a
-// different account than the main app.
-async function enforceSameAccount(session) {
-  const main = mainAppUser();
-  if (!main || !session?.user || main.id === session.user.id) return false;
-  try { await withAuthTimeout(getSb().auth.signOut({ scope: 'local' }), 5000, 'signOut()'); }
-  catch (e) { /* cleared below regardless */ }
-  try { localStorage.removeItem('gallery-sb-auth-token'); } catch (e) {}
-  showLogin(`You're signed in to Smart Stage PRO as ${main.email || 'a different account'}. Sign in here with that account to see its listings.`);
-  if (main.email) loginEmail.value = main.email;
-  return true;
+let _sessionUserId = null;
+
+function initAuth() {
+  const s = readAppSession();
+  if (s) { _sessionUserId = s.user.id; showApp(s); } else showLogin();
+  // The app writes its session to localStorage; other tabs get a
+  // "storage" event for every change — sign-in, sign-out, token refresh.
+  window.addEventListener('storage', (e) => { if (!e.key || e.key.startsWith(APP_AUTH_KEY)) recheckSession(); });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') recheckSession(); });
 }
 
-async function initAuth() {
-  const sb = getSb();
-  let session;
-  try {
-    const result = await withAuthTimeout(sb.auth.getSession(), 8000, 'getSession()');
-    session = result.data.session;
-  } catch (stallErr) {
-    // getSession() never resolved — fail into the same path as "no session"
-    // rather than leaving the page frozen with no login screen and no menu.
-    console.warn('Gallery auth init stalled:', stallErr.message);
-    showLogin();
-    return;
+function recheckSession() {
+  const s = readAppSession();
+  if (!s) { _sessionUserId = null; showLogin(); return; }
+  if (s.user.id !== _sessionUserId || appEl.style.display === 'none') {
+    _sessionUserId = s.user.id;
+    cardsEl.innerHTML = '';
+    showApp(s); // different account (or back from signed-out) → reload its listings
   }
-  if (session?.user) {
-    if (!(await enforceSameAccount(session))) showApp(session);
-  } else {
-    showLogin();
-  }
-  sb.auth.onAuthStateChange((event, session) => {
-    if (event === 'SIGNED_IN' && session?.user) {
-      // Deferred: Supabase advises against calling auth methods inside this callback.
-      setTimeout(async () => { if (!(await enforceSameAccount(session))) showApp(session); }, 0);
-    }
-    else if (event === 'SIGNED_OUT') showLogin();
-  });
-
-  // A Gallery tab can sit open while the user switches accounts in the
-  // main app — re-check whenever this tab comes back into view.
-  document.addEventListener('visibilitychange', async () => {
-    if (document.visibilityState !== 'visible') return;
-    try {
-      const r = await withAuthTimeout(getSb().auth.getSession(), 8000, 'getSession()');
-      const s = r.data.session;
-      if (s?.user) await enforceSameAccount(s);
-    } catch (e) { /* stall — leave the page as is */ }
-  });
 }
 
-function showLogin(note) {
+function showLogin() {
   loginScreen.style.display = 'flex';
   appEl.style.display = 'none';
-  const noteEl = document.getElementById('loginNote');
-  if (noteEl) {
-    noteEl.textContent = note || '';
-    noteEl.style.display = note ? 'block' : 'none';
-  }
 }
 
 function showApp(session) {
@@ -383,54 +303,28 @@ function showApp(session) {
   runSearch('');
 }
 
-async function doLogin() {
-  loginError.style.display = 'none';
-  loginBtn.disabled = true;
-  loginBtn.textContent = 'Signing in...';
-  try {
-    const sb = getSb();
-    const { error } = await sb.auth.signInWithPassword({
-      email: loginEmail.value.trim(),
-      password: loginPassword.value,
-    });
-    if (error) throw error;
-    // onAuthStateChange fires showApp()
-  } catch (err) {
-    loginError.textContent = err.message || 'Sign in failed.';
-    loginError.style.display = 'block';
-  } finally {
-    loginBtn.disabled = false;
-    loginBtn.textContent = 'Sign In';
-  }
-}
-
-loginBtn.addEventListener('click', doLogin);
-loginPassword.addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
-
-signoutBtn.addEventListener('click', async () => {
-  await getSb().auth.signOut();
-});
-
-// Every call to media-gallery.js needs the current session's access token —
-// the function verifies it server-side and scopes results to whoever it
-// belongs to (see media-gallery.js's own comments).
 async function authedFetch(url) {
-  const sb = getSb();
-  let session;
-  try {
-    const result = await withAuthTimeout(sb.auth.getSession(), 8000, 'getSession()');
-    session = result.data.session;
-  } catch (stallErr) {
-    // Same fail path as the existing !session case below — every caller
-    // already handles this thrown error, so a stall now surfaces the same
-    // way instead of hanging every gallery search/fetch forever.
-    showLogin();
-    throw new Error('Session expired — please sign in again.');
-  }
-  if (!session) { showLogin(); throw new Error('Session expired — please sign in again.'); }
-  return fetch(url, { headers: { 'Authorization': `Bearer ${session.access_token}` } });
+  const s = readAppSession();
+  if (!s) { showLogin(); throw new Error('Signed out — sign in to Smart Stage PRO.'); }
+  if (s.user.id !== _sessionUserId) { recheckSession(); throw new Error('Account changed — reloading.'); }
+  return fetch(url, { headers: { 'Authorization': `Bearer ${s.access_token}` } });
 }
 
+// ── SWITCHING TABS ───────────────────────────────────────────────────────
+// Jump to the app's existing tab (index.html names itself 'ssp-app')
+// instead of opening another copy of the app every time.
+function goToApp(e) {
+  if (e) e.preventDefault();
+  let w = null;
+  try { w = window.open('', 'ssp-app'); } catch (err) {}
+  if (!w) { window.location.href = '/'; return; }
+  try {
+    if (!w.location.href || w.location.href === 'about:blank') w.location.href = '/';
+    w.focus();
+  } catch (err) { window.location.href = '/'; }
+}
+document.getElementById('backToAppBtn').addEventListener('click', goToApp);
+document.getElementById('openAppBtn').addEventListener('click', goToApp);
 
 // ── LISTINGS (redesigned Sep 24, 2026 — card grid with cover photos) ─────
 

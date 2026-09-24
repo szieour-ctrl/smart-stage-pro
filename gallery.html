@@ -7,94 +7,219 @@
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&family=DM+Sans:wght@300;400;500;700&display=swap" rel="stylesheet" />
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.90.0/dist/umd/supabase.min.js"></script>
 <style>
-:root{--ink:#1a1714;--cream:#f7f4ef;--warm:#e8e0d4;--gold:#b8975a;--gold-light:#d4b87a;--muted:#7a6f63;--danger:#c0392b;--success:#2d6a4f;--border:#ddd5c8;--sky:#3a7ca5;--shadow:0 2px 20px rgba(26,23,20,0.08);}
+:root{--ink:#1a1714;--ink-2:#241f1a;--cream:#f7f4ef;--warm:#e8e0d4;--gold:#b8975a;--gold-light:#d4b87a;--muted:#7a6f63;--danger:#c0392b;--success:#2d6a4f;--border:#ddd5c8;--shadow:0 2px 20px rgba(26,23,20,0.08);--shadow-lg:0 18px 40px rgba(26,23,20,0.16);}
 *{box-sizing:border-box;}
 body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);min-height:100vh;font-size:15px;line-height:1.6;margin:0;}
-.wrap{max-width:1000px;margin:0 auto;padding:32px 20px 80px;}
-h1{font-family:'Cormorant Garamond',serif;font-size:1.8rem;font-weight:400;margin:0 0 4px;}
-.sub{font-size:0.85rem;color:var(--muted);margin-bottom:28px;}
+a{color:inherit;}
+button{font-family:inherit;}
 
-/* ── Login screen ─────────────────────────────────────────── */
-.login-wrap{max-width:380px;margin:80px auto;padding:0 20px;}
-.login-panel{background:#fff;border:1px solid var(--border);border-radius:6px;padding:32px;box-shadow:var(--shadow);}
-.login-title{font-family:'Cormorant Garamond',serif;font-size:1.5rem;margin-bottom:6px;}
-.login-sub{font-size:0.82rem;color:var(--muted);margin-bottom:22px;}
-.login-input{width:100%;border:1px solid var(--border);border-radius:4px;padding:11px 14px;font-family:'DM Sans',sans-serif;font-size:0.9rem;color:var(--ink);background:var(--cream);margin-bottom:12px;}
-.login-input:focus{outline:none;border-color:var(--gold);}
-.login-btn{width:100%;background:var(--ink);color:var(--gold);border:none;border-radius:4px;padding:12px;font-size:0.85rem;font-weight:500;letter-spacing:0.04em;cursor:pointer;}
-.login-btn:hover{opacity:0.9;}
+/* ── Top bar (matches the app header) ─────────────────────── */
+.nav{background:var(--ink);color:#c8bfb0;position:sticky;top:0;z-index:20;box-shadow:0 1px 0 rgba(184,151,90,0.25);}
+.nav-inner{max-width:1240px;margin:0 auto;padding:12px 24px;display:flex;align-items:center;gap:18px;}
+.nav-logo{height:38px;width:auto;display:block;}
+.nav-title{font-family:'Cormorant Garamond',serif;color:var(--gold-light);font-size:1.25rem;font-weight:400;letter-spacing:0.02em;padding-left:18px;border-left:1px solid rgba(184,151,90,0.3);}
+.nav-spacer{flex:1;}
+.nav-chip{font-size:0.72rem;color:#c8bfb0;border:1px solid rgba(184,151,90,0.3);border-radius:3px;padding:6px 12px;white-space:nowrap;max-width:260px;overflow:hidden;text-overflow:ellipsis;}
+.nav-btn{font-size:0.72rem;letter-spacing:0.06em;text-transform:uppercase;color:#c8bfb0;background:none;border:1px solid rgba(184,151,90,0.3);border-radius:3px;padding:6px 14px;cursor:pointer;text-decoration:none;white-space:nowrap;}
+.nav-btn:hover{border-color:var(--gold);color:var(--gold-light);}
+
+/* ── Hero ─────────────────────────────────────────────────── */
+.hero{background:linear-gradient(180deg,var(--ink) 0%,var(--ink-2) 100%);color:var(--cream);padding:46px 0 70px;}
+.hero-inner{max-width:1240px;margin:0 auto;padding:0 24px;}
+.eyebrow{font-size:0.68rem;letter-spacing:0.16em;text-transform:uppercase;color:var(--gold);font-weight:600;margin-bottom:10px;}
+.hero h1{font-family:'Cormorant Garamond',serif;font-weight:300;font-size:2.8rem;line-height:1.08;margin:0 0 10px;}
+.hero h1 em{color:var(--gold-light);font-style:italic;}
+.hero p{color:#b9ae9f;font-size:0.92rem;max-width:620px;margin:0;}
+.search-wrap{max-width:1240px;margin:-30px auto 0;padding:0 24px;position:relative;z-index:5;}
+.search{display:flex;align-items:center;gap:12px;background:#fff;border:1px solid var(--border);border-radius:10px;padding:6px 8px 6px 18px;box-shadow:var(--shadow-lg);}
+.search svg{flex-shrink:0;color:var(--gold);}
+.search input{flex:1;border:none;outline:none;font-family:inherit;font-size:1rem;padding:12px 0;color:var(--ink);background:transparent;min-width:0;}
+.search .count{font-size:0.72rem;color:var(--muted);white-space:nowrap;padding-right:10px;}
+
+/* ── Listing cards ────────────────────────────────────────── */
+.main{max-width:1240px;margin:0 auto;padding:30px 24px 90px;}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:22px;}
+.card{background:#fff;border:1px solid var(--border);border-radius:10px;overflow:hidden;cursor:pointer;box-shadow:var(--shadow);transition:transform .18s ease,box-shadow .18s ease,border-color .18s ease;text-align:left;padding:0;display:flex;flex-direction:column;}
+.card:hover,.card:focus-visible{transform:translateY(-3px);box-shadow:var(--shadow-lg);border-color:var(--gold);outline:none;}
+.card-cover{position:relative;aspect-ratio:4/3;background:var(--warm);overflow:hidden;}
+.card-cover img{width:100%;height:100%;object-fit:cover;display:block;transition:transform .5s ease;}
+.card:hover .card-cover img{transform:scale(1.04);}
+.card-cover .noimg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:0.78rem;}
+.card-badge{position:absolute;top:12px;left:12px;background:rgba(26,23,20,0.78);color:var(--gold-light);font-size:0.62rem;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;padding:4px 9px;border-radius:20px;}
+.card-body{padding:16px 18px 18px;}
+.card-addr{font-family:'Cormorant Garamond',serif;font-size:1.3rem;line-height:1.2;color:var(--ink);}
+.card-city{font-size:0.76rem;color:var(--muted);margin-top:2px;}
+.card-meta{display:flex;gap:14px;margin-top:12px;padding-top:12px;border-top:1px solid rgba(26,23,20,0.08);font-size:0.72rem;color:var(--muted);}
+.card-meta strong{color:var(--ink);font-weight:600;}
+
+/* ── Listing detail ───────────────────────────────────────── */
+.detail-head{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:22px;}
+.back{background:none;border:none;color:var(--gold);font-size:0.78rem;letter-spacing:0.06em;text-transform:uppercase;cursor:pointer;padding:0;margin-bottom:10px;}
+.back:hover{color:var(--ink);}
+.detail-addr{font-family:'Cormorant Garamond',serif;font-weight:400;font-size:2.2rem;line-height:1.1;margin:0;}
+.detail-sub{font-size:0.8rem;color:var(--muted);margin-top:4px;}
+.seg{display:inline-flex;background:#fff;border:1px solid var(--border);border-radius:30px;padding:4px;}
+.seg button{border:none;background:none;padding:8px 18px;border-radius:30px;font-size:0.8rem;color:var(--muted);cursor:pointer;}
+.seg button.active{background:var(--ink);color:var(--gold-light);}
+.chips{display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;margin-bottom:20px;scrollbar-width:thin;}
+.chip{flex-shrink:0;border:1px solid var(--border);background:#fff;border-radius:30px;padding:7px 14px;font-size:0.78rem;color:var(--ink);cursor:pointer;white-space:nowrap;}
+.chip span{color:var(--muted);margin-left:4px;}
+.chip.active{background:var(--gold);border-color:var(--gold);color:var(--ink);}
+.chip.active span{color:rgba(26,23,20,0.7);}
+.room-block{margin-bottom:34px;}
+.room-title{display:flex;align-items:baseline;gap:10px;font-family:'Cormorant Garamond',serif;font-size:1.35rem;margin:0 0 12px;}
+.room-title span{font-family:'DM Sans',sans-serif;font-size:0.72rem;color:var(--muted);}
+.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px;}
+.tile{position:relative;border-radius:8px;overflow:hidden;background:var(--warm);aspect-ratio:4/3;cursor:pointer;box-shadow:var(--shadow);}
+.tile img{width:100%;height:100%;object-fit:cover;display:block;}
+.tile-type{position:absolute;top:10px;left:10px;font-size:0.6rem;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;padding:3px 8px;border-radius:20px;}
+.tile-type.final{background:var(--gold);color:var(--ink);}
+.tile-type.original{background:rgba(255,255,255,0.9);color:var(--ink);}
+.tile-type.marketing{background:var(--ink);color:var(--gold-light);}
+.tile-over{position:absolute;inset:0;background:linear-gradient(180deg,rgba(26,23,20,0) 40%,rgba(26,23,20,0.82) 100%);opacity:0;transition:opacity .18s;display:flex;align-items:flex-end;justify-content:space-between;gap:8px;padding:12px;}
+.tile:hover .tile-over,.tile:focus-within .tile-over{opacity:1;}
+.tile-name{color:#fff;font-size:0.76rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.tile-actions{display:flex;gap:6px;flex-shrink:0;}
+.tbtn{border:none;border-radius:4px;padding:6px 10px;font-size:0.7rem;font-weight:600;cursor:pointer;background:#fff;color:var(--ink);}
+.tbtn.gold{background:var(--gold);}
+
+/* ── Lightbox ─────────────────────────────────────────────── */
+.lb{position:fixed;inset:0;background:rgba(15,13,11,0.94);z-index:50;display:none;flex-direction:column;}
+.lb.open{display:flex;}
+.lb-top{display:flex;align-items:center;gap:12px;padding:14px 20px;color:#c8bfb0;}
+.lb-title{flex:1;font-family:'Cormorant Garamond',serif;font-size:1.2rem;color:var(--cream);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.lb-stage{flex:1;display:flex;align-items:center;justify-content:center;padding:0 20px 20px;min-height:0;}
+.lb-stage img{max-width:100%;max-height:100%;object-fit:contain;border-radius:4px;box-shadow:0 20px 60px rgba(0,0,0,0.5);}
+.lb .seg{background:rgba(255,255,255,0.06);border-color:rgba(184,151,90,0.3);}
+.lb .seg button{color:#c8bfb0;}
+.lb .seg button.active{background:var(--gold);color:var(--ink);}
+
+/* ── States, toast ────────────────────────────────────────── */
+.empty{background:#fff;border:1px dashed var(--border);border-radius:12px;padding:56px 24px;text-align:center;max-width:620px;margin:10px auto;}
+.empty h3{font-family:'Cormorant Garamond',serif;font-weight:400;font-size:1.7rem;margin:12px 0 6px;}
+.empty p{color:var(--muted);font-size:0.88rem;margin:0 auto 20px;max-width:420px;}
+.cta{display:inline-block;background:var(--ink);color:var(--gold-light);text-decoration:none;border-radius:6px;padding:11px 22px;font-size:0.82rem;font-weight:600;letter-spacing:0.03em;}
+.cta:hover{opacity:0.9;}
+.skel{background:linear-gradient(90deg,#efe9e0 25%,#f7f2ea 50%,#efe9e0 75%);background-size:200% 100%;animation:sh 1.2s infinite;border-radius:10px;}
+@keyframes sh{0%{background-position:200% 0}100%{background-position:-200% 0}}
+.error-state{color:var(--danger);font-size:0.88rem;padding:16px 0;}
+.toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%) translateY(20px);background:var(--ink);color:var(--gold-light);padding:11px 20px;border-radius:30px;font-size:0.82rem;opacity:0;pointer-events:none;transition:all .2s;z-index:60;box-shadow:var(--shadow-lg);}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+
+/* ── Login ────────────────────────────────────────────────── */
+.login-page{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;background:radial-gradient(ellipse at top,#2b241d 0%,var(--ink) 60%);}
+.login-panel{background:var(--cream);border-radius:12px;max-width:400px;width:100%;overflow:hidden;box-shadow:0 30px 80px rgba(0,0,0,0.45);}
+.login-band{background:var(--ink);padding:22px 30px;display:flex;align-items:center;gap:14px;border-bottom:1px solid rgba(184,151,90,0.3);}
+.login-band img{height:40px;}
+.login-body{padding:28px 30px 30px;}
+.login-title{font-family:'Cormorant Garamond',serif;font-size:1.8rem;font-weight:400;margin:0 0 4px;}
+.login-sub{font-size:0.84rem;color:var(--muted);margin-bottom:20px;}
+.login-input{width:100%;border:1px solid var(--border);border-radius:6px;padding:12px 14px;font-family:inherit;font-size:0.92rem;color:var(--ink);background:#fff;margin-bottom:12px;}
+.login-input:focus{outline:none;border-color:var(--gold);box-shadow:0 0 0 3px rgba(184,151,90,0.15);}
+.login-btn{width:100%;background:var(--ink);color:var(--gold-light);border:none;border-radius:6px;padding:13px;font-size:0.86rem;font-weight:600;letter-spacing:0.04em;cursor:pointer;}
+.login-btn:hover{opacity:0.92;}
 .login-btn:disabled{opacity:0.5;cursor:default;}
 .login-error{color:var(--danger);font-size:0.8rem;margin-top:12px;}
+.login-note{background:rgba(184,151,90,0.12);border:1px solid rgba(184,151,90,0.35);border-radius:6px;padding:10px 12px;font-size:0.8rem;color:var(--ink);margin:0 0 16px;}
 
-/* ── Gallery UI ────────────────────────────────────────────── */
-.top-bar{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;}
-.signout-btn{background:none;border:1px solid var(--border);border-radius:3px;padding:6px 14px;font-size:0.75rem;color:var(--muted);cursor:pointer;font-family:inherit;}
-.signout-btn:hover{border-color:var(--gold);color:var(--ink);}
-.search-box{position:relative;margin-bottom:8px;}
-.search-input{width:100%;border:1px solid var(--border);border-radius:4px;padding:12px 16px;font-family:'DM Sans',sans-serif;font-size:0.95rem;color:var(--ink);background:#fff;}
-.search-input:focus{outline:none;border-color:var(--gold);}
-.results{border:1px solid var(--border);border-radius:4px;background:#fff;margin-top:4px;overflow:hidden;box-shadow:var(--shadow);}
-.result-item{padding:12px 16px;cursor:pointer;border-bottom:1px solid var(--border);transition:background 0.15s;}
-.result-item:last-child{border-bottom:none;}
-.result-item:hover{background:var(--warm);}
-.result-addr{font-size:0.9rem;color:var(--ink);}
-.result-meta{font-size:0.72rem;color:var(--muted);margin-top:2px;}
-.selected-bar{display:flex;align-items:center;justify-content:space-between;background:#fff;border:1px solid var(--border);border-radius:4px;padding:14px 18px;margin:20px 0;}
-.selected-addr{font-family:'Cormorant Garamond',serif;font-size:1.25rem;}
-.change-btn{background:none;border:1px solid var(--border);border-radius:3px;padding:6px 14px;font-size:0.75rem;color:var(--muted);cursor:pointer;font-family:inherit;}
-.change-btn:hover{border-color:var(--gold);color:var(--ink);}
-.room-section{margin-bottom:36px;}
-.room-title{font-family:'Cormorant Garamond',serif;font-size:1.2rem;margin-bottom:12px;padding-bottom:6px;border-bottom:1px solid var(--border);}
-.type-label{font-size:0.65rem;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);margin:14px 0 8px;}
-.thumb-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;}
-.thumb-card{cursor:pointer;border-radius:4px;overflow:hidden;border:2px solid transparent;background:var(--warm);transition:border-color 0.15s;position:relative;}
-.thumb-card:hover{border-color:var(--gold);}
-.thumb-card img{width:100%;aspect-ratio:4/3;object-fit:cover;display:block;}
-.thumb-copied{position:absolute;inset:0;background:rgba(45,106,79,0.88);color:#fff;display:flex;align-items:center;justify-content:center;font-size:0.8rem;font-weight:500;opacity:0;pointer-events:none;transition:opacity 0.15s;}
-.thumb-copied.show{opacity:1;}
-.empty-state{color:var(--muted);font-size:0.85rem;padding:40px 0;text-align:center;}
-.loading{color:var(--muted);font-size:0.85rem;padding:20px 0;}
-.error-state{color:var(--danger);font-size:0.85rem;padding:16px 0;}
+@media (max-width:720px){
+  .nav-title,.nav-chip{display:none;}
+  .hero{padding:34px 0 60px;}
+  .hero h1{font-size:2.1rem;}
+  .detail-addr{font-size:1.7rem;}
+  .tiles{grid-template-columns:repeat(2,1fr);gap:10px;}
+  .tile-over{opacity:1;background:linear-gradient(180deg,rgba(26,23,20,0) 55%,rgba(26,23,20,0.75) 100%);}
+  .tile-name{display:none;}
+}
 </style>
 </head>
 <body>
 
-<div id="loginScreen" class="login-wrap">
+<!-- LOGIN -->
+<div id="loginScreen" class="login-page" style="display:none;">
   <div class="login-panel">
-    <div class="login-title">Media Gallery</div>
-    <div class="login-sub">Sign in with your Smart Stage PRO account.</div>
-    <input id="loginEmail" class="login-input" type="email" placeholder="Email" autocomplete="username" />
-    <input id="loginPassword" class="login-input" type="password" placeholder="Password" autocomplete="current-password" />
-    <button id="loginBtn" class="login-btn">Sign In</button>
-    <div id="loginError" class="login-error" style="display:none;"></div>
-    <div id="loginNote" class="login-sub" style="display:none;margin-top:12px;"></div>
+    <div class="login-band"><img src="https://smart-stage-pro-media-938733852197-us-east-2-an.s3.us-east-2.amazonaws.com/smart-stage-marketing/Smart_Stage_PRO_Logo_zciwlo.png" alt="Smart Stage PRO™" /></div>
+    <div class="login-body">
+      <h1 class="login-title">Media Gallery</h1>
+      <div class="login-sub">Sign in with your Smart Stage PRO account.</div>
+      <div id="loginNote" class="login-note" style="display:none;"></div>
+      <input id="loginEmail" class="login-input" type="email" placeholder="Email" autocomplete="username" />
+      <input id="loginPassword" class="login-input" type="password" placeholder="Password" autocomplete="current-password" />
+      <button id="loginBtn" class="login-btn">Sign In</button>
+      <div id="loginError" class="login-error" style="display:none;"></div>
+    </div>
   </div>
 </div>
 
-<div id="app" class="wrap" style="display:none;">
-  <div class="top-bar">
-    <div>
-      <h1>Media Gallery</h1>
-      <div class="sub">Search a listing, click any photo to copy its URL.</div>
-      <div class="sub" id="signedInAs" style="margin-top:4px;font-size:0.78rem;"></div>
+<!-- APP -->
+<div id="app" style="display:none;">
+  <nav class="nav">
+    <div class="nav-inner">
+      <a href="/"><img class="nav-logo" src="https://smart-stage-pro-media-938733852197-us-east-2-an.s3.us-east-2.amazonaws.com/smart-stage-marketing/Smart_Stage_PRO_Logo_zciwlo.png" alt="Smart Stage PRO™" /></a>
+      <div class="nav-title">Media Gallery</div>
+      <div class="nav-spacer"></div>
+      <div class="nav-chip" id="signedInAs"></div>
+      <a class="nav-btn" href="/">Back to app</a>
+      <button class="nav-btn" id="signoutBtn">Sign out</button>
     </div>
-    <button class="signout-btn" id="signoutBtn">Sign Out</button>
-  </div>
+  </nav>
 
-  <div id="searchArea">
-    <div class="search-box">
-      <input id="searchInput" class="search-input" type="text" placeholder="Search by address..." autocomplete="off" />
-      <div id="results" class="results" style="display:none;"></div>
+  <!-- Listing list -->
+  <div id="listView">
+    <header class="hero">
+      <div class="hero-inner">
+        <div class="eyebrow">Your listing media</div>
+        <h1>Every photo, <em>ready to share.</em></h1>
+        <p>Originals and staged finals for each listing, organized by room. Click any photo to copy its link for MLS, email, or social.</p>
+      </div>
+    </header>
+    <div class="search-wrap">
+      <div class="search">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+        <input id="searchInput" type="text" placeholder="Search your listings by address…" autocomplete="off" />
+        <div class="count" id="listCount"></div>
+      </div>
     </div>
+    <main class="main"><div id="cards"></div></main>
   </div>
 
-  <div id="selectedBar" class="selected-bar" style="display:none;">
-    <div class="selected-addr" id="selectedAddr"></div>
-    <button class="change-btn" id="changeBtn">Change listing</button>
+  <!-- Listing detail -->
+  <div id="detailView" style="display:none;">
+    <main class="main" style="padding-top:34px;">
+      <button class="back" id="backBtn">← All listings</button>
+      <div class="detail-head">
+        <div>
+          <h1 class="detail-addr" id="detailAddr"></h1>
+          <div class="detail-sub" id="detailSub"></div>
+        </div>
+        <div class="seg" id="typeSeg">
+          <button data-type="final" class="active">Staged finals</button>
+          <button data-type="original">Originals</button>
+          <button data-type="all">All</button>
+        </div>
+      </div>
+      <div class="chips" id="roomChips"></div>
+      <div id="galleryArea"></div>
+    </main>
   </div>
-
-  <div id="galleryArea"></div>
 </div>
+
+<!-- Lightbox -->
+<div class="lb" id="lb" role="dialog" aria-modal="true">
+  <div class="lb-top">
+    <div class="lb-title" id="lbTitle"></div>
+    <div class="seg" id="lbSeg" style="display:none;">
+      <button data-v="final" class="active">Staged</button>
+      <button data-v="original">Original</button>
+    </div>
+    <button class="tbtn gold" id="lbCopy">Copy link</button>
+    <a class="tbtn" id="lbOpen" target="_blank" rel="noopener" style="text-decoration:none;">Open full size</a>
+    <button class="tbtn" id="lbClose" aria-label="Close">✕</button>
+  </div>
+  <div class="lb-stage"><img id="lbImg" alt="" /></div>
+</div>
+
+<div class="toast" id="toast"></div>
 
 <script>
 const FN = '/.netlify/functions/media-gallery';
@@ -145,6 +270,7 @@ function withAuthTimeout(promise, ms, label) {
   ]);
 }
 
+
 let searchTimer = null;
 
 const loginScreen = document.getElementById('loginScreen');
@@ -156,12 +282,11 @@ const loginError = document.getElementById('loginError');
 const signoutBtn = document.getElementById('signoutBtn');
 
 const searchInput = document.getElementById('searchInput');
-const resultsEl = document.getElementById('results');
-const searchArea = document.getElementById('searchArea');
-const selectedBar = document.getElementById('selectedBar');
-const selectedAddr = document.getElementById('selectedAddr');
+const cardsEl = document.getElementById('cards');
+const listCount = document.getElementById('listCount');
+const listView = document.getElementById('listView');
+const detailView = document.getElementById('detailView');
 const galleryArea = document.getElementById('galleryArea');
-const changeBtn = document.getElementById('changeBtn');
 
 // ── AUTH ──────────────────────────────────────────────────────────────────
 
@@ -241,7 +366,7 @@ async function initAuth() {
 }
 
 function showLogin(note) {
-  loginScreen.style.display = 'block';
+  loginScreen.style.display = 'flex';
   appEl.style.display = 'none';
   const noteEl = document.getElementById('loginNote');
   if (noteEl) {
@@ -306,7 +431,8 @@ async function authedFetch(url) {
   return fetch(url, { headers: { 'Authorization': `Bearer ${session.access_token}` } });
 }
 
-// ── SEARCH / GALLERY (unchanged behavior, now via authedFetch) ────────────
+
+// ── LISTINGS (redesigned Sep 24, 2026 — card grid with cover photos) ─────
 
 searchInput.addEventListener('input', () => {
   clearTimeout(searchTimer);
@@ -314,121 +440,264 @@ searchInput.addEventListener('input', () => {
   searchTimer = setTimeout(() => runSearch(q), 250);
 });
 
+function cardSkeletons(n) {
+  return `<div class="cards">${Array.from({ length: n }, () => '<div class="skel" style="height:300px;"></div>').join('')}</div>`;
+}
+
 async function runSearch(q) {
+  showListView();
+  if (!cardsEl.innerHTML.trim()) cardsEl.innerHTML = cardSkeletons(6);
   try {
     const res = await authedFetch(`${FN}?action=search-listings&q=${encodeURIComponent(q)}`);
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || `Search failed (${res.status})`);
-    renderResults(data.listings || []);
+    renderCards(data.listings || [], q);
   } catch (err) {
-    resultsEl.style.display = 'block';
-    resultsEl.innerHTML = `<div class="error-state" style="padding:12px 16px;">Search failed: ${escHtml(err.message)}</div>`;
+    cardsEl.innerHTML = `<div class="error-state">Couldn't load listings: ${escHtml(err.message)}</div>`;
   }
 }
 
-function renderResults(listings) {
+function splitAddress(addr) {
+  const s = String(addr || '');
+  const i = s.indexOf(',');
+  return i === -1 ? [s, ''] : [s.slice(0, i), s.slice(i + 1).trim()];
+}
+
+function renderCards(listings, q) {
+  listCount.textContent = listings.length ? `${listings.length} listing${listings.length === 1 ? '' : 's'}` : '';
   if (!listings.length) {
-    resultsEl.style.display = 'block';
-    resultsEl.innerHTML = `<div class="result-item" style="cursor:default;color:var(--muted);">No listings found.</div>`;
+    cardsEl.innerHTML = q
+      ? `<div class="empty"><h3>No matches</h3><p>No listing addresses match “${escHtml(q)}”.</p></div>`
+      : `<div class="empty">
+           <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#b8975a" stroke-width="1.4"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/></svg>
+           <h3>No listing photos yet</h3>
+           <p>Stage your first listing and its originals and staged finals will appear here automatically, organized by room.</p>
+           <a class="cta" href="/">Start a listing →</a>
+         </div>`;
     return;
   }
-  resultsEl.style.display = 'block';
-  resultsEl.innerHTML = listings.map(l => `
-    <div class="result-item" data-slug="${escAttr(l.slug)}" data-addr="${escAttr(l.address)}">
-      <div class="result-addr">${escHtml(l.address)}</div>
-      <div class="result-meta">${escHtml(new Date(l.created_at).toLocaleDateString())}</div>
-    </div>
-  `).join('');
-  resultsEl.querySelectorAll('.result-item[data-slug]').forEach(el => {
+  cardsEl.innerHTML = `<div class="cards">${listings.map(l => {
+    const [street, city] = splitAddress(l.address);
+    const date = l.created_at ? new Date(l.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+    const total = (l.finals || 0) + (l.originals || 0);
+    return `
+      <button class="card" data-slug="${escAttr(l.slug)}" data-addr="${escAttr(l.address)}">
+        <div class="card-cover">
+          ${l.coverUrl ? `<img src="${escAttr(l.coverUrl)}" alt="" loading="lazy" />` : `<div class="noimg">No photos yet</div>`}
+          ${l.finals ? `<div class="card-badge">${l.finals} staged</div>` : ''}
+        </div>
+        <div class="card-body">
+          <div class="card-addr">${escHtml(street)}</div>
+          <div class="card-city">${escHtml(city)}</div>
+          <div class="card-meta">
+            <div><strong>${total}</strong> photos</div>
+            <div><strong>${l.originals || 0}</strong> originals</div>
+            <div style="margin-left:auto;">${escHtml(date)}</div>
+          </div>
+        </div>
+      </button>`;
+  }).join('')}</div>`;
+  cardsEl.querySelectorAll('.card[data-slug]').forEach(el => {
     el.addEventListener('click', () => selectListing(el.dataset.slug, el.dataset.addr));
   });
 }
 
+function showListView() {
+  detailView.style.display = 'none';
+  listView.style.display = 'block';
+}
+
+document.getElementById('backBtn').addEventListener('click', () => {
+  showListView();
+  galleryArea.innerHTML = '';
+  window.scrollTo({ top: 0 });
+});
+
+// ── LISTING DETAIL ───────────────────────────────────────────────────────
+
+let _assets = [];
+let _typeFilter = 'final';
+let _roomFilter = 'all';
+let _address = '';
+
 function selectListing(slug, address) {
-  searchArea.style.display = 'none';
-  resultsEl.style.display = 'none';
-  searchInput.value = '';
-  selectedAddr.textContent = address;
-  selectedBar.style.display = 'flex';
+  _address = address;
+  _typeFilter = 'final';
+  _roomFilter = 'all';
+  const [street, city] = splitAddress(address);
+  document.getElementById('detailAddr').textContent = street;
+  document.getElementById('detailSub').textContent = city;
+  listView.style.display = 'none';
+  detailView.style.display = 'block';
+  window.scrollTo({ top: 0 });
+  setSeg('typeSeg', 'type', 'final');
+  document.getElementById('roomChips').innerHTML = '';
   loadAssets(slug);
 }
 
-changeBtn.addEventListener('click', () => {
-  selectedBar.style.display = 'none';
-  searchArea.style.display = 'block';
-  galleryArea.innerHTML = '';
-  searchInput.focus();
+function setSeg(id, attr, val) {
+  document.querySelectorAll(`#${id} button`).forEach(b => b.classList.toggle('active', b.dataset[attr] === val));
+}
+
+document.getElementById('typeSeg').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-type]');
+  if (!b) return;
+  _typeFilter = b.dataset.type;
+  setSeg('typeSeg', 'type', _typeFilter);
+  renderGallery();
 });
 
 async function loadAssets(slug) {
-  galleryArea.innerHTML = `<div class="loading">Loading photos...</div>`;
+  galleryArea.innerHTML = `<div class="tiles">${Array.from({ length: 8 }, () => '<div class="skel" style="aspect-ratio:4/3;"></div>').join('')}</div>`;
   try {
     const res = await authedFetch(`${FN}?action=assets&slug=${encodeURIComponent(slug)}`);
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || `Failed to load photos (${res.status})`);
-    renderGallery(data.assets || []);
+    _assets = data.assets || [];
+    const finals = _assets.filter(a => a.imageType === 'final').length;
+    const originals = _assets.filter(a => a.imageType === 'original').length;
+    const sub = splitAddress(_address)[1];
+    document.getElementById('detailSub').textContent = [sub, `${finals} staged · ${originals} originals`].filter(Boolean).join(' · ');
+    // Listings with originals but no finals yet open on Originals.
+    if (!finals && originals) { _typeFilter = 'original'; setSeg('typeSeg', 'type', 'original'); }
+    renderGallery();
   } catch (err) {
-    galleryArea.innerHTML = `<div class="error-state">Failed to load photos: ${escHtml(err.message)}</div>`;
+    galleryArea.innerHTML = `<div class="error-state">Couldn't load photos: ${escHtml(err.message)}</div>`;
   }
 }
 
-function renderGallery(assets) {
-  if (!assets.length) {
-    galleryArea.innerHTML = `<div class="empty-state">No cataloged photos for this listing yet.</div>`;
+function fileKey(a) {
+  // "listings/<slug>/finals/open-plan-01.jpg" → "open-plan-01" — pairs a
+  // staged final with its original of the same room/number.
+  const m = String(a.s3Key || '').match(/\/([^/]+)\.[a-z0-9]+$/i);
+  return m ? m[1] : null;
+}
+
+function visibleAssets() {
+  return _assets.filter(a =>
+    (_typeFilter === 'all' || a.imageType === _typeFilter) &&
+    (_roomFilter === 'all' || a.room === _roomFilter));
+}
+
+function renderChips() {
+  const pool = _assets.filter(a => _typeFilter === 'all' || a.imageType === _typeFilter);
+  const counts = {};
+  pool.forEach(a => { counts[a.room] = (counts[a.room] || 0) + 1; });
+  const rooms = Object.keys(counts).sort();
+  if (_roomFilter !== 'all' && !counts[_roomFilter]) _roomFilter = 'all';
+  const chips = document.getElementById('roomChips');
+  chips.innerHTML = rooms.length > 1
+    ? [`<button class="chip ${_roomFilter === 'all' ? 'active' : ''}" data-room="all">All rooms<span>${pool.length}</span></button>`]
+        .concat(rooms.map(r => `<button class="chip ${_roomFilter === r ? 'active' : ''}" data-room="${escAttr(r)}">${escHtml(r)}<span>${counts[r]}</span></button>`)).join('')
+    : '';
+  chips.querySelectorAll('.chip').forEach(c => c.addEventListener('click', () => { _roomFilter = c.dataset.room; renderGallery(); }));
+}
+
+function renderGallery() {
+  renderChips();
+  if (!_assets.length) {
+    galleryArea.innerHTML = `<div class="empty"><h3>No photos cataloged yet</h3><p>Photos appear here after you stage images for this listing.</p><a class="cta" href="/">Open Smart Stage PRO →</a></div>`;
     return;
   }
-
+  const list = visibleAssets();
+  if (!list.length) {
+    galleryArea.innerHTML = `<div class="empty"><h3>Nothing here yet</h3><p>No ${_typeFilter === 'final' ? 'staged finals' : 'photos'} for this selection.</p></div>`;
+    return;
+  }
+  const typeOrder = { final: 0, original: 1, marketing: 2 };
   const byRoom = {};
-  assets.forEach(a => {
-    if (!byRoom[a.room]) byRoom[a.room] = {};
-    if (!byRoom[a.room][a.imageType]) byRoom[a.room][a.imageType] = [];
-    byRoom[a.room][a.imageType].push(a);
-  });
-
-  const typeOrder = ['final', 'original', 'marketing'];
-  const typeLabel = { final: 'Finals', original: 'Originals', marketing: 'Marketing' };
-
+  list.forEach(a => { (byRoom[a.room] = byRoom[a.room] || []).push(a); });
+  const typeLabel = { final: 'Staged', original: 'Original', marketing: 'Marketing' };
   galleryArea.innerHTML = Object.keys(byRoom).sort().map(room => {
-    const types = byRoom[room];
-    const sections = typeOrder.filter(t => types[t]).map(t => `
-      <div class="type-label">${typeLabel[t]}</div>
-      <div class="thumb-grid">
-        ${types[t].map(a => thumbCardHtml(a)).join('')}
-      </div>
-    `).join('');
+    const items = byRoom[room].sort((x, y) => (typeOrder[x.imageType] ?? 9) - (typeOrder[y.imageType] ?? 9) || String(x.s3Key).localeCompare(String(y.s3Key)));
     return `
-      <div class="room-section">
-        <div class="room-title">${escHtml(room)}</div>
-        ${sections}
-      </div>
-    `;
+      <section class="room-block">
+        <h2 class="room-title">${escHtml(room)}<span>${items.length} photo${items.length === 1 ? '' : 's'}</span></h2>
+        <div class="tiles">
+          ${items.map(a => `
+            <div class="tile" data-idx="${_assets.indexOf(a)}" tabindex="0">
+              <img src="${escAttr(a.thumbnailUrl)}" alt="${escAttr(room)}" loading="lazy" />
+              <div class="tile-type ${escAttr(a.imageType)}">${typeLabel[a.imageType] || escHtml(a.imageType)}</div>
+              <div class="tile-over">
+                <div class="tile-name">${escHtml(fileKey(a) || room)}</div>
+                <div class="tile-actions">
+                  <button class="tbtn gold" data-act="copy">Copy link</button>
+                  <button class="tbtn" data-act="view">View</button>
+                </div>
+              </div>
+            </div>`).join('')}
+        </div>
+      </section>`;
   }).join('');
-
-  galleryArea.querySelectorAll('.thumb-card[data-url]').forEach(el => {
-    el.addEventListener('click', () => copyUrl(el));
+  galleryArea.querySelectorAll('.tile').forEach(t => {
+    const a = _assets[Number(t.dataset.idx)];
+    t.addEventListener('click', (e) => {
+      const act = e.target.closest('[data-act]')?.dataset.act;
+      if (act === 'view') openLightbox(a);
+      else copyLink(a.url);
+    });
+    t.addEventListener('keydown', (e) => { if (e.key === 'Enter') openLightbox(a); });
   });
 }
 
-function thumbCardHtml(a) {
-  return `
-    <div class="thumb-card" data-url="${escAttr(a.url)}">
-      <img src="${escAttr(a.thumbnailUrl)}" alt="${escAttr(a.room)}" loading="lazy" />
-      <div class="thumb-copied">Copied!</div>
-    </div>
-  `;
+// ── LIGHTBOX (with Staged / Original toggle when a pair exists) ──────────
+
+const lb = document.getElementById('lb');
+let _lbPair = null;
+let _lbCurrent = null;
+
+function openLightbox(a) {
+  const key = fileKey(a);
+  const partnerType = a.imageType === 'final' ? 'original' : a.imageType === 'original' ? 'final' : null;
+  const partner = partnerType && key ? _assets.find(x => x.imageType === partnerType && fileKey(x) === key) : null;
+  _lbPair = partner ? { final: a.imageType === 'final' ? a : partner, original: a.imageType === 'original' ? a : partner } : null;
+  document.getElementById('lbSeg').style.display = _lbPair ? 'inline-flex' : 'none';
+  document.getElementById('lbTitle').textContent = `${a.room} · ${splitAddress(_address)[0]}`;
+  showInLightbox(a);
+  lb.classList.add('open');
+  document.body.style.overflow = 'hidden';
 }
 
-async function copyUrl(el) {
-  const url = el.dataset.url;
+function showInLightbox(a) {
+  _lbCurrent = a;
+  document.getElementById('lbImg').src = a.url;
+  document.getElementById('lbOpen').href = a.url;
+  if (_lbPair) setSeg('lbSeg', 'v', a.imageType);
+}
+
+function closeLightbox() {
+  lb.classList.remove('open');
+  document.body.style.overflow = '';
+  document.getElementById('lbImg').removeAttribute('src');
+}
+
+document.getElementById('lbSeg').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-v]');
+  if (b && _lbPair) showInLightbox(_lbPair[b.dataset.v]);
+});
+document.getElementById('lbCopy').addEventListener('click', () => _lbCurrent && copyLink(_lbCurrent.url));
+document.getElementById('lbClose').addEventListener('click', closeLightbox);
+lb.addEventListener('click', (e) => { if (e.target === lb || e.target.classList.contains('lb-stage')) closeLightbox(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && lb.classList.contains('open')) closeLightbox(); });
+
+// ── COPY + TOAST ─────────────────────────────────────────────────────────
+
+let _toastTimer = null;
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => t.classList.remove('show'), 1600);
+}
+
+async function copyLink(url) {
   try {
     await navigator.clipboard.writeText(url);
+    toast('Link copied');
   } catch {
     window.prompt('Copy this URL:', url);
-    return;
   }
-  const badge = el.querySelector('.thumb-copied');
-  badge.classList.add('show');
-  setTimeout(() => badge.classList.remove('show'), 1000);
 }
 
 function escHtml(s) {

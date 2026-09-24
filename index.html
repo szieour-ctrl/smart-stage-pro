@@ -4885,6 +4885,7 @@ async function attachFinalToProject(finalBase64, room, orig, enhId) {
               siteUrl: window.location.origin,
               finalKey: sig.s3Key || null,
               originalKey: s3KeyFromUrl(orig?.originalUrl),
+              roomName: room?.roomName || null, // Sep 24: prospect page now shows every shot, labeled by room
             })
           });
           SESSION.prospectPageUrl = `${window.location.origin}/prospect/${_prospectSlug}`;
@@ -5637,6 +5638,7 @@ async function attachHeroShotToProject(finalBase64, room, shot, shotId) {
               siteUrl: window.location.origin,
               finalKey: sig.s3Key || null,
               originalKey: s3KeyFromUrl(orig?.originalUrl),
+              roomName: shot?.name || null, // Sep 24: prospect page now shows every shot, labeled by room
             })
           });
           SESSION.prospectPageUrl = `${window.location.origin}/prospect/${_prospectSlug}`;

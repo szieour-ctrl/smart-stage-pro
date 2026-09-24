@@ -968,6 +968,10 @@ function defaultEndMotionForEngine(presetKey, engine) {
 }
 
 let balance = null; // null = not yet loaded — real value comes from action=balance
+// Sep 24, 2026: free trial is Ken Burns only. Set from action=balance's
+// aiMotionAllowed; video-job.js enforces the same rule server-side.
+let AI_MOTION_LOCKED = false;
+const AI_MOTION_LOCKED_MSG = "AI Motion isn't included in the free trial — your trial video uses Ken Burns motion. Get a Listing Package or subscription to use AI Motion.";
 let generationCount = 1; // 1 = first generation; handleIterate() bumps this on every regenerate
 let frames = [];
 let frameIdCounter = 0;
@@ -2339,6 +2343,7 @@ function toggleContinuationMotion(id, checked) {
 
 function setMotion(id, motion) {
   const f = frames.find(x => x.id === id);
+  if (AI_MOTION_LOCKED && motion !== "kenburns") { alert(AI_MOTION_LOCKED_MSG); return; }
   f.motion = motion;
   if (motion === "kenburns" && !f.kenBurnsPreset) f.kenBurnsPreset = "auto";
   if (motion === "kling") f.preset = f.preset || null;
@@ -2878,7 +2883,8 @@ async function handleGenerate() {
       // Image-balance/subscription errors can come back here now.
       const MESSAGES = {
         insufficient_credits: `Not enough Images to cover this generation (needs ${data.required ?? "?"}, balance is ${data.balance ?? "?"}).`,
-        no_active_subscription: "This account doesn't have an active subscription.",
+        no_active_subscription: "This account doesn't have an active subscription, trial, or Listing Package.",
+        ai_motion_not_in_trial: AI_MOTION_LOCKED_MSG,
         dispatch_failed: "Couldn't start the render job — Images were not charged.",
       };
       throw new Error(MESSAGES[data.error] || data.error || "Failed to start render");
@@ -3098,13 +3104,20 @@ async function refreshBalanceDisplay() {
     const data = await res.json();
     balance = data.balance;
     document.getElementById("balanceDisplay").textContent = balance ?? "\u2014";
+    AI_MOTION_LOCKED = data.aiMotionAllowed === false;
+    if (AI_MOTION_LOCKED) {
+      // Anything an earlier session or auto-select set to AI Motion falls back to Ken Burns.
+      frames.forEach(f => { if (f.motion === "ltx" || f.motion === "kling") { f.motion = "kenburns"; f.kenBurnsPreset = f.kenBurnsPreset || "auto"; } });
+    }
 
     // FIX (July 13): the pool count previously only lived inside the
     // Confirm-step markup (quotaPill), so it was invisible on every other
     // step and never showed at all until a user reached Step 4. Now also
     // populates a persistent header chip, visible on every step, same as
     // the Image balance always is.
-    if (typeof data.klingPoolUsed === "number" && typeof data.klingPoolLimit === "number") {
+    if (AI_MOTION_LOCKED) {
+      document.getElementById("klingPoolDisplay").textContent = "Not in trial";
+    } else if (typeof data.klingPoolUsed === "number" && typeof data.klingPoolLimit === "number") {
       const remaining = Math.max(0, data.klingPoolLimit - data.klingPoolUsed);
       document.getElementById("klingPoolDisplay").textContent = `${remaining} of ${data.klingPoolLimit} free`;
     }

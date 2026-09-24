@@ -147,6 +147,13 @@
 [functions."project-manage"]
   timeout = 15
 
+# Sep 24, 2026: marketing-manage had no entry and ran on the 10s default.
+# A slow Blobs/Supabase lookup ran past it and Netlify returned its HTML
+# error page, which the Property Search couldn't parse as JSON. Matches
+# project-manage's 15s.
+[functions."marketing-manage"]
+  timeout = 15
+
 [functions."upload-staged"]
   timeout = 30
 

@@ -9,7 +9,10 @@ const https = require('https');
 // Valid plan names. Credit amounts live only in stripe-webhook.js
 // (Solo 50 / Team 125 / Brokerage 400) — the stale 100/300/1000 table that
 // used to be here was only ever used for validation.
-const VALID_PLANS = ['solo', 'team', 'brokerage'];
+// 'listing_package' (Sep 24, 2026) is the $59 one-time Listing Package —
+// Stripe mode 'payment', price STRIPE_PRICE_LISTING_PACKAGE. stripe-webhook.js
+// routes it by metadata.plan.
+const VALID_PLANS = ['solo', 'team', 'brokerage', 'listing_package'];
 
 // ── Supabase: verify JWT and get user record ─────────────
 function verifyJWT(authHeader) {
@@ -117,7 +120,7 @@ exports.handler = async function(event) {
   const { plan, teamName, brokerageName } = body;
 
   if (!VALID_PLANS.includes(plan)) {
-    return { statusCode: 400, body: JSON.stringify({ error: `Invalid plan: ${plan}. Must be solo, team, or brokerage.` }) };
+    return { statusCode: 400, body: JSON.stringify({ error: `Invalid plan: ${plan}. Must be solo, team, brokerage, or listing_package.` }) };
   }
 
   // ToS acceptance is REQUIRED and must be verifiable from the database.
@@ -134,8 +137,55 @@ exports.handler = async function(event) {
 
   // Never start a second subscription on top of a live one (e.g. a
   // past_due user landing on pricing). They manage it in Billing instead.
+  // Same rule for the Listing Package: a live subscriber already has
+  // everything it includes.
   if (userRecord.stripe_subscription_id && ['active', 'past_due'].includes(userRecord.subscription_status)) {
-    return { statusCode: 409, body: JSON.stringify({ error: 'You already have a subscription. Use Billing to manage it.' }) };
+    return { statusCode: 409, body: JSON.stringify({ error: plan === 'listing_package'
+      ? 'Your subscription already covers every listing — no package needed.'
+      : 'You already have a subscription. Use Billing to manage it.' }) };
+  }
+
+  const BASE_URL = process.env.SITE_URL || 'https://smartstagepro.com';
+
+  // ── Listing Package: one-time payment ──────────────────
+  if (plan === 'listing_package') {
+    const packagePrice = process.env.STRIPE_PRICE_LISTING_PACKAGE;
+    if (!packagePrice) {
+      return { statusCode: 500, body: JSON.stringify({ error: 'Stripe price ID not configured for the Listing Package' }) };
+    }
+    const pParams = {
+      'mode':                                'payment',
+      'payment_method_types[]':              'card',
+      'customer_email':                      authUser.email,
+      'line_items[0][price]':                packagePrice,
+      'line_items[0][quantity]':             '1',
+      'success_url':                         `${BASE_URL}?checkout=success&purchase=package&session_id={CHECKOUT_SESSION_ID}`,
+      'cancel_url':                          `${BASE_URL}?checkout=cancelled`,
+      'metadata[user_id]':                   authUser.id,
+      'metadata[plan]':                      'listing_package',
+      'metadata[terms_accepted_at]':         userRecord.terms_accepted_at,
+      'metadata[terms_version]':             userRecord.terms_version || '',
+      'payment_intent_data[metadata][user_id]': authUser.id,
+      'payment_intent_data[metadata][plan]':    'listing_package',
+    };
+    if (userRecord.stripe_customer_id) {
+      pParams['customer'] = userRecord.stripe_customer_id;
+      delete pParams['customer_email'];
+    } else {
+      // Payment mode doesn't create a Customer by default — we want one so
+      // receipts, the Billing portal and a later subscription all line up.
+      pParams['customer_creation'] = 'always';
+    }
+    const pResult = await stripePost('checkout/sessions', pParams);
+    if (pResult.status !== 200) {
+      console.error('Stripe package checkout error:', JSON.stringify(pResult.data));
+      return { statusCode: 500, body: JSON.stringify({ error: 'Stripe checkout session creation failed', detail: pResult.data?.error?.message }) };
+    }
+    return {
+      statusCode: 200,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: pResult.data.url, sessionId: pResult.data.id })
+    };
   }
 
   const PRICE_IDS = {
@@ -147,8 +197,6 @@ exports.handler = async function(event) {
   if (!PRICE_IDS[plan]) {
     return { statusCode: 500, body: JSON.stringify({ error: `Stripe price ID not configured for plan: ${plan}` }) };
   }
-
-  const BASE_URL = process.env.SITE_URL || 'https://smartstagepro.com';
 
   // Build Stripe checkout params
   const params = {

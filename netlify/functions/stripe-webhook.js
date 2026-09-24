@@ -24,6 +24,16 @@
 //  • Stripe statuses the users table's CHECK constraint doesn't allow
 //    (incomplete, paused, …) are no longer written raw — previously that
 //    PATCH failed silently.
+//
+// Sep 24, 2026 — $59 Listing Package (one-time payment, mode 'payment'):
+//  • checkout.session.completed with metadata.plan 'listing_package' is
+//    routed to onPackagePurchased() instead of the subscription path.
+//  • Each purchase = one listing_packages row (one listing slot) + 18 Images.
+//    App access runs 30 days from purchase; the claimed listing's compliance
+//    page stays live 6 months from purchase (ToS 2.1). Unused Images from an
+//    earlier, already-expired trial/package window are forfeited first.
+//  • Subscribing clears every per-listing compliance expiry the user has
+//    (trial/package listings become ordinary subscriber listings).
 
 const https  = require('https');
 const crypto = require('crypto');
@@ -40,6 +50,13 @@ const PLAN_CREDITS = {
 // ToS §6 — compliance pages + ZIP export stay available this long after the
 // paid period ends. compliance-page.js enforces it via users.data_expires_at.
 const POST_CANCEL_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+
+// ── Listing Package ($59, one-time) ───────────────────────
+const PACKAGE_IMAGES          = 18;                              // 15 staged + 3 (15 Smart Correct corrections)
+const PACKAGE_ACCESS_MS       = 30 * 24 * 60 * 60 * 1000;        // app access / slot-claim window
+const PACKAGE_EXPORT_MS       = 30 * 24 * 60 * 60 * 1000;        // ZIP export window after access ends
+const PACKAGE_COMPLIANCE_MONTHS = 6;                             // compliance page lifespan (ToS 2.1)
+const TRIAL_LENGTH_MS         = 30 * 24 * 60 * 60 * 1000;
 
 function getRoleFromPlan(plan) {
   return { solo: 'individual_agent', team: 'team_lead', brokerage: 'broker_admin' }[plan] || 'individual_agent';
@@ -117,16 +134,24 @@ async function getCurrentBalance(userId) {
   return r.data?.[0]?.balance_after ?? 0;
 }
 
-async function alreadyCredited(stripePaymentId) {
+async function alreadyCredited(stripePaymentId, type = 'monthly_allotment') {
   if (!stripePaymentId) return false;
   const r = await db('GET', 'credit_ledger', null,
-    `?stripe_payment_id=eq.${encodeURIComponent(stripePaymentId)}&type=eq.monthly_allotment&select=id&limit=1`);
+    `?stripe_payment_id=eq.${encodeURIComponent(stripePaymentId)}&type=eq.${type}&select=id&limit=1`);
   return Array.isArray(r.data) && r.data.length > 0;
 }
 
 // ── EVENT: checkout.session.completed ────────────────────
 // Fires when user completes payment. Creates subscription record + initial credits.
 async function onCheckoutComplete(session) {
+  if (session.mode === 'payment' && session.metadata?.plan === 'listing_package') {
+    return onPackagePurchased(session);
+  }
+  if (session.mode === 'payment') {
+    console.log(`stripe-webhook: payment-mode checkout ${session.id} with no known plan — ignored`);
+    return;
+  }
+
   const userId         = session.metadata?.user_id;
   const plan           = session.metadata?.plan || 'solo';
   const role           = getRoleFromPlan(plan);
@@ -147,7 +172,14 @@ async function onCheckoutComplete(session) {
     role,
     cancel_at:               null,
     cancelled_at:            null,
-    data_expires_at:         null
+    data_expires_at:         null,
+    package_access_expires_at: null
+  });
+
+  // 1b. Trial / package listings become ordinary subscriber listings — their
+  //     per-listing compliance expiry no longer applies.
+  await dbStrict('PATCH', `listings?user_id=eq.${userId}&compliance_expires_at=not.is.null`, {
+    compliance_expires_at: null
   });
 
   // 2. Add initial credit allotment to ledger (once per checkout session)
@@ -195,6 +227,116 @@ async function onCheckoutComplete(session) {
   }
 
   console.log(`stripe-webhook: checkout complete — user ${userId}, plan ${plan}, +${credits} credits`);
+}
+
+// ── EVENT: checkout.session.completed — Listing Package ───
+// One-time $59 payment. Retry-safe: the Image grant is keyed on the checkout
+// session id (credit_ledger.stripe_payment_id), and listing_packages has a
+// UNIQUE stripe_session_id, so a Stripe resend changes nothing.
+async function onPackagePurchased(session) {
+  const userId = session.metadata?.user_id;
+  if (!userId) { console.error('stripe-webhook: package checkout with no user_id'); return; }
+  if (session.payment_status !== 'paid') {
+    console.log(`stripe-webhook: package checkout ${session.id} not paid (${session.payment_status}) — skipping`);
+    return;
+  }
+
+  const uRes = await db('GET', 'users', null,
+    `?id=eq.${userId}&select=id,subscription_status,created_at,package_access_expires_at,data_expires_at,stripe_customer_id`);
+  const user = uRes.data?.[0];
+  if (!user) throw new Error(`package purchase for unknown user ${userId}`); // 500 → Stripe retries
+
+  const now          = Date.now();
+  const purchasedAt  = new Date(now);
+  const accessUntil  = new Date(now + PACKAGE_ACCESS_MS);
+  const exportUntil  = new Date(now + PACKAGE_ACCESS_MS + PACKAGE_EXPORT_MS);
+  const complianceUntil = new Date(purchasedAt);
+  complianceUntil.setUTCMonth(complianceUntil.getUTCMonth() + PACKAGE_COMPLIANCE_MONTHS);
+
+  // Does the user still have a live window whose Images should carry over?
+  const status = user.subscription_status;
+  const trialLive   = status === 'trial' && user.created_at &&
+                      (now - new Date(user.created_at).getTime()) <= TRIAL_LENGTH_MS;
+  const packageLive = status === 'package' && user.package_access_expires_at &&
+                      new Date(user.package_access_expires_at).getTime() > now;
+
+  if (await alreadyCredited(session.id, 'purchase')) {
+    console.log(`stripe-webhook: package ${session.id} already credited — skipping grant`);
+  } else {
+    let balance = await getCurrentBalance(userId);
+    // Leftover Images from an expired trial/package window don't ride along.
+    if (!trialLive && !packageLive && balance > 0) {
+      await dbStrict('POST', 'credit_ledger', {
+        user_id:           userId,
+        type:              'adjustment',
+        reason:            'expired_window_forfeit',
+        amount:            -balance,
+        balance_after:     0,
+        stripe_payment_id: `forfeit_${session.id}`,
+        description:       `Access window had ended — ${balance} unused Images forfeited before Listing Package`
+      });
+      balance = 0;
+    }
+    await dbStrict('POST', 'credit_ledger', {
+      user_id:           userId,
+      type:              'purchase',
+      reason:            'listing_package',
+      amount:            PACKAGE_IMAGES,
+      balance_after:     balance + PACKAGE_IMAGES,
+      stripe_payment_id: session.id,
+      description:       `Listing Package — ${PACKAGE_IMAGES} Images`
+    });
+  }
+
+  // The slot. ignore-duplicates on the UNIQUE stripe_session_id makes this retry-safe.
+  const pkgRes = await new Promise((resolve, reject) => {
+    const body = JSON.stringify({
+      user_id:                  userId,
+      stripe_session_id:        session.id,
+      stripe_payment_intent_id: session.payment_intent || null,
+      amount_cents:             session.amount_total ?? null,
+      images_granted:           PACKAGE_IMAGES,
+      purchased_at:             purchasedAt.toISOString(),
+      access_expires_at:        accessUntil.toISOString(),
+      compliance_expires_at:    complianceUntil.toISOString()
+    });
+    const url = new URL(`${process.env.SUPABASE_URL}/rest/v1/listing_packages?on_conflict=stripe_session_id`);
+    const req = https.request({
+      hostname: url.hostname, path: url.pathname + url.search, method: 'POST',
+      headers: {
+        'apikey':         process.env.SUPABASE_SERVICE_ROLE_KEY,
+        'Authorization':  `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
+        'Content-Type':   'application/json',
+        'Prefer':         'resolution=ignore-duplicates,return=minimal',
+        'Content-Length': Buffer.byteLength(body)
+      }
+    }, res => { res.resume(); res.on('end', () => resolve(res.statusCode)); });
+    req.on('error', reject);
+    req.write(body);
+    req.end();
+  });
+  if (pkgRes >= 300) throw new Error(`listing_packages insert failed with ${pkgRes}`);
+
+  // A cancelled subscriber's old listings were governed by the account-level
+  // 30-day window. Pin that date onto each listing before the status flip, so
+  // buying a package never revives pages that were scheduled to come down.
+  if (status === 'cancelled' && user.data_expires_at) {
+    await dbStrict('PATCH',
+      `listings?user_id=eq.${userId}&compliance_expires_at=is.null&package_id=is.null`,
+      { compliance_expires_at: user.data_expires_at });
+  }
+
+  // Latest window wins. Never downgrade a live subscriber (checkout blocks
+  // that, but a stale session could still land here).
+  const userPatch = {
+    package_access_expires_at: accessUntil.toISOString(),
+    data_expires_at:           exportUntil.toISOString()
+  };
+  if (session.customer && !user.stripe_customer_id) userPatch.stripe_customer_id = session.customer;
+  if (!['active', 'past_due'].includes(status)) userPatch.subscription_status = 'package';
+  await dbStrict('PATCH', `users?id=eq.${userId}`, userPatch);
+
+  console.log(`stripe-webhook: listing package — user ${userId}, +${PACKAGE_IMAGES} Images, access until ${accessUntil.toISOString()}, compliance until ${complianceUntil.toISOString()}`);
 }
 
 // ── EVENT: invoice.paid ───────────────────────────────────

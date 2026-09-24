@@ -8460,6 +8460,10 @@ async function signOut() {
     console.warn('signOut() itself stalled (known library issue) — cleared locally anyway, and next sign-in already gets a fresh client:', e.message);
   });
   Object.keys(localStorage).filter(k => k.startsWith('sb-')).forEach(k => localStorage.removeItem(k));
+  // Sep 24, 2026: gallery.html keeps its own session under a separate key
+  // (see its storageKey comment). Clear it too, so signing out of the app
+  // never leaves the Gallery signed in as the previous account.
+  try { localStorage.removeItem('gallery-sb-auth-token'); } catch (e) {}
   _currentUser = null;
   _userRecord = null;
   // FIX (Sep 16, 2026): SESSION was never cleared on sign-out at all — a
@@ -8858,7 +8862,7 @@ function subscriptionStatusChip() {
     return '<span style="font-size:0.7rem;color:var(--muted);font-weight:500;">· trial</span>';
   }
   if (rec.subscription_status === 'package') {
-    return `<span style="font-size:0.7rem;color:var(--muted);font-weight:500;">· Listing Package${rec.package_access_expires_at ? ' until ' + escHtml(fmtBillingDate(rec.package_access_expires_at)) : ''}</span>`;
+    return `<span style="font-size:0.7rem;color:var(--muted);font-weight:500;">Listing Package${rec.package_access_expires_at ? ' until ' + escHtml(fmtBillingDate(rec.package_access_expires_at)) : ''}</span>`;
   }
   return '<span style="font-size:0.7rem;color:var(--success);font-weight:500;">· active</span>';
 }
@@ -13075,7 +13079,7 @@ function renderDashboard(data, filter, search) {
       <div class="db-stat"><div class="db-stat-val">${stats.totalListings || 0}</div><div class="db-stat-label">Total Listings</div></div>
       <div class="db-stat"><div class="db-stat-val">${stats.totalImageSets || 0}</div><div class="db-stat-label">Staged Image Sets</div></div>
       <div class="db-stat"><div class="db-stat-val gold">${stats.creditsRemaining ?? '—'}</div><div class="db-stat-label">Images Remaining</div></div>
-      <div class="db-stat"><div class="db-stat-val" style="font-size:1rem;padding-top:4px;">${stats.plan || 'Solo'} ${subscriptionStatusChip()}</div><div class="db-stat-label">Subscription</div></div>
+      <div class="db-stat"><div class="db-stat-val" style="font-size:1rem;padding-top:4px;">${(_userRecord?.subscription_status === 'package') ? '' : (stats.plan || 'Solo')} ${subscriptionStatusChip()}</div><div class="db-stat-label">${['package','trial'].includes(_userRecord?.subscription_status) ? 'Plan' : 'Subscription'}</div></div>
     </div>
     <div class="db-filters">
       <button class="db-filter-btn ${filter==='all'?'active':''}" onclick="filterDashboard('all')">All</button>

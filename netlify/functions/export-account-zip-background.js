@@ -14,8 +14,8 @@
 // migration and staged_images still holds legacy Cloudinary URLs.
 // Soft-hidden images are excluded, same rule as the compliance page.
 //
-// Access: any signed-in user, EXCEPT a cancelled account whose 30-day window
-// (users.data_expires_at, ToS §6) has passed.
+// Access: any signed-in user, EXCEPT a cancelled, trial or Listing Package
+// account whose export window (users.data_expires_at, ToS §6) has passed.
 //
 // Memory: a whole account can be well over 1GB of full-res photos, so the
 // ZIP is never held in memory. archiver streams into an S3 multipart upload
@@ -236,8 +236,13 @@ exports.handler = async (event) => {
     const u = await supabaseGet("users", `?id=eq.${userId}&select=subscription_status,data_expires_at`);
     const rec = u.data?.[0];
     if (!rec) throw new Error("User record not found");
-    if (rec.subscription_status === "cancelled" &&
-        (!rec.data_expires_at || new Date(rec.data_expires_at) < new Date())) {
+    // Sep 24, 2026: trial and Listing Package accounts use the same
+    // data_expires_at export window (trial: signup + 60 days; package: last
+    // purchase + 60 days). A missing date only closes a cancelled account.
+    const st = rec.subscription_status;
+    const pastWindow = rec.data_expires_at && new Date(rec.data_expires_at) < new Date();
+    if ((st === "cancelled" && (!rec.data_expires_at || pastWindow)) ||
+        ((st === "trial" || st === "package") && pastWindow)) {
       await writeStatus({ status: "failed", error: "export_window_closed" });
       return;
     }

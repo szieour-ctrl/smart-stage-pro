@@ -156,10 +156,22 @@ async function getDisclosedVideoJobs(projectId) {
 // Fails OPEN: if the owner lookup errors or the listing/user can't be found,
 // the page renders normally. Only a positively confirmed expired
 // cancellation takes a page down.
+//
+// Sep 24, 2026: per-listing expiry. listings.compliance_expires_at, when
+// set, is authoritative for that listing — trial listings (signup + 60
+// days), Listing Package listings (purchase + 6 months, ToS 2.1), and a
+// cancelled subscriber's old listings once they buy a package. Support
+// extensions = editing that one date. Subscribing clears it. Still fails
+// open: only a positively confirmed past date takes a page down.
 async function isComplianceWindowClosed(projectId) {
   try {
-    const l = await supabaseGet("listings", `?project_id=eq.${encodeURIComponent(projectId)}&select=user_id&limit=1`);
-    const ownerId = l.data?.[0]?.user_id;
+    const l = await supabaseGet("listings", `?project_id=eq.${encodeURIComponent(projectId)}&select=user_id,compliance_expires_at&limit=1`);
+    const listing = l.data?.[0];
+    if (listing?.compliance_expires_at) {
+      const t = new Date(listing.compliance_expires_at).getTime();
+      return Number.isFinite(t) && t < Date.now();
+    }
+    const ownerId = listing?.user_id;
     if (!ownerId) return false;
     const u = await supabaseGet("users", `?id=eq.${ownerId}&select=subscription_status,data_expires_at`);
     const owner = u.data?.[0];
@@ -479,8 +491,9 @@ ${videoTourSections}
       <strong>Record Retention Policy</strong><br>
       This compliance page is maintained by Smart Stage PRO™ for a minimum of 3 years from the date of
       project creation, in accordance with California DRE record retention requirements. If the associated
-      subscription is cancelled, this page will remain accessible for 30 days following cancellation,
-      after which all project files will be delivered to the agent of record via email archive.
+      subscription is cancelled, this page will remain accessible for 30 days following cancellation.
+      Pages created under a free trial or a Listing Package remain accessible for the period stated in the
+      Smart Stage PRO™ Terms of Service. Records are retained privately after a page goes offline.
     </div>
   </div>
   <div class="legal-video-disclosure">

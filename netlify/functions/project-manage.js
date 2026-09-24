@@ -239,6 +239,31 @@ function addressHash(address) {
 // upload-staged.js, matching this codebase's existing per-file style —
 // they only ever need to derive one as a fallback if a listing row
 // predates this column; the real value is written once, here.
+// FIX (Sep 24, 2026 — cross-account isolation): slugs used to be the bare
+// street address, so two agents staging the same address got the SAME slug —
+// and S3 keys (listings/<slug>/…) plus media_assets rows are keyed by slug
+// alone. Their photos landed in one shared folder and both agents' Gallery
+// showed both sets (confirmed: 635-equinox-loop, demo@ + johnpklein).
+// A slug is now unique per owner: if another account already holds the base
+// slug, this listing gets "-2", "-3", …. Same-owner repeats keep reusing
+// their own slug, exactly as before.
+async function uniqueSlugFor(address, userId) {
+  const base = slugifyAddress(address);
+  if (!base || !process.env.SUPABASE_URL) return base;
+  const r = await supabase("GET", "listings", null,
+    `?slug=like.${encodeURIComponent(base)}*&select=slug,user_id`);
+  const rows = Array.isArray(r.data) ? r.data : [];
+  const takenByOthers = new Set(rows.filter(x => x.user_id !== userId).map(x => x.slug));
+  if (!takenByOthers.has(base)) return base;
+  const mine = rows.find(x => x.user_id === userId && /-\d+$/.test(x.slug) && x.slug.replace(/-\d+$/, "") === base);
+  if (mine) return mine.slug;
+  for (let n = 2; n < 1000; n++) {
+    const candidate = `${base}-${n}`;
+    if (!takenByOthers.has(candidate)) return candidate;
+  }
+  return `${base}-${Date.now()}`;
+}
+
 function slugifyAddress(address) {
   return (address || "")
     .toLowerCase()
@@ -335,7 +360,7 @@ async function lookupProject(address, userId, env) {
         // Listing predates the slug column — derive one now and best-effort
         // patch it back so future uploads for this listing skip this branch.
         if (listingId && !slug) {
-          slug = slugifyAddress(project.address);
+          slug = await uniqueSlugFor(project.address, userId);
           if (slug) {
             // AWAITED (Aug 28, 2026 — fixed a real bug, not a hypothesis):
             // confirmed via live testing that Netlify Functions can tear
@@ -365,7 +390,7 @@ async function lookupProject(address, userId, env) {
               console.error("lookupProject: could not resolve user context for backfill (non-fatal):", e.message);
             }
           }
-          const backfillSlug = slugifyAddress(project.address);
+          const backfillSlug = await uniqueSlugFor(project.address, userId);
           const result = await insertListingWithRetry(withPlanFields({
             address: project.address,
             project_id: project.projectId,
@@ -447,7 +472,7 @@ async function createProject(address, agentInfo, siteUrl, userId, env) {
         slug = listingLookup.data?.[0]?.slug || null;
 
         if (listingId && !slug) {
-          slug = slugifyAddress(proj.address);
+          slug = await uniqueSlugFor(proj.address, userId);
           if (slug) {
             try {
               await supabase("PATCH", "listings", { slug }, `?project_id=eq.${proj.projectId}`);
@@ -460,7 +485,7 @@ async function createProject(address, agentInfo, siteUrl, userId, env) {
         // exists at all (not "a row with stale data", genuinely no row),
         // create one now rather than perpetuating the gap on every retry.
         if (!listingId) {
-          const backfillSlug = slugifyAddress(proj.address);
+          const backfillSlug = await uniqueSlugFor(proj.address, userId);
           const result = await insertListingWithRetry(withPlanFields({
             address: proj.address,
             project_id: proj.projectId,
@@ -514,7 +539,7 @@ async function createProject(address, agentInfo, siteUrl, userId, env) {
 
   // ── Write to Supabase listings table ──────────────────────────────────
   let listingId = null;
-  const slug = slugifyAddress(address);
+  const slug = await uniqueSlugFor(address, userId);
   if (process.env.SUPABASE_URL) {
     // FIX (Sep 16, 2026 — real bug, confirmed live for 11625 Tortuguero
     // Way): this used to be a single, unretried POST — a catch swallowed

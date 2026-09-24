@@ -1631,6 +1631,9 @@ async function lookupOrCreateProject(address) {
     });
     const data = await res.json();
 
+    // Sep 24, 2026: Listing Package account with no free slot for this address.
+    if (data.packageRequired) { showPackageRequiredCard(address); return; }
+
     if (data.exists) {
       // Project found
       SESSION.projectId = data.projectId;
@@ -1695,6 +1698,37 @@ async function lookupOrCreateProject(address) {
   }
 }
 
+// Sep 24, 2026 — a Listing Package covers exactly one listing. When the
+// account's package(s) are all claimed (or its 30-day window closed) and the
+// agent searches a different address, no project is created and staging
+// can't continue on it; they're offered a package for this address instead.
+function showPackageRequiredCard(address) {
+  const cardContent = document.getElementById('project-card-content');
+  const actions = document.getElementById('property-actions');
+  SESSION.projectId = null;
+  SESSION.listingId = null;
+  SESSION.complianceUrl = null;
+  SESSION.projectStatus = 'package-required';
+  if (cardContent) cardContent.innerHTML = `
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+      <span style="font-size:20px;">🏷️</span>
+      <div>
+        <div style="font-weight:500;font-size:14px;color:var(--ink);">This address needs its own Listing Package</div>
+        <div style="font-size:12px;color:var(--muted);">${escHtml(address)}</div>
+      </div>
+    </div>
+    <div style="background:var(--bg);border-radius:4px;padding:12px;font-size:12px;line-height:1.8;">
+      <div>Each $59 Listing Package covers one listing, and your package is already in use on another address.</div>
+      <div style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap;">
+        <button class="btn btn-primary" onclick="startCheckout('listing_package')">Get a Listing Package for this address — $59 →</button>
+        <button class="btn btn-ghost" onclick="showPricingPage(_currentUser, _userRecord)">Compare subscriptions</button>
+      </div>
+    </div>`;
+  const cont = document.getElementById('property-continue-btn');
+  if (cont) cont.style.display = 'none';
+  if (actions) actions.style.display = 'flex';
+}
+
 async function createNewProject(address) {
   const cardContent = document.getElementById('project-card-content');
   const actions = document.getElementById('property-actions');
@@ -1728,6 +1762,10 @@ async function createNewProject(address) {
       }),
     });
     const data = await res.json();
+
+    // Sep 24, 2026: Listing Package account with no free slot for this address.
+    if (data.packageRequired) { showPackageRequiredCard(address); return; }
+    if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
 
     SESSION.projectId = data.projectId;
     SESSION.listingId = data.listingId || null;
@@ -2160,7 +2198,7 @@ function generateBatchId() {
 // convention as Generate Final / Kling / video download. "No free lunch."
 // See smart-correct-usage.js for the quote/commit split this calls into.
 async function quoteSmartCorrectCharge(userId, count) {
-  const res = await fetch(`/.netlify/functions/smart-correct-usage?action=quote&userId=${encodeURIComponent(userId)}&count=${count}`);
+  const res = await fetch(`/.netlify/functions/smart-correct-usage?action=quote&userId=${encodeURIComponent(userId)}&count=${count}`, { headers: authJsonHeaders() });
   if (!res.ok) throw new Error('Failed to check Smart Correct balance');
   return res.json();
 }
@@ -2169,7 +2207,7 @@ async function commitSmartCorrectCharge(userId, correctionsCompleted) {
   try {
     const res = await fetch('/.netlify/functions/smart-correct-usage', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authJsonHeaders(),
       body: JSON.stringify({ userId, correctionsCompleted }),
     });
     const data = await res.json();
@@ -5199,7 +5237,7 @@ async function generateDraftCollage(roomId, sourceClean, selectedShots) {
   if (_sbUser) {
     const debitRes = await fetch('/.netlify/functions/debit-credit', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authJsonHeaders(),
       body: JSON.stringify({ userId: _sbUser.id, cost: 1, reason: 'hero_shot_draft_batch' }),
     });
     const debitData = await debitRes.json();
@@ -5369,7 +5407,7 @@ async function generateHeroShotFinal(roomId, shotId, qualityChoice) {
   if (_sbUser) {
     const debitRes = await fetch('/.netlify/functions/debit-credit', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authJsonHeaders(),
       body: JSON.stringify({ userId: _sbUser.id, cost: creditCost, reason: 'hero_shot_final' }),
     });
     const debitData = await debitRes.json();
@@ -6056,7 +6094,7 @@ async function generateFinal(roomId,enhId){
   if (_sbUser) {
     const debitRes = await fetch('/.netlify/functions/debit-credit', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authJsonHeaders(),
       body: JSON.stringify({ userId: _sbUser.id, cost: creditCost }),
     });
     const debitData = await debitRes.json();
@@ -7666,6 +7704,11 @@ function showOverageModal(balance, cost, actionLabel = 'Final') {
           style="background:linear-gradient(135deg,#c9a84c,#b8963e);color:#1a1a1a;border:none;border-radius:3px;padding:12px 24px;font-weight:700;font-size:0.9rem;cursor:pointer;letter-spacing:0.04em;">
           Upgrade Plan →
         </button>
+        ${['trial', 'package'].includes(_userRecord?.subscription_status) ? `
+        <button onclick="document.getElementById('overage-modal').remove();startCheckout('listing_package');"
+          style="background:transparent;color:#c9a84c;border:1px solid #c9a84c;border-radius:3px;padding:11px 24px;font-weight:600;font-size:0.85rem;cursor:pointer;">
+          Get a Listing Package — $59 (18 images)
+        </button>` : ''}
         <button onclick="document.getElementById('overage-modal').remove();"
           style="background:transparent;color:#888;border:1px solid #333;border-radius:3px;padding:10px 24px;font-size:0.85rem;cursor:pointer;">
           Cancel
@@ -8126,7 +8169,8 @@ const TRIAL_LENGTH_MS = 30 * 24 * 60 * 60 * 1000;
 // ToS check in handleAuthenticatedUser). 2.0 (Sep 2026): cancellation terms —
 // compliance pages stay live 30 days after the paid period ends, credits
 // forfeited, 30-day ZIP export window.
-const CURRENT_TERMS_VERSION = '2.0';
+// 2.1 (Sep 24, 2026): free trial and $59 Listing Package terms (Section 6A).
+const CURRENT_TERMS_VERSION = '2.1';
 function isTrialExpired(createdAt) {
   if (!createdAt) return false;
   return (Date.now() - new Date(createdAt).getTime()) > TRIAL_LENGTH_MS;
@@ -8218,12 +8262,32 @@ async function handleAuthenticatedUser(user) {
     return;
   }
 
+  // Listing Package ($59): full app while its 30-day access window is open —
+  // even at 0 Images, so the agent can still see the listing and download.
+  // Afterwards: the ended screen (ZIP + buy again) until data_expires_at,
+  // then pricing. debit-credit.js enforces the same window server-side.
+  if (status === 'package') {
+    const accessUntil = userRec.package_access_expires_at ? new Date(userRec.package_access_expires_at) : null;
+    if (accessUntil && accessUntil > new Date()) {
+      await showMainApp(user, userRec);
+      return;
+    }
+    const exportUntil = userRec.data_expires_at ? new Date(userRec.data_expires_at) : null;
+    if (exportUntil && exportUntil > new Date()) showAccountClosedPage(user, userRec);
+    else showPricingPage(user, userRec, 'package_expired');
+    return;
+  }
+
   // Trial. Expired trial blocks unconditionally, BEFORE the balance check —
   // unused balance was never meant to extend access past the promised
   // window. Mirrors debit-credit.js's identical check.
+  // Sep 24, 2026: an ended trial gets the same 30-day ZIP window as a
+  // cancelled subscription (data_expires_at = signup + 60 days).
   if (status === 'trial' || !status) {
     if (isTrialExpired(userRec.created_at)) {
-      showPricingPage(user, userRec, 'trial_expired');
+      const exportUntil = userRec.data_expires_at ? new Date(userRec.data_expires_at) : null;
+      if (exportUntil && exportUntil > new Date()) showAccountClosedPage(user, userRec);
+      else showPricingPage(user, userRec, 'trial_expired');
       return;
     }
     const sb = getSupabase();
@@ -8290,7 +8354,7 @@ async function refreshSmartCorrectUsageChip() {
   const chip = document.getElementById('header-smart-correct-badge');
   if (!chip || !_currentUser?.id) return;
   try {
-    const res = await fetch(`/.netlify/functions/smart-correct-usage?action=status&userId=${encodeURIComponent(_currentUser.id)}`);
+    const res = await fetch(`/.netlify/functions/smart-correct-usage?action=status&userId=${encodeURIComponent(_currentUser.id)}`, { headers: authJsonHeaders() });
     if (!res.ok) return;
     const data = await res.json();
     chip.textContent = `Smart Correct: ${data.correctionsTowardNextCredit} of 5 to next Image`;
@@ -8679,13 +8743,14 @@ function showTosModal(user) {
         </div>
       </div>
       <div id="tos-scroll" style="overflow-y:auto;flex:1;padding:24px 28px;font-size:0.82rem;color:var(--ink);line-height:1.7;" onscroll="checkTosScroll()">
-        <p style="margin-bottom:14px;"><strong>Smart Stage PRO™ Terms of Service</strong><br>Effective date: September 2026 · Version 2.0</p>
-        <p style="margin-bottom:10px;"><strong>1. AB 723 Compliance</strong><br>All staged images generated through this platform include mandatory disclosure overlays and are stored with compliance records per California AB 723 §10140.8. Each compliance record includes a public compliance page, which remains live while your subscription is active and for 30 days after your paid subscription period ends (see Section 6). You agree to use all staged images in compliance with California real estate disclosure laws, MetroList Rule 11.6.1, and applicable MLS rules. Staged images must be clearly labeled as virtually staged in all MLS and public marketing materials.</p>
+        <p style="margin-bottom:14px;"><strong>Smart Stage PRO™ Terms of Service</strong><br>Effective date: September 2026 · Version 2.1</p>
+        <p style="margin-bottom:10px;"><strong>1. AB 723 Compliance</strong><br>All staged images generated through this platform include mandatory disclosure overlays and are stored with compliance records per California AB 723 §10140.8. Each compliance record includes a public compliance page, which remains live while your subscription is active and for 30 days after your paid subscription period ends (see Section 6), or for the periods stated in Section 6A for free-trial and Listing Package listings. You agree to use all staged images in compliance with California real estate disclosure laws, MetroList Rule 11.6.1, and applicable MLS rules. Staged images must be clearly labeled as virtually staged in all MLS and public marketing materials.</p>
         <p style="margin-bottom:10px;"><strong>2. Staged Image Credits</strong><br>Your subscription includes a monthly allocation of staged images, shared across Smart Stage PRO and Smart Stage PRO Plus. Unused credits roll over for up to 3 months from the month they were allocated, after which they expire. Overage usage is billed at published rates. One platform credit equals one staged image generation or one photo used as a video frame.</p>
         <p style="margin-bottom:10px;"><strong>3. Permitted Use</strong><br>Smart Stage PRO™ is licensed for use by licensed California real estate professionals for legitimate listing marketing purposes. You may not resell, redistribute, or sublicense access to this platform.</p>
         <p style="margin-bottom:10px;"><strong>4. Image Ownership &amp; License</strong><br>You retain ownership of all original listing photographs you upload. By uploading images, you represent and warrant that you own them or hold all rights, licenses, and permissions necessary to upload and process them on this platform, and you are solely responsible for obtaining any permissions required from photographers, brokers, property owners, or other rights holders before uploading.<br><br>Staged images generated by the platform are licensed to you for real estate marketing use. You grant Smart Stage PRO™ a limited, non-exclusive license to process uploaded content for the purpose of providing the platform's services — including staging, image enhancement, AI-assisted rendering, video generation, and compliance documentation — including the right to transmit and sublicense uploaded content to the third-party service providers used to deliver the platform (see our Privacy Policy for the current list).<br><br>This license is revocable upon account cancellation, except that it survives — and remains irrevocable — as to content already incorporated into a published AB 723 compliance record. The platform retains the right to store original and staged images for AB 723 compliance purposes for a minimum of three years, regardless of subscription status, as required by California law. Records retained after a public compliance page is taken offline (see Section 6) are stored privately and are not publicly accessible.</p>
         <p style="margin-bottom:10px;"><strong>5. Privacy &amp; Data</strong><br>Property addresses, agent information, and staged images are stored securely and used solely to provide platform services and maintain AB 723 compliance records. We do not sell your data.</p>
         <p style="margin-bottom:10px;"><strong>6. Subscription &amp; Billing</strong><br>Subscriptions are billed monthly or annually. You may cancel at any time from the Billing menu in your account; access continues through the end of the paid period. Refunds are not provided for partial months.<br><br>When your paid period ends: (a) staging, correction, and video tools are no longer available; (b) all unused and rolled-over staged image credits are forfeited; (c) your public compliance pages remain live for 30 days, after which they are taken offline and replaced with a notice that the record is no longer publicly available; and (d) during those same 30 days you may sign in and download a ZIP file of the original and staged images for all of your listings. If a listing that uses a compliance page link or QR code is still active on an MLS or in other public marketing, you are responsible for replacing that link before the 30-day period ends. Resubscribing restores your compliance pages.</p>
+        <p style="margin-bottom:10px;"><strong>6A. Free Trial &amp; Listing Package</strong><br><em>Free trial.</em> The free trial lasts 30 days from signup and includes 5 staged images and 1 PRO Plus video with Ken Burns motion (AI Motion is not included). No payment card is required. When the trial ends, staging, correction, and video tools are no longer available and unused trial images are forfeited unless you subscribe. Compliance pages created during the trial remain live for 30 days after the trial ends, and during those same 30 days you may sign in and download a ZIP file of your listing images; after that the pages are taken offline as described in Section 6.<br><br><em>Listing Package.</em> A Listing Package is a one-time, non-subscription purchase for a single listing (one property address). It includes 18 images, usable for staging and Smart Correct™ (5 corrections use 1 image), and 1 PRO Plus video including 2 AI Motion frames. Tools and unused images are available for 30 days from purchase; unused images are forfeited after that. The package applies to the first listing you open or create after purchase and cannot be moved to a different address. That listing's compliance page remains live for 6 months from the date of purchase. If the listing is still actively marketed at the end of that period, you may contact support@smartstagepro.com to request an extension; extensions are granted at our discretion. You may download a ZIP file of your listing images for 30 days after the package's 30-day access period ends. Subscribing at any time converts your trial and package listings to your subscription, and their compliance pages then follow Section 6.</p>
         <p style="margin-bottom:10px;"><strong>7. Limitation of Liability &amp; Indemnification</strong><br>Smart Stage PRO™ is provided as-is. We are not responsible for MLS violations, disclosure errors, or regulatory penalties arising from your use of staged images. You are solely responsible for compliance with all applicable real estate laws and MLS rules.<br><br>You agree to indemnify, defend, and hold harmless Smart Stage PRO™ and its officers, employees, and service providers from and against any claims, damages, liabilities, costs, and expenses (including reasonable attorneys' fees) arising out of or related to: (a) your uploaded content, including any claim that it infringes a third party's copyright, trademark, privacy, or other rights; (b) your breach of the representations and warranties in Section 4; or (c) your violation of any applicable law, MLS rule, or disclosure requirement in connection with your use of the platform.</p>
         <p style="margin-bottom:20px;"><strong>8. Changes to Terms</strong><br>We may update these terms with 30 days notice. Continued use constitutes acceptance.</p>
         <p style="font-size:0.75rem;color:var(--muted);">Smart Stage PRO™ · support@smartstagepro.com</p>
@@ -8792,7 +8857,17 @@ function subscriptionStatusChip() {
   if (rec.subscription_status === 'trial') {
     return '<span style="font-size:0.7rem;color:var(--muted);font-weight:500;">· trial</span>';
   }
+  if (rec.subscription_status === 'package') {
+    return `<span style="font-size:0.7rem;color:var(--muted);font-weight:500;">· Listing Package${rec.package_access_expires_at ? ' until ' + escHtml(fmtBillingDate(rec.package_access_expires_at)) : ''}</span>`;
+  }
   return '<span style="font-size:0.7rem;color:var(--success);font-weight:500;">· active</span>';
+}
+
+// Sep 24, 2026: debit-credit.js and smart-correct-usage.js now require the
+// caller's login token (they used to trust any userId in the request).
+function authJsonHeaders() {
+  const jwt = readStoredSessionDirect()?.access_token;
+  return { 'Content-Type': 'application/json', ...(jwt ? { 'Authorization': 'Bearer ' + jwt } : {}) };
 }
 
 function billingJwtOrSignOut() {
@@ -8835,6 +8910,9 @@ function showBillingModal() {
 
   let statusLine = 'Your subscription is active.';
   if (rec.subscription_status === 'trial') statusLine = 'You are on the free trial.';
+  if (rec.subscription_status === 'package') {
+    statusLine = `You're using a Listing Package${rec.package_access_expires_at ? ` — tools and Images are available through ${escHtml(fmtBillingDate(rec.package_access_expires_at))}` : ''}. No subscription is active.`;
+  }
   if (rec.subscription_status === 'past_due') statusLine = 'Your last payment failed. Update your card to keep your account active.';
   if (rec.subscription_status === 'active' && rec.cancel_at) {
     statusLine = `Your subscription is set to end ${escHtml(fmtBillingDate(rec.cancel_at))}. You can undo the cancellation in Stripe before then.`;
@@ -8872,21 +8950,42 @@ function showAccountClosedPage(user, userRec) {
   hideAppUI();
   document.getElementById('account-closed-page')?.remove();
 
-  const endedOn   = fmtBillingDate(userRec.cancelled_at);
   const expiresOn = fmtBillingDate(userRec.data_expires_at);
   const hasStripe = !!userRec.stripe_customer_id;
+
+  // Sep 24, 2026: same screen for an ended trial / Listing Package.
+  const kind = userRec.subscription_status === 'trial' ? 'trial'
+             : userRec.subscription_status === 'package' ? 'package' : 'cancelled';
+  const endedOn = kind === 'trial'
+    ? fmtBillingDate(userRec.created_at ? new Date(new Date(userRec.created_at).getTime() + TRIAL_LENGTH_MS).toISOString() : null)
+    : kind === 'package' ? fmtBillingDate(userRec.package_access_expires_at)
+    : fmtBillingDate(userRec.cancelled_at);
+  const heading = kind === 'trial' ? 'Your free trial has ended'
+                : kind === 'package' ? 'Your Listing Package has ended'
+                : 'Your subscription has ended';
+  const introHtml = kind === 'trial'
+    ? `${endedOn ? `Your 30-day trial ended on ${escHtml(endedOn)}. ` : ''}Your trial compliance pages stay live until <strong style="color:var(--ink);">${escHtml(expiresOn)}</strong>, then they go offline.`
+    : kind === 'package'
+    ? `${endedOn ? `Your package's 30-day access ended on ${escHtml(endedOn)}. ` : ''}Your listing's compliance page stays live for 6 months from purchase. You can download your images until <strong style="color:var(--ink);">${escHtml(expiresOn)}</strong>.`
+    : `${endedOn ? `Your paid access ended on ${escHtml(endedOn)}. ` : ''}Your public compliance pages stay live until <strong style="color:var(--ink);">${escHtml(expiresOn)}</strong>, then they go offline.`;
 
   const page = document.createElement('div');
   page.id = 'account-closed-page';
   page.style.cssText = 'min-height:100vh;background:var(--cream);padding:48px 20px 80px;';
   page.innerHTML = `
     <div style="max-width:620px;margin:0 auto;">
-      <h1 style="font-family:'Cormorant Garamond',serif;font-size:2rem;color:var(--ink);margin-bottom:8px;">Your subscription has ended</h1>
+      <h1 style="font-family:'Cormorant Garamond',serif;font-size:2rem;color:var(--ink);margin-bottom:8px;">${heading}</h1>
       <p style="font-size:0.9rem;color:var(--muted);line-height:1.6;margin-bottom:24px;">
-        ${endedOn ? `Your paid access ended on ${escHtml(endedOn)}. ` : ''}Your public compliance pages stay live until <strong style="color:var(--ink);">${escHtml(expiresOn)}</strong>, then they go offline.
+        ${introHtml}
       </p>
 
-      <div style="background:rgba(192,57,43,0.06);border:1px solid rgba(192,57,43,0.3);border-radius:4px;padding:14px 16px;margin-bottom:24px;">
+      <div style="background:#fff;border:1px solid var(--gold);border-radius:4px;padding:20px;margin-bottom:24px;">
+        <div style="font-size:0.95rem;font-weight:600;color:var(--ink);margin-bottom:6px;">${kind === 'package' ? 'Next listing coming up?' : 'Not listing anything right now? No problem.'}</div>
+        <p style="font-size:0.8rem;color:var(--muted);line-height:1.5;margin-bottom:14px;">When your next listing comes up, get a $59 Listing Package — 18 images, 1 PRO Plus video with 2 AI Motion frames, and a compliance page that stays live for 6 months. No subscription required.</p>
+        <button onclick="startCheckout('listing_package')" class="btn btn-primary" style="width:100%;justify-content:center;">Get a Listing Package — $59 →</button>
+      </div>
+
+      <div style="background:rgba(192,57,43,0.06);${kind === 'package' ? 'display:none;' : ''}border:1px solid rgba(192,57,43,0.3);border-radius:4px;padding:14px 16px;margin-bottom:24px;">
         <div style="font-size:0.85rem;font-weight:600;color:#c0392b;margin-bottom:4px;">Listings still on MLS?</div>
         <div style="font-size:0.8rem;color:var(--ink);line-height:1.6;">If any listing still uses a Smart Stage PRO compliance link or QR code, replace it before ${escHtml(expiresOn)}. After that date the link will no longer show the original photos.</div>
       </div>
@@ -8898,8 +8997,8 @@ function showAccountClosedPage(user, userRec) {
       </div>
 
       <div style="background:#fff;border:1px solid var(--border);border-radius:4px;padding:20px;margin-bottom:24px;">
-        <div style="font-size:0.95rem;font-weight:600;color:var(--ink);margin-bottom:6px;">Come back anytime</div>
-        <p style="font-size:0.8rem;color:var(--muted);line-height:1.5;margin-bottom:14px;">Resubscribing restores your compliance pages and staging tools.</p>
+        <div style="font-size:0.95rem;font-weight:600;color:var(--ink);margin-bottom:6px;">${kind === 'cancelled' ? 'Come back anytime' : 'Listing more often?'}</div>
+        <p style="font-size:0.8rem;color:var(--muted);line-height:1.5;margin-bottom:14px;">${kind === 'cancelled' ? 'Resubscribing restores your compliance pages and staging tools.' : 'Subscribing keeps every compliance page live and unlocks your staging tools every month.'}</p>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
           <button onclick="startCheckout('solo')" class="btn btn-ghost" style="flex:1;min-width:140px;justify-content:center;border:1px solid var(--gold);">Subscribe — Solo →</button>
           <button onclick="startCheckout('team')" class="btn btn-ghost" style="flex:1;min-width:140px;justify-content:center;border:1px solid var(--gold);">Subscribe — Team →</button>
@@ -9014,16 +9113,22 @@ function showPricingPage(user, userRec, reason) {
 
   const urlParams = new URLSearchParams(window.location.search);
   const checkoutSuccess = urlParams.get('checkout') === 'success';
+  const packagePurchase = urlParams.get('purchase') === 'package';
   const trialExpired = reason === 'trial_expired';
+  const packageExpired = reason === 'package_expired';
 
   page.innerHTML = `
     ${checkoutSuccess ? `
     <div style="background:#2d6a4f;color:#fff;text-align:center;padding:14px;font-size:0.85rem;letter-spacing:0.04em;">
-      ✅ Subscription activated — welcome to Smart Stage PRO™! Loading your account...
+      ${packagePurchase ? '✅ Listing Package purchased — loading your account...' : '✅ Subscription activated — welcome to Smart Stage PRO™! Loading your account...'}
     </div>` : ''}
     ${trialExpired && !checkoutSuccess ? `
     <div style="background:var(--ink,#1a1714);color:#f0f0f0;text-align:center;padding:14px;font-size:0.85rem;letter-spacing:0.04em;">
-      Your 30-day free trial has ended. Choose a plan below to keep going — any Images left on your trial balance carry over.
+      Your 30-day free trial has ended. Get a Listing Package for your next listing, or subscribe — trial Images left on your balance carry over when you subscribe.
+    </div>` : ''}
+    ${packageExpired && !checkoutSuccess ? `
+    <div style="background:var(--ink,#1a1714);color:#f0f0f0;text-align:center;padding:14px;font-size:0.85rem;letter-spacing:0.04em;">
+      Your Listing Package has ended. When your next listing comes up, get another package — or subscribe if you're listing regularly.
     </div>` : ''}
     <div style="max-width:860px;margin:0 auto;padding:48px 20px 0;">
       <div style="text-align:center;margin-bottom:48px;">
@@ -9087,6 +9192,19 @@ function showPricingPage(user, userRec, reason) {
 
       </div>
 
+      <!-- LISTING PACKAGE (Sep 24, 2026) -->
+      <div style="background:#fff;border:1px solid var(--gold);border-radius:6px;padding:24px;box-shadow:var(--shadow);display:flex;flex-wrap:wrap;gap:16px 24px;align-items:center;margin-bottom:40px;">
+        <div style="flex:1 1 320px;">
+          <div style="font-family:'Cormorant Garamond',serif;font-size:1.4rem;color:var(--ink);margin-bottom:4px;">Listing Package</div>
+          <div style="font-size:0.85rem;color:var(--ink);line-height:1.6;">Only need Smart Stage PRO for one listing? Get the complete Listing Package — no subscription required.</div>
+          <div style="font-size:0.78rem;color:var(--muted);line-height:1.7;margin-top:6px;">18 images (staging + Smart Correct™) · 1 PRO Plus video with 2 AI Motion frames · Compliance page live 6 months · Use within 30 days</div>
+        </div>
+        <div style="flex:0 0 200px;text-align:center;">
+          <div style="font-size:2rem;font-weight:300;color:var(--gold);margin-bottom:8px;">$59<span style="font-size:0.9rem;color:var(--muted)"> one-time</span></div>
+          <button onclick="startCheckout('listing_package')" class="btn btn-primary" style="width:100%;justify-content:center;">Get the Listing Package →</button>
+        </div>
+      </div>
+
       <div style="text-align:center;font-size:0.78rem;color:var(--muted);line-height:1.8;">
         All plans include AB 723 compliance · Stripe secure billing · Cancel anytime<br>
         Questions? Contact <a href="mailto:sam@szrealestategroup.com" style="color:var(--gold);">sam@szrealestategroup.com</a>
@@ -9098,7 +9216,9 @@ function showPricingPage(user, userRec, reason) {
     setTimeout(async () => {
       const sb = getSupabase();
       const { data: updated } = await sb.from('users').select('*').eq('id', user.id).single();
-      if (updated?.subscription_status === 'active') {
+      if (updated?.subscription_status === 'active' ||
+          (packagePurchase && updated?.subscription_status === 'package' &&
+           updated?.package_access_expires_at && new Date(updated.package_access_expires_at) > new Date())) {
         page.remove();
         await showMainApp(user, updated);
         // Clean URL
@@ -9122,7 +9242,7 @@ async function startCheckout(plan) {
     if (!jwt) {
       showToast('Session expired — please sign in again.', 'error');
       showAuthModal('login');
-      if (btn) { btn.textContent = 'Subscribe — ' + plan.charAt(0).toUpperCase() + plan.slice(1) + ' →'; btn.disabled = false; }
+      if (btn) { btn.textContent = checkoutButtonLabel(plan); btn.disabled = false; }
       return;
     }
     const res = await fetch('/.netlify/functions/create-checkout-session', {
@@ -9135,8 +9255,13 @@ async function startCheckout(plan) {
     if (data.url) window.location.href = data.url;
   } catch (err) {
     showToast('Checkout error: ' + err.message, 'error');
-    if (btn) { btn.textContent = `Subscribe — ${plan.charAt(0).toUpperCase()+plan.slice(1)} →`; btn.disabled = false; }
+    if (btn) { btn.textContent = checkoutButtonLabel(plan); btn.disabled = false; }
   }
+}
+
+function checkoutButtonLabel(plan) {
+  if (plan === 'listing_package') return 'Get the Listing Package →';
+  return `Subscribe — ${plan.charAt(0).toUpperCase() + plan.slice(1)} →`;
 }
 
 
@@ -11421,7 +11546,7 @@ function showLandingPage() {
 
   /* ── CARD GRID ─────────────────────────────────────────────────────── */
   .pr-grid{
-    display:grid; grid-template-columns:repeat(4, 1fr); gap:18px;
+    display:grid; grid-template-columns:repeat(5, 1fr); gap:16px;
     align-items:stretch;
   }
 
@@ -11431,6 +11556,8 @@ function showLandingPage() {
     position:relative; min-width:0; box-shadow:0 18px 40px rgba(0,0,0,0.25);
   }
   .pr-card.trial{ background:var(--warm); }
+  .pr-card.package{ border:1px solid var(--gold); }
+  .pr-badge.alt{ background:var(--ink); color:var(--gold-light); border:1px solid var(--gold); }
   .pr-card.featured{ border:2px solid var(--gold); box-shadow:0 24px 55px rgba(184,151,90,0.28); }
 
   .pr-badge{
@@ -11485,7 +11612,10 @@ function showLandingPage() {
   .pr-overage strong{ color:var(--gold-light); }
   .pr-fineprint{ font-size:0.74rem; color:#8a8074; line-height:1.7; }
 
-  @media (max-width:1080px){
+  @media (max-width:1240px){
+    .pr-grid{ grid-template-columns:repeat(3, 1fr); row-gap:30px; }
+  }
+  @media (max-width:860px){
     .pr-grid{ grid-template-columns:repeat(2, 1fr); }
   }
   @media (max-width:600px){
@@ -11817,7 +11947,7 @@ function showLandingPage() {
     <div id="gs-panels-landing"></div>
 
     <div class="gs-cta-row">
-      <a href="#" class="pr-cta" onclick="hideLandingPage(); showAuthModal('signup'); return false;">Start Free Trial</a>
+      <a href="#" class="pr-cta" onclick="hideLandingPage(); showAuthModal('signup'); return false;">Try Free for 30 Days</a>
       <a href="#pricing" class="hd-nav-link" style="color:var(--ink);border:1px solid var(--border);padding:11px 22px;border-radius:3px;">See Pricing</a>
     </div>
   </div>
@@ -12566,8 +12696,8 @@ function showLandingPage() {
 
     <div class="pr-header">
       <div class="pr-eyebrow">Simple, Transparent Pricing</div>
-      <h2 class="pr-title">One plan for <em>however your office works.</em></h2>
-      <p class="pr-sub">Every paid plan includes the full staging suite, AB 723 compliance pages, and PRO Plus video generation. Start with a free trial — no credit card required.</p>
+      <h2 class="pr-title">An option for <em>however often you list.</em></h2>
+      <p class="pr-sub">Try it free for 30 days, buy a single Listing Package when a listing comes up, or subscribe when you list every month. Every option includes the full staging suite, AB 723 compliance pages, and PRO Plus video.</p>
     </div>
 
     <div class="pr-toggle-wrap">
@@ -12579,26 +12709,48 @@ function showLandingPage() {
 
     <div class="pr-grid">
 
-      <!-- FREE TRIAL -->
+      <!-- FREE TRIAL (content revised Sep 24, 2026) -->
       <div class="pr-card trial">
         <div class="pr-plan-name">Free Trial</div>
-        <div class="pr-price-row"><span class="pr-price">$0</span></div>
+        <div class="pr-price-row"><span class="pr-price">$0</span><span class="pr-price-period">for 30 days</span></div>
         <div class="pr-price-save">&nbsp;</div>
-        <p class="pr-tagline">No credit card required. Expires 30 days after signup.</p>
-        <a href="#" class="pr-cta" onclick="hideLandingPage(); showAuthModal('signup'); return false;">Start Free Trial</a>
-        <div class="pr-cta-hint">Upgrade anytime</div>
+        <p class="pr-tagline">Learn the workflow on a real listing before you spend a dollar.</p>
+        <a href="#" class="pr-cta" onclick="hideLandingPage(); showAuthModal('signup'); return false;">Try Free for 30 Days</a>
+        <div class="pr-cta-hint">No credit card required</div>
         <ul class="pr-features">
-          <li>10 staged images</li>
+          <li><strong>5 staged images</strong></li>
+          <li><strong>1 PRO Plus Video</strong> (Ken Burns motion)</li>
           <li>All 5 staging modules</li>
-          <li>AB 723 compliance pages</li>
-          <li>QR codes on Final Image</li>
           <li>Smart Correct™ one-click photo correction</li>
-          <li><strong>1 Video</strong> included</li>
-          <li><strong>1 AI Motion Frame</strong> included</li>
+          <li>AB 723 compliance pages</li>
+          <li>QR codes on Final Images</li>
         </ul>
         <div class="pr-rollover-strip">
-          <div class="pr-rollover-line"><span class="no">✗</span> No rollover</div>
-          <div class="pr-rollover-line"><span class="no">✗</span> Trial expires 30 days after signup</div>
+          <div class="pr-rollover-line"><span class="no">✗</span> AI Motion not included</div>
+          <div class="pr-rollover-line"><span class="no">✗</span> Ends 30 days after signup — then 30 days to download your images</div>
+        </div>
+      </div>
+
+      <!-- LISTING PACKAGE (Sep 24, 2026) — no data-plan, so the monthly/annual toggle leaves it alone -->
+      <div class="pr-card package">
+        <div class="pr-badge alt">No Subscription</div>
+        <div class="pr-plan-name">Listing Package</div>
+        <div class="pr-price-row"><span class="pr-price">$59</span><span class="pr-price-period">/ one listing</span></div>
+        <div class="pr-price-save">&nbsp;</div>
+        <p class="pr-tagline">Only need Smart Stage PRO for one listing? Everything it takes, one payment.</p>
+        <a href="#" class="pr-cta" onclick="landingStartCheckout('listing_package'); return false;">Get the Listing Package</a>
+        <div class="pr-cta-hint">One-time payment</div>
+        <ul class="pr-features">
+          <li><strong>18 images</strong> — staging + Smart Correct™</li>
+          <li><strong>1 PRO Plus Video</strong></li>
+          <li><strong>2 AI Motion Frames</strong> included</li>
+          <li>All 5 staging modules</li>
+          <li>AB 723 compliance page — <strong>live 6 months</strong></li>
+          <li>QR codes on all Finals</li>
+        </ul>
+        <div class="pr-rollover-strip">
+          <div class="pr-rollover-line"><span class="yes">✓</span> Compliance page live 6 months from purchase</div>
+          <div class="pr-rollover-line"><span class="no">✗</span> One property address · images and tools for 30 days</div>
         </div>
       </div>
 
@@ -12694,10 +12846,10 @@ function showLandingPage() {
 
     <div class="cta-eyebrow">Ready When You Are</div>
     <h2 class="cta-title">Give every listing the presentation <em>it deserves.</em></h2>
-    <p class="cta-sub">Start free — no credit card required. Your 30-day trial includes 10 staged images and a full look at the platform.</p>
+    <p class="cta-sub">Try Smart Stage PRO free for 30 days — 5 staged images and 1 PRO Plus video, no credit card required. Only need it for one listing? The $59 Listing Package has you covered.</p>
 
     <div class="cta-actions">
-      <a href="#" class="cta-cta-primary" onclick="hideLandingPage(); showAuthModal('signup'); return false;">Start Free Trial</a>
+      <a href="#" class="cta-cta-primary" onclick="hideLandingPage(); showAuthModal('signup'); return false;">Try Free for 30 Days</a>
       <a href="#pricing" class="cta-cta-secondary">View Pricing</a>
     </div>
 

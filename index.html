@@ -11574,7 +11574,7 @@ function showLandingPage() {
   .pr-price-save{
     font-size:0.66rem; font-weight:700; color:var(--gold); margin-bottom:14px; min-height:1.1em;
   }
-  .pr-tagline{ font-size:0.78rem; color:var(--muted); line-height:1.5; margin-bottom:18px; min-height:2em; }
+  .pr-tagline{ font-size:0.78rem; color:var(--muted); line-height:1.5; margin-bottom:18px; min-height:4.5em; } /* 3 lines — keeps every CTA button on the same row */
 
   .pr-cta{
     display:block; width:100%; text-align:center; padding:11px 16px; border-radius:7px;
@@ -11586,12 +11586,17 @@ function showLandingPage() {
   .pr-cta-hint{ text-align:center; font-size:0.66rem; color:var(--muted); margin-bottom:18px; min-height:1.2em; }
 
   .pr-features{ list-style:none; margin:0 0 14px; padding:0; flex:1; }
+  /* FIX (Sep 24, 2026): li was display:flex, which turned every <strong>
+     and the text after it into separate side-by-side columns
+     ("18 images | — staging + Smart Correct"). Block layout with an
+     absolutely positioned checkmark keeps each line as normal text. */
   .pr-features li{
-    display:flex; align-items:flex-start; gap:9px; font-size:0.78rem; color:#332e28;
-    padding:7px 0; border-top:1px solid rgba(26,23,20,0.08); line-height:1.4;
+    display:block; position:relative; padding:7px 0 7px 18px;
+    font-size:0.78rem; color:#332e28;
+    border-top:1px solid rgba(26,23,20,0.08); line-height:1.45;
   }
+  .pr-features li::before{ content:"✓"; color:var(--gold); font-weight:700; position:absolute; left:0; top:7px; }
   .pr-features li:first-child{ border-top:none; }
-  .pr-features li::before{ content:"✓"; color:var(--gold); font-weight:700; flex-shrink:0; }
   .pr-features li strong{ color:var(--ink); }
   .pr-features li.summary{ font-style:italic; color:var(--muted); }
   .pr-features li.summary::before{ content:"+"; color:var(--muted); font-weight:700; }
@@ -12714,12 +12719,12 @@ function showLandingPage() {
         <div class="pr-plan-name">Free Trial</div>
         <div class="pr-price-row"><span class="pr-price">$0</span><span class="pr-price-period">for 30 days</span></div>
         <div class="pr-price-save">&nbsp;</div>
-        <p class="pr-tagline">Learn the workflow on a real listing before you spend a dollar.</p>
+        <p class="pr-tagline">Learn the workflow on a real listing — free.</p>
         <a href="#" class="pr-cta" onclick="hideLandingPage(); showAuthModal('signup'); return false;">Try Free for 30 Days</a>
         <div class="pr-cta-hint">No credit card required</div>
         <ul class="pr-features">
           <li><strong>5 staged images</strong></li>
-          <li><strong>1 PRO Plus Video</strong> (Ken Burns motion)</li>
+          <li><strong>1 PRO Plus Video</strong> with Ken Burns motion</li>
           <li>All 5 staging modules</li>
           <li>Smart Correct™ one-click photo correction</li>
           <li>AB 723 compliance pages</li>
@@ -12727,7 +12732,7 @@ function showLandingPage() {
         </ul>
         <div class="pr-rollover-strip">
           <div class="pr-rollover-line"><span class="no">✗</span> AI Motion not included</div>
-          <div class="pr-rollover-line"><span class="no">✗</span> Ends 30 days after signup — then 30 days to download your images</div>
+          <div class="pr-rollover-line"><span class="no">✗</span> Ends after 30 days, then 30 more days to download</div>
         </div>
       </div>
 
@@ -12737,20 +12742,20 @@ function showLandingPage() {
         <div class="pr-plan-name">Listing Package</div>
         <div class="pr-price-row"><span class="pr-price">$59</span><span class="pr-price-period">/ one listing</span></div>
         <div class="pr-price-save">&nbsp;</div>
-        <p class="pr-tagline">Only need Smart Stage PRO for one listing? Everything it takes, one payment.</p>
-        <a href="#" class="pr-cta" onclick="landingStartCheckout('listing_package'); return false;">Get the Listing Package</a>
+        <p class="pr-tagline">One listing, one payment. No subscription.</p>
+        <a href="#" class="pr-cta" onclick="landingStartCheckout('listing_package'); return false;">Get the Package</a>
         <div class="pr-cta-hint">One-time payment</div>
         <ul class="pr-features">
-          <li><strong>18 images</strong> — staging + Smart Correct™</li>
+          <li><strong>18 images</strong> for staging and Smart Correct™</li>
           <li><strong>1 PRO Plus Video</strong></li>
           <li><strong>2 AI Motion Frames</strong> included</li>
           <li>All 5 staging modules</li>
-          <li>AB 723 compliance page — <strong>live 6 months</strong></li>
+          <li>AB 723 compliance page, <strong>live 6 months</strong></li>
           <li>QR codes on all Finals</li>
         </ul>
         <div class="pr-rollover-strip">
           <div class="pr-rollover-line"><span class="yes">✓</span> Compliance page live 6 months from purchase</div>
-          <div class="pr-rollover-line"><span class="no">✗</span> One property address · images and tools for 30 days</div>
+          <div class="pr-rollover-line"><span class="no">✗</span> One address · images and tools for 30 days</div>
         </div>
       </div>
 

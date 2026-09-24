@@ -110,9 +110,56 @@ async function insertListingWithRetry(payload, label) {
 async function getSupabaseUserContext(userId) {
   if (!userId || !process.env.SUPABASE_URL) return null;
   const r = await supabase("GET", "users", null,
-    `?id=eq.${userId}&select=id,role,team_id,brokerage_id,subscription_status`
+    `?id=eq.${userId}&select=id,role,team_id,brokerage_id,subscription_status,created_at,data_expires_at`
   );
   return r.data?.[0] || null;
+}
+
+// ── PLAN RULES FOR LISTINGS (Sep 24, 2026) ──────────────────────────────────
+// Trial listings: compliance page comes down with the trial's data window
+//   (signup + 60 days = 30-day trial + 30 days to export). Stamped on the
+//   listing row at insert.
+// Listing Package ($59): each purchase is ONE listing slot. A package
+//   account may only work on listings that a package has claimed; the first
+//   listing it opens or creates while it holds an unclaimed slot claims it
+//   (claim_listing_package() in Supabase — atomic, also stamps the 6-month
+//   compliance expiry). No free slot → { packageRequired: true } and the app
+//   offers another package for that address instead of a project.
+// Subscribers: nothing changes (compliance_expires_at stays NULL).
+
+const TRIAL_DATA_WINDOW_MS = 60 * 24 * 60 * 60 * 1000;
+
+function trialComplianceExpiry(userContext) {
+  if (userContext?.subscription_status !== "trial") return undefined;
+  if (userContext.data_expires_at) return userContext.data_expires_at;
+  if (userContext.created_at) return new Date(new Date(userContext.created_at).getTime() + TRIAL_DATA_WINDOW_MS).toISOString();
+  return undefined;
+}
+
+// Adds compliance_expires_at to a listings insert payload for trial accounts.
+function withPlanFields(payload, userContext) {
+  const exp = trialComplianceExpiry(userContext);
+  return exp ? { ...payload, compliance_expires_at: exp } : payload;
+}
+
+async function packageSlotAvailable(userId) {
+  const r = await supabase("GET", "listing_packages", null,
+    `?user_id=eq.${userId}&listing_id=is.null&access_expires_at=gt.${encodeURIComponent(new Date().toISOString())}&select=id&limit=1`
+  );
+  if (r.status >= 300) throw new Error(`package slot check failed (${r.status})`);
+  return Array.isArray(r.data) && r.data.length > 0;
+}
+
+// Returns null when the account may use this listing, or the response the
+// handler should send instead.
+async function enforcePackage(userContext, userId, listingId, extra = {}) {
+  if (userContext?.subscription_status !== "package") return null;
+  if (!listingId) return { packageRequired: true, reason: "no_listing_row", ...extra };
+  const r = await supabase("POST", "rpc/claim_listing_package", { p_user_id: userId, p_listing_id: listingId });
+  if (r.status >= 300) throw new Error(`package claim failed (${r.status})`);
+  const out = r.data && typeof r.data === "object" && !Array.isArray(r.data) ? r.data : (Array.isArray(r.data) ? r.data[0] : null);
+  if (out?.ok) return null;
+  return { packageRequired: true, reason: out?.reason || "no_free_package", ...extra };
 }
 
 async function getCurrentCreditBalance(userId) {
@@ -319,7 +366,7 @@ async function lookupProject(address, userId, env) {
             }
           }
           const backfillSlug = slugifyAddress(project.address);
-          const result = await insertListingWithRetry({
+          const result = await insertListingWithRetry(withPlanFields({
             address: project.address,
             project_id: project.projectId,
             slug: backfillSlug,
@@ -329,7 +376,7 @@ async function lookupProject(address, userId, env) {
             team_id: backfillUserContext?.team_id || null,
             brokerage_id: backfillUserContext?.brokerage_id || null,
             status: "active",
-          }, "lookupProject (missing-row backfill)");
+          }, backfillUserContext), "lookupProject (missing-row backfill)");
           listingId = result.listingId;
           if (listingId) slug = backfillSlug;
         }
@@ -337,6 +384,14 @@ async function lookupProject(address, userId, env) {
         console.error("Listing id lookup error (non-fatal):", err.message);
       }
     }
+    // Listing Package accounts: this listing must hold (or now claim) a slot.
+    // Errors here propagate (fail closed) — see the handler.
+    if (userId) {
+      const pkgCtx = await getSupabaseUserContext(userId);
+      const blocked = await enforcePackage(pkgCtx, userId, listingId, { exists: true, address: project.address });
+      if (blocked) return blocked;
+    }
+
     return {
       exists:        true,
       projectId:     project.projectId,
@@ -350,6 +405,7 @@ async function lookupProject(address, userId, env) {
       slug,
     };
   } catch (err) {
+    if (/^package (claim|slot check) failed/.test(err.message)) throw err; // fail closed
     console.error("lookup error:", err.message);
     return { exists: false };
   }
@@ -405,7 +461,7 @@ async function createProject(address, agentInfo, siteUrl, userId, env) {
         // create one now rather than perpetuating the gap on every retry.
         if (!listingId) {
           const backfillSlug = slugifyAddress(proj.address);
-          const result = await insertListingWithRetry({
+          const result = await insertListingWithRetry(withPlanFields({
             address: proj.address,
             project_id: proj.projectId,
             slug: backfillSlug,
@@ -415,7 +471,7 @@ async function createProject(address, agentInfo, siteUrl, userId, env) {
             team_id: userContext?.team_id || null,
             brokerage_id: userContext?.brokerage_id || null,
             status: "active",
-          }, "createProject (race-guard branch backfill)");
+          }, userContext), "createProject (race-guard branch backfill)");
           listingId = result.listingId;
           if (listingId) slug = backfillSlug;
         }
@@ -423,7 +479,14 @@ async function createProject(address, agentInfo, siteUrl, userId, env) {
         console.error("Listing id lookup error (non-fatal):", err.message);
       }
     }
+    const blockedExisting = await enforcePackage(userContext, userId, listingId, { created: false, address: proj.address });
+    if (blockedExisting) return blockedExisting;
     return { created: false, existing: true, projectId: proj.projectId, complianceUrl: proj.complianceUrl, listingId, slug };
+  }
+
+  // Listing Package account with no unclaimed slot: never create a project.
+  if (userContext?.subscription_status === "package" && !(await packageSlotAvailable(userId))) {
+    return { created: false, packageRequired: true, reason: "no_free_package", address };
   }
 
   const projectId = generateProjectId(address, tier);
@@ -462,7 +525,7 @@ async function createProject(address, agentInfo, siteUrl, userId, env) {
     // upload-staged.js then has nothing to find, so it falls back to the
     // legacy smart-stage-originals/smart-stage-finals/ naming. See
     // insertListingWithRetry() above for why this now retries.
-    const result = await insertListingWithRetry({
+    const result = await insertListingWithRetry(withPlanFields({
       address,
       project_id:          projectId,
       slug,
@@ -472,13 +535,18 @@ async function createProject(address, agentInfo, siteUrl, userId, env) {
       team_id:             userContext?.team_id      || null,
       brokerage_id:        userContext?.brokerage_id || null,
       status:              "active",
-    }, "createProject (fresh insert)");
+    }, userContext), "createProject (fresh insert)");
     // NEW: capture the real Supabase id — this is what video-job.js's
     // action=frames/action=create actually need as "listingId". Distinct
     // from projectId (the human-readable compliance slug above) — the two
     // are different columns on this same row.
     listingId = result.listingId;
   }
+
+  // Claim the slot checked above. Losing a race to another tab leaves the
+  // listing unclaimed — the app then offers a package for it, same as lookup.
+  const blockedNew = await enforcePackage(userContext, userId, listingId, { created: false, address });
+  if (blockedNew) return blockedNew;
 
   return { created: true, projectId, complianceUrl: cUrl, listingId, slug };
 }

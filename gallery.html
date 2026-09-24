@@ -67,6 +67,7 @@ h1{font-family:'Cormorant Garamond',serif;font-size:1.8rem;font-weight:400;margi
     <input id="loginPassword" class="login-input" type="password" placeholder="Password" autocomplete="current-password" />
     <button id="loginBtn" class="login-btn">Sign In</button>
     <div id="loginError" class="login-error" style="display:none;"></div>
+    <div id="loginNote" class="login-sub" style="display:none;margin-top:12px;"></div>
   </div>
 </div>
 
@@ -75,6 +76,7 @@ h1{font-family:'Cormorant Garamond',serif;font-size:1.8rem;font-weight:400;margi
     <div>
       <h1>Media Gallery</h1>
       <div class="sub">Search a listing, click any photo to copy its URL.</div>
+      <div class="sub" id="signedInAs" style="margin-top:4px;font-size:0.78rem;"></div>
     </div>
     <button class="signout-btn" id="signoutBtn">Sign Out</button>
   </div>
@@ -163,6 +165,43 @@ const changeBtn = document.getElementById('changeBtn');
 
 // ── AUTH ──────────────────────────────────────────────────────────────────
 
+// FIX (Sep 24, 2026): this page keeps its OWN session (storageKey
+// 'gallery-sb-auth-token'), separate from the main app. Before this fix it
+// never checked which account that was, so a Gallery tab could keep showing
+// the account someone signed into here earlier (e.g. demo@) while the main
+// app was signed in as a different user — it looked exactly like a data
+// leak. media-gallery.js was always scoping correctly to whoever THIS page
+// was signed in as. Now:
+//   - the signed-in account is always shown at the top;
+//   - if the main app (same browser) is signed in as a different user, this
+//     page signs itself out and asks for that account instead.
+function mainAppUser() {
+  try {
+    for (const k of Object.keys(localStorage)) {
+      if (k === 'gallery-sb-auth-token') continue;
+      if (!/^sb-.*-auth-token(-r\d+)?$/.test(k)) continue;
+      const parsed = JSON.parse(localStorage.getItem(k) || 'null');
+      if (!parsed?.access_token || !parsed?.user?.id) continue;
+      if (parsed.expires_at && parsed.expires_at * 1000 < Date.now()) continue;
+      return { id: parsed.user.id, email: parsed.user.email || '' };
+    }
+  } catch (e) { /* storage unreadable — skip the check */ }
+  return null;
+}
+
+// Returns true if the Gallery session was dropped for belonging to a
+// different account than the main app.
+async function enforceSameAccount(session) {
+  const main = mainAppUser();
+  if (!main || !session?.user || main.id === session.user.id) return false;
+  try { await withAuthTimeout(getSb().auth.signOut({ scope: 'local' }), 5000, 'signOut()'); }
+  catch (e) { /* cleared below regardless */ }
+  try { localStorage.removeItem('gallery-sb-auth-token'); } catch (e) {}
+  showLogin(`You're signed in to Smart Stage PRO as ${main.email || 'a different account'}. Sign in here with that account to see its listings.`);
+  if (main.email) loginEmail.value = main.email;
+  return true;
+}
+
 async function initAuth() {
   const sb = getSb();
   let session;
@@ -177,24 +216,45 @@ async function initAuth() {
     return;
   }
   if (session?.user) {
-    showApp();
+    if (!(await enforceSameAccount(session))) showApp(session);
   } else {
     showLogin();
   }
   sb.auth.onAuthStateChange((event, session) => {
-    if (event === 'SIGNED_IN' && session?.user) showApp();
+    if (event === 'SIGNED_IN' && session?.user) {
+      // Deferred: Supabase advises against calling auth methods inside this callback.
+      setTimeout(async () => { if (!(await enforceSameAccount(session))) showApp(session); }, 0);
+    }
     else if (event === 'SIGNED_OUT') showLogin();
+  });
+
+  // A Gallery tab can sit open while the user switches accounts in the
+  // main app — re-check whenever this tab comes back into view.
+  document.addEventListener('visibilitychange', async () => {
+    if (document.visibilityState !== 'visible') return;
+    try {
+      const r = await withAuthTimeout(getSb().auth.getSession(), 8000, 'getSession()');
+      const s = r.data.session;
+      if (s?.user) await enforceSameAccount(s);
+    } catch (e) { /* stall — leave the page as is */ }
   });
 }
 
-function showLogin() {
+function showLogin(note) {
   loginScreen.style.display = 'block';
   appEl.style.display = 'none';
+  const noteEl = document.getElementById('loginNote');
+  if (noteEl) {
+    noteEl.textContent = note || '';
+    noteEl.style.display = note ? 'block' : 'none';
+  }
 }
 
-function showApp() {
+function showApp(session) {
   loginScreen.style.display = 'none';
   appEl.style.display = 'block';
+  const who = document.getElementById('signedInAs');
+  if (who) who.textContent = session?.user?.email ? `Signed in as ${session.user.email}` : '';
   runSearch('');
 }
 

@@ -80,6 +80,34 @@
 // furniture ones; the "design vocabulary, not a literal catalog" framing now
 // explicitly covers artwork/accessories too. No other section changed.
 //
+// v6.3.8 (Sep 24, 2026): bedroom variety. Complaint: when 2+ bedrooms are
+// staged in the same listing, GPT Image 2 gave them the same bedding and props.
+// Root cause: the Furniture Profile had no bedroom vocabulary at all (no bed,
+// bedding, nightstands or lamps) and its art/props lines were written for living
+// rooms ("on the coffee table"), so every bedroom prompt was nearly identical and
+// the model fell back to its own default bedding every time. Bedrooms also
+// received the whole-house sofa/dining/rug lines and the "match established
+// furnishings" continuity line meant for open plans. Fix, Design DNA layer only:
+//   - BEDROOM_VOCABULARY: per-style bed, bedding, nightstand+lamp, rug, art and
+//     props lists (5+ each), plus BEDROOM_COLOR_LEAD palette-role options.
+//   - Sam's rules: the ROOM LABEL decides the look. Every photo labeled
+//     "Primary Suite / Bedroom" gets the same set (different angles of one room);
+//     every "Bedroom 2" photo gets the same set; Primary, Bedroom 2, 3 and 4 each
+//     get a DIFFERENT set, guaranteed — each list is shuffled once per project +
+//     style and each label takes its own fixed position in it (bedroomSlot()), so
+//     two different labels can never land on the same option.
+//   - Wood tone and metal finish stay whole-house (one wood, one metal for every
+//     room — Sam's rule). Bedroom vocabulary never names a wood or metal; it says
+//     "the home's wood tone"/"the home's metal finish", filled from the profile.
+//   - Bedroom prompts drop the sofa/coffee-table/dining/accent-chair/area-rug
+//     lines and the living-room art/props lines.
+//   - furnishingsDNA ("MATCH ESTABLISHED FURNISHINGS") now applies to OPEN PLAN
+//     prompts only (its purpose: consistency across different angles of the same
+//     open plan). Previously it was added to every room's prompt.
+//   - Kids Room is intentionally NOT treated as a bedroom here (adult bedding
+//     vocabulary); it keeps its previous behavior.
+// Non-bedroom rooms are unchanged apart from the open-plan-only furnishingsDNA rule.
+//
 // v6.3.6 (Sep 2026): style-variety fix, Design DNA layer only — nothing above this note
 // changed. Prospect feedback showed staged renders reading as too similar in styling and
 // furniture within a style. Root cause: STYLE_FURNITURE_VOCABULARY only had a populated
@@ -817,6 +845,122 @@ const STYLE_FURNITURE_VOCABULARY = {
   },
 };
 
+// ── BEDROOM VOCABULARY (Sep 24, 2026) ─────────────────────────────────────────
+// Per-style bedroom furnishings. Wood and metal are never named here: every
+// bedroom piece refers to "the home's wood tone" / "the home's metal finish",
+// which buildDesignDnaVariable() fills from the whole-house Furniture Profile —
+// so the whole house shares one wood and one metal (Sam's rule), while bedding,
+// bed, nightstands, rug, art and props vary bedroom to bedroom.
+// Colors are expressed as palette roles (BEDROOM_COLOR_LEAD) rather than fixed
+// colors, so every option stays inside whatever palette the agent selected.
+// Every list has at least 5 entries so Primary + Bedroom 2/3/4 can never share one.
+const BEDROOM_COLOR_LEAD = [
+  "Let the palette's lightest tone lead the bedding, with its deepest tone used only as a thin accent",
+  "Let the palette's accent color lead through a quilt or coverlet, balanced by lighter sheets",
+  "Use a tonal, layered look built from the palette's two softer tones, no strong contrast",
+  "Anchor the bed with the palette's deepest tone on the throw and lumbar pillow, keeping the duvet light",
+  "Use the palette's middle tone as the main bedding color, with white sheets for crispness",
+];
+
+const BEDROOM_VOCABULARY = {
+  'Organic Modern': {
+    bed: ['an upholstered bed with a rounded boucle headboard', 'a low platform bed in the home\'s wood tone with a slatted headboard', 'a bed with a wide channel-tufted linen headboard', 'a bed with a woven cane-panel headboard framed in the home\'s wood tone', 'a floating-look platform bed with a soft rounded upholstered headboard'],
+    bedding: ['a stonewashed linen duvet with a textured waffle-knit throw', 'a matelasse coverlet layered over a crisp percale duvet', 'a chunky cable-knit throw over a soft cotton gauze duvet', 'a quilted organic-cotton coverlet with linen shams and a bolster', 'a nubby boucle-texture throw over a relaxed washed-linen duvet', 'a pleated-edge duvet with a fringed woven throw at the foot'],
+    nightstands: ['rounded-edge nightstands in the home\'s wood tone with sculptural ceramic lamps', 'woven-front nightstands with paper-shade lamps', 'plinth-style stone-look side tables with linen-shade lamps', 'single-drawer nightstands in the home\'s wood tone with wall-mounted swing-arm sconces in the home\'s metal finish', 'open-shelf nightstands with textured terracotta lamps'],
+    rug: ['a low-pile jute bedroom rug extending past both sides of the bed', 'a hand-tufted wool rug with a subtle tone-on-tone pattern', 'a flat-weave natural-fiber rug with a bound edge', 'a plush undyed wool shag rug under the lower two-thirds of the bed', 'a textured loop-pile wool rug with an organic ridge pattern'],
+    artwork: ['a pair of framed botanical line drawings above the bed', 'a single wide abstract landscape canvas above the headboard', 'a textured plaster-relief art piece above the bed', 'a small gallery of three earth-tone prints above one nightstand', 'a large woven textile wall hanging above the bed'],
+    props: ['a ceramic tray with a small vase on one nightstand and two stacked books on the other', 'a woven bench at the foot of the bed with a folded throw', 'a sculptural ceramic bowl and a single stem in a bud vase on the nightstand', 'a lounge chair in a corner with a small side table and a book', 'a round mirror on a side wall with a woven basket beneath it'],
+  },
+  'Transitional': {
+    bed: ['an upholstered panel bed with a softly arched headboard', 'a wingback upholstered bed in a tailored neutral fabric', 'a bed with a nailhead-trimmed rectangular headboard', 'a bed with a channel-tufted headboard and a matching upholstered frame', 'a bed with a framed headboard in the home\'s wood tone and an inset upholstered panel'],
+    bedding: ['a crisp white hotel-style duvet with a tailored bed skirt and a knit throw', 'a quilted diamond-stitch coverlet with Euro shams', 'a soft velvet quilt folded at the foot over a percale duvet', 'a tone-on-tone jacquard duvet with two lumbar pillows', 'a linen duvet with a contrast flange-edge sham set', 'a pintuck duvet cover layered with a cashmere-look throw'],
+    nightstands: ['three-drawer nightstands in the home\'s wood tone with ceramic gourd lamps', 'mirrored-front nightstands with drum-shade lamps', 'painted nightstands with column lamps in the home\'s metal finish', 'round pedestal side tables with glass-base lamps', 'two-drawer chests used as nightstands with tailored linen-shade lamps'],
+    rug: ['a soft wool-blend rug with a faint Moroccan trellis pattern', 'a solid plush wool rug with a subtle border', 'a low-pile rug with a muted vintage-wash pattern', 'a hand-loomed wool rug with a tone-on-tone stripe', 'a sisal-look rug with a wide fabric border'],
+    artwork: ['a pair of framed abstract prints in matching mats above the bed', 'a large framed landscape photograph above the headboard', 'a single oversized abstract canvas in soft brushstrokes', 'an arrangement of four small framed prints in a grid', 'a large round mirror centered above the headboard'],
+    props: ['an upholstered bench at the foot of the bed', 'a tray with a small candle and a bud vase on one nightstand', 'a slipper chair with a throw pillow in a corner', 'a stack of hardcover books topped with a small bowl on the nightstand', 'a pair of framed photos and a small lamp on a dresser'],
+  },
+  'Contemporary': {
+    bed: ['a low platform bed with a minimal upholstered headboard', 'a bed with a floating headboard panel spanning the wall', 'a sleek bed with a tall rectangular upholstered headboard', 'a bed with a thin frame in the home\'s metal finish and a padded headboard', 'a platform bed with integrated side ledges'],
+    bedding: ['a smooth sateen duvet with a single graphic lumbar pillow', 'a crisp white duvet with a boldly colored folded throw', 'a color-block duvet cover with contrasting shams', 'a textured ribbed duvet with a minimalist knit throw', 'a quilted coverlet in a clean geometric stitch', 'a solid duvet with a sharp contrast-piped sham set'],
+    nightstands: ['floating wall-mounted nightstands with pendant-style bedside lights', 'lacquered two-drawer nightstands with sculptural globe lamps', 'cylindrical side tables with slim metal lamps in the home\'s metal finish', 'minimal cube nightstands with arc lamps', 'glass-top side tables with LED-profile lamps'],
+    rug: ['a low-pile rug with a large-scale abstract pattern', 'a solid short-pile rug with a crisp bound edge', 'a two-tone rug with a bold geometric block', 'a high-low texture rug in a subtle linear pattern', 'a plush solid wool rug'],
+    artwork: ['a large graphic abstract canvas above the bed', 'a triptych of minimal line prints', 'a single bold color-field painting', 'a framed black-and-white architectural photograph', 'a sculptural wall piece in the home\'s metal finish'],
+    props: ['a sleek bench at the foot of the bed', 'a single sculptural object and a small stack of books on the nightstand', 'a modern accent chair with a graphic pillow in a corner', 'a floor mirror leaning against a side wall', 'a glass vase with a single dramatic stem on the dresser'],
+  },
+  'Luxe Modern': {
+    bed: ['a tall velvet channel-tufted bed', 'a bed with a wall-width upholstered headboard panel', 'a bed with a curved velvet headboard and a plinth base', 'a bed with a padded leather-look headboard trimmed in the home\'s metal finish', 'a bed with a tall tufted headboard and upholstered side rails'],
+    bedding: ['a silky sateen duvet with a velvet quilt folded at the foot', 'layered silk-look shams with a faux-fur throw', 'a quilted velvet coverlet over a crisp white duvet', 'a jacquard duvet with a subtle sheen and a fringed throw', 'a tonal duvet with pleated shams and a velvet bolster', 'a luxurious bouclé coverlet over a high-thread-count sheet set'],
+    nightstands: ['mirrored nightstands with crystal-base lamps', 'lacquered nightstands with sculptural lamps in the home\'s metal finish', 'marble-top nightstands with pleated-shade lamps', 'fluted nightstands with glass orb lamps', 'curved nightstands with pendant lights hanging beside the bed'],
+    rug: ['a plush silk-blend rug with a soft sheen', 'a deep-pile solid rug', 'a hand-knotted rug with a faint abstract marble pattern', 'a luxe shag rug', 'a low-pile rug with a metallic thread detail'],
+    artwork: ['an oversized abstract canvas with metallic leaf accents', 'a large framed mirror with a thin frame in the home\'s metal finish', 'a pair of dramatic black-and-white photographs', 'a large textured sculptural canvas', 'a gallery of two gilded-frame abstract prints'],
+    props: ['a velvet bench at the foot of the bed', 'a mirrored tray with a perfume bottle and a candle on the nightstand', 'a velvet lounge chair in a corner', 'a sculptural bowl and a stack of fashion books on the dresser', 'a floral arrangement in a glass vase on the nightstand'],
+  },
+  'Japandi': {
+    bed: ['a very low platform bed in the home\'s wood tone', 'a bed with a simple slatted headboard', 'a low bed with a linen-wrapped headboard', 'a floor-level bed on a wide wooden base', 'a bed with a minimal frame and a paper-screen-style headboard panel'],
+    bedding: ['a washed linen duvet with a single folded throw', 'a pale cotton duvet with a textured waffle throw', 'a quilted coverlet in a simple sashiko-style stitch', 'a tonal gauze duvet with two plain shams', 'a raw-edge linen duvet with a thin knit blanket', 'a muted organic-cotton duvet with a single bolster pillow'],
+    nightstands: ['low stools in the home\'s wood tone used as nightstands with paper lanterns', 'simple wooden nightstands with rice-paper lamps', 'stone-look side tables with minimal ceramic lamps', 'floating shelves beside the bed with small table lamps', 'low open-shelf nightstands with linen lamps'],
+    rug: ['a flat-woven natural rug', 'a low-pile wool rug in a solid tone', 'a subtle textured rug with a fine grid pattern', 'a rectangular tatami-inspired woven mat', 'a soft undyed wool rug'],
+    artwork: ['a single ink-wash landscape print', 'a minimal brushstroke canvas', 'a pair of small framed botanical studies', 'a large textured paper art piece', 'a simple wall sculpture in the home\'s wood tone'],
+    props: ['a ceramic vase with a single branch on the nightstand', 'a low bench in the home\'s wood tone with a folded blanket at the foot', 'a small stack of books with a stone on top', 'a woven basket in the corner with a folded throw', 'a tea tray with a small cup on one nightstand'],
+  },
+  'Coastal': {
+    bed: ['a bed with a painted planked headboard', 'a rattan headboard bed', 'an upholstered bed with a slipcovered linen headboard', 'a bed with a woven seagrass headboard', 'a slim four-post bed in the home\'s wood tone'],
+    bedding: ['a breezy white linen duvet with a striped throw', 'a quilted cotton coverlet with seashell-textured pillows', 'a chambray duvet with white shams', 'a gauze duvet layered with a knit throw', 'a light stripe duvet cover with a solid quilt', 'a matelasse coverlet with a woven lumbar pillow'],
+    nightstands: ['rattan-front nightstands with glass-gourd lamps', 'white-painted nightstands with rope-base lamps', 'weathered-finish side tables in the home\'s wood tone with ceramic lamps', 'woven-wicker side tables with linen lamps', 'simple two-drawer nightstands with clear glass lamps'],
+    rug: ['a jute rug with a light border', 'a striped flat-weave rug', 'a soft natural-fiber rug', 'a low-pile rug with a faded coastal pattern', 'a sisal rug with a fabric border'],
+    artwork: ['a large coastal landscape photograph', 'a pair of framed abstract watercolors in the palette\'s softer tones', 'a woven wall basket arrangement', 'a large framed botanical print of sea grasses', 'a gallery of three small framed seascapes'],
+    props: ['a woven bench at the foot of the bed', 'a coral-style sculpture on a nightstand', 'a rattan accent chair with a pillow in a corner', 'a glass jar with sea glass on the dresser', 'a basket with rolled throws beside the bed'],
+  },
+  'Mid-Century Modern': {
+    bed: ['a low bed with a tapered-leg frame in the home\'s wood tone', 'a bed with a cane-panel headboard', 'a bed with a channel-tufted upholstered headboard', 'a platform bed with a floating headboard ledge', 'a bed with a spindle-style headboard'],
+    bedding: ['a solid duvet with a geometric-print throw pillow in the palette\'s accent color', 'a textured knit coverlet with shams in the palette\'s accent color', 'a crisp white duvet with a folded throw in the palette\'s accent color', 'a patterned duvet cover with a simple mid-century motif', 'a quilted duvet in a clean channel stitch', 'a linen duvet with a contrast bolster pillow'],
+    nightstands: ['tapered-leg nightstands with mushroom lamps', 'floating nightstands with arc-arm lamps in the home\'s metal finish', 'round side tables with ceramic base lamps', 'two-drawer nightstands with tripod lamps', 'slatted-front nightstands in the home\'s wood tone with globe lamps'],
+    rug: ['a low-pile rug with a mid-century geometric pattern', 'a solid shag rug', 'a flat-weave rug with a simple stripe', 'a wool rug with an abstract retro motif', 'a round rug under the side of the bed'],
+    artwork: ['a large abstract mid-century print', 'a pair of framed geometric prints', 'a sunburst mirror above the bed', 'a framed retro travel poster', 'a gallery of three abstract shapes'],
+    props: ['a sculptural ceramic vase on a nightstand', 'an Eames-style lounge chair in a corner', 'a stack of vintage books with a small object', 'a bench in the home\'s wood tone at the foot of the bed', 'a tabletop planter with a snake plant on the dresser'],
+  },
+  'Scandinavian': {
+    bed: ['a simple bed frame in the home\'s wood tone with a plain headboard', 'an upholstered bed with a soft gray headboard', 'a bed with a rounded wooden headboard', 'a bed with a knit-covered headboard', 'a platform bed with a slim headboard'],
+    bedding: ['a white duvet with a chunky knit throw', 'a light gray linen duvet with white shams', 'a subtle check-pattern duvet', 'a quilted coverlet with a sheepskin throw', 'a cotton duvet with a textured waffle blanket', 'a tone-on-tone striped duvet'],
+    nightstands: ['simple nightstands in the home\'s wood tone with white ceramic lamps', 'wall-mounted shelves with small pendant lights', 'round side tables with bentwood lamps', 'minimal two-drawer nightstands with fabric shade lamps', 'open-cube nightstands with small lamps'],
+    rug: ['a soft wool rug in solid white', 'a geometric flat-weave rug', 'a sheepskin rug beside the bed', 'a textured neutral rug', 'a low-pile rug with a subtle stripe'],
+    artwork: ['a minimal black-and-white line print', 'a pair of framed botanical prints', 'a simple abstract canvas', 'a framed Nordic landscape photograph', 'a single graphic print'],
+    props: ['a small plant in a white pot on the nightstand', 'a bench in the home\'s wood tone with a folded blanket', 'a knit pouf in a corner', 'a stack of books with a candle', 'a woven basket for extra throws'],
+  },
+  'Mediterranean': {
+    bed: ['a wrought-iron bed in the home\'s metal finish', 'a carved wooden headboard bed', 'an upholstered bed with an arched headboard', 'a bed with a plaster-look curved headboard', 'a bed with a woven rattan headboard'],
+    bedding: ['a textured linen duvet with an embroidered throw', 'a quilt with a border in the palette\'s deepest tone', 'a white duvet with patterned shams', 'a block-print coverlet', 'a soft cotton duvet with a fringed throw', 'a layered linen bed with a woven blanket'],
+    nightstands: ['carved nightstands in the home\'s wood tone with ceramic lamps', 'terracotta-style side tables with linen lamps', 'wrought-iron side tables with glass lamps', 'painted nightstands with rustic lamps', 'stone-look nightstands with sculptural lamps'],
+    rug: ['a patterned wool rug in the palette\'s tones', 'a flat-weave kilim-style rug', 'a jute rug with a border', 'a vintage-look rug', 'a soft textured rug'],
+    artwork: ['a large framed Mediterranean landscape', 'a pair of arched mirrors', 'a ceramic plate wall arrangement', 'a textured earth-tone canvas', 'a framed vintage map'],
+    props: ['a clay vase with olive branches on the nightstand', 'a bench in the home\'s wood tone at the foot of the bed', 'a woven basket with throws', 'a small ceramic dish on the dresser', 'a linen-covered accent chair in a corner'],
+  },
+  'Farmhouse': {
+    bed: ['a shiplap headboard bed', 'a metal bed in the home\'s metal finish', 'a bed with a rustic plank headboard in the home\'s wood tone', 'an upholstered bed with a linen headboard', 'a bed with a spindle headboard'],
+    bedding: ['a white quilt with a check-pattern throw in the palette\'s accent color', 'a cozy flannel duvet', 'a patchwork quilt at the foot of the bed', 'a linen duvet with a knit blanket', 'a ticking-stripe duvet', 'a chenille coverlet'],
+    nightstands: ['rustic nightstands in the home\'s wood tone with lamps in the home\'s metal finish', 'painted nightstands with ceramic lamps', 'barrel-style side tables with lanterns', 'plank-top nightstands in the home\'s wood tone with glass jar lamps', 'simple two-drawer nightstands with linen lamps'],
+    rug: ['a braided rug', 'a jute rug with a stripe', 'a vintage-look rug', 'a soft neutral rug', 'a woven cotton rug'],
+    artwork: ['a large framed barn photograph', 'a vintage sign above the bed', 'a pair of framed botanical prints', 'a woven wall hanging', 'a round mirror framed in the home\'s wood tone'],
+    props: ['a bench in the home\'s wood tone with a quilt', 'a mason jar with wildflowers on the nightstand', 'a wicker basket with throws', 'an accent chair with a plaid pillow', 'a small stack of vintage books'],
+  },
+  'Traditional': {
+    bed: ['a four-poster bed in the home\'s wood tone', 'a sleigh bed', 'an upholstered bed with a camelback headboard', 'a bed with a carved wooden headboard', 'a tufted wingback bed'],
+    bedding: ['a damask duvet with coordinating shams', 'a quilted coverlet with a bed skirt', 'a crisp white duvet with an embroidered throw', 'a floral print duvet', 'a velvet quilt folded at the foot', 'a toile-pattern duvet'],
+    nightstands: ['classic three-drawer nightstands with urn lamps', 'round skirted tables with ginger-jar lamps', 'carved nightstands with candlestick lamps', 'marble-top nightstands with lamps in the home\'s metal finish', 'painted nightstands with porcelain lamps'],
+    rug: ['a Persian-style rug', 'a floral wool rug', 'an Oriental rug', 'a soft solid rug with a border', 'a traditional medallion rug'],
+    artwork: ['a large oil landscape in a gilt frame', 'a pair of framed botanical prints', 'a classic portrait-style painting', 'an ornate mirror above the bed', 'a gallery of framed etchings'],
+    props: ['an upholstered bench at the foot of the bed', 'a tray in the home\'s metal finish with a crystal decanter', 'a wingback chair in a corner', 'a vase of fresh flowers on the dresser', 'a stack of leather-bound books'],
+  },
+  'Art Deco': {
+    bed: ['a bed with a fan-shaped upholstered headboard', 'a channel-tufted velvet bed', 'a bed with a geometric-panel headboard', 'a bed with a lacquered headboard trimmed in the home\'s metal finish', 'a bed with a curved scalloped headboard'],
+    bedding: ['a velvet duvet with geometric shams', 'a satin coverlet with a fringed throw', 'a bold duvet with a Deco pattern', 'a quilted velvet coverlet', 'a crisp white duvet with contrasting piping', 'a throw in the palette\'s richest tone over a neutral duvet'],
+    nightstands: ['mirrored nightstands with fan-shade lamps', 'lacquered nightstands with geometric lamps', 'round side tables with glass globe lamps', 'fluted nightstands with sculptural lamps', 'marble-top nightstands with tiered lamps'],
+    rug: ['a geometric Deco rug', 'a plush solid rug', 'a patterned rug with fan motifs', 'a high-contrast rug', 'a low-pile rug with a metallic accent'],
+    artwork: ['a large Deco-style print', 'a sunburst mirror', 'a pair of geometric prints', 'a glamorous portrait', 'a metallic wall art piece'],
+    props: ['a velvet bench at the foot of the bed', 'a mirrored tray with a perfume bottle', 'a velvet chair in a corner', 'a crystal vase with flowers', 'a stack of books with a sculptural object'],
+  },
+};
+
 function mulberry32(seed) {
   let a = seed >>> 0;
   return function () {
@@ -875,6 +1019,50 @@ function pickArtworkAndProps(styleLabel, projectSeedStr, roomName) {
   return { artwork: pick(pool.artwork), props: pick(pool.props) };
 }
 
+// Which bedroom label is this? Same label → same slot → same furnishings.
+// Returns null for anything that isn't one of the bedroom labels.
+function bedroomSlot(roomName) {
+  const n = String(roomName || '').toLowerCase().trim();
+  if (!n || n.includes('kids')) return null;
+  if (n.includes('primary')) return (n.includes('bath') || n.includes('closet')) ? null : 0;
+  const m = n.match(/bed(?:room)?\s*#?\s*(\d+)/);
+  if (m) return Math.max(1, parseInt(m[1], 10) - 1); // Bedroom 2 → 1, Bedroom 3 → 2, Bedroom 4 → 3
+  if (n.includes('bedroom') || n.includes('guest room')) return 4;
+  return null;
+}
+
+function seededShuffle(arr, seedStr) {
+  const rand = mulberry32(hashStringToSeed(seedStr));
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+// Each category is shuffled once per project + style, and each bedroom label
+// takes its own fixed position — so different labels never share an option.
+function pickBedroomSet(styleLabel, projectSeedStr, roomName) {
+  const pool = BEDROOM_VOCABULARY[styleLabel];
+  const slot = bedroomSlot(roomName);
+  if (!pool || slot === null) return null;
+  const base = styleLabel + '::' + (projectSeedStr || 'no-project') + '::bedroom::';
+  const take = (arr, key) => {
+    const shuffled = seededShuffle(arr, base + key);
+    return shuffled[slot % shuffled.length];
+  };
+  return {
+    bed: take(pool.bed, 'bed'),
+    bedding: take(pool.bedding, 'bedding'),
+    colorLead: take(BEDROOM_COLOR_LEAD, 'color'),
+    nightstands: take(pool.nightstands, 'nightstands'),
+    rug: take(pool.rug, 'rug'),
+    artwork: take(pool.artwork, 'artwork'),
+    props: take(pool.props, 'props'),
+  };
+}
+
 function buildRoomAssignmentVariable({ zoneList, flexNote, roomName, isOpenPlan, roomAssignmentText }) {
   // Vision-produced override (analyze-open-plan-zones.js) -- the rich,
   // per-zone anchor text validated this session (e.g. "Kitchen: Anchor:
@@ -894,7 +1082,7 @@ function buildRoomAssignmentVariable({ zoneList, flexNote, roomName, isOpenPlan,
   return names.join(', ');
 }
 
-function buildDesignDnaVariable({ style, palette, buyerProfile, desiredFeeling, stagingLevel, furnishingsDNA, projectId, roomName }) {
+function buildDesignDnaVariable({ style, palette, buyerProfile, desiredFeeling, stagingLevel, furnishingsDNA, projectId, roomName, isOpenPlan }) {
   const parts = [];
   if (style)           parts.push('Design Style: ' + style);
   if (palette)         parts.push('Color Palette: ' + (PALETTE_TONES[palette] || palette));
@@ -904,7 +1092,30 @@ function buildDesignDnaVariable({ style, palette, buyerProfile, desiredFeeling, 
   let dnaText = parts.join('. ') + (parts.length ? '.' : '');
 
   const profile = style ? pickFurnitureProfile(style, projectId) : null;
-  if (profile) {
+  const bedroomSet = (profile && !isOpenPlan) ? pickBedroomSet(style, projectId, roomName) : null;
+  if (bedroomSet) {
+    // Bedroom path (v6.3.8) — see header note. Wood/metal are the whole-house picks.
+    const greenery = pickGreenery(style, projectId, roomName);
+    const fill = (t) => String(t)
+      .replace(/the home's wood tone/g, profile.woodTone)
+      .replace(/the home's metal finish/g, profile.metalFinish);
+    const bedroomParts = [
+      'Wood-tone direction (whole home): ' + profile.woodTone + '.',
+      'Metal-finish direction (whole home): ' + profile.metalFinish + '.',
+      'Bed direction: ' + fill(bedroomSet.bed) + '.',
+      'Bedding direction: ' + fill(bedroomSet.bedding) + '.',
+      'Bedding color direction: ' + bedroomSet.colorLead + '.',
+      'Nightstand and lamp direction: ' + fill(bedroomSet.nightstands) + '.',
+      'Bedroom-rug direction: ' + fill(bedroomSet.rug) + '.',
+      'Wall-art direction: ' + fill(bedroomSet.artwork) + '.',
+      'Styling-accessories direction: ' + fill(bedroomSet.props) + '.',
+    ];
+    if (greenery) bedroomParts.push('Greenery direction: ' + greenery + '.');
+    dnaText += '\n\nBEDROOM FURNISHINGS DNA FOR THIS ROOM (use as a design vocabulary, not a literal furniture catalog): ' +
+      'This bedroom has its own specific bed, bedding, nightstands, rug, art and accessories, listed below. Follow these directions closely rather than defaulting to generic white hotel bedding or generic decor — other bedrooms in this home are deliberately styled differently. ' +
+      'Keep the selected style and palette recognizable, and use the whole-home wood tone and metal finish for all wood and metal pieces. Scale every piece to this room and keep clear walkways on both sides of the bed. Do not alter permanent architecture or fixed finishes to accommodate the furnishings. ' +
+      bedroomParts.join(' ');
+  } else if (profile) {
     const greenery = pickGreenery(style, projectId, roomName);
     const artProps = pickArtworkAndProps(style, projectId, roomName);
     const profileParts = [
@@ -928,7 +1139,9 @@ function buildDesignDnaVariable({ style, palette, buyerProfile, desiredFeeling, 
       profileParts.join(' ');
   }
 
-  if (furnishingsDNA) {
+  // v6.3.8: open plans only — keeps different angles of the same open plan
+  // consistent. Bedrooms and other single rooms no longer get this line.
+  if (furnishingsDNA && isOpenPlan) {
     const f = furnishingsDNA;
     const furnishingParts = [];
     if (f.continuityPrompt) furnishingParts.push(f.continuityPrompt);
@@ -947,7 +1160,7 @@ function buildDesignDnaVariable({ style, palette, buyerProfile, desiredFeeling, 
 
 function assembleSpatialZonePrompt({ zones, dna }) {
   const roomAssignmentValue = buildRoomAssignmentVariable(zones || {});
-  const designDnaValue = buildDesignDnaVariable({ ...(dna || {}), roomName: (zones || {}).roomName });
+  const designDnaValue = buildDesignDnaVariable({ ...(dna || {}), roomName: (zones || {}).roomName, isOpenPlan: !!(zones || {}).isOpenPlan });
   return SPATIAL_ZONE_TEMPLATE
     .replace(/\{\{room_assignment_variables\}\}(?: go here)?/, roomAssignmentValue)
     .replace('{{all_design_style_&_palette}} variables go here User Selected DNA {{variables}}', designDnaValue);
@@ -962,6 +1175,10 @@ module.exports = {
   pickFurnitureProfile,
   pickGreenery,
   pickArtworkAndProps,
+  BEDROOM_VOCABULARY,
+  BEDROOM_COLOR_LEAD,
+  bedroomSlot,
+  pickBedroomSet,
   buildRoomAssignmentVariable,
   buildDesignDnaVariable,
   assembleSpatialZonePrompt,

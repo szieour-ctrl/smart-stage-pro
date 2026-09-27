@@ -122,6 +122,34 @@
   .scan-step.active .scan-dot::after{content:"";position:absolute;inset:3px;background:var(--navy);border-radius:50%;animation:pulse 1.1s ease-in-out infinite;}
   @keyframes pulse{0%,100%{opacity:1;}50%{opacity:0.3;}}
 
+  /* Scan progress feedback (Sep 2026) */
+  .scan-progress{margin:0 0 14px;text-align:left;}
+  .progress-track{height:6px;background:var(--line);border-radius:3px;overflow:hidden;}
+  .progress-fill{height:100%;width:0;background:var(--orange);border-radius:3px;transition:width .9s ease;}
+  .progress-meta{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-top:8px;font-size:12px;color:var(--dim);}
+  .progress-elapsed{font-family:var(--mono);font-weight:600;color:var(--navy);flex-shrink:0;}
+  .scan-live{min-height:42px;font-size:13px;line-height:1.45;color:var(--ink);background:var(--paper);border-radius:8px;padding:11px 13px;margin-bottom:18px;text-align:left;transition:opacity .3s ease;}
+  .scan-live.fade{opacity:0;}
+  .photo-grid{display:none;grid-template-columns:repeat(6,1fr);gap:5px;margin-bottom:8px;}
+  .photo-grid.show{display:grid;}
+  .pg-tile{position:relative;aspect-ratio:1;border-radius:4px;overflow:hidden;background:var(--line);}
+  .pg-tile img{width:100%;height:100%;object-fit:cover;display:block;transition:opacity .4s ease;}
+  .pg-tile.queued img{opacity:.4;}
+  .pg-tile.checking::after{content:"";position:absolute;inset:0;background:linear-gradient(100deg,rgba(255,255,255,0) 30%,rgba(255,255,255,.6) 50%,rgba(255,255,255,0) 70%);background-size:220% 100%;animation:shimmer 1.4s ease-in-out infinite;}
+  .pg-badge{position:absolute;right:3px;bottom:3px;width:16px;height:16px;border-radius:50%;display:none;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;}
+  .pg-tile.clear .pg-badge,.pg-tile.review .pg-badge,.pg-tile.skipped .pg-badge{display:flex;}
+  .pg-tile.clear .pg-badge{background:var(--green);}
+  .pg-tile.review .pg-badge{background:var(--amber);}
+  .pg-tile.review{box-shadow:inset 0 0 0 2px var(--amber);}
+  .pg-tile.skipped .pg-badge{background:#9098A8;}
+  .photo-grid-caption{display:none;font-size:12px;color:var(--dim);margin-bottom:18px;text-align:left;}
+  .photo-grid-caption.show{display:block;}
+  @media (max-width:480px){.photo-grid{grid-template-columns:repeat(4,1fr);}.scan-card{padding:26px 18px;}}
+  @media (prefers-reduced-motion:reduce){
+    .photo-frame.loading,.pg-tile.checking::after,.scan-step.active .scan-dot::after{animation:none;}
+    .progress-fill,.scan-live,.pg-tile img{transition:none;}
+  }
+
   /* Gate (RED/GREEN + lead capture) */
   .gate-card{max-width:520px;margin:0 auto;}
   .verdict-banner{border-radius:10px;padding:22px 26px;display:flex;align-items:center;gap:16px;margin-bottom:22px;}
@@ -306,9 +334,16 @@
         </div>
         <div class="scan-address" id="scanAddressLabel">&nbsp;</div>
         <div class="scan-price" id="scanPriceLabel">&nbsp;</div>
+        <div class="scan-progress" id="scanProgress" role="progressbar" aria-label="Scan progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+          <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+          <div class="progress-meta"><span id="progressEstimate">Most scans take 1&ndash;2 minutes</span><span class="progress-elapsed" id="progressElapsed">0:00</span></div>
+        </div>
+        <div class="scan-live" id="scanLive" aria-live="polite">Pulling the listing from Zillow&hellip;</div>
+        <div class="photo-grid" id="photoGrid"></div>
+        <div class="photo-grid-caption" id="photoGridCaption" aria-live="polite"></div>
         <div class="scan-steps">
           <div class="scan-step" id="step1"><div class="scan-dot"></div><span>Fetching property data&hellip;</span></div>
-          <div class="scan-step" id="step2"><div class="scan-dot"></div><span>Analyzing listing photos&hellip;</span></div>
+          <div class="scan-step" id="step2"><div class="scan-dot"></div><span id="step2Label">Analyzing listing photos&hellip;</span></div>
           <div class="scan-step" id="step3"><div class="scan-dot"></div><span>Scanning listing description&hellip;</span></div>
           <div class="scan-step" id="step4"><div class="scan-dot"></div><span>Checking disclosure language&hellip;</span></div>
           <div class="scan-step" id="step5"><div class="scan-dot"></div><span>Checking validation URL&hellip;</span></div>
@@ -438,7 +473,189 @@ function parseAddressFromUrl(url) {
   return match[1].replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
 
+// ── SCAN PROGRESS FEEDBACK (Sep 2026) ───────────────────────────────────────
+// The Zillow pull through Bright Data is the slow part and gives no progress
+// of its own, so the bar is time-based during that phase (it eases toward 60%
+// and never claims to be done). Once the listing lands, the bar moves on real
+// events: each photo batch that comes back advances it.
+const PHOTO_BATCH_SIZE = 6;
+const SCRAPE_MESSAGES = [
+  'Pulling the listing from Zillow\u2026 this is the slowest part of the scan.',
+  'Next, we\u2019ll check each listing photo for signs of virtual staging or digital editing.',
+  'Then we\u2019ll look for a disclosure and a link or QR code to the original photos.',
+  'Why it matters: since January 1, 2025, California requires digitally altered listing photos to be disclosed, with access to the original.',
+  'We also check that any disclosure link actually opens and shows the original photos.',
+  'Still pulling the listing \u2014 Zillow listings with large photo galleries take a little longer.',
+];
+let progressTimer = null, messageTimer = null, scanStartedAt = 0, progressPct = 0, progressPhase = 'scrape', messageIndex = 0;
+
+function setProgress(pct) {
+  progressPct = Math.max(progressPct, Math.min(100, pct));
+  document.getElementById('progressFill').style.width = progressPct.toFixed(1) + '%';
+  document.getElementById('scanProgress').setAttribute('aria-valuenow', Math.round(progressPct));
+}
+
+function setLiveMessage(text) {
+  const el = document.getElementById('scanLive');
+  if (el.textContent === text) return;
+  el.classList.add('fade');
+  setTimeout(() => { el.textContent = text; el.classList.remove('fade'); }, 300);
+}
+
+function formatElapsed(sec) {
+  return Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0');
+}
+
+function startProgress() {
+  stopProgress();
+  progressPct = 0; progressPhase = 'scrape'; messageIndex = 0;
+  scanStartedAt = Date.now();
+  document.getElementById('progressFill').style.width = '0%';
+  document.getElementById('progressEstimate').textContent = 'Most scans take 1\u20132 minutes';
+  document.getElementById('progressElapsed').textContent = '0:00';
+  document.getElementById('scanLive').textContent = SCRAPE_MESSAGES[0];
+  progressTimer = setInterval(() => {
+    const sec = Math.floor((Date.now() - scanStartedAt) / 1000);
+    document.getElementById('progressElapsed').textContent = formatElapsed(sec);
+    if (progressPhase === 'scrape') {
+      setProgress(60 * (1 - Math.exp(-sec / 45)));
+      if (sec >= 120) document.getElementById('progressEstimate').textContent = 'Taking longer than usual \u2014 some listings need up to 3 minutes';
+    }
+  }, 1000);
+  messageTimer = setInterval(() => {
+    if (progressPhase !== 'scrape') return;
+    messageIndex = (messageIndex + 1) % SCRAPE_MESSAGES.length;
+    setLiveMessage(SCRAPE_MESSAGES[messageIndex]);
+  }, 6000);
+}
+
+function stopProgress() {
+  clearInterval(progressTimer); clearInterval(messageTimer);
+  progressTimer = messageTimer = null;
+}
+
+function resetPhotoGrid() {
+  const grid = document.getElementById('photoGrid');
+  grid.innerHTML = '';
+  grid.classList.remove('show');
+  const cap = document.getElementById('photoGridCaption');
+  cap.textContent = '';
+  cap.classList.remove('show');
+  document.getElementById('step2Label').textContent = 'Analyzing listing photos\u2026';
+}
+
+function renderPhotoGrid(scanPhotos) {
+  const grid = document.getElementById('photoGrid');
+  grid.innerHTML = '';
+  scanPhotos.forEach(p => {
+    const tile = document.createElement('div');
+    tile.className = 'pg-tile queued';
+    tile.id = 'pg-' + p.photoNumber;
+    tile.title = 'Photo ' + p.photoNumber + ': waiting';
+    const img = document.createElement('img');
+    img.src = p.thumbUrl || p.scanUrl;
+    img.alt = 'Listing photo ' + p.photoNumber;
+    img.loading = 'lazy';
+    const badge = document.createElement('span');
+    badge.className = 'pg-badge';
+    badge.setAttribute('aria-hidden', 'true');
+    tile.appendChild(img);
+    tile.appendChild(badge);
+    grid.appendChild(tile);
+  });
+  grid.classList.add('show');
+  document.getElementById('photoGridCaption').classList.add('show');
+}
+
+function setTileState(photoNumber, state, note) {
+  const tile = document.getElementById('pg-' + photoNumber);
+  if (!tile) return;
+  tile.classList.remove('queued', 'checking', 'clear', 'review', 'skipped');
+  tile.classList.add(state);
+  const badge = tile.querySelector('.pg-badge');
+  const labels = { checking: 'checking', clear: 'no signs of editing', review: 'flagged for review', skipped: 'could not be checked' };
+  badge.textContent = state === 'clear' ? '\u2713' : state === 'review' ? '!' : state === 'skipped' ? '\u2013' : '';
+  tile.title = 'Photo ' + photoNumber + ': ' + (labels[state] || state) + (note ? ' \u2014 ' + note : '');
+}
+
+function updatePhotoCaption(done, total, flagged) {
+  let text = done + ' of ' + total + ' photos checked';
+  if (flagged) text += ', ' + flagged + ' flagged for review';
+  document.getElementById('photoGridCaption').textContent = text;
+  document.getElementById('step2Label').textContent = done < total
+    ? 'Analyzing listing photos (' + done + ' of ' + total + ')\u2026'
+    : 'Analyzed ' + total + ' listing photos';
+}
+
+async function postPhotoBatch(batch) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 28000);
+  try {
+    const res = await fetch(`${API_BASE}?action=photo-batch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ photos: batch.map(p => ({ photoNumber: p.photoNumber, url: p.scanUrl })) }),
+      signal: controller.signal,
+    });
+    const data = await res.json();
+    return (data && data.status === 'ready' && Array.isArray(data.photos)) ? data : null;
+  } catch (err) {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Runs the photo check as parallel batches and returns the same shape the
+// old single photo-scan call returned, so synthesizeReport() and the PDF
+// don't need to change.
+async function runPhotoBatches(scanPhotos) {
+  const total = scanPhotos.length;
+  const batches = [];
+  for (let i = 0; i < total; i += PHOTO_BATCH_SIZE) batches.push(scanPhotos.slice(i, i + PHOTO_BATCH_SIZE));
+
+  const results = [], skipped = [];
+  let done = 0, flagged = 0;
+  updatePhotoCaption(0, total, 0);
+
+  await Promise.all(batches.map(async (batch) => {
+    batch.forEach(p => setTileState(p.photoNumber, 'checking'));
+    let data = await postPhotoBatch(batch);
+    if (!data) data = await postPhotoBatch(batch); // one retry
+    const returned = data ? data.photos : [];
+    batch.forEach(p => {
+      const r = returned.find(x => x.photoNumber === p.photoNumber);
+      if (r) {
+        results.push({ ...r, photoUrl: r.photoUrl || p.scanUrl });
+        const isFlagged = r.status === 'confirmed_altered' || r.status === 'suspected_altered';
+        if (isFlagged) flagged++;
+        setTileState(p.photoNumber, isFlagged ? 'review' : 'clear', r.reasoning);
+      } else {
+        skipped.push(p.photoNumber);
+        setTileState(p.photoNumber, 'skipped');
+      }
+    });
+    done += batch.length;
+    updatePhotoCaption(done, total, flagged);
+    setProgress(62 + 33 * (done / total));
+  }));
+
+  if (results.length === 0) return null;
+  results.sort((a, b) => a.photoNumber - b.photoNumber);
+  skipped.sort((a, b) => a - b);
+  const galleryCount = (checkData && checkData.photoCount) != null ? checkData.photoCount : '?';
+  return {
+    status: 'ready',
+    photosAnalyzed: results.length,
+    photos: results,
+    limitation: `Analyzed ${results.length} of the first ${total} of ${galleryCount} listing photos (a vision-based visual read, capped for cost and response time \u2014 Zillow galleries commonly front-load hero rooms but this isn't guaranteed).` +
+      (skipped.length ? ` Photo(s) ${skipped.join(', ')} could not be checked.` : '') +
+      ` This is a probabilistic signal, not a verdict: it can miss well-executed staging and can flag a photo that was never altered. Treat "confirmed_altered"/"suspected_altered" results as evidence to manually confirm, not proof.`,
+  };
+}
+
 function resetToIntakeWithError(message) {
+  stopProgress();
   document.getElementById('scanBtn').disabled = false;
   const errorEl = document.getElementById('intakeError');
   errorEl.textContent = message;
@@ -471,8 +688,10 @@ async function startScan() {
   document.getElementById('photoPlaceholder').textContent = 'Fetching listing photo\u2026';
 
   ['step1','step2','step3','step4','step5','step6','step7'].forEach(s => setStep(s, null));
+  resetPhotoGrid();
   setStep('step1', 'active');
   showState('stateScan');
+  startProgress();
 
   try {
     const res = await fetch(`${API_BASE}?action=trigger&url=${encodeURIComponent(url)}`);
@@ -515,6 +734,16 @@ function pollForCheckResult() {
       document.getElementById('scanAddressLabel').textContent = data.address || currentListingUrl;
       if (data.price) document.getElementById('scanPriceLabel').textContent = '$' + Number(data.price).toLocaleString('en-US');
 
+      progressPhase = 'photos';
+      setProgress(62);
+      document.getElementById('progressEstimate').textContent = 'Listing found \u2014 almost done';
+      if (Array.isArray(data.scanPhotos) && data.scanPhotos.length) {
+        renderPhotoGrid(data.scanPhotos);
+        setLiveMessage('Found the listing. Checking each photo for signs of virtual staging or digital editing\u2026');
+      } else {
+        setLiveMessage('Found the listing. Checking photos and disclosures\u2026');
+      }
+
       setStep('step2', 'active');
       setStep('step3', 'active');
       runDeepChecks();
@@ -533,8 +762,12 @@ async function runDeepChecks() {
   setStep('step4', 'done'); // text-based disclosure-language check already ran server-side inside action=check
   setStep('step5', 'active');
 
+  const scanPhotos = (checkData && Array.isArray(checkData.scanPhotos)) ? checkData.scanPhotos : [];
   const jobs = [
-    fetch(`${API_BASE}?action=photo-scan&snapshotId=${currentSnapshotId}`).then(r => r.json()).catch(() => null),
+    scanPhotos.length
+      ? runPhotoBatches(scanPhotos).catch(() => null)
+      // Fallback: backend without scanPhotos (e.g. mid-deploy) — use the original single call.
+      : fetch(`${API_BASE}?action=photo-scan&snapshotId=${currentSnapshotId}`).then(r => r.json()).catch(() => null),
   ];
   const foundUrl = checkData.ab723?.urlOrQrFound;
   if (foundUrl && /^https?:\/\//i.test(foundUrl)) {
@@ -555,8 +788,11 @@ async function runDeepChecks() {
 
   setStep('step6', 'done');
   setStep('step7', 'done');
+  setProgress(100);
+  stopProgress();
+  setLiveMessage('Scan complete. Opening your results\u2026');
 
-  setTimeout(showGate, 500);
+  setTimeout(showGate, 900);
 }
 
 // ── Report synthesis — builds the same schema generate-compliance-pdf.js

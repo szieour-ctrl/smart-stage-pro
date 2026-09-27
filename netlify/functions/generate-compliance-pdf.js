@@ -196,16 +196,26 @@ exports.handler = async (event) => {
   }
 
   // ── Per-photo findings ────────────────────────────────────────────
+  // Tables above/below position text in columns (x=320, 400, 450...), and
+  // pdfkit keeps the last x as the cursor. Every section after a table must
+  // reset x to the left margin or it renders squeezed into the last column
+  // (the Sep 26, 2026 "Final Finding" layout bug).
+  doc.x = 50;
   if (Array.isArray(r.perPhoto) && r.perPhoto.length) {
     if (doc.y > 600) doc.addPage();
     doc.fontSize(13).fillColor(COLORS.ink).font("Helvetica-Bold").text("Per-Photo Findings");
     doc.moveDown(0.4);
-    doc.fontSize(8.5).fillColor(COLORS.dim).font("Helvetica-Bold")
-      .text("PHOTO", 50, doc.y, { width: 50, continued: true })
-      .text("ALTERATION STATUS", 100, doc.y, { width: 180, continued: true })
-      .text("DISCLOSURE", 280, doc.y, { width: 90, continued: true })
-      .text("ORIGINAL", 370, doc.y, { width: 80, continued: true })
-      .text("RESULT", 450, doc.y, { width: 100 });
+    // Each header is placed at the same y (not chained with continued:true,
+    // which staggered them down the page).
+    doc.fontSize(8.5).fillColor(COLORS.dim).font("Helvetica-Bold");
+    const photoHeadY = doc.y;
+    doc.text("PHOTO", 50, photoHeadY, { width: 50, lineBreak: false });
+    doc.text("ALTERATION STATUS", 100, photoHeadY, { width: 180, lineBreak: false });
+    doc.text("DISCLOSURE", 280, photoHeadY, { width: 90, lineBreak: false });
+    doc.text("ORIGINAL", 370, photoHeadY, { width: 80, lineBreak: false });
+    doc.text("RESULT", 450, photoHeadY, { width: 100, lineBreak: false });
+    doc.x = 50;
+    doc.y = photoHeadY + 12;
     doc.moveDown(0.3);
     doc.moveTo(50, doc.y).lineTo(562, doc.y).strokeColor(COLORS.line).stroke();
     doc.moveDown(0.3);
@@ -223,47 +233,89 @@ exports.handler = async (event) => {
   }
 
   // ── Final finding ─────────────────────────────────────────────────
+  doc.x = 50;
   if (r.finalFinding) {
-    if (doc.y > 650) doc.addPage();
-    doc.fontSize(13).fillColor(COLORS.ink).font("Helvetica-Bold").text("Final Finding");
-    doc.moveDown(0.3);
-    doc.fontSize(11).fillColor(bannerColor).font("Helvetica-Bold").text(r.finalFinding.headline || "");
-    doc.fontSize(9.5).fillColor(COLORS.ink).font("Helvetica").text(r.finalFinding.body || "", { lineGap: 2 });
-    doc.moveDown(0.8);
+    if (doc.y > 640) doc.addPage();
+    doc.x = 50;
+    doc.fontSize(13).fillColor(COLORS.ink).font("Helvetica-Bold").text("Final Finding", 50, doc.y, { width: 512 });
+    doc.moveDown(0.4);
+    // Tinted panel with a colored left rule, sized to the text it holds.
+    const panelTop = doc.y;
+    const innerX = 66, innerW = 484;
+    doc.fontSize(11).font("Helvetica-Bold");
+    const headH = doc.heightOfString(r.finalFinding.headline || "", { width: innerW });
+    doc.fontSize(9.5).font("Helvetica");
+    const bodyH = doc.heightOfString(r.finalFinding.body || "", { width: innerW, lineGap: 2 });
+    const panelH = 14 + headH + 5 + bodyH + 14;
+    doc.rect(50, panelTop, 512, panelH).fill("#F6F3EE");
+    doc.rect(50, panelTop, 4, panelH).fill(bannerColor);
+    doc.fontSize(11).fillColor(bannerColor).font("Helvetica-Bold").text(r.finalFinding.headline || "", innerX, panelTop + 14, { width: innerW });
+    doc.moveDown(0.25);
+    doc.fontSize(9.5).fillColor(COLORS.ink).font("Helvetica").text(r.finalFinding.body || "", innerX, doc.y, { width: innerW, lineGap: 2 });
+    doc.x = 50;
+    doc.y = panelTop + panelH + 18;
   }
 
   // ── Recommended corrective action ────────────────────────────────
+  // Items arrive from the page as "Address: <requirement> — <evidence>" or
+  // "Review: <requirement> — <evidence>". Split them so the requirement
+  // reads as a bold line with the evidence under it, instead of one long
+  // run-on bullet. Works for reports already saved, too.
+  function splitAction(a) {
+    const text = String(a || "").replace(/^(Address|Review):\s*/, "");
+    const i = text.indexOf(" \u2014 ");
+    return i === -1 ? { title: text, detail: "" } : { title: text.slice(0, i), detail: text.slice(i + 3) };
+  }
+  function actionGroup(label, color, items) {
+    if (doc.y > 700) doc.addPage();
+    doc.fontSize(10.5).fillColor(color).font("Helvetica-Bold").text(label, 50, doc.y, { width: 512 });
+    doc.moveDown(0.35);
+    items.forEach((a) => {
+      const { title, detail } = splitAction(a);
+      if (doc.y > 720) doc.addPage();
+      const top = doc.y;
+      doc.rect(50, top + 3, 5, 5).fill(color);
+      doc.fontSize(9.5).fillColor(COLORS.ink).font("Helvetica-Bold").text(title, 64, top, { width: 498 });
+      if (detail) {
+        doc.moveDown(0.1);
+        doc.fontSize(9).fillColor(COLORS.dim).font("Helvetica").text(detail, 64, doc.y, { width: 498, lineGap: 1.5 });
+      }
+      doc.moveDown(0.55);
+    });
+    doc.x = 50;
+  }
   if (r.recommendedActions && ((r.recommendedActions.immediate || []).length || (r.recommendedActions.manualReview || []).length)) {
     if (doc.y > 620) doc.addPage();
-    doc.fontSize(13).fillColor(COLORS.ink).font("Helvetica-Bold").text("Recommended Corrective Action");
-    doc.moveDown(0.3);
+    doc.fontSize(13).fillColor(COLORS.ink).font("Helvetica-Bold").text("Recommended Corrective Action", 50, doc.y, { width: 512 });
+    doc.moveDown(0.5);
     if ((r.recommendedActions.immediate || []).length) {
-      doc.fontSize(10).fillColor(COLORS.flag).font("Helvetica-Bold").text("Immediate correction required");
-      r.recommendedActions.immediate.forEach((a) => {
-        doc.fontSize(9.5).fillColor(COLORS.ink).font("Helvetica").text("\u2022 " + a, { indent: 10, lineGap: 2 });
-      });
-      doc.moveDown(0.4);
+      actionGroup("Immediate correction required", COLORS.flag, r.recommendedActions.immediate);
+      doc.moveDown(0.3);
     }
     if ((r.recommendedActions.manualReview || []).length) {
-      doc.fontSize(10).fillColor(COLORS.amber).font("Helvetica-Bold").text("Manual review required");
-      r.recommendedActions.manualReview.forEach((a) => {
-        doc.fontSize(9.5).fillColor(COLORS.ink).font("Helvetica").text("\u2022 " + a, { indent: 10, lineGap: 2 });
-      });
+      actionGroup("Manual review required", COLORS.amber, r.recommendedActions.manualReview);
     }
-    doc.moveDown(0.8);
+    doc.moveDown(0.5);
   }
 
   // ── CTA ───────────────────────────────────────────────────────────
-  if (doc.y > 680) doc.addPage();
+  doc.x = 50;
+  const ctaLine = "Smart Stage PRO builds the disclosure and original-image link automatically for every photo it stages.";
+  doc.font("Helvetica-Bold").fontSize(10.5);
+  const ctaTextH = doc.heightOfString(ctaLine, { width: 488 });
+  const ctaH = 12 + ctaTextH + 6 + 12 + 12; // padding + text + gap + link line + padding
+  if (doc.y + ctaH > 740) doc.addPage();
   const ctaY = doc.y;
-  doc.rect(50, ctaY, 512, 54).fill(COLORS.verifiedBg);
+  doc.rect(50, ctaY, 512, ctaH).fill(COLORS.verifiedBg);
   doc.fillColor(COLORS.ink).font("Helvetica-Bold").fontSize(10.5)
-    .text("Smart Stage PRO builds the disclosure and original-image link automatically for every photo it stages.", 62, ctaY + 12, { width: 488 });
+    .text(ctaLine, 62, ctaY + 12, { width: 488 });
   doc.fillColor(COLORS.verified).font("Helvetica").fontSize(9.5)
-    .text("See how it works: smartstagepro.com", 62, ctaY + 32, { link: "https://smartstagepro.com", underline: true });
-  doc.y = ctaY + 54 + 16;
+    .text("See how it works: smartstagepro.com", 62, ctaY + 12 + ctaTextH + 6, { link: "https://smartstagepro.com", underline: true });
+  doc.x = 50;
+  doc.y = ctaY + ctaH + 16;
 
   // ── Footer / limitation ──────────────────────────────────────────
+  doc.x = 50;
   doc.fontSize(8).fillColor(COLORS.dim).font("Helvetica")
     .text((r.limitation || "") + "\n\nThis report documents observable AB 723 disclosure evidence on the Zillow advertisement as scanned. It is a scan, not a legal audit or finding, and does not constitute legal advice or a court determination.", { lineGap: 2 });
 

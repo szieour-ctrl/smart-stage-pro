@@ -627,9 +627,12 @@ async function runPhotoBatches(scanPhotos) {
       const r = returned.find(x => x.photoNumber === p.photoNumber);
       if (r) {
         results.push({ ...r, photoUrl: r.photoUrl || p.scanUrl });
-        const isFlagged = r.status === 'confirmed_altered' || r.status === 'suspected_altered';
+        const stagingFlag = r.status === 'confirmed_altered' || r.status === 'suspected_altered';
+        const lightingFlag = r.lightingStatus === 'requires_review' || r.lightingStatus === 'confirmed_alteration';
+        const isFlagged = stagingFlag || lightingFlag;
         if (isFlagged) flagged++;
-        setTileState(p.photoNumber, isFlagged ? 'review' : 'clear', r.reasoning);
+        const note = stagingFlag ? r.reasoning : (lightingFlag ? 'Lighting: ' + (r.lightingReasoning || '') : r.reasoning);
+        setTileState(p.photoNumber, isFlagged ? 'review' : 'clear', note);
       } else {
         skipped.push(p.photoNumber);
         setTileState(p.photoNumber, 'skipped');

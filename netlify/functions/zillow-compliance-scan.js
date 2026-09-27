@@ -609,7 +609,7 @@ exports.handler = async (event) => {
 
       const body2 = JSON.stringify({
         model: VISION_MODEL,
-        max_tokens: 2048,
+        max_tokens: 4096,
         messages: [{
           role: "user",
           content: [
@@ -618,10 +618,11 @@ exports.handler = async (event) => {
               "You are looking at numbered photos from a real estate listing (Photo 1 through Photo " + validPairs.length + "). " +
               "For EACH photo, judge whether it shows signs of digital alteration — virtual staging (furniture/decor added to an empty room), decluttering (personal items/furniture removed), changed fixtures, flooring, wall color, landscaping, sky/lighting replacement, or added architectural elements. " +
               "Only flag a photo if you see genuine visual evidence — inconsistent shadows, furniture that looks rendered rather than photographed, unnaturally perfect staging, mismatched perspective/lighting between an object and the room, or a room that looks suspiciously bare/generic in a way real listing photos rarely are. A well-furnished, ordinary-looking room is NOT enough on its own — most listing photos are of real, normally-furnished homes. Prefer no-flag over a false positive.\n\n" +
+              "SEPARATELY, for EACH photo judge the LIGHTING REPRESENTATION. Ordinary photographic correction is normal and must be \"no_issue\": brightening, exposure balancing, HDR blending, white balance, and color correction. Only flag lighting when it misrepresents the property or its surroundings: a replaced or fake sky (including a day-to-twilight conversion) whose light doesn't match the scene's shadows or light direction; a fireplace, lamp, or fixture shown lit or glowing in a way that looks added; light sources that appear invented; window views that look replaced; or light falling where the room's actual windows and fixtures couldn't produce it. Use \"confirmed_alteration\" ONLY when you can point to a specific physical inconsistency; use \"requires_review\" when it looks suspicious but you can't point to one. An unusually bright or well-lit room on its own is \"no_issue\".\n\n" +
               "Return ONLY valid JSON, no markdown fences. Exact shape:\n" +
               "{\n" +
               '  "photos": [\n' +
-              '    {"photoNumber": <int>, "status": "confirmed_altered" | "suspected_altered" | "no_signal", "confidence": "high"|"medium"|"low", "reasoning": "<one sentence>"}\n' +
+              '    {"photoNumber": <int>, "status": "confirmed_altered" | "suspected_altered" | "no_signal", "confidence": "high"|"medium"|"low", "reasoning": "<one sentence>", "lightingStatus": "no_issue" | "requires_review" | "confirmed_alteration", "lightingConfidencePct": <integer 0-100>, "lightingReasoning": "<one sentence naming the specific inconsistency, or empty string if no_issue>"}\n' +
               "  ]\n" +
               "}\n" +
               "Include an entry for every photo number, even ones with status \"no_signal\"." }
@@ -719,7 +720,7 @@ exports.handler = async (event) => {
 
       const visionResponse = await callAnthropic({
         model: VISION_MODEL,
-        max_tokens: 1024,
+        max_tokens: 1536,
         messages: [{
           role: "user",
           content: [
@@ -728,10 +729,11 @@ exports.handler = async (event) => {
               "You are looking at numbered photos from a real estate listing (Photo " + numbers.join(", Photo ") + "). " +
               "For EACH photo, judge whether it shows signs of digital alteration — virtual staging (furniture/decor added to an empty room), decluttering (personal items/furniture removed), changed fixtures, flooring, wall color, landscaping, sky/lighting replacement, or added architectural elements. " +
               "Only flag a photo if you see genuine visual evidence — inconsistent shadows, furniture that looks rendered rather than photographed, unnaturally perfect staging, mismatched perspective/lighting between an object and the room, or a room that looks suspiciously bare/generic in a way real listing photos rarely are. A well-furnished, ordinary-looking room is NOT enough on its own — most listing photos are of real, normally-furnished homes. Prefer no-flag over a false positive.\n\n" +
+              "SEPARATELY, for EACH photo judge the LIGHTING REPRESENTATION. Ordinary photographic correction is normal and must be \"no_issue\": brightening, exposure balancing, HDR blending, white balance, and color correction. Only flag lighting when it misrepresents the property or its surroundings: a replaced or fake sky (including a day-to-twilight conversion) whose light doesn't match the scene's shadows or light direction; a fireplace, lamp, or fixture shown lit or glowing in a way that looks added; light sources that appear invented; window views that look replaced; or light falling where the room's actual windows and fixtures couldn't produce it. Use \"confirmed_alteration\" ONLY when you can point to a specific physical inconsistency; use \"requires_review\" when it looks suspicious but you can't point to one. An unusually bright or well-lit room on its own is \"no_issue\".\n\n" +
               "Return ONLY valid JSON, no markdown fences. Exact shape:\n" +
               "{\n" +
               '  "photos": [\n' +
-              '    {"photoNumber": <int>, "status": "confirmed_altered" | "suspected_altered" | "no_signal", "confidence": "high"|"medium"|"low", "reasoning": "<one sentence>"}\n' +
+              '    {"photoNumber": <int>, "status": "confirmed_altered" | "suspected_altered" | "no_signal", "confidence": "high"|"medium"|"low", "reasoning": "<one sentence>", "lightingStatus": "no_issue" | "requires_review" | "confirmed_alteration", "lightingConfidencePct": <integer 0-100>, "lightingReasoning": "<one sentence naming the specific inconsistency, or empty string if no_issue>"}\n' +
               "  ]\n" +
               "}\n" +
               "Use the photo numbers exactly as labeled. Include an entry for every photo number (" + numbers.join(", ") + "), even ones with status \"no_signal\"." }

@@ -9654,7 +9654,185 @@ function parseAddressFromUrl(url) {
   return match[1].replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
 
+// ── SCAN PROGRESS FEEDBACK (Sep 2026) ───────────────────────────────────────
+// Same behavior as agent-compliance.html (/ab723-check), with zs-prefixed
+// names so nothing collides with the rest of index.html. The Zillow pull is
+// time-based (eases toward 60%, never claims done); after that the bar moves
+// on real events as each photo batch returns.
+const ZS_PHOTO_BATCH_SIZE = 6;
+const ZS_SCRAPE_MESSAGES = [
+  'Pulling the listing from Zillow\u2026 this is the slowest part of the scan.',
+  'Next, we\u2019ll check each listing photo for signs of virtual staging or digital editing.',
+  'Then we\u2019ll look for a disclosure and a link or QR code to the original photos.',
+  'Why it matters: since January 1, 2025, California requires digitally altered listing photos to be disclosed, with access to the original.',
+  'We also check that any disclosure link actually opens and shows the original photos.',
+  'Still pulling the listing \u2014 Zillow listings with large photo galleries take a little longer.',
+];
+let zsProgressTimer = null, zsMessageTimer = null, zsScanStartedAt = 0, zsProgressPct = 0, zsProgressPhase = 'scrape', zsMessageIndex = 0;
+
+function zsSetProgress(pct) {
+  zsProgressPct = Math.max(zsProgressPct, Math.min(100, pct));
+  document.getElementById('zsProgressFill').style.width = zsProgressPct.toFixed(1) + '%';
+  document.getElementById('zsProgress').setAttribute('aria-valuenow', Math.round(zsProgressPct));
+}
+
+function zsSetLiveMessage(text) {
+  const el = document.getElementById('zsLive');
+  if (el.textContent === text) return;
+  el.classList.add('fade');
+  setTimeout(() => { el.textContent = text; el.classList.remove('fade'); }, 300);
+}
+
+function zsStartProgress() {
+  zsStopProgress();
+  zsProgressPct = 0; zsProgressPhase = 'scrape'; zsMessageIndex = 0;
+  zsScanStartedAt = Date.now();
+  document.getElementById('zsProgressFill').style.width = '0%';
+  document.getElementById('zsProgressEstimate').textContent = 'Most scans take 1\u20132 minutes';
+  document.getElementById('zsProgressElapsed').textContent = '0:00';
+  document.getElementById('zsLive').textContent = ZS_SCRAPE_MESSAGES[0];
+  zsProgressTimer = setInterval(() => {
+    const sec = Math.floor((Date.now() - zsScanStartedAt) / 1000);
+    document.getElementById('zsProgressElapsed').textContent = Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0');
+    if (zsProgressPhase === 'scrape') {
+      zsSetProgress(60 * (1 - Math.exp(-sec / 45)));
+      if (sec >= 120) document.getElementById('zsProgressEstimate').textContent = 'Taking longer than usual \u2014 some listings need up to 3 minutes';
+    }
+  }, 1000);
+  zsMessageTimer = setInterval(() => {
+    if (zsProgressPhase !== 'scrape') return;
+    zsMessageIndex = (zsMessageIndex + 1) % ZS_SCRAPE_MESSAGES.length;
+    zsSetLiveMessage(ZS_SCRAPE_MESSAGES[zsMessageIndex]);
+  }, 6000);
+}
+
+function zsStopProgress() {
+  clearInterval(zsProgressTimer); clearInterval(zsMessageTimer);
+  zsProgressTimer = zsMessageTimer = null;
+}
+
+function zsResetPhotoGrid() {
+  const grid = document.getElementById('zsPhotoGrid');
+  grid.innerHTML = '';
+  grid.classList.remove('show');
+  const cap = document.getElementById('zsPhotoGridCaption');
+  cap.textContent = '';
+  cap.classList.remove('show');
+  document.getElementById('zsStep2Label').textContent = 'Analyzing listing photos\u2026';
+}
+
+function zsRenderPhotoGrid(scanPhotos) {
+  const grid = document.getElementById('zsPhotoGrid');
+  grid.innerHTML = '';
+  scanPhotos.forEach(p => {
+    const tile = document.createElement('div');
+    tile.className = 'zs-ptile queued';
+    tile.id = 'zs-pg-' + p.photoNumber;
+    tile.title = 'Photo ' + p.photoNumber + ': waiting';
+    const img = document.createElement('img');
+    img.src = p.thumbUrl || p.scanUrl;
+    img.alt = 'Listing photo ' + p.photoNumber;
+    img.loading = 'lazy';
+    const badge = document.createElement('span');
+    badge.className = 'zs-pbadge';
+    badge.setAttribute('aria-hidden', 'true');
+    tile.appendChild(img);
+    tile.appendChild(badge);
+    grid.appendChild(tile);
+  });
+  grid.classList.add('show');
+  document.getElementById('zsPhotoGridCaption').classList.add('show');
+}
+
+function zsSetTileState(photoNumber, state, note) {
+  const tile = document.getElementById('zs-pg-' + photoNumber);
+  if (!tile) return;
+  tile.classList.remove('queued', 'checking', 'clear', 'review', 'skipped');
+  tile.classList.add(state);
+  const labels = { checking: 'checking', clear: 'no signs of editing', review: 'flagged for review', skipped: 'could not be checked' };
+  tile.querySelector('.zs-pbadge').textContent = state === 'clear' ? '\u2713' : state === 'review' ? '!' : state === 'skipped' ? '\u2013' : '';
+  tile.title = 'Photo ' + photoNumber + ': ' + (labels[state] || state) + (note ? ' \u2014 ' + note : '');
+}
+
+function zsUpdatePhotoCaption(done, total, flagged) {
+  let text = done + ' of ' + total + ' photos checked';
+  if (flagged) text += ', ' + flagged + ' flagged for review';
+  document.getElementById('zsPhotoGridCaption').textContent = text;
+  document.getElementById('zsStep2Label').textContent = done < total
+    ? 'Analyzing listing photos (' + done + ' of ' + total + ')\u2026'
+    : 'Analyzed ' + total + ' listing photos';
+}
+
+async function zsPostPhotoBatch(batch) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 28000);
+  try {
+    const res = await fetch(`${API_BASE}?action=photo-batch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ photos: batch.map(p => ({ photoNumber: p.photoNumber, url: p.scanUrl })) }),
+      signal: controller.signal,
+    });
+    const data = await res.json();
+    return (data && data.status === 'ready' && Array.isArray(data.photos)) ? data : null;
+  } catch (err) {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Returns the same shape the old single photo-scan call returned, so
+// synthesizeReport() and the PDF don't change.
+async function zsRunPhotoBatches(scanPhotos) {
+  const total = scanPhotos.length;
+  const batches = [];
+  for (let i = 0; i < total; i += ZS_PHOTO_BATCH_SIZE) batches.push(scanPhotos.slice(i, i + ZS_PHOTO_BATCH_SIZE));
+  const results = [], skipped = [];
+  let done = 0, flagged = 0;
+  zsUpdatePhotoCaption(0, total, 0);
+
+  await Promise.all(batches.map(async (batch) => {
+    batch.forEach(p => zsSetTileState(p.photoNumber, 'checking'));
+    let data = await zsPostPhotoBatch(batch);
+    if (!data) data = await zsPostPhotoBatch(batch); // one retry
+    const returned = data ? data.photos : [];
+    batch.forEach(p => {
+      const r = returned.find(x => x.photoNumber === p.photoNumber);
+      if (r) {
+        results.push({ ...r, photoUrl: r.photoUrl || p.scanUrl });
+        const stagingFlag = r.status === 'confirmed_altered' || r.status === 'suspected_altered';
+        const lightingFlag = r.lightingStatus === 'requires_review' || r.lightingStatus === 'confirmed_alteration';
+        const isFlagged = stagingFlag || lightingFlag;
+        if (isFlagged) flagged++;
+        const note = stagingFlag ? r.reasoning : (lightingFlag ? 'Lighting: ' + (r.lightingReasoning || '') : r.reasoning);
+        zsSetTileState(p.photoNumber, isFlagged ? 'review' : 'clear', note);
+      } else {
+        skipped.push(p.photoNumber);
+        zsSetTileState(p.photoNumber, 'skipped');
+      }
+    });
+    done += batch.length;
+    zsUpdatePhotoCaption(done, total, flagged);
+    zsSetProgress(62 + 33 * (done / total));
+  }));
+
+  if (results.length === 0) return null;
+  results.sort((a, b) => a.photoNumber - b.photoNumber);
+  skipped.sort((a, b) => a - b);
+  const galleryCount = (checkData && checkData.photoCount) != null ? checkData.photoCount : '?';
+  return {
+    status: 'ready',
+    photosAnalyzed: results.length,
+    photos: results,
+    limitation: `Analyzed ${results.length} of the first ${total} of ${galleryCount} listing photos (a vision-based visual read, capped for cost and response time \u2014 Zillow galleries commonly front-load hero rooms but this isn't guaranteed).` +
+      (skipped.length ? ` Photo(s) ${skipped.join(', ')} could not be checked.` : '') +
+      ` This is a probabilistic signal, not a verdict: it can miss well-executed staging and can flag a photo that was never altered. Treat "confirmed_altered"/"suspected_altered" results as evidence to manually confirm, not proof.`,
+  };
+}
+
 function resetToIntakeWithError(message) {
+  zsStopProgress();
   document.getElementById('scanBtn').disabled = false;
   const errorEl = document.getElementById('intakeError');
   errorEl.textContent = message;
@@ -9687,8 +9865,10 @@ async function startScan() {
   document.getElementById('photoPlaceholder').textContent = 'Fetching listing photo\u2026';
 
   ['step1','step2','step3','step4','step5','step6','step7'].forEach(s => setStep(s, null));
+  zsResetPhotoGrid();
   setStep('step1', 'active');
   showState('stateScan');
+  zsStartProgress();
 
   try {
     const res = await fetch(`${API_BASE}?action=trigger&url=${encodeURIComponent(url)}`);
@@ -9731,6 +9911,16 @@ function pollForCheckResult() {
       document.getElementById('scanAddressLabel').textContent = data.address || currentListingUrl;
       if (data.price) document.getElementById('scanPriceLabel').textContent = '$' + Number(data.price).toLocaleString('en-US');
 
+      zsProgressPhase = 'photos';
+      zsSetProgress(62);
+      document.getElementById('zsProgressEstimate').textContent = 'Listing found \u2014 almost done';
+      if (Array.isArray(data.scanPhotos) && data.scanPhotos.length) {
+        zsRenderPhotoGrid(data.scanPhotos);
+        zsSetLiveMessage('Found the listing. Checking each photo for signs of virtual staging or digital editing\u2026');
+      } else {
+        zsSetLiveMessage('Found the listing. Checking photos and disclosures\u2026');
+      }
+
       setStep('step2', 'active');
       setStep('step3', 'active');
       runDeepChecks();
@@ -9749,8 +9939,12 @@ async function runDeepChecks() {
   setStep('step4', 'done'); // text-based disclosure-language check already ran server-side inside action=check
   setStep('step5', 'active');
 
+  const zsScanPhotos = (checkData && Array.isArray(checkData.scanPhotos)) ? checkData.scanPhotos : [];
   const jobs = [
-    fetch(`${API_BASE}?action=photo-scan&snapshotId=${currentSnapshotId}`).then(r => r.json()).catch(() => null),
+    zsScanPhotos.length
+      ? zsRunPhotoBatches(zsScanPhotos).catch(() => null)
+      // Fallback if the backend ever returns no scanPhotos: the original single call.
+      : fetch(`${API_BASE}?action=photo-scan&snapshotId=${currentSnapshotId}`).then(r => r.json()).catch(() => null),
   ];
   const foundUrl = checkData.ab723?.urlOrQrFound;
   if (foundUrl && /^https?:\/\//i.test(foundUrl)) {
@@ -9771,8 +9965,11 @@ async function runDeepChecks() {
 
   setStep('step6', 'done');
   setStep('step7', 'done');
+  zsSetProgress(100);
+  zsStopProgress();
+  zsSetLiveMessage('Scan complete. Opening your results\u2026');
 
-  setTimeout(showGate, 500);
+  setTimeout(showGate, 900);
 }
 
 // ── Report synthesis — builds the same schema generate-compliance-pdf.js
@@ -9969,9 +10166,10 @@ async function submitLead() {
         email, phone,
         listingUrl: currentListingUrl,
         address: composedReport.address,
+        streetAddress: checkData.streetAddress || null,
         ab723Verdict: checkData.ab723.verdict,
         rule1210fVerdict: checkData.rule1210f?.verdict,
-        source: 'agent-compliance-landing',
+        source: 'homepage-compliance-scan', // /ab723-check sends 'agent-compliance-landing' — kept distinct so homepage and prospecting leads can be told apart
         reportJson: composedReport,
       }),
     });
@@ -11447,6 +11645,35 @@ function showLandingPage() {
   .zs-scan-step.active .zs-scan-dot::after{ content:""; position:absolute; inset:3px; background:var(--gold); border-radius:50%; animation:zsPulse 1.1s ease-in-out infinite; }
   @keyframes zsPulse{ 0%,100%{opacity:1;} 50%{opacity:0.3;} }
 
+  /* Scan progress feedback (Sep 2026) — same behavior as /ab723-check,
+     styled for the landing page. */
+  .zs-progress{ margin:0 0 14px; text-align:left; }
+  .zs-progress-track{ height:5px; background:var(--warm); border-radius:3px; overflow:hidden; }
+  .zs-progress-fill{ height:100%; width:0; background:var(--gold); border-radius:3px; transition:width .9s ease; }
+  .zs-progress-meta{ display:flex; justify-content:space-between; align-items:baseline; gap:12px; margin-top:8px; font-size:0.74rem; color:var(--muted); }
+  .zs-progress-elapsed{ font-variant-numeric:tabular-nums; font-weight:700; color:var(--ink); flex-shrink:0; }
+  .zs-live{ min-height:42px; font-size:0.8rem; line-height:1.45; color:var(--ink); background:var(--cream); border-radius:8px; padding:11px 13px; margin-bottom:18px; text-align:left; transition:opacity .3s ease; }
+  .zs-live.fade{ opacity:0; }
+  .zs-pgrid{ display:none; grid-template-columns:repeat(6,1fr); gap:5px; margin-bottom:8px; }
+  .zs-pgrid.show{ display:grid; }
+  .zs-ptile{ position:relative; aspect-ratio:1; border-radius:4px; overflow:hidden; background:var(--warm); }
+  .zs-ptile img{ width:100%; height:100%; object-fit:cover; display:block; transition:opacity .4s ease; }
+  .zs-ptile.queued img{ opacity:.4; }
+  .zs-ptile.checking::after{ content:""; position:absolute; inset:0; background:linear-gradient(100deg,rgba(255,255,255,0) 30%,rgba(255,255,255,.6) 50%,rgba(255,255,255,0) 70%); background-size:220% 100%; animation:zsShimmer 1.4s ease-in-out infinite; }
+  .zs-pbadge{ position:absolute; right:3px; bottom:3px; width:16px; height:16px; border-radius:50%; display:none; align-items:center; justify-content:center; font-size:10px; font-weight:700; color:#fff; }
+  .zs-ptile.clear .zs-pbadge, .zs-ptile.review .zs-pbadge, .zs-ptile.skipped .zs-pbadge{ display:flex; }
+  .zs-ptile.clear .zs-pbadge{ background:var(--success); }
+  .zs-ptile.review .zs-pbadge{ background:#8a6c3a; }
+  .zs-ptile.review{ box-shadow:inset 0 0 0 2px #8a6c3a; }
+  .zs-ptile.skipped .zs-pbadge{ background:var(--muted); }
+  .zs-pgrid-caption{ display:none; font-size:0.74rem; color:var(--muted); margin-bottom:18px; text-align:left; }
+  .zs-pgrid-caption.show{ display:block; }
+  @media (max-width:480px){ .zs-pgrid{ grid-template-columns:repeat(4,1fr); } }
+  @media (prefers-reduced-motion:reduce){
+    .zs-photo-frame.loading, .zs-ptile.checking::after, .zs-scan-step.active .zs-scan-dot::after{ animation:none; }
+    .zs-progress-fill, .zs-live, .zs-ptile img{ transition:none; }
+  }
+
   .zs-gate-card{ max-width:520px; margin:0 auto; }
   .zs-verdict-banner{ border-radius:10px; padding:20px 24px; display:flex; align-items:center; gap:16px; margin-bottom:22px; }
   .zs-verdict-banner.red{ background:rgba(180,90,70,0.1); }
@@ -12665,9 +12892,16 @@ function showLandingPage() {
         </div>
         <div class="zs-scan-address" id="scanAddressLabel">&nbsp;</div>
         <div class="zs-scan-price" id="scanPriceLabel">&nbsp;</div>
+        <div class="zs-progress" id="zsProgress" role="progressbar" aria-label="Scan progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+          <div class="zs-progress-track"><div class="zs-progress-fill" id="zsProgressFill"></div></div>
+          <div class="zs-progress-meta"><span id="zsProgressEstimate">Most scans take 1&ndash;2 minutes</span><span class="zs-progress-elapsed" id="zsProgressElapsed">0:00</span></div>
+        </div>
+        <div class="zs-live" id="zsLive" aria-live="polite">Pulling the listing from Zillow&hellip;</div>
+        <div class="zs-pgrid" id="zsPhotoGrid"></div>
+        <div class="zs-pgrid-caption" id="zsPhotoGridCaption" aria-live="polite"></div>
         <div class="zs-scan-steps">
           <div class="zs-scan-step" id="step1"><div class="zs-scan-dot"></div><span>Fetching property data&hellip;</span></div>
-          <div class="zs-scan-step" id="step2"><div class="zs-scan-dot"></div><span>Analyzing listing photos&hellip;</span></div>
+          <div class="zs-scan-step" id="step2"><div class="zs-scan-dot"></div><span id="zsStep2Label">Analyzing listing photos&hellip;</span></div>
           <div class="zs-scan-step" id="step3"><div class="zs-scan-dot"></div><span>Scanning listing description&hellip;</span></div>
           <div class="zs-scan-step" id="step4"><div class="zs-scan-dot"></div><span>Checking disclosure language&hellip;</span></div>
           <div class="zs-scan-step" id="step5"><div class="zs-scan-dot"></div><span>Checking validation URL&hellip;</span></div>

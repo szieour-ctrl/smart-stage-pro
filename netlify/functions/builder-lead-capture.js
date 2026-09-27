@@ -37,8 +37,8 @@
 // this codebase (see video-job.js) — same headers, same error handling
 // shape — rather than inventing a new one.
 //
-// EMAIL DELIVERY — fires the same fire-and-forget Pabbly webhook pattern
-// already established in video-notify.js (PABBLY_VIDEO_DELIVERY_WEBHOOK_URL).
+// EMAIL DELIVERY — posts to a Pabbly webhook (awaited, 5s cap — see the
+// note at the call site for why it is no longer fire-and-forget).
 // New env var PABBLY_COMPLIANCE_REPORT_WEBHOOK_URL needs a Pabbly scenario
 // built on Sam's side: trigger receives {email, phone, address, verdict,
 // pdfUrl}, scenario fetches pdfUrl (a generate-compliance-pdf.js link,
@@ -94,7 +94,7 @@ exports.handler = async (event) => {
   try { body = JSON.parse(event.body || "{}"); }
   catch { return { statusCode: 400, headers, body: JSON.stringify({ error: "Invalid JSON body." }) }; }
 
-  const { email, phone, listingUrl, address, ab723Verdict, rule1210fVerdict, source, reportJson } = body;
+  const { email, phone, listingUrl, address, streetAddress, ab723Verdict, rule1210fVerdict, source, reportJson } = body;
 
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return { statusCode: 400, headers, body: JSON.stringify({ error: "A valid email is required." }) };
@@ -128,10 +128,12 @@ exports.handler = async (event) => {
     const savedRow = Array.isArray(result.data) ? result.data[0] : null;
     const reportId = savedRow?.id || null;
 
-    // Fire-and-forget email delivery, same non-blocking pattern as
-    // video-notify.js's Pabbly hand-off — a Pabbly outage or missing env
-    // var should never fail the lead save itself, since the lead is
-    // already safely stored by this point.
+    // Email delivery via Pabbly. The webhook call is AWAITED (with a 5s cap)
+    // rather than fire-and-forget: Netlify can freeze a function the moment
+    // it returns, so an un-awaited request sometimes never leaves at all —
+    // the likely cause of report emails silently not sending (Sep 2026).
+    // A Pabbly failure or timeout is still non-fatal: the lead is already
+    // saved, so this never fails the response to the page.
     if (reportId && process.env.PABBLY_COMPLIANCE_REPORT_WEBHOOK_URL) {
       try {
         const pabblyUrl = new URL(process.env.PABBLY_COMPLIANCE_REPORT_WEBHOOK_URL);
@@ -139,17 +141,28 @@ exports.handler = async (event) => {
         const pdfUrl = `${siteBase}/.netlify/functions/generate-compliance-pdf?reportId=${reportId}`;
         const pabblyBody = JSON.stringify({
           reportId, email, phone: phone || null, address: address || null,
+          streetAddress: streetAddress || null,
           listingUrl: listingUrl || null,
           ab723Verdict: ab723Verdict || null,
           pdfUrl,
         });
-        const req = require("https").request({
-          hostname: pabblyUrl.hostname, path: pabblyUrl.pathname + pabblyUrl.search, method: "POST",
-          headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(pabblyBody) },
-        }, () => {});
-        req.on("error", (err) => console.error("Compliance report Pabbly webhook failed (non-fatal):", err.message));
-        req.write(pabblyBody);
-        req.end();
+        await new Promise((resolve) => {
+          const req = require("https").request({
+            hostname: pabblyUrl.hostname, path: pabblyUrl.pathname + pabblyUrl.search, method: "POST",
+            headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(pabblyBody) },
+            timeout: 5000,
+          }, (res) => {
+            res.resume();
+            res.on("end", () => {
+              if (res.statusCode >= 400) console.error("Compliance report Pabbly webhook returned HTTP", res.statusCode);
+              resolve();
+            });
+          });
+          req.on("timeout", () => { console.error("Compliance report Pabbly webhook timed out after 5s (non-fatal)"); req.destroy(); resolve(); });
+          req.on("error", (err) => { console.error("Compliance report Pabbly webhook failed (non-fatal):", err.message); resolve(); });
+          req.write(pabblyBody);
+          req.end();
+        });
       } catch (err) {
         console.error("Compliance report Pabbly webhook setup error (non-fatal):", err.message);
       }

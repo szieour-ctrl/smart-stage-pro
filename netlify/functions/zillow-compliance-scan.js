@@ -37,7 +37,14 @@
 //     → returns {snapshotId} immediately
 //   Check:   GET ?action=check&snapshotId=<id>
 //     → returns {status:"running"} while processing, or the real verdict
-//       once Bright Data's scrape completes
+//       once Bright Data's scrape completes. The ready response also
+//       carries scanPhotos[] (photoNumber, thumbUrl, scanUrl) so the page
+//       can show the gallery immediately and run the photo check in batches.
+//   Photo batch: POST ?action=photo-batch  body {photos:[{photoNumber,url}]}
+//     → runs the photo alteration check on up to 6 photos in one call. The
+//       page fires several of these in parallel instead of one 24-photo
+//       call (the single large call was slow and could hit the 25s timeout,
+//       which silently dropped all photo findings).
 
 const https = require("https");
 
@@ -159,6 +166,65 @@ function extractHeroPhotoUrl(listing) {
   const jpegSources = first.mixed_sources?.jpeg || [];
   const preferred = jpegSources.find(s => Number(s.width) >= 1000) || jpegSources[jpegSources.length - 1] || jpegSources[0];
   return preferred?.url || null;
+}
+
+// ── BATCHED PHOTO SCAN HELPERS (Sep 2026) ────────────────────────────
+// Photo numbers here are the photo's real position in the Zillow gallery
+// (Photo 1 = first gallery photo), so "Photo 7" in the report is the 7th
+// photo the agent sees on Zillow.
+const MAX_PHOTOS_PER_BATCH = 6;
+
+function pickJpegUrl(photo, targetWidth) {
+  const sources = photo?.mixed_sources?.jpeg || [];
+  let best = null;
+  for (const src of sources) {
+    const w = Number(src.width) || 0;
+    if (!best || Math.abs(w - targetWidth) < Math.abs((Number(best.width) || 0) - targetWidth)) best = src;
+  }
+  return best?.url || null;
+}
+
+function extractScanPhotos(listing) {
+  const photos = listing.original_photos || listing.responsive_photos || [];
+  return photos.slice(0, MAX_PHOTOS_FOR_VISUAL_CHECK).map((p, i) => ({
+    photoNumber: i + 1,
+    thumbUrl: pickJpegUrl(p, 384),   // for the on-screen grid
+    scanUrl: pickJpegUrl(p, 768),    // what the vision check reads
+  })).filter(p => p.scanUrl);
+}
+
+// The photo-batch action accepts photo URLs from the browser, so it only
+// ever downloads from Zillow's own photo host — never an arbitrary URL.
+function isZillowPhotoUrl(u) {
+  try {
+    const parsed = new URL(u);
+    return parsed.protocol === "https:" && (parsed.hostname === "photos.zillowstatic.com" || parsed.hostname.endsWith(".zillowstatic.com"));
+  } catch { return false; }
+}
+
+function callAnthropic(payload, apiKey, timeoutMs) {
+  const bodyStr = JSON.stringify(payload);
+  return new Promise((resolve, reject) => {
+    const req = https.request({
+      hostname: "api.anthropic.com", path: "/v1/messages", method: "POST",
+      headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "Content-Type": "application/json", "Content-Length": Buffer.byteLength(bodyStr) },
+      timeout: timeoutMs,
+    }, (res) => {
+      const chunks = [];
+      res.on("data", (c) => chunks.push(c));
+      res.on("end", () => {
+        try {
+          const p = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+          if (res.statusCode !== 200) reject(new Error(`Claude API error ${res.statusCode}: ${JSON.stringify(p).slice(0, 300)}`));
+          else resolve(p);
+        } catch (e) { reject(new Error("Claude API response parse error")); }
+      });
+    });
+    req.on("error", reject);
+    req.on("timeout", () => { req.destroy(); reject(new Error(`Claude Vision call timed out after ${Math.round(timeoutMs / 1000)}s`)); });
+    req.write(bodyStr);
+    req.end();
+  });
 }
 
 function fetchImageAsBase64(url) {
@@ -381,7 +447,7 @@ exports.handler = async (event) => {
       return {
         statusCode: 200,
         headers,
-        body: JSON.stringify({ snapshotId, status: "ready", listingUrl: listing.url, ...compliance }, null, 2),
+        body: JSON.stringify({ snapshotId, status: "ready", listingUrl: listing.url, ...compliance, scanPhotos: extractScanPhotos(listing), photoCount: listing.photo_count ?? null }, null, 2),
       };
     } catch (err) {
       return { statusCode: 200, headers, body: JSON.stringify({ snapshotId, status: "error", error: err.message }) };
@@ -608,6 +674,84 @@ exports.handler = async (event) => {
       };
     } catch (err) {
       return { statusCode: 200, headers, body: JSON.stringify({ snapshotId, status: "error", error: err.message }) };
+    }
+  }
+
+  // ── ACTION: PHOTO-BATCH ──────────────────────────────────────────────
+  // Same alteration check and same prompt wording as photo-scan, but on a
+  // small batch of photos whose URLs the page already has from action=check.
+  // No Bright Data call here at all, and each call is small enough to
+  // finish well inside the timeout. photo-scan above is left in place as
+  // the fallback the page uses if scanPhotos is ever missing.
+  if (action === "photo-batch") {
+    if (event.httpMethod !== "POST") {
+      return { statusCode: 405, headers, body: JSON.stringify({ error: "photo-batch expects a POST." }) };
+    }
+    const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
+    if (!anthropicApiKey) {
+      return { statusCode: 500, headers, body: JSON.stringify({ error: "ANTHROPIC_API_KEY is not set in Netlify environment variables." }) };
+    }
+    let input;
+    try { input = JSON.parse(event.body || "{}"); }
+    catch { return { statusCode: 400, headers, body: JSON.stringify({ error: "Body must be JSON." }) }; }
+
+    const requested = (Array.isArray(input.photos) ? input.photos : [])
+      .slice(0, MAX_PHOTOS_PER_BATCH)
+      .filter(p => p && Number.isInteger(p.photoNumber) && p.photoNumber > 0 && isZillowPhotoUrl(p.url));
+    if (requested.length === 0) {
+      return { statusCode: 400, headers, body: JSON.stringify({ error: "No valid Zillow photo URLs in this batch." }) };
+    }
+
+    try {
+      const downloaded = await Promise.all(requested.map(p =>
+        fetchImageAsBase64(p.url).then(b64 => ({ ...p, b64 })).catch(() => null)
+      ));
+      const valid = downloaded.filter(Boolean);
+      if (valid.length === 0) {
+        return { statusCode: 200, headers, body: JSON.stringify({ status: "error", error: "None of the photos in this batch could be downloaded." }) };
+      }
+      const numbers = valid.map(p => p.photoNumber);
+
+      const imageBlocks = valid.flatMap(p => ([
+        { type: "text", text: `Photo ${p.photoNumber}:` },
+        { type: "image", source: { type: "base64", media_type: "image/jpeg", data: p.b64 } },
+      ]));
+
+      const visionResponse = await callAnthropic({
+        model: VISION_MODEL,
+        max_tokens: 1024,
+        messages: [{
+          role: "user",
+          content: [
+            ...imageBlocks,
+            { type: "text", text:
+              "You are looking at numbered photos from a real estate listing (Photo " + numbers.join(", Photo ") + "). " +
+              "For EACH photo, judge whether it shows signs of digital alteration — virtual staging (furniture/decor added to an empty room), decluttering (personal items/furniture removed), changed fixtures, flooring, wall color, landscaping, sky/lighting replacement, or added architectural elements. " +
+              "Only flag a photo if you see genuine visual evidence — inconsistent shadows, furniture that looks rendered rather than photographed, unnaturally perfect staging, mismatched perspective/lighting between an object and the room, or a room that looks suspiciously bare/generic in a way real listing photos rarely are. A well-furnished, ordinary-looking room is NOT enough on its own — most listing photos are of real, normally-furnished homes. Prefer no-flag over a false positive.\n\n" +
+              "Return ONLY valid JSON, no markdown fences. Exact shape:\n" +
+              "{\n" +
+              '  "photos": [\n' +
+              '    {"photoNumber": <int>, "status": "confirmed_altered" | "suspected_altered" | "no_signal", "confidence": "high"|"medium"|"low", "reasoning": "<one sentence>"}\n' +
+              "  ]\n" +
+              "}\n" +
+              "Use the photo numbers exactly as labeled. Include an entry for every photo number (" + numbers.join(", ") + "), even ones with status \"no_signal\"." }
+          ]
+        }]
+      }, anthropicApiKey, 22000);
+
+      const textBlock = visionResponse.content?.find(b => b.type === "text");
+      let visionResult;
+      try { visionResult = JSON.parse(textBlock.text.trim().replace(/^```json\s*|\s*```$/g, "")); }
+      catch { return { statusCode: 200, headers, body: JSON.stringify({ status: "error", error: "Could not parse Claude's response as JSON.", rawText: textBlock?.text }) }; }
+
+      const urlByNumber = new Map(valid.map(p => [p.photoNumber, p.url]));
+      const photosOut = (visionResult.photos || [])
+        .filter(p => urlByNumber.has(p.photoNumber))
+        .map(p => ({ ...p, photoUrl: urlByNumber.get(p.photoNumber) }));
+
+      return { statusCode: 200, headers, body: JSON.stringify({ status: "ready", photos: photosOut }) };
+    } catch (err) {
+      return { statusCode: 200, headers, body: JSON.stringify({ status: "error", error: err.message }) };
     }
   }
 

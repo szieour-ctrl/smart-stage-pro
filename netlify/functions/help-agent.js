@@ -97,9 +97,9 @@ Clicking Generate Final:
 3. Generates Final Side-by-Side disclosure document
 4. Makes Marketing QR code available for download
 5. Writes compliance record to database
-6. Debits one staged image from subscription balance
+6. Debits one staged image from subscription balance (if a Photographic Preset was applied to the image, the preset adds one more staged image)
 
-Output quality options: MLS Ready / Marketing Quality / Print Quality
+Output size: every Generate Final delivers one full-size image, up to 4096 px on the long edge (about 13 x 9 inches at 300 dpi, or about 20 x 13.5 inches at 200 dpi). There are no separate quality tiers or extra charges for resolution.
 
 ## Draft Watermark
 All draft and iteration images display a SMART STAGE PRO™ DRAFT watermark. These are for review purposes only and cannot be used for MLS upload. The clean watermark-free image is delivered only at Generate Final.

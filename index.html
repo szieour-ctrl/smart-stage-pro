@@ -310,9 +310,24 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
 .pm-body{padding:20px 24px;overflow-y:auto;flex:1;}
 .pm-room-label{font-size:0.72rem;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);margin-bottom:6px;}
 .pm-room-name{font-family:'Cormorant Garamond',serif;font-size:1.1rem;color:var(--ink);margin-bottom:16px;}
-.pm-thumb-wrap{display:none;margin:0 0 16px;}
-.pm-thumb{display:block;max-width:100%;max-height:210px;object-fit:contain;border:1px solid var(--border);border-radius:3px;background:var(--cream);}
-.pm-thumb-cap{font-size:0.66rem;color:var(--muted);margin-top:4px;}
+.pm-top{display:none;gap:20px;align-items:flex-start;margin:0 0 6px;}
+.pm-top.on{display:flex;}
+.pm-top-thumb{flex:0 0 48%;min-width:0;}
+.pm-top-hint{flex:1;min-width:0;font-size:0.8rem;line-height:1.5;color:var(--ink);}
+.pm-top-hint .pm-eg{margin-top:8px;color:var(--ink);}
+.pm-top-hint .pm-areas{margin-top:8px;font-size:0.74rem;color:var(--muted);}
+.pm-top-hint .pm-areas b{color:var(--ink);font-weight:600;}
+.pm-link{background:none;border:0;padding:0;margin-top:10px;font:inherit;font-size:0.74rem;color:var(--gold,#9a7b3c);text-decoration:underline;cursor:pointer;display:block;}
+.pm-thumb-stack{position:relative;display:inline-block;max-width:100%;line-height:0;}
+.pm-thumb{display:block;width:auto;height:auto;max-width:100%;max-height:260px;border:1px solid var(--border);border-radius:3px;background:var(--cream);}
+.pm-thumb-cap{font-size:0.66rem;color:var(--muted);margin-top:4px;line-height:1.4;}
+.pm-grid{display:none;position:absolute;inset:0;pointer-events:none;}
+.pm-grid.on{display:block;}
+.pm-grid .pg{position:absolute;display:flex;align-items:center;justify-content:center;text-align:center;box-sizing:border-box;border:1px solid rgba(20,40,70,0.65);font-size:0.6rem;font-weight:700;line-height:1.15;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,0.55);}
+.pm-grid .pg-side{background:rgba(235,215,40,0.42);color:#3b3200;text-shadow:none;}
+.pm-grid .pg-bg{background:rgba(60,130,220,0.46);}
+.pm-grid .pg-fg{background:rgba(40,170,70,0.52);}
+@media (max-width:640px){.pm-top.on{flex-direction:column;}.pm-top-thumb{flex:none;width:100%;}}
 .pm-section-label{font-size:0.68rem;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);font-weight:600;margin-bottom:6px;margin-top:14px;}
 .pm-meta{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px;}
 .pm-meta-chip{background:var(--cream);border:1px solid var(--border);border-radius:2px;font-size:0.72rem;padding:3px 9px;color:var(--ink);}
@@ -453,15 +468,36 @@ if (new URLSearchParams(window.location.search).get('debug') === '1') {
     <div class="pm-body">
       <div class="pm-room-label">Room</div>
       <div class="pm-room-name" id="pm-room-name">—</div>
-      <div class="pm-thumb-wrap" id="pm-thumb-wrap"><img class="pm-thumb" id="pm-thumb" alt="Photo being staged"><div class="pm-thumb-cap">Photo being staged — directions like "left wall" or "foreground" refer to this view.</div></div>
-      <div class="pm-section-label">Session Parameters</div>
-      <div class="pm-meta" id="pm-meta"></div>
+      <div class="pm-top" id="pm-top">
+        <div class="pm-top-thumb" id="pm-top-thumb">
+          <div class="pm-thumb-stack">
+            <img class="pm-thumb" id="pm-thumb" alt="Photo being staged">
+            <div class="pm-grid" id="pm-grid" aria-hidden="true">
+              <div class="pg pg-side" style="left:0;top:0;width:33.7%;height:67.8%;">Left</div>
+              <div class="pg pg-side" style="left:62.2%;top:0;width:37.8%;height:67.8%;">Right</div>
+              <div class="pg pg-bg" style="left:33.7%;top:16.2%;width:28.5%;height:36.3%;">Background</div>
+              <div class="pg pg-fg" style="left:0;top:67.8%;width:33.7%;height:32.2%;">Foreground Left</div>
+              <div class="pg pg-fg" style="left:33.7%;top:67.8%;width:28.5%;height:32.2%;">Foreground Center</div>
+              <div class="pg pg-fg" style="left:62.2%;top:67.8%;width:37.8%;height:32.2%;">Foreground Right</div>
+            </div>
+          </div>
+          <div class="pm-thumb-cap">Photo being staged — directions like "left wall" or "foreground" refer to this view.</div>
+        </div>
+        <div class="pm-top-hint" id="pm-hint-side">
+          <strong>Add an anchor or placement direction</strong> to any zone.
+          <div class="pm-eg">Example: <em>Living Room: arm chair, foreground right.</em></div>
+          <div class="pm-areas">Areas: <b>left</b> · <b>right</b> · <b>background</b> · <b>foreground left</b> / <b>center</b> / <b>right</b></div>
+          <button type="button" class="pm-link" id="pm-grid-toggle" onclick="togglePlacementGuide()">Show placement areas on photo</button>
+        </div>
+      </div>
       <div class="pm-section-label" id="pm-read-label">Room Read — Edit Before Approving</div>
       <div class="pm-prompt-wrap">
         <textarea class="pm-prompt" id="pm-prompt" rows="10" spellcheck="false"></textarea>
       </div>
-      <div class="pm-prompt-hint" id="pm-hint">✏️ <strong>Edit the room read directly before staging.</strong> This is what the Smart Stage engine detected in your photo — which zones it found and where it anchored them. Add instructions, fix a misread zone, or remove a placement detail; whatever you leave here is used exactly as written. Your style, palette, and compliance settings from earlier are applied automatically and aren't shown here. Use the <strong>Stage Without Prompt</strong> button to stage with no text guidance.</div>
+      <div class="pm-prompt-hint" id="pm-hint">✏️ <strong>Edit the room read directly before staging.</strong> This is what the Smart Stage engine detected in your photo — which zones it found and where it anchored them. Add instructions, fix a misread zone, or remove a placement detail; whatever you leave here is used exactly as written. Your style, palette, and compliance settings from earlier are applied automatically and aren't shown here.</div>
       <div class="pm-warning" id="pm-open-plan-warning" style="display:none;">⚠ <strong>Open Plan detected.</strong> The Smart Stage engine read this as a multi-zone space. Watch for zone crowding — if the prompt places dining furniture AND living furniture in the same area, delete the placement instructions and keep only style/material descriptions. The engine's native open-plan logic handles zone separation better than text instructions.</div>
+      <div class="pm-section-label" style="margin-top:18px;">Session Parameters</div>
+      <div class="pm-meta" id="pm-meta"></div>
       <div class="pm-section-label" style="margin-top:18px;">Staging Engine Payload</div>
       <pre id="pm-api-payload" style="background:#1a1a1a;color:#e8e8e8;padding:14px;border-radius:3px;font-size:0.74rem;line-height:1.6;overflow-x:auto;white-space:pre-wrap;word-break:break-word;margin:0;"></pre>
       <div style="font-size:0.68rem;color:var(--muted);margin-top:6px;">Exact parameters sent to the staging engine. If a custom prompt is present, design_style and color_scheme are omitted.</div>
@@ -470,7 +506,6 @@ if (new URLSearchParams(window.location.search).get('debug') === '1') {
       <div class="pm-footer-left" id="pm-cost-note">Approving uses 1 staged image · ~15 seconds</div>
       <div class="pm-footer-right">
         <button class="btn btn-ghost" onclick="cancelPromptModal()">✕ Cancel — Don't Stage</button>
-        <button class="btn btn-outline" onclick="clearPromptAndStage()" title="Stage with no custom prompt">Stage Without Prompt</button>
         <button class="btn btn-primary" onclick="approvePromptAndStage()">Approve → Stage It</button>
       </div>
     </div>
@@ -4686,7 +4721,7 @@ async function stageRoom(roomId) {
       showToast('Staging cancelled — no credit used.', '');
       return;
     }
-    const finalPrompt = approvedPrompt; // may be edited text or '' for no-prompt mode
+    const finalPrompt = approvedPrompt; // the edited prompt text
 
     // Step 2: Call GPT Image 2 via background fire-and-poll
     room.promptStatus = 'Generating draft — takes ~15 seconds...';
@@ -7675,32 +7710,29 @@ function showPromptModal(room, prompt, hiddenParts) {
     _pmPromptSplit = split;
     document.getElementById('pm-prompt').value = split.isSplit ? split.visible : (prompt || '');
 
-    // First-pass staging prompt (zone list only): show the photo being staged, and show the
-    // heading as a read-only label above the editable zone list. Other prompt types
-    // (revisions, declutter, ...) look exactly as before.
+    // First-pass staging prompt (zone list only): photo + short placement hint side by side,
+    // heading shown as a read-only label above the editable zone list. Other prompt types
+    // (revisions, declutter, ...) keep the original layout and hint under the box.
     const zonesOnly = !!(split.isSplit && split.zonesOnly && !hiddenParts);
-    const thumbWrap = document.getElementById('pm-thumb-wrap');
+    const topRow = document.getElementById('pm-top');
+    const thumbCol = document.getElementById('pm-top-thumb');
     const thumbImg = document.getElementById('pm-thumb');
     const readLabel = document.getElementById('pm-read-label');
+    const hintBelow = document.getElementById('pm-hint');
     let thumbSrc = '';
     if (zonesOnly) {
       const origForThumb = (SESSION.originals || []).find(o => o.id === room.originalId);
       if (origForThumb) thumbSrc = origForThumb.dataUrl || (origForThumb.base64 ? ('data:' + (origForThumb.mimeType || 'image/jpeg') + ';base64,' + origForThumb.base64) : '');
     }
-    if (thumbWrap && thumbImg) {
-      if (thumbSrc) { thumbImg.src = thumbSrc; thumbWrap.style.display = 'block'; }
-      else { thumbImg.removeAttribute('src'); thumbWrap.style.display = 'none'; }
-    }
+    if (topRow) topRow.classList.toggle('on', zonesOnly);
+    if (thumbCol) thumbCol.style.display = thumbSrc ? '' : 'none';
+    if (thumbImg) { if (thumbSrc) thumbImg.src = thumbSrc; else thumbImg.removeAttribute('src'); }
+    if (hintBelow) hintBelow.style.display = zonesOnly ? 'none' : '';
     if (readLabel) readLabel.textContent = zonesOnly ? 'ROOMS AND ZONES TO STAGE — USER SELECTIONS' : 'Room Read — Edit Before Approving';
-    // The zone list is the rooms/zones the USER selected; the engine's only job here is to find
-    // fixtures that anchor them ("Anchor: ..."). Say that, instead of implying it detects zones.
-    const hintEl = document.getElementById('pm-hint');
-    if (hintEl) {
-      if (!hintEl.dataset.def) hintEl.dataset.def = hintEl.innerHTML;
-      hintEl.innerHTML = zonesOnly
-        ? '✏️ <strong>These are the rooms and zones you selected.</strong> Where the engine found a fixture in your photo to anchor a zone, it is shown as “Anchor: …”; otherwise only the zone name is listed. Add or change anchors and placement directions — for example “arm chair in the right foreground” (left and right refer to the photo above); whatever you leave here is used exactly as written. The staging rules around this list, plus your style, palette, and compliance settings, are applied automatically and aren\'t shown here. Use the <strong>Stage Without Prompt</strong> button to stage with no text guidance.'
-        : hintEl.dataset.def;
-    }
+    // placement-area overlay always starts hidden
+    const gridEl = document.getElementById('pm-grid'), gridBtn = document.getElementById('pm-grid-toggle');
+    if (gridEl) gridEl.classList.remove('on');
+    if (gridBtn) gridBtn.textContent = 'Show placement areas on photo';
 
     // Open Plan warning
     const warn = document.getElementById('pm-open-plan-warning');
@@ -7749,7 +7781,7 @@ function approvePromptAndStage() {
   // The zone list is the only thing telling the engine what to stage; with the fixed
   // wording now hidden, an empty box would send the engine nothing to stage.
   if (_pmPromptSplit && _pmPromptSplit.zonesOnly && !box) {
-    showToast('The zone list can\u2019t be empty \u2014 add the room or zone to stage, or use Stage Without Prompt.', 'error');
+    showToast('The zone list can\u2019t be empty \u2014 add the room or zone to stage.', 'error');
     return;
   }
   // Reassemble: hidden algorithm text (before/after) + whatever the user
@@ -7763,27 +7795,11 @@ function approvePromptAndStage() {
   if (_promptModalResolve) { _promptModalResolve(edited || ''); _promptModalResolve = null; }
 }
 
-function clearPromptAndStage() {
-  // Update payload preview to show enum mode (no prompt)
-  const payloadEl = document.getElementById('pm-api-payload');
-  if (payloadEl) {
-    try {
-      const current = JSON.parse(payloadEl.textContent);
-      const enumPayload = {
-        input_image_url: "[assigned at image upload]",
-        room_type: current.room_type,
-        design_style: current.design_style || 'organicmodern',
-        num_images: 1,
-        scale_factor: 2,
-        color_scheme: current.color_scheme || 'COLOR_SCHEME_9',
-      };
-      payloadEl.textContent = JSON.stringify(enumPayload, null, 2);
-    } catch(e) {}
-  }
-  document.getElementById('prompt-modal').classList.add('hidden');
-  _pmPromptSplit = null;
-  if (_promptModalResolve) { _promptModalResolve(''); _promptModalResolve = null; }
-  showToast('Staging with no custom prompt — engine default style only.', '');
+function togglePlacementGuide() {
+  const g = document.getElementById('pm-grid'), b = document.getElementById('pm-grid-toggle');
+  if (!g) return;
+  const on = g.classList.toggle('on');
+  if (b) b.textContent = on ? 'Hide placement areas' : 'Show placement areas on photo';
 }
 
 function cancelPromptModal() {

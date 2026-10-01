@@ -310,6 +310,9 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
 .pm-body{padding:20px 24px;overflow-y:auto;flex:1;}
 .pm-room-label{font-size:0.72rem;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);margin-bottom:6px;}
 .pm-room-name{font-family:'Cormorant Garamond',serif;font-size:1.1rem;color:var(--ink);margin-bottom:16px;}
+.pm-thumb-wrap{display:none;margin:0 0 16px;}
+.pm-thumb{display:block;max-width:100%;max-height:210px;object-fit:contain;border:1px solid var(--border);border-radius:3px;background:var(--cream);}
+.pm-thumb-cap{font-size:0.66rem;color:var(--muted);margin-top:4px;}
 .pm-section-label{font-size:0.68rem;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);font-weight:600;margin-bottom:6px;margin-top:14px;}
 .pm-meta{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px;}
 .pm-meta-chip{background:var(--cream);border:1px solid var(--border);border-radius:2px;font-size:0.72rem;padding:3px 9px;color:var(--ink);}
@@ -450,13 +453,14 @@ if (new URLSearchParams(window.location.search).get('debug') === '1') {
     <div class="pm-body">
       <div class="pm-room-label">Room</div>
       <div class="pm-room-name" id="pm-room-name">—</div>
+      <div class="pm-thumb-wrap" id="pm-thumb-wrap"><img class="pm-thumb" id="pm-thumb" alt="Photo being staged"><div class="pm-thumb-cap">Photo being staged — directions like "left wall" or "foreground" refer to this view.</div></div>
       <div class="pm-section-label">Session Parameters</div>
       <div class="pm-meta" id="pm-meta"></div>
-      <div class="pm-section-label">Room Read — Edit Before Approving</div>
+      <div class="pm-section-label" id="pm-read-label">Room Read — Edit Before Approving</div>
       <div class="pm-prompt-wrap">
         <textarea class="pm-prompt" id="pm-prompt" rows="10" spellcheck="false"></textarea>
       </div>
-      <div class="pm-prompt-hint">✏️ <strong>Edit the room read directly before staging.</strong> This is what the Smart Stage engine detected in your photo — which zones it found and where it anchored them. Add instructions, fix a misread zone, or remove a placement detail; whatever you leave here is used exactly as written. Your style, palette, and compliance settings from earlier are applied automatically and aren't shown here. Use the <strong>Stage Without Prompt</strong> button to stage with no text guidance.</div>
+      <div class="pm-prompt-hint" id="pm-hint">✏️ <strong>Edit the room read directly before staging.</strong> This is what the Smart Stage engine detected in your photo — which zones it found and where it anchored them. Add instructions, fix a misread zone, or remove a placement detail; whatever you leave here is used exactly as written. Your style, palette, and compliance settings from earlier are applied automatically and aren't shown here. Use the <strong>Stage Without Prompt</strong> button to stage with no text guidance.</div>
       <div class="pm-warning" id="pm-open-plan-warning" style="display:none;">⚠ <strong>Open Plan detected.</strong> The Smart Stage engine read this as a multi-zone space. Watch for zone crowding — if the prompt places dining furniture AND living furniture in the same area, delete the placement instructions and keep only style/material descriptions. The engine's native open-plan logic handles zone separation better than text instructions.</div>
       <div class="pm-section-label" style="margin-top:18px;">Staging Engine Payload</div>
       <pre id="pm-api-payload" style="background:#1a1a1a;color:#e8e8e8;padding:14px;border-radius:3px;font-size:0.74rem;line-height:1.6;overflow-x:auto;white-space:pre-wrap;word-break:break-word;margin:0;"></pre>
@@ -7612,10 +7616,24 @@ function splitStagingVisiblePrompt(fullPrompt) {
   }
   const before = src.slice(0, startIdx);
   const after = src.slice(endIdx);
-  // Cosmetic only: puts the zone list on its own lines under "Find and
-  // stage:" instead of run-on the same line. Reconstruction below splices
-  // whatever text is in the box back in verbatim, so this doesn't change
-  // what the model actually receives.
+  // Oct 1, 2026: the user only needs to see (and edit) the zone list with its anchors.
+  // The heading, the "Your job is to identify, find, and stage ONLY..." instruction and
+  // the "Find and stage:" lead-in are fixed template text: they stay in the hidden
+  // `before` part, so the model still receives exactly the same words in the same order
+  // (including the blank line after "Find and stage:" that the old box showed). The
+  // modal shows the heading as a read-only label instead.
+  const FIND = 'Find and stage: ';
+  const fIdx = src.indexOf(FIND, startIdx);
+  if (fIdx !== -1 && fIdx < endIdx) {
+    const zoneStart = fIdx + FIND.length;
+    return {
+      isSplit: true, zonesOnly: true,
+      before: src.slice(0, zoneStart) + '\n\n',
+      after,
+      visible: src.slice(zoneStart, endIdx).trim(),
+    };
+  }
+  // Lead-in not found (template wording changed): fall back to showing the whole block, as before.
   const visible = src.slice(startIdx, endIdx).replace(/\s+$/, '').replace('Find and stage: ', 'Find and stage: \n\n');
   return { isSplit: true, before, after, visible };
 }
@@ -7656,6 +7674,33 @@ function showPromptModal(room, prompt, hiddenParts) {
       : splitStagingVisiblePrompt(prompt);
     _pmPromptSplit = split;
     document.getElementById('pm-prompt').value = split.isSplit ? split.visible : (prompt || '');
+
+    // First-pass staging prompt (zone list only): show the photo being staged, and show the
+    // heading as a read-only label above the editable zone list. Other prompt types
+    // (revisions, declutter, ...) look exactly as before.
+    const zonesOnly = !!(split.isSplit && split.zonesOnly && !hiddenParts);
+    const thumbWrap = document.getElementById('pm-thumb-wrap');
+    const thumbImg = document.getElementById('pm-thumb');
+    const readLabel = document.getElementById('pm-read-label');
+    let thumbSrc = '';
+    if (zonesOnly) {
+      const origForThumb = (SESSION.originals || []).find(o => o.id === room.originalId);
+      if (origForThumb) thumbSrc = origForThumb.dataUrl || (origForThumb.base64 ? ('data:' + (origForThumb.mimeType || 'image/jpeg') + ';base64,' + origForThumb.base64) : '');
+    }
+    if (thumbWrap && thumbImg) {
+      if (thumbSrc) { thumbImg.src = thumbSrc; thumbWrap.style.display = 'block'; }
+      else { thumbImg.removeAttribute('src'); thumbWrap.style.display = 'none'; }
+    }
+    if (readLabel) readLabel.textContent = zonesOnly ? 'ROOMS AND ZONES TO STAGE — USER SELECTIONS' : 'Room Read — Edit Before Approving';
+    // The zone list is the rooms/zones the USER selected; the engine's only job here is to find
+    // fixtures that anchor them ("Anchor: ..."). Say that, instead of implying it detects zones.
+    const hintEl = document.getElementById('pm-hint');
+    if (hintEl) {
+      if (!hintEl.dataset.def) hintEl.dataset.def = hintEl.innerHTML;
+      hintEl.innerHTML = zonesOnly
+        ? '✏️ <strong>These are the rooms and zones you selected.</strong> Where the engine found a fixture in your photo to anchor a zone, it is shown as “Anchor: …”; otherwise only the zone name is listed. Add or change anchors and placement directions — for example “arm chair in the right foreground” (left and right refer to the photo above); whatever you leave here is used exactly as written. The staging rules around this list, plus your style, palette, and compliance settings, are applied automatically and aren\'t shown here. Use the <strong>Stage Without Prompt</strong> button to stage with no text guidance.'
+        : hintEl.dataset.def;
+    }
 
     // Open Plan warning
     const warn = document.getElementById('pm-open-plan-warning');
@@ -7701,6 +7746,12 @@ function showPromptModal(room, prompt, hiddenParts) {
 
 function approvePromptAndStage() {
   const box = document.getElementById('pm-prompt').value.trim();
+  // The zone list is the only thing telling the engine what to stage; with the fixed
+  // wording now hidden, an empty box would send the engine nothing to stage.
+  if (_pmPromptSplit && _pmPromptSplit.zonesOnly && !box) {
+    showToast('The zone list can\u2019t be empty \u2014 add the room or zone to stage, or use Stage Without Prompt.', 'error');
+    return;
+  }
   // Reassemble: hidden algorithm text (before/after) + whatever the user
   // left in the visible room-read box. Falls back to the raw box contents
   // for prompt types that weren't split (revision/declutter/correction).

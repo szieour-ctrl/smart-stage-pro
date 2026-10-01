@@ -3870,14 +3870,6 @@ function renderFinalPanelForDeclutter(roomId) {
         <input type="radio" name="${selId}" value="mls" checked style="accent-color:var(--success);" onchange="updateDeclutterFinalLabel('${roomId}')">
         <span><strong>MLS Ready</strong> <span style="color:var(--muted);font-size:0.72rem;">— Included</span></span>
       </label>
-      <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:0.78rem;padding:5px 10px;border:1px solid #b8ddd0;border-radius:3px;background:#fff;">
-        <input type="radio" name="${selId}" value="marketing" style="accent-color:var(--success);" onchange="updateDeclutterFinalLabel('${roomId}')">
-        <span><strong>Marketing Quality</strong> <span style="color:var(--muted);font-size:0.72rem;">+1 image</span></span>
-      </label>
-      <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:0.78rem;padding:5px 10px;border:1px solid #b8ddd0;border-radius:3px;background:#fff;">
-        <input type="radio" name="${selId}" value="print" style="accent-color:var(--success);" onchange="updateDeclutterFinalLabel('${roomId}')">
-        <span><strong>Print Quality</strong> <span style="color:var(--muted);font-size:0.72rem;">+2 images</span></span>
-      </label>
     </div>
     <div style="display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap;">
       <button class="btn btn-success btn-sm" id="gen-final-btn-dcl-${roomId}" onclick="generateDeclutterFinal('${roomId}')">Generate Final — MLS Ready →</button>
@@ -3897,7 +3889,7 @@ function resetDeclutterFinal(roomId) {
 function updateDeclutterFinalLabel(roomId) {
   const selId = `qsel-dcl-${roomId}`;
   const sel = document.querySelector(`input[name="${selId}"]:checked`)?.value || 'mls';
-  const creditMap = {mls:1, marketing:2, print:3};
+  const creditMap = {mls:1, marketing:1, print:1};
   const noteEl = document.getElementById(`gen-final-note-dcl-${roomId}`);
   const btnEl = document.getElementById(`gen-final-btn-dcl-${roomId}`);
   const labels = {mls:'Generate Final — MLS Ready →', marketing:'Generate Final — Marketing Quality →', print:'Generate Final — Print Quality →'};
@@ -4002,7 +3994,7 @@ function renderFinalPanel(roomId,enhId){
   // selected tier (interior path only — presets don't apply to exterior).
   // Keep in sync with the same hasPreset logic in generateFinal().
   const hasPreset = !enhId && !!room.presetCleanBase64;
-  const baseCreditMap = {'mls':1,'marketing':2,'print':3};
+  const baseCreditMap = {'mls':1,'marketing':1,'print':1};
   const initialCost = baseCreditMap.mls + (hasPreset ? 1 : 0);
   const presetSurchargeNote = hasPreset ? ` <span style="color:#4a5fa5;font-weight:600;">+1 preset</span>` : '';
   return `<div class="final-panel">
@@ -4011,14 +4003,6 @@ function renderFinalPanel(roomId,enhId){
       <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:0.78rem;padding:5px 10px;border:1px solid #b8ddd0;border-radius:3px;background:#fff;">
         <input type="radio" name="${selId}" value="mls" checked style="accent-color:var(--success);" onchange="updateFinalLabel('${roomId}','${enhId||''}')">
         <span><strong>MLS Ready</strong> <span style="color:var(--muted);font-size:0.72rem;">— Included${presetSurchargeNote}</span></span>
-      </label>
-      <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:0.78rem;padding:5px 10px;border:1px solid #b8ddd0;border-radius:3px;background:#fff;">
-        <input type="radio" name="${selId}" value="marketing" style="accent-color:var(--success);" onchange="updateFinalLabel('${roomId}','${enhId||''}')">
-        <span><strong>Marketing Quality</strong> <span style="color:var(--muted);font-size:0.72rem;">+1 image${presetSurchargeNote}</span></span>
-      </label>
-      <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:0.78rem;padding:5px 10px;border:1px solid #b8ddd0;border-radius:3px;background:#fff;">
-        <input type="radio" name="${selId}" value="print" style="accent-color:var(--success);" onchange="updateFinalLabel('${roomId}','${enhId||''}')">
-        <span><strong>Print Quality</strong> <span style="color:var(--muted);font-size:0.72rem;">+2 images${presetSurchargeNote}</span></span>
       </label>
     </div>
     <div style="display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap;">
@@ -5121,7 +5105,7 @@ async function applyPreset(roomId, presetKey) {
 //   Stage 1 (1 credit flat, any number of shots): crop each selected shot's bbox,
 //     GPT Image 2 "low" quality render using the matched rule's camera_technique —
 //     NOT upscaled. Shown as a watermarked draft grid.
-//   Stage 2 (per shot, 1/2/3 credits MLS/Marketing/Print): pure Sharp upscale of
+//   Stage 2 (per shot, 1 credit): pure Sharp upscale of
 //     that shot's existing draft — no second GPT call, exactly like generateFinal()
 //     does for the main staged image. Unlocks the real download.
 //
@@ -5415,9 +5399,7 @@ function openHeroShotPreview(roomId, shotId) {
     const qSelName = 'cag-final-qsel-' + shotId;
     const qWrap = document.createElement('div');
     qWrap.style.cssText = 'display:flex;gap:10px;font-size:0.75rem;';
-    qWrap.innerHTML = `<label><input type="radio" name="${qSelName}" value="mls" checked> MLS (1cr)</label>
-      <label><input type="radio" name="${qSelName}" value="marketing"> Marketing (2cr)</label>
-      <label><input type="radio" name="${qSelName}" value="print"> Print (3cr)</label>`;
+    qWrap.innerHTML = `<label><input type="radio" name="${qSelName}" value="mls" checked> Full size (1cr)</label>`;
     footer.appendChild(qWrap);
     const finalBtn = document.createElement('button');
     finalBtn.className = 'btn btn-primary btn-sm';
@@ -5449,8 +5431,8 @@ async function generateHeroShotFinal(roomId, shotId, qualityChoice) {
   if (!shot?.draftBase64) return;
 
   const quality = qualityChoice || 'mls';
-  const scaleMap = { mls: 4, marketing: 6, print: 8 };
-  const creditCost = { mls: 1, marketing: 2, print: 3 }[quality] || 1;
+  const scaleMap = { mls: 4, marketing: 4, print: 4 };
+  const creditCost = { mls: 1, marketing: 1, print: 1 }[quality] || 1;
 
   // FIX (Sep 7, 2026): getUser() now wrapped in withAuthTimeout — a stall here
   // (stuck cross-tab lock or the Supabase JWT-refresh incident) previously hung
@@ -6128,8 +6110,12 @@ async function generateFinal(roomId,enhId){
   // Read selected radio button value
   const selectedRadio = document.querySelector(`input[name="${selId}"]:checked`);
   const qualityChoice = selectedRadio ? selectedRadio.value : 'mls';
-  // Map to scale factor: mls=4x, marketing=6x, print=8x
-  const scaleMap = { mls: 4, marketing: 6, print: 8 };
+  // Sep 30, 2026: all tiers are now a single full-size output (4x upscale, long edge capped
+  // at 4096px by the badge step). Marketing/Print used to request 6x/8x, but upscale-image.js
+  // clamps the scale at 4 and the badge canvas caps the long edge at 4096, so those tiers
+  // returned the identical file while charging 2-3 credits. Map kept so a stale radio value
+  // can never change size or price.
+  const scaleMap = { mls: 4, marketing: 4, print: 4 };
   const scaleFactor = scaleMap[qualityChoice] || 4;
 
   // ── CREDIT GATE — debit before upscale fires ─────────────────────────────
@@ -6138,7 +6124,7 @@ async function generateFinal(roomId,enhId){
   // additive to) the MLS/Marketing/Print tier cost. Interior path only
   // (enhId present = exterior, which doesn't have presets).
   const hasPreset = !enhId && !!room.presetCleanBase64;
-  const baseCreditCost = { mls: 1, marketing: 2, print: 3 }[qualityChoice] || 1;
+  const baseCreditCost = { mls: 1, marketing: 1, print: 1 }[qualityChoice] || 1;
   const creditCost = baseCreditCost + (hasPreset ? 1 : 0);
   // FIX (Sep 7, 2026): getUser() now wrapped in withAuthTimeout — a stall here
   // (stuck cross-tab lock or the Supabase JWT-refresh incident) previously hung
@@ -6315,7 +6301,7 @@ async function generateFinal(roomId,enhId){
       room.finalStatus='done';
     }
 
-    showToast(`✓ Final generated at ${scaleFactor}x · MLS-ready with ${_badgeLabel} disclosure.`,'success');
+    showToast(`✓ Final generated · MLS-ready with ${_badgeLabel} disclosure.`,'success');
     renderRoomQueue();
 
     // ── UPLOAD STAGED FINAL TO CLOUDINARY + ATTACH TO COMPLIANCE PAGE ────────
@@ -7791,7 +7777,7 @@ function updateFinalLabel(roomId, enhId) {
   const noteId = 'gen-final-note-' + roomId + '-' + (enhId || 'int');
   const selected = document.querySelector(`input[name="${selId}"]:checked`)?.value || 'mls';
   const labels = { mls: 'MLS Ready', marketing: 'Marketing Quality', print: 'Print Quality' };
-  const baseCosts = { mls: 1, marketing: 2, print: 3 };
+  const baseCosts = { mls: 1, marketing: 1, print: 1 };
   // A Photographic Preset adds +1 credit on top of the selected tier — interior
   // path only (enhId present = exterior, which doesn't have presets). Keep this
   // note in sync with the actual debit logic in generateFinal().
@@ -10316,7 +10302,7 @@ const GETTING_STARTED_CONTENT = [
       { title: "Generate a Draft and review it", desc: "Your first staged image is a Draft. Check furniture selection, placement, style, color, and composition before moving on." },
       { title: "Revise if needed", desc: "Enter what you want changed and create a revised draft. Only what you specify changes — everything else stays true to your Design DNA." },
       { title: "Add a photographic preset (optional)", desc: "Apply a look like <strong>MLS Bright</strong>, <strong>Luxury Editorial</strong>, or <strong>Twilight Boost</strong> before generating the Final." },
-      { title: "Generate the Final", desc: "Choose your output quality — MLS Ready, Marketing Quality, or Print Quality — then click <strong>Generate Final</strong>. This creates the finished image and adds it to the property's compliance record." }
+      { title: "Generate the Final", desc: "Click <strong>Generate Final</strong>. This creates the finished image and adds it to the property's compliance record." }
     ]
   },
   {
@@ -10328,7 +10314,7 @@ const GETTING_STARTED_CONTENT = [
       { title: "Let the Cinematic Photo Director analyze it", desc: "It identifies the strongest potential compositions and shows recommendations directly over the image, each with a confidence level." },
       { title: "Select the shots you want", desc: "Check or uncheck the recommended compositions — you're always in control of what gets created." },
       { title: "Generate a draft collage", desc: "Preview drafts let you inspect each composition before spending an Image on the full-resolution Final." },
-      { title: "Choose output quality and generate", desc: "Pick MLS, Marketing, or Print quality, then click <strong>Generate Final</strong> for the finished Hero Shot." }
+      { title: "Generate the final", desc: "Click <strong>Generate Final</strong> for the finished Hero Shot." }
     ]
   },
   {

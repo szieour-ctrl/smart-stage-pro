@@ -4281,7 +4281,24 @@ async function compressImageForUpload(base64, mimeType, maxDim = 1536, maxKB = 1
   }
 }
 
-async function callStageAPI(imageBase64, mimeType, prompt, quality) {
+// Oct 1, 2026 — draft monitoring: tags each staging call with what it is and which
+// photo it belongs to, so stage-openai.js can record it (table: staging_usage) and,
+// if you turn on the optional limits, count drafts per photo. originals have unique
+// ids (orig_<time>_<rand>), so projectId:originalId identifies one photo's whole
+// chain of drafts: first stage, iterations, re-stages, presets.
+function stageCtx(kind, roomId, enhId) {
+  try {
+    const room = SESSION.rooms.find(r => r.id === roomId);
+    const base = (room && (room.originalId || room.id)) || roomId || 'unknown';
+    return {
+      kind,
+      projectId: SESSION.projectId || null,
+      imageKey: (SESSION.projectId || 'noproject') + ':' + base + (enhId ? ':' + enhId : ''),
+    };
+  } catch (e) { return { kind, projectId: null, imageKey: null }; }
+}
+
+async function callStageAPI(imageBase64, mimeType, prompt, quality, ctx) {
   // Pre-crop to 3:2 before anything else touches this image — see
   // preCropTo3x2() above for why. Every downstream step (compression,
   // the OpenAI call, resizeToMatch()) now operates on the already-correct
@@ -4295,13 +4312,17 @@ async function callStageAPI(imageBase64, mimeType, prompt, quality) {
   const { base64: readyBase64, mimeType: readyMime } = await compressImageForUpload(imageBase64, mimeType);
 
   // Step 1: Fire background job — returns jobId immediately
+  // authJsonHeaders() adds the login token so the server knows who is staging.
+  // `quality` is still sent for compatibility, but the server now decides it.
   const startRes = await fetch('/.netlify/functions/stage-openai', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ imageBase64: readyBase64, mimeType: readyMime, stagingPrompt: prompt, quality: quality || 'low' })
+    headers: authJsonHeaders(),
+    body: JSON.stringify({ imageBase64: readyBase64, mimeType: readyMime, stagingPrompt: prompt, quality: quality || 'low', ctx: ctx || null })
   });
   if (!startRes.ok) {
     const d = await startRes.json().catch(() => ({}));
+    // Plain-language messages for the two expected rejections (login expired / draft limit).
+    if (d.code === 'UNAUTHORIZED' || d.code === 'DRAFT_LIMIT') { const e = new Error(d.error); e.code = d.code; throw e; }
     throw new Error('Staging failed to start: ' + (d.error || startRes.status));
   }
   const { jobId } = await startRes.json();
@@ -4667,7 +4688,7 @@ async function stageRoom(roomId) {
     room.promptStatus = 'Generating draft — takes ~15 seconds...';
     renderRoomQueue();
 
-    const stageResult = await callStageAPI(sourceBase64, sourceMime, finalPrompt, 'low');
+    const stageResult = await callStageAPI(sourceBase64, sourceMime, finalPrompt, 'low', stageCtx('stage', roomId));
     if (!stageResult) throw new Error('Staging engine failed — no image returned');
     const stagedBase64 = stageResult.watermarked;
     const stagedCleanBase64 = stageResult.clean;
@@ -5060,7 +5081,7 @@ async function applyPreset(roomId, presetKey) {
     room.promptStatus = `Applying ${preset.label} preset — takes ~15 seconds...`;
     renderRoomQueue();
 
-    const presetResult = await callStageAPI(sourceClean, 'image/jpeg', approvedPrompt, 'low');
+    const presetResult = await callStageAPI(sourceClean, 'image/jpeg', approvedPrompt, 'low', stageCtx('preset', roomId));
     if (!presetResult) throw new Error('Preset rendering failed — no image returned');
 
     room.presetCleanBase64 = presetResult.clean;
@@ -5336,7 +5357,7 @@ async function generateDraftCollage(roomId, sourceClean, selectedShots) {
         `Constraints: ${(shot.render_constraints || []).join('; ')}.\n` +
         `Do not: ${(shot.disallow || []).join('; ')}.`;
 
-      const result = await callStageAPI(cropData.croppedUpscaledBase64, 'image/jpeg', groundedPrompt, 'low');
+      const result = await callStageAPI(cropData.croppedUpscaledBase64, 'image/jpeg', groundedPrompt, 'low', stageCtx('hero', roomId));
       if (!result) throw new Error('Draft rendering failed — no image returned');
 
       room.heroDetailShots[shot.id] = {
@@ -5933,6 +5954,8 @@ async function iterateRoom(roomId) {
     ? { before: revParts.before, after: revParts.after, visible: note }
     : { before: room.lastPrompt + '\n\nREVISION — Apply these changes to the staging above. Everything not mentioned stays exactly the same:\n', after: '', visible: note };
 
+  // Snapshot so a server-side rejection (draft limit / login) can restore the room untouched.
+  const priorStagedBase64 = room.stagedBase64, priorFinalBase64 = room.finalBase64, priorFinalStatus = room.finalStatus, priorLastPrompt = room.lastPrompt;
   room.status = 'processing';
   room.promptStatus = 'Re-staging with revision...';
   room.finalBase64 = null;
@@ -5968,7 +5991,7 @@ async function iterateRoom(roomId) {
     const rawSourceImage = hasPriorStaged ? priorStagedClean : orig.base64;
     const sourceImage = await downscaleForStagingInput(rawSourceImage, 2048);
     const sourceMime = hasPriorStaged ? 'image/jpeg' : orig.mimeType;
-    const stageResult = await callStageAPI(sourceImage, sourceMime, approvedPrompt, 'low');
+    const stageResult = await callStageAPI(sourceImage, sourceMime, approvedPrompt, 'low', stageCtx('iterate', roomId));
     if (!stageResult) throw new Error('Staging engine failed — no image returned');
     const stagedBase64 = stageResult.watermarked;
     const stagedCleanBase64 = stageResult.clean;
@@ -5988,6 +6011,20 @@ async function iterateRoom(roomId) {
     renderRoomQueue();
     showToast(`✓ ${room.roomName} re-staged successfully.`, 'success');
   } catch (err) {
+    // The server refused BEFORE generating anything (draft limit reached, or login expired).
+    // Put the room back exactly as it was, so the current draft, its revision panel and its
+    // Generate Final button are all still there instead of dropping to "Stage This Room".
+    if (err && (err.code === 'DRAFT_LIMIT' || err.code === 'UNAUTHORIZED') && priorStagedBase64) {
+      room.status = 'done';
+      room.promptStatus = null;
+      room.stagedBase64 = priorStagedBase64;
+      room.finalBase64 = priorFinalBase64;
+      room.finalStatus = priorFinalStatus;
+      room.lastPrompt = priorLastPrompt;
+      renderRoomQueue();
+      showToast(err.message, 'error');
+      return;
+    }
     room.status = 'error';
     room.promptStatus = null;
     renderRoomQueue();
@@ -6020,6 +6057,8 @@ async function reStageRoom(roomId) {
     ? { before: revParts.before, after: revParts.after, visible: note }
     : { before: room.lastPrompt + '\n\nREVISION — Apply these changes to the staging above. Everything not mentioned stays exactly the same:\n', after: '', visible: note };
 
+  // Snapshot so a server-side rejection (draft limit / login) can restore the room untouched.
+  const priorStagedBase64 = room.stagedBase64, priorFinalBase64 = room.finalBase64, priorFinalStatus = room.finalStatus, priorLastPrompt = room.lastPrompt;
   room.status = 'processing';
   room.promptStatus = 'Re-staging with revision...';
   room.stagedBase64 = null;
@@ -6054,7 +6093,7 @@ async function reStageRoom(roomId) {
     const rawSourceImage = hasPriorStaged ? priorStagedClean : room.declutteredBase64;
     const sourceImage = await downscaleForStagingInput(rawSourceImage, 2048);
     const sourceMime = 'image/jpeg';
-    const stageResult = await callStageAPI(sourceImage, sourceMime, approvedPrompt, 'low');
+    const stageResult = await callStageAPI(sourceImage, sourceMime, approvedPrompt, 'low', stageCtx('restage', roomId));
     if (!stageResult) throw new Error('Staging engine failed — no image returned');
     const stagedBase64 = stageResult.watermarked;
     const stagedCleanBase64 = stageResult.clean;
@@ -6074,6 +6113,20 @@ async function reStageRoom(roomId) {
     renderRoomQueue();
     showToast(`✓ ${room.roomName} re-staged successfully.`, 'success');
   } catch (err) {
+    // The server refused BEFORE generating anything (draft limit reached, or login expired).
+    // Put the room back exactly as it was, so the current draft, its revision panel and its
+    // Generate Final button are all still there instead of dropping to "Stage This Room".
+    if (err && (err.code === 'DRAFT_LIMIT' || err.code === 'UNAUTHORIZED') && priorStagedBase64) {
+      room.status = 'done';
+      room.promptStatus = null;
+      room.stagedBase64 = priorStagedBase64;
+      room.finalBase64 = priorFinalBase64;
+      room.finalStatus = priorFinalStatus;
+      room.lastPrompt = priorLastPrompt;
+      renderRoomQueue();
+      showToast(err.message, 'error');
+      return;
+    }
     room.status = 'error';
     room.promptStatus = null;
     renderRoomQueue();
@@ -6393,7 +6446,7 @@ async function runDeclutterOnly(roomId) {
     room.status = 'processing';
     room.promptStatus = 'Removing objects — takes ~15 seconds...';
     renderRoomQueue();
-    const dclResult = await callStageAPI(orig.base64, orig.mimeType, approvedPrompt, 'low');
+    const dclResult = await callStageAPI(orig.base64, orig.mimeType, approvedPrompt, 'low', stageCtx('declutter', roomId));
     if (!dclResult) throw new Error('Declutter failed — no image returned');
     room.declutteredBase64 = dclResult.watermarked;
     room.declutteredCleanBase64 = dclResult.clean;
@@ -6461,7 +6514,7 @@ async function runCleanAndStage(roomId) {
     room.status = 'processing';
     room.promptStatus = 'Step 1 of 3 — Removing objects...';
     renderRoomQueue();
-    const cnsCleanResult = await callStageAPI(orig.base64, orig.mimeType, approvedDeclutter, 'low');
+    const cnsCleanResult = await callStageAPI(orig.base64, orig.mimeType, approvedDeclutter, 'low', stageCtx('clean_stage', roomId));
     if (!cnsCleanResult) throw new Error('Declutter failed — no image returned');
     room.declutteredBase64 = cnsCleanResult.watermarked;
     room.declutteredCleanBase64 = cnsCleanResult.clean;
@@ -6514,7 +6567,7 @@ async function runCleanAndStage(roomId) {
     room.promptStatus = 'Step 3 of 3 — Generating staged draft...';
     renderRoomQueue();
     console.log('Clean+Stage step 3: staging cleaned image (' + Math.round(cleanedBase64.length/1024) + 'KB)');
-    const cnsStageResult = await callStageAPI(cleanedBase64, 'image/png', approvedStage, 'low');
+    const cnsStageResult = await callStageAPI(cleanedBase64, 'image/png', approvedStage, 'low', stageCtx('clean_stage', roomId));
     if (!cnsStageResult) throw new Error('No staged image returned');
     room.stagedBase64 = cnsStageResult.watermarked;
     room.stagedCleanBase64 = cnsStageResult.clean;
@@ -6581,7 +6634,7 @@ async function runExtEnhancements(roomId){
   
   for(const enh of toRun){
     try{
-      const extResult=await callStageAPI(compressedB64,'image/jpeg',buildExteriorPrompt(room,enh,'low'),'low');
+      const extResult=await callStageAPI(compressedB64,'image/jpeg',buildExteriorPrompt(room,enh,'low'),'low', stageCtx('exterior', roomId, enh && enh.id));
       const b64=extResult.watermarked;const b64Clean=extResult.clean;
       room.extSelections[enh.id].base64=b64;room.extSelections[enh.id].cleanBase64=b64Clean;room.extSelections[enh.id].status='done';
       await resizeToMatch(room,orig,enh.id,'__extdraft__',b64);
@@ -6675,7 +6728,7 @@ async function iterateDeclutter(roomId) {
     renderRoomQueue();
 
     const sourceImage = await downscaleForStagingInput(priorCleanBase64, 2048);
-    const iterResult = await callStageAPI(sourceImage, 'image/jpeg', approvedPrompt, 'low');
+    const iterResult = await callStageAPI(sourceImage, 'image/jpeg', approvedPrompt, 'low', stageCtx('iterate_declutter', roomId));
     if (!iterResult) throw new Error('Re-declutter failed — no image returned');
 
     room.declutteredBase64 = iterResult.watermarked;
@@ -6761,7 +6814,7 @@ async function runDeclutterEnhance(roomId, note) {
     renderRoomQueue();
 
     const sourceImage = await downscaleForStagingInput(priorCleanBase64, 2048);
-    const enhResult = await callStageAPI(sourceImage, 'image/jpeg', approvedPrompt, 'low');
+    const enhResult = await callStageAPI(sourceImage, 'image/jpeg', approvedPrompt, 'low', stageCtx('enhance', roomId));
     if (!enhResult) throw new Error('AI Enhance failed — no image returned');
 
     room.declutteredBase64 = enhResult.watermarked;
@@ -6817,7 +6870,7 @@ async function iterateExtEnhancement(roomId, enhId) {
   try {
     const basePrompt = buildExteriorPrompt(room, enh, 'low');
     const revisedPrompt = note ? basePrompt + ` Additional instruction: ${note}` : basePrompt;
-    const extIterResult = await callStageAPI(compressedB64, 'image/jpeg', revisedPrompt, 'low');
+    const extIterResult = await callStageAPI(compressedB64, 'image/jpeg', revisedPrompt, 'low', stageCtx('iterate_exterior', roomId, enhId));
     const b64 = extIterResult.watermarked;
     room.extSelections[enhId].base64 = b64;
     room.extSelections[enhId].cleanBase64 = extIterResult.clean;
@@ -6862,7 +6915,7 @@ async function runSingleExtEnhancement(roomId, enhId) {
   });
 
   try {
-    const extRestageResult = await callStageAPI(compressedB64, 'image/jpeg', buildExteriorPrompt(room, enh, 'low'), 'low');
+    const extRestageResult = await callStageAPI(compressedB64, 'image/jpeg', buildExteriorPrompt(room, enh, 'low'), 'low', stageCtx('exterior', roomId, enhId));
     const b64 = extRestageResult.watermarked;
     room.extSelections[enhId].base64 = b64;
     room.extSelections[enhId].cleanBase64 = extRestageResult.clean;
@@ -7496,7 +7549,7 @@ async function stageRoomWithPrompt(roomId, promptText) {
   renderRoomQueue();
 
   try {
-    const groupResult = await callStageAPI(orig.base64, orig.mimeType, promptText, 'low');
+    const groupResult = await callStageAPI(orig.base64, orig.mimeType, promptText, 'low', stageCtx('stage', roomId));
     if (!groupResult) throw new Error('No image returned');
     const stagedBase64 = groupResult.watermarked;
     const stagedCleanBase64 = groupResult.clean;

@@ -486,7 +486,7 @@ if (new URLSearchParams(window.location.search).get('debug') === '1') {
       </div>
       <div class="pm-section-label" id="pm-read-label">Room Read — Edit Before Approving</div>
       <div class="pm-prompt-wrap">
-        <textarea class="pm-prompt" id="pm-prompt" rows="10" spellcheck="false"></textarea>
+        <textarea class="pm-prompt" id="pm-prompt" rows="10" spellcheck="true" lang="en-US" autocorrect="on"></textarea>
       </div>
       <div class="pm-prompt-hint" id="pm-hint">✏️ <strong>Edit the room read directly before staging.</strong> This is what the Smart Stage engine detected in your photo — which zones it found and where it anchored them. Add instructions, fix a misread zone, or remove a placement detail; whatever you leave here is used exactly as written. Your style, palette, and compliance settings from earlier are applied automatically and aren't shown here.</div>
       <div class="pm-warning" id="pm-open-plan-warning" style="display:none;">⚠ <strong>Open Plan detected.</strong> The Smart Stage engine read this as a multi-zone space. Watch for zone crowding — if the prompt places dining furniture AND living furniture in the same area, delete the placement instructions and keep only style/material descriptions. The engine's native open-plan logic handles zone separation better than text instructions.</div>

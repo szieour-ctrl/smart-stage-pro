@@ -163,8 +163,23 @@ h1{font-family:Georgia,serif;font-weight:400;font-size:1.7rem;text-align:center;
 .cta:hover{background:var(--gold-light);}
 .footer{text-align:center;color:var(--muted);font-size:0.72rem;margin-top:28px;}
 </style>
+<!-- Meta Pixel Code (Oct 2026) — PageView only, prospecting page only -->
+<script>
+!function(f,b,e,v,n,t,s)
+{if(f.fbq)return;n=f.fbq=function(){n.callMethod?
+n.callMethod.apply(n,arguments):n.queue.push(arguments)};
+if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
+n.queue=[];t=b.createElement(e);t.async=!0;
+t.src=v;s=b.getElementsByTagName(e)[0];
+s.parentNode.insertBefore(t,s)}(window, document,'script',
+'https://connect.facebook.net/en_US/fbevents.js');
+fbq('init', '2034726263826697');
+fbq('track', 'PageView');
+</script>
+<!-- End Meta Pixel Code -->
 </head>
 <body>
+<noscript><img height="1" width="1" style="display:none" src="https://www.facebook.com/tr?id=2034726263826697&ev=PageView&noscript=1" alt="" /></noscript>
 <div class="wrap">
   <div class="brand">SMART STAGE <b>PRO</b></div>
   <div class="eyebrow">Before &amp; After</div>

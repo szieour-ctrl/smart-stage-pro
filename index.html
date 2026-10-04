@@ -8984,8 +8984,30 @@ function checkTosReady() {
   }
 }
 
+// NEW (Oct 4, 2026): Meta Pixel "CompleteRegistration" for new free-trial
+// accounts. Fires from acceptTos() because that's the first point a new user
+// is a fully registered, email-confirmed, signed-in account (it works the
+// same whether Supabase email confirmation is on or off, and it never fires
+// on the signUp() call itself, which also "succeeds" for an already-existing
+// email and for unconfirmed addresses). Guards: (1) only the FIRST ToS
+// acceptance — a later terms-version bump re-shows the modal to existing
+// users and must not count as a new signup; (2) only when the accept-terms
+// save succeeded (a failed save re-prompts and would double-count); (3) once
+// per user per browser via localStorage. No email/name/ID is sent to Meta.
+// Wrapped in try/catch — tracking must never block the app.
+function trackTrialSignup(userId) {
+  try {
+    if (typeof fbq !== 'function') return;
+    const key = 'ssp_fb_reg_' + (userId || 'anon');
+    try { if (localStorage.getItem(key)) return; } catch (e) { /* storage blocked — fall through, fire once */ }
+    fbq('track', 'CompleteRegistration', { content_name: 'Smart Stage PRO Free Trial', status: true });
+    try { localStorage.setItem(key, '1'); } catch (e) { /* non-fatal */ }
+  } catch (e) { /* never block signup flow */ }
+}
+
 async function acceptTos() {
   const btn = document.getElementById('tos-accept-btn');
+  const firstAcceptance = !_userRecord?.terms_accepted_at; // false for existing users re-accepting a new terms version
   if (btn) { btn.textContent = 'Saving...'; btn.disabled = true; }
   try {
     const session = readStoredSessionDirect();
@@ -8998,6 +9020,7 @@ async function acceptTos() {
       },
       body: JSON.stringify({ userId: _currentUser?.id, signupSource: getCapturedSignupSource(), termsVersion: CURRENT_TERMS_VERSION }),
     });
+    if (res.ok && firstAcceptance) trackTrialSignup(_currentUser?.id);
     // Proceed regardless — if DB write fails, terms_accepted_at may already be set via SQL
     // Brief pause to allow DB trigger to seed free trial credits
     document.getElementById('tos-modal')?.remove();

@@ -7953,11 +7953,25 @@ let _idleCheckHandle = null;
 
 function _markActivity() { _lastActivityAt = Date.now(); }
 
+// FIX (Oct 8, 2026): this list used to be only click / keydown / touchstart,
+// so a user who was genuinely working but not clicking or typing — scrolling
+// a gallery or the room list, moving the mouse over an image, pinch/drag on
+// a phone, or waiting on a render while watching results — looked "idle" and
+// got signed out at 45 minutes. Count every real interaction signal instead.
+// Listeners are registered in the CAPTURE phase on window: `scroll` doesn't
+// bubble from inner scrollable panels (modals, lightboxes, the ToS box) and
+// any handler that calls stopPropagation() would otherwise hide its event
+// from a bubble-phase document listener.
+const _IDLE_ACTIVITY_EVENTS = [
+  'click', 'mousedown', 'mousemove', 'pointerdown', 'wheel', 'scroll',
+  'keydown', 'touchstart', 'touchmove'
+];
+
 function startIdleTimer() {
   if (_idleCheckHandle) return; // already running — don't stack a second interval
   _lastActivityAt = Date.now();
-  ['click', 'keydown', 'touchstart'].forEach(evt =>
-    document.addEventListener(evt, _markActivity, { passive: true })
+  _IDLE_ACTIVITY_EVENTS.forEach(evt =>
+    window.addEventListener(evt, _markActivity, { passive: true, capture: true })
   );
   _idleCheckHandle = setInterval(() => {
     if (Date.now() - _lastActivityAt > IDLE_LIMIT_MS) {
@@ -7972,8 +7986,8 @@ function stopIdleTimer() {
     clearInterval(_idleCheckHandle);
     _idleCheckHandle = null;
   }
-  ['click', 'keydown', 'touchstart'].forEach(evt =>
-    document.removeEventListener(evt, _markActivity)
+  _IDLE_ACTIVITY_EVENTS.forEach(evt =>
+    window.removeEventListener(evt, _markActivity, { capture: true })
   );
 }
 

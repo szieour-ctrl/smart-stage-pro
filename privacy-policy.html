@@ -141,7 +141,7 @@
   <h1 class="page-title">Privacy Policy</h1>
   <div class="page-effective">
     <strong>Effective Date:</strong> June 2026 &nbsp;·&nbsp;
-    <strong>Last Updated:</strong> June 2026 &nbsp;·&nbsp;
+    <strong>Last Updated:</strong> October 2026 &nbsp;·&nbsp;
     <strong>Applies to:</strong> smartstagepro.com and all related services
   </div>
 
@@ -176,6 +176,7 @@
       <li>Credit ledger activity (image allocations, usage, purchases)</li>
       <li>Help Agent conversation history (thumbs up/down feedback only — not stored long-term)</li>
       <li>Browser type and device information (collected by third-party services listed below)</li>
+      <li>Advertising measurement data collected by the Meta (Facebook) pixel — page views of smartstagepro.com and of prospect landing pages, a free-trial sign-up event, and the browser and device identifiers Meta's pixel collects automatically (see Sections 4 and 9)</li>
     </ul>
     <p><strong>Payment Information</strong></p>
     <p>We do not store credit card numbers or payment details. All payment processing is handled by Stripe. We receive only a Stripe customer ID and subscription status confirmation.</p>
@@ -195,7 +196,7 @@
       <li>To improve platform performance and staging quality</li>
     </ul>
     <div class="highlight-box">
-      <strong>We do not sell your data.</strong> We do not share your personal information, property data, or staged images with third parties for advertising, marketing, or data brokerage purposes.
+      <strong>We do not sell your data.</strong> We do not share your name, email address, property data, or staged images with third parties for advertising, marketing, or data brokerage purposes. The only advertising-related data flow is the Meta (Facebook) pixel described in Sections 4 and 9, which sends Meta page-view and sign-up events and the browser and device information the pixel collects automatically. It does not send your name, email address, property addresses, or images.
     </div>
   </div>
 
@@ -224,10 +225,10 @@
         <td><a href="https://supabase.com/privacy" target="_blank">supabase.com/privacy</a></td>
       </tr>
       <tr>
-        <td><strong>Cloudinary</strong></td>
-        <td>Image storage and delivery (CDN)</td>
-        <td>Original photos uploaded by agents, staged image files, final output images</td>
-        <td><a href="https://cloudinary.com/privacy" target="_blank">cloudinary.com/privacy</a></td>
+        <td><strong>Amazon Web Services (AWS S3)</strong></td>
+        <td>Image, video, and audio file storage and delivery</td>
+        <td>Original photos uploaded by agents, staged and final output images, thumbnails, rendered videos, and narration audio</td>
+        <td><a href="https://aws.amazon.com/privacy/" target="_blank">aws.amazon.com/privacy</a></td>
       </tr>
       <tr>
         <td><strong>Netlify</strong></td>
@@ -271,6 +272,12 @@
         <td>Image and video files in transit during rendering; job metadata</td>
         <td><a href="https://railway.com/legal/privacy" target="_blank">railway.com/legal/privacy</a></td>
       </tr>
+      <tr>
+        <td><strong>Meta (Facebook)</strong></td>
+        <td>Advertising measurement for our Facebook page and ads (Meta pixel)</td>
+        <td>Page-view events from smartstagepro.com and prospect landing pages; a free-trial sign-up event; browser and device identifiers (such as IP address, browser type, and Meta cookies) collected automatically by the pixel. No name, email, property address, or images are sent.</td>
+        <td><a href="https://www.facebook.com/privacy/policy/" target="_blank">facebook.com/privacy/policy</a></td>
+      </tr>
     </table>
 
     <div class="highlight-box">
@@ -288,16 +295,16 @@
       <li>The date and time each staged image was generated</li>
       <li>The agent's name and DRE license number</li>
       <li>The property address</li>
-      <li>Public compliance page URL (permanent public record)</li>
+      <li>Public compliance page URL (a public record for as long as the page is live — see below)</li>
     </ul>
-    <p>This data is retained for a minimum of <strong>3 years</strong> from project creation date, in accordance with California DRE record retention requirements. Compliance pages remain publicly accessible at their permanent URL even after a listing is archived or a subscription is cancelled. If a subscription is cancelled, the agent of record will receive a data archive via email within 30 days.</p>
+    <p>This data is retained for a minimum of <strong>3 years</strong> from project creation date, in accordance with California DRE record retention requirements. Compliance pages remain publicly accessible at their permanent URL even after a listing is archived. When a paid subscription is cancelled or ends, its compliance pages stay live for 30 days and are then taken offline and replaced with a notice that the record is no longer publicly available; during those 30 days the account holder can sign in and download a ZIP file of their listing images. Pages created during a free trial follow the same 30-day period after the trial ends, and a Listing Package page stays live for 6 months from purchase (extensions may be requested from support). After a page is taken offline, the underlying records are retained privately for the retention period above and are not publicly accessible. If a subscription is cancelled, the agent of record will receive a data archive via email within 30 days.</p>
   </div>
 
   <!-- 6. DATA STORAGE AND SECURITY -->
   <div class="section">
     <h2 class="section-title">6. Data Storage and Security</h2>
     <ul>
-      <li>All data is stored in the United States on infrastructure provided by Supabase (PostgreSQL), Cloudinary, Netlify, and Railway (video render pipeline)</li>
+      <li>All data is stored in the United States on infrastructure provided by Supabase (PostgreSQL), Amazon Web Services (S3 file storage), Netlify, and Railway (video render pipeline)</li>
       <li>Database access is protected by row-level security (RLS) — agents can only access their own listings and compliance data</li>
       <li>API keys and service credentials are stored as server-side environment variables and are never exposed to the browser</li>
       <li>Passwords are hashed using bcrypt via Supabase Auth — we never store or transmit plaintext passwords</li>
@@ -325,7 +332,7 @@
     <ul>
       <li><strong>Right to Know:</strong> Request disclosure of the categories and specific pieces of personal information we have collected about you</li>
       <li><strong>Right to Delete:</strong> Request deletion of your personal information, subject to AB 723 compliance retention requirements</li>
-      <li><strong>Right to Opt-Out:</strong> We do not sell personal information — there is nothing to opt out of</li>
+      <li><strong>Right to Opt-Out:</strong> We do not sell personal information in exchange for money. Because the Meta pixel (Section 9) shares browser and device identifiers with Meta for advertising measurement, you may ask us to stop that sharing for you by emailing support@smartstagepro.com, and you can also block the pixel with your browser's tracking-protection settings or manage ad preferences in your Meta account</li>
       <li><strong>Right to Non-Discrimination:</strong> We will not discriminate against you for exercising your privacy rights</li>
     </ul>
     <p>To exercise these rights, contact us at <a href="mailto:support@smartstagepro.com">support@smartstagepro.com</a>. We will respond within 45 days. Note that AB 723 compliance records cannot be deleted regardless of deletion requests, as they are required by California law.</p>
@@ -334,7 +341,8 @@
   <!-- 9. COOKIES -->
   <div class="section">
     <h2 class="section-title">9. Cookies and Local Storage</h2>
-    <p>Smart Stage PRO™ uses browser session storage and authentication tokens (managed by Supabase Auth) to maintain your logged-in session. We do not use third-party advertising cookies or tracking pixels. We do not use Google Analytics or similar behavioral tracking services.</p>
+    <p>Smart Stage PRO™ uses browser session storage and authentication tokens (managed by Supabase Auth) to maintain your logged-in session. We do not use Google Analytics or similar behavioral tracking services.</p>
+    <p><strong>Meta (Facebook) pixel.</strong> To measure the results of our Facebook page and ads, smartstagepro.com and the prospect landing pages reached through our marketing QR codes load the Meta pixel. The pixel records page views and one free-trial sign-up event, and Meta may set cookies and collect your IP address, browser type, and device information to attribute those events to Facebook ads. We do not send Meta your name, email address, property addresses, or images. The pixel is not loaded on public AB 723 compliance pages. Meta's use of this data is governed by its own privacy policy (linked in Section 4). To avoid the pixel, use a browser or extension that blocks trackers, or contact us at <a href="mailto:support@smartstagepro.com">support@smartstagepro.com</a>.</p>
     <p>The platform uses a Supabase authentication token stored in your browser's local storage to keep you logged in. This token expires automatically and can be cleared by signing out.</p>
   </div>
 

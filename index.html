@@ -1581,9 +1581,49 @@ async function fetchAddressPredictions(input) {
   }
 }
 
+// Oct 10, 2026 — manual-address fallback for brand-new builds. Google Places
+// only returns addresses it has already indexed, so a new-construction lot
+// (common in 55+ communities) can come back with zero matches, leaving no way
+// to create a project. Every downstream function (project-manage.js,
+// marketing-manage.js, S3 slugs, compliance/prospect pages) works from the
+// address TEXT alone — none read a Google place_id — so a typed address is a
+// fully valid input. Returns a Google-style "street, city, CA, USA" string, or
+// null if what was typed doesn't yet look like a street address plus city.
+function buildManualAddress(raw) {
+  let t = (raw || '').trim().replace(/\s+/g, ' ');
+  if (!/^\d+[A-Za-z]?\s+[^,]+,\s*[^,]+/.test(t)) return null;
+  if (!/,\s*(CA|California)\b/i.test(t)) t += ', CA';
+  if (!/,\s*USA$/i.test(t)) t += ', USA';
+  return t.replace(/,\s*California\b/i, ', CA');
+}
+
 function renderAddressDropdown(predictions) {
   const dd = document.getElementById('addr-dropdown');
-  if (!predictions.length) { dd.style.display = 'none'; return; }
+  const typed = (document.getElementById('addr-input')?.value || '').trim();
+  const manual = buildManualAddress(typed);
+  // Always offer the typed address as the last option (not only on zero
+  // results — Google may return a near-miss neighbor for a new lot). It joins
+  // _addrPredictions so arrow keys and selectAddress() work unchanged.
+  predictions = (predictions || []).filter(p => !p.manual);
+  if (manual) {
+    predictions = predictions.concat([{
+      description: manual,
+      mainText: 'Use "' + typed + '" as entered',
+      secondaryText: 'New build or address Google can’t find yet',
+      manual: true,
+    }]);
+  }
+  _addrPredictions = predictions;
+  if (!predictions.length) {
+    // Nothing from Google and not yet a full address: hint instead of vanishing
+    if (typed.length >= 5 && /^\d/.test(typed)) {
+      dd.innerHTML = '<div style="padding:12px 16px;font-size:12px;color:var(--muted);">No match yet. For a new build, type the full address with city — e.g. 123 Main St, Roseville — and choose “Use as entered.”</div>';
+      dd.style.display = 'block';
+    } else {
+      dd.style.display = 'none';
+    }
+    return;
+  }
 
   dd.innerHTML = predictions.map((p, i) => `
     <div class="addr-option" data-index="${i}" onclick="selectAddress(${i})"

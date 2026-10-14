@@ -210,6 +210,11 @@ function renderPage(project, projectId, videoJobs) {
   const address       = project.address || "Property Address";
   const compUrl       = project.complianceUrl || `${process.env.URL || "https://smartstagepro.com"}/compliance/${projectId}`;
   const createdAt     = formatDate(project.createdAt);
+  // Oct 14, 2026: exterior / enhancement-only images are "Digitally Enhanced", not "Virtually Staged".
+  const enhancedCount = images.filter(img => img.enhanced === true).length;
+  const stagedCount   = images.length - enhancedCount;
+  const allEnhanced   = images.length > 0 && stagedCount === 0;
+  const anyEnhanced   = enhancedCount > 0;
   const videoJobsList = videoJobs || [];
 
   const videoTourSections = videoJobsList.map((job, i) => {
@@ -249,6 +254,11 @@ function renderPage(project, projectId, videoJobs) {
   const imagePairs = images.map((img, i) => {
     const hasOriginal = !!img.originalUrl;
     const hasStaged   = !!img.stagedUrl;
+    const isEnh       = img.enhanced === true;
+    const kindLabel   = isEnh ? "Digitally enhanced" : "Virtually staged";
+    const kindUpper   = isEnh ? "DIGITALLY ENHANCED" : "VIRTUALLY STAGED";
+    const kindShort   = isEnh ? "ENHANCED" : "STAGED";
+    const kindDate    = isEnh ? "Enhanced" : "Staged";
 
     // If both images present — render interactive slider
     if (hasOriginal && hasStaged) {
@@ -257,11 +267,11 @@ function renderPage(project, projectId, videoJobs) {
       <div class="pair-header">
         <span class="pair-num">Image Set ${i + 1}</span>
         <span class="pair-room">${img.roomName || "Room"}</span>
-        <span class="pair-date">Staged ${formatDate(img.stagedAt)}</span>
+        <span class="pair-date">${kindDate} ${formatDate(img.stagedAt)}</span>
       </div>
       <div class="pair-grid">
         <div class="comp-slider" data-slider>
-          <img src="${img.stagedUrl}" alt="Virtually staged photo of ${address}" loading="lazy">
+          <img src="${img.stagedUrl}" alt="${kindLabel} photo of ${address}" loading="lazy">
           <div class="sl-before-wrap">
             <img src="${img.originalUrl}" alt="Original unaltered photo of ${address}" loading="lazy">
           </div>
@@ -271,7 +281,7 @@ function renderPage(project, projectId, videoJobs) {
             </div>
           </div>
           <span class="comp-sl-label comp-sl-label-before">ORIGINAL</span>
-          <span class="comp-sl-label comp-sl-label-after">STAGED</span>
+          <span class="comp-sl-label comp-sl-label-after">${kindShort}</span>
         </div>
         ${img.sbsUrl ? `<div style="padding:10px 12px;background:#f7f4ef;border-top:1px solid #e0d8ce;font-size:11px;"><a href="${img.sbsUrl}" download class="dl-link">↓ Download Side-by-Side Disclosure Document</a></div>` : ""}
       </div>
@@ -288,7 +298,7 @@ function renderPage(project, projectId, videoJobs) {
     const fallbackImg = hasOriginal
       ? `<div style="padding:12px;"><div class="comp-sl-label-before" style="display:inline-block;margin-bottom:8px;padding:4px 10px;border-radius:20px;font-size:10px;font-weight:700;letter-spacing:0.1em;background:rgba(0,0,0,0.08);color:#7a6f63;">ORIGINAL — UNALTERED</div><img src="${img.originalUrl}" alt="Original" style="width:100%;border-radius:4px;" loading="lazy"></div>`
       : hasStaged
-      ? `<div style="padding:12px;"><div class="comp-sl-label-before" style="display:inline-block;margin-bottom:8px;padding:4px 10px;border-radius:20px;font-size:10px;font-weight:700;letter-spacing:0.1em;background:rgba(184,151,90,0.15);color:#b8975a;">VIRTUALLY STAGED</div><img src="${img.stagedUrl}" alt="Virtually staged photo of ${address}" style="width:100%;border-radius:4px;" loading="lazy"></div>`
+      ? `<div style="padding:12px;"><div class="comp-sl-label-before" style="display:inline-block;margin-bottom:8px;padding:4px 10px;border-radius:20px;font-size:10px;font-weight:700;letter-spacing:0.1em;background:rgba(184,151,90,0.15);color:#b8975a;">${kindUpper}</div><img src="${img.stagedUrl}" alt="${kindLabel} photo of ${address}" style="width:100%;border-radius:4px;" loading="lazy"></div>`
       : `<div style="padding:40px;text-align:center;color:#b0a090;font-size:13px;">Image not available</div>`;
 
     return `
@@ -296,7 +306,7 @@ function renderPage(project, projectId, videoJobs) {
       <div class="pair-header">
         <span class="pair-num">Image Set ${i + 1}</span>
         <span class="pair-room">${img.roomName || "Room"}</span>
-        <span class="pair-date">Staged ${formatDate(img.stagedAt)}</span>
+        <span class="pair-date">${kindDate} ${formatDate(img.stagedAt)}</span>
       </div>
       <div class="pair-grid">${fallbackImg}</div>
     </div>`;

@@ -586,6 +586,8 @@ async function addImage(projectId, imageData, userId, ab723Prompt, env) {
     imageId:     "img_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 5),
     roomName:    imageData.roomName    || "Room",
     tier:        imageData.tier        || "final",
+    mode:        imageData.mode        || null,
+    enhanced:    imageData.enhanced === true,
     originalUrl: imageData.originalUrl || null,
     stagedUrl:   imageData.stagedUrl   || null,
     sbsUrl:      imageData.sbsUrl      || null,

@@ -4350,7 +4350,9 @@ function renderFinalPanel(roomId,enhId){
     const wasFromPreset = !!(_ph && _ph.presetCleanBase64);
     const presetLabel = wasFromPreset && PHOTOGRAPHIC_PRESETS[_ph.presetKey] ? PHOTOGRAPHIC_PRESETS[_ph.presetKey].label : null;
     const _isSkyFinal = !!(presetLabel && PHOTOGRAPHIC_PRESETS[_ph.presetKey].isSky);
-    const tag = presetLabel ? presetLabel.replace(/\s+/g,'') : enh ? enh.label.replace(/\s+/g,'') : 'VirtuallyStaged';
+    // Oct 14, 2026: strip everything but letters/digits -- "Heaven's Light" put an apostrophe inside the
+    // single-quoted onclick string below, a JS syntax error that silently killed the ↓ Final button.
+    const tag = (presetLabel ? presetLabel : enh ? enh.label : 'VirtuallyStaged').replace(/[^A-Za-z0-9]/g,'');
     const orig=SESSION.originals.find(o=>o.id===room.originalId);
     const target = enhId ? room.extSelections[enhId] : room;
     const attachStatus = target?.complianceAttachStatus;

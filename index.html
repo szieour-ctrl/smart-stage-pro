@@ -1108,9 +1108,330 @@ const PHOTOGRAPHIC_PRESETS = {
   },
 };
 const PRESET_ORDER = ['mls_bright','luxury_editorial','magazine','builder_showcase','twilight_boost','hdr_natural','premium_detail','window_recovery'];
+
+// ══════════════════════════════════════════════════════════════════════════
+// SKY PRESETS (Oct 13, 2026) — exterior-only finishing presets.
+// Same flow as the photographic presets above (Refine → Presets → Apply →
+// Generate Final, +1 image), but they do NOT use PRESET_EDIT_INSTRUCTION_HEADER
+// or CRITICAL_WINDOW_RULE_SUFFIX: that suffix forbids changing the sky, which is
+// exactly what these presets are for. Prompt = SKY_GLOBAL_INSTRUCTION + the
+// preset's own body + SKY_POOL_SPA_BLOCK (see buildPresetPrompt below).
+// Source prompts: "Global Sky Preset Instruction & Prompts" (Sam, Oct 13, 2026).
+// ══════════════════════════════════════════════════════════════════════════
+// Display label for sky finals (cards/badges). The compliance record itself
+// carries only `mode`, same as the photographic presets.
+const SKY_DISCLOSURE_LABEL = 'Digitally Enhanced — Sky';
+
+// Set true to show ONLY Sky Presets on exterior photos (hides the interior-style
+// photographic presets there). Default false = Sky Presets on top, photographic
+// presets below.
+const SKY_REPLACES_PHOTO_PRESETS = false;
+
+const SKY_GLOBAL_INSTRUCTION =
+`You are applying a photographic sky and lighting preset to an already completed, approved, virtually staged exterior real-estate image.
+
+This is a finishing operation, NOT a new virtual staging operation.
+
+The supplied image is the approved final composition. Preserve all architecture, landscaping, furniture, ceramic planters, decorative accessories, fences, utility lines, neighboring properties, camera perspective, and existing staging exactly as shown.
+
+Modify the sky according to the selected sky preset and make only the permitted lighting adjustments.
+
+Do not add, remove, relocate, replace, or redesign any physical objects. Do not generate additional furniture, planters, landscaping, or decorative lighting.
+
+Do not add new light sources. Lights already present in the image (house fixtures, fire pit flames, candles, pool or spa lights) stay as shown and, in the dusk presets, appear lit.
+
+Maintain the photographic quality, detail, framing, and resolution of the approved image.
+
+Apply the selected sky preset instructions below.`;
+
+const SKY_POOL_SPA_BLOCK =
+`POOL & SPA — SKY-AWARE WATER REFLECTIONS
+
+When a swimming pool, spa, hot tub, pond, or other water feature is visible in the final approved exterior image, naturally harmonize its water-surface reflections with the selected Sky Preset.
+
+Reflect the sky's actual visible color palette, cloud characteristics, ambient lighting, and time-of-day atmosphere wherever physically appropriate.
+
+Preserve the existing water's natural underlying blue, turquoise, or green coloration, transparency, texture, and depth.
+
+Allow soft, naturally distorted sky reflections across the water surface, respecting existing ripples, viewing perspective, and surrounding objects.
+
+For Morning Glow: Use pale blue and white cloud reflections with delicate warm morning highlights.
+For Champagne Golden Hour: Use restrained champagne-gold and pale peach reflections over naturally blue water.
+For California Dreaming: Use powder-blue reflections with delicate peach and apricot accents.
+For Heaven's Light: Use soft cloud reflections and realistic scattered silvery highlights consistent with natural directional sunlight.
+For Tuscan Sunset: Use muted amber, apricot, and terracotta reflections while retaining natural blue water.
+For Twilight Subtle: Use sapphire-blue, lavender, and delicate pink dusk reflections without artificial illumination.
+For Golden Hour Subtle Cinematic: Use richer golden cloud reflections while preventing exaggerated orange coloration.
+For Twilight Subtle Enhancement: Use natural blue-violet reflections and soft reflections from existing illuminated architectural windows or visible house lights.
+
+Preserve all existing pool and spa shapes, coping, tile, waterline, steps, jets, water features, decking, and approved staging. Do not add underwater lighting or fixtures; a pool or spa light already visible in the image may appear on. Do not invent landscape lights, waterfalls, fountains, jets, or decorative objects. Keep reflections consistent with the visible sky, surrounding objects, existing light sources, and natural viewing perspective. Produce photorealistic premium real-estate photography.`;
+
+const SKY_PRESETS = {
+  sky_morning_glow: {
+    key: 'sky_morning_glow', label: 'Morning Glow', isSky: true,
+    shortDescription: 'Bright early morning sky, fresh natural lighting.',
+    instructionBody:
+`SKY PRESET: MORNING GLOW
+
+Edit the supplied, final approved exterior real-estate photograph.
+
+SKY:
+
+Create a fresh, natural early-morning sky featuring soft powder-blue tones, delicate white clouds, and a pale golden-white glow near the horizon. The atmosphere should feel bright, welcoming, airy, and naturally illuminated.
+
+LIGHTING:
+
+Apply very subtle morning lighting enhancement. Gently soften harsh highlights and balance exposure while preserving the property's original brightness, material colors, and existing shadow directions. Maintain clean whites, neutral concrete, natural green landscaping, and realistic roofing colors.
+
+PRESERVATION:
+
+Preserve all existing architecture, landscaping, fences, power lines, furnishings, ceramic planters, decorative elements, neighboring structures, and camera composition exactly as approved.
+
+RESTRICTIONS:
+
+No dramatic sunrise, excessive yellow or orange coloring, artificial sun flares, invented lighting, structural changes, or additional decorative objects.
+
+FINAL RESULT:
+
+Bright, fresh, photorealistic premium MLS photography with a naturally beautiful early-morning atmosphere.`,
+  },
+  sky_champagne_golden_hour: {
+    key: 'sky_champagne_golden_hour', label: 'Champagne Golden Hour', isSky: true,
+    shortDescription: 'Elegant golden sky, restrained warm highlights.',
+    instructionBody:
+`SKY PRESET: CHAMPAGNE GOLDEN HOUR
+
+Edit the supplied, final approved exterior real-estate photograph.
+
+SKY:
+
+Create an elegant champagne-golden-hour sky with muted champagne gold, soft ivory, and pale peach highlights near the horizon. Transition naturally into a delicate blue-gray upper sky with softly illuminated, realistic clouds. The atmosphere should resemble refined late-afternoon architectural photography.
+
+LIGHTING:
+
+Apply restrained golden warmth to existing natural highlights on the home, landscaping, driveway, and surrounding surfaces. Preserve neutral siding, concrete, roofing, and material colors. Keep the overall exposure bright, balanced, and realistic. Maintain existing directional shadows with only minor refinement.
+
+PRESERVATION:
+
+Preserve all approved architecture, landscaping, trees, power lines, fences, outdoor furniture, planters, neighboring structures, and camera composition.
+
+RESTRICTIONS:
+
+Do not turn the entire photograph orange or yellow. Avoid excessive saturation, strong amber color casts, dramatic shadows, artificial sun flares, invented exterior lighting, or additional decorative objects.
+
+FINAL RESULT:
+
+Sophisticated luxury real-estate photography featuring a soft champagne sunset atmosphere and naturally balanced architectural lighting.`,
+  },
+  sky_california_dreaming: {
+    key: 'sky_california_dreaming', label: 'California Dreaming', isSky: true,
+    shortDescription: 'Peach horizon, powder-blue sky, soft clouds.',
+    instructionBody:
+`SKY PRESET: CALIFORNIA DREAMING
+
+Edit the supplied, final approved exterior real-estate photograph.
+
+SKY:
+
+Create a signature California late-afternoon sky with a delicate peach and soft apricot horizon transitioning smoothly into a beautiful powder-blue upper sky. Include elegant, airy white clouds with subtle peach highlights. The atmosphere should feel warm, relaxed, upscale, and distinctly West Coast.
+
+LIGHTING:
+
+Use subtle enhancement lighting. Introduce gentle warmth into existing natural highlights while maintaining bright, accurate exposure throughout the property. Preserve realistic siding, roofing, driveway, and landscaping colors. Maintain natural shadow depth without dramatic changes.
+
+PRESERVATION:
+
+Maintain all approved architectural features, landscaping, furniture, ceramic planters, trees, power lines, fences, neighboring structures, and original camera perspective.
+
+RESTRICTIONS:
+
+Avoid intense sunset oranges, excessive pink saturation, dramatic cloud formations, dark foregrounds, invented lighting, or changes to any approved staging elements.
+
+FINAL RESULT:
+
+Fresh, elegant, premium California real-estate photography with a soft peach horizon, powder-blue sky, and refined natural lighting.`,
+  },
+  sky_heavens_light: {
+    key: 'sky_heavens_light', label: "Heaven's Light", isSky: true,
+    shortDescription: 'Luminous cloud breaks with subtle sunbeams.',
+    instructionBody:
+`SKY PRESET: HEAVEN'S LIGHT
+
+Edit the supplied, final approved exterior real-estate photograph.
+
+SKY:
+
+Create a beautiful, realistic sky featuring softly layered white and light-gray clouds with natural openings that allow delicate sunbeams to filter through. The rays should appear as subtle atmospheric shafts of sunlight, producing an elegant architectural editorial effect. Maintain a natural blue or pale-blue sky behind the cloud layers.
+
+LIGHTING:
+
+Apply subtle-to-moderate directional lighting enhancement. Gently harmonize natural highlights across the property with the direction of the atmospheric sunbeams. Maintain balanced foreground exposure, realistic shadows, and accurate material colors. Keep the home clearly visible and naturally illuminated.
+
+PRESERVATION:
+
+Preserve the complete approved property composition, architecture, landscaping, outdoor furnishings, decorative planters, fences, power lines, neighboring structures, and physical features.
+
+RESTRICTIONS:
+
+Do not create theatrical sun rays, exaggerated glowing clouds, extreme contrast, storm effects, artificial spotlights, invented exterior lighting, or dramatic darkness. Do not alter the approved staging.
+
+FINAL RESULT:
+
+Premium architectural photography with luminous clouds, restrained atmospheric sunbeams, natural realism, and elegant editorial depth.`,
+  },
+  sky_tuscan_sunset: {
+    key: 'sky_tuscan_sunset', label: 'Tuscan Sunset', isSky: true,
+    shortDescription: 'Muted terracotta, apricot, and amber sunset.',
+    instructionBody:
+`SKY PRESET: TUSCAN SUNSET
+
+Edit the supplied, final approved exterior real-estate photograph.
+
+SKY:
+
+Create a refined Mediterranean-inspired sunset featuring muted terracotta, soft apricot, warm amber, and delicate peach tones near the horizon. Blend these colors naturally into a softly illuminated upper sky with elegant, lightly textured clouds. The atmosphere should feel romantic, warm, and sophisticated without excessive saturation.
+
+LIGHTING:
+
+Apply subtle warm-evening enhancement. Gently warm existing highlights on the property while preserving natural architectural materials and accurate colors. Maintain bright, readable foreground exposure and realistic shadow depth. Concrete and neutral siding must remain natural rather than becoming orange.
+
+PRESERVATION:
+
+Preserve all approved architectural details, rooflines, landscaping, fences, power lines, outdoor furniture, ceramic planters, neighboring structures, and existing staging.
+
+RESTRICTIONS:
+
+Avoid strong orange color casts, exaggerated red skies, overly dark foregrounds, dramatic shadow changes, invented lighting fixtures, or additional decorative objects.
+
+FINAL RESULT:
+
+Photorealistic premium real-estate photography with an elegant Tuscan-inspired sunset and restrained Mediterranean warmth.`,
+  },
+  sky_twilight_subtle: {
+    key: 'sky_twilight_subtle', label: 'Twilight Subtle', isSky: true,
+    shortDescription: 'Soft blue-hour sky, natural dusk. Existing lighting stays as shown; no new lights.',
+    instructionBody:
+`SKY PRESET: TWILIGHT SUBTLE
+
+Edit the supplied, final approved exterior real-estate photograph.
+
+SKY:
+
+Replace the existing sky with a natural early-blue-hour sky featuring soft sapphire-blue and lavender tones, delicate purple cloud highlights, and a restrained pink glow near the horizon. Create the atmosphere of early evening shortly after sunset.
+
+LIGHTING:
+
+Apply minimal dusk lighting enhancement. Slightly cool the existing ambient daylight and gently soften foreground brightness while maintaining clear visibility of the home, driveway, landscaping, and surrounding features. Preserve existing shadow relationships and realistic architectural colors.
+
+Maintain all currently visible interior and exterior lighting exactly as shown in the approved photograph. Do not activate additional lights, other than fire features, candles, and visible pool or spa lights.
+
+PRESERVATION:
+
+Retain every approved architectural feature, landscaping element, outdoor furniture arrangement, ceramic planter, fence, utility line, neighboring structure, and camera perspective.
+
+RESTRICTIONS:
+
+Do not substantially darken the property. Do not introduce illuminated windows, exterior fixtures, landscape uplighting, garden spotlights, pathway lighting, or other artificial illumination. Do not alter any approved physical features.
+
+FINAL RESULT:
+
+Natural, softly enhanced early-twilight real-estate photography featuring an elegant blue-hour sky and a bright, believable property exterior.`,
+  },
+  sky_golden_hour_cinematic: {
+    key: 'sky_golden_hour_cinematic', label: 'Golden Hour Subtle Cinematic', isSky: true,
+    shortDescription: 'Warm late-afternoon sky with cinematic cloud depth; slight foreground warming only.',
+    instructionBody:
+`SKY PRESET: GOLDEN HOUR SUBTLE CINEMATIC
+
+Edit the supplied, final approved exterior real-estate photograph.
+
+SKY:
+
+Create a beautiful cinematic golden-hour sky featuring layered soft clouds, warm golden highlights, subtle amber tones near the horizon, and natural blue-gray atmospheric depth above. Introduce gentle cinematic cloud contrast while avoiding exaggerated sunset colors.
+
+LIGHTING:
+
+Apply subtle enhancement to the foreground only. Introduce a slight warm late-afternoon glow to existing natural highlights on the building, driveway, and landscaping. Preserve the property's original overall brightness, accurate material colors, and existing shadow directions.
+
+Allow the sky to appear moderately dramatic while keeping the home and yard naturally illuminated. Cinematic treatment should primarily affect the sky, not the entire property.
+
+PRESERVATION:
+
+Preserve all approved architecture, landscaping, windows, rooflines, power lines, fences, outdoor furniture, ceramic planters, neighboring properties, and original composition.
+
+RESTRICTIONS:
+
+Do not cast orange or yellow across the entire photograph. Do not significantly redesign shadows, dramatically darken the foreground, introduce artificial lens flares, invent exterior lighting, or add decorative objects.
+
+FINAL RESULT:
+
+Beautiful cinematic golden-hour real-estate photography with a rich, elegant sky and restrained, natural-looking property lighting.`,
+  },
+  sky_twilight_enhanced: {
+    key: 'sky_twilight_enhanced', label: 'Twilight Subtle Enhancement', isSky: true,
+    shortDescription: 'Soft dusk sky with warm window glow and existing house lights switched on.',
+    instructionBody:
+`SKY PRESET: TWILIGHT SUBTLE ENHANCEMENT
+
+Edit the supplied, final approved exterior real-estate photograph.
+
+SKY:
+
+Create an elegant twilight sky featuring a natural transition from deep sapphire-blue in the upper sky to soft lavender, muted violet, and delicate pink near the horizon. Include subtle evening cloud textures and a beautiful, realistic blue-hour atmosphere.
+
+LIGHTING:
+
+Apply restrained evening lighting enhancement. Gently reduce the appearance of direct daytime sunlight and introduce soft, cool ambient dusk tones while maintaining excellent foreground visibility.
+
+Keep the building, driveway, landscaping, and surrounding features sufficiently illuminated to remain clear and appealing.
+
+WINDOW AND HOUSE LIGHTING:
+
+Introduce a gentle, warm interior glow through existing windows, suggesting naturally illuminated rooms.
+
+Existing, clearly visible porch lights, entry fixtures, garage-mounted sconces, or other permanent house-mounted exterior fixtures may appear switched on with subtle, realistic warm illumination.
+
+Do not invent new exterior fixtures. Do not create strong artificial lighting effects.
+
+LANDSCAPE LIGHTING:
+
+Do not add ground spotlights, landscape uplighting, pathway lights, garden lights, tree illumination, or decorative lighting that does not exist in the approved image.
+
+PRESERVATION:
+
+Preserve all approved architecture, existing landscaping, rooflines, fences, power lines, patio furniture, ceramic planters, neighboring structures, and camera composition.
+
+RESTRICTIONS:
+
+Do not make the property excessively dark. Do not create glowing shrubs, illuminated trees, artificial pools of light, excessive window brightness, or dramatic nighttime contrast. Do not modify physical property features.
+
+FINAL RESULT:
+
+Premium photorealistic twilight real-estate photography with an elegant blue-hour sky, clearly visible property details, warm illuminated windows, and restrained existing architectural lighting.`,
+  },
+};
+const SKY_PRESET_ORDER = ['sky_morning_glow','sky_champagne_golden_hour','sky_california_dreaming','sky_heavens_light','sky_tuscan_sunset','sky_twilight_subtle','sky_golden_hour_cinematic','sky_twilight_enhanced'];
+// Merged into the one lookup table so every existing label/badge/filename path
+// (PHOTOGRAPHIC_PRESETS[room.presetKey]?.label) works for sky presets unchanged.
+Object.assign(PHOTOGRAPHIC_PRESETS, SKY_PRESETS);
+
+// Exterior photo = the room was mapped to an exterior type, or runs in Exterior mode.
+const EXTERIOR_DECOR8_TYPES = ['back_patio', 'back_porch', 'front_porch'];
+function isSkyPhoto(room) {
+  return !!(room && (room.isExterior || EXTERIOR_DECOR8_TYPES.includes(room.decor8Type)));
+}
+// Object that holds preset state: the room itself (standard path) or one exterior
+// enhancement's selection (Exterior mode, enhId present).
+function presetHolder(room, enhId) {
+  return enhId ? (room && room.extSelections && room.extSelections[enhId]) : room;
+}
+
 function buildPresetPrompt(presetKey) {
   const preset = PHOTOGRAPHIC_PRESETS[presetKey];
   if (!preset) throw new Error('Unknown preset key: ' + presetKey);
+  if (preset.isSky) {
+    return SKY_GLOBAL_INSTRUCTION + '\n\n' + preset.instructionBody + '\n\n' + SKY_POOL_SPA_BLOCK;
+  }
   return PRESET_EDIT_INSTRUCTION_HEADER + preset.instructionBody + CRITICAL_WINDOW_RULE_SUFFIX;
 }
 
@@ -1198,8 +1519,8 @@ const EXTERIOR_KEYWORDS = ["exterior","backyard","patio","front yard","side yard
 const EXT_ENHANCEMENTS = [
   {id:"outdoor-living",label:"Outdoor Living Staging",icon:"🪑",desc:"Patio furniture, dining set, fire pit, planters.",mlsTag:"Virtually Staged — Outdoor Furnishings"},
   {id:"landscape",label:"Landscape Enhancement",icon:"🌿",desc:"Fresh lawn, trimmed hedges, seasonal flowers, mulch.",mlsTag:"Digitally Enhanced — Landscaping"},
-  {id:"golden-hour",label:"Golden Hour",icon:"🌅",desc:"Warm sunset lighting, long soft shadows.",mlsTag:"Digitally Enhanced — Golden Hour Lighting"},
-  {id:"twilight",label:"Twilight",icon:"🌙",desc:"Blue-hour sky, warm window glow, curb appeal.",mlsTag:"Digitally Enhanced — Twilight"},
+  // Oct 13, 2026: Golden Hour and Twilight moved out of this list — sky/lighting is now
+  // applied to the approved staged image as a Sky Preset (see SKY_PRESETS).
 ];
 
 // ── Room-type staging rules (Problem 4 fix) ──────────────────────────────────
@@ -3154,9 +3475,9 @@ function openLightboxRefine(roomId, startTab, enhId){
   _lbMode=null;
   _lbRefineTab = startTab || 'revise';
   _lbEnhId = enhId || null;
-  _lbPresetKey = room.presetKey || null;
+  _lbPresetKey = (presetHolder(room, enhId) || {}).presetKey || null;
 
-  const srcBase64 = enhId ? room.extSelections[enhId].base64 : (room.presetCleanBase64||room.stagedCleanBase64||room.declutteredCleanBase64||room.stagedBase64);
+  const srcBase64 = enhId ? (room.extSelections[enhId].presetCleanBase64||room.extSelections[enhId].base64) : (room.presetCleanBase64||room.stagedCleanBase64||room.declutteredCleanBase64||room.stagedBase64);
   const enh = enhId ? EXT_ENHANCEMENTS.find(e=>e.id===enhId) : null;
   document.getElementById('lightbox-img').src='data:image/jpeg;base64,'+srcBase64;
   document.getElementById('lightbox-title').textContent='Refine — '+room.roomName+(enh?' · '+enh.label:'');
@@ -3187,8 +3508,10 @@ function renderRefineTabs(){
   // equivalent second action for this mode.
   const roomId=_lbRoomId.replace('__refine__:','');
   const room=SESSION.rooms.find(r=>r.id===roomId);
+  // Oct 13, 2026: exterior enhancements now get the Presets tab too — it carries the
+  // Sky Presets (applied per enhancement, see applyPreset(roomId, key, enhId)).
   const tabs=_lbEnhId
-    ? [{key:'revise',label:'Free Revision'}]
+    ? [{key:'revise',label:'Free Revision'},{key:'presets',label:'Presets'}]
     : isDeclutterOnlyRoom(room)
       ? [{key:'revise',label:'Free Revision'},{key:'enhance',label:'✨ AI Enhance'}]
       : [{key:'revise',label:'Free Revision'},{key:'presets',label:'Presets'}];
@@ -3226,18 +3549,29 @@ function renderRefineBody(){
     saveBtn.textContent='Run AI Enhance →';
     saveBtn.setAttribute('onclick','submitRefineEnhance()');
   } else {
-    sub.textContent='Choose a professional rendering style for this staged photo. Staging itself is unchanged — only the photographic rendering is adjusted.';
-    body.innerHTML=`
-      <div class="lb-preset-grid">
-        ${PRESET_ORDER.map(key=>{
-          const p=PHOTOGRAPHIC_PRESETS[key];
-          return `<div class="lb-preset-card ${_lbPresetKey===key?'checked':''}" onclick="selectRefinePreset('${key}')">
+    const isSky = isSkyPhoto(room);
+    sub.textContent = isSky
+      ? 'Choose a Sky Preset for this approved exterior. Staging itself is unchanged — only the sky and lighting are adjusted.'
+      : 'Choose a professional rendering style for this staged photo. Staging itself is unchanged — only the photographic rendering is adjusted.';
+    const presetCards = keys => keys.map(key=>{
+      const p=PHOTOGRAPHIC_PRESETS[key];
+      return `<div class="lb-preset-card ${_lbPresetKey===key?'checked':''}" onclick="selectRefinePreset('${key}')">
             <div class="lb-preset-card-name">${p.label}</div>
             <div class="lb-preset-card-desc">${p.shortDescription}</div>
           </div>`;
-        }).join('')}
-      </div>
-      ${room?.presetKey?`<div class="lb-preset-clear" onclick="clearRefinePreset()">Remove preset — revert to staged draft</div>`:''}
+    }).join('');
+    // Exterior photos: Sky Presets first, photographic presets below (unless
+    // SKY_REPLACES_PHOTO_PRESETS). Interiors: unchanged.
+    const gridHtml = !isSky
+      ? `<div class="lb-preset-grid">${presetCards(PRESET_ORDER)}</div>`
+      : `<div class="lb-section-label" style="margin:2px 0 8px;">Sky Presets</div>
+         <div class="lb-preset-grid">${presetCards(SKY_PRESET_ORDER)}</div>
+         ${SKY_REPLACES_PHOTO_PRESETS ? '' : `<div class="lb-section-label" style="margin:16px 0 8px;">Photographic Presets</div>
+         <div class="lb-preset-grid">${presetCards(PRESET_ORDER)}</div>`}`;
+    const holder = presetHolder(room, _lbEnhId);
+    body.innerHTML=`
+      ${gridHtml}
+      ${holder?.presetKey?`<div class="lb-preset-clear" onclick="clearRefinePreset()">Remove preset — revert to staged draft</div>`:''}
     `;
     saveBtn.textContent='Apply Preset →';
     saveBtn.setAttribute('onclick','submitRefinePreset()');
@@ -3250,7 +3584,8 @@ function selectRefinePreset(key){
 function clearRefinePreset(){
   const roomId=_lbRoomId.replace('__refine__:','');
   const room=SESSION.rooms.find(r=>r.id===roomId);
-  if(room){ room.presetCleanBase64=null; room.presetKey=null; room.presetStatus=null; renderRoomQueue(); }
+  const holder=presetHolder(room,_lbEnhId);
+  if(holder){ holder.presetCleanBase64=null; holder.presetKey=null; holder.presetStatus=null; renderRoomQueue(); }
   closeLightbox();
   showToast('Preset removed — back to staged draft.', '');
 }
@@ -3360,8 +3695,9 @@ async function submitRefinePreset(){
   const roomId=_lbRoomId.replace('__refine__:','');
   if(!_lbPresetKey){ showToast('Pick a preset first.','error'); return; }
   const chosenPresetKey=_lbPresetKey; // capture BEFORE closeLightbox() nulls _lbPresetKey
+  const chosenEnhId=_lbEnhId;         // same — null for the standard path, enhancement id in Exterior mode
   closeLightbox();
-  await applyPreset(roomId, chosenPresetKey);
+  await applyPreset(roomId, chosenPresetKey, chosenEnhId);
 }
 
 function setLightboxExample(el){document.getElementById('lightbox-input').value=el.textContent;}
@@ -3622,9 +3958,12 @@ function renderRoomQueue(){
             <button class="btn btn-outline btn-sm" onclick="downloadSideBySide('${room.id}','${enh.id}','draft')">↓ Side-by-Side</button>
             <button class="btn btn-ghost btn-sm" onclick="restageExtEnhancement('${room.id}','${enh.id}')">↺ Restage</button>
           </div></div>
-          <div class="result-viewer" style="padding:12px;"><div class="result-pair">
+          <div class="result-viewer" style="padding:12px;"><div class="result-pair ${(es.presetCleanBase64||es.presetStatus==='processing')?'has-preset':''}">
             <div class="result-img-wrap"><img src="${orig.dataUrl}" onclick="openLightbox('${room.id}')" /><div class="result-img-badge">Original</div></div>
             <div class="result-img-wrap"><img src="data:image/jpeg;base64,${es.base64}" onclick="openLightboxRefine('${room.id}','revise','${enh.id}')" title="Click to revise" /><div class="result-img-badge ext-enhanced">${enh.mlsTag}</div></div>
+            ${es.presetStatus==='processing'
+              ?`<div class="result-img-wrap" style="display:flex;align-items:center;justify-content:center;background:var(--cream);min-height:140px;border:1px solid var(--border);border-radius:3px;"><span class="spinner"></span></div>`
+              :es.presetCleanBase64?`<div class="result-img-wrap"><img src="data:image/jpeg;base64,${es.presetCleanBase64}" onclick="openLightboxRefine('${room.id}','presets','${enh.id}')" title="Click to change Sky Preset" /><div class="result-img-badge preset">${PHOTOGRAPHIC_PRESETS[es.presetKey]?.label||'Preset'}</div></div>`:''}
           </div></div>
           <div class="iterate-panel">
             <div style="flex:1;">
@@ -3634,6 +3973,7 @@ function renderRoomQueue(){
             <div style="display:flex;flex-direction:column;gap:6px;">
               <button class="btn btn-primary btn-sm" onclick="iterateExtEnhancement('${room.id}','${enh.id}')">Re-Stage</button>
               <button class="btn btn-outline btn-sm" onclick="openLightboxRefine('${room.id}','revise','${enh.id}')">Make Revision →</button>
+              <button class="btn btn-outline btn-sm" onclick="openLightboxRefine('${room.id}','presets','${enh.id}')">Sky Presets →</button>
             </div>
           </div>
           ${renderFinalPanel(room.id,enh.id)}</div>`;
@@ -4032,7 +4372,7 @@ async function restageExtEnhancement(roomId, enhId) {
   if (!room) return;
   // Reset just this enhancement's draft — keep others intact
   if (room.extSelections[enhId]) {
-    room.extSelections[enhId] = { ...room.extSelections[enhId], status: 'pending', base64: null, finalBase64: null, finalStatus: null };
+    room.extSelections[enhId] = { ...room.extSelections[enhId], status: 'pending', base64: null, finalBase64: null, finalStatus: null, presetCleanBase64: null, presetKey: null, presetStatus: null };
   }
   renderRooms();
   // Re-run just this enhancement
@@ -4049,9 +4389,11 @@ function renderFinalPanel(roomId,enhId){
   if(!draftReady)return '';
   if(fs==='generating')return `<div class="final-panel"><span class="final-panel-label">Generating Final...</span><span class="final-progress"><span class="spinner spinner-green"></span> Processing at selected quality — this may take 30–60 seconds...</span></div>`;
   if(fs==='done'&&fb64){
-    const wasFromPreset = !enhId && !!room.presetCleanBase64;
-    const presetLabel = wasFromPreset && PHOTOGRAPHIC_PRESETS[room.presetKey] ? PHOTOGRAPHIC_PRESETS[room.presetKey].label : null;
-    const tag=enh?enh.label.replace(/\s+/g,'') : presetLabel ? presetLabel.replace(/\s+/g,'') : 'VirtuallyStaged';
+    const _ph = presetHolder(room, enhId);
+    const wasFromPreset = !!(_ph && _ph.presetCleanBase64);
+    const presetLabel = wasFromPreset && PHOTOGRAPHIC_PRESETS[_ph.presetKey] ? PHOTOGRAPHIC_PRESETS[_ph.presetKey].label : null;
+    const _isSkyFinal = !!(presetLabel && PHOTOGRAPHIC_PRESETS[_ph.presetKey].isSky);
+    const tag = presetLabel ? presetLabel.replace(/\s+/g,'') : enh ? enh.label.replace(/\s+/g,'') : 'VirtuallyStaged';
     const orig=SESSION.originals.find(o=>o.id===room.originalId);
     const target = enhId ? room.extSelections[enhId] : room;
     const attachStatus = target?.complianceAttachStatus;
@@ -4067,10 +4409,10 @@ function renderFinalPanel(roomId,enhId){
       attachStatus === 'failed' ? `<div style="background:#fdf0ef;border:1px solid #f0c0c0;border-radius:4px;padding:8px 10px;margin-top:8px;font-size:0.75rem;color:#a03030;">⚠ ${attachCopy.failedPrefix} — ${(target.complianceAttachError||'unknown error').replace(/</g,'&lt;')} <button class="btn btn-outline btn-sm" style="margin-left:6px;padding:2px 8px;" onclick="retryComplianceAttach('${roomId}','${enhId||''}')">↻ Retry</button></div>` :
       '';
     return `<div class="result-viewer" style="padding:12px 16px;">
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><span class="tier-label tier-final">Final — MLS Quality</span>${presetLabel?`<span style="font-size:0.72rem;color:var(--muted);">Includes ${presetLabel} preset</span>`:''}</div>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><span class="tier-label tier-final">Final — MLS Quality</span>${presetLabel?`<span style="font-size:0.72rem;color:var(--muted);">Includes ${presetLabel} preset${_isSkyFinal?` · ${SKY_DISCLOSURE_LABEL}`:''}</span>`:''}</div>
       <div class="result-pair">
         <div class="result-img-wrap"><img src="${orig.dataUrl}" /><div class="result-img-badge">Original</div></div>
-        <div class="result-img-wrap"><img src="data:image/jpeg;base64,${fb64}" /><div class="result-img-badge final-badge">Final · ${enh?enh.mlsTag:(presetLabel||'Virtually Staged')}</div></div>
+        <div class="result-img-wrap"><img src="data:image/jpeg;base64,${fb64}" /><div class="result-img-badge final-badge">Final · ${presetLabel||(enh?enh.mlsTag:'Virtually Staged')}</div></div>
       </div>
       ${attachNoticeHtml}
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
@@ -4083,9 +4425,9 @@ function renderFinalPanel(roomId,enhId){
   }
   const selId=`qsel-${roomId}-${enhId||'int'}`;
   // Credit cost by selection. A Photographic Preset adds +1 on top of the
-  // selected tier (interior path only — presets don't apply to exterior).
+  // selected tier (standard path, and Sky Presets on Exterior enhancements).
   // Keep in sync with the same hasPreset logic in generateFinal().
-  const hasPreset = !enhId && !!room.presetCleanBase64;
+  const hasPreset = !!presetHolder(room, enhId)?.presetCleanBase64;
   const baseCreditMap = {'mls':1,'marketing':1,'print':1};
   const initialCost = baseCreditMap.mls + (hasPreset ? 1 : 0);
   const presetSurchargeNote = hasPreset ? ` <span style="color:#4a5fa5;font-weight:600;">+1 preset</span>` : '';
@@ -4199,12 +4541,6 @@ ADD: outdoor furniture for ${i.buyer_label} buyer — patio dining set, lounge s
     'landscape':`Professional real estate exterior landscape enhancement.
 PRESERVE EXACTLY: all architecture, structure, hardscape, fencing, driveway, roofline, camera perspective.
 ENHANCE: lawn to lush green, trim hedges, seasonal flowers, fresh mulch, clean walkways. Realistic only — no fantasy landscaping.${base}`,
-    'golden-hour':`Professional real estate Golden Hour lighting conversion.
-PRESERVE EXACTLY: all architecture, roofline, structure, driveway, windows, landscaping layout, camera perspective. Do NOT add or remove any element.
-LIGHTING ONLY: Warm golden hour sunset — low-angle amber light, long soft shadows, subtle warm facade glow, cinematic sky. Avoid oversaturated orange or fake HDR.${base}`,
-    'twilight':`Professional real estate Twilight conversion.
-PRESERVE EXACTLY: all architecture, roofline, structure, driveway, windows, landscaping, camera perspective. Do NOT add or remove any element.
-LIGHTING ONLY: Blue-hour sky, warm interior window glow, subtle path lighting, luxury curb appeal. Realistic exposure — no neon, no fantasy colors.${base}`,
   };
   return prompts[enh.id]||'Professional real estate exterior photo enhancement.';
 }
@@ -5140,17 +5476,25 @@ function downloadMarketingQR() {
 //      silently build on top of a rendering-only instruction instead of the
 //      real staging prompt — a corruption bug that would be hard to trace.
 // generateFinal() prefers presetCleanBase64 over stagedCleanBase64 when present.
-async function applyPreset(roomId, presetKey) {
+// Oct 13, 2026: optional enhId = Exterior mode. There the preset (a Sky Preset) is
+// applied to ONE enhancement's clean draft and stored on that enhancement's
+// selection (extSelections[enhId].presetCleanBase64 / presetKey), exactly parallel
+// to the room-level fields used by the standard path.
+async function applyPreset(roomId, presetKey, enhId) {
   const room = SESSION.rooms.find(r => r.id === roomId);
   if (!room) return;
-  const sourceClean = room.stagedCleanBase64 || room.stagedBase64;
+  const holder = presetHolder(room, enhId);
+  if (!holder) return;
+  const sourceClean = enhId
+    ? (holder.cleanBase64 || holder.base64)
+    : (room.stagedCleanBase64 || room.stagedBase64);
   if (!sourceClean) { showToast('No staged draft found — stage this room first.', 'error'); return; }
   const preset = PHOTOGRAPHIC_PRESETS[presetKey];
   if (!preset) { showToast('Unknown preset.', 'error'); return; }
 
   const presetPrompt = buildPresetPrompt(presetKey);
 
-  room.presetStatus = 'processing';
+  holder.presetStatus = 'processing';
   room.promptStatus = '✏️ Review preset prompt before applying...';
   renderRoomQueue();
 
@@ -5168,32 +5512,33 @@ async function applyPreset(roomId, presetKey) {
       ? presetPrompt
       : await showPromptModal({ ...room, lastPrompt: presetPrompt }, presetPrompt);
     if (approvedPrompt === null) {
-      room.presetStatus = null;
+      holder.presetStatus = null;
+      room.promptStatus = null;
       renderRoomQueue();
       showToast('Preset cancelled.', '');
       return;
     }
 
-    room.presetStatus = 'processing';
+    holder.presetStatus = 'processing';
     room.promptStatus = `Applying ${preset.label} preset — takes ~15 seconds...`;
     renderRoomQueue();
 
-    const presetResult = await callStageAPI(sourceClean, 'image/jpeg', approvedPrompt, 'low', stageCtx('preset', roomId));
+    const presetResult = await callStageAPI(sourceClean, 'image/jpeg', approvedPrompt, 'low', stageCtx('preset', roomId, enhId));
     if (!presetResult) throw new Error('Preset rendering failed — no image returned');
 
-    room.presetCleanBase64 = presetResult.clean;
-    room.presetKey = presetKey;
-    room.presetStatus = 'done';
+    holder.presetCleanBase64 = presetResult.clean;
+    holder.presetKey = presetKey;
+    holder.presetStatus = 'done';
     room.promptStatus = null;
     const orig = SESSION.originals.find(o => o.id === room.originalId);
-    await resizeToMatch(room, orig, null, 'presetCleanBase64', presetResult.clean);
+    await resizeToMatch(room, orig, enhId || null, enhId ? '__extpreset__' : 'presetCleanBase64', presetResult.clean);
     // Sam (Aug 11): applying a preset here is real digital alteration — it
     // goes through the real Generate Final button next, same as staging,
     // not an automatic stand-in finalBase64.
     renderRoomQueue();
     showToast(`✓ ${preset.label} preset applied to ${room.roomName}. Generate Final when ready to send it to compliance.`, 'success');
   } catch (err) {
-    room.presetStatus = 'error';
+    holder.presetStatus = 'error';
     room.promptStatus = null;
     renderRoomQueue();
     showToast('Preset error: ' + err.message, 'error');
@@ -6247,8 +6592,9 @@ async function generateFinal(roomId,enhId){
   // Interior path prefers presetCleanBase64 when a Photographic Preset has been
   // applied — it's the same upscale target slot, just a rendering-refined version
   // of the same staged result. Falls back to stagedCleanBase64 when no preset exists.
+  // Oct 13, 2026: Exterior mode now also prefers a per-enhancement Sky Preset result.
   const draftBase64 = enhId
-    ? (room.extSelections?.[enhId]?.cleanBase64 || room.extSelections?.[enhId]?.base64)
+    ? (room.extSelections?.[enhId]?.presetCleanBase64 || room.extSelections?.[enhId]?.cleanBase64 || room.extSelections?.[enhId]?.base64)
     : (room.presetCleanBase64 || room.stagedCleanBase64 || room.stagedBase64);
 
   if(!draftBase64){
@@ -6271,9 +6617,9 @@ async function generateFinal(roomId,enhId){
   // ── CREDIT GATE — debit before upscale fires ─────────────────────────────
   // A Photographic Preset adds +1 credit on top of the selected tier — it's an
   // additional rendering pass on top of the staged draft, distinct from (and
-  // additive to) the MLS/Marketing/Print tier cost. Interior path only
-  // (enhId present = exterior, which doesn't have presets).
-  const hasPreset = !enhId && !!room.presetCleanBase64;
+  // additive to) the MLS/Marketing/Print tier cost. Applies to both paths:
+  // the room-level preset (standard) and a Sky Preset on an Exterior enhancement.
+  const hasPreset = !!presetHolder(room, enhId)?.presetCleanBase64;
   const baseCreditCost = { mls: 1, marketing: 1, print: 1 }[qualityChoice] || 1;
   const creditCost = baseCreditCost + (hasPreset ? 1 : 0);
   // FIX (Sep 7, 2026): getUser() now wrapped in withAuthTimeout — a stall here
@@ -6943,7 +7289,8 @@ async function iterateExtEnhancement(roomId, enhId) {
   if (!enh) return;
 
   const note = document.getElementById(`iter-ext-${roomId}-${enhId}`)?.value?.trim() || '';
-  room.extSelections[enhId] = { ...room.extSelections[enhId], status: 'processing', finalBase64: null, finalStatus: null };
+  // A new draft invalidates any Sky Preset applied to the old one.
+  room.extSelections[enhId] = { ...room.extSelections[enhId], status: 'processing', finalBase64: null, finalStatus: null, presetCleanBase64: null, presetKey: null, presetStatus: null };
   renderRoomQueue();
 
   const compressedB64 = await new Promise((resolve, reject) => {
@@ -7085,6 +7432,7 @@ function resizeToMatch(room,orig,enhId,storeKey,incomingB64){
         return;
       }
       else if(storeKey==='__extdraft__'){if(enhId)room.extSelections[enhId].base64=newB64;}
+      else if(storeKey==='__extpreset__'){if(enhId)room.extSelections[enhId].presetCleanBase64=newB64;}
       else{room[storeKey]=newB64;}
       resolve();
     };
@@ -7963,10 +8311,10 @@ function updateFinalLabel(roomId, enhId) {
   const labels = { mls: 'MLS Ready', marketing: 'Marketing Quality', print: 'Print Quality' };
   const baseCosts = { mls: 1, marketing: 1, print: 1 };
   // A Photographic Preset adds +1 credit on top of the selected tier — interior
-  // path only (enhId present = exterior, which doesn't have presets). Keep this
-  // note in sync with the actual debit logic in generateFinal().
+  // path, and Sky Presets on Exterior enhancements. Keep this note in sync with
+  // the actual debit logic in generateFinal().
   const room = SESSION.rooms.find(r => r.id === roomId);
-  const hasPreset = !enhId && !!room?.presetCleanBase64;
+  const hasPreset = !!presetHolder(room, enhId)?.presetCleanBase64;
   const totalCost = baseCosts[selected] + (hasPreset ? 1 : 0);
   const btn = document.getElementById(btnId);
   const note = document.getElementById(noteId);

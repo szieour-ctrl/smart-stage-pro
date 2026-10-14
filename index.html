@@ -5567,7 +5567,7 @@ async function applyPreset(roomId, presetKey, enhId) {
   const presetPrompt = buildPresetPrompt(presetKey);
 
   holder.presetStatus = 'processing';
-  room.promptStatus = '✏️ Review preset prompt before applying...';
+  room.promptStatus = preset.isSky ? `Applying ${preset.label} preset — takes ~15 seconds...` : '✏️ Review preset prompt before applying...';
   renderRoomQueue();
 
   try {
@@ -5580,7 +5580,8 @@ async function applyPreset(roomId, presetKey, enhId) {
     // Decor8 room_type, Open Plan warning, "uses 1 staged image" — none of
     // which apply to a plain rendering-style pass over an already-corrected
     // photo with no staging content involved. Skip straight to the prompt.
-    const approvedPrompt = room.correctedOnly
+    // Sky Presets never show their prompt (proprietary) — they apply straight away.
+    const approvedPrompt = (room.correctedOnly || preset.isSky)
       ? presetPrompt
       : await showPromptModal({ ...room, lastPrompt: presetPrompt }, presetPrompt);
     if (approvedPrompt === null) {
@@ -7392,7 +7393,9 @@ async function iterateExtEnhancement(roomId, enhId) {
   const w = REVISION_WRAP.exteriorPhoto;
   const after = w.after + (enh.id === 'outdoor-living' ? ' Any furniture you are asked to add must be weather-rated outdoor furniture.' : '');
   const approved = await showPromptModal(
-    { ...room, isExterior: true, roomName: (room.roomName || 'Exterior') + ' — ' + enh.label },
+    { ...room, isExterior: true, roomName: (room.roomName || 'Exterior') + ' — ' + enh.label,
+      pmThumb: 'data:image/jpeg;base64,' + es.cleanBase64, pmCaption: 'Current staged photo — only what you name will change.',
+      pmSideHint: '<strong>Describe only the change.</strong> Everything else in this photo stays exactly as shown.<div class="pm-eg-title">Examples:</div><div class="pm-eg">Remove the umbrella</div><div class="pm-eg">Change the cushions to navy</div><div class="pm-eg">Move the fire pit to the left</div>' },
     w.before + note + '\n\n' + after,
     { before: w.before, visible: note, after }
   );
@@ -8223,19 +8226,29 @@ function showPromptModal(room, prompt, hiddenParts) {
     const readLabel = document.getElementById('pm-read-label');
     const hintBelow = document.getElementById('pm-hint');
     let thumbSrc = '';
-    if (zonesOnly) {
+    const extView = !!(room.isExterior && hiddenParts);
+    const sideHint = document.getElementById('pm-hint-side');
+    if (sideHint && sideHint._orig === undefined) sideHint._orig = sideHint.innerHTML;
+    const areasEl = document.querySelector('#pm-top-thumb .pm-areas'), gridBtn = document.getElementById('pm-grid-toggle');
+    if (areasEl) areasEl.style.display = extView ? 'none' : '';
+    if (gridBtn) gridBtn.style.display = extView ? 'none' : '';
+    if (sideHint) sideHint.innerHTML = extView
+      ? (room.pmSideHint || '<strong>Add your own instructions</strong> to the text on the left — what to include, where to place it, and what to leave out.<div class="pm-eg-title">Examples:</div><div class="pm-eg">Dining set for six under the pergola</div><div class="pm-eg">Fire pit on the lawn, no umbrella</div><div class="pm-eg">Lounge seating on the left side of the patio</div>')
+      : sideHint._orig;
+    if (zonesOnly || extView) {
       const origForThumb = (SESSION.originals || []).find(o => o.id === room.originalId);
-      if (origForThumb) thumbSrc = origForThumb.dataUrl || (origForThumb.base64 ? ('data:' + (origForThumb.mimeType || 'image/jpeg') + ';base64,' + origForThumb.base64) : '');
+      if (room.pmThumb) thumbSrc = room.pmThumb;
+      else if (origForThumb) thumbSrc = origForThumb.dataUrl || (origForThumb.base64 ? ('data:' + (origForThumb.mimeType || 'image/jpeg') + ';base64,' + origForThumb.base64) : '');
     }
-    if (topRow) topRow.classList.toggle('on', zonesOnly);
+    if (topRow) topRow.classList.toggle('on', zonesOnly || extView);
     if (thumbCol) thumbCol.style.display = thumbSrc ? '' : 'none';
     if (thumbImg) { if (thumbSrc) thumbImg.src = thumbSrc; else thumbImg.removeAttribute('src'); }
-    if (hintBelow) hintBelow.style.display = zonesOnly ? 'none' : '';
-    if (hintBelow && room.isExterior && hiddenParts) hintBelow.innerHTML = '✏️ <strong>Add or change instructions before the first render.</strong> The text above is what will be staged — edit it, or add your own (e.g. "dining set for six, fire pit on the lawn, no umbrella"). Everything else (preserve-the-architecture rules, outdoor-rated furnishings, compliance) is applied automatically.';
+    if (hintBelow) hintBelow.style.display = (zonesOnly || extView) ? 'none' : '';
     if (readLabel && room.isExterior && hiddenParts) readLabel.textContent = 'Staging Instructions — Edit Before Approving';
     else if (readLabel) readLabel.textContent = zonesOnly ? 'ROOMS AND ZONES TO STAGE — USER SELECTIONS' : 'Room Read — Edit Before Approving';
     // the placement guide overlay always starts hidden (the user's photo is shown clean)
     setPlacementGuide(false);
+    if (extView) { const cap = document.getElementById('pm-thumb-cap'); if (cap) cap.textContent = room.pmCaption || 'Photo being staged — directions like "left" or "foreground" refer to this view.'; }
 
     // Open Plan warning
     const warn = document.getElementById('pm-open-plan-warning');

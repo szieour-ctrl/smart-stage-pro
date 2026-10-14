@@ -1516,9 +1516,15 @@ function getDecor8RoomType(roomName, adjacentRooms, decor8Type) {
 
 const EXTERIOR_KEYWORDS = ["exterior","backyard","patio","front yard","side yard","pool","garden","outdoor","landscape","driveway","covered patio"];
 
+// Oct 13, 2026: outdoor furnishings must be weather-rated, not interior pieces.
+const OUTDOOR_FURNITURE_RULE = 'OUTDOOR FURNISHINGS ONLY: Every furnishing must be true outdoor furniture built for weather exposure — powder-coated or cast aluminum, teak or treated hardwood, all-weather wicker or rope, solution-dyed outdoor fabric cushions, outdoor rugs, and glazed ceramic, resin or metal planters. No upholstered indoor sofas or chairs, indoor rugs, indoor lamps or interior-finish wood. Apply the style and color direction using outdoor materials and finishes.';
+
 const EXT_ENHANCEMENTS = [
   {id:"outdoor-living",label:"Outdoor Living Staging",icon:"🪑",desc:"Patio furniture, dining set, fire pit, planters.",mlsTag:"Virtually Staged — Outdoor Furnishings"},
   {id:"landscape",label:"Landscape Enhancement",icon:"🌿",desc:"Fresh lawn, trimmed hedges, seasonal flowers, mulch.",mlsTag:"Digitally Enhanced — Landscaping"},
+  // Oct 13, 2026: sky-only option — no staging or landscaping render. The original photo goes
+  // straight to the Sky Presets step; Generate Final requires a preset.
+  {id:"sky",label:"Sky Enhancement",icon:"🌅",desc:"Sky only — apply a Sky Preset to your photo. No staging or landscaping.",mlsTag:SKY_DISCLOSURE_LABEL,skyOnly:true},
   // Oct 13, 2026: Golden Hour and Twilight moved out of this list — sky/lighting is now
   // applied to the approved staged image as a Sky Preset (see SKY_PRESETS).
 ];
@@ -1738,7 +1744,7 @@ async function applyVirtuallyStagedBadge(base64Jpeg) {
 // same footprint at the same canvas size. Font size is solved by
 // measuring the actual text and scaling to fit, since text width (unlike
 // a fixed-aspect image) varies with the string and can't be hardcoded.
-async function applyDigitallyEnhancedBadge(base64Jpeg) {
+async function applyDigitallyEnhancedBadge(base64Jpeg, subline) {
   try {
     // Canvas fillText silently falls back to a default system font if the
     // webfont isn't actually loaded yet when this runs — unlike regular
@@ -1797,8 +1803,19 @@ async function applyDigitallyEnhancedBadge(base64Jpeg) {
                          (metrics.actualBoundingBoxDescent || fontSize * 0.18);
     const bandTop = canvas.height - verticalMargin - targetHeight;
     const baselineX = horizontalMargin + (targetWidth * 0.04);
-    const baselineY = bandTop + (targetHeight + glyphHeight) / 2 -
+    let baselineY = bandTop + (targetHeight + glyphHeight) / 2 -
                        (metrics.actualBoundingBoxDescent || fontSize * 0.18);
+    // Oct 13, 2026: optional second line (the Sky Preset name) under the main text.
+    let subFont = 0, subY = 0;
+    if (subline) {
+      subFont = Math.round(fontSize * 0.55);
+      ctx.font = `italic 600 ${subFont}px "Cormorant Garamond", Georgia, serif`;
+      const subW = ctx.measureText(subline).width;
+      if (subW > desiredWidth) { subFont = Math.round(subFont * desiredWidth / subW); }
+      baselineY -= subFont * 0.55;           // shift main line up to make room
+      subY = baselineY + subFont * 1.25;
+      ctx.font = `italic 600 ${fontSize}px "Cormorant Garamond", Georgia, serif`;
+    }
 
     // Same soft "engraved" look as the Virtually Staged badge: semi-
     // transparent white fill with a soft dark drop shadow.
@@ -1809,6 +1826,11 @@ async function applyDigitallyEnhancedBadge(base64Jpeg) {
     ctx.shadowOffsetY = fontSize * 0.05;
     ctx.fillStyle = 'rgba(255,255,255,0.88)';
     ctx.fillText(text, baselineX, baselineY);
+    if (subline) {
+      ctx.font = `italic 600 ${subFont}px "Cormorant Garamond", Georgia, serif`;
+      ctx.shadowBlur = subFont * 0.08;
+      ctx.fillText(subline, baselineX, subY);
+    }
 
     const result = canvas.toDataURL('image/jpeg', 0.95).split(',')[1];
     // See applyVirtuallyStagedBadge's matching validation comment.
@@ -1820,6 +1842,17 @@ async function applyDigitallyEnhancedBadge(base64Jpeg) {
     console.error('Digitally Enhanced badge compositing failed (non-fatal, using unbadged image):', err.message);
     return base64Jpeg;
   }
+}
+
+// Oct 13, 2026: Exterior-mode Finals (Outdoor Living, Landscape, Sky) all carry the
+// "Digitally Enhanced" badge; when a Sky Preset was applied its name is added as a second line.
+async function badgeFinalFor(room, enhId, base64) {
+  if (enhId || room.correctedOnly) {
+    const ph = enhId ? room.extSelections?.[enhId] : null;
+    const pk = ph && ph.presetCleanBase64 && PHOTOGRAPHIC_PRESETS[ph.presetKey];
+    return applyDigitallyEnhancedBadge(base64, pk && pk.isSky ? pk.label : null);
+  }
+  return applyVirtuallyStagedBadge(base64);
 }
 
 // ══════════════════════════════════════════
@@ -3811,6 +3844,10 @@ function toggleRoomMode(roomId,mode){
   room.status='pending';room.stagedBase64=null;room.finalBase64=null;room.finalStatus=null;room.extSelections={};room.declutteredBase64=null;
   renderRoomQueue();
 }
+function setExtInstruction(roomId,enhId,val){
+  const room=SESSION.rooms.find(r=>r.id===roomId);
+  if(room&&room.extSelections[enhId])room.extSelections[enhId].instruction=val;
+}
 function toggleExtSelection(roomId,enhId){
   const room=SESSION.rooms.find(r=>r.id===roomId);
   if(!room)return;
@@ -3947,8 +3984,27 @@ function renderRoomQueue(){
       const opts=EXT_ENHANCEMENTS.map(enh=>{const sel=!!room.extSelections[enh.id];return `<div class="ext-option ${sel?'selected':''}" onclick="toggleExtSelection('${room.id}','${enh.id}')">
         <input type="checkbox" ${sel?'checked':''} onclick="event.stopPropagation();toggleExtSelection('${room.id}','${enh.id}')" />
         <div><div class="ext-option-label">${enh.icon} ${enh.label}</div><div class="ext-option-desc">${enh.desc}</div></div></div>`;}).join('');
+      // Oct 13, 2026: optional instructions before the first stage (stored per enhancement, sent in the prompt).
+      const instrBoxes=EXT_ENHANCEMENTS.filter(enh=>!enh.skyOnly&&room.extSelections[enh.id]&&room.extSelections[enh.id].status==='pending').map(enh=>`<div style="margin-top:10px;">
+        <div class="ext-option-label" style="font-size:0.78rem;margin-bottom:4px;">${enh.icon} ${enh.label} — instructions (optional)</div>
+        <textarea class="iterate-input" rows="2" oninput="setExtInstruction('${room.id}','${enh.id}',this.value)" placeholder='${enh.id==='outdoor-living'?'e.g. "Dining set for six under the pergola, fire pit on the lawn, no umbrella"':'e.g. "Keep the lawn natural, add flowering shrubs along the fence"'}'>${(room.extSelections[enh.id].instruction||'').replace(/&/g,'&amp;').replace(/</g,'&lt;')}</textarea></div>`).join('');
       const enhResults=EXT_ENHANCEMENTS.filter(enh=>room.extSelections[enh.id]).map(enh=>{
         const es=room.extSelections[enh.id];
+        if(es.status==='done'&&es.base64&&enh.skyOnly)return `<div class="ext-enhancement-item">
+          <div class="ext-enhancement-header"><span class="ext-enhancement-name">${enh.icon} ${enh.label}</span>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+            <button class="btn btn-outline btn-sm" onclick="downloadOriginal('${room.id}')">↓ Original</button>
+          </div></div>
+          <div class="result-viewer" style="padding:12px;"><div class="result-pair">
+            <div class="result-img-wrap"><img src="${orig.dataUrl}" onclick="openLightbox('${room.id}')" /><div class="result-img-badge">Original</div></div>
+            ${es.presetStatus==='processing'
+              ?`<div class="result-img-wrap" style="display:flex;align-items:center;justify-content:center;background:var(--cream);min-height:140px;border:1px solid var(--border);border-radius:3px;"><span class="spinner"></span></div>`
+              :es.presetCleanBase64?`<div class="result-img-wrap"><img src="data:image/jpeg;base64,${es.presetCleanBase64}" onclick="openLightboxRefine('${room.id}','presets','${enh.id}')" title="Click to change Sky Preset" /><div class="result-img-badge preset">${PHOTOGRAPHIC_PRESETS[es.presetKey]?.label||'Preset'}</div></div>`
+              :`<div class="result-img-wrap" style="display:flex;align-items:center;justify-content:center;background:var(--cream);min-height:140px;border:1px dashed var(--border);border-radius:3px;color:var(--muted);font-size:0.8rem;text-align:center;padding:12px;">Choose a Sky Preset</div>`}
+          </div></div>
+          <div class="iterate-panel"><div style="flex:1;font-size:0.8rem;color:var(--muted);">Pick a Sky Preset, then Generate Final. Only the sky and lighting change.</div>
+            <button class="btn btn-primary btn-sm" onclick="openLightboxRefine('${room.id}','presets','${enh.id}')">${es.presetCleanBase64?'Change Sky Preset →':'Choose Sky Preset →'}</button></div>
+          ${renderFinalPanel(room.id,enh.id)}</div>`;
         if(es.status==='done'&&es.base64)return `<div class="ext-enhancement-item">
           <div class="ext-enhancement-header"><span class="ext-enhancement-name">${enh.icon} ${enh.label}</span>
           <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
@@ -3986,7 +4042,7 @@ function renderRoomQueue(){
         <div class="room-card-status" style="color:var(--sky);">Select enhancements · Click photo to set Shot Focus · Click here for results</div></div>
         <div class="room-card-actions">${runBtn}${modeToggle}</div></div>
         ${roomWorkspaceModal(room, `<div class="ext-panel"><div class="ext-panel-title">Choose Exterior Enhancements — Multiple Allowed</div>
-        <div class="ext-options">${opts}</div></div>${enhResults}`)}`;
+        <div class="ext-options">${opts}</div>${instrBoxes}</div>${enhResults}`)}`;
     }
 
     // ── DECLUTTER ONLY ──
@@ -4428,9 +4484,11 @@ function renderFinalPanel(roomId,enhId){
   // selected tier (standard path, and Sky Presets on Exterior enhancements).
   // Keep in sync with the same hasPreset logic in generateFinal().
   const hasPreset = !!presetHolder(room, enhId)?.presetCleanBase64;
+  const needsPreset = !!(enh && enh.skyOnly && !hasPreset);
   const baseCreditMap = {'mls':1,'marketing':1,'print':1};
-  const initialCost = baseCreditMap.mls + (hasPreset ? 1 : 0);
-  const presetSurchargeNote = hasPreset ? ` <span style="color:#4a5fa5;font-weight:600;">+1 preset</span>` : '';
+  const _chargePreset = hasPreset && !(enh && enh.skyOnly);
+  const initialCost = baseCreditMap.mls + (_chargePreset ? 1 : 0);
+  const presetSurchargeNote = _chargePreset ? ` <span style="color:#4a5fa5;font-weight:600;">+1 preset</span>` : '';
   return `<div class="final-panel">
     <span class="final-panel-label">Generate Final</span>
     <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
@@ -4440,8 +4498,8 @@ function renderFinalPanel(roomId,enhId){
       </label>
     </div>
     <div style="display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap;">
-      <button class="btn btn-success btn-sm" id="gen-final-btn-${roomId}-${enhId||'int'}" onclick="generateFinal('${roomId}','${enhId||''}')">Generate Final — MLS Ready →</button>
-      <span id="gen-final-note-${roomId}-${enhId||'int'}" style="font-size:0.72rem;color:var(--muted);">${hasPreset ? `Uses ${initialCost} staged images from your plan (includes +1 for Photographic Preset)` : `Uses ${initialCost} staged image from your plan`}</span>
+      <button class="btn btn-success btn-sm" id="gen-final-btn-${roomId}-${enhId||'int'}" ${needsPreset?'disabled':''} onclick="generateFinal('${roomId}','${enhId||''}')">Generate Final — MLS Ready →</button>
+      <span id="gen-final-note-${roomId}-${enhId||'int'}" style="font-size:0.72rem;color:var(--muted);">${needsPreset ? 'Choose a Sky Preset first' : _chargePreset ? `Uses ${initialCost} staged images from your plan (includes +1 for Photographic Preset)` : `Uses ${initialCost} staged image from your plan`}</span>
     </div>
   </div>`;
 }
@@ -4533,11 +4591,14 @@ function buildExteriorPrompt(room,enh,quality){
   const mlsRule=i.mls==='A'?'MLS SAFE MODE: Preserve ALL architectural elements exactly — roofline, structure, driveway, windows, hardscape. No fabrication.':'Maintain photorealistic quality.';
   const shotFocus=room.shotFocus?`\nSHOT FOCUS: ${room.shotFocus}`:'';
   const qualNote=quality==='high'?'Maximum photorealistic quality.':quality==='medium'?'High quality MLS output.':'Draft quality.';
-  const base=`${shotFocus}\n${REFLECTION_RULE}\n${mlsRule} ${qualNote}\nEmbed "${enh.mlsTag}" text in lower portion.`;
+  const userNote=(room.extSelections&&room.extSelections[enh.id]&&room.extSelections[enh.id].instruction||'').trim();
+  const instr=userNote?`\nUSER INSTRUCTIONS: ${userNote}`:'';
+  const base=`${instr}${shotFocus}\n${REFLECTION_RULE}\n${mlsRule} ${qualNote}\nEmbed "${enh.mlsTag}" text in lower portion.`;
   const prompts={
     'outdoor-living':`Professional real estate virtual exterior staging. Add outdoor living furniture to this exterior photo.
 PRESERVE EXACTLY: all architecture, structure, hardscape, fencing, existing landscaping, roofline, camera perspective.
-ADD: outdoor furniture for ${i.buyer_label} buyer — patio dining set, lounge seating, side tables, planters. Style: ${i.style_label}. Color: ${i.palette_label}. Realistic scale on existing hardscape only — do not float furniture.${base}`,
+ADD: outdoor furniture for ${i.buyer_label} buyer — patio dining set, lounge seating, side tables, planters. Style: ${i.style_label}. Color: ${i.palette_label}. Realistic scale on existing hardscape only — do not float furniture.
+${OUTDOOR_FURNITURE_RULE}${base}`,
     'landscape':`Professional real estate exterior landscape enhancement.
 PRESERVE EXACTLY: all architecture, structure, hardscape, fencing, driveway, roofline, camera perspective.
 ENHANCE: lawn to lush green, trim hedges, seasonal flowers, fresh mulch, clean walkways. Realistic only — no fantasy landscaping.${base}`,
@@ -5092,7 +5153,8 @@ async function stageRoom(roomId) {
       throw new Error('Prompt generation failed: ' + (d.error || 'unknown'));
     }
     const promptData = await promptRes.json();
-    const prompt = promptData.stagingPrompt;
+    let prompt = promptData.stagingPrompt;
+    if (isSkyPhoto(room)) prompt += '\n\n' + OUTDOOR_FURNITURE_RULE;
     room.lastPrompt = prompt;
 
     // ── PROMPT PREVIEW MODAL — pause here, wait for user approval ────────────
@@ -6620,8 +6682,10 @@ async function generateFinal(roomId,enhId){
   // additive to) the MLS/Marketing/Print tier cost. Applies to both paths:
   // the room-level preset (standard) and a Sky Preset on an Exterior enhancement.
   const hasPreset = !!presetHolder(room, enhId)?.presetCleanBase64;
+  const _enhDef = enhId ? EXT_ENHANCEMENTS.find(e => e.id === enhId) : null;
+  if (_enhDef && _enhDef.skyOnly && !hasPreset) { showToast('Choose a Sky Preset first.', 'error'); return; }
   const baseCreditCost = { mls: 1, marketing: 1, print: 1 }[qualityChoice] || 1;
-  const creditCost = baseCreditCost + (hasPreset ? 1 : 0);
+  const creditCost = baseCreditCost + (hasPreset && !(_enhDef && _enhDef.skyOnly) ? 1 : 0);
   // FIX (Sep 7, 2026): getUser() now wrapped in withAuthTimeout — a stall here
   // (stuck cross-tab lock or the Supabase JWT-refresh incident) previously hung
   // this whole function forever with no feedback. On a stall, fail closed with a
@@ -6725,9 +6789,8 @@ async function generateFinal(roomId,enhId){
     // must carry "Digitally Enhanced," not "Virtually Staged" — the DB
     // mode (dbMode above) already got this right; the actual image pixels
     // didn't, unconditionally, until now.
-    let finalBase64 = room.correctedOnly
-      ? await applyDigitallyEnhancedBadge(upscaleData.upscaledBase64)
-      : await applyVirtuallyStagedBadge(upscaleData.upscaledBase64);
+    const _digitalOnly = !!(room.correctedOnly || enhId);
+    let finalBase64 = await badgeFinalFor(room, enhId, upscaleData.upscaledBase64);
 
     // Upload original to Cloudinary if not already done (needed for compliance page)
     //
@@ -6785,7 +6848,7 @@ async function generateFinal(roomId,enhId){
       }
     }
 
-    const _badgeLabel = room.correctedOnly ? 'Digitally Enhanced' : 'Virtually Staged';
+    const _badgeLabel = _digitalOnly ? 'Digitally Enhanced' : 'Virtually Staged';
     console.log(`Generate Final: badged image ${Math.round(finalBase64.length/1024)}KB — ${_badgeLabel} disclosure applied`);
 
     // Store final — clean image
@@ -6992,7 +7055,8 @@ async function runCleanAndStage(roomId) {
       })
     });
     if (!stageRes.ok) throw new Error('Stage prompt failed: ' + stageRes.status);
-    const { stagingPrompt } = await stageRes.json();
+    let { stagingPrompt } = await stageRes.json();
+    if (isSkyPhoto(room)) stagingPrompt += '\n\n' + OUTDOOR_FURNITURE_RULE;
 
     // Step 2B: Show staging modal
     room.status = 'prompt-review';
@@ -7076,6 +7140,11 @@ async function runExtEnhancements(roomId){
   })(orig.base64);
   
   for(const enh of toRun){
+    if(enh.skyOnly){
+      // No render: the photo itself is the base for the Sky Preset.
+      room.extSelections[enh.id].base64=compressedB64;room.extSelections[enh.id].cleanBase64=compressedB64;room.extSelections[enh.id].status='done';
+      continue;
+    }
     try{
       const extResult=await callStageAPI(compressedB64,'image/jpeg',buildExteriorPrompt(room,enh,'low'),'low', stageCtx('exterior', roomId, enh && enh.id));
       const b64=extResult.watermarked;const b64Clean=extResult.clean;
@@ -7085,6 +7154,7 @@ async function runExtEnhancements(roomId){
     }catch(err){room.extSelections[enh.id].status='pending';showToast(`${enh.label}: ${err.message}`,'error');}
     renderRoomQueue();
   }
+  renderRoomQueue();
 }
 
 // ── DECLUTTER SBS DOWNLOAD ───────────────────────────────────────────────────
@@ -7424,7 +7494,7 @@ function resizeToMatch(room,orig,enhId,storeKey,incomingB64){
         // — dbMode already treats a corrected-only exterior room as
         // photo_enhancement regardless of roomMode, so the badge on the
         // actual pixels needs to agree.
-        (room.correctedOnly ? applyDigitallyEnhancedBadge(newB64) : applyVirtuallyStagedBadge(newB64)).then(badgedB64 => {
+        badgeFinalFor(room, enhId, newB64).then(badgedB64 => {
           if(enhId){room.extSelections[enhId].finalBase64=badgedB64;room.extSelections[enhId].finalStatus='done';}
           else{room.finalBase64=badgedB64;room.finalStatus='done';}
           resolve();
@@ -8314,7 +8384,8 @@ function updateFinalLabel(roomId, enhId) {
   // path, and Sky Presets on Exterior enhancements. Keep this note in sync with
   // the actual debit logic in generateFinal().
   const room = SESSION.rooms.find(r => r.id === roomId);
-  const hasPreset = !!presetHolder(room, enhId)?.presetCleanBase64;
+  const _enhU = enhId ? EXT_ENHANCEMENTS.find(e => e.id === enhId) : null;
+  const hasPreset = !!presetHolder(room, enhId)?.presetCleanBase64 && !(_enhU && _enhU.skyOnly);
   const totalCost = baseCosts[selected] + (hasPreset ? 1 : 0);
   const btn = document.getElementById(btnId);
   const note = document.getElementById(noteId);

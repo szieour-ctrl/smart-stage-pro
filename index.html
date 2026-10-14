@@ -3543,7 +3543,10 @@ function renderRefineTabs(){
   const room=SESSION.rooms.find(r=>r.id===roomId);
   // Oct 13, 2026: exterior enhancements now get the Presets tab too — it carries the
   // Sky Presets (applied per enhancement, see applyPreset(roomId, key, enhId)).
-  const tabs=_lbEnhId
+  const _skyOnlyLb=_lbEnhId&&EXT_ENHANCEMENTS.find(e=>e.id===_lbEnhId&&e.skyOnly);
+  const tabs=_skyOnlyLb
+    ? [{key:'presets',label:'Sky Presets'}]
+    : _lbEnhId
     ? [{key:'revise',label:'Free Revision'},{key:'presets',label:'Presets'}]
     : isDeclutterOnlyRoom(room)
       ? [{key:'revise',label:'Free Revision'},{key:'enhance',label:'✨ AI Enhance'}]
@@ -3844,10 +3847,6 @@ function toggleRoomMode(roomId,mode){
   room.status='pending';room.stagedBase64=null;room.finalBase64=null;room.finalStatus=null;room.extSelections={};room.declutteredBase64=null;
   renderRoomQueue();
 }
-function setExtInstruction(roomId,enhId,val){
-  const room=SESSION.rooms.find(r=>r.id===roomId);
-  if(room&&room.extSelections[enhId])room.extSelections[enhId].instruction=val;
-}
 function toggleExtSelection(roomId,enhId){
   const room=SESSION.rooms.find(r=>r.id===roomId);
   if(!room)return;
@@ -3984,10 +3983,6 @@ function renderRoomQueue(){
       const opts=EXT_ENHANCEMENTS.map(enh=>{const sel=!!room.extSelections[enh.id];return `<div class="ext-option ${sel?'selected':''}" onclick="toggleExtSelection('${room.id}','${enh.id}')">
         <input type="checkbox" ${sel?'checked':''} onclick="event.stopPropagation();toggleExtSelection('${room.id}','${enh.id}')" />
         <div><div class="ext-option-label">${enh.icon} ${enh.label}</div><div class="ext-option-desc">${enh.desc}</div></div></div>`;}).join('');
-      // Oct 13, 2026: optional instructions before the first stage (stored per enhancement, sent in the prompt).
-      const instrBoxes=EXT_ENHANCEMENTS.filter(enh=>!enh.skyOnly&&room.extSelections[enh.id]&&room.extSelections[enh.id].status==='pending').map(enh=>`<div style="margin-top:10px;">
-        <div class="ext-option-label" style="font-size:0.78rem;margin-bottom:4px;">${enh.icon} ${enh.label} — instructions (optional)</div>
-        <textarea class="iterate-input" rows="2" oninput="setExtInstruction('${room.id}','${enh.id}',this.value)" placeholder='${enh.id==='outdoor-living'?'e.g. "Dining set for six under the pergola, fire pit on the lawn, no umbrella"':'e.g. "Keep the lawn natural, add flowering shrubs along the fence"'}'>${(room.extSelections[enh.id].instruction||'').replace(/&/g,'&amp;').replace(/</g,'&lt;')}</textarea></div>`).join('');
       const enhResults=EXT_ENHANCEMENTS.filter(enh=>room.extSelections[enh.id]).map(enh=>{
         const es=room.extSelections[enh.id];
         if(es.status==='done'&&es.base64&&enh.skyOnly)return `<div class="ext-enhancement-item">
@@ -4042,7 +4037,7 @@ function renderRoomQueue(){
         <div class="room-card-status" style="color:var(--sky);">Select enhancements · Click photo to set Shot Focus · Click here for results</div></div>
         <div class="room-card-actions">${runBtn}${modeToggle}</div></div>
         ${roomWorkspaceModal(room, `<div class="ext-panel"><div class="ext-panel-title">Choose Exterior Enhancements — Multiple Allowed</div>
-        <div class="ext-options">${opts}</div>${instrBoxes}</div>${enhResults}`)}`;
+        <div class="ext-options">${opts}</div></div>${enhResults}`)}`;
     }
 
     // ── DECLUTTER ONLY ──
@@ -4586,24 +4581,39 @@ ${mlsRule} ${qualNote}
 Embed "VIRTUALLY STAGED" text in lower portion.`.trim();
 }
 
-function buildExteriorPrompt(room,enh,quality){
-  const i=SESSION.intake;
+// Returns {before, visible, after, full}. `visible` is the part the user sees and edits in the
+// prompt-review box before the first stage; before/after stay hidden and are stitched back around it.
+function buildExteriorParts(room,enh,quality){
+  const i=SESSION.intake||{};
   const mlsRule=i.mls==='A'?'MLS SAFE MODE: Preserve ALL architectural elements exactly — roofline, structure, driveway, windows, hardscape. No fabrication.':'Maintain photorealistic quality.';
   const shotFocus=room.shotFocus?`\nSHOT FOCUS: ${room.shotFocus}`:'';
   const qualNote=quality==='high'?'Maximum photorealistic quality.':quality==='medium'?'High quality MLS output.':'Draft quality.';
-  const userNote=(room.extSelections&&room.extSelections[enh.id]&&room.extSelections[enh.id].instruction||'').trim();
-  const instr=userNote?`\nUSER INSTRUCTIONS: ${userNote}`:'';
-  const base=`${instr}${shotFocus}\n${REFLECTION_RULE}\n${mlsRule} ${qualNote}\nEmbed "${enh.mlsTag}" text in lower portion.`;
-  const prompts={
-    'outdoor-living':`Professional real estate virtual exterior staging. Add outdoor living furniture to this exterior photo.
+  const base=`${shotFocus}\n${REFLECTION_RULE}\n${mlsRule} ${qualNote}\nEmbed "${enh.mlsTag}" text in lower portion.`;
+  const parts={
+    'outdoor-living':{
+      before:`Professional real estate virtual exterior staging. Add outdoor living furniture to this exterior photo.
 PRESERVE EXACTLY: all architecture, structure, hardscape, fencing, existing landscaping, roofline, camera perspective.
-ADD: outdoor furniture for ${i.buyer_label} buyer — patio dining set, lounge seating, side tables, planters. Style: ${i.style_label}. Color: ${i.palette_label}. Realistic scale on existing hardscape only — do not float furniture.
-${OUTDOOR_FURNITURE_RULE}${base}`,
-    'landscape':`Professional real estate exterior landscape enhancement.
+ADD: `,
+      visible:`outdoor furniture for ${i.buyer_label} buyer — patio dining set, lounge seating, side tables, planters. Style: ${i.style_label}. Color: ${i.palette_label}.`,
+      after:`Realistic scale on existing hardscape only — do not float furniture.
+${OUTDOOR_FURNITURE_RULE}${base}`},
+    'landscape':{
+      before:`Professional real estate exterior landscape enhancement.
 PRESERVE EXACTLY: all architecture, structure, hardscape, fencing, driveway, roofline, camera perspective.
-ENHANCE: lawn to lush green, trim hedges, seasonal flowers, fresh mulch, clean walkways. Realistic only — no fantasy landscaping.${base}`,
+ENHANCE: `,
+      visible:`lawn to lush green, trim hedges, seasonal flowers, fresh mulch, clean walkways.`,
+      after:`Realistic only — no fantasy landscaping.${base}`},
   };
-  return prompts[enh.id]||'Professional real estate exterior photo enhancement.';
+  const p=parts[enh.id]||{before:'Professional real estate exterior photo enhancement.',visible:'',after:''};
+  return {...p,full:p.before+p.visible+' '+p.after};
+}
+function buildExteriorPrompt(room,enh,quality){return buildExteriorParts(room,enh,quality).full;}
+
+// Prompt review before the first exterior stage — same modal the interior flow uses.
+// Returns the approved prompt, or null if the user cancels (no credit used).
+function reviewExtPrompt(room,enh){
+  const p=buildExteriorParts(room,enh,'low');
+  return showPromptModal({...room,isExterior:true,roomName:(room.roomName||'Exterior')+' — '+enh.label},p.full,{before:p.before,visible:p.visible,after:p.after});
 }
 
 // ══════════════════════════════════════════
@@ -6420,6 +6430,10 @@ const REVISION_WRAP = {
     before: 'PRIMARY ROLE: Edit this already-staged photo. Make ONLY the change(s) described below — everything else in the photo (furniture, decor, architecture, lighting, camera angle) must remain exactly as shown.\n\nREQUESTED CHANGE:\n',
     after: 'Do not re-stage, restyle, or regenerate the room. Do not alter anything not explicitly mentioned above. Preserve all architectural elements exactly as photographed — this image is for MLS listing per California AB 723 §10140.6.',
   },
+  exteriorPhoto: {
+    before: 'PRIMARY ROLE: Edit this already-enhanced exterior photo. Make ONLY the change(s) described below — everything else (every piece of furniture and furnishing with its exact position, style, color and fabric; plants, landscaping, hardscape, architecture, lighting, sky, camera angle) must remain exactly as shown.\n\nREQUESTED CHANGE:\n',
+    after: 'Do not re-stage, restyle, rearrange, replace or regenerate anything. Do not alter anything not explicitly mentioned above. Preserve all architectural elements exactly as photographed — this image is for MLS listing per California AB 723 §10140.6.',
+  },
   declutteredPhoto: {
     before: 'PRIMARY ROLE: Edit this already-decluttered photo. Make ONLY the change(s) described below — everything else (the furniture-free state, architecture, lighting, camera angle) must remain exactly as shown.\n\nREQUESTED CHANGE:\n',
     after: 'Do not re-declutter or reprocess the whole room. Do not alter anything not explicitly mentioned above. Never invent a shower door, glass enclosure, or panel that wasn\'t in the original photo. Closet hanging rods must match the original count and position exactly. Bathroom vanity cabinetry (upper and lower) must be fully preserved. Windows must stay the exact original size and position — never resize, shift, or convert a window into a door or opening. If a bed is involved, remember it means the ENTIRE bed (frame, headboard, footboard, slats) — not just bedding, and a stripped frame left standing is not a complete removal. This image is prepared per California AB 723 §10140.6 for virtual staging.',
@@ -7113,8 +7127,17 @@ async function runExtEnhancements(roomId){
   const room=SESSION.rooms.find(r=>r.id===roomId);
   const orig=SESSION.originals.find(o=>o.id===room.originalId);
   if(!room||!orig)return;
-  const toRun=EXT_ENHANCEMENTS.filter(enh=>room.extSelections[enh.id]&&room.extSelections[enh.id].status==='pending');
-  if(!toRun.length){showToast('Select at least one enhancement.','error');return;}
+  const toRun0=EXT_ENHANCEMENTS.filter(enh=>room.extSelections[enh.id]&&room.extSelections[enh.id].status==='pending');
+  if(!toRun0.length){showToast('Select at least one enhancement.','error');return;}
+  // Prompt review for each render-based enhancement BEFORE anything is generated.
+  const approvedPrompts={};
+  for(const enh of toRun0){
+    if(enh.skyOnly)continue;
+    const ap=await reviewExtPrompt(room,enh);
+    if(ap!==null)approvedPrompts[enh.id]=ap;
+  }
+  const toRun=toRun0.filter(enh=>enh.skyOnly||approvedPrompts[enh.id]!==undefined);
+  if(!toRun.length){showToast('Staging cancelled — no credit used.','');return;}
   toRun.forEach(enh=>room.extSelections[enh.id].status='processing');
   renderRoomQueue();
   
@@ -7146,7 +7169,7 @@ async function runExtEnhancements(roomId){
       continue;
     }
     try{
-      const extResult=await callStageAPI(compressedB64,'image/jpeg',buildExteriorPrompt(room,enh,'low'),'low', stageCtx('exterior', roomId, enh && enh.id));
+      const extResult=await callStageAPI(compressedB64,'image/jpeg',approvedPrompts[enh.id],'low', stageCtx('exterior', roomId, enh && enh.id));
       const b64=extResult.watermarked;const b64Clean=extResult.clean;
       room.extSelections[enh.id].base64=b64;room.extSelections[enh.id].cleanBase64=b64Clean;room.extSelections[enh.id].status='done';
       await resizeToMatch(room,orig,enh.id,'__extdraft__',b64);
@@ -7357,40 +7380,37 @@ async function iterateExtEnhancement(roomId, enhId) {
   if (!room || !orig) return;
   const enh = EXT_ENHANCEMENTS.find(e => e.id === enhId);
   if (!enh) return;
+  const es = room.extSelections[enhId];
 
   const note = document.getElementById(`iter-ext-${roomId}-${enhId}`)?.value?.trim() || '';
+  if (!note) { showToast('Enter revision instructions first.', 'error'); return; }
+  // The CURRENT staged draft (unwatermarked) is what gets edited — never the original photo —
+  // so everything not named in the note stays exactly as it is.
+  const priorClean = es && es.cleanBase64;
+  if (!priorClean) { showToast('No staged draft found — stage this enhancement first.', 'error'); return; }
+
+  const w = REVISION_WRAP.exteriorPhoto;
+  const after = w.after + (enh.id === 'outdoor-living' ? ' Any furniture you are asked to add must be weather-rated outdoor furniture.' : '');
+  const approved = await showPromptModal(
+    { ...room, isExterior: true, roomName: (room.roomName || 'Exterior') + ' — ' + enh.label },
+    w.before + note + '\n\n' + after,
+    { before: w.before, visible: note, after }
+  );
+  if (approved === null) { showToast('Revision cancelled — no credit used.', ''); return; }
+
   // A new draft invalidates any Sky Preset applied to the old one.
-  room.extSelections[enhId] = { ...room.extSelections[enhId], status: 'processing', finalBase64: null, finalStatus: null, presetCleanBase64: null, presetKey: null, presetStatus: null };
+  room.extSelections[enhId] = { ...es, status: 'processing', finalBase64: null, finalStatus: null, presetCleanBase64: null, presetKey: null, presetStatus: null };
   renderRoomQueue();
 
-  const compressedB64 = await new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => {
-      const canvas = document.createElement('canvas');
-      const maxDim = 1024;
-      let w = img.width, h = img.height;
-      if (w > maxDim || h > maxDim) {
-        if (w > h) { h = Math.round(h * maxDim / w); w = maxDim; }
-        else { w = Math.round(w * maxDim / h); h = maxDim; }
-      }
-      canvas.width = w; canvas.height = h;
-      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-      resolve(canvas.toDataURL('image/jpeg', 0.85).split(',')[1]);
-    };
-    img.onerror = () => reject(new Error('Compression failed'));
-    img.src = orig.dataUrl || ('data:' + orig.mimeType + ';base64,' + orig.base64);
-  });
-
   try {
-    const basePrompt = buildExteriorPrompt(room, enh, 'low');
-    const revisedPrompt = note ? basePrompt + ` Additional instruction: ${note}` : basePrompt;
-    const extIterResult = await callStageAPI(compressedB64, 'image/jpeg', revisedPrompt, 'low', stageCtx('iterate_exterior', roomId, enhId));
+    const sourceImage = await downscaleForStagingInput(priorClean, 2048);
+    const extIterResult = await callStageAPI(sourceImage, 'image/jpeg', approved, 'low', stageCtx('iterate_exterior', roomId, enhId));
     const b64 = extIterResult.watermarked;
     room.extSelections[enhId].base64 = b64;
     room.extSelections[enhId].cleanBase64 = extIterResult.clean;
     room.extSelections[enhId].status = 'done';
     await resizeToMatch(room, orig, enhId, '__extdraft__', b64);
-    showToast(`✓ ${enh.label} re-staged.`, 'success');
+    showToast(`✓ ${enh.label} revised.`, 'success');
   } catch (err) {
     room.extSelections[enhId].status = 'done';
     showToast(`${enh.label}: ${err.message}`, 'error');
@@ -7406,6 +7426,13 @@ async function runSingleExtEnhancement(roomId, enhId) {
   const enh = EXT_ENHANCEMENTS.find(e => e.id === enhId);
   if (!enh) return;
 
+  const approvedSingle = await reviewExtPrompt(room, enh);
+  if (approvedSingle === null) {
+    room.extSelections[enhId].status = 'pending';
+    renderRoomQueue();
+    showToast('Staging cancelled — no credit used.', '');
+    return;
+  }
   room.extSelections[enhId] = { ...room.extSelections[enhId], status: 'processing' };
   renderRoomQueue();
 
@@ -7429,7 +7456,7 @@ async function runSingleExtEnhancement(roomId, enhId) {
   });
 
   try {
-    const extRestageResult = await callStageAPI(compressedB64, 'image/jpeg', buildExteriorPrompt(room, enh, 'low'), 'low', stageCtx('exterior', roomId, enhId));
+    const extRestageResult = await callStageAPI(compressedB64, 'image/jpeg', approvedSingle, 'low', stageCtx('exterior', roomId, enhId));
     const b64 = extRestageResult.watermarked;
     room.extSelections[enhId].base64 = b64;
     room.extSelections[enhId].cleanBase64 = extRestageResult.clean;
@@ -8170,7 +8197,7 @@ function showPromptModal(room, prompt, hiddenParts) {
       { label: 'Decor8 Room Type', val: getDecor8RoomType(room.roomName, room.adjacentRooms, room.decor8Type) },
       { label: 'DNA Tier', val: getDNATier(room) === 'none' ? '—' : getDNATier(room) },
     ];
-    document.getElementById('pm-meta').innerHTML = meta
+    document.getElementById('pm-meta').innerHTML = (room.isExterior ? meta.slice(0, 3) : meta)
       .map(m => `<div class="pm-meta-chip"><strong>${m.label}:</strong> ${m.val || '—'}</div>`)
       .join('');
 
@@ -8204,7 +8231,9 @@ function showPromptModal(room, prompt, hiddenParts) {
     if (thumbCol) thumbCol.style.display = thumbSrc ? '' : 'none';
     if (thumbImg) { if (thumbSrc) thumbImg.src = thumbSrc; else thumbImg.removeAttribute('src'); }
     if (hintBelow) hintBelow.style.display = zonesOnly ? 'none' : '';
-    if (readLabel) readLabel.textContent = zonesOnly ? 'ROOMS AND ZONES TO STAGE — USER SELECTIONS' : 'Room Read — Edit Before Approving';
+    if (hintBelow && room.isExterior && hiddenParts) hintBelow.innerHTML = '✏️ <strong>Add or change instructions before the first render.</strong> The text above is what will be staged — edit it, or add your own (e.g. "dining set for six, fire pit on the lawn, no umbrella"). Everything else (preserve-the-architecture rules, outdoor-rated furnishings, compliance) is applied automatically.';
+    if (readLabel && room.isExterior && hiddenParts) readLabel.textContent = 'Staging Instructions — Edit Before Approving';
+    else if (readLabel) readLabel.textContent = zonesOnly ? 'ROOMS AND ZONES TO STAGE — USER SELECTIONS' : 'Room Read — Edit Before Approving';
     // the placement guide overlay always starts hidden (the user's photo is shown clean)
     setPlacementGuide(false);
 

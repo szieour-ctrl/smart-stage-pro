@@ -5240,7 +5240,10 @@ async function attachFinalToProject(finalBase64, room, orig, enhId) {
   // this room renders through the normal post-draft UI). NEEDS a matching
   // Postgres CHECK constraint update on staged_images.mode before this
   // will actually write successfully -- not yet applied.
-  const dbMode = room.correctedOnly ? 'photo_enhancement' : (ROOM_MODE_TO_DB_MODE[room.roomMode] || 'vacant_stage');
+  // Oct 14, 2026: any exterior photo (Exterior mode, or an exterior-type room staged via Stage Vacant /
+  // Clean + Stage) is recorded as exterior_enhancement and carries the Digitally Enhanced disclosure.
+  const _extPhoto = !!(enhId || isSkyPhoto(room));
+  const dbMode = room.correctedOnly ? 'photo_enhancement' : (_extPhoto ? 'exterior_enhancement' : (ROOM_MODE_TO_DB_MODE[room.roomMode] || 'vacant_stage'));
 
   const target = enhId ? room.extSelections[enhId] : room;
   target.complianceAttachStatus = 'pending';
@@ -5361,6 +5364,7 @@ async function attachFinalToProject(finalBase64, room, orig, enhId) {
             roomName: room.roomName || 'Room',
             tier: enhId ? 'final-enhanced' : 'final', // quality label — Blobs/compliance-page display only
             mode: dbMode,                              // NEW — the real staged_images.mode value
+            enhanced: (dbMode === 'exterior_enhancement' || dbMode === 'photo_enhancement'), // compliance page wording: Digitally Enhanced vs Virtually Staged
             originalUrl: orig?.originalUrl || null,
             stagedUrl: sig.publicUrl,
             thumbnailUrl,

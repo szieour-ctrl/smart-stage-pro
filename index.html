@@ -1115,7 +1115,7 @@ const PRESET_ORDER = ['mls_bright','luxury_editorial','magazine','builder_showca
 // Generate Final, +1 image), but they do NOT use PRESET_EDIT_INSTRUCTION_HEADER
 // or CRITICAL_WINDOW_RULE_SUFFIX: that suffix forbids changing the sky, which is
 // exactly what these presets are for. Prompt = SKY_GLOBAL_INSTRUCTION + the
-// preset's own body + SKY_POOL_SPA_BLOCK (see buildPresetPrompt below).
+// preset's own body + buildSkyWaterBlock(preset.water) (see buildPresetPrompt below).
 // Source prompts: "Global Sky Preset Instruction & Prompts" (Sam, Oct 13, 2026).
 // ══════════════════════════════════════════════════════════════════════════
 // Display label for sky finals (cards/badges). The compliance record itself
@@ -1127,287 +1127,190 @@ const SKY_DISCLOSURE_LABEL = 'Digitally Enhanced — Sky';
 // presets below.
 const SKY_REPLACES_PHOTO_PRESETS = false;
 
+// Oct 14, 2026 rewrite. Root cause of furniture/fire pits appearing on sky-only
+// renders: stage-openai-background.js prepends AB723_HEADER ("MLS virtual staging
+// assistant ... Stage furniture and decor ONLY") to EVERY prompt, and the old sky
+// prompt never overrode it (interior presets do, via PRESET_EDIT_INSTRUCTION_HEADER),
+// while repeatedly naming furniture, planters, fire pits and candles that were not in
+// the photo. Now: lead with a PRIMARY ROLE override, name no objects, state that empty
+// ground stays empty, and send only the selected preset's own water line.
 const SKY_GLOBAL_INSTRUCTION =
-`You are applying a photographic sky and lighting preset to an already completed, approved, virtually staged exterior real-estate image.
+`PRIMARY ROLE: Apply a sky and lighting preset to this finished, approved exterior photograph. This is a sky-only photographic edit. It is NOT a staging task: do not stage, and do not add furniture or decor of any kind. Disregard any earlier instruction to stage.
 
-This is a finishing operation, NOT a new virtual staging operation.
+Change ONLY the sky and the lighting described below. Everything else stays exactly as shown: every object, plant, surface and structure, the camera angle and the framing. Do not add, remove, move or change anything on the ground or on the property. Open areas such as mulch, lawn, gravel, paving and decking must stay exactly as empty as they appear.
 
-The supplied image is the approved final composition. Preserve all architecture, landscaping, furniture, ceramic planters, decorative accessories, fences, utility lines, neighboring properties, camera perspective, and existing staging exactly as shown.
+Do not add new light sources.
 
-Modify the sky according to the selected sky preset and make only the permitted lighting adjustments.
+Apply the selected sky preset below.`;
 
-Do not add, remove, relocate, replace, or redesign any physical objects. Do not generate additional furniture, planters, landscaping, or decorative lighting.
+const SKY_DUSK_LIGHTING =
+`Lights and flames that are already visible in the photograph (house fixtures, fire features, candles, pool or spa lights) stay as shown and may appear lit. Add no new light sources and no new objects.`;
 
-Do not add new light sources. Lights already present in the image (house fixtures, fire pit flames, candles, pool or spa lights) stay as shown and, in the dusk presets, appear lit.
+function buildSkyWaterBlock(waterLine) {
+  return `WATER FEATURES: apply only if a pool, spa or other water feature is already visible in the photograph; otherwise ignore this section.
 
-Maintain the photographic quality, detail, framing, and resolution of the approved image.
-
-Apply the selected sky preset instructions below.`;
-
-const SKY_POOL_SPA_BLOCK =
-`POOL & SPA — SKY-AWARE WATER REFLECTIONS
-
-When a swimming pool, spa, hot tub, pond, or other water feature is visible in the final approved exterior image, naturally harmonize its water-surface reflections with the selected Sky Preset.
-
-Reflect the sky's actual visible color palette, cloud characteristics, ambient lighting, and time-of-day atmosphere wherever physically appropriate.
-
-Preserve the existing water's natural underlying blue, turquoise, or green coloration, transparency, texture, and depth.
-
-Allow soft, naturally distorted sky reflections across the water surface, respecting existing ripples, viewing perspective, and surrounding objects.
-
-For Morning Glow: Use pale blue and white cloud reflections with delicate warm morning highlights.
-For Champagne Golden Hour: Use restrained champagne-gold and pale peach reflections over naturally blue water.
-For California Dreaming: Use powder-blue reflections with delicate peach and apricot accents.
-For Heaven's Light: Use soft cloud reflections and realistic scattered silvery highlights consistent with natural directional sunlight.
-For Tuscan Sunset: Use muted amber, apricot, and terracotta reflections while retaining natural blue water.
-For Twilight Subtle: Use sapphire-blue, lavender, and delicate pink dusk reflections without artificial illumination.
-For Golden Hour Subtle Cinematic: Use richer golden cloud reflections while preventing exaggerated orange coloration.
-For Twilight Subtle Enhancement: Use natural blue-violet reflections and soft reflections from existing illuminated architectural windows or visible house lights.
-
-Preserve all existing pool and spa shapes, coping, tile, waterline, steps, jets, water features, decking, and approved staging. Do not add underwater lighting or fixtures; a pool or spa light already visible in the image may appear on. Do not invent landscape lights, waterfalls, fountains, jets, or decorative objects. Keep reflections consistent with the visible sky, surrounding objects, existing light sources, and natural viewing perspective. Produce photorealistic premium real-estate photography.`;
+Harmonize the water-surface reflections with the sky above: ${waterLine} Keep the water's natural blue, turquoise or green color, transparency and ripples. Do not add or change any water feature, light or fixture.`;
+}
 
 const SKY_PRESETS = {
   sky_morning_glow: {
     key: 'sky_morning_glow', label: 'Morning Glow', isSky: true,
     shortDescription: 'Bright early morning sky, fresh natural lighting.',
+    water: 'pale blue and white cloud reflections with delicate warm morning highlights.',
     instructionBody:
 `SKY PRESET: MORNING GLOW
 
-Edit the supplied, final approved exterior real-estate photograph.
-
 SKY:
-
-Create a fresh, natural early-morning sky featuring soft powder-blue tones, delicate white clouds, and a pale golden-white glow near the horizon. The atmosphere should feel bright, welcoming, airy, and naturally illuminated.
+Create a fresh, natural early-morning sky with soft powder-blue tones, delicate white clouds and a pale golden-white glow near the horizon. Bright, welcoming and airy.
 
 LIGHTING:
-
-Apply very subtle morning lighting enhancement. Gently soften harsh highlights and balance exposure while preserving the property's original brightness, material colors, and existing shadow directions. Maintain clean whites, neutral concrete, natural green landscaping, and realistic roofing colors.
-
-PRESERVATION:
-
-Preserve all existing architecture, landscaping, fences, power lines, furnishings, ceramic planters, decorative elements, neighboring structures, and camera composition exactly as approved.
+Very subtle morning enhancement. Gently soften harsh highlights and balance exposure while keeping the original brightness, material colors and shadow directions. Keep whites clean, concrete neutral, greenery natural and roofing realistic.
 
 RESTRICTIONS:
-
-No dramatic sunrise, excessive yellow or orange coloring, artificial sun flares, invented lighting, structural changes, or additional decorative objects.
+No dramatic sunrise, no excessive yellow or orange, no sun flares, no invented lighting. Add no objects and change no structures.
 
 FINAL RESULT:
-
-Bright, fresh, photorealistic premium MLS photography with a naturally beautiful early-morning atmosphere.`,
+Bright, fresh, photorealistic MLS photography with a natural early-morning atmosphere.`,
   },
   sky_champagne_golden_hour: {
     key: 'sky_champagne_golden_hour', label: 'Champagne Golden Hour', isSky: true,
     shortDescription: 'Elegant golden sky, restrained warm highlights.',
+    water: 'restrained champagne-gold and pale peach reflections over naturally blue water.',
     instructionBody:
 `SKY PRESET: CHAMPAGNE GOLDEN HOUR
 
-Edit the supplied, final approved exterior real-estate photograph.
-
 SKY:
-
-Create an elegant champagne-golden-hour sky with muted champagne gold, soft ivory, and pale peach highlights near the horizon. Transition naturally into a delicate blue-gray upper sky with softly illuminated, realistic clouds. The atmosphere should resemble refined late-afternoon architectural photography.
+Create an elegant champagne-golden-hour sky with muted champagne gold, soft ivory and pale peach near the horizon, blending into a delicate blue-gray upper sky with softly lit, realistic clouds. Refined late-afternoon architectural photography.
 
 LIGHTING:
-
-Apply restrained golden warmth to existing natural highlights on the home, landscaping, driveway, and surrounding surfaces. Preserve neutral siding, concrete, roofing, and material colors. Keep the overall exposure bright, balanced, and realistic. Maintain existing directional shadows with only minor refinement.
-
-PRESERVATION:
-
-Preserve all approved architecture, landscaping, trees, power lines, fences, outdoor furniture, planters, neighboring structures, and camera composition.
+Restrained golden warmth on existing natural highlights only. Keep siding, concrete, roofing and other materials their neutral colors. Keep exposure bright, balanced and realistic, with existing shadow directions.
 
 RESTRICTIONS:
-
-Do not turn the entire photograph orange or yellow. Avoid excessive saturation, strong amber color casts, dramatic shadows, artificial sun flares, invented exterior lighting, or additional decorative objects.
+Do not turn the photograph orange or yellow. No heavy saturation, amber color casts, dramatic shadows, sun flares or invented lighting. Add no objects and change no structures.
 
 FINAL RESULT:
-
-Sophisticated luxury real-estate photography featuring a soft champagne sunset atmosphere and naturally balanced architectural lighting.`,
+Sophisticated luxury real-estate photography with a soft champagne sunset atmosphere and naturally balanced lighting.`,
   },
   sky_california_dreaming: {
     key: 'sky_california_dreaming', label: 'California Dreaming', isSky: true,
     shortDescription: 'Peach horizon, powder-blue sky, soft clouds.',
+    water: 'powder-blue reflections with delicate peach and apricot accents.',
     instructionBody:
 `SKY PRESET: CALIFORNIA DREAMING
 
-Edit the supplied, final approved exterior real-estate photograph.
-
 SKY:
-
-Create a signature California late-afternoon sky with a delicate peach and soft apricot horizon transitioning smoothly into a beautiful powder-blue upper sky. Include elegant, airy white clouds with subtle peach highlights. The atmosphere should feel warm, relaxed, upscale, and distinctly West Coast.
+Create a signature California late-afternoon sky: a delicate peach and soft apricot horizon blending smoothly into a powder-blue upper sky, with airy white clouds carrying subtle peach highlights. Warm, relaxed, upscale and West Coast.
 
 LIGHTING:
-
-Use subtle enhancement lighting. Introduce gentle warmth into existing natural highlights while maintaining bright, accurate exposure throughout the property. Preserve realistic siding, roofing, driveway, and landscaping colors. Maintain natural shadow depth without dramatic changes.
-
-PRESERVATION:
-
-Maintain all approved architectural features, landscaping, furniture, ceramic planters, trees, power lines, fences, neighboring structures, and original camera perspective.
+Subtle enhancement. Add gentle warmth to existing natural highlights while keeping exposure bright and accurate. Keep siding, roofing, paving and plant colors realistic and shadow depth natural.
 
 RESTRICTIONS:
-
-Avoid intense sunset oranges, excessive pink saturation, dramatic cloud formations, dark foregrounds, invented lighting, or changes to any approved staging elements.
+No intense sunset orange, heavy pink saturation, dramatic clouds, dark foreground or invented lighting. Add no objects and change no structures.
 
 FINAL RESULT:
-
-Fresh, elegant, premium California real-estate photography with a soft peach horizon, powder-blue sky, and refined natural lighting.`,
+Fresh, elegant California real-estate photography with a soft peach horizon, powder-blue sky and refined natural lighting.`,
   },
   sky_heavens_light: {
     key: 'sky_heavens_light', label: "Heaven's Light", isSky: true,
     shortDescription: 'Luminous cloud breaks with subtle sunbeams.',
+    water: 'soft cloud reflections and realistic scattered silvery highlights consistent with natural directional sunlight.',
     instructionBody:
 `SKY PRESET: HEAVEN'S LIGHT
 
-Edit the supplied, final approved exterior real-estate photograph.
-
 SKY:
-
-Create a beautiful, realistic sky featuring softly layered white and light-gray clouds with natural openings that allow delicate sunbeams to filter through. The rays should appear as subtle atmospheric shafts of sunlight, producing an elegant architectural editorial effect. Maintain a natural blue or pale-blue sky behind the cloud layers.
+Create a realistic sky of softly layered white and light-gray clouds with natural openings that let delicate sunbeams filter through as subtle atmospheric shafts of light. Keep a natural blue or pale-blue sky behind the clouds.
 
 LIGHTING:
-
-Apply subtle-to-moderate directional lighting enhancement. Gently harmonize natural highlights across the property with the direction of the atmospheric sunbeams. Maintain balanced foreground exposure, realistic shadows, and accurate material colors. Keep the home clearly visible and naturally illuminated.
-
-PRESERVATION:
-
-Preserve the complete approved property composition, architecture, landscaping, outdoor furnishings, decorative planters, fences, power lines, neighboring structures, and physical features.
+Subtle-to-moderate directional enhancement. Gently harmonize existing highlights with the direction of the sunbeams. Keep foreground exposure balanced, shadows realistic and material colors accurate, with the property clearly visible and naturally lit.
 
 RESTRICTIONS:
-
-Do not create theatrical sun rays, exaggerated glowing clouds, extreme contrast, storm effects, artificial spotlights, invented exterior lighting, or dramatic darkness. Do not alter the approved staging.
+No theatrical rays, glowing clouds, extreme contrast, storm effects, spotlights, invented lighting or dramatic darkness. Add no objects and change no structures.
 
 FINAL RESULT:
-
-Premium architectural photography with luminous clouds, restrained atmospheric sunbeams, natural realism, and elegant editorial depth.`,
+Premium architectural photography with luminous clouds, restrained sunbeams and natural realism.`,
   },
   sky_tuscan_sunset: {
     key: 'sky_tuscan_sunset', label: 'Tuscan Sunset', isSky: true,
     shortDescription: 'Muted terracotta, apricot, and amber sunset.',
+    water: 'muted amber, apricot and terracotta reflections while retaining natural blue water.',
     instructionBody:
 `SKY PRESET: TUSCAN SUNSET
 
-Edit the supplied, final approved exterior real-estate photograph.
-
 SKY:
-
-Create a refined Mediterranean-inspired sunset featuring muted terracotta, soft apricot, warm amber, and delicate peach tones near the horizon. Blend these colors naturally into a softly illuminated upper sky with elegant, lightly textured clouds. The atmosphere should feel romantic, warm, and sophisticated without excessive saturation.
+Create a refined Mediterranean-inspired sunset with muted terracotta, soft apricot, warm amber and delicate peach near the horizon, blending naturally into a softly lit upper sky with lightly textured clouds. Romantic and sophisticated, without heavy saturation.
 
 LIGHTING:
-
-Apply subtle warm-evening enhancement. Gently warm existing highlights on the property while preserving natural architectural materials and accurate colors. Maintain bright, readable foreground exposure and realistic shadow depth. Concrete and neutral siding must remain natural rather than becoming orange.
-
-PRESERVATION:
-
-Preserve all approved architectural details, rooflines, landscaping, fences, power lines, outdoor furniture, ceramic planters, neighboring structures, and existing staging.
+Subtle warm-evening enhancement. Gently warm existing highlights while keeping materials and colors accurate. Keep foreground exposure bright and readable with realistic shadow depth. Concrete and neutral siding must stay natural, not orange.
 
 RESTRICTIONS:
-
-Avoid strong orange color casts, exaggerated red skies, overly dark foregrounds, dramatic shadow changes, invented lighting fixtures, or additional decorative objects.
+No strong orange cast, red sky, dark foreground, dramatic shadow changes or invented lighting. Add no objects and change no structures.
 
 FINAL RESULT:
-
-Photorealistic premium real-estate photography with an elegant Tuscan-inspired sunset and restrained Mediterranean warmth.`,
+Photorealistic real-estate photography with an elegant Tuscan-inspired sunset and restrained Mediterranean warmth.`,
   },
   sky_twilight_subtle: {
     key: 'sky_twilight_subtle', label: 'Twilight Subtle', isSky: true,
     shortDescription: 'Soft blue-hour sky, natural dusk. Existing lighting stays as shown; no new lights.',
+    water: 'sapphire-blue, lavender and delicate pink dusk reflections without artificial illumination.',
     instructionBody:
 `SKY PRESET: TWILIGHT SUBTLE
 
-Edit the supplied, final approved exterior real-estate photograph.
-
 SKY:
-
-Replace the existing sky with a natural early-blue-hour sky featuring soft sapphire-blue and lavender tones, delicate purple cloud highlights, and a restrained pink glow near the horizon. Create the atmosphere of early evening shortly after sunset.
+Replace the sky with a natural early-blue-hour sky of soft sapphire-blue and lavender, delicate purple cloud highlights and a restrained pink glow near the horizon, shortly after sunset.
 
 LIGHTING:
+Minimal dusk enhancement. Slightly cool the ambient daylight and gently soften foreground brightness, keeping the property clearly visible, shadow relationships intact and colors realistic.
 
-Apply minimal dusk lighting enhancement. Slightly cool the existing ambient daylight and gently soften foreground brightness while maintaining clear visibility of the home, driveway, landscaping, and surrounding features. Preserve existing shadow relationships and realistic architectural colors.
-
-Maintain all currently visible interior and exterior lighting exactly as shown in the approved photograph. Do not activate additional lights, other than fire features, candles, and visible pool or spa lights.
-
-PRESERVATION:
-
-Retain every approved architectural feature, landscaping element, outdoor furniture arrangement, ceramic planter, fence, utility line, neighboring structure, and camera perspective.
+${SKY_DUSK_LIGHTING}
 
 RESTRICTIONS:
-
-Do not substantially darken the property. Do not introduce illuminated windows, exterior fixtures, landscape uplighting, garden spotlights, pathway lighting, or other artificial illumination. Do not alter any approved physical features.
+Do not substantially darken the property. Do not add illuminated windows, exterior fixtures, uplighting, spotlights, pathway lighting or any other artificial illumination. Change no structures.
 
 FINAL RESULT:
-
-Natural, softly enhanced early-twilight real-estate photography featuring an elegant blue-hour sky and a bright, believable property exterior.`,
+Natural, softly enhanced early-twilight real-estate photography with an elegant blue-hour sky and a bright, believable exterior.`,
   },
   sky_golden_hour_cinematic: {
     key: 'sky_golden_hour_cinematic', label: 'Golden Hour Subtle Cinematic', isSky: true,
     shortDescription: 'Warm late-afternoon sky with cinematic cloud depth; slight foreground warming only.',
+    water: 'richer golden cloud reflections while preventing exaggerated orange coloration.',
     instructionBody:
 `SKY PRESET: GOLDEN HOUR SUBTLE CINEMATIC
 
-Edit the supplied, final approved exterior real-estate photograph.
-
 SKY:
-
-Create a beautiful cinematic golden-hour sky featuring layered soft clouds, warm golden highlights, subtle amber tones near the horizon, and natural blue-gray atmospheric depth above. Introduce gentle cinematic cloud contrast while avoiding exaggerated sunset colors.
+Create a cinematic golden-hour sky of layered soft clouds, warm golden highlights, subtle amber near the horizon and natural blue-gray depth above. Gentle cloud contrast, no exaggerated sunset colors.
 
 LIGHTING:
-
-Apply subtle enhancement to the foreground only. Introduce a slight warm late-afternoon glow to existing natural highlights on the building, driveway, and landscaping. Preserve the property's original overall brightness, accurate material colors, and existing shadow directions.
-
-Allow the sky to appear moderately dramatic while keeping the home and yard naturally illuminated. Cinematic treatment should primarily affect the sky, not the entire property.
-
-PRESERVATION:
-
-Preserve all approved architecture, landscaping, windows, rooflines, power lines, fences, outdoor furniture, ceramic planters, neighboring properties, and original composition.
+Foreground enhancement only: a slight warm late-afternoon glow on existing natural highlights. Keep the original overall brightness, material colors and shadow directions. The sky may look moderately dramatic while the property stays naturally lit; the cinematic treatment belongs to the sky, not the whole scene.
 
 RESTRICTIONS:
-
-Do not cast orange or yellow across the entire photograph. Do not significantly redesign shadows, dramatically darken the foreground, introduce artificial lens flares, invent exterior lighting, or add decorative objects.
+Do not cast orange or yellow across the photograph. Do not redesign shadows, darken the foreground, add lens flares or invent lighting. Add no objects and change no structures.
 
 FINAL RESULT:
-
-Beautiful cinematic golden-hour real-estate photography with a rich, elegant sky and restrained, natural-looking property lighting.`,
+Cinematic golden-hour real-estate photography with a rich, elegant sky and restrained, natural property lighting.`,
   },
   sky_twilight_enhanced: {
     key: 'sky_twilight_enhanced', label: 'Twilight Subtle Enhancement', isSky: true,
     shortDescription: 'Soft dusk sky with warm window glow and existing house lights switched on.',
+    water: 'natural blue-violet reflections and soft reflections from existing illuminated windows or visible house lights.',
     instructionBody:
 `SKY PRESET: TWILIGHT SUBTLE ENHANCEMENT
 
-Edit the supplied, final approved exterior real-estate photograph.
-
 SKY:
-
-Create an elegant twilight sky featuring a natural transition from deep sapphire-blue in the upper sky to soft lavender, muted violet, and delicate pink near the horizon. Include subtle evening cloud textures and a beautiful, realistic blue-hour atmosphere.
+Create an elegant twilight sky moving from deep sapphire-blue above to soft lavender, muted violet and delicate pink near the horizon, with subtle evening cloud texture and a realistic blue-hour atmosphere.
 
 LIGHTING:
+Restrained evening enhancement. Gently reduce direct daytime sunlight and add soft, cool dusk tones while keeping the building, paving and surroundings clearly visible and appealing.
 
-Apply restrained evening lighting enhancement. Gently reduce the appearance of direct daytime sunlight and introduce soft, cool ambient dusk tones while maintaining excellent foreground visibility.
+WINDOWS AND HOUSE LIGHTS:
+Add a gentle, warm interior glow through the existing windows. Existing, clearly visible porch lights, entry fixtures and other permanent house-mounted fixtures may appear on with subtle, realistic warm light. Do not invent fixtures.
 
-Keep the building, driveway, landscaping, and surrounding features sufficiently illuminated to remain clear and appealing.
-
-WINDOW AND HOUSE LIGHTING:
-
-Introduce a gentle, warm interior glow through existing windows, suggesting naturally illuminated rooms.
-
-Existing, clearly visible porch lights, entry fixtures, garage-mounted sconces, or other permanent house-mounted exterior fixtures may appear switched on with subtle, realistic warm illumination.
-
-Do not invent new exterior fixtures. Do not create strong artificial lighting effects.
-
-LANDSCAPE LIGHTING:
-
-Do not add ground spotlights, landscape uplighting, pathway lights, garden lights, tree illumination, or decorative lighting that does not exist in the approved image.
-
-PRESERVATION:
-
-Preserve all approved architecture, existing landscaping, rooflines, fences, power lines, patio furniture, ceramic planters, neighboring structures, and camera composition.
+${SKY_DUSK_LIGHTING}
 
 RESTRICTIONS:
-
-Do not make the property excessively dark. Do not create glowing shrubs, illuminated trees, artificial pools of light, excessive window brightness, or dramatic nighttime contrast. Do not modify physical property features.
+Do not add ground spotlights, uplighting, pathway or garden lights, tree illumination or other lighting that is not already in the photograph. Do not make the property excessively dark, add glowing plants, artificial pools of light, overly bright windows or night-level contrast. Change no structures.
 
 FINAL RESULT:
-
-Premium photorealistic twilight real-estate photography with an elegant blue-hour sky, clearly visible property details, warm illuminated windows, and restrained existing architectural lighting.`,
+Premium photorealistic twilight real-estate photography with a blue-hour sky, clearly visible property details, warm windows and restrained existing lighting.`,
   },
 };
 const SKY_PRESET_ORDER = ['sky_morning_glow','sky_champagne_golden_hour','sky_california_dreaming','sky_heavens_light','sky_tuscan_sunset','sky_twilight_subtle','sky_golden_hour_cinematic','sky_twilight_enhanced'];
@@ -1430,7 +1333,7 @@ function buildPresetPrompt(presetKey) {
   const preset = PHOTOGRAPHIC_PRESETS[presetKey];
   if (!preset) throw new Error('Unknown preset key: ' + presetKey);
   if (preset.isSky) {
-    return SKY_GLOBAL_INSTRUCTION + '\n\n' + preset.instructionBody + '\n\n' + SKY_POOL_SPA_BLOCK;
+    return SKY_GLOBAL_INSTRUCTION + '\n\n' + preset.instructionBody + '\n\n' + buildSkyWaterBlock(preset.water);
   }
   return PRESET_EDIT_INSTRUCTION_HEADER + preset.instructionBody + CRITICAL_WINDOW_RULE_SUFFIX;
 }

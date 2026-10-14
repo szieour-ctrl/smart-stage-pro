@@ -225,10 +225,10 @@ function renderPage(project, projectId, videoJobs) {
       : "All staged images have been digitally altered by adding virtual furniture and décor for illustrative purposes only.";
   const countNoun  = allEnhanced ? "enhanced" : (anyEnhanced ? "staged / enhanced" : "staged");
   const remarksText = allEnhanced
-    ? "One or more photos in this listing have been digitally enhanced using AI-assisted technology. Enhanced images are for illustrative purposes only and do not represent the current condition of the property."
+    ? "One or more photos in this listing have been digitally enhanced using AI-assisted technology. Outdoor furnishings, landscaping, and sky or lighting shown in enhanced images may be digitally added or altered and may not be physically present or match the property as it appears in person."
     : anyEnhanced
-      ? "One or more photos in this listing have been virtually staged or digitally enhanced using AI-assisted technology. Altered images are for illustrative purposes only and do not represent the current condition of the property."
-      : "One or more photos in this listing have been virtually staged using AI-assisted technology. Staged images are for illustrative purposes only and do not represent the current condition of the property.";
+      ? "One or more photos in this listing have been virtually staged or digitally enhanced using AI-assisted technology. Furniture, décor, outdoor furnishings, landscaping, and sky or lighting shown in altered images are digital additions or adjustments for illustrative purposes only and may not be physically present or match the property in person."
+      : "One or more photos in this listing have been virtually staged using AI-assisted technology. Furniture and décor shown in staged images are digital additions for illustrative purposes only and are not physically present at the property.";
   const videoJobsList = videoJobs || [];
 
   const videoTourSections = videoJobsList.map((job, i) => {

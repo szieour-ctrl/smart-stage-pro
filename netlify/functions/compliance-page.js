@@ -215,6 +215,20 @@ function renderPage(project, projectId, videoJobs) {
   const stagedCount   = images.length - enhancedCount;
   const allEnhanced   = images.length > 0 && stagedCount === 0;
   const anyEnhanced   = enhancedCount > 0;
+  // Page-level wording follows what the listing actually contains.
+  const kindNoun   = allEnhanced ? "digitally enhanced" : (anyEnhanced ? "virtually staged and digitally enhanced" : "virtually staged");
+  const bannerTitle = allEnhanced ? "Digital Enhancement Disclosure" : (anyEnhanced ? "Virtual Staging &amp; Digital Enhancement Disclosure" : "Virtual Staging Disclosure");
+  const bannerAction = allEnhanced
+    ? "All enhanced images have been digitally altered for illustrative purposes only (for example, added outdoor furnishings, landscaping or sky and lighting adjustments)."
+    : anyEnhanced
+      ? "Staged images have been digitally altered by adding virtual furniture and décor, and enhanced images have been digitally altered (for example, outdoor furnishings, landscaping or sky and lighting adjustments), all for illustrative purposes only."
+      : "All staged images have been digitally altered by adding virtual furniture and décor for illustrative purposes only.";
+  const countNoun  = allEnhanced ? "enhanced" : (anyEnhanced ? "staged / enhanced" : "staged");
+  const remarksText = allEnhanced
+    ? "One or more photos in this listing have been digitally enhanced using AI-assisted technology. Enhanced images are for illustrative purposes only and do not represent the current condition of the property."
+    : anyEnhanced
+      ? "One or more photos in this listing have been virtually staged or digitally enhanced using AI-assisted technology. Altered images are for illustrative purposes only and do not represent the current condition of the property."
+      : "One or more photos in this listing have been virtually staged using AI-assisted technology. Staged images are for illustrative purposes only and do not represent the current condition of the property.";
   const videoJobsList = videoJobs || [];
 
   const videoTourSections = videoJobsList.map((job, i) => {
@@ -428,12 +442,11 @@ function renderPage(project, projectId, videoJobs) {
 
 <!-- COMPLIANCE BANNER -->
 <div class="compliance-banner">
-  <h1>Virtual Staging Disclosure — California AB 723 §10140.8</h1>
+  <h1>${bannerTitle} — California AB 723 §10140.8</h1>
   <p>
-    This page provides the original, unaltered photographs and their corresponding virtually staged versions
+    This page provides the original, unaltered photographs and their corresponding ${kindNoun} versions
     for the property listed below, in compliance with California Business and Professions Code §10140.8
-    (Assembly Bill 723, effective January 1, 2026). All staged images have been digitally altered by
-    adding virtual furniture and décor for illustrative purposes only. The property is sold as shown
+    (Assembly Bill 723, effective January 1, 2026). ${bannerAction} The property is sold as shown
     in the original photographs. This page is maintained by Smart Stage PRO™.
   </p>
 </div>
@@ -460,7 +473,7 @@ function renderPage(project, projectId, videoJobs) {
 <div class="property-card">
   <div>
     <div class="property-address">${address}</div>
-    <div class="property-meta">${images.length} staged image set${images.length !== 1 ? "s" : ""} · Last updated ${formatDate(project.updatedAt || project.createdAt)}</div>
+    <div class="property-meta">${images.length} ${countNoun} image set${images.length !== 1 ? "s" : ""} · Last updated ${formatDate(project.updatedAt || project.createdAt)}</div>
   </div>
   <div class="property-actions">
     <a href="/.netlify/functions/download-compliance-zip?projectId=${projectId}" class="btn btn-primary">↓ Download All Images (ZIP)</a>
@@ -470,7 +483,7 @@ function renderPage(project, projectId, videoJobs) {
 <!-- MLS REMARKS DISCLOSURE BLOCK -->
 <div class="remarks-block">
   <div class="remarks-block-label">MLS Public Remarks &mdash; Copy &amp; Paste Disclosure</div>
-  <div class="remarks-block-text" id="remarks-disclosure-text">One or more photos in this listing have been virtually staged using AI-assisted technology. Staged images are for illustrative purposes only and do not represent the current condition of the property. Address: ${address}. Virtual staging disclosure: ${compUrl}</div>
+  <div class="remarks-block-text" id="remarks-disclosure-text">${remarksText} Address: ${address}. ${allEnhanced ? "Digital enhancement" : "Virtual staging"} disclosure: ${compUrl}</div>
   <button class="remarks-copy-btn" id="remarks-copy-btn" onclick="copyRemarksText()">
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
     Copy for MLS Remarks

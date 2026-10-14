@@ -40,16 +40,17 @@ Dual Prompt Preview Modals — agent can edit at each step.
 Processing time: 45–90 seconds (two engine calls).
 
 ### 4. Exterior Enhancements
-Transforms exterior photographs with lighting, landscape, and outdoor living improvements.
+Transforms exterior photographs with outdoor furniture, landscaping, and sky/lighting improvements.
 What is NEVER changed: House structure, roofline, windows, doors, driveway, fencing, property lines, neighboring structures.
-Enhancements available:
-- Golden Hour: Warm late-afternoon sunlight, long shadows, golden tones
-- Sunset Glow: Orange/pink/lavender sky ~15–20 min after sunset
-- Twilight: Deep cobalt-blue sky, warm interior lights, exterior fixtures lit. Most popular MLS choice.
-- Luxury Twilight: Rich navy-blue sky, strong warm interior lighting, emphasized architectural lighting
-- Landscape Enhancement: Basic Refresh / California Water-Wise / Luxury Resort × Entry / Move-Up / Luxury property tier
-- Outdoor Living Staging: Adds patio/deck furniture. Five configurations. Placed on existing hardscape only.
-Iteration: Each enhancement can be independently re-run with revision instructions.
+Options (any combination):
+- Outdoor Living Staging: Adds weather-rated outdoor furniture only (powder-coated or cast aluminum, teak or treated hardwood, all-weather wicker or rope, solution-dyed outdoor fabric cushions, outdoor rugs, glazed ceramic/resin/metal planters). Never indoor sofas, chairs, rugs or lamps. Placed on existing hardscape only.
+- Landscape Enhancement: Lawn, trimmed hedges, seasonal flowers, fresh mulch, clean walkways. Realistic only.
+- Sky Enhancement: Sky only. Applies a Sky Preset to the photo with no staging or landscaping. Generate Final stays disabled until a preset is chosen. Costs 1 staged image in total.
+Prompt review: Run Selected opens a Prompt Preview with the photo beside it. The agent can edit what will be staged or add their own instructions (for example "dining set for six, fire pit, no umbrella") before anything is generated. Cancelling uses no staged image.
+Revisions: Describe only the change (for example "remove the umbrella"). The current staged image is edited and everything else stays exactly as shown — furniture, plants, hardscape, architecture, lighting, sky and camera angle. Restage (the button) starts over from the original photo.
+Sky Presets (applied to the approved staged or landscaped image, or on their own with Sky Enhancement): Morning Glow, Champagne Golden Hour, California Dreaming, Heaven's Light, Tuscan Sunset, Twilight Subtle, Golden Hour Subtle Cinematic, Twilight Subtle Enhancement. Only the sky and lighting change. No new light sources are invented: existing house lights, fire pits, candles and visible pool or spa lights stay and appear lit in dusk presets; pools and spas reflect the new sky. Applying a Sky Preset adds one staged image to the Final (Sky Enhancement alone costs one total). The preset prompt itself is not shown.
+Workflow: choose options, Run Selected, review the prompt, approve, revise if needed, optionally apply a Sky Preset (Presets button), then Generate Final.
+Disclosure: Exterior Finals carry the "Digitally Enhanced" badge. When a Sky Preset was applied, its name appears as a second line under the badge.
 
 ### 5. Compliance Dashboard (My Listings)
 Subscriber dashboard at smartstagepro.com. Displays all property projects with live compliance status.
@@ -315,7 +316,9 @@ Mirror/Art Repair: exposed wall area filled with matching paint and texture auto
 ## Exterior Enhancement — Architecture Preservation
 Never altered: house structure, roofline, windows, doors, driveway, hardscape, fencing, property lines, neighbors, existing mature trees.
 Can be changed: sky, lawn, planting beds, patio/outdoor areas, exterior lighting at dusk, pool condition.
-Outdoor Living Staging: furniture placed on existing hardscape only — never on lawn or driveway.
+Outdoor Living Staging: weather-rated outdoor furniture only, placed on existing hardscape — never on lawn or driveway.
+Sky changes (Golden Hour, Twilight and other looks) are Sky Presets applied after staging; the engine is told not to invent new lights.
+If a revision seems to change furniture that was not mentioned: the revision edits the current image and locks everything else, so ask again naming only the one change.
 
 ## Why Results Vary
 Low-resolution or dark photos produce lower quality results — best results from well-lit, sharp MLS-resolution images.

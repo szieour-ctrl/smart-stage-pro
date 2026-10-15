@@ -32,6 +32,9 @@ function splitAddress(address) {
   return { street, cityState };
 }
 
+// Oct 14, 2026: the disclosure text below is neutral wording that is true for staged, enhanced and mixed
+// listings, because this card does not know which kind a listing is. It replaces the old line saying
+// staged images do not represent the property's condition.
 function buildCanvasSVG(address, agentName, agentBrokerage, complianceUrl) {
   const { street, cityState } = splitAddress(address);
   const QR_BOTTOM = QR_TOP + QR_PX;  // 540
@@ -71,32 +74,33 @@ function buildCanvasSVG(address, agentName, agentBrokerage, complianceUrl) {
     <text x="${CANVAS_W / 2}" y="${QR_BOTTOM + 155}"
       font-family="Arial, sans-serif" font-size="13" font-weight="700"
       fill="#b8975a" text-anchor="middle" letter-spacing="0.10em">
-      AB 723 VIRTUAL STAGING DISCLOSURE
+      AB 723 VIRTUAL STAGING &amp; DIGITAL ENHANCEMENT DISCLOSURE
     </text>
 
-    <!-- Disclosure text line 1 -->
+    <!-- Disclosure text -->
     <text x="${CANVAS_W / 2}" y="${QR_BOTTOM + 182}"
       font-family="Arial, sans-serif" font-size="15" font-weight="400"
       fill="#2a2520" text-anchor="middle">
-      One or more photos in this listing have been virtually staged
+      One or more photos in this listing have been virtually staged or
     </text>
-
-    <!-- Disclosure text line 2 -->
     <text x="${CANVAS_W / 2}" y="${QR_BOTTOM + 203}"
       font-family="Arial, sans-serif" font-size="15" font-weight="400"
       fill="#2a2520" text-anchor="middle">
-      using AI-assisted technology. Staged images do not represent
+      digitally enhanced using AI-assisted technology. Furniture, décor,
     </text>
-
-    <!-- Disclosure text line 3 -->
     <text x="${CANVAS_W / 2}" y="${QR_BOTTOM + 224}"
       font-family="Arial, sans-serif" font-size="15" font-weight="400"
       fill="#2a2520" text-anchor="middle">
-      the current condition of the property.
+      landscaping, and sky shown may be digital additions or adjustments
+    </text>
+    <text x="${CANVAS_W / 2}" y="${QR_BOTTOM + 245}"
+      font-family="Arial, sans-serif" font-size="15" font-weight="400"
+      fill="#2a2520" text-anchor="middle">
+      and may not be physically present or match the property in person.
     </text>
 
     <!-- Compliance URL -->
-    <text x="${CANVAS_W / 2}" y="${QR_BOTTOM + 254}"
+    <text x="${CANVAS_W / 2}" y="${QR_BOTTOM + 278}"
       font-family="Arial, sans-serif" font-size="14" font-weight="600"
       fill="#b8975a" text-anchor="middle" letter-spacing="0.01em">
       ${escSVG(complianceUrl || "")}

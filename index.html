@@ -15046,5 +15046,43 @@ if (window.__pwRecovery) {
 <!-- ============================================================
      END HELP AGENT WIDGET
      ============================================================ -->
+<script>
+// ── PENDING VIDEO BANNER ─────────────────────────────────────────────────────
+// PRO Plus videos render server-side, so the user can leave the video builder
+// to stage more and come back. Banner shows while a video is rendering or
+// finished but not yet Downloaded (a video reaches the compliance page only
+// at Download).
+async function refreshPendingVideoBanner() {
+  try {
+    const user = readStoredSessionDirect()?.user;
+    const old = document.getElementById('pending-video-banner');
+    if (!user?.id) { old?.remove(); return; }
+    const res = await fetch('/.netlify/functions/video-job?action=pending&userId=' + encodeURIComponent(user.id));
+    if (!res.ok) return;
+    const jobs = (await res.json()).jobs || [];
+    if (!jobs.length) { old?.remove(); return; }
+    const job = jobs[0];
+    const rendering = jobs.some(j => j.status !== 'complete');
+    const addr = (job.address || 'a listing').replace(/[<>&"]/g, '');
+    const msg = rendering
+      ? 'Your video for ' + addr + ' is rendering'
+      : 'Your video for ' + addr + ' is ready \u2014 not on the compliance page until you Download it';
+    let el = old;
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'pending-video-banner';
+      el.style.cssText = 'position:fixed;left:50%;bottom:20px;transform:translateX(-50%);z-index:9000;background:#1a1a1a;color:#fff;padding:12px 18px;border-radius:6px;font-family:DM Sans,sans-serif;font-size:0.85rem;box-shadow:0 4px 20px rgba(0,0,0,0.3);display:flex;gap:14px;align-items:center;max-width:92vw;';
+      document.body.appendChild(el);
+    }
+    el.innerHTML = '<span>' + msg + (jobs.length > 1 ? ' (+' + (jobs.length - 1) + ' more)' : '') + '</span>' +
+      '<button style="background:#c9a84c;color:#1a1a1a;border:none;padding:7px 14px;border-radius:3px;font-weight:600;cursor:pointer;white-space:nowrap;">' + (rendering ? 'View' : 'Review & Download') + '</button>';
+    el.querySelector('button').onclick = () => openVideoBuilderFor(job.listing_id, '');
+  } catch (e) { /* convenience only */ }
+}
+setTimeout(refreshPendingVideoBanner, 3000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshPendingVideoBanner(); });
+window.addEventListener('focus', refreshPendingVideoBanner);
+setInterval(refreshPendingVideoBanner, 60000);
+</script>
 </body>
 </html>

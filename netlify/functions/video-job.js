@@ -308,18 +308,16 @@ function callDebitCredit(userId, cost, reason, isRefund = false) {
 // Image at download" rule exactly, separate from any Kling charges (which
 // no longer touch this constant at all — see calculateKlingCharge).
 //
-// CONFIRMED via assemble.js: concatenateClips() and mixAudio() run ONCE,
-// then renderFormat() is called separately per format as a cheap crop/scale
-// pass on the same already-assembled master (9:16 is just
-// `crop=ih*9/16:ih,scale=...` on the 16:9 output) — never a second Kling
-// generation. So bundling both formats for Ken Burns-only jobs is genuinely
-// cheap, not a margin giveaway.
+// UPDATED (Oct 15, 2026 — native 9:16): in clean-copy mode (every frame has an
+// unbadged twin, see getCleanCopyInfo) Railway renders 9:16 NATIVELY from the
+// full-resolution photo — a second Ken Burns pass with a subject-aware window —
+// instead of cropping the 16:9 master. That adds Railway compute (roughly one extra
+// Ken Burns render per room) but never a second Kling call, so both formats stay
+// inside the flat 1 Image. Legacy jobs (no clean copies) still use the old crop.
 //
-// AI motion jobs are still restricted to exactly one format regardless —
-// see validateFormatChoiceForAiMotion below. Not a cost issue (confirmed
-// above), a quality issue: that same center-crop is fine on Ken Burns
-// geometry we control, but risky on Kling's AI-chosen composition, which
-// could put the actual generated motion off-center and get cropped out.
+// AI motion jobs may now deliver both formats in clean-copy mode: 16:9 gets the
+// Kling clips, 9:16 renders those rooms as native Ken Burns — see
+// validateFormatChoiceForAiMotion below for the eligibility rule.
 const BASE_VIDEO_COST = 1;
 
 // Max images/frames per video job. Bounded by render time (Railway processes
@@ -834,6 +832,48 @@ async function resolveNarrationBilling({ userId, existingFreeUsed, wantsNarratio
 // list without preserving that distinction — see external_photos table
 // comment in the schema for the full reasoning.
 
+// ── CLEAN COPIES (native 9:16 + fixed badge overlay) ─────────────────────
+// Generate Final (index.html) now also saves an UNBADGED twin of every staged Final
+// into a private S3 prefix, linked on staged_images (clean_s3_key, badge_type — see
+// add_clean_copy_columns.sql). When EVERY frame of a job has one (staged frames) or is
+// an external photo (never altered → no badge), Railway renders in "clean-copy mode":
+// the AB 723 badge is a fixed overlay in both 16:9 and 9:16, and 9:16 is rendered
+// natively from the full photo instead of cropped from the 16:9 master.
+//
+// Returns Map<imageUrl, { url, badgeType }>. A staged frame with no clean copy (older
+// Final) is simply absent from the map → Railway sees no badgeType for it → the whole
+// job falls back to the legacy baked-badge / center-crop behaviour. Never throws.
+async function getCleanCopyInfo(rows) {
+  const info = new Map();
+  try {
+    const urls = [...new Set(rows.map(r => r.image_url).filter(Boolean))];
+    if (urls.length === 0) return info;
+    const inList = urls.map(u => `"${String(u).replace(/"/g, "")}"`).join(",");
+    const res = await supabase("GET", "staged_images", null,
+      `?cloudinary_staged_url=in.(${encodeURIComponent(inList)})&select=cloudinary_staged_url,clean_s3_key,badge_type`
+    );
+    if (res.status !== 200 || !Array.isArray(res.data)) {
+      console.warn("getCleanCopyInfo: staged_images query failed (legacy video path will be used):", res.status);
+      return info;
+    }
+    const byUrl = new Map(res.data.map(r => [r.cloudinary_staged_url, r]));
+    for (const u of urls) {
+      const row = byUrl.get(u);
+      if (!row) {
+        // Not a staged_images row → an external photo; nothing was altered, so no badge.
+        info.set(u, { url: u, badgeType: "none" });
+      } else if (row.clean_s3_key && row.badge_type) {
+        // 12h: long enough for the Railway queue + Kling polling; the clean prefix is never public.
+        const signed = await signVideoUrl(row.clean_s3_key, 12 * 3600);
+        if (signed) info.set(u, { url: signed, badgeType: row.badge_type });
+      }
+    }
+  } catch (err) {
+    console.warn("getCleanCopyInfo failed (legacy video path will be used):", err.message);
+  }
+  return info;
+}
+
 async function getFramesForListing(listingId) {
   // room_type column added to staged_images July 15, 2026 (confirmed via
   // direct schema inspection this time, not guessed) — selecting and
@@ -873,8 +913,18 @@ async function getFramesForListing(listingId) {
     console.error(`getFramesForListing: external_photos query failed for listing ${listingId} — status ${externalResult.status}:`, externalResult.data);
   }
 
+  // Which staged rows have a clean copy (separate, non-fatal query — if the migration
+  // hasn't run yet this just yields "nobody is ready", never breaks the gallery).
+  let cleanReadyIds = new Set();
+  try {
+    const cleanRes = await supabase("GET", "staged_images", null,
+      `?listing_id=eq.${listingId}&hidden=eq.false&clean_s3_key=not.is.null&select=id`);
+    if (cleanRes.status === 200 && Array.isArray(cleanRes.data)) cleanReadyIds = new Set(cleanRes.data.map(r => r.id));
+  } catch (e) { /* non-fatal */ }
+
   const stagedFrames = (Array.isArray(stagedResult.data) ? stagedResult.data : []).map(row => ({
     id:            row.id,
+    nativeVerticalReady: cleanReadyIds.has(row.id),
     source:        "staged",
     mode:           row.mode,
     roomType:       row.room_type,
@@ -892,6 +942,7 @@ async function getFramesForListing(listingId) {
   const externalFrames = (Array.isArray(externalResult.data) ? externalResult.data : []).map(row => ({
     id:            row.id,
     source:        "external",
+    nativeVerticalReady: true, // never altered → no badge, always eligible
     imageUrl:       row.image_url,
     roomType:       row.room_type,
     sourceLabel:    row.source_label || "Professional Photography",
@@ -1027,19 +1078,19 @@ function validateAiMotionEligibility(frames) {
 // feature. Enforced server-side so a frontend bug that omits `formats`
 // can't silently default to two formats for an AI motion job.
 
-function validateFormatChoiceForAiMotion(frames, formats) {
-  // FIX (July 18, 2026) — was frames.some(f => f.useAiMotion), missing
-  // LTX entirely. Same reasoning as the frontend's identical fix in
-  // build-video-demo.html: LTX is real, AI-generated camera motion, not
-  // a deterministic Ken Burns transform — its composition can't be
-  // safely auto-cropped to a second aspect ratio any more than Kling's
-  // can. This is the server-side enforcement of that same rule — exists
-  // specifically so a frontend bug can't silently slip an LTX frame
-  // through with two formats selected.
+async function validateFormatChoiceForAiMotion(frames, formats) {
+  // CHANGED (Oct 15, 2026 — native 9:16): AI Motion jobs may now deliver BOTH formats.
+  // 16:9 gets the Kling clips; 9:16 re-renders those same rooms as native Ken Burns from
+  // the full photo (nearest equivalent move — no second Kling call, no extra cost).
+  // That requires every frame to have a clean copy (see getCleanCopyInfo); otherwise the
+  // legacy rule stands, because without it 9:16 would be an auto-crop of Kling output.
   const hasAiMotion = frames.some(usesAiMotion);
-  if (hasAiMotion && formats.length !== 1) {
+  if (!hasAiMotion || formats.length <= 1) return;
+  const info = await getCleanCopyInfo(frames.map(f => ({ image_url: f.imageUrl })));
+  const allReady = frames.every(f => info.has(f.imageUrl));
+  if (!allReady) {
     throw new Error(
-      "AI motion videos must be delivered in a single format — choose 16:9 or 9:16 before submitting. The AI-generated motion can't be safely auto-cropped to a second aspect ratio."
+      "This AI Motion video includes rooms finalized before native 9:16 was available — choose a single format, or re-run Generate Final on those rooms."
     );
   }
 }
@@ -1099,7 +1150,7 @@ async function createVideoJob({ listingId, projectId, userId, frames, formats, m
 
   // AI motion jobs must commit to one format — see comment above
   // validateFormatChoiceForAiMotion for why (composition risk, not cost).
-  validateFormatChoiceForAiMotion(frames, formats);
+  await validateFormatChoiceForAiMotion(frames, formats);
 
   // CHANGE (July 13, 2026): the video-creation quota (5/12/40) no longer
   // hard-blocks action=create. Per Sam's direction: once a subscriber has
@@ -1376,6 +1427,7 @@ async function createVideoJob({ listingId, projectId, userId, frames, formats, m
     listingAddress = listingRes.data?.[0]?.address || null;
 
     // Dispatch to Railway.
+    const cleanInfo = await getCleanCopyInfo(frameRows);
     await dispatchToRailway({
       jobId:      job.id,
       projectId,
@@ -1392,7 +1444,10 @@ async function createVideoJob({ listingId, projectId, userId, frames, formats, m
       voiceKey: voiceKey || null,
       address: listingAddress,
       frames: frameRows.map(f => ({
-        imageUrl:          f.image_url,
+        // Clean-copy mode: presigned UNBADGED image + badgeType (Railway overlays the badge).
+        // No entry (older Final) → original URL, badgeType undefined → legacy path for the job.
+        imageUrl:          cleanInfo.get(f.image_url)?.url || f.image_url,
+        badgeType:         cleanInfo.get(f.image_url)?.badgeType,
         beforeUrl:         f.before_url,
         isBeforeAfter:     f.is_before_after,
         useAiMotion:       f.use_ai_motion,
@@ -1577,7 +1632,7 @@ async function regenerateVideoJob({ jobId, userId, frames, formats, musicStyle, 
   if (existing.user_id !== userId) return { error: "forbidden" };
 
   validateAiMotionEligibility(frames);
-  validateFormatChoiceForAiMotion(frames, formats);
+  await validateFormatChoiceForAiMotion(frames, formats);
 
   // Sep 24, 2026: same plan gate as createVideoJob.
   const regenGateErr = planGateError(await getPlanContext(userId), frames);
@@ -1780,6 +1835,7 @@ async function regenerateVideoJob({ jobId, userId, frames, formats, musicStyle, 
     const listingRes = await supabase("GET", "listings", null, `?id=eq.${existing.listing_id}&select=address`);
     listingAddress = listingRes.data?.[0]?.address || null;
 
+    const cleanInfo = await getCleanCopyInfo(frameRows);
     await dispatchToRailway({
       jobId,
       formats,
@@ -1788,7 +1844,10 @@ async function regenerateVideoJob({ jobId, userId, frames, formats, musicStyle, 
       voiceKey: voiceKey || null,
       address: listingAddress,
       frames: frameRows.map(f => ({
-        imageUrl:          f.image_url,
+        // Clean-copy mode: presigned UNBADGED image + badgeType (Railway overlays the badge).
+        // No entry (older Final) → original URL, badgeType undefined → legacy path for the job.
+        imageUrl:          cleanInfo.get(f.image_url)?.url || f.image_url,
+        badgeType:         cleanInfo.get(f.image_url)?.badgeType,
         beforeUrl:         f.before_url,
         isBeforeAfter:     f.is_before_after,
         useAiMotion:       f.use_ai_motion,

@@ -1512,6 +1512,9 @@ function toggleGalleryItem(itemId) {
     frames.push({
       id: ++frameIdCounter,
       galleryId: itemId, // links back to the gallery item for deselect/toggle
+      // NEW (Oct 15, 2026 — native 9:16): true when this photo has an unbadged "clean copy" (or is an
+      // external photo), which lets 9:16 render natively from the full photo — even alongside AI Motion.
+      nativeVerticalReady: !!item.nativeVerticalReady,
       fileName: item.roomLabel,
       dataUrl: isStaged ? item.stagedUrl : item.imageUrl,
       realUrl: isStaged ? item.stagedUrl : item.imageUrl, // already a real, hosted Cloudinary URL — no upload step needed
@@ -2241,7 +2244,13 @@ function renderFormatRow() {
   const hasKling = frames.some(frameUsesAiMotion);
   const formatRow = document.getElementById("formatRow");
   const note = document.getElementById("formatNote");
-  let selectedFormats = window._selectedFormats || (hasKling ? ["16x9"] : ["16x9","9x16"]);
+  // NEW (Oct 15, 2026 — native 9:16): AI Motion no longer forces a single format when
+  // EVERY selected photo has a clean copy. 16:9 gets the AI Motion clips; 9:16 renders
+  // those same rooms as native Ken Burns (nearest equivalent move) — no second AI call.
+  // If any photo predates clean copies, the old single-format rule still applies.
+  const canNativeVertical = frames.length > 0 && frames.every(f => f.nativeVerticalReady);
+  const lockSingleFormat = hasKling && !canNativeVertical;
+  let selectedFormats = window._selectedFormats || (lockSingleFormat ? ["16x9"] : ["16x9","9x16"]);
 
   // FIX (July 20, 2026 — real bug Sam hit: the tool required manually
   // re-selecting 16:9 whenever AI Motion was in use, otherwise a render
@@ -2256,18 +2265,20 @@ function renderFormatRow() {
   // "9x16" rode all the way to the render request and failed there. Now
   // force-corrected every time this function runs, not just on first load,
   // so AI Motion can never leave a stale second format selected again.
-  if (hasKling && selectedFormats.includes("9x16")) {
+  if (lockSingleFormat && selectedFormats.includes("9x16")) {
     selectedFormats = ["16x9"];
   }
   window._selectedFormats = selectedFormats;
 
   formatRow.innerHTML = `
-    <button class="format-btn ${selectedFormats.includes('16x9')?'active':''}" onclick="toggleFormat('16x9', ${hasKling})">16:9</button>
-    <button class="format-btn ${selectedFormats.includes('9x16')?'active':''}" ${hasKling ? 'disabled' : ''} onclick="toggleFormat('9x16', ${hasKling})">9:16</button>
+    <button class="format-btn ${selectedFormats.includes('16x9')?'active':''}" onclick="toggleFormat('16x9', ${lockSingleFormat})">16:9</button>
+    <button class="format-btn ${selectedFormats.includes('9x16')?'active':''}" ${lockSingleFormat ? 'disabled' : ''} onclick="toggleFormat('9x16', ${lockSingleFormat})">9:16</button>
   `;
-  note.textContent = hasKling
-    ? "AI Motion videos can only be rendered in 16:9 — AI Motion's camera composition can't be safely auto-cropped to a second aspect ratio."
-    : "Ken Burns videos can deliver both formats at no extra cost — 9:16 is a clean crop of the same render.";
+  note.textContent = lockSingleFormat
+    ? "This AI Motion video can only be rendered in one format — some photos were finalized before native 9:16 was available. Re-run Generate Final on those rooms to unlock both formats."
+    : (hasKling
+        ? "Both formats at no extra cost — 16:9 uses your AI Motion clips; 9:16 is built natively from the full photo with Ken Burns motion for those rooms (AI Motion clips can't be reframed to vertical)."
+        : "Both formats at no extra cost — 9:16 is built natively from the full photo with a subject-aware vertical framing, not a crop of the 16:9.");
 }
 
 function renderAudioPickers() {

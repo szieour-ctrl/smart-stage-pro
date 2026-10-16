@@ -225,6 +225,45 @@ function supabase(method, table, body, queryParams = "") {
   });
 }
 
+// ── END CARD PAYLOAD (Oct 2026) ───────────────────────────────────────────
+// Railway draws the video end card as an overlay (panel over the last seconds + the AB 723
+// compliance QR for the final second). It needs the compliance-page URL and which variant to
+// draw. Branded = CTA + agent name/DRE/brokerage/headshot/logo from the Marketing Profile.
+// Unbranded (MLS-safe) = address + details only: no CTA, name, DRE, brokerage, headshot or logo.
+// Variant: caller's endCardVariant if given, else "branded" only when the profile is complete
+// (name + DRE + brokerage), otherwise "unbranded". Never throws — a failure here must not block
+// the render; Railway falls back to its legacy end card and logs [QR MISSING].
+const { brandingForUser } = require("./lib/marketing-profile-lib");
+
+async function buildEndCardPayload({ userId, projectId, requestedVariant }) {
+  const out = {};
+  try {
+    if (projectId) {
+      const base = (process.env.SITE_URL || "https://smartstagepro.com").replace(/\/+$/, "");
+      out.qrUrl = `${base}/compliance/${projectId}`;
+    }
+    const b = await brandingForUser(userId);
+    const complete = !!(b.hasProfile && b.licensedName && b.dreNumber && b.brokerageName);
+    const variant = requestedVariant === "branded" || requestedVariant === "unbranded"
+      ? (requestedVariant === "branded" && !complete ? "unbranded" : requestedVariant)
+      : (complete ? "branded" : "unbranded");
+    out.endCard = {
+      variant,
+      details: [], // price/beds/baths/sqft are not stored on listings yet
+      ...(variant === "branded" ? {
+        brand: {
+          licensedName: b.licensedName, dre: b.dreNumber, brokerage: b.brokerageName,
+          primary: b.brandPrimary, secondary: b.brandSecondary, border: b.brandBorder,
+          logoUrl: b.logoUrl || "", headshotUrl: b.headshotUrl || "",
+        },
+      } : {}),
+    };
+  } catch (e) {
+    console.warn("buildEndCardPayload failed (render continues with legacy end card):", e.message);
+  }
+  return out;
+}
+
 // ── RAILWAY DISPATCH ──────────────────────────────────────────────────────
 
 function dispatchToRailway(payload) {
@@ -1107,7 +1146,7 @@ async function validateFormatChoiceForAiMotion(frames, formats) {
 //
 // Order of operations matters a lot in this function — see inline comments.
 
-async function createVideoJob({ listingId, projectId, userId, frames, formats, musicStyle, wantsNarration, voiceKey }) {
+async function createVideoJob({ listingId, projectId, userId, frames, formats, musicStyle, wantsNarration, voiceKey, endCardVariant }) {
   if (!frames || frames.length === 0) throw new Error("No frames provided");
 
   // CHANGE: resolve projectId from the listing record if the caller didn't
@@ -1428,7 +1467,9 @@ async function createVideoJob({ listingId, projectId, userId, frames, formats, m
 
     // Dispatch to Railway.
     const cleanInfo = await getCleanCopyInfo(frameRows);
+    const endCardPayload = await buildEndCardPayload({ userId, projectId, requestedVariant: endCardVariant });
     await dispatchToRailway({
+      ...endCardPayload,
       jobId:      job.id,
       projectId,
       formats,
@@ -1614,7 +1655,7 @@ async function createVideoJob({ listingId, projectId, userId, frames, formats, m
 // times as their Kling pool + Image balance allow without using up
 // another one of their plan's monthly video-creation slots.
 
-async function regenerateVideoJob({ jobId, userId, frames, formats, musicStyle, wantsNarration, voiceKey }) {
+async function regenerateVideoJob({ jobId, userId, frames, formats, musicStyle, wantsNarration, voiceKey, endCardVariant }) {
   if (!jobId || !userId) throw new Error("Missing jobId or userId");
   if (!frames || frames.length === 0) throw new Error("No frames provided");
 
@@ -1625,7 +1666,7 @@ async function regenerateVideoJob({ jobId, userId, frames, formats, musicStyle, 
   }
 
   const existingRes = await supabase("GET", "video_jobs", null,
-    `?id=eq.${jobId}&select=id,user_id,listing_id,generation_count,kling_images_charged,narration_free_used,trial_video_free`
+    `?id=eq.${jobId}&select=id,user_id,listing_id,project_id,generation_count,kling_images_charged,narration_free_used,trial_video_free`
   );
   const existing = existingRes.data?.[0];
   if (!existing) return { error: "job_not_found" };
@@ -1836,7 +1877,9 @@ async function regenerateVideoJob({ jobId, userId, frames, formats, musicStyle, 
     listingAddress = listingRes.data?.[0]?.address || null;
 
     const cleanInfo = await getCleanCopyInfo(frameRows);
+    const endCardPayload = await buildEndCardPayload({ userId, projectId: existing.project_id, requestedVariant: endCardVariant });
     await dispatchToRailway({
+      ...endCardPayload,
       jobId,
       formats,
       musicStyle: musicStyle || "default",
@@ -2488,12 +2531,12 @@ exports.handler = async (event) => {
 
     if (action === "create") {
       const body = JSON.parse(event.body || "{}");
-      const { listingId, projectId, userId, frames, formats, musicStyle, wantsNarration, voiceKey } = body;
+      const { listingId, projectId, userId, frames, formats, musicStyle, wantsNarration, voiceKey, endCardVariant } = body;
       if (!listingId || !userId || !frames) {
         return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing required fields" }) };
       }
       const result = await createVideoJob({
-        listingId, projectId, userId, frames,
+        listingId, projectId, userId, frames, endCardVariant,
         formats: formats || ["16x9", "9x16"],
         musicStyle,
         wantsNarration: !!wantsNarration,
@@ -2515,12 +2558,12 @@ exports.handler = async (event) => {
 
     if (action === "regenerate") {
       const body = JSON.parse(event.body || "{}");
-      const { jobId, userId, frames, formats, musicStyle, wantsNarration, voiceKey } = body;
+      const { jobId, userId, frames, formats, musicStyle, wantsNarration, voiceKey, endCardVariant } = body;
       if (!jobId || !userId || !frames) {
         return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing required fields" }) };
       }
       const result = await regenerateVideoJob({
-        jobId, userId, frames,
+        jobId, userId, frames, endCardVariant,
         formats: formats || ["16x9", "9x16"],
         musicStyle,
         wantsNarration: !!wantsNarration,

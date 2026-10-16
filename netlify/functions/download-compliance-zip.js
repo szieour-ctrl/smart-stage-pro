@@ -16,6 +16,7 @@
 // browser a redirect to a presigned URL instead of the bytes themselves.
 
 const { getStore } = require("@netlify/blobs");
+const { brandingForProject } = require("./lib/marketing-profile-lib");
 const https = require("https");
 // archiver v8 (current "latest") is ESM-only and exports classes
 // ({ ZipArchive, … }) instead of the old archiver("zip", opts) factory —
@@ -120,10 +121,15 @@ function safeFilename(str) {
   return (str || "room").replace(/[^a-z0-9\-_\.]/gi, "_").slice(0, 50);
 }
 
-function generateManifest(project, projectId) {
-  const agentName     = project.agentName     || process.env.AGENT_NAME     || "";
-  const agentBrokerage= project.agentBrokerage|| process.env.AGENT_BROKERAGE|| "";
-  const agentDRE      = project.agentDRE      || process.env.AGENT_DRE      || "";
+function generateManifest(project, projectId, branding) {
+  // Oct 16, 2026 — Marketing Profile: agent details come from the listing
+  // owner's profile. No profile → the lines are simply omitted (the old
+  // project.agent* / AGENT_* env fallbacks are gone so one account's identity
+  // can never appear in another account's archive).
+  const b = branding || {};
+  const agentName     = b.hasProfile ? b.licensedName  : "";
+  const agentBrokerage= b.hasProfile ? b.brokerageName : "";
+  const agentDRE      = b.hasProfile ? b.dreNumber     : "";
   // Same filter as the handler below — a hidden image must not appear in
   // the manifest listing either, even though its files are already excluded
   // from the zip itself.
@@ -202,7 +208,8 @@ exports.handler = async (event) => {
     archive.on("data", chunk => chunks.push(chunk));
 
     // Add manifest
-    archive.append(generateManifest(project, projectId), { name: "MANIFEST.txt" });
+    const branding = await brandingForProject(project);
+    archive.append(generateManifest(project, projectId, branding), { name: "MANIFEST.txt" });
 
     // Add each image pair
     for (let i = 0; i < images.length; i++) {

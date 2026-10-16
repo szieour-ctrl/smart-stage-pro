@@ -523,10 +523,14 @@ async function createProject(address, agentInfo, siteUrl, userId, env) {
     complianceUrl: cUrl,
     tier,
     userId:         userId     || null,
-    agentName:      agentInfo.agentName      || env.AGENT_NAME      || "",
-    agentBrokerage: agentInfo.agentBrokerage || env.AGENT_BROKERAGE || "",
-    agentDRE:       agentInfo.agentDRE       || env.AGENT_DRE       || "",
-    agentLogoUrl:   agentInfo.agentLogoUrl   || env.AGENT_LOGO_URL  || "",
+    // Oct 16, 2026 — Marketing Profile: branding is resolved at render time from
+    // the owner's profile (lib/marketing-profile-lib.js). These fields are no
+    // longer filled from the global AGENT_* env vars, which put one identity on
+    // every account's project record.
+    agentName:      agentInfo.agentName      || "",
+    agentBrokerage: agentInfo.agentBrokerage || "",
+    agentDRE:       agentInfo.agentDRE       || "",
+    agentLogoUrl:   agentInfo.agentLogoUrl   || "",
     createdAt: new Date().toISOString(),
     status: "active",
     images: [],

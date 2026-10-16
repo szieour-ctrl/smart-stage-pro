@@ -9,6 +9,8 @@
 // Size: 600x720px — print-ready at 300dpi = 2x2 inch QR + branding strip
 
 const QRCode = require("qrcode");
+const { getStore } = require("@netlify/blobs");
+const { brandingForUser, supabase } = require("./lib/marketing-profile-lib");
 const sharp  = require("sharp");
 
 const QR_PX    = 480;   // QR code pixel size
@@ -119,6 +121,45 @@ function buildCanvasSVG(address, agentName, agentBrokerage, complianceUrl) {
   </svg>`;
 }
 
+
+// Oct 16, 2026 — Marketing Profile. The card's agent line used to read the
+// global AGENT_NAME / AGENT_BROKERAGE env vars (one identity for every
+// account). It now reads the listing owner's profile: found via the Blobs
+// project record (listings) or the prospects table (prospect slugs). Anything
+// missing → no agent line (neutral card). Never throws: the QR must always
+// generate. The name, DRE number and brokerage are the same details already
+// public on the compliance page.
+async function lookupAgentLine(projectId) {
+  if (!projectId) return { agentName: "", agentBrokerage: "" };
+  try {
+    let userId = null;
+    try {
+      const store = getStore({
+        name: "smart-stage-projects",
+        siteID: process.env.SZREG_SITE_ID || process.env.NETLIFY_SITE_ID,
+        token: process.env.NETLIFY_ACCESS_TOKEN,
+      });
+      const raw = await store.get("pid_" + projectId);
+      if (raw) userId = JSON.parse(raw).userId || null;
+    } catch (_) { /* fall through to prospects lookup */ }
+
+    if (!userId) {
+      const pr = await supabase("GET", "prospects", null,
+        `?slug=eq.${encodeURIComponent(projectId)}&select=user_id&limit=1`);
+      userId = Array.isArray(pr.data) ? (pr.data[0]?.user_id || null) : null;
+    }
+    if (!userId) return { agentName: "", agentBrokerage: "" };
+
+    const b = await brandingForUser(userId);
+    if (!b.hasProfile) return { agentName: "", agentBrokerage: "" };
+    const name = b.dreNumber ? `${b.licensedName}  ·  DRE #${b.dreNumber}` : b.licensedName;
+    return { agentName: name, agentBrokerage: b.brokerageName };
+  } catch (e) {
+    console.warn("generate-qr: agent lookup failed (neutral card):", e.message);
+    return { agentName: "", agentBrokerage: "" };
+  }
+}
+
 exports.handler = async (event) => {
   const headers = {
     "Access-Control-Allow-Origin": "*",
@@ -148,8 +189,7 @@ exports.handler = async (event) => {
       body: JSON.stringify({ error: "Missing complianceUrl" })
     };
 
-    const agentName      = process.env.AGENT_NAME      || "";
-    const agentBrokerage = process.env.AGENT_BROKERAGE || "";
+    const { agentName, agentBrokerage } = await lookupAgentLine(projectId);
 
     // Generate high-resolution QR code
     const cleanUrl = String(complianceUrl).trim();

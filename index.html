@@ -445,6 +445,7 @@ src="https://www.facebook.com/tr?id=2034726263826697&ev=PageView&noscript=1"
      <a id="header-gallery-btn" class="hidden btn btn-ghost" style="font-size:0.72rem;padding:5px 14px;color:#c8bfb0;border:1px solid rgba(184,151,90,0.3);border-radius:3px;text-decoration:none;display:inline-block;" href="/gallery.html" target="_blank" rel="noopener">Gallery</a>
     <button id="header-getting-started-btn" class="hidden btn btn-ghost" style="font-size:0.72rem;padding:5px 14px;color:#c8bfb0;border:1px solid rgba(184,151,90,0.3);border-radius:3px;" onclick="showGettingStartedModal()">Getting Started</button>
     <button id="header-faq-btn" class="hidden btn btn-ghost" style="font-size:0.72rem;padding:5px 14px;color:#c8bfb0;border:1px solid rgba(184,151,90,0.3);border-radius:3px;" onclick="showFaqModal()">FAQ</button>
+    <button id="header-branding-btn" class="hidden btn btn-ghost" style="font-size:0.72rem;padding:5px 14px;color:#c8bfb0;border:1px solid rgba(184,151,90,0.3);border-radius:3px;" onclick="showBrandingModal()">Branding</button>
     <button id="header-billing-btn" class="hidden btn btn-ghost" style="font-size:0.72rem;padding:5px 14px;color:#c8bfb0;border:1px solid rgba(184,151,90,0.3);border-radius:3px;" onclick="showBillingModal()">Billing</button>
     <button id="header-signout-btn" class="hidden btn btn-ghost" style="font-size:0.72rem;padding:5px 12px;color:#c8bfb0;" onclick="signOut()">Sign Out</button>
   </div>
@@ -8994,6 +8995,7 @@ if (galleryBtn) galleryBtn.classList.remove('hidden');
   const faqBtn = document.getElementById('header-faq-btn');
   if (faqBtn) faqBtn.classList.remove('hidden');
   document.getElementById('header-billing-btn')?.classList.remove('hidden');
+  document.getElementById('header-branding-btn')?.classList.remove('hidden');
 
   // Load credit balance from Supabase
   if (creditBadge && userRec) {
@@ -9049,8 +9051,10 @@ function hideAppUI() {
   document.getElementById('header-getting-started-btn')?.classList.add('hidden');
   document.getElementById('header-faq-btn')?.classList.add('hidden');
   document.getElementById('header-billing-btn')?.classList.add('hidden');
+  document.getElementById('header-branding-btn')?.classList.add('hidden');
   document.getElementById('account-closed-page')?.remove();
   document.getElementById('billing-modal')?.remove();
+  document.getElementById('branding-modal')?.remove();
   stopAccountExportPolling();
   document.getElementById('header-user-info')?.classList.add('hidden');
   document.getElementById('header-signout-btn')?.classList.add('hidden');
@@ -9637,6 +9641,217 @@ function showBillingModal() {
     </div>`;
   modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
   document.body.appendChild(modal);
+}
+
+// ── Marketing Profile / Branding (Oct 16, 2026) ───────────
+// One reusable public-branding profile per user, shared by Smart Stage PRO
+// (compliance page, ZIP, QR card) and PRO Plus (closing card, Reels). Saved via
+// marketing-profile.js. The licensed name, DRE number and brokerage are required
+// (California advertising rules); logo, headshot and colors are optional.
+let _brandingState = { logoKey: '', headshotKey: '', logoUrl: '', headshotUrl: '' };
+const BRANDING_DEFAULT_PRIMARY = '#1f2d45';
+const BRANDING_DEFAULT_ACCENT  = '#b8975a';
+
+async function showBrandingModal() {
+  document.getElementById('branding-modal')?.remove();
+  const jwt = billingJwtOrSignOut();
+  if (!jwt) return;
+
+  const modal = document.createElement('div');
+  modal.id = 'branding-modal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(26,23,20,0.6);z-index:960;display:flex;align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto;';
+  modal.innerHTML = `
+    <div style="background:var(--cream);border-radius:6px;max-width:520px;width:100%;padding:28px;box-shadow:0 20px 60px rgba(0,0,0,0.3);margin:auto;">
+      <div style="font-size:0.85rem;color:var(--muted);">Loading your branding…</div>
+    </div>`;
+  modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+  document.body.appendChild(modal);
+
+  try {
+    const res = await fetch('/.netlify/functions/marketing-profile', { headers: { 'Authorization': 'Bearer ' + jwt } });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    renderBrandingForm(modal, data.profile, data.prefill || {});
+  } catch (err) {
+    modal.remove();
+    showToast('Could not load your branding: ' + err.message, 'error');
+  }
+}
+
+function brandingFieldHtml(id, label, value, opts = {}) {
+  const { required, placeholder, hint, type } = opts;
+  return `
+    <div style="margin-bottom:12px;">
+      <label for="${id}" style="display:block;font-size:0.72rem;font-weight:600;color:var(--ink);letter-spacing:0.04em;margin-bottom:4px;">${label}${required ? ' <span style="color:#c0392b;">*</span>' : ''}</label>
+      <input id="${id}" type="${type || 'text'}" value="${escHtml(value || '')}" placeholder="${escHtml(placeholder || '')}" autocomplete="off"
+        style="width:100%;box-sizing:border-box;padding:9px 11px;border:1px solid var(--border);border-radius:3px;font-size:0.85rem;background:#fff;color:var(--ink);">
+      ${hint ? `<div style="font-size:0.68rem;color:var(--muted);margin-top:3px;line-height:1.4;">${hint}</div>` : ''}
+    </div>`;
+}
+
+function brandingImageRowHtml(kind, label, hint) {
+  return `
+    <div style="margin-bottom:14px;">
+      <div style="font-size:0.72rem;font-weight:600;color:var(--ink);letter-spacing:0.04em;margin-bottom:4px;">${label} <span style="font-weight:400;color:var(--muted);">(optional)</span></div>
+      <div style="display:flex;align-items:center;gap:12px;">
+        <div id="branding-${kind}-preview" style="width:64px;height:64px;border:1px dashed var(--border);border-radius:3px;background:#fff;display:flex;align-items:center;justify-content:center;overflow:hidden;font-size:0.6rem;color:var(--muted);text-align:center;"></div>
+        <div>
+          <input id="branding-${kind}-file" type="file" accept="image/png,image/jpeg,image/webp" style="display:none;" onchange="uploadBrandingImage('${kind}', this)">
+          <button type="button" class="btn btn-ghost" style="font-size:0.72rem;padding:5px 12px;border:1px solid var(--border);" onclick="document.getElementById('branding-${kind}-file').click()">Choose file</button>
+          <button type="button" id="branding-${kind}-remove" class="btn btn-ghost" style="font-size:0.72rem;padding:5px 10px;color:var(--muted);" onclick="removeBrandingImage('${kind}')">Remove</button>
+        </div>
+      </div>
+      <div style="font-size:0.68rem;color:var(--muted);margin-top:3px;line-height:1.4;">${hint}</div>
+    </div>`;
+}
+
+function renderBrandingForm(modal, profile, prefill) {
+  const p = profile || {};
+  _brandingState = {
+    logoKey: p.logoKey || '', headshotKey: p.headshotKey || '',
+    logoUrl: p.logoUrl || '', headshotUrl: p.headshotUrl || '',
+  };
+  const firstTime = !profile;
+  modal.innerHTML = `
+    <div style="background:var(--cream);border-radius:6px;max-width:520px;width:100%;padding:28px;box-shadow:0 20px 60px rgba(0,0,0,0.3);margin:auto;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;">
+        <div style="font-family:'Cormorant Garamond',serif;font-size:1.5rem;color:var(--ink);">Your Branding</div>
+        <button onclick="document.getElementById('branding-modal')?.remove()" style="background:none;border:none;font-size:1.2rem;color:var(--muted);cursor:pointer;">✕</button>
+      </div>
+      <p style="font-size:0.78rem;color:var(--muted);line-height:1.5;margin-bottom:16px;">Set this up once. It appears on your compliance pages, QR cards and the videos and social posts you create. ${firstTime ? 'We pre-filled what we could — please confirm.' : ''}</p>
+
+      <div style="background:rgba(184,151,90,0.08);border:1px solid rgba(184,151,90,0.35);border-radius:3px;padding:10px 12px;margin-bottom:16px;font-size:0.72rem;color:var(--ink);line-height:1.5;">
+        California requires your name exactly as licensed, your DRE license number, and your responsible broker's licensed brokerage name on each piece of advertising. Those three are required.
+      </div>
+
+      ${brandingFieldHtml('branding-licensed-name', 'Your name, exactly as licensed', p.licensedName || prefill.licensedName, { required: true, placeholder: 'Jane A. Smith' })}
+      ${brandingFieldHtml('branding-dre', 'Your DRE license number', p.dreNumber, { required: true, placeholder: '01234567', hint: '7 or 8 digits.' })}
+      ${brandingFieldHtml('branding-brokerage', 'Responsible broker (licensed brokerage name)', p.brokerageName, { required: true, placeholder: 'Example Realty, Inc.' })}
+      ${brandingFieldHtml('branding-team', 'Team name', p.teamName, { placeholder: 'Optional — e.g. The Smith Team' })}
+      ${brandingFieldHtml('branding-phone', 'Phone', p.phone, { placeholder: '(555) 555-5555', type: 'tel' })}
+      ${brandingFieldHtml('branding-email', 'Contact email', p.contactEmail || prefill.contactEmail, { placeholder: 'Where buyers should reach you', type: 'email', hint: 'Can be different from your login email.' })}
+      ${brandingFieldHtml('branding-website', 'Website', p.website, { placeholder: 'yourwebsite.com' })}
+
+      ${brandingImageRowHtml('logo', 'Logo', 'PNG, JPG or WebP, up to 5 MB. Without a logo we use a clean text-only layout.')}
+      ${brandingImageRowHtml('headshot', 'Headshot', 'PNG, JPG or WebP, up to 5 MB.')}
+
+      <div style="display:flex;gap:20px;margin-bottom:18px;">
+        <div>
+          <label for="branding-primary" style="display:block;font-size:0.72rem;font-weight:600;color:var(--ink);letter-spacing:0.04em;margin-bottom:4px;">Brand color</label>
+          <input id="branding-primary" type="color" value="${escHtml(p.brandPrimary || BRANDING_DEFAULT_PRIMARY)}" style="width:56px;height:34px;border:1px solid var(--border);border-radius:3px;background:#fff;padding:2px;">
+        </div>
+        <div>
+          <label for="branding-accent" style="display:block;font-size:0.72rem;font-weight:600;color:var(--ink);letter-spacing:0.04em;margin-bottom:4px;">Accent color</label>
+          <input id="branding-accent" type="color" value="${escHtml(p.brandAccent || BRANDING_DEFAULT_ACCENT)}" style="width:56px;height:34px;border:1px solid var(--border);border-radius:3px;background:#fff;padding:2px;">
+        </div>
+      </div>
+
+      <div id="branding-error" style="display:none;font-size:0.75rem;color:#c0392b;margin-bottom:10px;line-height:1.4;"></div>
+      <button id="branding-save-btn" class="btn btn-primary" style="width:100%;justify-content:center;" onclick="saveBrandingProfile(this)">Save branding</button>
+    </div>`;
+  refreshBrandingPreview('logo');
+  refreshBrandingPreview('headshot');
+}
+
+function refreshBrandingPreview(kind) {
+  const box = document.getElementById(`branding-${kind}-preview`);
+  const rm = document.getElementById(`branding-${kind}-remove`);
+  if (!box) return;
+  const url = _brandingState[kind + 'Url'];
+  if (url) {
+    box.innerHTML = `<img src="${escHtml(url)}" alt="" style="max-width:100%;max-height:100%;object-fit:contain;">`;
+  } else {
+    box.textContent = 'None';
+  }
+  if (rm) rm.style.display = url ? '' : 'none';
+}
+
+function removeBrandingImage(kind) {
+  _brandingState[kind + 'Key'] = '';
+  _brandingState[kind + 'Url'] = '';
+  refreshBrandingPreview(kind);
+}
+
+function showBrandingError(msg) {
+  const el = document.getElementById('branding-error');
+  if (!el) { showToast(msg, 'error'); return; }
+  el.textContent = msg;
+  el.style.display = msg ? 'block' : 'none';
+}
+
+async function uploadBrandingImage(kind, input) {
+  const file = input.files && input.files[0];
+  input.value = '';
+  if (!file) return;
+  showBrandingError('');
+  if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
+    showBrandingError('Please choose a PNG, JPG or WebP image.');
+    return;
+  }
+  if (file.size > 5 * 1024 * 1024) {
+    showBrandingError('That image is larger than 5 MB. Please choose a smaller one.');
+    return;
+  }
+  const jwt = billingJwtOrSignOut();
+  if (!jwt) return;
+  const box = document.getElementById(`branding-${kind}-preview`);
+  if (box) box.textContent = 'Uploading…';
+  try {
+    const pre = await fetch('/.netlify/functions/marketing-profile?action=presign', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + jwt },
+      body: JSON.stringify({ kind, contentType: file.type }),
+    });
+    const preData = await pre.json().catch(() => ({}));
+    if (!pre.ok || !preData.uploadUrl) throw new Error(preData.error || `HTTP ${pre.status}`);
+    const put = await fetch(preData.uploadUrl, { method: 'PUT', headers: { 'Content-Type': file.type }, body: file });
+    if (!put.ok) throw new Error(`Upload failed (HTTP ${put.status})`);
+    _brandingState[kind + 'Key'] = preData.key;
+    _brandingState[kind + 'Url'] = preData.publicUrl;
+  } catch (err) {
+    showBrandingError('Could not upload the image: ' + err.message);
+  }
+  refreshBrandingPreview(kind);
+}
+
+async function saveBrandingProfile(btn) {
+  showBrandingError('');
+  const val = id => (document.getElementById(id)?.value || '').trim();
+  const body = {
+    licensedName: val('branding-licensed-name'),
+    dreNumber: val('branding-dre'),
+    brokerageName: val('branding-brokerage'),
+    teamName: val('branding-team'),
+    phone: val('branding-phone'),
+    contactEmail: val('branding-email'),
+    website: val('branding-website'),
+    logoKey: _brandingState.logoKey,
+    headshotKey: _brandingState.headshotKey,
+    brandPrimary: val('branding-primary'),
+    brandAccent: val('branding-accent'),
+  };
+  if (!body.licensedName || !body.dreNumber || !body.brokerageName) {
+    showBrandingError('Your licensed name, DRE number and brokerage name are required.');
+    return;
+  }
+  const jwt = billingJwtOrSignOut();
+  if (!jwt) return;
+  const original = btn?.textContent;
+  if (btn) { btn.textContent = 'Saving…'; btn.disabled = true; }
+  try {
+    const res = await fetch('/.netlify/functions/marketing-profile?action=save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + jwt },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    document.getElementById('branding-modal')?.remove();
+    showToast('✓ Branding saved', 'success');
+  } catch (err) {
+    showBrandingError(err.message);
+    if (btn) { btn.textContent = original; btn.disabled = false; }
+  }
 }
 
 // ── Account-closed screen (cancelled, inside 30-day window) ──

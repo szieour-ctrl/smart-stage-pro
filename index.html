@@ -437,6 +437,7 @@ src="https://www.facebook.com/tr?id=2034726263826697&ev=PageView&noscript=1"
   <div class="header-left" style="display:flex;align-items:center;gap:14px;">
     <img src="https://smart-stage-pro-media-938733852197-us-east-2-an.s3.us-east-2.amazonaws.com/smart-stage-marketing/Smart_Stage_PRO_Logo_zciwlo.png" alt="Smart Stage PRO™" style="height:44px;width:auto;display:block;" />
   </div>
+  <div id="header-brand" class="hidden" style="margin-left:auto;align-items:center;gap:10px;cursor:pointer;" onclick="showBrandingModal()" title="Edit your branding"></div>
   <div class="header-right" style="display:flex;align-items:center;gap:12px;">
     <div id="header-credit-badge" class="hidden" style="background:rgba(184,151,90,0.18);border:1px solid var(--gold);border-radius:3px;padding:4px 12px;font-size:0.72rem;color:var(--gold);letter-spacing:0.06em;white-space:nowrap;"></div>
     <div id="header-smart-correct-badge" class="hidden" style="background:rgba(184,151,90,0.08);border:1px solid rgba(184,151,90,0.4);border-radius:3px;padding:4px 12px;font-size:0.72rem;color:#c8bfb0;letter-spacing:0.04em;white-space:nowrap;" title="Smart Correct™ — every 5 corrections uses 1 Image"></div>
@@ -8996,6 +8997,7 @@ if (galleryBtn) galleryBtn.classList.remove('hidden');
   if (faqBtn) faqBtn.classList.remove('hidden');
   document.getElementById('header-billing-btn')?.classList.remove('hidden');
   document.getElementById('header-branding-btn')?.classList.remove('hidden');
+  loadHeaderBranding();
 
   // Load credit balance from Supabase
   if (creditBadge && userRec) {
@@ -9052,6 +9054,8 @@ function hideAppUI() {
   document.getElementById('header-faq-btn')?.classList.add('hidden');
   document.getElementById('header-billing-btn')?.classList.add('hidden');
   document.getElementById('header-branding-btn')?.classList.add('hidden');
+  _headerBrand = { loaded: false, profile: null };
+  document.getElementById('header-brand')?.classList.add('hidden');
   document.getElementById('account-closed-page')?.remove();
   document.getElementById('billing-modal')?.remove();
   document.getElementById('branding-modal')?.remove();
@@ -9643,6 +9647,48 @@ function showBillingModal() {
   document.body.appendChild(modal);
 }
 
+// ── Header branding block (Oct 16, 2026) ───────────────────
+// Shows the signed-in user's logo and licensed name in the open space on the
+// right of the header, above Sign Out. No profile yet → a small "Set up your
+// branding" link instead. A failed fetch shows nothing (never a false nudge).
+let _headerBrand = { loaded: false, profile: null };
+
+function renderHeaderBrand() {
+  const el = document.getElementById('header-brand');
+  if (!el) return;
+  if (!_headerBrand.loaded) { el.classList.add('hidden'); return; }
+  const p = _headerBrand.profile;
+  if (!p) {
+    el.innerHTML = `<span style="color:var(--gold);font-size:0.72rem;letter-spacing:0.06em;border-bottom:1px dotted var(--gold);">Set up your branding →</span>`;
+  } else {
+    const logo = p.logoUrl
+      ? `<img src="${escHtml(p.logoUrl)}" alt="" style="height:38px;max-width:120px;object-fit:contain;background:#f7f4ef;border-radius:3px;padding:3px;display:block;">`
+      : '';
+    el.innerHTML = `
+      ${logo}
+      <div style="text-align:left;line-height:1.25;">
+        <div style="font-size:0.85rem;color:#f7f4ef;letter-spacing:0.03em;">${escHtml(p.licensedName)}</div>
+        <div style="font-size:0.66rem;color:#c8bfb0;letter-spacing:0.04em;">${escHtml(p.brokerageName)}</div>
+      </div>`;
+  }
+  el.classList.remove('hidden');
+  el.style.display = 'flex';
+}
+
+async function loadHeaderBranding() {
+  try {
+    const jwt = readStoredSessionDirect()?.access_token;
+    if (!jwt) return;
+    const res = await fetch('/.netlify/functions/marketing-profile', { headers: { 'Authorization': 'Bearer ' + jwt } });
+    if (!res.ok) return;
+    const data = await res.json();
+    _headerBrand = { loaded: true, profile: data.profile || null };
+    renderHeaderBrand();
+  } catch (e) {
+    console.warn('header branding load failed (non-fatal):', e.message);
+  }
+}
+
 // ── Marketing Profile / Branding (Oct 16, 2026) ───────────
 // One reusable public-branding profile per user, shared by Smart Stage PRO
 // (compliance page, ZIP, QR card) and PRO Plus (closing card, Reels). Saved via
@@ -9847,6 +9893,8 @@ async function saveBrandingProfile(btn) {
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
     document.getElementById('branding-modal')?.remove();
+    _headerBrand = { loaded: true, profile: data.profile || null };
+    renderHeaderBrand();
     showToast('✓ Branding saved', 'success');
   } catch (err) {
     showBrandingError(err.message);

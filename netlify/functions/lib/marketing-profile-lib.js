@@ -18,6 +18,10 @@
 
 const https = require("https");
 
+// A stalled Supabase call must fail fast (and return a normal JSON error)
+// rather than run into Netlify's function limit and surface as an HTML 504.
+const REQUEST_TIMEOUT_MS = 8000;
+
 const NEUTRAL_NAME = "Smart Stage PRO™";
 const NEUTRAL_LOGO_KEY = "smart-stage-marketing/Smart_Stage_PRO_Logo_zciwlo.png";
 
@@ -51,6 +55,7 @@ function supabase(method, table, body, queryParams = "") {
         catch { resolve({ status: res.statusCode, data }); }
       });
     });
+    req.setTimeout(REQUEST_TIMEOUT_MS, () => req.destroy(new Error(`Supabase ${method} ${table} timed out after ${REQUEST_TIMEOUT_MS}ms`)));
     req.on("error", reject);
     if (bodyStr) req.write(bodyStr);
     req.end();
@@ -73,6 +78,7 @@ function verifyJWT(authHeader) {
         catch { resolve(null); }
       });
     });
+    req.setTimeout(REQUEST_TIMEOUT_MS, () => { console.warn("verifyJWT timed out"); req.destroy(); });
     req.on("error", () => resolve(null));
     req.end();
   });

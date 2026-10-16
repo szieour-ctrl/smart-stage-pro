@@ -4,6 +4,7 @@
 // URL: /compliance/{projectId}
 
 const { getStore } = require("@netlify/blobs");
+const { brandingForProject, escapeHtml: escBrand } = require("./lib/marketing-profile-lib");
 const https = require("https");
 
 // MIGRATED (Aug 25, 2026 — Cloudinary→S3 finished-video migration):
@@ -198,11 +199,19 @@ function formatDate(isoString) {
   });
 }
 
-function renderPage(project, projectId, videoJobs) {
-  const agentName     = project.agentName     || process.env.AGENT_NAME     || "Smart Stage PRO™";
-  const agentBrokerage= project.agentBrokerage|| process.env.AGENT_BROKERAGE|| "";
-  const agentDRE       = project.agentDRE      || process.env.AGENT_DRE      || "";
-  const agentLogoUrl  = project.agentLogoUrl  || process.env.AGENT_LOGO_URL || "";
+function renderPage(project, projectId, videoJobs, branding) {
+  // Oct 16, 2026 — Marketing Profile. Branding now comes from the listing
+  // owner's profile (see lib/marketing-profile-lib.js), resolved at request time.
+  // A user with no profile gets a NEUTRAL Smart Stage PRO header: the old
+  // project.agent* / AGENT_* env fallbacks are gone so no account's page can
+  // ever show another account's identity. Every value is HTML-escaped because
+  // these are now user-typed strings on a public page.
+  const b = branding || {};
+  const agentName      = escBrand(b.hasProfile ? b.licensedName : "Smart Stage PRO™");
+  const agentBrokerage = escBrand(b.brokerageName || "");
+  const agentDRE       = escBrand(b.dreNumber || "");
+  const agentLogoUrl   = escBrand(b.logoUrl || "");
+  const agentLogoAlt   = escBrand(b.hasProfile ? (b.brokerageName || b.licensedName) : "Smart Stage PRO™");
   // Soft-hidden images (see hide-image.js) never appear on the public page.
   // Nothing is deleted — the record survives in project.images for the
   // AB 723 3-year retention requirement, it just doesn't render here.
@@ -431,7 +440,7 @@ function renderPage(project, projectId, videoJobs) {
 <!-- HEADER -->
 <header class="site-header">
   <div class="header-brand">
-    ${agentLogoUrl ? `<img src="${agentLogoUrl}" alt="Smart Stage PRO™" class="header-logo">` : ""}
+    ${agentLogoUrl ? `<img src="${agentLogoUrl}" alt="${agentLogoAlt}" class="header-logo">` : ""}
     <div>
       <div class="header-name">${agentName}</div>
       ${agentBrokerage ? `<div class="header-brokerage">${agentBrokerage}${agentDRE ? " · DRE #" + agentDRE : ""}</div>` : ""}
@@ -691,7 +700,10 @@ exports.handler = async (event) => {
       console.error("compliance-page video fetch error (non-fatal):", videoErr.message);
     }
 
-    return { statusCode: 200, headers: htmlHeaders, body: renderPage(project, projectId, videoJobs) };
+    // Never throws: falls back to the neutral Smart Stage PRO header.
+    const branding = await brandingForProject(project);
+
+    return { statusCode: 200, headers: htmlHeaders, body: renderPage(project, projectId, videoJobs, branding) };
 
   } catch (err) {
     console.error("compliance-page error:", err.message);

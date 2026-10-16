@@ -24,6 +24,7 @@ const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 const {
   supabase, verifyJWT, brandingKeyPrefix, publicUrlForKey, getProfileRow, rowToBranding,
 } = require("./lib/marketing-profile-lib");
+const { FONTS, THEMES, DEFAULT_CUSTOM } = require("./lib/brand-themes");
 
 const s3 = new S3Client({
   region: process.env.S3_REGION,
@@ -95,10 +96,23 @@ function validateProfile(body, userId) {
     website = u.toString();
   }
 
-  const brandPrimary = clean(body.brandPrimary, 7);
-  const brandAccent = clean(body.brandAccent, 7);
-  if (brandPrimary && !HEX_RE.test(brandPrimary)) return { error: "Brand color must look like #1a2b3c." };
-  if (brandAccent && !HEX_RE.test(brandAccent)) return { error: "Accent color must look like #b8975a." };
+  // Theme: national-brand colors are locked (taken from the server's table, never
+  // from the request). Custom uses the user's own three colors.
+  const brandTheme = clean(body.brandTheme, 20) || "custom";
+  if (brandTheme !== "custom" && !THEMES[brandTheme]) return { error: "Unknown brand theme." };
+  const brandFont = clean(body.brandFont, 40) || (THEMES[brandTheme] ? THEMES[brandTheme].font : DEFAULT_CUSTOM.font);
+  if (!FONTS.includes(brandFont)) return { error: "Choose a font from the list." };
+  let brandPrimary, brandSecondary, brandBorder;
+  if (brandTheme === "custom") {
+    brandPrimary = clean(body.brandPrimary, 7) || DEFAULT_CUSTOM.primary;
+    brandSecondary = clean(body.brandSecondary, 7) || DEFAULT_CUSTOM.secondary;
+    brandBorder = clean(body.brandBorder, 7) || DEFAULT_CUSTOM.border;
+    if (![brandPrimary, brandSecondary, brandBorder].every(c => HEX_RE.test(c))) {
+      return { error: "Colors must look like #1a2b3c." };
+    }
+  } else {
+    ({ primary: brandPrimary, secondary: brandSecondary, border: brandBorder } = THEMES[brandTheme]);
+  }
 
   // Image keys must live in THIS user's branding folder (they come back from
   // the presign step); anything else is rejected, so a user can never point
@@ -125,8 +139,11 @@ function validateProfile(body, userId) {
       website: website || null,
       logo_key: logo.value,
       headshot_key: headshot.value,
-      brand_primary: brandPrimary || null,
-      brand_accent: brandAccent || null,
+      brand_theme: brandTheme,
+      brand_primary: brandPrimary,
+      brand_secondary: brandSecondary,
+      brand_border: brandBorder,
+      brand_font: brandFont,
     },
   };
 }
@@ -146,8 +163,11 @@ function profileForClient(row) {
     headshotKey: row.headshot_key || "",
     logoUrl: b.logoUrl,
     headshotUrl: b.headshotUrl,
+    brandTheme: b.brandTheme,
     brandPrimary: b.brandPrimary,
-    brandAccent: b.brandAccent,
+    brandSecondary: b.brandSecondary,
+    brandBorder: b.brandBorder,
+    brandFont: b.brandFont,
   };
 }
 

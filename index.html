@@ -9055,6 +9055,7 @@ function hideAppUI() {
   document.getElementById('header-billing-btn')?.classList.add('hidden');
   document.getElementById('header-branding-btn')?.classList.add('hidden');
   _headerBrand = { loaded: false, profile: null };
+  applyBrandTheme(null);
   document.getElementById('header-brand')?.classList.add('hidden');
   document.getElementById('account-closed-page')?.remove();
   document.getElementById('billing-modal')?.remove();
@@ -9684,6 +9685,7 @@ async function loadHeaderBranding() {
     const data = await res.json();
     _headerBrand = { loaded: true, profile: data.profile || null };
     renderHeaderBrand();
+    applyBrandTheme(_headerBrand.profile);
   } catch (e) {
     console.warn('header branding load failed (non-fatal):', e.message);
   }
@@ -9695,8 +9697,60 @@ async function loadHeaderBranding() {
 // marketing-profile.js. The licensed name, DRE number and brokerage are required
 // (California advertising rules); logo, headshot and colors are optional.
 let _brandingState = { logoKey: '', headshotKey: '', logoUrl: '', headshotUrl: '' };
-const BRANDING_DEFAULT_PRIMARY = '#1f2d45';
-const BRANDING_DEFAULT_ACCENT  = '#b8975a';
+// Branding Themes (Oct 16, 2026). Mirrors netlify/functions/lib/brand-themes.js —
+// the server is the source of truth and enforces locked national-brand colors.
+const BRAND_FONTS = ['Montserrat', 'Lato', 'Open Sans', 'Playfair Display', 'Bodoni Moda'];
+const BRAND_THEMES = {
+  kw:        { label: 'Keller Williams',                 primary: '#B40101', secondary: '#333333', border: '#B40101', font: 'Montserrat' },
+  coldwell:  { label: 'Coldwell Banker',                 primary: '#1F69FF', secondary: '#012169', border: '#1F69FF', font: 'Open Sans' },
+  remax:     { label: 'RE/MAX',                          primary: '#DC1C2E', secondary: '#003DA5', border: '#DC1C2E', font: 'Montserrat' },
+  century21: { label: 'Century 21',                      primary: '#BEAF87', secondary: '#252526', border: '#BEAF87', font: 'Lato' },
+  compass:   { label: 'Compass',                         primary: '#000000', secondary: '#FFFFFF', border: '#000000', font: 'Open Sans' },
+  exp:       { label: 'eXp Realty',                      primary: '#1E5BA8', secondary: '#0B2A4A', border: '#1E5BA8', font: 'Montserrat' },
+  sothebys:  { label: "Sotheby's International Realty",  primary: '#002349', secondary: '#002349', border: '#B5A47B', font: 'Playfair Display' },
+  bhhs:      { label: 'Berkshire Hathaway HomeServices', primary: '#670A3A', secondary: '#670A3A', border: '#CDA24A', font: 'Bodoni Moda' },
+};
+const BRANDING_CUSTOM_DEFAULT = { primary: '#b8975a', secondary: '#1a1714', border: '#b8975a', font: 'Montserrat' };
+
+function brandIsLight(hex) {
+  const n = parseInt(String(hex).replace('#', ''), 16);
+  const lin = c => { c /= 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
+  const L = 0.2126 * lin((n >> 16) & 255) + 0.7152 * lin((n >> 8) & 255) + 0.0722 * lin(n & 255);
+  return L > 0.4;
+}
+
+// Applies the user's theme to the app header: Secondary = nav bar background,
+// Border = bottom rule + button outlines, chosen font. Text/button colors flip
+// to dark automatically when the Secondary color is light (e.g. Compass white).
+// No profile → the stock Smart Stage PRO header (style tag removed).
+function applyBrandTheme(profile) {
+  document.getElementById('brand-theme-style')?.remove();
+  if (!profile) return;
+  const sec = /^#[0-9a-fA-F]{6}$/.test(profile.brandSecondary || '') ? profile.brandSecondary : BRANDING_CUSTOM_DEFAULT.secondary;
+  const bor = /^#[0-9a-fA-F]{6}$/.test(profile.brandBorder || '') ? profile.brandBorder : BRANDING_CUSTOM_DEFAULT.border;
+  const font = BRAND_FONTS.includes(profile.brandFont) ? profile.brandFont : BRANDING_CUSTOM_DEFAULT.font;
+  if (!document.getElementById('brand-fonts-link')) {
+    const l = document.createElement('link');
+    l.id = 'brand-fonts-link'; l.rel = 'stylesheet';
+    l.href = 'https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600&family=Lato:wght@400;700&family=Open+Sans:wght@400;600&family=Playfair+Display:wght@400;600&family=Bodoni+Moda:wght@400;600&display=swap';
+    document.head.appendChild(l);
+  }
+  const light = brandIsLight(sec);
+  const fg = light ? '#1a1714' : '#f7f4ef';
+  const fgMuted = light ? '#4a4239' : '#c8bfb0';
+  const st = document.createElement('style');
+  st.id = 'brand-theme-style';
+  st.textContent = `
+    .header{background:${sec} !important;border-bottom:3px solid ${bor};font-family:'${font}',sans-serif;}
+    .header #header-user-info,.header .header-right .btn-ghost{color:${fgMuted} !important;}
+    .header .header-right .btn-ghost{border-color:${bor} !important;}
+    .header #header-brand div{color:${fg} !important;}
+    .header #header-brand div + div{color:${fgMuted} !important;}
+    .header #header-credit-badge,.header #header-smart-correct-badge{color:${fg} !important;border-color:${bor} !important;background:transparent !important;}
+    ${light ? '.header .header-left img{background:#1a1714;padding:4px 8px;border-radius:3px;}' : ''}
+  `;
+  document.head.appendChild(st);
+}
 
 async function showBrandingModal() {
   document.getElementById('branding-modal')?.remove();
@@ -9751,6 +9805,54 @@ function brandingImageRowHtml(kind, label, hint) {
     </div>`;
 }
 
+function brandingThemeSectionHtml(p) {
+  const theme = BRAND_THEMES[p.brandTheme] ? p.brandTheme : 'custom';
+  const t = BRAND_THEMES[theme];
+  const cur = t || { primary: p.brandPrimary || BRANDING_CUSTOM_DEFAULT.primary, secondary: p.brandSecondary || BRANDING_CUSTOM_DEFAULT.secondary, border: p.brandBorder || BRANDING_CUSTOM_DEFAULT.border };
+  const font = BRAND_FONTS.includes(p.brandFont) ? p.brandFont : (t ? t.font : BRANDING_CUSTOM_DEFAULT.font);
+  const lbl = 'display:block;font-size:0.72rem;font-weight:600;color:var(--ink);letter-spacing:0.04em;margin-bottom:4px;';
+  const sel = 'width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:3px;font-size:0.85rem;background:#fff;';
+  const picker = (id, label, v) => `<div><label for="${id}" style="${lbl}">${label}</label><input id="${id}" type="color" value="${escHtml(v)}" onchange="onBrandColorChange()" style="width:56px;height:34px;border:1px solid var(--border);border-radius:3px;background:#fff;padding:2px;"></div>`;
+  const swatch = (label, v) => `<div style="text-align:center;"><div class="branding-swatch" data-role="${label}" style="width:56px;height:34px;border:1px solid var(--border);border-radius:3px;background:${escHtml(v)};"></div><div style="font-size:0.65rem;color:var(--muted);margin-top:2px;">${label}</div></div>`;
+  return `
+    <div style="margin-bottom:18px;">
+      <label for="branding-theme" style="${lbl}">Theme</label>
+      <select id="branding-theme" onchange="onBrandThemeChange()" style="${sel}">
+        ${Object.entries(BRAND_THEMES).map(([k, v]) => `<option value="${k}" ${k === theme ? 'selected' : ''}>${escHtml(v.label)}</option>`).join('')}
+        <option value="custom" ${theme === 'custom' ? 'selected' : ''}>Custom</option>
+      </select>
+      <div id="branding-locked" style="display:${theme === 'custom' ? 'none' : 'flex'};gap:16px;margin-top:10px;">
+        ${swatch('Primary', cur.primary)}${swatch('Secondary', cur.secondary)}${swatch('Border', cur.border)}
+        <div style="font-size:0.7rem;color:var(--muted);align-self:center;line-height:1.4;">Brand colors are set by the theme. Choose Custom to pick your own.</div>
+      </div>
+      <div id="branding-custom" style="display:${theme === 'custom' ? 'flex' : 'none'};gap:20px;margin-top:10px;">
+        ${picker('branding-primary', 'Primary', cur.primary)}${picker('branding-secondary', 'Secondary', cur.secondary)}${picker('branding-border', 'Border', cur.border)}
+      </div>
+      <div style="font-size:0.68rem;color:var(--muted);margin-top:6px;line-height:1.4;">Primary: buttons and social posts. Secondary: your navigation bar. Border: lines and outlines.</div>
+    </div>
+    <div style="margin-bottom:18px;">
+      <label for="branding-font" style="${lbl}">Font</label>
+      <select id="branding-font" style="${sel}" onchange="_brandingFontTouched=true">
+        ${BRAND_FONTS.map(f => `<option value="${f}" ${f === font ? 'selected' : ''}>${f}</option>`).join('')}
+      </select>
+      <div style="font-size:0.68rem;color:var(--muted);margin-top:4px;">Defaults to the closest match for your brand — you can change it.</div>
+    </div>`;
+}
+
+let _brandingFontTouched = false;
+function onBrandThemeChange() {
+  const theme = document.getElementById('branding-theme').value;
+  const t = BRAND_THEMES[theme];
+  document.getElementById('branding-locked').style.display = t ? 'flex' : 'none';
+  document.getElementById('branding-custom').style.display = t ? 'none' : 'flex';
+  if (t) {
+    const vals = { Primary: t.primary, Secondary: t.secondary, Border: t.border };
+    document.querySelectorAll('.branding-swatch').forEach(el => { el.style.background = vals[el.dataset.role]; });
+    document.getElementById('branding-font').value = t.font; // brand font first; user can still change it
+  }
+}
+function onBrandColorChange() { /* custom pickers are read on save */ }
+
 function renderBrandingForm(modal, profile, prefill) {
   const p = profile || {};
   _brandingState = {
@@ -9781,16 +9883,7 @@ function renderBrandingForm(modal, profile, prefill) {
       ${brandingImageRowHtml('logo', 'Logo', 'PNG, JPG or WebP, up to 5 MB. Without a logo we use a clean text-only layout.')}
       ${brandingImageRowHtml('headshot', 'Headshot', 'PNG, JPG or WebP, up to 5 MB.')}
 
-      <div style="display:flex;gap:20px;margin-bottom:18px;">
-        <div>
-          <label for="branding-primary" style="display:block;font-size:0.72rem;font-weight:600;color:var(--ink);letter-spacing:0.04em;margin-bottom:4px;">Brand color</label>
-          <input id="branding-primary" type="color" value="${escHtml(p.brandPrimary || BRANDING_DEFAULT_PRIMARY)}" style="width:56px;height:34px;border:1px solid var(--border);border-radius:3px;background:#fff;padding:2px;">
-        </div>
-        <div>
-          <label for="branding-accent" style="display:block;font-size:0.72rem;font-weight:600;color:var(--ink);letter-spacing:0.04em;margin-bottom:4px;">Accent color</label>
-          <input id="branding-accent" type="color" value="${escHtml(p.brandAccent || BRANDING_DEFAULT_ACCENT)}" style="width:56px;height:34px;border:1px solid var(--border);border-radius:3px;background:#fff;padding:2px;">
-        </div>
-      </div>
+      ${brandingThemeSectionHtml(p)}
 
       <div id="branding-error" style="display:none;font-size:0.75rem;color:#c0392b;margin-bottom:10px;line-height:1.4;"></div>
       <button id="branding-save-btn" class="btn btn-primary" style="width:100%;justify-content:center;" onclick="saveBrandingProfile(this)">Save branding</button>
@@ -9873,8 +9966,11 @@ async function saveBrandingProfile(btn) {
     website: val('branding-website'),
     logoKey: _brandingState.logoKey,
     headshotKey: _brandingState.headshotKey,
+    brandTheme: val('branding-theme') || 'custom',
     brandPrimary: val('branding-primary'),
-    brandAccent: val('branding-accent'),
+    brandSecondary: val('branding-secondary'),
+    brandBorder: val('branding-border'),
+    brandFont: val('branding-font'),
   };
   if (!body.licensedName || !body.dreNumber || !body.brokerageName) {
     showBrandingError('Your licensed name, DRE number and brokerage name are required.');
@@ -9895,6 +9991,7 @@ async function saveBrandingProfile(btn) {
     document.getElementById('branding-modal')?.remove();
     _headerBrand = { loaded: true, profile: data.profile || null };
     renderHeaderBrand();
+    applyBrandTheme(_headerBrand.profile);
     showToast('✓ Branding saved', 'success');
   } catch (err) {
     showBrandingError(err.message);

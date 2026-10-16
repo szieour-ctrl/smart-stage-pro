@@ -114,8 +114,11 @@ function neutralBranding() {
     website: "",
     logoUrl: publicUrlForKey(NEUTRAL_LOGO_KEY),
     headshotUrl: "",
-    brandPrimary: "",
-    brandAccent: "",
+    brandTheme: "custom",
+    brandPrimary: "#b8975a",
+    brandSecondary: "#1a1714",
+    brandBorder: "#b8975a",
+    brandFont: "Montserrat",
     displayName: NEUTRAL_NAME,
   };
 }
@@ -132,8 +135,11 @@ function rowToBranding(row) {
     website: row.website || "",
     logoUrl: publicUrlForKey(row.logo_key),
     headshotUrl: publicUrlForKey(row.headshot_key),
-    brandPrimary: row.brand_primary || "",
-    brandAccent: row.brand_accent || "",
+    brandTheme: row.brand_theme || "custom",
+    brandPrimary: row.brand_primary || "#b8975a",
+    brandSecondary: row.brand_secondary || "#1a1714",
+    brandBorder: row.brand_border || "#b8975a",
+    brandFont: row.brand_font || "Montserrat",
     displayName: row.licensed_name || NEUTRAL_NAME,
   };
 }

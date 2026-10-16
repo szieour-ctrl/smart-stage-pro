@@ -151,10 +151,26 @@ function profileForClient(row) {
   };
 }
 
+// Oct 16, 2026: first live Save returned HTTP 504 even though the row WAS written
+// (Supabase showed the insert landing right at the 10-second function limit), so
+// something before the insert was slow. These per-step timings go to the Netlify
+// function log so the slow step is visible next time instead of guessed at.
+function stepTimer(label) {
+  const t0 = Date.now();
+  let last = t0;
+  return (step) => {
+    const now = Date.now();
+    console.log(`marketing-profile[${label}] ${step}: +${now - last}ms (total ${now - t0}ms)`);
+    last = now;
+  };
+}
+
 exports.handler = async (event) => {
   if (event.httpMethod === "OPTIONS") return { statusCode: 200, headers: JSON_HEADERS, body: "" };
 
+  const mark = stepTimer(event.httpMethod + ":" + (event.queryStringParameters?.action || "get"));
   const authUser = await verifyJWT(event.headers?.authorization || event.headers?.Authorization);
+  mark("verifyJWT");
   if (!authUser) return reply(401, { error: "Please sign in again." });
   const userId = authUser.id;
 
@@ -200,6 +216,7 @@ exports.handler = async (event) => {
       if (v.error) return reply(400, { error: v.error });
 
       const existing = await getProfileRow(userId);
+      mark("getProfileRow");
       let saved;
       if (existing) {
         const res = await supabase("PATCH", "marketing_profiles", v.row,
@@ -217,6 +234,7 @@ exports.handler = async (event) => {
           return reply(500, { error: "Could not save your branding. Please try again." });
         }
       }
+      mark(existing ? "update" : "insert");
       return reply(200, { profile: profileForClient(saved) });
     }
 

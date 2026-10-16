@@ -8,6 +8,12 @@
 [functions]
   node_bundler = "esbuild"
 
+# Oct 16, 2026: Marketing Profile save hit the default 10s limit once on first use
+# (HTTP 504, row still written). Headroom plus the per-step timing logs in the
+# function will show which step is slow.
+[functions."marketing-profile"]
+  timeout = 26
+
 [functions."stage-image"]
   timeout = 26
 

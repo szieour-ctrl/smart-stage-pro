@@ -5212,6 +5212,42 @@ async function stageDecor8Background(payload, onStatus) {
   throw new Error('Staging timed out after 3 minutes — please retry');
 }
 
+// ── CLEAN COPY FOR PRO PLUS VIDEO (Oct 15, 2026) ────────────────────────────
+// Generate Final bakes the AB 723 badge into the final image (Gallery, compliance
+// pages and Downloads keep that baked version, unchanged). PRO Plus Video now needs
+// the SAME image without the badge: the render service overlays the badge as a fixed
+// element in both 16:9 and 9:16, so a 9:16 crop can never cut the disclosure off.
+// This uploads that unbadged copy to a private S3 prefix (never public, never shown
+// in Gallery/compliance) and links it to the staged_images row via upload-clean-copy.js.
+// Fully non-fatal: if it fails, the room simply renders with the legacy baked-badge
+// path in PRO Plus until Generate Final is re-run.
+async function uploadCleanCopyForVideo(cleanBase64, stagedUrl, badgeType) {
+  if (!cleanBase64 || !stagedUrl || !SESSION.projectId) return false;
+  try {
+    const sigRes = await fetch('/.netlify/functions/upload-clean-copy', {
+      method: 'POST', headers: authJsonHeaders(),
+      body: JSON.stringify({ action: 'presign', projectId: SESSION.projectId })
+    });
+    const sig = await sigRes.json();
+    if (!sigRes.ok || !sig.uploadUrl || !sig.cleanKey) throw new Error(sig.error || 'no presigned URL');
+    const putRes = await fetch(sig.uploadUrl, {
+      method: 'PUT', headers: { 'Content-Type': 'image/jpeg' },
+      body: base64ToBlob(cleanBase64, 'image/jpeg')
+    });
+    if (!putRes.ok) throw new Error('S3 rejected clean copy (status ' + putRes.status + ')');
+    const linkRes = await fetch('/.netlify/functions/upload-clean-copy', {
+      method: 'POST', headers: authJsonHeaders(),
+      body: JSON.stringify({ action: 'link', projectId: SESSION.projectId, stagedUrl, cleanKey: sig.cleanKey, badgeType })
+    });
+    const link = await linkRes.json().catch(() => ({}));
+    if (!linkRes.ok) throw new Error(link.error || 'link failed (status ' + linkRes.status + ')');
+    return true;
+  } catch (e) {
+    console.warn('Clean copy for PRO Plus video failed (non-fatal):', e.message);
+    return false;
+  }
+}
+
 // ── PROJECT IMAGE ATTACHMENT ─────────────────────────────────────────────────
 async function attachFinalToProject(finalBase64, room, orig, enhId) {
   if (!SESSION.projectId) return;
@@ -5380,6 +5416,13 @@ async function attachFinalToProject(finalBase64, room, orig, enhId) {
       }
 
       console.log('Image attached to project:', SESSION.projectId, 'room:', room.roomName);
+      // Clean (unbadged) copy for PRO Plus Video — see uploadCleanCopyForVideo.
+      if (target.finalCleanBase64) {
+        await uploadCleanCopyForVideo(
+          target.finalCleanBase64, sig.publicUrl,
+          (dbMode === 'exterior_enhancement' || dbMode === 'photo_enhancement') ? 'digitally_enhanced' : 'virtually_staged'
+        );
+      }
       // FIX (Sep 2026): addImage() now reports it when the Blobs write
       // succeeded but the Supabase compliance mirror didn't (e.g. userId
       // still missing after the retry above, or the insert itself failed).
@@ -5966,6 +6009,7 @@ async function generateHeroShotFinal(roomId, shotId, qualityChoice) {
       ...shot,
       status: 'final',
       finalBase64: badgedHeroBase64,
+      finalCleanBase64: upData.upscaledBase64, // unbadged twin for PRO Plus Video
       qualityChoice: quality,
       creditCost,
     };
@@ -6140,6 +6184,9 @@ async function attachHeroShotToProject(finalBase64, room, shot, shotId) {
       }
 
       console.log('Hero shot attached to project:', SESSION.projectId, 'shot:', shot.name, 'room:', room.roomName);
+      if (shot.finalCleanBase64) {
+        await uploadCleanCopyForVideo(shot.finalCleanBase64, sig.publicUrl, room.correctedOnly ? 'digitally_enhanced' : 'virtually_staged');
+      }
       shot.complianceAttachStatus = 'success';
       showToast(`✓ Hero shot added to compliance project: ${SESSION.projectAddress || SESSION.projectId}`, 'success');
     }
@@ -6718,6 +6765,8 @@ async function generateFinal(roomId,enhId){
     // didn't, unconditionally, until now.
     const _digitalOnly = !!(room.correctedOnly || enhId || isSkyPhoto(room));
     let finalBase64 = await badgeFinalFor(room, enhId, upscaleData.upscaledBase64);
+    // Unbadged twin of finalBase64, used ONLY by PRO Plus Video (see uploadCleanCopyForVideo).
+    (enhId ? room.extSelections[enhId] : room).finalCleanBase64 = upscaleData.upscaledBase64;
 
     // Upload original to Cloudinary if not already done (needed for compliance page)
     //
@@ -7437,8 +7486,9 @@ function resizeToMatch(room,orig,enhId,storeKey,incomingB64){
         // photo_enhancement regardless of roomMode, so the badge on the
         // actual pixels needs to agree.
         badgeFinalFor(room, enhId, newB64).then(badgedB64 => {
-          if(enhId){room.extSelections[enhId].finalBase64=badgedB64;room.extSelections[enhId].finalStatus='done';}
-          else{room.finalBase64=badgedB64;room.finalStatus='done';}
+          // New pixels — any earlier clean copy no longer matches this final.
+          if(enhId){room.extSelections[enhId].finalCleanBase64=newB64;room.extSelections[enhId].finalBase64=badgedB64;room.extSelections[enhId].finalStatus='done';}
+          else{room.finalCleanBase64=newB64;room.finalBase64=badgedB64;room.finalStatus='done';}
           resolve();
         });
         return;

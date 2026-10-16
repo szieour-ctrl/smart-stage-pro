@@ -3049,7 +3049,48 @@ function showRenderComplete(job) {
 
 function handleIterate() {
   document.getElementById("resultPanel").classList.add("hidden");
-  goToStep(2);
+  // A resumed video has no photo selection in memory (the page was
+  // reloaded), so start at photo selection instead of an empty order step.
+  goToStep(frames.length ? 2 : 1);
+}
+
+// NEW — resume a video the user started earlier but never downloaded.
+// Job state lives server-side (video_jobs row; the render keeps running on
+// Railway whether or not this page is open), so on load we ask for this
+// listing's un-downloaded job and pick up where they left off.
+async function resumePendingVideo() {
+  if (!REAL_LISTING_ID || !REAL_USER_ID) return;
+  try {
+    const res = await fetch(`${API_BASE}?action=pending&userId=${encodeURIComponent(REAL_USER_ID)}&listingId=${encodeURIComponent(REAL_LISTING_ID)}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    const job = (data.jobs || [])[0];
+    if (!job) return;
+    window._currentJobId = job.id;
+    generationCount = job.generation_count || 1;
+    if (Array.isArray(job.formats) && job.formats.length) window._selectedFormats = job.formats;
+    ["stepUpload","stepMotion","stepOrder","stepConfirm"].forEach(id => document.getElementById(id).classList.add("hidden"));
+    document.getElementById("resultPanel").classList.remove("hidden");
+    if (job.status === "complete") {
+      const full = await (await fetch(`${API_BASE}?action=status&jobId=${encodeURIComponent(job.id)}`)).json();
+      if (full && full.status === "complete") {
+        showRenderComplete(full);
+        document.getElementById("resultContent").insertAdjacentHTML("afterbegin",
+          `<div class="warn-box" style="text-align:left;margin-bottom:14px;"><strong>Welcome back \u2014 your video is ready</strong>It isn\u2019t on your compliance page until you Download it.</div>`);
+        return;
+      }
+    }
+    document.getElementById("resultContent").innerHTML = `
+      <div class="result-icon">&#9203;</div>
+      <div class="result-title">Welcome back \u2014 your video is still rendering</div>
+      <div class="result-body">Generation #${generationCount}. You can leave this page and come back; it will be here when it\u2019s done.</div>
+    `;
+    pollJobStatus(job.id);
+  } catch (e) {
+    // Resume is a convenience — on any failure, fall through to a normal fresh builder.
+    window._currentJobId = null;
+    goToStep(1);
+  }
 }
 
 // NEW — Retry after a render FAILURE (distinct from Iterate, which is
@@ -3211,6 +3252,7 @@ const narrationCostYesEl = document.getElementById("narrationCostYes");
 if (narrationCostYesEl) narrationCostYesEl.textContent = `Free the first time, ${NARRATION_IMAGE_COST} Images after`;
 setNarrationPreference(true);
 goToStep(1);
+resumePendingVideo();
 
 if (!REAL_LISTING_ID || !REAL_USER_ID) {
   document.querySelector(".stage").insertAdjacentHTML("afterbegin",

@@ -2560,6 +2560,32 @@ exports.handler = async (event) => {
       return { statusCode, headers, body: JSON.stringify(result) };
     }
 
+    if (action === "pending") {
+      // NEW — videos the user started but hasn't downloaded yet (still
+      // rendering, or finished and waiting for review/Download). Lets the
+      // builder resume on return and PRO show an "awaiting download"
+      // banner. Download is what attaches a video to the compliance page
+      // (credits_charged_at is set at Download), so null = not yet
+      // downloaded. Lookup is by userId, same convention as "balance".
+      const userId = event.queryStringParameters?.userId;
+      const listingId = event.queryStringParameters?.listingId;
+      if (!userId) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing userId" }) };
+      const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+      let q = `?user_id=eq.${encodeURIComponent(userId)}&status=in.(queued,processing,complete)&credits_charged_at=is.null&created_at=gte.${encodeURIComponent(since)}&order=created_at.desc&limit=10&select=id,listing_id,status,formats,generation_count,created_at,completed_at`;
+      if (listingId) q += `&listing_id=eq.${encodeURIComponent(listingId)}`;
+      const r = await supabase("GET", "video_jobs", null, q);
+      const jobs = Array.isArray(r.data) ? r.data : [];
+      const ids = [...new Set(jobs.map(j => j.listing_id).filter(Boolean))];
+      const addr = {};
+      if (ids.length) {
+        const lr = await supabase("GET", "listings", null, `?id=in.(${ids.map(encodeURIComponent).join(",")})&select=id,address`);
+        for (const l of (lr.data || [])) addr[l.id] = l.address;
+      }
+      return { statusCode: 200, headers, body: JSON.stringify({
+        jobs: jobs.map(j => ({ ...j, address: addr[j.listing_id] || null })),
+      }) };
+    }
+
     if (action === "status") {
       const jobId = event.queryStringParameters?.jobId;
       if (!jobId) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing jobId" }) };

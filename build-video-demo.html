@@ -316,7 +316,22 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
     </div>
     <div class="action-row">
       <button class="btn btn-ghost" onclick="reelBackToIntake()">Back</button>
+      <button class="btn btn-ghost hidden" id="reelNextBtn" onclick="enterReelMotion()">Next: Motion &rarr;</button>
       <button class="btn btn-primary" id="reelPlanBtn" onclick="buildReelPlan()" disabled>Build storyboard</button>
+    </div>
+  </div>
+
+  <div class="panel hidden" id="stepReelMotion">
+    <div class="panel-pad">
+      <div class="eyebrow">Reel &middot; Step 3</div>
+      <div class="panel-title">Choose the motion</div>
+      <div class="panel-sub">Reels use Ken Burns movement only. Leave a scene on Auto and we'll pick a movement that suits the room.</div>
+      <div class="rp-board" id="reelMotionBoard"></div>
+      <div id="reelMotionSaved" class="hidden"></div>
+    </div>
+    <div class="action-row">
+      <button class="btn btn-ghost" onclick="reelBackToStoryboard()">Back</button>
+      <button class="btn btn-primary" onclick="saveReelMotion()">Save Reel plan</button>
     </div>
   </div>
 
@@ -1865,7 +1880,7 @@ function renderUpload() {
 }
 
 function goToStep(n) {
-  ["stepUpload","stepMotion","stepOrder","stepConfirm","resultPanel","stepReelPhotos"].forEach(id => document.getElementById(id).classList.add("hidden"));
+  ["stepUpload","stepMotion","stepOrder","stepConfirm","resultPanel","stepReelPhotos","stepReelMotion"].forEach(id => document.getElementById(id).classList.add("hidden"));
   [1,2,3,4].forEach(i => {
     const pill = document.getElementById("stepPill"+i);
     pill.classList.remove("active","done");
@@ -3387,7 +3402,7 @@ function renderReelBrandNote() {
   }
 }
 function enterReelMode() {
-  ["stepUpload","stepMotion","stepOrder","stepConfirm","resultPanel","stepReelPhotos"].forEach(id => document.getElementById(id).classList.add("hidden"));
+  ["stepUpload","stepMotion","stepOrder","stepConfirm","resultPanel","stepReelPhotos","stepReelMotion"].forEach(id => document.getElementById(id).classList.add("hidden"));
   document.getElementById("stepsBar").classList.add("hidden");
   document.getElementById("stepReelIntake").classList.remove("hidden");
   document.getElementById("modeReelBtn").classList.add("on");
@@ -3399,6 +3414,7 @@ function enterReelMode() {
 function exitReelMode() {
   document.getElementById("stepReelIntake").classList.add("hidden");
   document.getElementById("stepReelPhotos").classList.add("hidden");
+  document.getElementById("stepReelMotion").classList.add("hidden");
   document.getElementById("stepsBar").classList.remove("hidden");
   document.getElementById("modeVideoBtn").classList.add("on");
   document.getElementById("modeReelBtn").classList.remove("on");
@@ -3445,6 +3461,7 @@ function enterReelPhotos() {
   document.getElementById("stepReelPhotos").classList.remove("hidden");
   reelPlan = null;
   document.getElementById("reelPlanBox").classList.add("hidden");
+  document.getElementById("reelNextBtn").classList.add("hidden");
   document.getElementById("reelPlanErr").textContent = "";
   const r = reelRange(), ev = window.ReelIntake.EVENTS[(window._reelIntake || {}).event];
   document.getElementById("reelPhotoSub").textContent = (ev ? ev.label : "Reel") + " \u00b7 " + r.sec + "s \u00b7 pick " +
@@ -3480,6 +3497,7 @@ function toggleReelPhoto(id) {
   else { if (reelPicked.length >= r.max) { alert("A " + r.sec + "s Reel uses at most " + r.max + " photos."); return; } reelPicked.push(id); }
   reelPlan = null;
   document.getElementById("reelPlanBox").classList.add("hidden");
+  document.getElementById("reelNextBtn").classList.add("hidden");
   renderReelPhotos();
 }
 async function buildReelPlan() {
@@ -3512,32 +3530,96 @@ async function buildReelPlan() {
     renderReelPhotos();
   }
 }
-function reelPlanArrays() {
+// Captions and motion belong to the PHOTO, so they travel with it when a photo is moved.
+// A scene without a caption position simply doesn't show its photo's caption (kept if moved back).
+function reelPlanSync() {
   const hl = [], sp = [];
-  reelPlan.slots.forEach(s => { if (s.captionKey) (s.captionKey === "highlights" ? hl : sp)[s.captionIdx] = s.caption || ""; });
+  reelPlan.slots.forEach(s => {
+    s.caption = s.captionKey ? (reelPlan.photoCaptions[s.photoId] || "") : "";
+    s.fixedCaption = !!(s.captionKey && reelPlan.photoFixed[s.photoId]);
+    s.motion = reelPlan.photoMotion[s.photoId] || "auto";
+    if (s.captionKey) (s.captionKey === "highlights" ? hl : sp)[s.captionIdx] = s.caption;
+  });
   for (let i = 0; i < hl.length; i++) if (hl[i] == null) hl[i] = "";
   for (let i = 0; i < sp.length; i++) if (sp[i] == null) sp[i] = "";
   reelPlan.highlights = hl; reelPlan.supporting = sp;
   window._reelPlan = reelPlan;
 }
+function reelPlanInit() {
+  reelPlan.photoCaptions = {}; reelPlan.photoFixed = {}; reelPlan.photoMotion = {};
+  reelPlan.slots.forEach(s => {
+    reelPlan.photoCaptions[s.photoId] = s.caption || "";
+    reelPlan.photoFixed[s.photoId] = !!s.fixedCaption;
+    reelPlan.photoMotion[s.photoId] = "auto";
+  });
+}
 function renderReelPlan() {
-  reelPlanArrays();
+  if (!reelPlan.photoCaptions) reelPlanInit();
+  reelPlanSync();
   const all = reelAllPhotos(), board = document.getElementById("reelPlanBoard");
   document.getElementById("reelPlanBox").classList.remove("hidden");
-  document.getElementById("reelPlanNote").textContent = (reelPlan.notes ? reelPlan.notes + " " : "") + "Edit any caption or move a photo up or down. Opening and closing scenes carry your headline and call to action.";
+  document.getElementById("reelNextBtn").classList.remove("hidden");
+  document.getElementById("reelPlanNote").textContent = (reelPlan.notes ? reelPlan.notes + " " : "") + "Edit any caption or move a photo up or down (its caption moves with it). Opening and closing scenes carry your headline and call to action.";
   board.innerHTML = reelPlan.slots.map((s, i) => {
     const p = all.find(x => x.id === s.photoId) || {};
+    const own = reelPlan.photoCaptions[s.photoId] || "";
     const cap = s.captionKey
       ? '<input type="text" maxlength="80" data-i="' + i + '" value="' + escHtml(s.caption) + '" placeholder="Caption (optional)">' + (s.fixedCaption ? '<div class="rp-fixed">Your highlight</div>' : "")
-      : '<div class="ri-help">' + (s.closing ? "Closing: call to action, address, QR" : "Text from your Reel details") + '</div>';
+      : '<div class="ri-help">' + (s.closing ? "Closing: call to action, address, QR" : "Text from your Reel details") + '</div>' +
+        (own ? '<div class="rp-fixed">This photo has a caption, but this scene doesn\u2019t show one.</div>' : "");
     return '<div class="rp-slot"><div class="rp-n">' + (i + 1) + '</div><img src="' + escHtml(p.url || "") + '" alt="">' +
       '<div><div class="rp-role">' + escHtml(s.role) + '</div>' + cap + '</div>' +
       '<div class="rp-move"><button type="button" data-up="' + i + '"' + (i === 0 ? " disabled" : "") + '>\u2191</button><button type="button" data-dn="' + i + '"' + (i === reelPlan.slots.length - 1 ? " disabled" : "") + '>\u2193</button></div></div>';
   }).join("");
-  board.querySelectorAll("input[data-i]").forEach(el => el.addEventListener("input", () => { reelPlan.slots[Number(el.getAttribute("data-i"))].caption = el.value; reelPlanArrays(); }));
+  board.querySelectorAll("input[data-i]").forEach(el => el.addEventListener("input", () => {
+    const sl = reelPlan.slots[Number(el.getAttribute("data-i"))];
+    reelPlan.photoCaptions[sl.photoId] = el.value; reelPlan.photoFixed[sl.photoId] = false; reelPlanSync();
+  }));
   const swap = (a, b) => { const x = reelPlan.slots; [x[a].photoId, x[b].photoId] = [x[b].photoId, x[a].photoId]; renderReelPlan(); };
   board.querySelectorAll("[data-up]").forEach(el => el.addEventListener("click", () => swap(Number(el.getAttribute("data-up")), Number(el.getAttribute("data-up")) - 1)));
   board.querySelectorAll("[data-dn]").forEach(el => el.addEventListener("click", () => swap(Number(el.getAttribute("data-dn")), Number(el.getAttribute("data-dn")) + 1)));
+}
+
+// ── Step 3: motion per scene (Ken Burns only) ──
+const REEL_MOTIONS = ["auto", "push_in", "pull_back", "pan_left", "pan_right", "tilt_up", "tilt_down", "drift", "float", "pan_zoom", "luxury_parallax", "static"];
+function enterReelMotion() {
+  document.getElementById("stepReelPhotos").classList.add("hidden");
+  document.getElementById("stepReelMotion").classList.remove("hidden");
+  document.getElementById("reelMotionSaved").classList.add("hidden");
+  renderReelMotion();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+function reelBackToStoryboard() {
+  document.getElementById("stepReelMotion").classList.add("hidden");
+  document.getElementById("stepReelPhotos").classList.remove("hidden");
+}
+function renderReelMotion() {
+  reelPlanSync();
+  const all = reelAllPhotos(), board = document.getElementById("reelMotionBoard");
+  board.innerHTML = reelPlan.slots.map((s, i) => {
+    const p = all.find(x => x.id === s.photoId) || {}, cur = reelPlan.photoMotion[s.photoId] || "auto";
+    const opts = REEL_MOTIONS.filter(k => KEN_BURNS_PRESETS[k]).map(k => '<option value="' + k + '"' + (k === cur ? " selected" : "") + ">" + KEN_BURNS_PRESETS[k].label + "</option>").join("");
+    return '<div class="rp-slot"><div class="rp-n">' + (i + 1) + '</div><img src="' + escHtml(p.url || "") + '" alt="">' +
+      '<div><div class="rp-role">' + escHtml(s.role) + '</div><select data-m="' + i + '" style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:4px;font-family:inherit;">' + opts + '</select>' +
+      '<div class="rp-fixed" data-md="' + i + '">' + escHtml((KEN_BURNS_PRESETS[cur] || {}).desc || "") + '</div></div>' +
+      '<div class="rp-move"><button type="button" data-pv="' + i + '">&#9654;</button></div></div>';
+  }).join("");
+  board.querySelectorAll("select[data-m]").forEach(el => el.addEventListener("change", () => {
+    const i = Number(el.getAttribute("data-m")), sl = reelPlan.slots[i];
+    reelPlan.photoMotion[sl.photoId] = el.value; reelPlanSync();
+    board.querySelector('[data-md="' + i + '"]').textContent = (KEN_BURNS_PRESETS[el.value] || {}).desc || "";
+  }));
+  board.querySelectorAll("[data-pv]").forEach(el => el.addEventListener("click", () => {
+    const sl = reelPlan.slots[Number(el.getAttribute("data-pv"))];
+    if (typeof openMotionPreview === "function") openMotionPreview(reelPlan.photoMotion[sl.photoId] || "auto", "kenburns");
+  }));
+}
+function saveReelMotion() {
+  reelPlanSync();
+  const box = document.getElementById("reelMotionSaved");
+  box.innerHTML = '<div class="ri-group-title">Reel plan saved</div><div class="ri-help">' + reelPlan.slots.length + ' scenes \u00b7 ' +
+    reelPlan.slots.map(s => (KEN_BURNS_PRESETS[s.motion] || {}).label || s.motion).join(" \u00b7 ") + '. Next: render the Reel (coming next).</div>';
+  box.classList.remove("hidden");
 }
 if (urlParams.get("reels") === "1") document.getElementById("reelModeBar").classList.remove("hidden");
 

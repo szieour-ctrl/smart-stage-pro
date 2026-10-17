@@ -316,7 +316,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
     </div>
     <div class="action-row">
       <button class="btn btn-ghost" onclick="reelBackToIntake()">Back</button>
-      <button class="btn btn-ghost hidden" id="reelNextBtn" onclick="enterReelMotion()">Next: Motion &rarr;</button>
+      <button class="btn btn-primary hidden" id="reelNextBtn" onclick="enterReelMotion()">Next: Motion &rarr;</button>
       <button class="btn btn-primary" id="reelPlanBtn" onclick="buildReelPlan()" disabled>Build storyboard</button>
     </div>
   </div>
@@ -342,11 +342,12 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
       <div class="panel-sub" id="reelReviewSummary"></div>
       <div class="ri-brand" id="reelReviewBrand"></div>
       <div class="ri-field" style="margin-top:14px;"><label for="reelMusic">Music</label><select id="reelMusic" class="btn btn-ghost" style="width:100%;text-align:left;"></select></div>
-      <div class="ri-help">Beta: rendering is free while we test. Takes about a minute or two.</div>
+      <div class="ri-help">Beta: rendering is free while we test. It usually takes a few minutes \u2014 you can keep this tab open.</div>
       <div id="reelRenderStatus" class="ri-brand hidden" style="margin-top:14px;"></div>
       <div id="reelResult" class="hidden">
         <div class="ri-group-title">Your Reel</div>
         <div class="ri-modebar" id="reelVariantTabs"></div>
+        <div class="ri-help" id="reelVariantNote" style="text-align:center;margin-top:8px;"></div>
         <div style="display:flex;justify-content:center;margin-top:10px;"><video id="reelPlayer" controls playsinline loop style="width:min(300px,70vw);aspect-ratio:9/16;background:#000;border-radius:8px;"></video></div>
         <div style="text-align:center;margin-top:10px;"><a id="reelDownload" class="btn btn-ghost" download target="_blank" rel="noopener">Download</a></div>
         <div class="ri-help" id="reelResultNote" style="text-align:center;margin-top:8px;"></div>
@@ -3525,6 +3526,7 @@ function toggleReelPhoto(id) {
   reelPlan = null;
   document.getElementById("reelPlanBox").classList.add("hidden");
   document.getElementById("reelNextBtn").classList.add("hidden");
+  { const pb = document.getElementById("reelPlanBtn"); pb.textContent = "Build storyboard"; pb.classList.add("btn-primary"); pb.classList.remove("btn-ghost"); }
   renderReelPhotos();
 }
 async function buildReelPlan() {
@@ -3553,7 +3555,9 @@ async function buildReelPlan() {
   } catch (e) {
     err.textContent = e.message;
   } finally {
-    btn.textContent = reelPlan ? "Rebuild storyboard" : "Build storyboard";
+    btn.textContent = reelPlan ? "Start over with AI" : "Build storyboard";
+    btn.classList.toggle("btn-primary", !reelPlan); btn.classList.toggle("btn-ghost", !!reelPlan);
+    btn.title = reelPlan ? "Re-run the AI storyboard. This replaces your caption, order and motion edits." : "";
     renderReelPhotos();
   }
 }
@@ -3720,6 +3724,9 @@ function setReelVariant(which) {
   const dl = document.getElementById("reelDownload");
   dl.href = url; dl.textContent = "Download " + (which === "branded" ? "Branded" : "Unbranded (MLS)");
   document.querySelectorAll("#reelVariantTabs button").forEach(b => b.classList.toggle("on", b.getAttribute("data-v") === which));
+  document.getElementById("reelVariantNote").textContent = which === "branded"
+    ? "Branded: includes your call to action, name, DRE, brokerage and logo."
+    : "Unbranded (MLS): no call to action, name, brokerage or logo \u2014 safe for MLS and portals.";
 }
 async function startReelRender() {
   const btn = document.getElementById("reelRenderBtn"), err = document.getElementById("reelRenderErr"), st = document.getElementById("reelRenderStatus");

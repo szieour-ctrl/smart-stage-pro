@@ -133,6 +133,36 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
 .result-body{font-size:0.85rem;color:var(--muted);line-height:1.6;}
 
 .hidden{display:none;}
+/* ── Reel intake (beta, ?reels=1) ── */
+.ri-modebar{display:flex;gap:8px;margin:0 0 14px;}
+.ri-modebar .motion-btn.on{outline:2px solid var(--gold);}
+.ri-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:10px;margin-bottom:18px;}
+.ri-card{text-align:left;background:#fff;border:1px solid var(--border);border-radius:6px;padding:12px 14px;cursor:pointer;font-family:inherit;color:var(--ink);}
+.ri-card b{display:block;font-size:0.88rem;margin-bottom:2px;}
+.ri-card span{display:block;font-size:0.74rem;color:var(--muted);line-height:1.35;}
+.ri-card.on{border-color:var(--gold);background:var(--cream);box-shadow:0 0 0 1px var(--gold);}
+.ri-form{border-top:1px solid var(--border);padding-top:6px;}
+.ri-group-title{font-size:0.68rem;text-transform:uppercase;letter-spacing:0.12em;color:var(--gold);font-weight:600;margin:18px 0 8px;}
+.ri-field{margin-bottom:12px;}
+.ri-field label{display:block;font-size:0.78rem;color:var(--muted);margin-bottom:4px;}
+.ri-field input{width:100%;box-sizing:border-box;border:1px solid var(--border);border-radius:4px;padding:8px 12px;font-size:0.88rem;font-family:inherit;color:var(--ink);background:#fff;}
+.ri-field input:focus{outline:none;border-color:var(--gold);}
+.ri-field input:disabled{background:var(--cream);color:var(--muted);}
+.ri-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+.ri-row3{grid-template-columns:1fr 1fr 1fr;}
+.ri-req{font-size:0.66rem;color:var(--danger);text-transform:uppercase;letter-spacing:0.06em;margin-left:4px;}
+.ri-help{font-size:0.72rem;color:var(--muted);margin-top:3px;}
+.ri-check{display:flex;gap:8px;align-items:flex-start;font-size:0.82rem;margin:6px 0 12px;}
+.ri-lens{display:flex;gap:8px;flex-wrap:wrap;}
+.ri-len{background:#fff;border:1px solid var(--border);border-radius:6px;padding:8px 14px;cursor:pointer;font-family:inherit;font-weight:600;color:var(--ink);}
+.ri-len span{display:block;font-weight:400;font-size:0.68rem;color:var(--muted);}
+.ri-len.on{border-color:var(--gold);background:var(--cream);box-shadow:0 0 0 1px var(--gold);}
+.ri-errors{color:var(--danger);font-size:0.8rem;margin-top:10px;}
+.ri-brand{font-size:0.8rem;border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin:14px 0 4px;background:var(--cream);}
+.ri-summary{font-size:0.85rem;line-height:1.7;}
+.ri-summary b{display:inline-block;min-width:130px;color:var(--muted);font-weight:500;}
+@media(max-width:560px){.ri-row,.ri-row3{grid-template-columns:1fr;}}
+
 
 .frame-thumb-clickable{cursor:pointer;}
 .preset-row{display:flex;gap:6px;align-items:stretch;}
@@ -229,7 +259,28 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
     </div>
   </div>
 
-  <div class="steps">
+  <!-- Reel mode (beta) — only shown with ?reels=1 until the whole Reel flow ships. -->
+  <div class="ri-modebar hidden" id="reelModeBar">
+    <button class="motion-btn kenburns on" id="modeVideoBtn" onclick="exitReelMode()">Video</button>
+    <button class="motion-btn kenburns" id="modeReelBtn" onclick="enterReelMode()">Reel (beta)</button>
+  </div>
+
+  <div class="panel hidden" id="stepReelIntake">
+    <div class="panel-pad">
+      <div class="eyebrow">Reel &middot; Step 1</div>
+      <div class="panel-title">What kind of Reel?</div>
+      <div class="panel-sub" style="margin-bottom:16px;">Pick a Reel type. Each one asks only for what it needs.</div>
+      <div id="reelIntakeMount"></div>
+      <div class="ri-brand" id="reelBrandNote"></div>
+      <div id="reelIntakeSaved" class="hidden"></div>
+    </div>
+    <div class="action-row">
+      <button class="btn btn-ghost" onclick="exitReelMode()">Back to video</button>
+      <button class="btn btn-primary" onclick="saveReelIntake()">Save &amp; continue</button>
+    </div>
+  </div>
+
+  <div class="steps" id="stepsBar">
     <div class="step-pill" id="stepPill1">1. Photos</div>
     <div class="step-pill" id="stepPill2">2. Order</div>
     <div class="step-pill" id="stepPill3">3. Motion &amp; format</div>
@@ -381,6 +432,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
   </div>
 </div>
 
+<script src="/reel-intake.js"></script>
 <script>
 // Real sample clips captured against 234 Bent Tree Ct during Playground/
 // verification testing this session — see Notion for the source doc. Two
@@ -1424,6 +1476,10 @@ async function loadGallery() {
         : humanizeRoomType(f.mode, f.roomType),
     }));
     galleryExternalFrames = (data.externalFrames || []).map(f => ({ ...f, roomLabel: f.roomType || f.sourceLabel || "Photo" }));
+    // Reel intake prefill (Oct 17, 2026): saved listing details, address, branding summary.
+    reelListingDetails = data.listingDetails || null;
+    reelListingAddress = data.listingAddress || "";
+    reelBrandingSummary = data.brandingSummary || null;
 
     document.getElementById("galleryLoading").style.display = "none";
     renderGallery();
@@ -3269,6 +3325,70 @@ uploadZone.addEventListener("drop", (e) => {
 });
 
 renderUpload();
+// ── REEL MODE (beta, ?reels=1) — intake step only. The photo/storyboard/render steps ship next. ──
+let reelListingDetails = null, reelListingAddress = "", reelBrandingSummary = null;
+const REEL_STATE_KEY = "reelIntake_" + (REAL_LISTING_ID || "none");
+const reelIntakeState = (() => {
+  try { return JSON.parse(sessionStorage.getItem(REEL_STATE_KEY) || "null") || {}; } catch (e) { return {}; }
+})();
+function persistReelState() { try { sessionStorage.setItem(REEL_STATE_KEY, JSON.stringify(reelIntakeState)); } catch (e) { /* non-fatal */ } }
+function reelOpts() {
+  return { address: reelListingAddress, listingDetails: reelListingDetails, state: reelIntakeState, onChange: persistReelState };
+}
+function escHtml(v) { return String(v == null ? "" : v).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+function renderReelBrandNote() {
+  const el = document.getElementById("reelBrandNote");
+  const b = reelBrandingSummary;
+  if (b && b.complete) {
+    el.innerHTML = "Branded version: <b>" + escHtml(b.licensedName) + "</b> &middot; DRE #" + escHtml(b.dre) + " &middot; " + escHtml(b.brokerage) +
+      ". Every Reel also gets an Unbranded (MLS) version at no extra charge.";
+  } else {
+    el.innerHTML = "Your Marketing Profile is incomplete (licensed name, DRE number and brokerage are required for a Branded version), so this Reel will be made <b>Unbranded (MLS)</b> only. Complete it from Branding in Smart Stage PRO.";
+  }
+}
+function enterReelMode() {
+  ["stepUpload","stepMotion","stepOrder","stepConfirm","resultPanel"].forEach(id => document.getElementById(id).classList.add("hidden"));
+  document.getElementById("stepsBar").classList.add("hidden");
+  document.getElementById("stepReelIntake").classList.remove("hidden");
+  document.getElementById("modeReelBtn").classList.add("on");
+  document.getElementById("modeVideoBtn").classList.remove("on");
+  document.getElementById("reelIntakeSaved").classList.add("hidden");
+  renderReelBrandNote();
+  window.ReelIntake.render(document.getElementById("reelIntakeMount"), reelOpts());
+}
+function exitReelMode() {
+  document.getElementById("stepReelIntake").classList.add("hidden");
+  document.getElementById("stepsBar").classList.remove("hidden");
+  document.getElementById("modeVideoBtn").classList.add("on");
+  document.getElementById("modeReelBtn").classList.remove("on");
+  goToStep(1);
+}
+function saveReelIntake() {
+  const r = window.ReelIntake.collect(reelOpts());
+  const errBox = document.getElementById("ri_errors");
+  if (!r.ok) {
+    if (errBox) errBox.innerHTML = r.errors.map(escHtml).join("<br>");
+    else alert(r.errors.join("\n"));
+    return;
+  }
+  if (errBox) errBox.innerHTML = "";
+  persistReelState();
+  const i = r.intake, ev = window.ReelIntake.EVENTS[i.event];
+  const rows = [["Reel", ev.label], ["Length", i.lengthSec + "s"], ["Address", i.address], ["City", i.city], ["Neighborhood", i.neighborhood],
+    ["Beds / baths / sq ft", [i.beds, i.baths, i.sqft].filter(Boolean).join(" / ")]];
+  Object.keys(i).forEach(k => { if (!["event","lengthSec","address","city","neighborhood","beds","baths","sqft","highlights","supporting"].includes(k)) rows.push([k, String(i[k])]); });
+  (i.highlights || []).forEach((h, n) => rows.push(["Highlight " + (n + 1), h]));
+  (i.supporting || []).forEach((h, n) => rows.push(["Detail " + (n + 1), h]));
+  const box = document.getElementById("reelIntakeSaved");
+  box.innerHTML = '<div class="ri-group-title">Saved</div><div class="ri-summary">' +
+    rows.filter(r2 => r2[1]).map(r2 => "<div><b>" + escHtml(r2[0]) + "</b>" + escHtml(r2[1]) + "</div>").join("") +
+    '</div><div class="ri-help" style="margin-top:10px;">Next: choose photos and review the storyboard (coming next).</div>';
+  box.classList.remove("hidden");
+  window._reelIntake = i;
+  box.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+if (urlParams.get("reels") === "1") document.getElementById("reelModeBar").classList.remove("hidden");
+
 loadGallery();
 refreshBalanceDisplay();
 // NEW (this session — fixing a real bug) — the narration toggle's initial

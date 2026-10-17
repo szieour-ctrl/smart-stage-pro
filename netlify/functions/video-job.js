@@ -2471,12 +2471,28 @@ exports.handler = async (event) => {
       if (!listingId) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing listingId" }) };
       const { stagedFrames, externalFrames } = await getFramesForListing(listingId);
       // Oct 17, 2026 — saved listing details (no price) so the video/Reel builders can prefill.
-      let listingDetails = null;
+      // Oct 17, 2026 — also the address and a minimal branding summary for the Reel intake form
+      // (address is shown read-only; the summary tells the agent whether a Branded version can be
+      // made). Name/DRE/brokerage are already public on the compliance page.
+      let listingDetails = null, listingAddress = null, brandingSummary = null;
       try {
-        const ld = await supabase("GET", "listings", null, `?id=eq.${encodeURIComponent(listingId)}&select=beds,baths,sqft,year_built&limit=1`);
-        listingDetails = ld.data?.[0] || null;
+        const ld = await supabase("GET", "listings", null, `?id=eq.${encodeURIComponent(listingId)}&select=address,user_id,beds,baths,sqft,year_built&limit=1`);
+        const row = ld.data?.[0] || null;
+        if (row) {
+          listingAddress = row.address || null;
+          listingDetails = { beds: row.beds ?? null, baths: row.baths ?? null, sqft: row.sqft ?? null, year_built: row.year_built ?? null };
+          try {
+            const b = await brandingForUser(row.user_id);
+            brandingSummary = {
+              complete: !!(b.hasProfile && b.licensedName && b.dreNumber && b.brokerageName),
+              licensedName: b.hasProfile ? (b.licensedName || "") : "",
+              dre: b.dreNumber || "",
+              brokerage: b.brokerageName || "",
+            };
+          } catch (be) { console.warn("frames: branding summary failed (non-fatal):", be.message); }
+        }
       } catch (e) { console.warn("frames: listing details fetch failed (non-fatal):", e.message); }
-      return { statusCode: 200, headers, body: JSON.stringify({ stagedFrames, externalFrames, listingDetails }) };
+      return { statusCode: 200, headers, body: JSON.stringify({ stagedFrames, externalFrames, listingDetails, listingAddress, brandingSummary }) };
     }
 
     if (action === "add-external-photo") {

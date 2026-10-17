@@ -234,8 +234,25 @@ function supabase(method, table, body, queryParams = "") {
 // (name + DRE + brokerage), otherwise "unbranded". Never throws — a failure here must not block
 // the render; Railway falls back to its legacy end card and logs [QR MISSING].
 const { brandingForUser } = require("./lib/marketing-profile-lib");
+const { formatDetailsLine } = require("./lib/listing-details-lib");
 
-async function buildEndCardPayload({ userId, projectId, requestedVariant }) {
+// Oct 17, 2026 — Listing Details: beds/baths/sqft/year built (no price) come from the
+// listing row. Sent as ONE string so Railway's two-line layout puts it on the lower
+// detail line (a multi-item array would promote the first item to the big "price" line).
+// Never throws; no saved details = empty array, same as before.
+async function listingDetailsForEndCard(listingId) {
+  if (!listingId) return [];
+  try {
+    const r = await supabase("GET", "listings", null, `?id=eq.${encodeURIComponent(listingId)}&select=beds,baths,sqft,year_built&limit=1`);
+    const line = formatDetailsLine(r.data?.[0]);
+    return line ? [line.replace(/ bd\b/, " Bd").replace(/ ba\b/, " Ba").replace(/ sq ft\b/, " Sq Ft")] : [];
+  } catch (e) {
+    console.warn("listingDetailsForEndCard failed (end card continues without details):", e.message);
+    return [];
+  }
+}
+
+async function buildEndCardPayload({ userId, projectId, listingId, requestedVariant }) {
   const out = {};
   try {
     if (projectId) {
@@ -249,7 +266,7 @@ async function buildEndCardPayload({ userId, projectId, requestedVariant }) {
       : (complete ? "branded" : "unbranded");
     out.endCard = {
       variant,
-      details: [], // price/beds/baths/sqft are not stored on listings yet
+      details: await listingDetailsForEndCard(listingId),
       ...(variant === "branded" ? {
         brand: {
           licensedName: b.licensedName, dre: b.dreNumber, brokerage: b.brokerageName,
@@ -1467,7 +1484,7 @@ async function createVideoJob({ listingId, projectId, userId, frames, formats, m
 
     // Dispatch to Railway.
     const cleanInfo = await getCleanCopyInfo(frameRows);
-    const endCardPayload = await buildEndCardPayload({ userId, projectId, requestedVariant: endCardVariant });
+    const endCardPayload = await buildEndCardPayload({ userId, projectId, listingId, requestedVariant: endCardVariant });
     await dispatchToRailway({
       ...endCardPayload,
       jobId:      job.id,
@@ -1877,7 +1894,7 @@ async function regenerateVideoJob({ jobId, userId, frames, formats, musicStyle, 
     listingAddress = listingRes.data?.[0]?.address || null;
 
     const cleanInfo = await getCleanCopyInfo(frameRows);
-    const endCardPayload = await buildEndCardPayload({ userId, projectId: existing.project_id, requestedVariant: endCardVariant });
+    const endCardPayload = await buildEndCardPayload({ userId, projectId: existing.project_id, listingId: existing.listing_id, requestedVariant: endCardVariant });
     await dispatchToRailway({
       ...endCardPayload,
       jobId,
@@ -2453,7 +2470,13 @@ exports.handler = async (event) => {
       const listingId = event.queryStringParameters?.listingId;
       if (!listingId) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing listingId" }) };
       const { stagedFrames, externalFrames } = await getFramesForListing(listingId);
-      return { statusCode: 200, headers, body: JSON.stringify({ stagedFrames, externalFrames }) };
+      // Oct 17, 2026 — saved listing details (no price) so the video/Reel builders can prefill.
+      let listingDetails = null;
+      try {
+        const ld = await supabase("GET", "listings", null, `?id=eq.${encodeURIComponent(listingId)}&select=beds,baths,sqft,year_built&limit=1`);
+        listingDetails = ld.data?.[0] || null;
+      } catch (e) { console.warn("frames: listing details fetch failed (non-fatal):", e.message); }
+      return { statusCode: 200, headers, body: JSON.stringify({ stagedFrames, externalFrames, listingDetails }) };
     }
 
     if (action === "add-external-photo") {

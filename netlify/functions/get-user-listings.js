@@ -164,11 +164,11 @@ exports.handler = async (event) => {
     // default vs. what a search reveals, not this query.
     let listingsQuery;
     if (user.role === "broker_admin" && user.brokerage_id) {
-      listingsQuery = `?brokerage_id=eq.${user.brokerage_id}&is_prospecting=not.is.true&select=id,address,project_id,compliance_page_url,mls_number,status,hidden,created_at,updated_at,user_id&order=updated_at.desc.nullsfirst&limit=100`;
+      listingsQuery = `?brokerage_id=eq.${user.brokerage_id}&is_prospecting=not.is.true&select=id,address,project_id,compliance_page_url,mls_number,status,hidden,created_at,updated_at,user_id,beds,baths,sqft,year_built&order=updated_at.desc.nullsfirst&limit=100`;
     } else if (user.role === "team_lead" && user.team_id) {
-      listingsQuery = `?team_id=eq.${user.team_id}&is_prospecting=not.is.true&select=id,address,project_id,compliance_page_url,mls_number,status,hidden,created_at,updated_at,user_id&order=updated_at.desc.nullsfirst&limit=100`;
+      listingsQuery = `?team_id=eq.${user.team_id}&is_prospecting=not.is.true&select=id,address,project_id,compliance_page_url,mls_number,status,hidden,created_at,updated_at,user_id,beds,baths,sqft,year_built&order=updated_at.desc.nullsfirst&limit=100`;
     } else {
-      listingsQuery = `?user_id=eq.${authUser.id}&is_prospecting=not.is.true&select=id,address,project_id,compliance_page_url,mls_number,status,hidden,created_at,updated_at,user_id&order=updated_at.desc.nullsfirst&limit=100`;
+      listingsQuery = `?user_id=eq.${authUser.id}&is_prospecting=not.is.true&select=id,address,project_id,compliance_page_url,mls_number,status,hidden,created_at,updated_at,user_id,beds,baths,sqft,year_built&order=updated_at.desc.nullsfirst&limit=100`;
     }
 
     const listingsResult = await supabase("GET", "listings", null, listingsQuery);
@@ -216,6 +216,10 @@ exports.handler = async (event) => {
         mlsNumber:      listing.mls_number || null,
         status:         listing.status || "active",
         hidden:         listing.hidden || false,
+        beds:           listing.beds ?? null,
+        baths:          listing.baths ?? null,
+        sqft:           listing.sqft ?? null,
+        yearBuilt:      listing.year_built ?? null,
         createdAt:      listing.created_at,
         lastStaged:     lastStaged,
         imageCount,

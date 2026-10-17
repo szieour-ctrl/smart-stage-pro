@@ -14493,6 +14493,7 @@ function renderListingsOnly(data, filter, search) {
         ${l.complianceUrl ? '<span>✓ QR active</span><span>✓ Compliance page active</span>' : ''}
         <span>${l.lastStaged ? 'Last staged ' + formatDate(l.lastStaged) : 'Created ' + formatDate(l.createdAt)}</span>
       </div>
+      ${listingDetailsLine(l) ? `<div class="db-card-details" style="font-size:0.82rem;color:var(--ink);margin:2px 0 8px;">${listingDetailsLine(l)}</div>` : ''}
       ${l.imageCount === 0 ? '<div class="db-autosave-note">Images auto-save to compliance page when a final is approved in the staging tool</div>' : ''}
       ${thumbsHtml(l)}
       <div class="db-card-actions">
@@ -14502,6 +14503,7 @@ function renderListingsOnly(data, filter, search) {
         ${l.hiddenCount ? `<button class="db-action-btn" style="color:#8a6d3b;border-color:#e8d5a8;" onclick="openHiddenImages('${l.id}','${l.projectId}')" title="Images pulled from public view — not deleted, review separately">Hidden (${l.hiddenCount}) — Review</button>` : ''}
         <button class="db-action-btn" onclick="openVideoBuilderFor('${l.id}','${l.projectId || ''}')">+ Create Video</button>
         <button class="db-action-btn primary" onclick="hideDashboard()">Continue Staging →</button>
+        <button class="db-action-btn" onclick="openDetailsModal('${l.id}')" title="Beds, baths, sq ft and year built — shown on your compliance page and prefilled in videos and Reels">${(l.beds != null || l.baths != null || l.sqft != null || l.yearBuilt != null) ? 'Edit Details' : '+ Add Details'}</button>
         <button class="db-action-btn" onclick="openStatusModal('${l.id}','${l.address.replace(/'/g,'').replace(/"/g,'')}','${l.status || 'active'}')" title="Set Active, Pending, Sold, Canceled, Expired, or Marketing">Change Status</button>
         ${l.hidden
           ? `<button class="db-action-btn" style="color:#1a5c3a;border-color:rgba(45,106,79,0.3);" onclick="restoreListing('${l.id}','${l.address.replace(/'/g,'').replace(/"/g,'')}')">Restore</button>`
@@ -14730,6 +14732,66 @@ function hideDashboard() {
   _dashboardData = null;
   _dbFilter = 'all';
   _dbSearch = '';
+}
+
+// ── LISTING DETAILS (Oct 17, 2026) — beds / baths / sq ft / year built.
+// No price (price changes constantly; it is entered per video/Reel).
+// Saved through listing-details.js; shown on this card, the public
+// compliance page, and prefilled into the video and Reel builders.
+function listingDetailsLine(l){
+  const esc = v => String(v).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const parts = [];
+  if (l.beds != null)      parts.push(esc(l.beds) + ' bd');
+  if (l.baths != null)     parts.push(esc(Number(l.baths)) + ' ba');
+  if (l.sqft != null)      parts.push(esc(Number(l.sqft).toLocaleString('en-US')) + ' sq ft');
+  if (l.yearBuilt != null) parts.push('Built ' + esc(l.yearBuilt));
+  return parts.join(' · ');
+}
+function openDetailsModal(listingId){
+  ensureStatusModal();
+  const l = (_dashboardData?.listings || []).find(x => x.id === listingId) || {};
+  const v = x => (x == null ? '' : String(x).replace(/"/g, '&quot;'));
+  document.getElementById('sm-content').innerHTML = `
+    <div class="sm-title">Listing Details</div>
+    <div class="sm-sub">${(l.address || '').replace(/</g,'&lt;')}. Shown on your compliance page and prefilled in videos and Reels. All fields optional.</div>
+    <label class="sm-label">Beds</label>
+    <input id="ld-beds" class="sm-select" type="text" inputmode="numeric" value="${v(l.beds)}" placeholder="e.g. 3">
+    <label class="sm-label">Baths</label>
+    <input id="ld-baths" class="sm-select" type="text" inputmode="decimal" value="${v(l.baths)}" placeholder="e.g. 2.5">
+    <label class="sm-label">Sq ft</label>
+    <input id="ld-sqft" class="sm-select" type="text" inputmode="numeric" value="${v(l.sqft)}" placeholder="e.g. 2150">
+    <label class="sm-label">Year built</label>
+    <input id="ld-year" class="sm-select" type="text" inputmode="numeric" value="${v(l.yearBuilt)}" placeholder="e.g. 1998">
+    <div class="sm-actions">
+      <button class="db-action-btn" onclick="closeStatusModal()">Cancel</button>
+      <button class="db-action-btn primary" onclick="submitDetails('${listingId}')">Save</button>
+    </div>`;
+  document.getElementById('status-modal').classList.remove('hidden');
+}
+async function submitDetails(listingId){
+  const token = await getDashboardAuthToken();
+  if (!token) { showToast('Session expired — please sign in again.', 'error'); return; }
+  const body = {
+    listingId,
+    beds:       document.getElementById('ld-beds')?.value.trim(),
+    baths:      document.getElementById('ld-baths')?.value.trim(),
+    sqft:       document.getElementById('ld-sqft')?.value.trim(),
+    year_built: document.getElementById('ld-year')?.value.trim(),
+  };
+  try {
+    const res = await fetch('/.netlify/functions/listing-details', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    if (!res.ok) { showToast(data.error || 'Could not save details.', 'error'); return; }
+    closeStatusModal();
+    showToast('✓ Listing details saved.', 'success');
+    loadDashboardData();
+  } catch (err) {
+    showToast('Could not save details: ' + err.message, 'error');
+  }
 }
 
 // ── STATUS MODAL — "Change Status" ────────────────────────────────────────

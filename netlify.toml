@@ -35,6 +35,12 @@
 [functions."reel-render"]
   timeout = 26
 
+[functions."reel-share"]
+  timeout = 10
+
+[functions."reel-view"]
+  timeout = 15
+
 [functions."check-narration"]
   timeout = 10
 
@@ -209,6 +215,13 @@
   to     = "https://smartstagepro.com/:splat"
   status = 301
   force  = true
+
+# ── Reel share page routing ──────────────────────────────
+[[redirects]]
+  from = "/reel/:token"
+  to = "/.netlify/functions/reel-view"
+  status = 200
+  force = true
 
 # ── Compliance page routing ──────────────────────────────
 [[redirects]]

@@ -1079,6 +1079,8 @@ module.exports = {
   buildSystemPrompt,
   applyAutoSelectionPlan,
   callClaudeVision,
+  KEN_BURNS_SELECTABLE_PRESETS,
+  COMPOUND_KEN_BURNS_PRESETS,
   fetchAndResizeForVision,
   CLAUDE_VISION_MAX_DIM,
 };

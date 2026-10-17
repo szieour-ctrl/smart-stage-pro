@@ -14,7 +14,10 @@
 //    invented facts (age of roof, school district, price, etc.)
 
 const SLOTS = require("./reel-slots.json");
-const { callClaudeVision, fetchAndResizeForVision, CLAUDE_VISION_MAX_DIM } = require("../autoSelect");
+const { callClaudeVision, fetchAndResizeForVision, CLAUDE_VISION_MAX_DIM, KEN_BURNS_SELECTABLE_PRESETS, COMPOUND_KEN_BURNS_PRESETS } = require("../autoSelect");
+
+// Ken Burns only (Reels have no AI Motion). Same vocabulary as the video builder.
+const ALLOWED_MOTION = new Set([...KEN_BURNS_SELECTABLE_PRESETS, ...COMPOUND_KEN_BURNS_PRESETS, "luxury_parallax"]);
 
 const MAX_CAPTION = 60;
 
@@ -61,9 +64,10 @@ Rules:
 4. Where a slot has a FIXED caption (typed by the agent), choose the photo that best matches that caption's meaning. Do not rewrite fixed captions.
 5. Where a slot asks for a caption, write 3-8 words (max ${MAX_CAPTION} characters) describing only what is clearly visible and permanent in that photo: architecture, natural light, layout, finishes, views, indoor-outdoor flow. Do NOT mention furniture, decor or staging (it may be virtually staged), and do NOT state anything you cannot see (no ages, upgrades, schools, prices, square footage). No emojis, no hashtags, no exclamation marks.
 6. Slots with no caption request get an empty caption.
+7. Motion: for EVERY slot also pick ONE Ken Burns camera movement for its photo, only from: ${[...ALLOWED_MOTION].join(", ")}. Match the photo's visual anchor: ceiling, chandelier or fan detail -> tilt_up; hero floor, rug or tilework -> tilt_down; main feature wall, island or fireplace -> push_in; a front exterior or wide open reveal -> pull_back; a strong lateral sightline (hallway, counter run) -> pan_left or pan_right; a corner-to-window or corner-to-patio diagonal -> drift; a wide shot with no directional feature -> float or pan_zoom; static only for a key clarity shot. Compound movements (names with several parts, e.g. soft_push_float_push, push_tilt_up, float_pull_back) only for hero spaces: front exterior, open-plan living, kitchen/living/dining, office/flex, primary bedroom or bath, and the strongest closing exterior. Never use a compound for a secondary bedroom, secondary bath or utility room. Use soft_push_float_strong_push for at most one scene. The Reel is a tall 9:16 crop, so favor push_in, pull_back, tilt and gentle drift, and use pan_left/pan_right sparingly. Judge the movements as a sequence: vary them and avoid the same move in two scenes in a row.
 
 Return ONLY a JSON object, no other text:
-{"slots":[{"slot":0,"photoId":"<id>","caption":""}, ...one entry per slot in order...],"notes":"<one short sentence on any weak spot, e.g. no kitchen photo, or empty string>"}`;
+{"slots":[{"slot":0,"photoId":"<id>","caption":"","motion":"push_in"}, ...one entry per slot in order...],"notes":"<one short sentence on any weak spot, e.g. no kitchen photo, or empty string>"}`;
 }
 
 async function buildUserContent({ event, slots, photos, intake }) {
@@ -114,7 +118,8 @@ function normalizePlan(raw, { event, slots, photos, intake }) {
       if (typed) { caption = typed; fixed = true; }
       else caption = String(e.caption || "").replace(/[!#]/g, "").replace(/\s+/g, " ").trim().slice(0, MAX_CAPTION).trim();
     }
-    return { slot: i, role: s.role, closing: !!s.closing, photoId, caption, captionKey: s.caption ? s.caption.key : null, captionIdx: s.caption ? s.caption.idx : null, fixedCaption: fixed };
+    const motion = ALLOWED_MOTION.has(e.motion) ? e.motion : "auto";
+    return { slot: i, role: s.role, closing: !!s.closing, photoId, caption, motion, captionKey: s.caption ? s.caption.key : null, captionIdx: s.caption ? s.caption.idx : null, fixedCaption: fixed };
   });
   // Arrays the Railway storyboard engine reads (aligned to its caption positions).
   const arrays = { highlights: [], supporting: [] };
@@ -133,4 +138,4 @@ async function generateReelPlan({ event, lengthSec, photos, intake, anthropicKey
   return normalizePlan(extractJsonObject(text), { event, slots, photos, intake });
 }
 
-module.exports = { SLOTS, photoRange, slotsFor, validateRequest, normalizePlan, extractJsonObject, buildSystemPrompt, generateReelPlan };
+module.exports = { ALLOWED_MOTION, SLOTS, photoRange, slotsFor, validateRequest, normalizePlan, extractJsonObject, buildSystemPrompt, generateReelPlan };

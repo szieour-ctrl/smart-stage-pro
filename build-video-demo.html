@@ -325,13 +325,13 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
     <div class="panel-pad">
       <div class="eyebrow">Reel &middot; Step 3</div>
       <div class="panel-title">Choose the motion</div>
-      <div class="panel-sub">Reels use Ken Burns movement only. Leave a scene on Auto and we'll pick a movement that suits the room.</div>
+      <div class="panel-sub">Reels use Ken Burns movement only. We've picked a movement for each photo \u2014 change any of them. Tap \u25b6 to preview it on your photo in 9:16.</div>
       <div class="rp-board" id="reelMotionBoard"></div>
       <div id="reelMotionSaved" class="hidden"></div>
     </div>
     <div class="action-row">
       <button class="btn btn-ghost" onclick="reelBackToStoryboard()">Back</button>
-      <button class="btn btn-primary" onclick="saveReelMotion()">Save Reel plan</button>
+      <button class="btn btn-primary" id="reelSaveBtn" onclick="saveReelMotion()">Save Reel plan</button>
     </div>
   </div>
 
@@ -2656,6 +2656,7 @@ function renderLightboxControls(id) {
 // Deliberately does not fake a video; says so plainly per the locked
 // decision rather than showing a static image dressed up as a preview.
 function openMotionPreview(presetKey, type) {
+  const st0 = document.getElementById("previewStage"); st0.style.aspectRatio = ""; st0.style.width = ""; st0.style.margin = ""; st0.style.overflow = "";
   const preset = type === "kling" ? KLING_PRESETS[presetKey] : (type === "ltx" ? LTX_PRESETS[presetKey] : KEN_BURNS_PRESETS[presetKey]);
   if (!preset) return;
   const clipUrl = PREVIEW_CLIP_URLS[presetKey];
@@ -2682,6 +2683,7 @@ function openMotionPreview(presetKey, type) {
 
 function closePreview() {
   document.getElementById("previewOverlay").classList.add("hidden");
+  const st = document.getElementById("previewStage"); st.style.aspectRatio = ""; st.style.width = ""; st.style.margin = ""; st.style.overflow = "";
   // Stop playback rather than leaving a hidden video looping/downloading
   // in the background — matters more here than usual since these are real
   // Cloudinary-hosted clips, not free local assets.
@@ -3550,7 +3552,7 @@ function reelPlanInit() {
   reelPlan.slots.forEach(s => {
     reelPlan.photoCaptions[s.photoId] = s.caption || "";
     reelPlan.photoFixed[s.photoId] = !!s.fixedCaption;
-    reelPlan.photoMotion[s.photoId] = "auto";
+    reelPlan.photoMotion[s.photoId] = (s.motion && KEN_BURNS_PRESETS[s.motion]) ? s.motion : "auto";
   });
 }
 function renderReelPlan() {
@@ -3581,11 +3583,58 @@ function renderReelPlan() {
 }
 
 // ── Step 3: motion per scene (Ken Burns only) ──
-const REEL_MOTIONS = ["auto", "push_in", "pull_back", "pan_left", "pan_right", "tilt_up", "tilt_down", "drift", "float", "pan_zoom", "luxury_parallax", "static"];
+const REEL_MOTION_STANDARD = ["auto", "push_in", "pull_back", "pan_left", "pan_right", "tilt_up", "tilt_down", "drift", "float", "pan_zoom", "luxury_parallax", "static"];
+const REEL_MOTION_COMPOUND = ["soft_push_float_push", "soft_push_float_diagonal", "soft_push_float_push_diagonal", "soft_push_float_gentle_diagonal", "soft_push_float_strong_push",
+  "push_tilt_up", "push_tilt_down", "push_pan_left", "push_pan_right", "pan_left_push", "pan_right_push", "float_pull_back"];
+
+// 9:16 preview on the agent's OWN photo: an approximation of each movement as [scale, x%, y%] waypoints.
+// (Exact-render previews would need pre-rendered stock clips; the video builder's clips are 16:9.)
+const RM = {
+  push_in: [[1.05,0,0],[1.3,0,0]], pull_back: [[1.3,0,0],[1.05,0,0]],
+  pan_left: [[1.25,-6,0],[1.25,6,0]], pan_right: [[1.25,6,0],[1.25,-6,0]],
+  tilt_up: [[1.25,0,-6],[1.25,0,6]], tilt_down: [[1.25,0,6],[1.25,0,-6]],
+  drift: [[1.25,-5,-4],[1.25,5,4]], pan_zoom: [[1.15,-5,0],[1.35,5,0]],
+  luxury_parallax: [[1.1,-4,3],[1.28,3,-2]], static: [[1,0,0],[1,0,0]],
+  float: [[1.12,0,0],[1.14,1.5,-1],[1.12,0,0],[1.14,-1.5,1],[1.12,0,0]],
+};
+const RM_SOFT = [[1.05,0,0],[1.15,0,0]], RM_FLOAT = [[1.15,0,0],[1.17,1.5,-1],[1.15,0,0]];
+const RM_COMPOUND = {
+  soft_push_float_push: [...RM_SOFT, ...RM_FLOAT, [1.32,0,0]],
+  soft_push_float_diagonal: [...RM_SOFT, ...RM_FLOAT, [1.28,5,3]],
+  soft_push_float_push_diagonal: [...RM_SOFT, ...RM_FLOAT, [1.34,6,4]],
+  soft_push_float_gentle_diagonal: [...RM_SOFT, ...RM_FLOAT, [1.22,3,2]],
+  soft_push_float_strong_push: [...RM_SOFT, ...RM_FLOAT, [1.42,0,0]],
+  push_tilt_up: [[1.05,0,0],[1.2,0,0],[1.28,0,6]], push_tilt_down: [[1.05,0,0],[1.2,0,0],[1.28,0,-6]],
+  push_pan_left: [[1.05,0,0],[1.2,0,0],[1.28,6,0]], push_pan_right: [[1.05,0,0],[1.2,0,0],[1.28,-6,0]],
+  pan_left_push: [[1.2,-6,0],[1.2,0,0],[1.38,0,0]], pan_right_push: [[1.2,6,0],[1.2,0,0],[1.38,0,0]],
+  float_pull_back: [[1.3,0,0],[1.32,1.5,-1],[1.3,0,0],[1.05,0,0]],
+};
+function reelMotionWaypoints(key) { return RM_COMPOUND[key] || RM[key] || RM.push_in; }
+function openReelMotionPreview(photoUrl, key) {
+  const isAuto = key === "auto", use = isAuto ? "push_in" : key, preset = KEN_BURNS_PRESETS[key] || KEN_BURNS_PRESETS.auto;
+  const stage = document.getElementById("previewStage");
+  stage.style.aspectRatio = "9/16"; stage.style.width = "min(260px, 52vh)"; stage.style.margin = "0 auto"; stage.style.overflow = "hidden";
+  stage.innerHTML = '<button class="lightbox-close" onclick="closePreview()">&times;</button>' +
+    '<img id="reelPrevImg" src="' + escHtml(photoUrl) + '" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;">';
+  document.getElementById("previewInfo").innerHTML = '<div class="panel-title">' + escHtml(preset.label) + '</div><div class="panel-sub">' + escHtml(preset.desc) +
+    '</div><div class="ri-help" style="margin-top:8px;">' + (isAuto ? "Auto picks a movement for the room when the Reel renders; showing Push In as an example. " : "") +
+    'Approximate preview on your photo in the 9:16 frame \u2014 the final render may differ slightly.</div>';
+  document.getElementById("previewOverlay").classList.remove("hidden");
+  const pts = reelMotionWaypoints(use), img = document.getElementById("reelPrevImg");
+  if (img && img.animate) {
+    img.animate(pts.map(([sc, x, y]) => ({ transform: "translate(" + x + "%," + y + "%) scale(" + sc + ")", easing: "ease-in-out" })),
+      { duration: Math.max(4000, pts.length * 1800), iterations: Infinity, direction: "alternate" });
+  }
+}
+function reelPreviewFor(i) {
+  const sl = reelPlan.slots[i], p = reelAllPhotos().find(x => x.id === sl.photoId) || {};
+  openReelMotionPreview(p.url || "", reelPlan.photoMotion[sl.photoId] || "auto");
+}
 function enterReelMotion() {
   document.getElementById("stepReelPhotos").classList.add("hidden");
   document.getElementById("stepReelMotion").classList.remove("hidden");
   document.getElementById("reelMotionSaved").classList.add("hidden");
+  const sb0 = document.getElementById("reelSaveBtn"); if (sb0) sb0.textContent = "Save Reel plan";
   renderReelMotion();
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
@@ -3598,11 +3647,12 @@ function renderReelMotion() {
   const all = reelAllPhotos(), board = document.getElementById("reelMotionBoard");
   board.innerHTML = reelPlan.slots.map((s, i) => {
     const p = all.find(x => x.id === s.photoId) || {}, cur = reelPlan.photoMotion[s.photoId] || "auto";
-    const opts = REEL_MOTIONS.filter(k => KEN_BURNS_PRESETS[k]).map(k => '<option value="' + k + '"' + (k === cur ? " selected" : "") + ">" + KEN_BURNS_PRESETS[k].label + "</option>").join("");
+    const optHtml = list => list.filter(k => KEN_BURNS_PRESETS[k]).map(k => '<option value="' + k + '"' + (k === cur ? " selected" : "") + ">" + KEN_BURNS_PRESETS[k].label + "</option>").join("");
+    const opts = '<optgroup label="Standard">' + optHtml(REEL_MOTION_STANDARD) + '</optgroup><optgroup label="Compound (hero rooms)">' + optHtml(REEL_MOTION_COMPOUND) + '</optgroup>';
     return '<div class="rp-slot"><div class="rp-n">' + (i + 1) + '</div><img src="' + escHtml(p.url || "") + '" alt="">' +
       '<div><div class="rp-role">' + escHtml(s.role) + '</div><select data-m="' + i + '" style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:4px;font-family:inherit;">' + opts + '</select>' +
       '<div class="rp-fixed" data-md="' + i + '">' + escHtml((KEN_BURNS_PRESETS[cur] || {}).desc || "") + '</div></div>' +
-      '<div class="rp-move"><button type="button" data-pv="' + i + '">&#9654;</button></div></div>';
+      '<div class="rp-move"><button type="button" data-pv="' + i + '" title="Preview in 9:16">&#9654;</button></div></div>';
   }).join("");
   board.querySelectorAll("select[data-m]").forEach(el => el.addEventListener("change", () => {
     const i = Number(el.getAttribute("data-m")), sl = reelPlan.slots[i];
@@ -3610,16 +3660,19 @@ function renderReelMotion() {
     board.querySelector('[data-md="' + i + '"]').textContent = (KEN_BURNS_PRESETS[el.value] || {}).desc || "";
   }));
   board.querySelectorAll("[data-pv]").forEach(el => el.addEventListener("click", () => {
-    const sl = reelPlan.slots[Number(el.getAttribute("data-pv"))];
-    if (typeof openMotionPreview === "function") openMotionPreview(reelPlan.photoMotion[sl.photoId] || "auto", "kenburns");
+    reelPreviewFor(Number(el.getAttribute("data-pv")));
   }));
 }
 function saveReelMotion() {
   reelPlanSync();
+  try { sessionStorage.setItem("reelPlan_" + (REAL_LISTING_ID || "none"), JSON.stringify({ intake: window._reelIntake, plan: reelPlan })); } catch (e) { /* non-fatal */ }
   const box = document.getElementById("reelMotionSaved");
-  box.innerHTML = '<div class="ri-group-title">Reel plan saved</div><div class="ri-help">' + reelPlan.slots.length + ' scenes \u00b7 ' +
-    reelPlan.slots.map(s => (KEN_BURNS_PRESETS[s.motion] || {}).label || s.motion).join(" \u00b7 ") + '. Next: render the Reel (coming next).</div>';
+  box.innerHTML = '<div class="ri-brand" style="border-color:var(--gold);"><b>&#10003; Reel plan saved.</b> ' + reelPlan.slots.length + ' scenes \u00b7 ' +
+    reelPlan.slots.map(s => (KEN_BURNS_PRESETS[s.motion] || {}).label || s.motion).join(" \u00b7 ") +
+    '<div class="ri-help" style="margin-top:6px;">Rendering the Reel from this plan is the next piece we\u2019re building \u2014 nothing renders or charges yet.</div></div>';
   box.classList.remove("hidden");
+  const btn = document.getElementById("reelSaveBtn"); if (btn) btn.textContent = "Saved \u2713";
+  box.scrollIntoView({ behavior: "smooth", block: "center" });
 }
 if (urlParams.get("reels") === "1") document.getElementById("reelModeBar").classList.remove("hidden");
 

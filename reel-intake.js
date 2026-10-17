@@ -11,13 +11,15 @@
 (function (root) {
   "use strict";
 
-  // Reel lengths and the photo counts they target. Proposed mapping (Oct 16) — one place to change it.
+  // Reel lengths and the photo counts they allow (Oct 17): each photo gets 2.5-7.5s, max 8 photos.
+  // Must match REEL_PHOTO_RANGES in the Railway reelStoryboard.js (and lib/reel-slots.json).
   const REEL_LENGTHS = [
-    { sec: 15, photos: "3-4" },
-    { sec: 30, photos: "5-6" },
-    { sec: 45, photos: "7" },
-    { sec: 60, photos: "8" },
+    { sec: 15, min: 3, max: 6 },
+    { sec: 30, min: 4, max: 8 },
+    { sec: 45, min: 6, max: 8 },
+    { sec: 60, min: 8, max: 8 },
   ];
+  const photoRangeText = (l) => (l.min === l.max ? `${l.min} photos` : `${l.min}\u2013${l.max} photos`);
 
   // Field kinds: text | money | textarea | date | time | check
   const F = {
@@ -282,7 +284,7 @@
         </div>
         <div class="ri-help">Beds, baths and sq ft come from your saved listing details. Changing them here applies to this Reel only.</div>`;
       const lengths = REEL_LENGTHS.map((l) =>
-        `<button type="button" class="ri-len${st.lengthSec === l.sec ? " on" : ""}" data-len="${l.sec}">${l.sec}s<span>about ${l.photos} photos</span></button>`).join("");
+        `<button type="button" class="ri-len${st.lengthSec === l.sec ? " on" : ""}" data-len="${l.sec}">${l.sec}s<span>${photoRangeText(l)}</span></button>`).join("");
       form = `
         <div class="ri-form">
           <div class="ri-group-title">${esc(ev.label)}</div>
@@ -328,7 +330,7 @@
     return { ok: true, errors: [], intake: buildIntake(st.eventKey, st.values, { address: opts.address, lengthSec: st.lengthSec }) };
   }
 
-  const api = { REEL_LENGTHS, EVENTS, EVENT_KEYS, formatMoney, formatDate, formatTime, buildIntake, validateIntake, render, collect };
+  const api = { REEL_LENGTHS, photoRangeText, EVENTS, EVENT_KEYS, formatMoney, formatDate, formatTime, buildIntake, validateIntake, render, collect };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.ReelIntake = api;
 })(typeof window !== "undefined" ? window : globalThis);

@@ -99,14 +99,10 @@ function extractJsonObject(text) {
 // Model captions: buyer-benefit phrase, max 8 words, no commas / dashes / trailing period.
 function cleanBenefit(raw) {
   let t = String(raw || "").replace(/[!#]/g, "").replace(/\u2013/g, "-").replace(/[,;:\u2014]+/g, " ").replace(/\s+/g, " ").trim().replace(/[.\s]+$/, "");
-  const words = t.split(" ").filter(Boolean);
-  if (words.length > 8) {
-    let w = words.slice(0, 8);
-    while (w.length > 3 && /^(and|with|for|to|of|the|a|an|in|on|at|by|or|your|every)$/i.test(w[w.length - 1])) w.pop(); // never end mid-phrase
-    t = w.join(" ");
-  }
   if (t.length > MAX_CAPTION) t = t.slice(0, MAX_CAPTION).replace(/\s+\S*$/, "");
-  return t.trim();
+  const w = t.split(" ").filter(Boolean).slice(0, 8);
+  while (w.length > 3 && /^(and|with|for|to|of|the|a|an|in|on|at|by|or|your|every)$/i.test(w[w.length - 1])) w.pop(); // never end mid-phrase
+  return w.join(" ");
 }
 
 // Never trust the model: fix duplicates / omissions / unknown ids, force fixed captions.

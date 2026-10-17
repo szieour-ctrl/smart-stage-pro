@@ -2165,7 +2165,7 @@ async function downloadVideoJob({ jobId, userId }) {
   if (!jobId || !userId) throw new Error("Missing jobId or userId");
 
   const jobRes = await supabase("GET", "video_jobs", null,
-    `?id=eq.${jobId}&select=id,user_id,status,output_16x9_url,output_9x16_url,credits_used,credits_charged_at,listing_id`
+    `?id=eq.${jobId}&select=id,user_id,status,output_16x9_url,output_9x16_url,output_16x9_unbranded_url,output_9x16_unbranded_url,credits_used,credits_charged_at,listing_id`
   );
   const job = jobRes.data?.[0];
 
@@ -2179,14 +2179,19 @@ async function downloadVideoJob({ jobId, userId }) {
   // (not cached) since a re-download request might come well after the
   // first one's 24-hour window expired.
   if (job.credits_charged_at) {
-    const [signed16x9, signed9x16] = await Promise.all([
+    const [signed16x9, signed9x16, signed16x9U, signed9x16U] = await Promise.all([
       signVideoUrl(job.output_16x9_url, 60 * 60 * 24),
       signVideoUrl(job.output_9x16_url, 60 * 60 * 24),
+      signVideoUrl(job.output_16x9_unbranded_url, 60 * 60 * 24),
+      signVideoUrl(job.output_9x16_unbranded_url, 60 * 60 * 24),
     ]);
     return {
       downloadReady: true,
       output16x9Url: signed16x9,
       output9x16Url: signed9x16,
+      // Unbranded (MLS) versions: same single charge covers both. null when not rendered.
+      output16x9UnbrandedUrl: signed16x9U,
+      output9x16UnbrandedUrl: signed9x16U,
     };
   }
 
@@ -2239,14 +2244,18 @@ async function downloadVideoJob({ jobId, userId }) {
     output9x16Url: job.output_9x16_url,
   });
 
-  const [downloadSigned16x9, downloadSigned9x16] = await Promise.all([
+  const [downloadSigned16x9, downloadSigned9x16, downloadSigned16x9U, downloadSigned9x16U] = await Promise.all([
     signVideoUrl(job.output_16x9_url, 60 * 60 * 24),
     signVideoUrl(job.output_9x16_url, 60 * 60 * 24),
+    signVideoUrl(job.output_16x9_unbranded_url, 60 * 60 * 24),
+    signVideoUrl(job.output_9x16_unbranded_url, 60 * 60 * 24),
   ]);
   return {
     downloadReady: true,
     output16x9Url: downloadSigned16x9,
     output9x16Url: downloadSigned9x16,
+    output16x9UnbrandedUrl: downloadSigned16x9U,
+    output9x16UnbrandedUrl: downloadSigned9x16U,
   };
 }
 
@@ -2365,20 +2374,24 @@ async function getJobStatus(jobId) {
   // the July 10 decision above: the user still watches the real, full
   // result live.
   const r = await supabase("GET", "video_jobs", null,
-    `?id=eq.${jobId}&select=id,status,thumbnail_url,output_16x9_url,output_9x16_url,credits_used,credits_charged_at,generation_count,kling_images_charged,narration_script,error_message,created_at,completed_at`
+    `?id=eq.${jobId}&select=id,status,thumbnail_url,output_16x9_url,output_9x16_url,output_16x9_unbranded_url,output_9x16_unbranded_url,credits_used,credits_charged_at,generation_count,kling_images_charged,narration_script,error_message,created_at,completed_at`
   );
   const job = r.data?.[0];
   if (!job) return null;
 
-  const [statusSigned16x9, statusSigned9x16] = await Promise.all([
+  const [statusSigned16x9, statusSigned9x16, statusSigned16x9U, statusSigned9x16U] = await Promise.all([
     signVideoUrl(job.output_16x9_url, 60 * 60),
     signVideoUrl(job.output_9x16_url, 60 * 60),
+    signVideoUrl(job.output_16x9_unbranded_url, 60 * 60),
+    signVideoUrl(job.output_9x16_unbranded_url, 60 * 60),
   ]);
 
   return {
     ...job,
     output_16x9_url: statusSigned16x9,
     output_9x16_url: statusSigned9x16,
+    output_16x9_unbranded_url: statusSigned16x9U,
+    output_9x16_unbranded_url: statusSigned9x16U,
   };
 }
 

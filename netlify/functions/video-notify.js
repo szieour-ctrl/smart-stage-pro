@@ -148,6 +148,10 @@ exports.handler = async (event) => {
     if (status === "complete") {
       updateFields.output_16x9_url = urls?.["16x9"] || null;
       updateFields.output_9x16_url = urls?.["9x16"] || null;
+      // Unbranded (MLS) versions of the same video — only present for branded jobs. Same private
+      // S3 keys as the main outputs; signed only behind the existing credit gate.
+      updateFields.output_16x9_unbranded_url = urls?.["16x9_unbranded"] || null;
+      updateFields.output_9x16_unbranded_url = urls?.["9x16_unbranded"] || null;
       updateFields.completed_at = new Date().toISOString();
       // NEW (July 14, 2026 — footage-grounded narration rebuild): the
       // script is generated Railway-side now, during the render — this

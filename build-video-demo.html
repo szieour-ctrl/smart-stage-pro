@@ -2989,7 +2989,19 @@ function pollJobStatus(jobId) {
 // loses the frame selection/ordering/motion assignments entirely, so that
 // decision needs to be made with real information, not a static thumbnail.
 function showRenderComplete(job) {
-  const videoUrl = job.output_16x9_url || job.output_9x16_url;
+  // Branded jobs also carry an UNBRANDED (MLS) version of the same video; one download covers both.
+  // Preview defaults to Unbranded when both exist.
+  const brandedUrl = job.output_16x9_url || job.output_9x16_url;
+  const unbrandedUrl = job.output_16x9_unbranded_url || job.output_9x16_unbranded_url;
+  const hasBothVariants = !!(brandedUrl && unbrandedUrl);
+  window._previewVariants = { branded: brandedUrl || null, unbranded: unbrandedUrl || null };
+  const videoUrl = hasBothVariants ? unbrandedUrl : brandedUrl;
+  const variantToggle = hasBothVariants ? `
+    <div id="variantToggle" style="display:flex;gap:8px;justify-content:center;margin:10px 0 0;">
+      <button type="button" class="btn btn-primary" style="flex:none;padding:6px 14px;" data-variant="unbranded" onclick="switchPreviewVariant('unbranded')">Unbranded (MLS)</button>
+      <button type="button" class="btn btn-ghost" style="flex:none;padding:6px 14px;" data-variant="branded" onclick="switchPreviewVariant('branded')">Branded (social)</button>
+    </div>
+    <div style="font-size:0.78rem;color:var(--ink);opacity:.75;margin-top:6px;">Both versions are included in one download. Unbranded has no agent name, license number, brokerage, logo or call-to-action.</div>` : "";
   const genCount = job.generation_count || generationCount;
   // FIX (July 13): the "used one of your monthly videos" line only applies
   // to generation #1 — consumeVideoQuotaSlot only runs in createVideoJob,
@@ -3025,6 +3037,7 @@ function showRenderComplete(job) {
     ${videoUrl
       ? `<video id="renderCompleteVideo" src="${videoUrl}" controls controlsList="nodownload noplaybackrate noremoteplayback" disablePictureInPicture disableRemotePlayback oncontextmenu="return false;" autoplay muted playsinline style="width:100%;max-width:480px;border-radius:4px;margin:12px 0;background:#000;"></video>`
       : (job.thumbnail_url ? `<img src="${job.thumbnail_url}" alt="Preview thumbnail" style="max-width:100%;border-radius:4px;margin:12px 0;">` : "")}
+    ${variantToggle}
     ${narrationBlock}
     <div class="result-body">Watch it back \u2014 the AI Motion cost above is already spent (or drawn from this month's free pool), and ${quotaLine}take your time deciding. Download is a separate flat fee for the formal export: it locks this in and adds it to your AB 723 compliance page, but never touches your monthly video count. If you Iterate instead, this same shared monthly AI Motion pool applies again \u2014 frames are free if you still have pool balance left, billed in Images once it's gone, exactly like a first generation. Iterating does NOT add to your monthly video count, since it's a redo of this same video, not a new one. The current result is replaced, not kept alongside the new one.</div>
     <div style="margin-top:18px;display:flex;gap:10px;justify-content:center;">
@@ -3105,6 +3118,18 @@ function handleRetryAfterFailure() {
   goToStep(4);
 }
 
+function switchPreviewVariant(kind) {
+  const v = window._previewVariants || {};
+  const url = v[kind];
+  const el = document.getElementById("renderCompleteVideo");
+  if (!url || !el) return;
+  el.src = url;
+  el.play().catch(() => {});
+  document.querySelectorAll("#variantToggle button").forEach((b) => {
+    b.className = "btn " + (b.dataset.variant === kind ? "btn-primary" : "btn-ghost");
+  });
+}
+
 async function handleDownload() {
   document.getElementById("resultContent").innerHTML = `<div class="result-icon">&#8987;</div><div class="result-title">Processing download\u2026</div>`;
   try {
@@ -3129,10 +3154,14 @@ async function handleDownload() {
       throw new Error(MESSAGES[data.error] || data.error || "Download failed");
     }
     await refreshBalanceDisplay();
-    const links = [
-      data.output16x9Url ? `<a href="${data.output16x9Url}" target="_blank" rel="noopener">16:9 video</a>` : "",
-      data.output9x16Url ? `<a href="${data.output9x16Url}" target="_blank" rel="noopener">9:16 video</a>` : "",
+    const linkRow = (a, b) => [
+      a ? `<a href="${a}" target="_blank" rel="noopener">16:9 video</a>` : "",
+      b ? `<a href="${b}" target="_blank" rel="noopener">9:16 video</a>` : "",
     ].filter(Boolean).join(" &nbsp;\u00b7&nbsp; ");
+    const hasUnbranded = !!(data.output16x9UnbrandedUrl || data.output9x16UnbrandedUrl);
+    const links = hasUnbranded
+      ? `<strong>Unbranded (MLS)</strong><br>${linkRow(data.output16x9UnbrandedUrl, data.output9x16UnbrandedUrl)}<br><br><strong>Branded (social)</strong><br>${linkRow(data.output16x9Url, data.output9x16Url)}<br><br><em>One download covers both versions.</em>`
+      : linkRow(data.output16x9Url, data.output9x16Url);
     document.getElementById("resultContent").innerHTML = `
       <div class="result-icon">&#11015;</div>
       <div class="result-title">Downloaded</div>

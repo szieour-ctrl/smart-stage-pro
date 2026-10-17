@@ -119,7 +119,7 @@ function supabaseGet(table, queryParams = "") {
 async function getDisclosedVideoJobs(projectId) {
   const jobsResult = await supabaseGet(
     "video_jobs",
-    `?project_id=eq.${projectId}&status=eq.complete&credits_charged_at=not.is.null&select=id,output_16x9_url,output_9x16_url,formats,completed_at&order=completed_at.asc`
+    `?project_id=eq.${projectId}&status=eq.complete&credits_charged_at=not.is.null&select=id,output_16x9_url,output_9x16_url,output_16x9_unbranded_url,output_9x16_unbranded_url,formats,completed_at&order=completed_at.asc`
   );
   const jobs = jobsResult.data || [];
   if (jobs.length === 0) return [];
@@ -140,6 +140,8 @@ async function getDisclosedVideoJobs(projectId) {
         // about it.
         output_16x9_url: await signVideoUrl(job.output_16x9_url),
         output_9x16_url: await signVideoUrl(job.output_9x16_url),
+        output_16x9_unbranded_url: await signVideoUrl(job.output_16x9_unbranded_url),
+        output_9x16_unbranded_url: await signVideoUrl(job.output_9x16_unbranded_url),
         frames: framesResult.data || [],
       };
     })
@@ -266,6 +268,8 @@ function renderPage(project, projectId, videoJobs, branding) {
       <div style="padding:10px 12px;background:#f7f4ef;border-top:1px solid #e0d8ce;font-size:11px;display:flex;gap:16px;flex-wrap:wrap;">
         ${job.output_16x9_url ? `<a href="${job.output_16x9_url}" download class="dl-link">↓ Download Video (16:9)</a>` : ""}
         ${job.output_9x16_url ? `<a href="${job.output_9x16_url}" download class="dl-link">↓ Download Video (9:16)</a>` : ""}
+        ${job.output_16x9_unbranded_url ? `<a href="${job.output_16x9_unbranded_url}" download class="dl-link">↓ Unbranded (MLS) 16:9</a>` : ""}
+        ${job.output_9x16_unbranded_url ? `<a href="${job.output_9x16_unbranded_url}" download class="dl-link">↓ Unbranded (MLS) 9:16</a>` : ""}
       </div>
       <div class="video-tour-sources-label">Original, unaltered photographs used to generate this video (${job.frames.length})</div>
       <div class="video-tour-sources-grid">

@@ -5,6 +5,7 @@
 
 const { getStore } = require("@netlify/blobs");
 const { brandingForProject, escapeHtml: escBrand } = require("./lib/marketing-profile-lib");
+const { formatDetailsLine } = require("./lib/listing-details-lib");
 const https = require("https");
 
 // MIGRATED (Aug 25, 2026 — Cloudinary→S3 finished-video migration):
@@ -201,7 +202,7 @@ function formatDate(isoString) {
   });
 }
 
-function renderPage(project, projectId, videoJobs, branding) {
+function renderPage(project, projectId, videoJobs, branding, listingDetails) {
   // Oct 16, 2026 — Marketing Profile. Branding now comes from the listing
   // owner's profile (see lib/marketing-profile-lib.js), resolved at request time.
   // A user with no profile gets a NEUTRAL Smart Stage PRO header: the old
@@ -486,6 +487,7 @@ function renderPage(project, projectId, videoJobs, branding) {
 <div class="property-card">
   <div>
     <div class="property-address">${address}</div>
+    ${formatDetailsLine(listingDetails) ? `<div class="property-meta" style="color:#1a1714;font-weight:500;">${escBrand(formatDetailsLine(listingDetails))}</div>` : ""}
     <div class="property-meta">${images.length} ${countNoun} image set${images.length !== 1 ? "s" : ""} · Last updated ${formatDate(project.updatedAt || project.createdAt)}</div>
   </div>
   <div class="property-actions">
@@ -707,7 +709,17 @@ exports.handler = async (event) => {
     // Never throws: falls back to the neutral Smart Stage PRO header.
     const branding = await brandingForProject(project);
 
-    return { statusCode: 200, headers: htmlHeaders, body: renderPage(project, projectId, videoJobs, branding) };
+    // Oct 17, 2026 — Listing Details (beds/baths/sqft/year built). Optional
+    // and non-fatal: a failure here just omits the line.
+    let listingDetails = null;
+    try {
+      const ld = await supabaseGet("listings", `?project_id=eq.${encodeURIComponent(projectId)}&select=beds,baths,sqft,year_built&limit=1`);
+      listingDetails = ld.data?.[0] || null;
+    } catch (detailsErr) {
+      console.error("compliance-page listing details fetch error (non-fatal):", detailsErr.message);
+    }
+
+    return { statusCode: 200, headers: htmlHeaders, body: renderPage(project, projectId, videoJobs, branding, listingDetails) };
 
   } catch (err) {
     console.error("compliance-page error:", err.message);

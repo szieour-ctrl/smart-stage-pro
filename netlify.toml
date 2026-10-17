@@ -32,6 +32,9 @@
 [functions."reel-plan"]
   timeout = 10
 
+[functions."reel-render"]
+  timeout = 26
+
 [functions."check-narration"]
   timeout = 10
 

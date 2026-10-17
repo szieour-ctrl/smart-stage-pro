@@ -62,7 +62,7 @@ Rules:
 2. Slot 0 is the opening: use the single strongest, most scroll-stopping image (usually the front exterior or the best hero room). The LAST slot is the closing: use a strong, welcoming image (an exterior, a view, or an inviting living space).
 3. Match each middle slot to its "image" hint as well as you can. Keep rooms that belong together adjacent.
 4. Where a slot has a FIXED caption (typed by the agent), choose the photo that best matches that caption's meaning. Do not rewrite fixed captions.
-5. Where a slot asks for a caption, write a BUYER BENEFIT line, not a description. The Reel exists to inspire, entice and meet a human need. Method: identify the clearly visible, permanent feature in the photo (architecture, natural light, layout, finishes, views, indoor-outdoor flow), then restate it as the comfort, flow, convenience or enjoyment it gives the buyer. One polished phrase of 8 words or fewer (and max ${MAX_CAPTION} characters). No commas, no conjunction chains ("and" strings), no filler, and never repeat the feature's own label (say what it gives them, not what it is). Examples: large kitchen island -> "Perfect kitchen for cooking and gathering"; open layout -> "Bright connected living with outdoor flow"; patio view -> "Inviting indoor-outdoor living for daily comfort". Stay truthful: the benefit must follow directly from what is visible. Do NOT mention furniture, decor or staging (it may be virtually staged), and do NOT state anything you cannot see (no ages, upgrades, schools, neighborhood claims, prices, square footage, "quiet" or "private" unless clearly visible). No emojis, no hashtags, no exclamation marks. Vary the wording and the benefit across scenes; do not reuse the same opening word twice.
+5. Where a slot asks for a caption, write a BUYER BENEFIT line, not a description. The Reel exists to inspire, entice and meet a human need. Method: identify the clearly visible, permanent feature in the photo (architecture, natural light, layout, finishes, views, indoor-outdoor flow), then restate it as the comfort, flow, convenience or enjoyment it gives the buyer. One polished phrase of 8 words or fewer (and max ${MAX_CAPTION} characters). No commas, no conjunction chains ("and" strings), no filler, and never repeat the feature's own label (say what it gives them, not what it is). Examples: large kitchen island -> "Perfect kitchen for cooking and gathering"; open layout -> "Bright connected living with outdoor flow"; patio view -> "Inviting indoor-outdoor living for daily comfort". Stay truthful: the benefit must follow directly from what is visible. Do NOT mention furniture, decor or staging (it may be virtually staged), and do NOT state anything you cannot see (no ages, upgrades, schools, neighborhood claims, prices, square footage, "quiet" or "private" unless clearly visible). No emojis, no hashtags, no exclamation marks. HARD LIMITS: count the words before you answer; if a caption has more than 8 words, rewrite it shorter (never trim words off the end). Never name the feature itself: skip words like island, fireplace, lawn, tub, patio, pool, cabinets, counters; say what it gives the buyer. BAD: "Outdoor fireplace and lawn for year-round enjoyment" (names the features). GOOD: "Cozy evenings outdoors in every season". BAD: "Soaking tub with a view for daily retreat" (names the tub). GOOD: "Spa-like daily retreat to unwind". BAD: "Room to cook gather and seat the whole family" (9 words, no punctuation). GOOD: "Room for everyone to cook and gather". Vary the wording and the benefit across scenes; do not reuse the same opening word twice.
 6. Slots with no caption request get an empty caption.
 7. Motion: for EVERY slot also pick ONE Ken Burns camera movement for its photo, only from: ${[...ALLOWED_MOTION].join(", ")}. Match the photo's visual anchor: ceiling, chandelier or fan detail -> tilt_up; hero floor, rug or tilework -> tilt_down; main feature wall, island or fireplace -> push_in; a front exterior or wide open reveal -> pull_back; a strong lateral sightline (hallway, counter run) -> pan_left or pan_right; a corner-to-window or corner-to-patio diagonal -> drift; a wide shot with no directional feature -> float or pan_zoom; static only for a key clarity shot. Compound movements (names with several parts, e.g. soft_push_float_push, push_tilt_up, float_pull_back) only for hero spaces: front exterior, open-plan living, kitchen/living/dining, office/flex, primary bedroom or bath, and the strongest closing exterior. Never use a compound for a secondary bedroom, secondary bath or utility room. Use soft_push_float_strong_push for at most one scene. The Reel is a tall 9:16 crop, so favor push_in, pull_back, tilt and gentle drift, and use pan_left/pan_right sparingly. Judge the movements as a sequence: vary them and avoid the same move in two scenes in a row.
 
@@ -97,8 +97,11 @@ function extractJsonObject(text) {
 }
 
 // Model captions: buyer-benefit phrase, max 8 words, no commas / dashes / trailing period.
+function tidyCaption(raw) {
+  return String(raw || "").replace(/[!#]/g, "").replace(/\u2013/g, "-").replace(/[,;:\u2014]+/g, " ").replace(/\s+/g, " ").trim().replace(/[.\s]+$/, "");
+}
 function cleanBenefit(raw) {
-  let t = String(raw || "").replace(/[!#]/g, "").replace(/\u2013/g, "-").replace(/[,;:\u2014]+/g, " ").replace(/\s+/g, " ").trim().replace(/[.\s]+$/, "");
+  let t = tidyCaption(raw);
   if (t.length > MAX_CAPTION) t = t.slice(0, MAX_CAPTION).replace(/\s+\S*$/, "");
   const w = t.split(" ").filter(Boolean).slice(0, 8);
   while (w.length > 3 && /^(and|with|for|to|of|the|a|an|in|on|at|by|or|your|every)$/i.test(w[w.length - 1])) w.pop(); // never end mid-phrase
@@ -121,20 +124,50 @@ function normalizePlan(raw, { event, slots, photos, intake }) {
   const out = slots.map((s, i) => {
     const e = byIdx[i] || {};
     const photoId = e.photoId || leftover.shift();
-    let caption = "", fixed = false;
+    let caption = "", rawCaption = "", fixed = false;
     if (s.caption) {
       const typed = userCaption(intake, s.caption);
       if (typed) { caption = typed; fixed = true; }
-      else caption = cleanBenefit(e.caption);
+      else { rawCaption = tidyCaption(e.caption); caption = cleanBenefit(e.caption); }
     }
     const motion = ALLOWED_MOTION.has(e.motion) ? e.motion : "auto";
-    return { slot: i, role: s.role, closing: !!s.closing, photoId, caption, motion, captionKey: s.caption ? s.caption.key : null, captionIdx: s.caption ? s.caption.idx : null, fixedCaption: fixed };
+    return { slot: i, role: s.role, closing: !!s.closing, photoId, caption, rawCaption, motion, captionKey: s.caption ? s.caption.key : null, captionIdx: s.caption ? s.caption.idx : null, fixedCaption: fixed };
   });
-  // Arrays the Railway storyboard engine reads (aligned to its caption positions).
+  const plan = { event, sceneCount: slots.length, slots: out, highlights: [], supporting: [], notes: String((raw && raw.notes) || "").slice(0, 200) };
+  rebuildArrays(plan);
+  return plan;
+}
+
+// Arrays the Railway storyboard engine reads (aligned to its caption positions).
+function rebuildArrays(plan) {
   const arrays = { highlights: [], supporting: [] };
-  out.forEach((o) => { if (o.captionKey) arrays[o.captionKey][o.captionIdx] = o.caption; });
+  plan.slots.forEach((o) => { if (o.captionKey) arrays[o.captionKey][o.captionIdx] = o.caption; });
   for (const k of ["highlights", "supporting"]) for (let i = 0; i < arrays[k].length; i++) if (arrays[k][i] == null) arrays[k][i] = "";
-  return { event, sceneCount: slots.length, slots: out, highlights: arrays.highlights, supporting: arrays.supporting, notes: String((raw && raw.notes) || "").slice(0, 200) };
+  plan.highlights = arrays.highlights; plan.supporting = arrays.supporting;
+}
+
+const FEATURE_WORDS = /\b(island|fireplace|lawn|tub|patio|pool|cabinets?|counters?|countertops?|backsplash|vanity|vanities|shower|pergola|deck|garage)\b/i;
+const wordCount = (t) => String(t || "").split(/\s+/).filter(Boolean).length;
+const REPAIR_SYSTEM = `You are a copy editor for real-estate Reel captions. Rewrite each draft as a BUYER BENEFIT line: 8 words or fewer, a single polished phrase, no commas, no conjunction chains, no filler. Express only the comfort, flow, convenience or enjoyment the feature gives a buyer. Never name the feature itself (no island, fireplace, lawn, tub, patio, pool, cabinets, counters). Keep it truthful: do not add facts that the draft does not support (no schools, ages, upgrades, prices, "quiet", "private"). No emojis, hashtags or exclamation marks. Example: "Large island" -> "Perfect kitchen for cooking and gathering". Count your words; if over 8, rewrite shorter instead of trimming.
+Return ONLY JSON: {"captions":[{"slot":<n>,"caption":"..."}]}`;
+
+// Second, text-only pass: model captions that break the rules (over 8 words, a comma chain, or a plain feature label)
+// are rewritten. Best effort: on any failure the code-side clamp from normalizePlan stays.
+async function repairCaptions(plan, anthropicKey, callFn) {
+  const bad = plan.slots.filter((s) => s.captionKey && !s.fixedCaption && s.rawCaption && (wordCount(s.rawCaption) > 8 || s.rawCaption.length > MAX_CAPTION || FEATURE_WORDS.test(s.rawCaption)));
+  if (!bad.length) return { repaired: 0 };
+  try {
+    const content = [{ type: "text", text: JSON.stringify({ drafts: bad.map((s) => ({ slot: s.slot, draft: s.rawCaption })) }) }];
+    const obj = extractJsonObject(await callFn(REPAIR_SYSTEM, content, anthropicKey));
+    let n = 0;
+    for (const c of (obj && obj.captions) || []) {
+      const s = plan.slots.find((x) => x.slot === c.slot);
+      const t = tidyCaption(c.caption);
+      if (s && bad.includes(s) && t && wordCount(t) <= 8 && t.length <= MAX_CAPTION && !FEATURE_WORDS.test(t)) { s.caption = t; n++; }
+    }
+    rebuildArrays(plan);
+    return { repaired: n };
+  } catch (e) { console.error("reel caption repair failed:", e.message); return { repaired: 0 }; }
 }
 
 async function generateReelPlan({ event, lengthSec, photos, intake, anthropicKey }) {
@@ -144,7 +177,9 @@ async function generateReelPlan({ event, lengthSec, photos, intake, anthropicKey
   if (!slots) throw new Error(`No scene layout for ${event} with ${photos.length} photos`);
   const userContent = await buildUserContent({ event, slots, photos, intake });
   const text = await callClaudeVision(buildSystemPrompt(), userContent, anthropicKey);
-  return normalizePlan(extractJsonObject(text), { event, slots, photos, intake });
+  const plan = normalizePlan(extractJsonObject(text), { event, slots, photos, intake });
+  await repairCaptions(plan, anthropicKey, callClaudeVision);
+  return plan;
 }
 
-module.exports = { ALLOWED_MOTION, SLOTS, photoRange, slotsFor, validateRequest, normalizePlan, extractJsonObject, buildSystemPrompt, generateReelPlan };
+module.exports = { ALLOWED_MOTION, SLOTS, photoRange, slotsFor, validateRequest, normalizePlan, extractJsonObject, buildSystemPrompt, generateReelPlan, repairCaptions, wordCount };

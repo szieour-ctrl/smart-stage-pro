@@ -9,7 +9,7 @@
 //  - every picked photo is used exactly once, scene order = slot order
 //  - slot 0 = the strongest opening image, last slot = a strong closing image
 //  - captions the agent typed are kept VERBATIM and the best-matching photo is placed with them
-//  - model-written captions describe only what is visible and permanent (architecture, light,
+//  - model-written captions are buyer-benefit phrases (<= 8 words) grounded in what is visible and permanent (architecture, light,
 //    finishes, layout) — never furniture/decor (it may be virtually staged, AB 723) and never
 //    invented facts (age of roof, school district, price, etc.)
 
@@ -62,7 +62,7 @@ Rules:
 2. Slot 0 is the opening: use the single strongest, most scroll-stopping image (usually the front exterior or the best hero room). The LAST slot is the closing: use a strong, welcoming image (an exterior, a view, or an inviting living space).
 3. Match each middle slot to its "image" hint as well as you can. Keep rooms that belong together adjacent.
 4. Where a slot has a FIXED caption (typed by the agent), choose the photo that best matches that caption's meaning. Do not rewrite fixed captions.
-5. Where a slot asks for a caption, write 3-8 words (max ${MAX_CAPTION} characters) describing only what is clearly visible and permanent in that photo: architecture, natural light, layout, finishes, views, indoor-outdoor flow. Do NOT mention furniture, decor or staging (it may be virtually staged), and do NOT state anything you cannot see (no ages, upgrades, schools, prices, square footage). No emojis, no hashtags, no exclamation marks.
+5. Where a slot asks for a caption, write a BUYER BENEFIT line, not a description. The Reel exists to inspire, entice and meet a human need. Method: identify the clearly visible, permanent feature in the photo (architecture, natural light, layout, finishes, views, indoor-outdoor flow), then restate it as the comfort, flow, convenience or enjoyment it gives the buyer. One polished phrase of 8 words or fewer (and max ${MAX_CAPTION} characters). No commas, no conjunction chains ("and" strings), no filler, and never repeat the feature's own label (say what it gives them, not what it is). Examples: large kitchen island -> "Perfect kitchen for cooking and gathering"; open layout -> "Bright connected living with outdoor flow"; patio view -> "Inviting indoor-outdoor living for daily comfort". Stay truthful: the benefit must follow directly from what is visible. Do NOT mention furniture, decor or staging (it may be virtually staged), and do NOT state anything you cannot see (no ages, upgrades, schools, neighborhood claims, prices, square footage, "quiet" or "private" unless clearly visible). No emojis, no hashtags, no exclamation marks. Vary the wording and the benefit across scenes; do not reuse the same opening word twice.
 6. Slots with no caption request get an empty caption.
 7. Motion: for EVERY slot also pick ONE Ken Burns camera movement for its photo, only from: ${[...ALLOWED_MOTION].join(", ")}. Match the photo's visual anchor: ceiling, chandelier or fan detail -> tilt_up; hero floor, rug or tilework -> tilt_down; main feature wall, island or fireplace -> push_in; a front exterior or wide open reveal -> pull_back; a strong lateral sightline (hallway, counter run) -> pan_left or pan_right; a corner-to-window or corner-to-patio diagonal -> drift; a wide shot with no directional feature -> float or pan_zoom; static only for a key clarity shot. Compound movements (names with several parts, e.g. soft_push_float_push, push_tilt_up, float_pull_back) only for hero spaces: front exterior, open-plan living, kitchen/living/dining, office/flex, primary bedroom or bath, and the strongest closing exterior. Never use a compound for a secondary bedroom, secondary bath or utility room. Use soft_push_float_strong_push for at most one scene. The Reel is a tall 9:16 crop, so favor push_in, pull_back, tilt and gentle drift, and use pan_left/pan_right sparingly. Judge the movements as a sequence: vary them and avoid the same move in two scenes in a row.
 
@@ -82,7 +82,7 @@ async function buildUserContent({ event, slots, photos, intake }) {
     let cap = "no caption";
     if (s.caption) {
       const fixed = userCaption(intake, s.caption);
-      cap = fixed ? `FIXED caption: "${fixed}"` : "write a caption";
+      cap = fixed ? `FIXED caption: "${fixed}"` : "write a buyer-benefit caption (max 8 words)";
     }
     return `Slot ${i}: ${s.role}${s.closing ? " (closing)" : ""} — wants: ${s.image}. ${cap}.`;
   });
@@ -94,6 +94,15 @@ function extractJsonObject(text) {
   const a = text.indexOf("{"), b = text.lastIndexOf("}");
   if (a === -1 || b < a) throw new Error(`No JSON object in Reel plan response. Raw: ${String(text).slice(0, 400)}`);
   return JSON.parse(text.slice(a, b + 1));
+}
+
+// Model captions: buyer-benefit phrase, max 8 words, no commas / dashes / trailing period.
+function cleanBenefit(raw) {
+  let t = String(raw || "").replace(/[!#]/g, "").replace(/\u2013/g, "-").replace(/[,;:\u2014]+/g, " ").replace(/\s+/g, " ").trim().replace(/[.\s]+$/, "");
+  if (t.length > MAX_CAPTION) t = t.slice(0, MAX_CAPTION).replace(/\s+\S*$/, "");
+  const w = t.split(" ").filter(Boolean).slice(0, 8);
+  while (w.length > 3 && /^(and|with|for|to|of|the|a|an|in|on|at|by|or|your|every)$/i.test(w[w.length - 1])) w.pop(); // never end mid-phrase
+  return w.join(" ");
 }
 
 // Never trust the model: fix duplicates / omissions / unknown ids, force fixed captions.
@@ -116,7 +125,7 @@ function normalizePlan(raw, { event, slots, photos, intake }) {
     if (s.caption) {
       const typed = userCaption(intake, s.caption);
       if (typed) { caption = typed; fixed = true; }
-      else caption = String(e.caption || "").replace(/[!#]/g, "").replace(/\s+/g, " ").trim().slice(0, MAX_CAPTION).trim();
+      else caption = cleanBenefit(e.caption);
     }
     const motion = ALLOWED_MOTION.has(e.motion) ? e.motion : "auto";
     return { slot: i, role: s.role, closing: !!s.closing, photoId, caption, motion, captionKey: s.caption ? s.caption.key : null, captionIdx: s.caption ? s.caption.idx : null, fixedCaption: fixed };

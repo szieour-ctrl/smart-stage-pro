@@ -26,6 +26,12 @@
 [functions."generate-narration-background"]
   timeout = 900
 
+[functions."reel-plan-background"]
+  timeout = 900
+
+[functions."reel-plan"]
+  timeout = 10
+
 [functions."check-narration"]
   timeout = 10
 

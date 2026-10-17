@@ -1078,4 +1078,7 @@ module.exports = {
   enforceAiMotionPoolCap,
   buildSystemPrompt,
   applyAutoSelectionPlan,
+  callClaudeVision,
+  fetchAndResizeForVision,
+  CLAUDE_VISION_MAX_DIM,
 };

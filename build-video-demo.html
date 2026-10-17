@@ -162,6 +162,26 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
 .ri-summary{font-size:0.85rem;line-height:1.7;}
 .ri-summary b{display:inline-block;min-width:130px;color:var(--muted);font-weight:500;}
 @media(max-width:560px){.ri-row,.ri-row3{grid-template-columns:1fr;}}
+.rp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;margin-top:12px;}
+.rp-card{position:relative;border:2px solid var(--border);border-radius:5px;overflow:hidden;cursor:pointer;background:#fff;}
+.rp-card img{display:block;width:100%;aspect-ratio:4/3;object-fit:cover;}
+.rp-card.on{border-color:var(--gold);box-shadow:0 0 0 2px var(--gold-light);}
+.rp-card .rp-num{position:absolute;top:6px;left:6px;background:var(--gold);color:var(--ink);font-weight:700;font-size:0.72rem;border-radius:50%;width:22px;height:22px;line-height:22px;text-align:center;}
+.rp-card .rp-label{font-size:0.72rem;padding:5px 7px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.rp-count{font-size:0.85rem;margin-top:10px;}
+.rp-count.ok{color:var(--ink);}
+.rp-board{display:flex;flex-direction:column;gap:10px;margin-top:14px;}
+.rp-slot{display:grid;grid-template-columns:34px 120px 1fr auto;gap:12px;align-items:center;border:1px solid var(--border);border-radius:6px;padding:8px 10px;background:#fff;}
+.rp-slot img{width:120px;aspect-ratio:4/3;object-fit:cover;border-radius:4px;}
+.rp-slot .rp-n{font-weight:700;color:var(--gold);text-align:center;}
+.rp-slot .rp-role{font-size:0.7rem;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted);margin-bottom:4px;}
+.rp-slot input{width:100%;box-sizing:border-box;border:1px solid var(--border);border-radius:4px;padding:6px 10px;font-size:0.85rem;font-family:inherit;}
+.rp-slot .rp-fixed{font-size:0.66rem;color:var(--muted);margin-top:2px;}
+.rp-move{display:flex;flex-direction:column;gap:4px;}
+.rp-move button{border:1px solid var(--border);background:#fff;border-radius:4px;cursor:pointer;padding:2px 8px;}
+.rp-move button:disabled{opacity:0.3;cursor:default;}
+@media(max-width:560px){.rp-slot{grid-template-columns:28px 90px 1fr;}.rp-slot img{width:90px;}.rp-move{flex-direction:row;grid-column:2/4;}}
+
 
 
 .frame-thumb-clickable{cursor:pointer;}
@@ -277,6 +297,26 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
     <div class="action-row">
       <button class="btn btn-ghost" onclick="exitReelMode()">Back to video</button>
       <button class="btn btn-primary" onclick="saveReelIntake()">Save &amp; continue</button>
+    </div>
+  </div>
+
+  <div class="panel hidden" id="stepReelPhotos">
+    <div class="panel-pad">
+      <div class="eyebrow">Reel &middot; Step 2</div>
+      <div class="panel-title">Choose your photos</div>
+      <div class="panel-sub" id="reelPhotoSub"></div>
+      <div class="rp-count" id="reelPhotoCount"></div>
+      <div class="rp-grid" id="reelPhotoGrid"></div>
+      <div id="reelPlanBox" class="hidden">
+        <div class="ri-group-title">Storyboard</div>
+        <div class="ri-help" id="reelPlanNote"></div>
+        <div class="rp-board" id="reelPlanBoard"></div>
+      </div>
+      <div class="ri-errors" id="reelPlanErr"></div>
+    </div>
+    <div class="action-row">
+      <button class="btn btn-ghost" onclick="reelBackToIntake()">Back</button>
+      <button class="btn btn-primary" id="reelPlanBtn" onclick="buildReelPlan()" disabled>Build storyboard</button>
     </div>
   </div>
 
@@ -1825,7 +1865,7 @@ function renderUpload() {
 }
 
 function goToStep(n) {
-  ["stepUpload","stepMotion","stepOrder","stepConfirm","resultPanel"].forEach(id => document.getElementById(id).classList.add("hidden"));
+  ["stepUpload","stepMotion","stepOrder","stepConfirm","resultPanel","stepReelPhotos"].forEach(id => document.getElementById(id).classList.add("hidden"));
   [1,2,3,4].forEach(i => {
     const pill = document.getElementById("stepPill"+i);
     pill.classList.remove("active","done");
@@ -3347,7 +3387,7 @@ function renderReelBrandNote() {
   }
 }
 function enterReelMode() {
-  ["stepUpload","stepMotion","stepOrder","stepConfirm","resultPanel"].forEach(id => document.getElementById(id).classList.add("hidden"));
+  ["stepUpload","stepMotion","stepOrder","stepConfirm","resultPanel","stepReelPhotos"].forEach(id => document.getElementById(id).classList.add("hidden"));
   document.getElementById("stepsBar").classList.add("hidden");
   document.getElementById("stepReelIntake").classList.remove("hidden");
   document.getElementById("modeReelBtn").classList.add("on");
@@ -3358,6 +3398,7 @@ function enterReelMode() {
 }
 function exitReelMode() {
   document.getElementById("stepReelIntake").classList.add("hidden");
+  document.getElementById("stepReelPhotos").classList.add("hidden");
   document.getElementById("stepsBar").classList.remove("hidden");
   document.getElementById("modeVideoBtn").classList.add("on");
   document.getElementById("modeReelBtn").classList.remove("on");
@@ -3382,10 +3423,121 @@ function saveReelIntake() {
   const box = document.getElementById("reelIntakeSaved");
   box.innerHTML = '<div class="ri-group-title">Saved</div><div class="ri-summary">' +
     rows.filter(r2 => r2[1]).map(r2 => "<div><b>" + escHtml(r2[0]) + "</b>" + escHtml(r2[1]) + "</div>").join("") +
-    '</div><div class="ri-help" style="margin-top:10px;">Next: choose photos and review the storyboard (coming next).</div>';
+    '</div>';
   box.classList.remove("hidden");
   window._reelIntake = i;
-  box.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  enterReelPhotos();
+}
+
+// ── REEL PHOTO PICKER + VISION PLAN ──
+let reelPicked = [];      // selected gallery ids
+let reelPlan = null;      // normalized plan from reel-plan.js
+function reelRange() {
+  const i = window._reelIntake || {};
+  return window.ReelIntake.REEL_LENGTHS.find(l => l.sec === i.lengthSec) || { sec: 0, min: 3, max: 8 };
+}
+function reelAllPhotos() {
+  return [...galleryStagedFrames.map(f => ({ id: f.id, url: f.stagedUrl, label: f.roomLabel })),
+          ...galleryExternalFrames.map(f => ({ id: f.id, url: f.imageUrl, label: f.roomLabel }))].filter(p => p.url);
+}
+function enterReelPhotos() {
+  document.getElementById("stepReelIntake").classList.add("hidden");
+  document.getElementById("stepReelPhotos").classList.remove("hidden");
+  reelPlan = null;
+  document.getElementById("reelPlanBox").classList.add("hidden");
+  document.getElementById("reelPlanErr").textContent = "";
+  const r = reelRange(), ev = window.ReelIntake.EVENTS[(window._reelIntake || {}).event];
+  document.getElementById("reelPhotoSub").textContent = (ev ? ev.label : "Reel") + " \u00b7 " + r.sec + "s \u00b7 pick " +
+    window.ReelIntake.photoRangeText(r) + ". We'll choose the order and match each photo to its scene.";
+  const have = new Set(reelAllPhotos().map(p => p.id));
+  reelPicked = reelPicked.filter(id => have.has(id)).slice(0, r.max);
+  renderReelPhotos();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+function reelBackToIntake() {
+  document.getElementById("stepReelPhotos").classList.add("hidden");
+  document.getElementById("stepReelIntake").classList.remove("hidden");
+}
+function renderReelPhotos() {
+  const r = reelRange(), photos = reelAllPhotos();
+  const grid = document.getElementById("reelPhotoGrid");
+  grid.innerHTML = photos.length ? photos.map(p => {
+    const k = reelPicked.indexOf(p.id);
+    return '<div class="rp-card' + (k >= 0 ? " on" : "") + '" data-id="' + escHtml(p.id) + '">' +
+      (k >= 0 ? '<div class="rp-num">' + (k + 1) + '</div>' : "") +
+      '<img src="' + escHtml(p.url) + '" alt="" loading="lazy"><div class="rp-label">' + escHtml(p.label) + '</div></div>';
+  }).join("") : '<div class="gallery-loading">No photos found for this listing yet. Stage or add photos in Smart Stage PRO first.</div>';
+  grid.querySelectorAll(".rp-card").forEach(el => el.addEventListener("click", () => toggleReelPhoto(el.getAttribute("data-id"))));
+  const n = reelPicked.length, ok = n >= r.min && n <= r.max;
+  const cnt = document.getElementById("reelPhotoCount");
+  cnt.className = "rp-count" + (ok ? " ok" : "");
+  cnt.textContent = n + " selected \u00b7 need " + window.ReelIntake.photoRangeText(r) + (n > r.max ? " (too many)" : n < r.min ? " (pick " + (r.min - n) + " more)" : " \u2713");
+  document.getElementById("reelPlanBtn").disabled = !ok;
+}
+function toggleReelPhoto(id) {
+  const r = reelRange(), k = reelPicked.indexOf(id);
+  if (k >= 0) reelPicked.splice(k, 1);
+  else { if (reelPicked.length >= r.max) { alert("A " + r.sec + "s Reel uses at most " + r.max + " photos."); return; } reelPicked.push(id); }
+  reelPlan = null;
+  document.getElementById("reelPlanBox").classList.add("hidden");
+  renderReelPhotos();
+}
+async function buildReelPlan() {
+  const btn = document.getElementById("reelPlanBtn"), err = document.getElementById("reelPlanErr");
+  err.textContent = "";
+  const all = reelAllPhotos(), photos = reelPicked.map(id => all.find(p => p.id === id)).filter(Boolean);
+  const intake = window._reelIntake;
+  btn.disabled = true; btn.textContent = "Reading your photos\u2026";
+  try {
+    const res = await fetch("/.netlify/functions/reel-plan", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ listingId: REAL_LISTING_ID, userId: REAL_USER_ID, event: intake.event, lengthSec: intake.lengthSec, photos, intake: { highlights: intake.highlights || [], supporting: intake.supporting || [] } }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Couldn't start the storyboard");
+    const deadline = Date.now() + 180000;
+    for (;;) {
+      await new Promise(r => setTimeout(r, 2500));
+      const pr = await fetch("/.netlify/functions/reel-plan?jobId=" + encodeURIComponent(data.jobId));
+      const pd = await pr.json();
+      if (pd.status === "done") { reelPlan = pd.plan; break; }
+      if (pd.status === "error") throw new Error(pd.error || "Storyboard failed");
+      if (Date.now() > deadline) throw new Error("This is taking longer than expected. Please try again.");
+    }
+    renderReelPlan();
+  } catch (e) {
+    err.textContent = e.message;
+  } finally {
+    btn.textContent = reelPlan ? "Rebuild storyboard" : "Build storyboard";
+    renderReelPhotos();
+  }
+}
+function reelPlanArrays() {
+  const hl = [], sp = [];
+  reelPlan.slots.forEach(s => { if (s.captionKey) (s.captionKey === "highlights" ? hl : sp)[s.captionIdx] = s.caption || ""; });
+  for (let i = 0; i < hl.length; i++) if (hl[i] == null) hl[i] = "";
+  for (let i = 0; i < sp.length; i++) if (sp[i] == null) sp[i] = "";
+  reelPlan.highlights = hl; reelPlan.supporting = sp;
+  window._reelPlan = reelPlan;
+}
+function renderReelPlan() {
+  reelPlanArrays();
+  const all = reelAllPhotos(), board = document.getElementById("reelPlanBoard");
+  document.getElementById("reelPlanBox").classList.remove("hidden");
+  document.getElementById("reelPlanNote").textContent = (reelPlan.notes ? reelPlan.notes + " " : "") + "Edit any caption or move a photo up or down. Opening and closing scenes carry your headline and call to action.";
+  board.innerHTML = reelPlan.slots.map((s, i) => {
+    const p = all.find(x => x.id === s.photoId) || {};
+    const cap = s.captionKey
+      ? '<input type="text" maxlength="80" data-i="' + i + '" value="' + escHtml(s.caption) + '" placeholder="Caption (optional)">' + (s.fixedCaption ? '<div class="rp-fixed">Your highlight</div>' : "")
+      : '<div class="ri-help">' + (s.closing ? "Closing: call to action, address, QR" : "Text from your Reel details") + '</div>';
+    return '<div class="rp-slot"><div class="rp-n">' + (i + 1) + '</div><img src="' + escHtml(p.url || "") + '" alt="">' +
+      '<div><div class="rp-role">' + escHtml(s.role) + '</div>' + cap + '</div>' +
+      '<div class="rp-move"><button type="button" data-up="' + i + '"' + (i === 0 ? " disabled" : "") + '>\u2191</button><button type="button" data-dn="' + i + '"' + (i === reelPlan.slots.length - 1 ? " disabled" : "") + '>\u2193</button></div></div>';
+  }).join("");
+  board.querySelectorAll("input[data-i]").forEach(el => el.addEventListener("input", () => { reelPlan.slots[Number(el.getAttribute("data-i"))].caption = el.value; reelPlanArrays(); }));
+  const swap = (a, b) => { const x = reelPlan.slots; [x[a].photoId, x[b].photoId] = [x[b].photoId, x[a].photoId]; renderReelPlan(); };
+  board.querySelectorAll("[data-up]").forEach(el => el.addEventListener("click", () => swap(Number(el.getAttribute("data-up")), Number(el.getAttribute("data-up")) - 1)));
+  board.querySelectorAll("[data-dn]").forEach(el => el.addEventListener("click", () => swap(Number(el.getAttribute("data-dn")), Number(el.getAttribute("data-dn")) + 1)));
 }
 if (urlParams.get("reels") === "1") document.getElementById("reelModeBar").classList.remove("hidden");
 

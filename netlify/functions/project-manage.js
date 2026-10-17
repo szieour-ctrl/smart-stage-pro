@@ -32,6 +32,7 @@
 const { getStore } = require("@netlify/blobs");
 const crypto = require("crypto");
 const https  = require("https");
+const { lookupPropertyDetails } = require("./lib/rentcast-lib");
 
 // ── SUPABASE HELPER ──────────────────────────────────────────────────────────
 
@@ -576,6 +577,24 @@ async function createProject(address, agentInfo, siteUrl, userId, env) {
   // listing unclaimed — the app then offers a package for it, same as lookup.
   const blockedNew = await enforcePackage(userContext, userId, listingId, { created: false, address });
   if (blockedNew) return blockedNew;
+
+  // Oct 17, 2026 — Listing Details: fill beds/baths/sqft/year built from
+  // RentCast public records for a brand-new Listing only. Runs after the
+  // package check so a blocked address costs no RentCast request, and never
+  // for Prospecting (that pipeline lives in marketing-manage.js). Best
+  // effort: any failure leaves the fields blank for the agent to edit.
+  if (listingId) {
+    try {
+      const details = await lookupPropertyDetails(address);
+      if (details) {
+        const patch = {};
+        for (const [k, v] of Object.entries(details)) if (v != null) patch[k] = v;
+        await supabase("PATCH", "listings", patch, `?id=eq.${listingId}`);
+      }
+    } catch (e) {
+      console.error("createProject: RentCast details fill failed (non-fatal):", e.message);
+    }
+  }
 
   return { created: true, projectId, complianceUrl: cUrl, listingId, slug };
 }

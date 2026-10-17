@@ -45,12 +45,23 @@ function railway(method, pathname, payload) {
   });
 }
 
+const { allocateDurations, REVEAL_MIN, PRESETS } = require("./lib/reel-reveal");
 const inList = (ids) => `in.(${ids.join(",")})`;
+
+// Room Reveal (Original -> Staged) only when the photo has a real Original (not a hero shot).
+function revealFor(r, preset, warnings) {
+  if (!preset) return {};
+  if (r.is_hero_shot || !/^https?:\/\//.test(r.cloudinary_original_url || "")) {
+    warnings.push("A photo has no Original to reveal; it was shown as Standard Motion.");
+    return {};
+  }
+  return { reveal: { beforeUrl: r.cloudinary_original_url, preset } };
+}
 
 async function resolveScenes(listingId, slots) {
   const ids = [...new Set(slots.map((s) => s.photoId))];
   const [st, ex] = await Promise.all([
-    supabase("GET", "staged_images", null, `?id=${inList(ids)}&listing_id=eq.${listingId}&select=id,cloudinary_staged_url,clean_s3_key,badge_type,room_type`),
+    supabase("GET", "staged_images", null, `?id=${inList(ids)}&listing_id=eq.${listingId}&select=id,cloudinary_staged_url,cloudinary_original_url,is_hero_shot,clean_s3_key,badge_type,room_type`),
     supabase("GET", "external_photos", null, `?id=${inList(ids)}&listing_id=eq.${listingId}&select=id,image_url,room_type`),
   ]);
   const byId = new Map();
@@ -59,6 +70,7 @@ async function resolveScenes(listingId, slots) {
   const warnings = [];
   const scenes = [];
   for (const s of slots) {
+    const wantReveal = PRESETS.includes(s.reveal) ? s.reveal : null;
     const hit = byId.get(s.photoId);
     if (!hit) throw new Error("One of the selected photos is no longer available for this listing");
     const label = (hit.r.room_type || "").replace(/_/g, " ");
@@ -67,11 +79,11 @@ async function resolveScenes(listingId, slots) {
     } else if (hit.r.clean_s3_key && hit.r.badge_type) {
       const url = await presignAny(hit.r.clean_s3_key, 12 * 3600);
       if (!url) throw new Error("Could not prepare a staged photo for rendering");
-      scenes.push({ imageUrl: url, motion: s.motion || "auto", badgeType: hit.r.badge_type, roomLabel: label });
+      scenes.push({ imageUrl: url, motion: s.motion || "auto", badgeType: hit.r.badge_type, roomLabel: label, ...revealFor(hit.r, wantReveal, warnings) });
     } else {
       // Older Final without a clean copy: the AB 723 badge is already baked into this image, so no overlay badge.
       warnings.push("A staged photo has no clean copy; its built-in badge is used and may be cropped in 9:16. Re-run Generate Final to fix.");
-      scenes.push({ imageUrl: hit.r.cloudinary_staged_url, motion: s.motion || "auto", badgeType: "none", roomLabel: label });
+      scenes.push({ imageUrl: hit.r.cloudinary_staged_url, motion: s.motion || "auto", badgeType: "none", roomLabel: label, ...revealFor(hit.r, wantReveal, warnings) });
     }
   }
   return { scenes, warnings };
@@ -121,6 +133,11 @@ exports.handler = async (event) => {
     if (!Array.isArray(lst.data) || !lst.data[0]) return reply(404, { error: "Listing not found" });
 
     const { scenes, warnings } = await resolveScenes(listingId, slots);
+    const revealFlags = scenes.map((sc) => !!sc.reveal);
+    if (!allocateDurations(Number(lengthSec), revealFlags)) {
+      const n = revealFlags.filter(Boolean).length;
+      return reply(400, { error: `${n} Room Reveal photos need more time than a ${lengthSec}s Reel allows (each needs at least ${REVEAL_MIN}s). Switch some photos to Standard Motion or choose a longer Reel.` });
+    }
 
     const br = await brandingForUser(userId);
     const complete = !!(br.hasProfile && br.licensedName && br.dreNumber && br.brokerageName);

@@ -325,13 +325,37 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
     <div class="panel-pad">
       <div class="eyebrow">Reel &middot; Step 3</div>
       <div class="panel-title">Choose the motion</div>
-      <div class="panel-sub">Reels use Ken Burns movement only. We've picked a movement for each photo \u2014 change any of them. Tap \u25b6 to preview it on your photo in 9:16.</div>
+      <div class="panel-sub">Reels use Ken Burns movement only. We&rsquo;ve picked a movement for each photo &mdash; change any of them. Tap &#9654; to preview it on your photo in 9:16.</div>
       <div class="rp-board" id="reelMotionBoard"></div>
       <div id="reelMotionSaved" class="hidden"></div>
     </div>
     <div class="action-row">
       <button class="btn btn-ghost" onclick="reelBackToStoryboard()">Back</button>
-      <button class="btn btn-primary" id="reelSaveBtn" onclick="saveReelMotion()">Save Reel plan</button>
+      <button class="btn btn-primary" id="reelSaveBtn" onclick="enterReelReview()">Review &amp; render &rarr;</button>
+    </div>
+  </div>
+
+  <div class="panel hidden" id="stepReelReview">
+    <div class="panel-pad">
+      <div class="eyebrow">Reel &middot; Step 4</div>
+      <div class="panel-title">Review &amp; render</div>
+      <div class="panel-sub" id="reelReviewSummary"></div>
+      <div class="ri-brand" id="reelReviewBrand"></div>
+      <div class="ri-field" style="margin-top:14px;"><label for="reelMusic">Music</label><select id="reelMusic" class="btn btn-ghost" style="width:100%;text-align:left;"></select></div>
+      <div class="ri-help">Beta: rendering is free while we test. Takes about a minute or two.</div>
+      <div id="reelRenderStatus" class="ri-brand hidden" style="margin-top:14px;"></div>
+      <div id="reelResult" class="hidden">
+        <div class="ri-group-title">Your Reel</div>
+        <div class="ri-modebar" id="reelVariantTabs"></div>
+        <div style="display:flex;justify-content:center;margin-top:10px;"><video id="reelPlayer" controls playsinline loop style="width:min(300px,70vw);aspect-ratio:9/16;background:#000;border-radius:8px;"></video></div>
+        <div style="text-align:center;margin-top:10px;"><a id="reelDownload" class="btn btn-ghost" download target="_blank" rel="noopener">Download</a></div>
+        <div class="ri-help" id="reelResultNote" style="text-align:center;margin-top:8px;"></div>
+      </div>
+      <div class="ri-errors" id="reelRenderErr"></div>
+    </div>
+    <div class="action-row">
+      <button class="btn btn-ghost" onclick="reelBackToMotion()">Back</button>
+      <button class="btn btn-primary" id="reelRenderBtn" onclick="startReelRender()">Render my Reel</button>
     </div>
   </div>
 
@@ -1880,7 +1904,7 @@ function renderUpload() {
 }
 
 function goToStep(n) {
-  ["stepUpload","stepMotion","stepOrder","stepConfirm","resultPanel","stepReelPhotos","stepReelMotion"].forEach(id => document.getElementById(id).classList.add("hidden"));
+  ["stepUpload","stepMotion","stepOrder","stepConfirm","resultPanel","stepReelPhotos","stepReelMotion","stepReelReview"].forEach(id => document.getElementById(id).classList.add("hidden"));
   [1,2,3,4].forEach(i => {
     const pill = document.getElementById("stepPill"+i);
     pill.classList.remove("active","done");
@@ -2273,9 +2297,9 @@ function renderMotionFrameCard(f, i) {
         -->
         ${f.beforeUrl ? (
           f.isBeforeAfter
-            ? `<div class="before-after-chip">&#10003; Known pair \u2014 eligible for hero transformation presets</div>
+            ? `<div class="before-after-chip">&#10003; Known pair &mdash; eligible for hero transformation presets</div>
                <div style="font-size:0.7rem;margin-top:4px;"><a href="javascript:void(0)" onclick="toggleBeforeAfter(${f.id}, false)" style="color:var(--muted);">Not a real match? Use single image only</a></div>`
-            : `<div class="preset-desc" style="margin-bottom:0;">Using single image only \u2014 <a href="javascript:void(0)" onclick="toggleBeforeAfter(${f.id}, true)" style="color:var(--gold);">actually, use the before/after pair</a></div>`
+            : `<div class="preset-desc" style="margin-bottom:0;">Using single image only &mdash; <a href="javascript:void(0)" onclick="toggleBeforeAfter(${f.id}, true)" style="color:var(--gold);">actually, use the before/after pair</a></div>`
         ) : ""}
         <div class="motion-toggle">
           <button class="motion-btn kenburns ${f.motion==='kenburns'?'active kenburns':''}" onclick="setMotion(${f.id}, 'kenburns')">Ken Burns</button>
@@ -2306,7 +2330,7 @@ function renderMotionFrameCard(f, i) {
             </div>
             ${selectedKlingPreset ? `<div class="preset-desc">${selectedKlingPreset.desc}</div>` : `<div class="preset-desc">Pick a transformation to see what it does.</div>`}
             ${f.preset === 'hero_transformation' ? `
-              <div class="preset-desc" style="font-style:italic;">Includes the finishing move automatically \u2014 nothing else to choose.</div>
+              <div class="preset-desc" style="font-style:italic;">Includes the finishing move automatically &mdash; nothing else to choose.</div>
             ` : (selectedKlingPreset ? `
               <label style="display:flex;align-items:center;gap:6px;font-size:0.76rem;color:var(--muted);margin-top:8px;cursor:pointer;">
                 <input type="checkbox" ${f.addContinuationMotion ? "checked" : ""} onchange="toggleContinuationMotion(${f.id}, this.checked)" style="accent-color:var(--gold);">
@@ -2947,7 +2971,7 @@ async function renderConfirmStep() {
   }
   document.getElementById("costTable").innerHTML = rows + `
     <div class="cost-total"><span class="label">Charged now, on ${isIteration ? "Regenerate" : "Generate"}</span><span class="val">${quote.totalImageCost}</span></div>
-    <div class="balance-line"><span>Current balance: ${quote.currentBalance ?? '\u2014'} Images</span><span class="after ${wouldExceed?'negative':''}">After: ${wouldExceed?'\u2014':quote.balanceAfter} Images</span></div>
+    <div class="balance-line"><span>Current balance: ${quote.currentBalance ?? '&mdash;'} Images</span><span class="after ${wouldExceed?'negative':''}">After: ${wouldExceed?'&mdash;':quote.balanceAfter} Images</span></div>
   `;
 
   const warnSlot = document.getElementById("warnSlot");
@@ -3043,7 +3067,7 @@ async function handleGenerate() {
 
     document.getElementById("resultContent").innerHTML = `
       <div class="result-icon">&#9203;</div>
-      <div class="result-title">Rendering your video \u2014 generation #${generationCount}</div>
+      <div class="result-title">Rendering your video &mdash; generation #${generationCount}</div>
       <div class="result-body">${poolLine}${billedLine}${narrationLine}${quotaLine}Real renders typically take a few minutes depending on frame count and how many use AI Motion. No more Images are charged until Download.</div>
     `;
     pollJobStatus(data.jobId);
@@ -3146,13 +3170,13 @@ function showRenderComplete(job) {
 
   document.getElementById("resultContent").innerHTML = `
     <div class="result-icon">&#9989;</div>
-    <div class="result-title">Ready \u2014 generation #${genCount}</div>
+    <div class="result-title">Ready &mdash; generation #${genCount}</div>
     ${videoUrl
       ? `<video id="renderCompleteVideo" src="${videoUrl}" controls controlsList="nodownload noplaybackrate noremoteplayback" disablePictureInPicture disableRemotePlayback oncontextmenu="return false;" autoplay muted playsinline style="width:100%;max-width:480px;border-radius:4px;margin:12px 0;background:#000;"></video>`
       : (job.thumbnail_url ? `<img src="${job.thumbnail_url}" alt="Preview thumbnail" style="max-width:100%;border-radius:4px;margin:12px 0;">` : "")}
     ${variantToggle}
     ${narrationBlock}
-    <div class="result-body">Watch it back \u2014 the AI Motion cost above is already spent (or drawn from this month's free pool), and ${quotaLine}take your time deciding. Download is a separate flat fee for the formal export: it locks this in and adds it to your AB 723 compliance page, but never touches your monthly video count. If you Iterate instead, this same shared monthly AI Motion pool applies again \u2014 frames are free if you still have pool balance left, billed in Images once it's gone, exactly like a first generation. Iterating does NOT add to your monthly video count, since it's a redo of this same video, not a new one. The current result is replaced, not kept alongside the new one.</div>
+    <div class="result-body">Watch it back &mdash; the AI Motion cost above is already spent (or drawn from this month's free pool), and ${quotaLine}take your time deciding. Download is a separate flat fee for the formal export: it locks this in and adds it to your AB 723 compliance page, but never touches your monthly video count. If you Iterate instead, this same shared monthly AI Motion pool applies again &mdash; frames are free if you still have pool balance left, billed in Images once it's gone, exactly like a first generation. Iterating does NOT add to your monthly video count, since it's a redo of this same video, not a new one. The current result is replaced, not kept alongside the new one.</div>
     <div style="margin-top:18px;display:flex;gap:10px;justify-content:center;">
       <button class="btn btn-ghost" style="flex:none;" onclick="resetDemo()">Start over</button>
       <button class="btn btn-ghost" style="flex:none;" onclick="handleIterate()">Iterate this video</button>
@@ -3202,14 +3226,14 @@ async function resumePendingVideo() {
       if (full && full.status === "complete") {
         showRenderComplete(full);
         document.getElementById("resultContent").insertAdjacentHTML("afterbegin",
-          `<div class="warn-box" style="text-align:left;margin-bottom:14px;"><strong>Welcome back \u2014 your video is ready</strong>It isn\u2019t on your compliance page until you Download it.</div>`);
+          `<div class="warn-box" style="text-align:left;margin-bottom:14px;"><strong>Welcome back &mdash; your video is ready</strong>It isn&rsquo;t on your compliance page until you Download it.</div>`);
         return;
       }
     }
     document.getElementById("resultContent").innerHTML = `
       <div class="result-icon">&#9203;</div>
-      <div class="result-title">Welcome back \u2014 your video is still rendering</div>
-      <div class="result-body">Generation #${generationCount}. You can leave this page and come back; it will be here when it\u2019s done.</div>
+      <div class="result-title">Welcome back &mdash; your video is still rendering</div>
+      <div class="result-body">Generation #${generationCount}. You can leave this page and come back; it will be here when it&rsquo;s done.</div>
     `;
     pollJobStatus(job.id);
   } catch (e) {
@@ -3297,7 +3321,7 @@ async function refreshBalanceDisplay() {
     const res = await fetch(`${API_BASE}?action=balance&userId=${encodeURIComponent(REAL_USER_ID)}`);
     const data = await res.json();
     balance = data.balance;
-    document.getElementById("balanceDisplay").textContent = balance ?? "\u2014";
+    document.getElementById("balanceDisplay").textContent = balance ?? "&mdash;";
     AI_MOTION_LOCKED = data.aiMotionAllowed === false;
     if (AI_MOTION_LOCKED) {
       // Anything an earlier session or auto-select set to AI Motion falls back to Ken Burns.
@@ -3404,7 +3428,7 @@ function renderReelBrandNote() {
   }
 }
 function enterReelMode() {
-  ["stepUpload","stepMotion","stepOrder","stepConfirm","resultPanel","stepReelPhotos","stepReelMotion"].forEach(id => document.getElementById(id).classList.add("hidden"));
+  ["stepUpload","stepMotion","stepOrder","stepConfirm","resultPanel","stepReelPhotos","stepReelMotion","stepReelReview"].forEach(id => document.getElementById(id).classList.add("hidden"));
   document.getElementById("stepsBar").classList.add("hidden");
   document.getElementById("stepReelIntake").classList.remove("hidden");
   document.getElementById("modeReelBtn").classList.add("on");
@@ -3417,6 +3441,7 @@ function exitReelMode() {
   document.getElementById("stepReelIntake").classList.add("hidden");
   document.getElementById("stepReelPhotos").classList.add("hidden");
   document.getElementById("stepReelMotion").classList.add("hidden");
+  document.getElementById("stepReelReview").classList.add("hidden");
   document.getElementById("stepsBar").classList.remove("hidden");
   document.getElementById("modeVideoBtn").classList.add("on");
   document.getElementById("modeReelBtn").classList.remove("on");
@@ -3568,7 +3593,7 @@ function renderReelPlan() {
     const cap = s.captionKey
       ? '<input type="text" maxlength="80" data-i="' + i + '" value="' + escHtml(s.caption) + '" placeholder="Caption (optional)">' + (s.fixedCaption ? '<div class="rp-fixed">Your highlight</div>' : "")
       : '<div class="ri-help">' + (s.closing ? "Closing: call to action, address, QR" : "Text from your Reel details") + '</div>' +
-        (own ? '<div class="rp-fixed">This photo has a caption, but this scene doesn\u2019t show one.</div>' : "");
+        (own ? '<div class="rp-fixed">This photo has a caption, but this scene doesn&rsquo;t show one.</div>' : "");
     return '<div class="rp-slot"><div class="rp-n">' + (i + 1) + '</div><img src="' + escHtml(p.url || "") + '" alt="">' +
       '<div><div class="rp-role">' + escHtml(s.role) + '</div>' + cap + '</div>' +
       '<div class="rp-move"><button type="button" data-up="' + i + '"' + (i === 0 ? " disabled" : "") + '>\u2191</button><button type="button" data-dn="' + i + '"' + (i === reelPlan.slots.length - 1 ? " disabled" : "") + '>\u2193</button></div></div>';
@@ -3618,7 +3643,7 @@ function openReelMotionPreview(photoUrl, key) {
     '<img id="reelPrevImg" src="' + escHtml(photoUrl) + '" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;">';
   document.getElementById("previewInfo").innerHTML = '<div class="panel-title">' + escHtml(preset.label) + '</div><div class="panel-sub">' + escHtml(preset.desc) +
     '</div><div class="ri-help" style="margin-top:8px;">' + (isAuto ? "Auto picks a movement for the room when the Reel renders; showing Push In as an example. " : "") +
-    'Approximate preview on your photo in the 9:16 frame \u2014 the final render may differ slightly.</div>';
+    'Approximate preview on your photo in the 9:16 frame &mdash; the final render may differ slightly.</div>';
   document.getElementById("previewOverlay").classList.remove("hidden");
   const pts = reelMotionWaypoints(use), img = document.getElementById("reelPrevImg");
   if (img && img.animate) {
@@ -3663,13 +3688,96 @@ function renderReelMotion() {
     reelPreviewFor(Number(el.getAttribute("data-pv")));
   }));
 }
+
+// ── Step 4: review + render (beta, no charging yet) ──
+let reelRenderJobId = null, reelResult = null, reelPollTimer = null;
+function enterReelReview() {
+  reelPlanSync();
+  try { sessionStorage.setItem("reelPlan_" + (REAL_LISTING_ID || "none"), JSON.stringify({ intake: window._reelIntake, plan: reelPlan })); } catch (e) { /* non-fatal */ }
+  document.getElementById("stepReelMotion").classList.add("hidden");
+  document.getElementById("stepReelReview").classList.remove("hidden");
+  const i = window._reelIntake || {}, ev = window.ReelIntake.EVENTS[i.event];
+  document.getElementById("reelReviewSummary").textContent = (ev ? ev.label : "Reel") + " \u00b7 " + i.lengthSec + "s \u00b7 " + reelPlan.slots.length + " scenes \u00b7 " + (i.address || "");
+  const b = reelBrandingSummary;
+  document.getElementById("reelReviewBrand").innerHTML = (b && b.complete)
+    ? "You\u2019ll get two versions: <b>Branded</b> (" + escHtml(b.licensedName) + ", DRE #" + escHtml(b.dre) + ", " + escHtml(b.brokerage) + ") and <b>Unbranded (MLS)</b>."
+    : "You\u2019ll get the <b>Unbranded (MLS)</b> version. Complete your Marketing Profile (licensed name, DRE, brokerage) to also get a Branded version.";
+  const sel = document.getElementById("reelMusic");
+  if (!sel.childElementCount) sel.innerHTML = MUSIC_LIBRARY.map(m => '<option value="' + m.key + '">' + escHtml(m.label) + "</option>").join("");
+  document.getElementById("reelRenderErr").textContent = "";
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+function reelBackToMotion() {
+  if (reelPollTimer) { clearTimeout(reelPollTimer); reelPollTimer = null; }
+  document.getElementById("stepReelReview").classList.add("hidden");
+  document.getElementById("stepReelMotion").classList.remove("hidden");
+}
+function setReelVariant(which) {
+  if (!reelResult) return;
+  const url = reelResult[which];
+  const v = document.getElementById("reelPlayer");
+  v.src = url; v.load(); const pl = v.play(); if (pl && pl.catch) pl.catch(() => {});
+  const dl = document.getElementById("reelDownload");
+  dl.href = url; dl.textContent = "Download " + (which === "branded" ? "Branded" : "Unbranded (MLS)");
+  document.querySelectorAll("#reelVariantTabs button").forEach(b => b.classList.toggle("on", b.getAttribute("data-v") === which));
+}
+async function startReelRender() {
+  const btn = document.getElementById("reelRenderBtn"), err = document.getElementById("reelRenderErr"), st = document.getElementById("reelRenderStatus");
+  err.textContent = ""; reelResult = null;
+  document.getElementById("reelResult").classList.add("hidden");
+  reelPlanSync();
+  const i = window._reelIntake, intake = { ...i };
+  delete intake.highlights; delete intake.supporting;
+  btn.disabled = true; btn.textContent = "Rendering\u2026";
+  st.classList.remove("hidden"); st.textContent = "Starting\u2026";
+  try {
+    const res = await fetch("/.netlify/functions/reel-render", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        listingId: REAL_LISTING_ID, projectId: REAL_PROJECT_ID, userId: REAL_USER_ID, event: i.event, lengthSec: i.lengthSec, intake,
+        musicStyle: document.getElementById("reelMusic").value,
+        plan: { slots: reelPlan.slots.map(s => ({ photoId: s.photoId, motion: s.motion || "auto", role: s.role })), highlights: reelPlan.highlights, supporting: reelPlan.supporting },
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Could not start the render");
+    reelRenderJobId = data.jobId;
+    const t0 = Date.now(); let misses = 0;
+    for (;;) {
+      await new Promise(r => { reelPollTimer = setTimeout(r, 3000); });
+      if (document.getElementById("stepReelReview").classList.contains("hidden")) return; // user went back
+      let pd;
+      try { const pr = await fetch("/.netlify/functions/reel-render?jobId=" + encodeURIComponent(reelRenderJobId)); pd = await pr.json(); misses = 0; }
+      catch (e) { if (++misses > 5) throw new Error("Lost connection while rendering. Please try again."); continue; }
+      if (pd.status === "error") throw new Error(pd.error || "Render failed");
+      if (pd.status === "done") { reelResult = pd; break; }
+      st.textContent = (pd.step || "Rendering") + "\u2026 " + Math.round((Date.now() - t0) / 1000) + "s";
+      if (Date.now() - t0 > 600000) throw new Error("This is taking longer than expected. Please try again.");
+    }
+    st.classList.add("hidden");
+    const tabs = document.getElementById("reelVariantTabs");
+    tabs.innerHTML = (reelResult.branded ? '<button class="motion-btn kenburns" data-v="branded">Branded</button>' : "") +
+      (reelResult.unbranded ? '<button class="motion-btn kenburns" data-v="unbranded">Unbranded (MLS)</button>' : "");
+    tabs.querySelectorAll("button").forEach(b => b.addEventListener("click", () => setReelVariant(b.getAttribute("data-v"))));
+    document.getElementById("reelResultNote").textContent = "Links work for about an hour while we\u2019re in beta. " + ((reelResult.warnings || []).join(" "));
+    document.getElementById("reelResult").classList.remove("hidden");
+    setReelVariant(reelResult.branded ? "branded" : "unbranded");
+    document.getElementById("reelResult").scrollIntoView({ behavior: "smooth", block: "start" });
+  } catch (e) {
+    st.classList.add("hidden");
+    err.textContent = e.message;
+  } finally {
+    btn.disabled = false; btn.textContent = reelResult ? "Re-render" : "Render my Reel";
+  }
+}
+
 function saveReelMotion() {
   reelPlanSync();
   try { sessionStorage.setItem("reelPlan_" + (REAL_LISTING_ID || "none"), JSON.stringify({ intake: window._reelIntake, plan: reelPlan })); } catch (e) { /* non-fatal */ }
   const box = document.getElementById("reelMotionSaved");
   box.innerHTML = '<div class="ri-brand" style="border-color:var(--gold);"><b>&#10003; Reel plan saved.</b> ' + reelPlan.slots.length + ' scenes \u00b7 ' +
     reelPlan.slots.map(s => (KEN_BURNS_PRESETS[s.motion] || {}).label || s.motion).join(" \u00b7 ") +
-    '<div class="ri-help" style="margin-top:6px;">Rendering the Reel from this plan is the next piece we\u2019re building \u2014 nothing renders or charges yet.</div></div>';
+    '<div class="ri-help" style="margin-top:6px;">Rendering the Reel from this plan is the next piece we&rsquo;re building &mdash; nothing renders or charges yet.</div></div>';
   box.classList.remove("hidden");
   const btn = document.getElementById("reelSaveBtn"); if (btn) btn.textContent = "Saved \u2713";
   box.scrollIntoView({ behavior: "smooth", block: "center" });

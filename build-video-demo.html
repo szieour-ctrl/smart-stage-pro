@@ -351,7 +351,9 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
         <div class="ri-modebar" id="reelVariantTabs"></div>
         <div class="ri-help" id="reelVariantNote" style="text-align:center;margin-top:8px;"></div>
         <div style="display:flex;justify-content:center;margin-top:10px;"><video id="reelPlayer" controls playsinline loop style="width:min(300px,70vw);aspect-ratio:9/16;background:#000;border-radius:8px;"></video></div>
-        <div style="text-align:center;margin-top:10px;"><a id="reelDownload" class="btn btn-ghost" download target="_blank" rel="noopener">Download</a></div>
+        <div style="text-align:center;margin-top:10px;"><a id="reelDownload" class="btn btn-ghost" download target="_blank" rel="noopener">Download</a>
+          <button type="button" class="btn btn-ghost" id="reelShareBtn" disabled style="margin-left:8px;" title="Download the Reel first, then you can share a link">Copy share link</button></div>
+        <div class="ri-help" id="reelShareNote" style="text-align:center;margin-top:6px;">Download this version to unlock a client share link (works for 7 days).</div>
         <div class="ri-help" id="reelResultNote" style="text-align:center;margin-top:8px;"></div>
       </div>
       <div class="ri-errors" id="reelRenderErr"></div>
@@ -3763,7 +3765,7 @@ function renderReelMotion() {
 }
 
 // ── Step 4: review + render (beta, no charging yet) ──
-let reelRenderJobId = null, reelResult = null, reelPollTimer = null;
+let reelRenderJobId = null, reelResult = null, reelPollTimer = null, reelCurVariant = null, reelDownloaded = {};
 function enterReelReview() {
   reelPlanSync();
   try { sessionStorage.setItem("reelPlan_" + (REAL_LISTING_ID || "none"), JSON.stringify({ intake: window._reelIntake, plan: reelPlan })); } catch (e) { /* non-fatal */ }
@@ -3785,6 +3787,29 @@ function reelBackToMotion() {
   document.getElementById("stepReelReview").classList.add("hidden");
   document.getElementById("stepReelMotion").classList.remove("hidden");
 }
+function updateReelShareUi() {
+  const b = document.getElementById("reelShareBtn"), n = document.getElementById("reelShareNote");
+  if (!b || !n) return;
+  const ok = !!(reelDownloaded[reelCurVariant]);
+  b.disabled = !ok;
+  n.textContent = ok ? "Share this version with a client. The link works for 7 days; share again any time before the Reel expires." : "Download this version to unlock a client share link (works for 7 days).";
+}
+function markReelDownloaded() { reelDownloaded[reelCurVariant] = true; updateReelShareUi(); }
+async function shareReel() {
+  const b = document.getElementById("reelShareBtn"), n = document.getElementById("reelShareNote");
+  const key = reelResult && reelResult.keys && reelResult.keys[reelCurVariant];
+  if (!key || !reelDownloaded[reelCurVariant]) return;
+  b.disabled = true; n.textContent = "Creating link\u2026";
+  try {
+    const r = await fetch("/.netlify/functions/reel-share", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key }) });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || "Could not create the link");
+    let copied = false;
+    try { await navigator.clipboard.writeText(d.url); copied = true; } catch (e) { /* show the link instead */ }
+    n.innerHTML = (copied ? "Link copied. " : "Copy this link: ") + '<a href="' + escHtml(d.url) + '" target="_blank" rel="noopener">' + escHtml(d.url) + "</a><br>Works until " + escHtml(new Date(d.expiresAt).toLocaleDateString()) + ".";
+  } catch (e) { n.textContent = e.message || "Could not create the link"; }
+  b.disabled = false;
+}
 function setReelVariant(which) {
   if (!reelResult) return;
   const url = reelResult[which];
@@ -3792,6 +3817,7 @@ function setReelVariant(which) {
   v.src = url; v.load(); const pl = v.play(); if (pl && pl.catch) pl.catch(() => {});
   const dl = document.getElementById("reelDownload");
   dl.href = url; dl.textContent = "Download " + (which === "branded" ? "Branded" : "Unbranded (MLS)");
+  reelCurVariant = which; updateReelShareUi();
   document.querySelectorAll("#reelVariantTabs button").forEach(b => b.classList.toggle("on", b.getAttribute("data-v") === which));
   document.getElementById("reelVariantNote").textContent = which === "branded"
     ? "Branded: includes your call to action, name, DRE, brokerage and logo."
@@ -3799,7 +3825,7 @@ function setReelVariant(which) {
 }
 async function startReelRender() {
   const btn = document.getElementById("reelRenderBtn"), err = document.getElementById("reelRenderErr"), st = document.getElementById("reelRenderStatus");
-  err.textContent = ""; reelResult = null;
+  err.textContent = ""; reelResult = null; reelDownloaded = {}; reelCurVariant = null;
   document.getElementById("reelResult").classList.add("hidden");
   reelPlanSync();
   const i = window._reelIntake, intake = { ...i };
@@ -3835,6 +3861,8 @@ async function startReelRender() {
     tabs.innerHTML = (reelResult.branded ? '<button class="motion-btn kenburns" data-v="branded">Branded</button>' : "") +
       (reelResult.unbranded ? '<button class="motion-btn kenburns" data-v="unbranded">Unbranded (MLS)</button>' : "");
     tabs.querySelectorAll("button").forEach(b => b.addEventListener("click", () => setReelVariant(b.getAttribute("data-v"))));
+    document.getElementById("reelDownload").onclick = markReelDownloaded;
+    document.getElementById("reelShareBtn").onclick = shareReel;
     document.getElementById("reelResultNote").textContent = "Links work for about an hour while we\u2019re in beta. " + ((reelResult.warnings || []).join(" "));
     document.getElementById("reelResult").classList.remove("hidden");
     setReelVariant(reelResult.branded ? "branded" : "unbranded");

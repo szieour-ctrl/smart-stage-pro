@@ -107,6 +107,7 @@ exports.handler = async (event) => {
       return reply(200, {
         status: "done", durationSec: j.result.durationSec, warnings: j.result.warnings || [],
         branded: await presign(keys.branded, 3600), unbranded: await presign(keys.unbranded, 3600),
+        keys: { branded: keys.branded || null, unbranded: keys.unbranded || null },
       });
     } catch (e) {
       console.error("reel-render status error:", e.message);

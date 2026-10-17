@@ -316,7 +316,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
     </div>
     <div class="action-row">
       <button class="btn btn-ghost" onclick="reelBackToIntake()">Back</button>
-      <button class="btn btn-ghost hidden" id="reelNextBtn" onclick="enterReelMotion()">Next: Motion &rarr;</button>
+      <button class="btn btn-primary hidden" id="reelNextBtn" onclick="enterReelMotion()">Next: Motion &rarr;</button>
       <button class="btn btn-primary" id="reelPlanBtn" onclick="buildReelPlan()" disabled>Build storyboard</button>
     </div>
   </div>
@@ -326,6 +326,8 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
       <div class="eyebrow">Reel &middot; Step 3</div>
       <div class="panel-title">Choose the motion</div>
       <div class="panel-sub">Reels use Ken Burns movement only. We&rsquo;ve picked a movement for each photo &mdash; change any of them. Tap &#9654; to preview it on your photo in 9:16.</div>
+      <div class="ri-help" id="reelRevealSummary" style="margin:8px 0;"></div>
+      <div class="ri-help" style="margin-bottom:10px;">Photos with an Original use <b>Room Reveal</b> by default, so viewers see the as-is room before the staged version. Choose <b>Standard motion</b> on a photo to show only the staged image (it keeps its Virtually Staged badge).</div>
       <div class="rp-board" id="reelMotionBoard"></div>
       <div id="reelMotionSaved" class="hidden"></div>
     </div>
@@ -342,11 +344,12 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
       <div class="panel-sub" id="reelReviewSummary"></div>
       <div class="ri-brand" id="reelReviewBrand"></div>
       <div class="ri-field" style="margin-top:14px;"><label for="reelMusic">Music</label><select id="reelMusic" class="btn btn-ghost" style="width:100%;text-align:left;"></select></div>
-      <div class="ri-help">Beta: rendering is free while we test. Takes about a minute or two.</div>
+      <div class="ri-help">Beta: rendering is free while we test. It usually takes a few minutes \u2014 you can keep this tab open.</div>
       <div id="reelRenderStatus" class="ri-brand hidden" style="margin-top:14px;"></div>
       <div id="reelResult" class="hidden">
         <div class="ri-group-title">Your Reel</div>
         <div class="ri-modebar" id="reelVariantTabs"></div>
+        <div class="ri-help" id="reelVariantNote" style="text-align:center;margin-top:8px;"></div>
         <div style="display:flex;justify-content:center;margin-top:10px;"><video id="reelPlayer" controls playsinline loop style="width:min(300px,70vw);aspect-ratio:9/16;background:#000;border-radius:8px;"></video></div>
         <div style="text-align:center;margin-top:10px;"><a id="reelDownload" class="btn btn-ghost" download target="_blank" rel="noopener">Download</a></div>
         <div class="ri-help" id="reelResultNote" style="text-align:center;margin-top:8px;"></div>
@@ -3480,8 +3483,8 @@ function reelRange() {
   return window.ReelIntake.REEL_LENGTHS.find(l => l.sec === i.lengthSec) || { sec: 0, min: 3, max: 8 };
 }
 function reelAllPhotos() {
-  return [...galleryStagedFrames.map(f => ({ id: f.id, url: f.stagedUrl, label: f.roomLabel })),
-          ...galleryExternalFrames.map(f => ({ id: f.id, url: f.imageUrl, label: f.roomLabel }))].filter(p => p.url);
+  return [...galleryStagedFrames.map(f => ({ id: f.id, url: f.stagedUrl, label: f.roomLabel, beforeUrl: (f.originalUrl && !f.isHeroShot) ? f.originalUrl : "" })),
+          ...galleryExternalFrames.map(f => ({ id: f.id, url: f.imageUrl, label: f.roomLabel, beforeUrl: "" }))].filter(p => p.url);
 }
 function enterReelPhotos() {
   document.getElementById("stepReelIntake").classList.add("hidden");
@@ -3525,6 +3528,7 @@ function toggleReelPhoto(id) {
   reelPlan = null;
   document.getElementById("reelPlanBox").classList.add("hidden");
   document.getElementById("reelNextBtn").classList.add("hidden");
+  { const pb = document.getElementById("reelPlanBtn"); pb.textContent = "Build storyboard"; pb.classList.add("btn-primary"); pb.classList.remove("btn-ghost"); }
   renderReelPhotos();
 }
 async function buildReelPlan() {
@@ -3553,7 +3557,9 @@ async function buildReelPlan() {
   } catch (e) {
     err.textContent = e.message;
   } finally {
-    btn.textContent = reelPlan ? "Rebuild storyboard" : "Build storyboard";
+    btn.textContent = reelPlan ? "Start over with AI" : "Build storyboard";
+    btn.classList.toggle("btn-primary", !reelPlan); btn.classList.toggle("btn-ghost", !!reelPlan);
+    btn.title = reelPlan ? "Re-run the AI storyboard. This replaces your caption, order and motion edits." : "";
     renderReelPhotos();
   }
 }
@@ -3565,6 +3571,7 @@ function reelPlanSync() {
     s.caption = s.captionKey ? (reelPlan.photoCaptions[s.photoId] || "") : "";
     s.fixedCaption = !!(s.captionKey && reelPlan.photoFixed[s.photoId]);
     s.motion = reelPlan.photoMotion[s.photoId] || "auto";
+    s.reveal = (reelPlan.photoReveal && reelPlan.photoReveal[s.photoId]) || "none";
     if (s.captionKey) (s.captionKey === "highlights" ? hl : sp)[s.captionIdx] = s.caption;
   });
   for (let i = 0; i < hl.length; i++) if (hl[i] == null) hl[i] = "";
@@ -3572,8 +3579,34 @@ function reelPlanSync() {
   reelPlan.highlights = hl; reelPlan.supporting = sp;
   window._reelPlan = reelPlan;
 }
+const REEL_SCENE_MIN = 2.5, REEL_REVEAL_MIN = 3.0; // mirrors Railway reelStoryboard + netlify lib/reel-reveal.js
+function reelLen() { return Number((window._reelIntake || {}).lengthSec) || 30; }
+function reelAllocate(lengthSec, reveals) {
+  const n = reveals.length;
+  let d = reveals.map(r => (r ? Math.max(lengthSec / n, REEL_REVEAL_MIN) : lengthSec / n));
+  let over = d.reduce((a, b) => a + b, 0) - lengthSec;
+  for (let pass = 0; pass < 6 && over > 1e-9; pass++) {
+    const room = d.map((x, i) => (reveals[i] ? 0 : Math.max(0, x - REEL_SCENE_MIN)));
+    const tot = room.reduce((a, b) => a + b, 0);
+    if (tot <= 1e-9) break;
+    const cut = Math.min(over, tot);
+    d = d.map((x, i) => x - (cut * room[i]) / tot);
+    over -= cut;
+  }
+  return over > 1e-6 ? null : d;
+}
+function reelRevealFlags() { return reelPlan.slots.map(s => (reelPlan.photoReveal[s.photoId] || "none") !== "none"); }
 function reelPlanInit() {
-  reelPlan.photoCaptions = {}; reelPlan.photoFixed = {}; reelPlan.photoMotion = {};
+  reelPlan.photoCaptions = {}; reelPlan.photoFixed = {}; reelPlan.photoMotion = {}; reelPlan.photoReveal = {};
+  // Room Reveal (Original -> Staged) is the default for every staged photo that has a real Original,
+  // as many as the Reel length allows. The rest start as Standard Motion (user can change either way).
+  { const all0 = reelAllPhotos(), flags = [];
+    reelPlan.slots.forEach(s => {
+      const p = all0.find(x => x.id === s.photoId) || {};
+      let want = !!p.beforeUrl;
+      if (want && !reelAllocate(reelLen(), [...flags.slice(0, flags.length), true, ...Array(reelPlan.slots.length - flags.length - 1).fill(false)])) want = false;
+      flags.push(want); reelPlan.photoReveal[s.photoId] = want ? "classic_reveal" : "none";
+    }); }
   reelPlan.slots.forEach(s => {
     reelPlan.photoCaptions[s.photoId] = s.caption || "";
     reelPlan.photoFixed[s.photoId] = !!s.fixedCaption;
@@ -3635,12 +3668,14 @@ const RM_COMPOUND = {
   float_pull_back: [[1.3,0,0],[1.32,1.5,-1],[1.3,0,0],[1.05,0,0]],
 };
 function reelMotionWaypoints(key) { return RM_COMPOUND[key] || RM[key] || RM.push_in; }
-function openReelMotionPreview(photoUrl, key) {
+function openReelMotionPreview(photoUrl, key, beforeUrl) {
   const isAuto = key === "auto", use = isAuto ? "push_in" : key, preset = KEN_BURNS_PRESETS[key] || KEN_BURNS_PRESETS.auto;
   const stage = document.getElementById("previewStage");
   stage.style.aspectRatio = "9/16"; stage.style.width = "min(260px, 52vh)"; stage.style.margin = "0 auto"; stage.style.overflow = "hidden";
   stage.innerHTML = '<button class="lightbox-close" onclick="closePreview()">&times;</button>' +
-    '<img id="reelPrevImg" src="' + escHtml(photoUrl) + '" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;">';
+    '<img id="reelPrevImg" src="' + escHtml(photoUrl) + '" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;">' +
+    (beforeUrl ? '<img id="reelPrevBefore" src="' + escHtml(beforeUrl) + '" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transition:clip-path .5s ease;clip-path:inset(0 0 0 0);">' +
+      '<div id="reelPrevTag" style="position:absolute;left:8px;top:8px;background:rgba(0,0,0,.65);color:#fff;font-size:.7rem;font-weight:700;padding:3px 8px;border-radius:3px;">Original</div>' : "");
   document.getElementById("previewInfo").innerHTML = '<div class="panel-title">' + escHtml(preset.label) + '</div><div class="panel-sub">' + escHtml(preset.desc) +
     '</div><div class="ri-help" style="margin-top:8px;">' + (isAuto ? "Auto picks a movement for the room when the Reel renders; showing Push In as an example. " : "") +
     'Approximate preview on your photo in the 9:16 frame &mdash; the final render may differ slightly.</div>';
@@ -3650,10 +3685,20 @@ function openReelMotionPreview(photoUrl, key) {
     img.animate(pts.map(([sc, x, y]) => ({ transform: "translate(" + x + "%," + y + "%) scale(" + sc + ")", easing: "ease-in-out" })),
       { duration: Math.max(4000, pts.length * 1800), iterations: Infinity, direction: "alternate" });
   }
+  if (beforeUrl) { // Original holds ~1.5s, then wipes left to reveal the staged photo; loops
+    const bf = document.getElementById("reelPrevBefore"), tag = document.getElementById("reelPrevTag");
+    const cycle = () => {
+      if (!document.getElementById("reelPrevBefore")) return;
+      bf.style.transition = "none"; bf.style.clipPath = "inset(0 0 0 0)"; tag.style.opacity = 1;
+      setTimeout(() => { if (!document.getElementById("reelPrevBefore")) return; bf.style.transition = "clip-path .5s ease"; bf.style.clipPath = "inset(0 100% 0 0)"; tag.style.opacity = 0; }, 1500);
+      setTimeout(cycle, 5500);
+    };
+    cycle();
+  }
 }
 function reelPreviewFor(i) {
   const sl = reelPlan.slots[i], p = reelAllPhotos().find(x => x.id === sl.photoId) || {};
-  openReelMotionPreview(p.url || "", reelPlan.photoMotion[sl.photoId] || "auto");
+  openReelMotionPreview(p.url || "", reelPlan.photoMotion[sl.photoId] || "auto", (reelPlan.photoReveal[sl.photoId] || "none") !== "none" ? p.beforeUrl : "");
 }
 function enterReelMotion() {
   document.getElementById("stepReelPhotos").classList.add("hidden");
@@ -3670,19 +3715,47 @@ function reelBackToStoryboard() {
 function renderReelMotion() {
   reelPlanSync();
   const all = reelAllPhotos(), board = document.getElementById("reelMotionBoard");
+  const revNames = { classic_reveal: "Classic Reveal", luxury_drift: "Luxury Drift", cinematic_reveal: "Cinematic Reveal" };
+  const durs = reelAllocate(reelLen(), reelRevealFlags());
   board.innerHTML = reelPlan.slots.map((s, i) => {
-    const p = all.find(x => x.id === s.photoId) || {}, cur = reelPlan.photoMotion[s.photoId] || "auto";
+    const p = all.find(x => x.id === s.photoId) || {}, cur = reelPlan.photoMotion[s.photoId] || "auto", rv = reelPlan.photoReveal[s.photoId] || "none";
     const optHtml = list => list.filter(k => KEN_BURNS_PRESETS[k]).map(k => '<option value="' + k + '"' + (k === cur ? " selected" : "") + ">" + KEN_BURNS_PRESETS[k].label + "</option>").join("");
     const opts = '<optgroup label="Standard">' + optHtml(REEL_MOTION_STANDARD) + '</optgroup><optgroup label="Compound (hero rooms)">' + optHtml(REEL_MOTION_COMPOUND) + '</optgroup>';
+    const selStyle = 'width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:4px;font-family:inherit;margin-top:4px;';
+    const modeHtml = p.beforeUrl
+      ? '<select data-rv="' + i + '" style="' + selStyle + '"><option value="reveal"' + (rv !== "none" ? " selected" : "") + '>Room Reveal (Original \u2192 Staged)</option><option value="none"' + (rv === "none" ? " selected" : "") + '>Standard motion (Staged only)</option></select>' : "";
+    const presetHtml = (p.beforeUrl && rv !== "none")
+      ? '<select data-rp="' + i + '" style="' + selStyle + '">' + Object.keys(revNames).map(k => '<option value="' + k + '"' + (k === rv ? " selected" : "") + ">" + revNames[k] + "</option>").join("") + "</select>" : "";
+    const endLabel = rv !== "none" ? "End motion after the reveal" : "Motion";
+    const note = p.beforeUrl ? "" : '<div class="rp-fixed">' + (all.find(x => x.id === s.photoId) && galleryExternalFrames.some(f => f.id === s.photoId) ? "Outside photo \u2014 no Original to reveal." : "No Original available for this photo.") + "</div>";
     return '<div class="rp-slot"><div class="rp-n">' + (i + 1) + '</div><img src="' + escHtml(p.url || "") + '" alt="">' +
-      '<div><div class="rp-role">' + escHtml(s.role) + '</div><select data-m="' + i + '" style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:4px;font-family:inherit;">' + opts + '</select>' +
-      '<div class="rp-fixed" data-md="' + i + '">' + escHtml((KEN_BURNS_PRESETS[cur] || {}).desc || "") + '</div></div>' +
+      '<div><div class="rp-role">' + escHtml(s.role) + (durs ? " \u00b7 " + durs[i].toFixed(1) + "s" : "") + '</div>' + modeHtml + presetHtml +
+      '<div class="rp-role" style="margin:6px 0 0;">' + endLabel + '</div><select data-m="' + i + '" style="' + selStyle.replace("margin-top:4px;", "") + '">' + opts + '</select>' +
+      '<div class="rp-fixed" data-md="' + i + '">' + escHtml((KEN_BURNS_PRESETS[cur] || {}).desc || "") + '</div>' + note + '</div>' +
       '<div class="rp-move"><button type="button" data-pv="' + i + '" title="Preview in 9:16">&#9654;</button></div></div>';
   }).join("");
+  const nRev = reelRevealFlags().filter(Boolean).length;
+  const sum = document.getElementById("reelRevealSummary");
+  if (sum) sum.textContent = nRev ? nRev + " of " + reelPlan.slots.length + " scenes use a Room Reveal (Original \u2192 Staged). Each reveal scene needs at least " + REEL_REVEAL_MIN + "s, so a " + reelLen() + "s Reel fits a limited number." : "All scenes show the Staged photo only (Standard motion).";
   board.querySelectorAll("select[data-m]").forEach(el => el.addEventListener("change", () => {
     const i = Number(el.getAttribute("data-m")), sl = reelPlan.slots[i];
     reelPlan.photoMotion[sl.photoId] = el.value; reelPlanSync();
     board.querySelector('[data-md="' + i + '"]').textContent = (KEN_BURNS_PRESETS[el.value] || {}).desc || "";
+  }));
+  board.querySelectorAll("select[data-rv]").forEach(el => el.addEventListener("change", () => {
+    const i = Number(el.getAttribute("data-rv")), sl = reelPlan.slots[i];
+    const prev = reelPlan.photoReveal[sl.photoId] || "none";
+    reelPlan.photoReveal[sl.photoId] = el.value === "reveal" ? (prev !== "none" ? prev : "classic_reveal") : "none";
+    if (!reelAllocate(reelLen(), reelRevealFlags())) {
+      reelPlan.photoReveal[sl.photoId] = prev;
+      document.getElementById("reelMotionSaved").classList.remove("hidden");
+      document.getElementById("reelMotionSaved").innerHTML = '<div class="ri-help" style="color:#b3261e;margin-top:8px;">A ' + reelLen() + 's Reel can\u2019t fit that Room Reveal with this many photos (each reveal needs at least ' + REEL_REVEAL_MIN + 's). Switch another photo to Standard motion first, use fewer photos, or choose a longer Reel.</div>';
+    } else { document.getElementById("reelMotionSaved").classList.add("hidden"); }
+    reelPlanSync(); renderReelMotion();
+  }));
+  board.querySelectorAll("select[data-rp]").forEach(el => el.addEventListener("change", () => {
+    const sl = reelPlan.slots[Number(el.getAttribute("data-rp"))];
+    reelPlan.photoReveal[sl.photoId] = el.value; reelPlanSync();
   }));
   board.querySelectorAll("[data-pv]").forEach(el => el.addEventListener("click", () => {
     reelPreviewFor(Number(el.getAttribute("data-pv")));
@@ -3697,7 +3770,7 @@ function enterReelReview() {
   document.getElementById("stepReelMotion").classList.add("hidden");
   document.getElementById("stepReelReview").classList.remove("hidden");
   const i = window._reelIntake || {}, ev = window.ReelIntake.EVENTS[i.event];
-  document.getElementById("reelReviewSummary").textContent = (ev ? ev.label : "Reel") + " \u00b7 " + i.lengthSec + "s \u00b7 " + reelPlan.slots.length + " scenes \u00b7 " + (i.address || "");
+  document.getElementById("reelReviewSummary").textContent = (ev ? ev.label : "Reel") + " \u00b7 " + i.lengthSec + "s \u00b7 " + reelPlan.slots.length + " scenes \u00b7 " + reelPlan.slots.filter(s => s.reveal && s.reveal !== "none").length + " Room Reveal \u00b7 " + (i.address || "");
   const b = reelBrandingSummary;
   document.getElementById("reelReviewBrand").innerHTML = (b && b.complete)
     ? "You\u2019ll get two versions: <b>Branded</b> (" + escHtml(b.licensedName) + ", DRE #" + escHtml(b.dre) + ", " + escHtml(b.brokerage) + ") and <b>Unbranded (MLS)</b>."
@@ -3720,6 +3793,9 @@ function setReelVariant(which) {
   const dl = document.getElementById("reelDownload");
   dl.href = url; dl.textContent = "Download " + (which === "branded" ? "Branded" : "Unbranded (MLS)");
   document.querySelectorAll("#reelVariantTabs button").forEach(b => b.classList.toggle("on", b.getAttribute("data-v") === which));
+  document.getElementById("reelVariantNote").textContent = which === "branded"
+    ? "Branded: includes your call to action, name, DRE, brokerage and logo."
+    : "Unbranded (MLS): no call to action, name, brokerage or logo \u2014 safe for MLS and portals.";
 }
 async function startReelRender() {
   const btn = document.getElementById("reelRenderBtn"), err = document.getElementById("reelRenderErr"), st = document.getElementById("reelRenderStatus");
@@ -3736,7 +3812,7 @@ async function startReelRender() {
       body: JSON.stringify({
         listingId: REAL_LISTING_ID, projectId: REAL_PROJECT_ID, userId: REAL_USER_ID, event: i.event, lengthSec: i.lengthSec, intake,
         musicStyle: document.getElementById("reelMusic").value,
-        plan: { slots: reelPlan.slots.map(s => ({ photoId: s.photoId, motion: s.motion || "auto", role: s.role })), highlights: reelPlan.highlights, supporting: reelPlan.supporting },
+        plan: { slots: reelPlan.slots.map(s => ({ photoId: s.photoId, motion: s.motion || "auto", role: s.role, reveal: s.reveal || "none" })), highlights: reelPlan.highlights, supporting: reelPlan.supporting },
       }),
     });
     const data = await res.json();

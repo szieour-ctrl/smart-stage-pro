@@ -70,6 +70,26 @@ Smart Stage PRO Plus turns a staged image into a short video using AI-generated 
 - Single-image motion: a small set of named presets (camera orbit, focus pull, fireplace flame, curtain sway) that animate camera movement or a dynamic element within one already-staged, already-disclosed photo.
 AI Motion video automatically gets the exact same AB 723 disclosure and compliance page as any staged image — Smart Stage PRO handles this for you, with no extra disclosure work required. See "AI Motion Video — Disclosure Requirements" in the Business Rules document for the full picture.
 
+## Reels (Smart Stage PRO Plus — beta)
+A Reel is a short vertical (9:16) video for Instagram, Facebook, TikTok, YouTube Shorts and similar, built from the listing's photos inside the video builder (open it with Reels turned on). Reels use Ken Burns camera movement only (no AI motion), with music.
+How to make one:
+1. Pick the listing and the Reel type (12 types: Teaser, Coming Soon, Just Listed, For Sale, For Lease, Feature Spotlight, Under Contract, Back on Market, Price Drop, Price Improvement, Open House, Just Sold) and a length: 15, 30, 45 or 60 seconds.
+2. Fill in the short form (address, price, beds, baths, sq ft, highlights, call to action). Saved listing details and your Branding fill in automatically. Highlights and the call to action can be left blank — the AI will write them.
+3. Pick photos. Photo counts: 15s = 3 to 6, 30s = 4 to 8, 45s = 6 to 8, 60s = 8.
+4. The AI plans the storyboard: it chooses the order, matches each photo to a scene, and writes a short buyer-benefit line (8 words or fewer) for the scenes that carry one. You can edit any text, move photos up or down (a photo's text and motion move with it), or start over with AI.
+5. Motion step: the AI picks a Ken Burns movement per photo and you can change any of them. Tap the play button for a 9:16 preview on your own photo.
+6. Review and render: pick music, then Render. A Reel usually takes a few minutes.
+Room Reveal (before and after): every staged photo that has an original defaults to Room Reveal — the viewer first sees the original room (labeled Original), it wipes into the staged version, then the camera movement continues. The Virtually Staged / Digitally Enhanced badge appears once the staged image is on screen. If you only want the staged image for a photo, choose Standard motion for that photo. Photos without an original (outside photos, hero shots) always use Standard motion. Each Room Reveal scene needs at least 3 seconds, so a short Reel can only fit a limited number of reveals (for example a 15s Reel with 5 photos fits all 5, but with 6 photos fits none).
+Closing: the closing panel (price and details, call to action, your name, DRE number and brokerage) fades in for roughly the last 3.5 seconds, and the compliance-page QR code joins for the final second.
+Two versions per render: Branded and Unbranded (MLS). See "Branding" below and "Reels — Disclosure, Branded vs Unbranded, Sharing and Expiry" in the Business Rules document.
+
+## Branding — Marketing Profile and Themes
+Open Branding from the header. The Marketing Profile holds the details that appear on compliance pages, the compliance ZIP, the QR card, Branded videos and Branded Reels.
+Required for a Branded video or Reel: your name exactly as licensed, your DRE license number, and your brokerage name. (California advertising rules require all three.) Optional: team name, phone, contact email, website, logo (PNG, JPG or WebP up to 5 MB) and headshot.
+Themes: pick a national-brand theme (Keller Williams, RE/MAX, Coldwell Banker, Century 21, Berkshire Hathaway HomeServices, Sotheby's, Compass, eXp) to apply that brand's colors and font — theme colors are locked once chosen. Pick Custom to choose three colors yourself: Primary (buttons and social), Secondary (navigation bar) and Border (lines). The font defaults to the theme's font and can be changed. Colors and fonts apply to the app header, compliance pages and Branded videos and Reels.
+Without a complete profile (name, DRE, brokerage), the account gets the Unbranded version only and compliance pages use a neutral Smart Stage PRO header.
+Branding on compliance pages is always on and cannot be turned off.
+
 ## The Staging Workflow
 
 1. Log in at smartstagepro.com
@@ -239,6 +259,17 @@ That said, a quick check before publishing is still worth doing:
 3. Confirm the original, un-animated photo is included in the MLS photo gallery — required by MetroList Rule 11.6.1(b), and not satisfied by the video link alone.
 4. If anything in the video doesn't match the real room, regenerate with a different motion preset, or use standard Ken Burns motion instead.
 This applies to every AI Motion preset equally — none of them are exempt from disclosure.
+
+## Reels — Disclosure, Branded vs Unbranded, Sharing and Expiry (Smart Stage PRO Plus beta)
+AB 723: every staged or enhanced scene in a Reel carries the Virtually Staged or Digitally Enhanced badge, and the closing frame carries a QR code to the listing's compliance page. With Room Reveal, the viewer sees the original room before the staged one, which keeps the Reel from misleading the public. A photo set to Standard motion shows only the staged image, with its badge. A staged photo that has no clean copy (older Finals) uses the badge already built into the image, and the render result notes it; re-run Generate Final to fix that.
+Branded vs Unbranded (MLS): each render produces both.
+- Branded: logo, theme, your name, DRE number, brokerage and call to action — for social and marketing.
+- Unbranded (MLS): no logo, name, DRE, brokerage, headshot, contact details or call to action. It keeps the AB 723 badges, the QR code, the headline and address, the price, beds, baths and sq ft, and the highlights. MetroList Rule 11.6 limits company or agent logos, people and contact information on images attached to a listing, so use the Unbranded version for MLS and portal uploads, and the Branded version for your own marketing. If MLS rules for video are unclear, confirm with your MLS or broker.
+Charging: Reels are in beta and are not charged yet. Pricing and monthly Reel allotments will be announced when Reels leave beta. Do not quote Reel prices or allotments.
+Downloading and expiry: a rendered Reel is a draft that is kept for about 7 days. Download it to keep it. Links on the review page work for about an hour; render again or return to the review page for a fresh link.
+Sharing with a client: after you download a version, a Copy share link button unlocks for that version. The link opens a simple page on smartstagepro.com where the client can watch and download the Reel. It works for up to 7 days (never longer than the draft itself lasts). Sharing is not a second download and does not count as another Reel. To share again later, make a new link.
+Posting: Reels are delivered as MP4 files. Download the file and upload it to Instagram, Facebook, TikTok, YouTube or your MLS. The compliance page link or QR on the closing frame covers the AB 723 link requirement; the original un-staged photos must still be included in the MLS gallery as described above.
+Render problems: if a render fails, try again; a message under the video will list any photo whose original could not be loaded (the Reel then shows that photo without the before and after wipe).
 
 ## Record Retention
 Compliance pages: permanent for life of subscription + minimum 30 days post-cancellation.

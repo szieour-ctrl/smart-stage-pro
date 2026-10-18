@@ -101,6 +101,42 @@ function stripePost(path, params) {
   });
 }
 
+// ── Stripe API GET ───────────────────────────────────────
+function stripeGet(path) {
+  return new Promise((resolve, reject) => {
+    const req = https.request({
+      hostname: 'api.stripe.com', path: `/v1/${path}`, method: 'GET',
+      headers: { 'Authorization': `Bearer ${process.env.STRIPE_SECRET_KEY}` }
+    }, res => {
+      let data = '';
+      res.on('data', c => data += c);
+      res.on('end', () => {
+        try { resolve({ status: res.statusCode, data: JSON.parse(data) }); }
+        catch { resolve({ status: res.statusCode, data }); }
+      });
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+// Listing Package special ("Better Late Than Never", $20 off). The code must
+// be an active Stripe promotion code on the special's coupon; anything else
+// (expired, used up, other coupon, lookup error) returns null and the buyer
+// simply pays the regular price.
+const PROMO_COUPON_ID = process.env.STRIPE_COUPON_LISTING_PACKAGE || 'FthMCKtG';
+async function lookupPromotionCodeId(code) {
+  try {
+    const clean = String(code || '').trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '').slice(0, 40);
+    if (!clean) return null;
+    const r = await stripeGet(`promotion_codes?code=${encodeURIComponent(clean)}&active=true&limit=1`);
+    const pc = r.status === 200 && r.data && r.data.data && r.data.data[0];
+    if (!pc) return null;
+    const couponId = pc.coupon && (pc.coupon.id || pc.coupon);
+    return couponId === PROMO_COUPON_ID ? pc.id : null;
+  } catch (e) { console.error('promo lookup failed:', e.message); return null; }
+}
+
 // ── Handler ──────────────────────────────────────────────
 exports.handler = async function(event) {
   if (event.httpMethod !== 'POST') {
@@ -117,7 +153,7 @@ exports.handler = async function(event) {
   try { body = JSON.parse(event.body); }
   catch { return { statusCode: 400, body: JSON.stringify({ error: 'Invalid JSON' }) }; }
 
-  const { plan, teamName, brokerageName } = body;
+  const { plan, teamName, brokerageName, promo } = body;
 
   if (!VALID_PLANS.includes(plan)) {
     return { statusCode: 400, body: JSON.stringify({ error: `Invalid plan: ${plan}. Must be solo, team, brokerage, or listing_package.` }) };
@@ -176,7 +212,20 @@ exports.handler = async function(event) {
       // receipts, the Billing portal and a later subscription all line up.
       pParams['customer_creation'] = 'always';
     }
-    const pResult = await stripePost('checkout/sessions', pParams);
+    let promoApplied;
+    if (promo) {
+      const promoId = await lookupPromotionCodeId(promo);
+      if (promoId) pParams['discounts[0][promotion_code]'] = promoId;
+      promoApplied = !!promoId;
+    }
+    let pResult = await stripePost('checkout/sessions', pParams);
+    if (pResult.status !== 200 && pParams['discounts[0][promotion_code]']) {
+      // Code went invalid between lookup and session creation (e.g. just used).
+      console.error('Stripe promo checkout error, retrying at full price:', JSON.stringify(pResult.data));
+      delete pParams['discounts[0][promotion_code]'];
+      promoApplied = false;
+      pResult = await stripePost('checkout/sessions', pParams);
+    }
     if (pResult.status !== 200) {
       console.error('Stripe package checkout error:', JSON.stringify(pResult.data));
       return { statusCode: 500, body: JSON.stringify({ error: 'Stripe checkout session creation failed', detail: pResult.data?.error?.message }) };
@@ -184,7 +233,7 @@ exports.handler = async function(event) {
     return {
       statusCode: 200,
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: pResult.data.url, sessionId: pResult.data.id })
+      body: JSON.stringify({ url: pResult.data.url, sessionId: pResult.data.id, promoApplied })
     };
   }
 

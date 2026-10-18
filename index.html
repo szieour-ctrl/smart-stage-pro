@@ -8898,6 +8898,7 @@ async function handleAuthenticatedUser(user) {
   // Returning from Stripe Checkout before the webhook has flipped status to
   // active — the pricing page's own checkout=success poll handles this.
   if (new URLSearchParams(window.location.search).get('checkout') === 'success') {
+    clearPendingPromo();
     showPricingPage(user, userRec);
     return;
   }
@@ -10303,10 +10304,12 @@ async function startCheckout(plan) {
     const res = await fetch('/.netlify/functions/create-checkout-session', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + jwt },
-      body: JSON.stringify({ plan, userId: _currentUser.id, email: _currentUser.email }),
+      body: JSON.stringify({ plan, userId: _currentUser.id, email: _currentUser.email,
+        promo: plan === 'listing_package' ? getPendingPromo() : undefined }),
     });
     const data = await res.json();
     if (data.error) throw new Error(data.error);
+    if (data.promoApplied === false) { clearPendingPromo(); showToast('That offer has ended or was already used — continuing at the regular price.', 'info'); }
     if (data.url) window.location.href = data.url;
   } catch (err) {
     showToast('Checkout error: ' + err.message, 'error');
@@ -14930,6 +14933,39 @@ function getCapturedSignupSource() {
     });
   }
 })();
+// ── PROMO LINK (?promo=CODE) ────────────────────────────────────────────────
+// Email link for the Listing Package special. Stores the code and the
+// intent to buy the Listing Package in localStorage (survives the signup
+// email-confirmation reload, same as the pending-plan flow), strips the
+// param from the URL, and opens signup. Stripe, not this page, decides
+// whether the code is valid — create-checkout-session just looks it up.
+const PENDING_PROMO_STORAGE_KEY = 'ssp_pending_promo';
+(function capturePromoFromParam() {
+  const params = new URLSearchParams(window.location.search);
+  const raw = params.get('promo');
+  if (!raw) return;
+  const code = raw.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '').slice(0, 40);
+  if (code) {
+    try {
+      localStorage.setItem(PENDING_PROMO_STORAGE_KEY, code);
+      localStorage.setItem('ssp_pending_checkout_plan', 'listing_package');
+    } catch (e) { /* storage unavailable — link then just opens signup */ }
+    document.addEventListener('DOMContentLoaded', () => {
+      if (typeof _currentUser !== 'undefined' && _currentUser) return;
+      hideLandingPage();
+      showAuthModal('signup');
+    });
+  }
+  params.delete('promo');
+  const qs = params.toString();
+  try { history.replaceState(null, '', window.location.pathname + (qs ? '?' + qs : '') + window.location.hash); } catch (e) {}
+})();
+function getPendingPromo() {
+  try { return localStorage.getItem(PENDING_PROMO_STORAGE_KEY) || null; } catch (e) { return null; }
+}
+function clearPendingPromo() {
+  try { localStorage.removeItem(PENDING_PROMO_STORAGE_KEY); } catch (e) {}
+}
 // ── INIT ─────────────────────────────────────────────────────────────────────
 showStep('step-property');
 // FIX (Sep 2026): the browser's back/forward cache (bfcache) can restore

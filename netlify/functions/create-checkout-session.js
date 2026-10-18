@@ -131,9 +131,13 @@ async function lookupPromotionCodeId(code) {
     if (!clean) return null;
     const r = await stripeGet(`promotion_codes?code=${encodeURIComponent(clean)}&active=true&limit=1`);
     const pc = r.status === 200 && r.data && r.data.data && r.data.data[0];
-    if (!pc) return null;
-    const couponId = pc.coupon && (pc.coupon.id || pc.coupon);
-    return couponId === PROMO_COUPON_ID ? pc.id : null;
+    if (!pc) { console.log('promo lookup: no active code', clean, 'status', r.status); return null; }
+    // Newer Stripe API versions move the coupon to promotion.coupon; older
+    // ones expose pc.coupon. Each may be an id string or an expanded object.
+    const raw = pc.promotion?.coupon ?? pc.coupon;
+    const couponId = raw && (raw.id || raw);
+    if (couponId !== PROMO_COUPON_ID) { console.log('promo lookup: coupon mismatch', clean, couponId, 'expected', PROMO_COUPON_ID); return null; }
+    return pc.id;
   } catch (e) { console.error('promo lookup failed:', e.message); return null; }
 }
 

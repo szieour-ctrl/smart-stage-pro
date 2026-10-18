@@ -124,7 +124,19 @@ function sliderHtml(p) {
   </section>`;
 }
 
-function renderPage({ slug, address, shots, qrUrl }) {
+// Promo codes arrive as ?promo=CODE on the page URL (set by the offer email).
+// Sanitized to the same charset create-checkout-session accepts; anything
+// else is dropped. Stripe, not this page, decides whether the code is valid.
+function cleanPromo(raw) {
+  const c = String(raw || "").trim().toUpperCase().replace(/[^A-Z0-9_-]/g, "").slice(0, 40);
+  return c || "";
+}
+
+function renderPage({ slug, address, shots, qrUrl, promo }) {
+  const ctaHref = promo
+    ? `https://smartstagepro.com/?promo=${encodeURIComponent(promo)}`
+    : "https://smartstagepro.com/#pricing";
+  const ctaLabel = promo ? "Get the Listing Package — $20 off →" : "See Plans &amp; Pricing →";
   const displayAddress = address || "This Property";
   const multi = shots.length > 1;
   return `<!DOCTYPE html>
@@ -193,8 +205,8 @@ fbq('track', 'PageView');
     <h2>This is what Smart Stage PRO can do for your listings.</h2>
     <p>AI-powered virtual staging, AB 723-compliant disclosure built in, ready in minutes — not days. Every listing gets its own permanent compliance record and QR code, automatically.</p>
     <div style="display:flex;gap:14px;justify-content:center;flex-wrap:wrap;align-items:center;">
-      <a class="cta" href="https://smartstagepro.com/#pricing" target="_blank">See Plans &amp; Pricing →</a>
-      ${qrUrl ? `<a href="${qrUrl}" download="SmartStage_QR_${slug}.png" style="color:var(--muted);font-size:0.82rem;text-decoration:underline;">↓ Download this QR code</a>` : ""}
+      <a class="cta" href="${ctaHref}" target="_blank" onclick="try{fbq('track','Lead',{content_name:'prospect_cta'${promo ? ",promo:'" + promo + "'" : ""}});}catch(e){}">${ctaLabel}</a>
+      ${qrUrl ? `<a href="${qrUrl}" download="SmartStage_QR_${slug}.png" onclick="try{fbq('trackCustom','QRDownload');}catch(e){}" style="color:var(--muted);font-size:0.82rem;text-decoration:underline;">↓ Download this QR code</a>` : ""}
     </div>
   </div>
 
@@ -278,7 +290,7 @@ exports.handler = async (event) => {
     return {
       statusCode: 200,
       headers: htmlHeaders,
-      body: renderPage({ slug, address: meta.address, shots, qrUrl }),
+      body: renderPage({ slug, address: meta.address, shots, qrUrl, promo: cleanPromo(event.queryStringParameters && event.queryStringParameters.promo) }),
     };
   } catch (err) {
     console.error("prospect-page error for slug", slug, ":", err.message);

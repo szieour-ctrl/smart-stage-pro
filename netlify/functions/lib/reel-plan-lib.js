@@ -90,10 +90,38 @@ async function buildUserContent({ event, slots, photos, intake }) {
   return content;
 }
 
+// Returns the end index (inclusive) of the balanced {...} that starts at `start`, or -1. String-aware.
+function balancedEnd(text, start) {
+  let depth = 0, inStr = false, esc = false;
+  for (let i = start; i < text.length; i++) {
+    const c = text[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (c === "\\") esc = true;
+      else if (c === '"') inStr = false;
+      continue;
+    }
+    if (c === '"') inStr = true;
+    else if (c === "{") depth++;
+    else if (c === "}" && --depth === 0) return i;
+  }
+  return -1;
+}
+
+// The model sometimes wraps the JSON in a code fence or adds commentary (with its own braces) after it.
+// Slicing from the first "{" to the last "}" then breaks JSON.parse ("Unexpected token `"), so take the
+// first balanced object that actually parses.
 function extractJsonObject(text) {
-  const a = text.indexOf("{"), b = text.lastIndexOf("}");
-  if (a === -1 || b < a) throw new Error(`No JSON object in Reel plan response. Raw: ${String(text).slice(0, 400)}`);
-  return JSON.parse(text.slice(a, b + 1));
+  const s = String(text || "");
+  let from = s.indexOf("{"), lastErr = null;
+  if (from === -1) throw new Error(`No JSON object in Reel plan response. Raw: ${s.slice(0, 400)}`);
+  while (from !== -1) {
+    const end = balancedEnd(s, from);
+    if (end === -1) break;
+    try { return JSON.parse(s.slice(from, end + 1)); } catch (e) { lastErr = e; }
+    from = s.indexOf("{", from + 1);
+  }
+  throw new Error(`Reel plan response was not valid JSON${lastErr ? ` (${lastErr.message})` : ""}. Raw: ${s.slice(0, 400)}`);
 }
 
 // Model captions: buyer-benefit phrase, max 8 words, no commas / dashes / trailing period.

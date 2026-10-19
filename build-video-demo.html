@@ -346,6 +346,10 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
       <div class="ri-field" style="margin-top:14px;"><label for="reelMusic">Music</label><select id="reelMusic" class="btn btn-ghost" style="width:100%;text-align:left;"></select></div>
       <div class="ri-help">A Reel is charged when you download it (Branded and Unbranded together count as one). It usually takes a few minutes to render &mdash; you can keep this tab open.</div>
       <div class="ri-brand hidden" id="reelQuotaBox" style="margin-top:12px;"></div>
+      <label class="ri-confirm" style="display:flex;gap:10px;align-items:flex-start;margin-top:14px;cursor:pointer;">
+        <input type="checkbox" id="reelAdConfirm" style="margin-top:3px;flex:none;" onchange="reelAdConfirmChanged()">
+        <span>I confirm that the property details, advertised amenities, and marketing claims in this Reel are accurate and comply with applicable advertising requirements.</span>
+      </label>
       <div id="reelRenderStatus" class="ri-brand hidden" style="margin-top:14px;"></div>
       <div id="reelResult" class="hidden">
         <div class="ri-group-title">Your Reel</div>
@@ -361,7 +365,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
     </div>
     <div class="action-row">
       <button class="btn btn-ghost" onclick="reelBackToMotion()">Back</button>
-      <button class="btn btn-primary" id="reelRenderBtn" onclick="startReelRender()">Render my Reel</button>
+      <button class="btn btn-primary" id="reelRenderBtn" onclick="startReelRender()" disabled title="Confirm the statement above to render">Render my Reel</button>
     </div>
   </div>
 
@@ -3825,6 +3829,7 @@ function enterReelReview() {
   const sel = document.getElementById("reelMusic");
   if (!sel.childElementCount) sel.innerHTML = MUSIC_LIBRARY.map(m => '<option value="' + m.key + '">' + escHtml(m.label) + "</option>").join("");
   document.getElementById("reelRenderErr").textContent = "";
+  { const c = document.getElementById("reelAdConfirm"); if (c && !reelRendering && !reelResult) c.checked = false; reelAdConfirmChanged(); }
   loadReelQuota();
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
@@ -3836,6 +3841,11 @@ function reelBackToMotion() {
 // ── Reel allotments + not-downloaded counter (Oct 19, 2026) ───────────────
 // Reels are charged at download (server: reel-download). Included Reels per plan first, then 1 Image each.
 // 5 Reels rendered but not downloaded = 1 Image; any download resets that count to 0.
+// The user, not Smart Stage PRO, is the advertiser: every Reel render needs this confirmation (Oct 19, 2026).
+function reelAdConfirmChanged() {
+  const c = document.getElementById("reelAdConfirm"), b = document.getElementById("reelRenderBtn");
+  if (b && !reelRendering) { b.disabled = !(c && c.checked); b.title = b.disabled ? "Confirm the statement above to render" : ""; }
+}
 let reelQuota = null;
 async function loadReelQuota() {
   if (!REAL_USER_ID) return;
@@ -3922,6 +3932,7 @@ function setReelVariant(which) {
 async function startReelRender() {
   const btn = document.getElementById("reelRenderBtn"), err = document.getElementById("reelRenderErr"), st = document.getElementById("reelRenderStatus");
   err.textContent = "";
+  if (!document.getElementById("reelAdConfirm").checked) { err.textContent = "Please confirm the statement above before rendering."; return; }
   if (reelQuota && reelQuota.undownloaded + 1 >= reelQuota.threshold &&
       !confirm("This is your " + reelQuota.threshold + "th Reel render without a download, so it will use 1 Image.\n\nDownload a Reel first to reset the count, or continue?\n\nOK = render anyway")) return;
   reelResult = null; reelDownloaded = {}; reelCurVariant = null;
@@ -3936,7 +3947,7 @@ async function startReelRender() {
     const res = await fetch("/.netlify/functions/reel-render", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        listingId: REAL_LISTING_ID, projectId: REAL_PROJECT_ID, userId: REAL_USER_ID, event: i.event, lengthSec: i.lengthSec, intake,
+        listingId: REAL_LISTING_ID, projectId: REAL_PROJECT_ID, userId: REAL_USER_ID, event: i.event, lengthSec: i.lengthSec, intake, advertisingConfirmed: true,
         musicStyle: document.getElementById("reelMusic").value,
         plan: { slots: reelPlan.slots.map(s => ({ photoId: s.photoId, motion: s.motion || "auto", role: s.role, reveal: s.reveal || "none" })), highlights: reelPlan.highlights, supporting: reelPlan.supporting },
       }),
@@ -3976,7 +3987,7 @@ async function startReelRender() {
     err.textContent = e.message;
   } finally {
     reelRendering = false;
-    btn.disabled = false; btn.textContent = reelResult ? "Re-render" : "Render my Reel";
+    btn.textContent = reelResult ? "Re-render" : "Render my Reel"; reelAdConfirmChanged();
   }
 }
 

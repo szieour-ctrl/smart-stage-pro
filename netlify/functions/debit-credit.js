@@ -153,7 +153,7 @@ exports.handler = async (event) => {
   // request body. reason defaults to 'generate_final' below at the insert
   // step, so the existing image-staging caller (which never sends `reason`)
   // behaves identically to before. video-job.js passes reason values like
-  // 'kling_generation', 'kling_generation_iteration', 'video_download', and
+  // 'kling_generation', 'kling_generation_iteration', 'video_download', 'reel_download', 'reel_unused_renders', and
   // on the narrow refund path, isRefund: true with a reason ending in
   // '_refund_dispatch_failed'.
   const { userId, cost, reason, isRefund } = body;

@@ -344,7 +344,8 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
       <div class="panel-sub" id="reelReviewSummary"></div>
       <div class="ri-brand" id="reelReviewBrand"></div>
       <div class="ri-field" style="margin-top:14px;"><label for="reelMusic">Music</label><select id="reelMusic" class="btn btn-ghost" style="width:100%;text-align:left;"></select></div>
-      <div class="ri-help">Beta: rendering is free while we test. It usually takes a few minutes &mdash; you can keep this tab open.</div>
+      <div class="ri-help">A Reel is charged when you download it (Branded and Unbranded together count as one). It usually takes a few minutes to render &mdash; you can keep this tab open.</div>
+      <div class="ri-brand hidden" id="reelQuotaBox" style="margin-top:12px;"></div>
       <div id="reelRenderStatus" class="ri-brand hidden" style="margin-top:14px;"></div>
       <div id="reelResult" class="hidden">
         <div class="ri-group-title">Your Reel</div>
@@ -3824,12 +3825,64 @@ function enterReelReview() {
   const sel = document.getElementById("reelMusic");
   if (!sel.childElementCount) sel.innerHTML = MUSIC_LIBRARY.map(m => '<option value="' + m.key + '">' + escHtml(m.label) + "</option>").join("");
   document.getElementById("reelRenderErr").textContent = "";
+  loadReelQuota();
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 function reelBackToMotion() {
   if (reelPollTimer) { clearTimeout(reelPollTimer); reelPollTimer = null; reelRendering = false; }
   document.getElementById("stepReelReview").classList.add("hidden");
   document.getElementById("stepReelMotion").classList.remove("hidden");
+}
+// ── Reel allotments + not-downloaded counter (Oct 19, 2026) ───────────────
+// Reels are charged at download (server: reel-download). Included Reels per plan first, then 1 Image each.
+// 5 Reels rendered but not downloaded = 1 Image; any download resets that count to 0.
+let reelQuota = null;
+async function loadReelQuota() {
+  if (!REAL_USER_ID) return;
+  try {
+    const r = await fetch("/.netlify/functions/reel-quota?userId=" + encodeURIComponent(REAL_USER_ID));
+    if (r.ok) reelQuota = await r.json();
+  } catch (e) { /* non-fatal: the box just stays hidden */ }
+  renderReelQuota();
+}
+function renderReelQuota() {
+  const box = document.getElementById("reelQuotaBox");
+  if (!box) return;
+  const q = reelQuota;
+  if (!q || typeof q.limit !== "number") { box.classList.add("hidden"); return; }
+  const when = q.plan === "subscription" ? (q.shared ? " this month (shared with your team)" : " this month") : "";
+  const inc = q.remaining > 0
+    ? "<b>" + q.remaining + " of " + q.limit + "</b> included Reel" + (q.limit === 1 ? "" : "s") + " left" + when + "."
+    : "Your included Reels are used up" + when + " &mdash; each more Reel costs <b>1 Image</b> when you download it.";
+  const next = q.undownloaded + 1;
+  const waste = next >= q.threshold
+    ? "<b>Your next render is the " + q.threshold + "th without a download and will use 1 Image.</b> Download a Reel first to reset the count."
+    : "Rendered, not downloaded: <b>" + q.undownloaded + " of " + q.threshold + "</b>. Every " + q.threshold + " renders you don&rsquo;t download use 1 Image; downloading any Reel resets the count.";
+  box.innerHTML = inc + "<div class=\"ri-help\" style=\"margin-top:6px;\">" + waste + "</div>";
+  box.classList.remove("hidden");
+}
+async function downloadReel(ev) {
+  if (ev && ev.preventDefault) ev.preventDefault();
+  const a = document.getElementById("reelDownload"), err = document.getElementById("reelRenderErr"), note = document.getElementById("reelShareNote");
+  if (!a || a.dataset.busy || !reelRenderJobId) return;
+  a.dataset.busy = "1"; const label = a.textContent; a.textContent = "Preparing\u2026"; err.textContent = "";
+  try {
+    const r = await fetch("/.netlify/functions/reel-download", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jobId: reelRenderJobId, userId: REAL_USER_ID }),
+    });
+    const d = await r.json();
+    if (r.status === 402) throw new Error(d.error === "no_active_subscription" ? "Your plan doesn\u2019t include Reel downloads right now." : "Not enough Images to download this Reel (1 Image needed). Add Images and try again.");
+    if (!r.ok) throw new Error(d.error || "Could not prepare the download");
+    const url = d[reelCurVariant];
+    if (!url) throw new Error("This version is not available.");
+    reelDownloaded = { branded: true, unbranded: true }; // one charge covers both versions
+    updateReelShareUi();
+    if (d.quota) { reelQuota = d.quota; renderReelQuota(); }
+    if (d.charge && !d.charge.already) note.textContent = (d.charge.via === "image" ? "1 Image was used for this Reel (your included Reels are used up). " : "Counted against your included Reels. ") + "Share this Reel with a client: the link works for 7 days.";
+    const tmp = document.createElement("a"); tmp.href = url; tmp.rel = "noopener"; document.body.appendChild(tmp); tmp.click(); tmp.remove();
+  } catch (e) { err.textContent = e.message || "Could not download"; }
+  finally { a.textContent = label; delete a.dataset.busy; }
 }
 function updateReelShareUi() {
   const b = document.getElementById("reelShareBtn"), n = document.getElementById("reelShareNote");
@@ -3838,7 +3891,6 @@ function updateReelShareUi() {
   b.disabled = !ok;
   n.textContent = ok ? "Share this version with a client. The link works for 7 days; share again any time before the Reel expires." : "Download this version to unlock a client share link (works for 7 days).";
 }
-function markReelDownloaded() { reelDownloaded[reelCurVariant] = true; updateReelShareUi(); }
 async function shareReel() {
   const b = document.getElementById("reelShareBtn"), n = document.getElementById("reelShareNote");
   const key = reelResult && reelResult.keys && reelResult.keys[reelCurVariant];
@@ -3860,7 +3912,7 @@ function setReelVariant(which) {
   const v = document.getElementById("reelPlayer");
   v.src = url; v.load(); const pl = v.play(); if (pl && pl.catch) pl.catch(() => {});
   const dl = document.getElementById("reelDownload");
-  dl.href = url; dl.textContent = "Download " + (which === "branded" ? "Branded" : "Unbranded (MLS)");
+  dl.href = "#"; dl.textContent = "Download " + (which === "branded" ? "Branded" : "Unbranded (MLS)");
   reelCurVariant = which; updateReelShareUi();
   document.querySelectorAll("#reelVariantTabs button").forEach(b => b.classList.toggle("on", b.getAttribute("data-v") === which));
   document.getElementById("reelVariantNote").textContent = which === "branded"
@@ -3869,7 +3921,10 @@ function setReelVariant(which) {
 }
 async function startReelRender() {
   const btn = document.getElementById("reelRenderBtn"), err = document.getElementById("reelRenderErr"), st = document.getElementById("reelRenderStatus");
-  err.textContent = ""; reelResult = null; reelDownloaded = {}; reelCurVariant = null;
+  err.textContent = "";
+  if (reelQuota && reelQuota.undownloaded + 1 >= reelQuota.threshold &&
+      !confirm("This is your " + reelQuota.threshold + "th Reel render without a download, so it will use 1 Image.\n\nDownload a Reel first to reset the count, or continue?\n\nOK = render anyway")) return;
+  reelResult = null; reelDownloaded = {}; reelCurVariant = null;
   document.getElementById("reelResult").classList.add("hidden");
   reelPlanSync();
   const i = window._reelIntake, intake = { ...i };
@@ -3907,9 +3962,12 @@ async function startReelRender() {
     tabs.innerHTML = (reelResult.branded ? '<button class="motion-btn kenburns" data-v="branded">Branded</button>' : "") +
       (reelResult.unbranded ? '<button class="motion-btn kenburns" data-v="unbranded">Unbranded (MLS)</button>' : "");
     tabs.querySelectorAll("button").forEach(b => b.addEventListener("click", () => setReelVariant(b.getAttribute("data-v"))));
-    document.getElementById("reelDownload").onclick = markReelDownloaded;
+    document.getElementById("reelDownload").onclick = downloadReel;
     document.getElementById("reelShareBtn").onclick = shareReel;
-    document.getElementById("reelResultNote").textContent = "Links work for about an hour while we\u2019re in beta. " + ((reelResult.warnings || []).join(" "));
+    const cn = reelResult.counter;
+    const wasteMsg = cn && cn.wasteCharged ? "Your " + cn.threshold + "th undownloaded render used 1 Image. " : (cn && cn.wasteOwed ? "Your " + cn.threshold + "th undownloaded render costs 1 Image, but you have none left. It will be collected before your next render. " : "");
+    document.getElementById("reelResultNote").textContent = wasteMsg + "The preview plays for about an hour; Download keeps working while this page is open. " + ((reelResult.warnings || []).join(" "));
+    loadReelQuota();
     document.getElementById("reelResult").classList.remove("hidden");
     setReelVariant(reelResult.branded ? "branded" : "unbranded");
     document.getElementById("reelResult").scrollIntoView({ behavior: "smooth", block: "start" });

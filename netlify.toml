@@ -38,6 +38,15 @@
 [functions."reel-share"]
   timeout = 10
 
+[functions."reel-download"]
+  timeout = 15
+
+[functions."reel-quota"]
+  timeout = 10
+
+[functions."reel-notify"]
+  timeout = 15
+
 [functions."reel-view"]
   timeout = 15
 

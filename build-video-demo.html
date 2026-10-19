@@ -3099,7 +3099,8 @@ async function handleGenerate() {
 // row this reads, so polling just needs to notice status flip to
 // complete/failed, not do anything Railway-side itself.
 function pollJobStatus(jobId) {
-  const poll = setInterval(async () => {
+  if (window._videoPoll) clearInterval(window._videoPoll); // never run two pollers
+  const poll = window._videoPoll = setInterval(async () => {
     try {
       const res = await fetch(`${API_BASE}?action=status&jobId=${encodeURIComponent(jobId)}`);
       const job = await res.json();
@@ -3457,6 +3458,10 @@ function exitReelMode() {
   document.getElementById("stepsBar").classList.remove("hidden");
   document.getElementById("modeVideoBtn").classList.add("on");
   document.getElementById("modeReelBtn").classList.remove("on");
+  // Oct 18, 2026: entering Reel mode hides the video result/progress panel.
+  // If a video is rendering (or finished, not yet downloaded), restore it
+  // instead of dropping the user on Photos with no sign of their video.
+  if (window._currentJobId) { resumePendingVideo(); return; }
   goToStep(1);
 }
 function saveReelIntake() {

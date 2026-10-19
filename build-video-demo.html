@@ -3449,6 +3449,11 @@ function enterReelMode() {
   document.getElementById("reelIntakeSaved").classList.add("hidden");
   renderReelBrandNote();
   window.ReelIntake.render(document.getElementById("reelIntakeMount"), reelOpts());
+  // Returning from Video mode while a Reel is rendering (or finished): show it again.
+  if (reelRenderJobId && (reelResult || reelRendering)) {
+    document.getElementById("stepReelIntake").classList.add("hidden");
+    document.getElementById("stepReelReview").classList.remove("hidden");
+  }
 }
 function exitReelMode() {
   document.getElementById("stepReelIntake").classList.add("hidden");
@@ -3780,7 +3785,7 @@ function renderReelMotion() {
 }
 
 // ── Step 4: review + render (beta, no charging yet) ──
-let reelRenderJobId = null, reelResult = null, reelPollTimer = null, reelCurVariant = null, reelDownloaded = {};
+let reelRendering = false, reelRenderJobId = null, reelResult = null, reelPollTimer = null, reelCurVariant = null, reelDownloaded = {};
 function enterReelReview() {
   reelPlanSync();
   try { sessionStorage.setItem("reelPlan_" + (REAL_LISTING_ID || "none"), JSON.stringify({ intake: window._reelIntake, plan: reelPlan })); } catch (e) { /* non-fatal */ }
@@ -3798,7 +3803,7 @@ function enterReelReview() {
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 function reelBackToMotion() {
-  if (reelPollTimer) { clearTimeout(reelPollTimer); reelPollTimer = null; }
+  if (reelPollTimer) { clearTimeout(reelPollTimer); reelPollTimer = null; reelRendering = false; }
   document.getElementById("stepReelReview").classList.add("hidden");
   document.getElementById("stepReelMotion").classList.remove("hidden");
 }
@@ -3847,6 +3852,7 @@ async function startReelRender() {
   delete intake.highlights; delete intake.supporting;
   btn.disabled = true; btn.textContent = "Rendering\u2026";
   st.classList.remove("hidden"); st.textContent = "Starting\u2026";
+  reelRendering = true;
   try {
     const res = await fetch("/.netlify/functions/reel-render", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -3862,7 +3868,8 @@ async function startReelRender() {
     const t0 = Date.now(); let misses = 0;
     for (;;) {
       await new Promise(r => { reelPollTimer = setTimeout(r, 3000); });
-      if (document.getElementById("stepReelReview").classList.contains("hidden")) return; // user went back
+      // Oct 18, 2026: a mode toggle (Video <-> Reels) hides the review step but must not
+      // abandon the render. Keep polling; the result is written to the DOM when ready.
       let pd;
       try { const pr = await fetch("/.netlify/functions/reel-render?jobId=" + encodeURIComponent(reelRenderJobId)); pd = await pr.json(); misses = 0; }
       catch (e) { if (++misses > 5) throw new Error("Lost connection while rendering. Please try again."); continue; }
@@ -3886,6 +3893,7 @@ async function startReelRender() {
     st.classList.add("hidden");
     err.textContent = e.message;
   } finally {
+    reelRendering = false;
     btn.disabled = false; btn.textContent = reelResult ? "Re-render" : "Render my Reel";
   }
 }

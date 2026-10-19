@@ -3098,6 +3098,23 @@ async function handleGenerate() {
 // approach here — video-notify.js's webhook updates the SAME video_jobs
 // row this reads, so polling just needs to notice status flip to
 // complete/failed, not do anything Railway-side itself.
+// Oct 18, 2026: show where the video is in the shared render queue (Railway runs
+// one render at a time). Cleared as soon as the render is running.
+function showVideoQueueNote(q) {
+  const host = document.getElementById("resultContent");
+  if (!host) return;
+  let el = document.getElementById("videoQueueNote");
+  if (!q || q.state !== "waiting") { if (el) el.remove(); return; }
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "videoQueueNote";
+    el.className = "result-body";
+    el.style.cssText = "margin-top:10px;font-weight:600;";
+    host.appendChild(el);
+  }
+  const n = q.ahead;
+  el.textContent = `Waiting in line \u2014 ${n} render${n === 1 ? "" : "s"} ahead of yours (about ${n * 3}\u2013${n * 5} min before it starts). You can leave this page; it will keep going.`;
+}
 function pollJobStatus(jobId) {
   if (window._videoPoll) clearInterval(window._videoPoll); // never run two pollers
   const poll = window._videoPoll = setInterval(async () => {
@@ -3120,7 +3137,7 @@ function pollJobStatus(jobId) {
           </div>
         `;
       }
-      // else: still pending/processing — keep polling, no UI change needed
+      else { showVideoQueueNote(job.queue); }
     } catch (err) {
       // Network hiccup on one poll tick — don't kill the whole flow over it,
       // just wait for the next tick.

@@ -152,7 +152,13 @@ exports.handler = async (event) => {
 
     const jobId = `reel-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const r = await railway("POST", "/render-reel", { jobId, event: evKey, lengthSec, data, scenes, brand, qrUrl: projectId ? `${base}/compliance/${projectId}` : base, musicStyle: music });
-    if (r.status === 429) return reply(429, { error: "The Reel renderer is busy. Please try again in a minute." });
+    if (r.status === 429) {
+      const ahead = r.json && Number.isFinite(r.json.running) ? (r.json.running + (r.json.waiting || 0)) : null;
+      const eta = ahead ? ` (roughly ${ahead * 3}\u2013${ahead * 5} minutes)` : "";
+      return reply(429, { error: ahead
+        ? `The Reel renderer is busy: ${ahead} render${ahead === 1 ? " is" : "s are"} ahead of you${eta}. Please try again in a few minutes.`
+        : "The Reel renderer is busy. Please try again in a few minutes." });
+    }
     if (r.status !== 202) { console.error("reel-render dispatch failed:", r.status, r.raw && r.raw.slice(0, 200)); return reply(502, { error: "Could not start the render" }); }
     return reply(200, { jobId, brandedAvailable: !!brand, warnings });
   } catch (e) {

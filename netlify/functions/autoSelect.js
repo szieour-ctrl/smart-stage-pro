@@ -179,6 +179,11 @@ const COMPOUND_END_MOTIONS = [
   "push_tilt_up", "push_tilt_down",
   "push_pan_left", "push_pan_right",
   "pan_left_push", "pan_right_push",
+  // Oct 18, 2026 (Sam's request) — pull-back + pan family. Ken Burns only:
+  // these are real-photo moves; an AI Motion pull-back or pan would have to
+  // invent the room beyond the photo, so they are never mapped to Kling.
+  "pull_back_pan_left", "pull_back_pan_right",
+  "pan_left_pull_back", "pan_right_pull_back",
 ];
 
 const REVEAL_PRESET_END_MOTIONS = {
@@ -272,6 +277,11 @@ const COMPOUND_KEN_BURNS_PRESETS = new Set([
   "push_tilt_up", "push_tilt_down",
   "push_pan_left", "push_pan_right",
   "pan_left_push", "pan_right_push",
+  // Oct 18, 2026 (Sam's request) — pull-back + pan family. Ken Burns only:
+  // these are real-photo moves; an AI Motion pull-back or pan would have to
+  // invent the room beyond the photo, so they are never mapped to Kling.
+  "pull_back_pan_left", "pull_back_pan_right",
+  "pan_left_pull_back", "pan_right_pull_back",
   // Added [DATE], Sam's design — Float, then a full pull-back settle.
   // Resolves to pull_back's own anchor (see mapping comment below), not
   // one of the push_in/drift/tilt/pan anchors the other 11 use.
@@ -291,7 +301,10 @@ const COMPOUND_KEN_BURNS_PRESETS = new Set([
 //   pan_left anchor     → push_pan_left
 //   pan_right anchor    → push_pan_right
 //   pull_back anchor    → float_pull_back (a floating settle before the
-//                         same open-reveal anchor pull_back itself uses)
+//                         same open-reveal anchor pull_back itself uses),
+//                         pull_back_pan_left/right, pan_left/right_pull_back
+//                         (open the room, with a sideways travel toward the
+//                         side that has more to show)
 
 // Every Ken Burns pick Claude may legally make (atomic + compound) — used
 // for validateAndSanitizePlan's ken_burns check below, so a compound pick
@@ -315,7 +328,7 @@ function buildSystemPrompt({ narrationEnabled, hasExteriorEnhancement, aiMotionC
   // (front exterior / Open Plan / hero living spaces / Office-Flex /
   // Primary Bedroom+Bath / closing exterior = compound-eligible;
   // secondary bedrooms, secondary bathrooms, utility/laundry = never).
-  const compoundKenBurnsGuidance = `    Ken Burns also offers COMPOUND presets — two or three motion phases in one continuous shot, ending on the same visual anchor as an atomic preset above but with more presence. Resolve by anchor: push_in anchor → soft_push_float_push (reserve soft_push_float_strong_push for the single most dramatic room in this listing, not a repeatable default) or pan_left_push / pan_right_push (when the room's strongest sightline enters from a pan before landing on the anchor); drift anchor → soft_push_float_diagonal, soft_push_float_push_diagonal, or soft_push_float_gentle_diagonal, scaled to how dramatic the diagonal actually is; tilt_up anchor → push_tilt_up; tilt_down anchor → push_tilt_down; pan_left anchor → push_pan_left; pan_right anchor → push_pan_right; pull_back anchor (a wide, open reveal — great rooms, open-plan living spaces, large primary suites) → float_pull_back, which adds a brief floating settle before the same pull-back-and-open feel.
+  const compoundKenBurnsGuidance = `    Ken Burns also offers COMPOUND presets — two or three motion phases in one continuous shot, ending on the same visual anchor as an atomic preset above but with more presence. Resolve by anchor: push_in anchor → soft_push_float_push (reserve soft_push_float_strong_push for the single most dramatic room in this listing, not a repeatable default) or pan_left_push / pan_right_push (when the room's strongest sightline enters from a pan before landing on the anchor); drift anchor → soft_push_float_diagonal, soft_push_float_push_diagonal, or soft_push_float_gentle_diagonal, scaled to how dramatic the diagonal actually is; tilt_up anchor → push_tilt_up; tilt_down anchor → push_tilt_down; pan_left anchor → push_pan_left; pan_right anchor → push_pan_right; pull_back anchor (a wide, open reveal — great rooms, open-plan living spaces, large primary suites) → float_pull_back, which adds a brief floating settle before the same pull-back-and-open feel. Pull-back pans: pull_back_pan_left / pull_back_pan_right (start tight, open the room, then travel sideways) and pan_left_pull_back / pan_right_pull_back (travel sideways, then open to the full room) suit wide open-plan rooms where one side holds more of the space (kitchen, dining, next room, window wall) — pan toward the side with MORE to reveal. pan_left means the camera travels toward the LEFT of the photo, pan_right toward the RIGHT.
     Compounds are reserved for rooms that can carry the extra motion: front exterior, Open Plan/multi-room lifestyle spaces, Kitchen/Living/Dining and other hero spaces, Office/Flex, Primary Bedroom, Primary Bathroom, and the single strongest closing exterior/backyard shot — the same category tier used in the Ordering section above. Never use a compound for a secondary bedroom, secondary bathroom, or utility/laundry room — the plain atomic preset for that same anchor is the better, calmer choice there, every time. If a room doesn't clearly fall in a compound-eligible category, default to the atomic preset.`;
 
   return `You are planning the shot order and camera motion for a real estate walkthrough video. You will see every staged photo for this listing, one at a time, each labeled with a frame ID. Some frames have a real vacant/before photo of the same room available — those will be marked explicitly.

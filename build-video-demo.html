@@ -655,6 +655,10 @@ const KEN_BURNS_PRESETS = {
   pan_left_push: { label: "Pan Left → Push", desc: "A tracking pan left, then a push forward into the room's main feature." },
   pan_right_push: { label: "Pan Right → Push", desc: "A tracking pan right, then a push forward into the room's main feature." },
   float_pull_back: { label: "Float → Pull Back", desc: "A brief floating settle, then a full pull-back that opens the room back up." },
+  pull_back_pan_left: { label: "Pull Back → Pan Left", desc: "Opens the room up, then travels left across it. Real photo only, nothing invented." },
+  pull_back_pan_right: { label: "Pull Back → Pan Right", desc: "Opens the room up, then travels right across it. Real photo only, nothing invented." },
+  pan_left_pull_back: { label: "Pan Left → Pull Back", desc: "Travels left, then opens out to the full room. Real photo only, nothing invented." },
+  pan_right_pull_back: { label: "Pan Right → Pull Back", desc: "Travels right, then opens out to the full room. Real photo only, nothing invented." },
 };
 
 // Reveal Presets — mirrors REVEAL_PRESETS in assemble.js exactly (label +
@@ -686,6 +690,9 @@ const COMPOUND_END_MOTIONS = [
   "push_tilt_up", "push_tilt_down",
   "push_pan_left", "push_pan_right",
   "pan_left_push", "pan_right_push",
+  // Oct 18, 2026 — pull-back + pan (Ken Burns only; mirrors assemble.js/autoSelect.js)
+  "pull_back_pan_left", "pull_back_pan_right",
+  "pan_left_pull_back", "pan_right_pull_back",
 ];
 
 const REVEAL_PRESETS = {
@@ -3645,7 +3652,8 @@ function renderReelPlan() {
 // ── Step 3: motion per scene (Ken Burns only) ──
 const REEL_MOTION_STANDARD = ["auto", "push_in", "pull_back", "pan_left", "pan_right", "tilt_up", "tilt_down", "drift", "float", "pan_zoom", "luxury_parallax", "static"];
 const REEL_MOTION_COMPOUND = ["soft_push_float_push", "soft_push_float_diagonal", "soft_push_float_push_diagonal", "soft_push_float_gentle_diagonal", "soft_push_float_strong_push",
-  "push_tilt_up", "push_tilt_down", "push_pan_left", "push_pan_right", "pan_left_push", "pan_right_push", "float_pull_back"];
+  "push_tilt_up", "push_tilt_down", "push_pan_left", "push_pan_right", "pan_left_push", "pan_right_push", "float_pull_back",
+  "pull_back_pan_left", "pull_back_pan_right", "pan_left_pull_back", "pan_right_pull_back"];
 
 // 9:16 preview on the agent's OWN photo: an approximation of each movement as [scale, x%, y%] waypoints.
 // (Exact-render previews would need pre-rendered stock clips; the video builder's clips are 16:9.)
@@ -3668,6 +3676,8 @@ const RM_COMPOUND = {
   push_pan_left: [[1.05,0,0],[1.2,0,0],[1.28,6,0]], push_pan_right: [[1.05,0,0],[1.2,0,0],[1.28,-6,0]],
   pan_left_push: [[1.2,-6,0],[1.2,0,0],[1.38,0,0]], pan_right_push: [[1.2,6,0],[1.2,0,0],[1.38,0,0]],
   float_pull_back: [[1.3,0,0],[1.32,1.5,-1],[1.3,0,0],[1.05,0,0]],
+  pull_back_pan_left: [[1.3,-4,0],[1.2,-4,0],[1.2,4,0]], pull_back_pan_right: [[1.3,4,0],[1.2,4,0],[1.2,-4,0]],
+  pan_left_pull_back: [[1.2,-4,0],[1.2,4,0],[1.05,0,0]], pan_right_pull_back: [[1.2,4,0],[1.2,-4,0],[1.05,0,0]],
 };
 function reelMotionWaypoints(key) { return RM_COMPOUND[key] || RM[key] || RM.push_in; }
 function openReelMotionPreview(photoUrl, key, beforeUrl) {

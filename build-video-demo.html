@@ -3850,7 +3850,7 @@ function renderReelQuota() {
   if (!box) return;
   const q = reelQuota;
   if (!q || typeof q.limit !== "number") { box.classList.add("hidden"); return; }
-  const when = q.plan === "subscription" ? " this month" : "";
+  const when = q.plan === "subscription" ? (q.shared ? " this month (shared with your team)" : " this month") : "";
   const inc = q.remaining > 0
     ? "<b>" + q.remaining + " of " + q.limit + "</b> included Reel" + (q.limit === 1 ? "" : "s") + " left" + when + "."
     : "Your included Reels are used up" + when + " &mdash; each more Reel costs <b>1 Image</b> when you download it.";

@@ -1,7 +1,9 @@
 // reel-quota-lib.js — Reel allotments and the not-downloaded render counter (Oct 19, 2026).
 //
 // RULES (Sam):
-//   Allotment per month, no roll-over: Solo 4, Team 10, Team lead 10, Brokerage 35.
+//   Allotment per month, no roll-over: Solo 4, Team 10, Brokerage 35.
+//   Team and Brokerage allotments are SHARED POOLS (Sam, Oct 19): everyone on the team / brokerage draws from
+//   the same 10 / 35, tracked on the pool owner's quota row (team lead / brokerage admin).
 //   Free Trial: 1 Reel total. Listing Package: 3 Reels per package purchased (lifetime).
 //   A Reel is charged once, at DOWNLOAD (Branded + Unbranded together = one charge): against the
 //   allotment first, then 1 Image per Reel beyond it.
@@ -23,7 +25,7 @@ const TRIAL_LENGTH_MS = 30 * 24 * 60 * 60 * 1000;
 
 async function getPlanContext(userId) {
   const userRes = await supabase("GET", "users", null,
-    `?id=eq.${userId}&select=role,subscription_status,created_at,package_access_expires_at`);
+    `?id=eq.${userId}&select=role,subscription_status,created_at,package_access_expires_at,team_id,brokerage_id`);
   const u = (Array.isArray(userRes.data) && userRes.data[0]) || {};
   const status = u.subscription_status || null;
   const isTrial = status === "trial";
@@ -38,7 +40,21 @@ async function getPlanContext(userId) {
   else if (isTrial) accessOk = !u.created_at || (Date.now() - new Date(u.created_at).getTime()) <= TRIAL_LENGTH_MS;
   else if (isPackage) accessOk = !!u.package_access_expires_at && new Date(u.package_access_expires_at).getTime() > Date.now();
   else accessOk = false;
-  return { role: u.role, status, isTrial, isPackage, packageCount, accessOk };
+  // Shared pools: a brokerage's 35 or a team's 10. Pool owner = brokerage admin / team lead
+  // (their video_quota_usage row holds the count). Trials and packages are never pooled.
+  let poolKind = "user", poolUserId = userId;
+  if (!isTrial && !isPackage) {
+    if (u.brokerage_id) {
+      const b = await supabase("GET", "brokerages", null, `?id=eq.${u.brokerage_id}&select=admin_user_id`);
+      const adminId = Array.isArray(b.data) && b.data[0] && b.data[0].admin_user_id;
+      if (adminId) { poolKind = "brokerage"; poolUserId = adminId; }
+    } else if (u.team_id) {
+      const t = await supabase("GET", "teams", null, `?id=eq.${u.team_id}&select=team_lead_id`);
+      const leadId = Array.isArray(t.data) && t.data[0] && t.data[0].team_lead_id;
+      if (leadId) { poolKind = "team"; poolUserId = leadId; }
+    }
+  }
+  return { role: u.role, status, isTrial, isPackage, packageCount, accessOk, poolKind, poolUserId };
 }
 
 function currentPeriodStart() {
@@ -50,6 +66,8 @@ function periodFor(ctx) { return (ctx.isPackage || ctx.isTrial) ? LIFETIME_PERIO
 function limitFor(ctx) {
   if (ctx.isTrial) return TRIAL_REEL_LIMIT;
   if (ctx.isPackage) return ctx.packageCount * PACKAGE_REELS_PER_PACKAGE;
+  if (ctx.poolKind === "brokerage") return MONTHLY_REEL_LIMIT.broker_admin;
+  if (ctx.poolKind === "team") return MONTHLY_REEL_LIMIT.team_member;
   return MONTHLY_REEL_LIMIT[ctx.role] ?? MONTHLY_REEL_LIMIT.individual_agent;
 }
 
@@ -116,11 +134,11 @@ async function getQuotaSummary(userId) {
   const ctx = await getPlanContext(userId);
   const limit = limitFor(ctx);
   const period = periodFor(ctx);
-  const u = await supabase("GET", "video_quota_usage", null, `?user_id=eq.${userId}&period_start=eq.${period}&select=reels_downloaded`);
+  const u = await supabase("GET", "video_quota_usage", null, `?user_id=eq.${ctx.poolUserId || userId}&period_start=eq.${period}&select=reels_downloaded`);
   const used = (Array.isArray(u.data) && u.data[0] && u.data[0].reels_downloaded) || 0;
   const c = await getCounter(userId);
   return {
-    plan: ctx.isTrial ? "trial" : ctx.isPackage ? "package" : "subscription",
+    plan: ctx.isTrial ? "trial" : ctx.isPackage ? "package" : "subscription", shared: ctx.poolKind !== "user",
     limit, used, remaining: Math.max(0, limit - used),
     undownloaded: c.undownloaded, threshold: WASTE_RENDER_THRESHOLD, accessOk: ctx.accessOk,
   };
@@ -130,7 +148,7 @@ async function getQuotaSummary(userId) {
 async function chargeDownload(jobId, userId) {
   const ctx = await getPlanContext(userId);
   if (!ctx.accessOk) return { error: "no_active_subscription" };
-  const res = await rpc("reel_consume_download", { p_job_id: jobId, p_user_id: userId, p_period: periodFor(ctx), p_limit: limitFor(ctx) });
+  const res = await rpc("reel_consume_download", { p_job_id: jobId, p_user_id: userId, p_pool_user_id: ctx.poolUserId || userId, p_period: periodFor(ctx), p_limit: limitFor(ctx) });
   if (res.error) return { error: res.error };
   const keys = { branded: res.branded_key || null, unbranded: res.unbranded_key || null };
   if (res.already) return { already: true, via: null, images: 0, keys };

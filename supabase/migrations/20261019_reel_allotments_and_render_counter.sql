@@ -64,7 +64,7 @@ $$;
 
 -- Atomic download decision. Included Reel if reels_downloaded < p_limit for the period, else 1 Image.
 -- Any download resets the not-downloaded counter to 0.
-create or replace function public.reel_consume_download(p_job_id text, p_user_id uuid, p_period date, p_limit integer)
+create or replace function public.reel_consume_download(p_job_id text, p_user_id uuid, p_pool_user_id uuid, p_period date, p_limit integer)
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare j public.reel_jobs; used integer; prev integer := 0; via text; imgs integer;
 begin
@@ -75,15 +75,16 @@ begin
   if j.downloaded_at is not null then
     return jsonb_build_object('already', true, 'branded_key', j.branded_key, 'unbranded_key', j.unbranded_key);
   end if;
-  insert into public.video_quota_usage(user_id, period_start) values (p_user_id, p_period)
+  -- Quota is kept on the pool owner (team lead / brokerage admin / the user themselves).
+  insert into public.video_quota_usage(user_id, period_start) values (p_pool_user_id, p_period)
     on conflict (user_id, period_start) do nothing;
   select reels_downloaded into used from public.video_quota_usage
-   where user_id = p_user_id and period_start = p_period for update;
+   where user_id = p_pool_user_id and period_start = p_period for update;
   insert into public.reel_render_counter(user_id) values (p_user_id) on conflict (user_id) do nothing;
   select undownloaded into prev from public.reel_render_counter where user_id = p_user_id for update;
   if used < p_limit then
     update public.video_quota_usage set reels_downloaded = used + 1, updated_at = now()
-     where user_id = p_user_id and period_start = p_period;
+     where user_id = p_pool_user_id and period_start = p_period;
     via := 'allotment'; imgs := 0;
   else
     via := 'image'; imgs := 1;
@@ -119,11 +120,11 @@ end $$;
 
 revoke all on function public.reel_count_completion(text, text, text) from public, anon, authenticated;
 revoke all on function public.reel_mark_failed(text) from public, anon, authenticated;
-revoke all on function public.reel_consume_download(text, uuid, date, integer) from public, anon, authenticated;
+revoke all on function public.reel_consume_download(text, uuid, uuid, date, integer) from public, anon, authenticated;
 revoke all on function public.reel_revert_download(text, uuid, integer) from public, anon, authenticated;
 revoke all on function public.reel_owed_adjust(uuid, integer) from public, anon, authenticated;
 grant execute on function public.reel_count_completion(text, text, text) to service_role;
 grant execute on function public.reel_mark_failed(text) to service_role;
-grant execute on function public.reel_consume_download(text, uuid, date, integer) to service_role;
+grant execute on function public.reel_consume_download(text, uuid, uuid, date, integer) to service_role;
 grant execute on function public.reel_revert_download(text, uuid, integer) to service_role;
 grant execute on function public.reel_owed_adjust(uuid, integer) to service_role;

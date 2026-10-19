@@ -2371,6 +2371,24 @@ async function quoteGeneration({ jobId, userId, frames, wantsNarration }) {
 
 // ── ACTION: STATUS ───────────────────────────────────────────────────────
 
+function fetchRailwayQueue(jobId) {
+  return new Promise((resolve) => {
+    if (!process.env.RAILWAY_RENDER_URL) return resolve(null);
+    let url;
+    try { url = new URL(`${process.env.RAILWAY_RENDER_URL}/queue/${encodeURIComponent(jobId)}`); } catch { return resolve(null); }
+    const req = https.request({
+      hostname: url.hostname, path: url.pathname, method: "GET",
+      headers: { "x-railway-secret": process.env.RAILWAY_SECRET },
+    }, (res) => {
+      let d = ""; res.on("data", (c) => (d += c));
+      res.on("end", () => { try { const j = JSON.parse(d); resolve(res.statusCode === 200 ? { state: j.state, ahead: j.ahead, running: j.running, waiting: j.waiting } : null); } catch { resolve(null); } });
+    });
+    req.setTimeout(3000, () => req.destroy());
+    req.on("error", () => resolve(null));
+    req.end();
+  });
+}
+
 async function getJobStatus(jobId) {
   // CHANGE (July 10, 2026): output_16x9_url/output_9x16_url ARE included
   // here, by design — the Kling charge happens at Generate, not Download
@@ -2407,8 +2425,17 @@ async function getJobStatus(jobId) {
     signVideoUrl(job.output_9x16_unbranded_url, 60 * 60),
   ]);
 
+  // Oct 18, 2026: while the job is waiting for / in a render, ask Railway where
+  // it stands in the shared render queue so the page can say "N ahead". Best
+  // effort only: any failure just means no queue note.
+  let queue = null;
+  if (job.status === "queued" || job.status === "processing") {
+    try { queue = await fetchRailwayQueue(jobId); } catch (_) { queue = null; }
+  }
+
   return {
     ...job,
+    queue,
     output_16x9_url: statusSigned16x9,
     output_9x16_url: statusSigned9x16,
     output_16x9_unbranded_url: statusSigned16x9U,

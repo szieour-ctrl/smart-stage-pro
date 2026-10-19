@@ -134,6 +134,8 @@ exports.handler = async (event) => {
   const plan = b.plan || {};
   const slots = Array.isArray(plan.slots) ? plan.slots : [];
   if (!UUID_RE.test(String(listingId || "")) || !userId) return reply(400, { error: "Missing listingId or userId" });
+  // The user is the advertiser; SSP is the tool. Every render needs their confirmation.
+  if (b.advertisingConfirmed !== true) return reply(400, { error: "Please confirm that the property details, amenities and marketing claims in this Reel are accurate and comply with applicable advertising requirements." });
   if (!SLOTS.events[evKey]) return reply(400, { error: `Unknown Reel event "${evKey}"` });
   const range = SLOTS.ranges[String(lengthSec)];
   if (!range) return reply(400, { error: "Unsupported Reel length" });
@@ -168,7 +170,13 @@ exports.handler = async (event) => {
 
     const jobId = `reel-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     // Register the render BEFORE dispatch so a user who leaves the page is still counted when Railway reports back.
-    const ins = await supabase("POST", "reel_jobs", { id: jobId, user_id: userId, listing_id: listingId, event: evKey, length_sec: Number(lengthSec) });
+    const jobRow = { id: jobId, user_id: userId, listing_id: listingId, event: evKey, length_sec: Number(lengthSec) };
+    let ins = await supabase("POST", "reel_jobs", { ...jobRow, advertising_confirmed_at: new Date().toISOString() });
+    if (ins.status >= 300 && /advertising_confirmed_at/.test(JSON.stringify(ins.data || ""))) {
+      // Column not added yet: do not block the render; the confirmation is still enforced above.
+      console.error("reel_jobs.advertising_confirmed_at is missing; run the migration. Rendering without recording it.");
+      ins = await supabase("POST", "reel_jobs", jobRow);
+    }
     if (ins.status >= 300) { console.error("reel_jobs insert failed:", ins.status, JSON.stringify(ins.data).slice(0, 200)); return reply(500, { error: "Could not start the render" }); }
     const r = await railway("POST", "/render-reel", { jobId, event: evKey, lengthSec, data, scenes, brand, qrUrl: projectId ? `${base}/compliance/${projectId}` : base, musicStyle: music });
     if (r.status !== 202) quota.rpc("reel_mark_failed", { p_job_id: jobId }).catch(() => {});

@@ -344,7 +344,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
       <div class="panel-sub" id="reelReviewSummary"></div>
       <div class="ri-brand" id="reelReviewBrand"></div>
       <div class="ri-field" style="margin-top:14px;"><label for="reelMusic">Music</label><select id="reelMusic" class="btn btn-ghost" style="width:100%;text-align:left;"></select></div>
-      <div class="ri-help">Beta: rendering is free while we test. It usually takes a few minutes \u2014 you can keep this tab open.</div>
+      <div class="ri-help">Beta: rendering is free while we test. It usually takes a few minutes &mdash; you can keep this tab open.</div>
       <div id="reelRenderStatus" class="ri-brand hidden" style="margin-top:14px;"></div>
       <div id="reelResult" class="hidden">
         <div class="ri-group-title">Your Reel</div>
@@ -3460,19 +3460,26 @@ function renderReelBrandNote() {
 function enterReelMode() {
   ["stepUpload","stepMotion","stepOrder","stepConfirm","resultPanel","stepReelPhotos","stepReelMotion","stepReelReview"].forEach(id => document.getElementById(id).classList.add("hidden"));
   document.getElementById("stepsBar").classList.add("hidden");
-  document.getElementById("stepReelIntake").classList.remove("hidden");
   document.getElementById("modeReelBtn").classList.add("on");
   document.getElementById("modeVideoBtn").classList.remove("on");
   document.getElementById("reelIntakeSaved").classList.add("hidden");
   renderReelBrandNote();
   window.ReelIntake.render(document.getElementById("reelIntakeMount"), reelOpts());
+  // Oct 19, 2026: come back to the Reel step the user left (photos / motion / review) instead of the intake form.
+  // Their picks and Vision plan are still in memory; going through Intake -> Photos again wiped the plan
+  // (enterReelPhotos sets reelPlan = null) and forced another Auto Order (a paid Vision call).
+  const restoreId = (reelLastStepId !== "stepReelIntake" && reelPlan) ? reelLastStepId : "stepReelIntake";
+  document.getElementById(restoreId).classList.remove("hidden");
   // Returning from Video mode while a Reel is rendering (or finished): show it again.
   if (reelRenderJobId && (reelResult || reelRendering)) {
-    document.getElementById("stepReelIntake").classList.add("hidden");
+    document.getElementById(restoreId).classList.add("hidden");
     document.getElementById("stepReelReview").classList.remove("hidden");
   }
 }
+let reelLastStepId = "stepReelIntake";
 function exitReelMode() {
+  const visible = ["stepReelIntake","stepReelPhotos","stepReelMotion","stepReelReview"].find(id => !document.getElementById(id).classList.contains("hidden"));
+  if (visible) reelLastStepId = visible;
   document.getElementById("stepReelIntake").classList.add("hidden");
   document.getElementById("stepReelPhotos").classList.add("hidden");
   document.getElementById("stepReelMotion").classList.add("hidden");

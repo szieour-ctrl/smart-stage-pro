@@ -75,7 +75,7 @@ A Reel is a short vertical (9:16) video for Instagram, Facebook, TikTok, YouTube
 How to make one:
 1. Pick the listing and the Reel type (12 types: Teaser, Coming Soon, Just Listed, For Sale, For Lease, Feature Spotlight, Under Contract, Back on Market, Price Drop, Price Improvement, Open House, Just Sold) and a length: 15, 30, 45 or 60 seconds.
 2. Fill in the short form (address, price, beds, baths, sq ft, highlights, call to action). Saved listing details and your Branding fill in automatically. Highlights and the call to action can be left blank — the AI will write them.
-3. Pick photos. Photo counts: 15s = 3 to 6, 30s = 4 to 8, 45s = 6 to 8, 60s = 8.
+3. Pick photos. Photo counts: 15s = 3 to 4, 30s = 5 to 6, 45s = 6 to 8, 60s = 8.
 4. The AI plans the storyboard: it chooses the order, matches each photo to a scene, and writes a short buyer-benefit line (8 words or fewer) for the scenes that carry one. You can edit any text, move photos up or down (a photo's text and motion move with it), or start over with AI.
 5. Motion step: the AI picks a Ken Burns movement per photo and you can change any of them. Tap the play button for a 9:16 preview on your own photo.
 6. Review and render: pick music, then Render. A Reel usually takes a few minutes.

@@ -11,11 +11,11 @@
 (function (root) {
   "use strict";
 
-  // Reel lengths and the photo counts they allow (Oct 17): each photo gets 2.5-7.5s, max 8 photos.
+  // Reel lengths and the photo counts they allow (Oct 17; 15s and 30s tightened Oct 18): each photo gets 3.75-7.5s, max 8 photos.
   // Must match REEL_PHOTO_RANGES in the Railway reelStoryboard.js (and lib/reel-slots.json).
   const REEL_LENGTHS = [
-    { sec: 15, min: 3, max: 6 },
-    { sec: 30, min: 4, max: 8 },
+    { sec: 15, min: 3, max: 4 },
+    { sec: 30, min: 5, max: 6 },
     { sec: 45, min: 6, max: 8 },
     { sec: 60, min: 8, max: 8 },
   ];

@@ -3,6 +3,7 @@
 // The share lifetime is capped at the draft's own 7-day life (counted from its upload time).
 const { S3Client, HeadObjectCommand } = require("@aws-sdk/client-s3");
 const { makeToken, KEY_RE, SHARE_SECONDS } = require("./lib/reel-share-lib");
+const { supabase } = require("./lib/marketing-profile-lib");
 const headers = { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json", "Cache-Control": "no-store" };
 const reply = (statusCode, obj) => ({ statusCode, headers, body: JSON.stringify(obj) });
 const s3 = new S3Client({ region: process.env.S3_REGION, credentials: { accessKeyId: process.env.S3_ACCESS_KEY_ID, secretAccessKey: process.env.S3_SECRET_ACCESS_KEY } });
@@ -14,6 +15,11 @@ exports.handler = async (event) => {
   const key = String(b.key || "");
   if (!KEY_RE.test(key)) return reply(400, { error: "Invalid Reel" });
   try {
+    // Sharing is a delivery: the Reel must have been downloaded (charged) first. Drafts rendered before
+    // charging existed have no reel_jobs row and are still allowed until they expire.
+    const jr = await supabase("GET", "reel_jobs", null, `?or=(branded_key.eq.${encodeURIComponent(key)},unbranded_key.eq.${encodeURIComponent(key)})&select=downloaded_at&limit=1`);
+    const job = Array.isArray(jr.data) ? jr.data[0] : null;
+    if (job && !job.downloaded_at) return reply(402, { error: "Download this Reel first to unlock sharing." });
     const h = await s3.send(new HeadObjectCommand({ Bucket: process.env.S3_BUCKET_NAME, Key: key }));
     const now = Math.floor(Date.now() / 1000);
     const born = h.LastModified ? Math.floor(h.LastModified.getTime() / 1000) : now;

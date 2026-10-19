@@ -1,4 +1,5 @@
-// reel-render.js — Netlify Function. Reels v1 render dispatch + status (beta, no charging yet).
+// reel-render.js — Netlify Function. Reels v1 render dispatch + status. Reels are charged at download
+// (reel-download.js); this file registers each render in reel_jobs and counts it when it completes.
 //   POST { listingId, projectId, userId, event, lengthSec, intake, plan:{slots[],highlights[],supporting[]}, musicStyle }
 //        → { jobId, brandedAvailable }
 //   GET  ?jobId=...  → { status: "running", step } | { status: "done", branded, unbranded, durationSec, warnings }
@@ -12,6 +13,7 @@ const { S3Client, GetObjectCommand } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 const { supabase, brandingForUser } = require("./lib/marketing-profile-lib");
 const { SLOTS } = require("./lib/reel-plan-lib");
+const quota = require("./lib/reel-quota-lib");
 
 const headers = { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json", "Cache-Control": "no-store" };
 const reply = (statusCode, obj) => ({ statusCode, headers, body: JSON.stringify(obj) });
@@ -101,13 +103,23 @@ exports.handler = async (event) => {
       if (r.status === 404) return reply(200, { status: "error", error: "This render was interrupted. Please try again." });
       if (r.status !== 200 || !r.json) return reply(200, { status: "running", step: "Rendering" }); // transient; client keeps polling
       const j = r.json;
-      if (j.status === "error") return reply(200, { status: "error", error: j.error || "Render failed" });
+      if (j.status === "error") { quota.rpc("reel_mark_failed", { p_job_id: jobId }).catch(() => {}); return reply(200, { status: "error", error: j.error || "Render failed" }); }
       if (j.status !== "done") return reply(200, { status: "running", step: j.step || "Rendering" });
       const keys = (j.result && j.result.keys) || {};
+      // Count this render toward the not-downloaded tally (idempotent; the Railway webhook may have done it already).
+      let counter = null;
+      try {
+        const cnt = await quota.countCompletion(jobId, keys);
+        if (cnt && cnt.user_id) {
+          const c = await quota.getCounter(cnt.user_id);
+          counter = { undownloaded: c.undownloaded, threshold: quota.WASTE_RENDER_THRESHOLD, wasteCharged: !!cnt.wasteCharged, wasteOwed: !!cnt.wasteOwed };
+        }
+      } catch (e) { console.error("reel-render count error:", e.message); }
       return reply(200, {
         status: "done", durationSec: j.result.durationSec, warnings: j.result.warnings || [],
         branded: await presign(keys.branded, 3600), unbranded: await presign(keys.unbranded, 3600),
         keys: { branded: keys.branded || null, unbranded: keys.unbranded || null },
+        counter,
       });
     } catch (e) {
       console.error("reel-render status error:", e.message);
@@ -133,6 +145,10 @@ exports.handler = async (event) => {
     const lst = await supabase("GET", "listings", null, `?id=eq.${listingId}&select=id,user_id&limit=1`);
     if (!Array.isArray(lst.data) || !lst.data[0]) return reply(404, { error: "Listing not found" });
 
+    // Collect any waste fee (5 renders not downloaded = 1 Image) that could not be charged earlier.
+    const owed = await quota.settleOwed(userId);
+    if (owed) return reply(owed.status, { error: owed.message, code: owed.error });
+
     const { scenes, warnings } = await resolveScenes(listingId, slots);
     const revealFlags = scenes.map((sc) => !!sc.reveal);
     if (!allocateDurations(Number(lengthSec), revealFlags)) {
@@ -151,7 +167,11 @@ exports.handler = async (event) => {
     const music = /^[a-z0-9_]{1,40}$/.test(String(b.musicStyle || "")) ? b.musicStyle : "default";
 
     const jobId = `reel-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    // Register the render BEFORE dispatch so a user who leaves the page is still counted when Railway reports back.
+    const ins = await supabase("POST", "reel_jobs", { id: jobId, user_id: userId, listing_id: listingId, event: evKey, length_sec: Number(lengthSec) });
+    if (ins.status >= 300) { console.error("reel_jobs insert failed:", ins.status, JSON.stringify(ins.data).slice(0, 200)); return reply(500, { error: "Could not start the render" }); }
     const r = await railway("POST", "/render-reel", { jobId, event: evKey, lengthSec, data, scenes, brand, qrUrl: projectId ? `${base}/compliance/${projectId}` : base, musicStyle: music });
+    if (r.status !== 202) quota.rpc("reel_mark_failed", { p_job_id: jobId }).catch(() => {});
     if (r.status === 429) {
       const ahead = r.json && Number.isFinite(r.json.running) ? (r.json.running + (r.json.waiting || 0)) : null;
       const eta = ahead ? ` (roughly ${ahead * 3}\u2013${ahead * 5} minutes)` : "";

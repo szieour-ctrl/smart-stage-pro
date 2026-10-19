@@ -1898,6 +1898,10 @@ async function regenerateVideoJob({ jobId, userId, frames, formats, musicStyle, 
     await dispatchToRailway({
       ...endCardPayload,
       jobId,
+      // Oct 18, 2026: this dispatch omitted projectId, so Railway stored the
+      // finished files under smart-stage-video-finals/undefined/. Pass it
+      // exactly as createVideoJob does.
+      projectId: existing.project_id,
       formats,
       musicStyle: musicStyle || "default",
       wantsNarration: !!wantsNarration,

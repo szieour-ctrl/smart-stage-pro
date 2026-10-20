@@ -41,7 +41,8 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
 
 .upload-zone{border:2px dashed var(--border);border-radius:4px;padding:36px 20px;text-align:center;cursor:pointer;transition:all 0.2s;background:var(--cream);margin-top:14px;position:relative;}
 .upload-zone:hover,.upload-zone.drag-over{border-color:var(--gold);background:#faf7f2;}
-.upload-zone input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;}
+.upload-zone input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;z-index:2;}
+.upload-zone > *:not(input){pointer-events:none;}
 .upload-zone-text{font-family:'Cormorant Garamond',serif;font-size:1.1rem;color:var(--muted);margin-bottom:3px;}
 .upload-zone-hint{font-size:0.75rem;color:var(--muted);}
 .upload-zone-icon{font-size:1.8rem;margin-bottom:8px;opacity:0.6;}
@@ -307,6 +308,14 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
       <div class="panel-sub" id="reelPhotoSub"></div>
       <div class="rp-count" id="reelPhotoCount"></div>
       <div class="rp-grid" id="reelPhotoGrid"></div>
+      <div class="eyebrow" style="margin-top:18px;">Don't see a room?</div>
+      <div class="panel-sub" style="margin-bottom:8px;">Add your own camera-ready photos. They are used as-is (no before/after) and saved to this listing.</div>
+      <div class="upload-zone upload-zone-secondary" id="reelUploadZone">
+        <input type="file" id="reelFileInput" accept="image/*" multiple>
+        <div class="upload-zone-icon">&#128193;</div>
+        <div class="upload-zone-text">Drop photos here or click to browse</div>
+        <div class="upload-zone-hint" id="reelUploadHint">From your device — tagged "Professional Photography."</div>
+      </div>
       <div id="reelPlanBox" class="hidden">
         <div class="ri-group-title">Storyboard</div>
         <div class="ri-help" id="reelPlanNote"></div>
@@ -3569,6 +3578,51 @@ function renderReelPhotos() {
   cnt.textContent = n + " selected \u00b7 need " + window.ReelIntake.photoRangeText(r) + (n > r.max ? " (too many)" : n < r.min ? " (pick " + (r.min - n) + " more)" : " \u2713");
   document.getElementById("reelPlanBtn").disabled = !ok;
 }
+// Camera-ready photos from the device: hosted via upload-original (hosting only, no AB 723 original),
+// then saved to the listing with add-external-photo so reel-plan and reel-render resolve them like any other
+// outside photo. A new upload is picked automatically while the Reel has room.
+async function addReelUploads(fileList) {
+  const hint = document.getElementById("reelUploadHint");
+  const files = Array.from(fileList).filter(f => f.type.startsWith("image/"));
+  if (!files.length) { alert("No image files found in that selection."); return; }
+  if (!REAL_LISTING_ID) { alert("Open this from a listing to add photos."); return; }
+  const r = reelRange();
+  let ok = 0, fail = 0;
+  for (let i = 0; i < files.length; i++) {
+    hint.textContent = "Adding photo " + (i + 1) + " of " + files.length + "…";
+    try {
+      const dataUrl = await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = () => rej(new Error("Could not read file")); fr.readAsDataURL(files[i]); });
+      const up = await fetch("/.netlify/functions/upload-original", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageBase64: dataUrl.split(",")[1], mimeType: files[i].type, listingId: REAL_LISTING_ID }),
+      });
+      const ud = await up.json();
+      if (!up.ok || !ud.publicUrl) throw new Error(ud.error || "Upload failed");
+      const add = await fetch(API_BASE + "?action=add-external-photo", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ listingId: REAL_LISTING_ID, userId: REAL_USER_ID, imageUrl: ud.publicUrl, roomType: null, sourceLabel: "Professional Photography" }),
+      });
+      const ad = await add.json();
+      if (!add.ok || !ad.id) throw new Error(ad.error || "Could not save photo");
+      galleryExternalFrames.push({ id: ad.id, imageUrl: ud.publicUrl, roomType: null, sourceLabel: "Professional Photography", roomLabel: "Professional Photography" });
+      if (reelPicked.length < r.max) reelPicked.push(ad.id);
+      ok++;
+    } catch (e) { fail++; console.error("reel photo upload:", e.message); }
+  }
+  hint.textContent = (ok ? ok + " added. " : "") + (fail ? fail + " failed — try again. " : "") + 'Add more any time — tagged "Professional Photography."';
+  reelPlan = null;
+  document.getElementById("reelPlanBox").classList.add("hidden");
+  document.getElementById("reelNextBtn").classList.add("hidden");
+  { const pb = document.getElementById("reelPlanBtn"); pb.textContent = "Build storyboard"; pb.classList.add("btn-primary"); pb.classList.remove("btn-ghost"); }
+  renderReelPhotos();
+}
+(function wireReelUpload() {
+  const z = document.getElementById("reelUploadZone"), inp = document.getElementById("reelFileInput");
+  inp.addEventListener("change", () => { const f = Array.from(inp.files); inp.value = ""; addReelUploads(f); });
+  z.addEventListener("dragover", (e) => { e.preventDefault(); z.classList.add("drag-over"); });
+  z.addEventListener("dragleave", () => z.classList.remove("drag-over"));
+  z.addEventListener("drop", (e) => { e.preventDefault(); z.classList.remove("drag-over"); addReelUploads(e.dataTransfer.files); });
+})();
 function toggleReelPhoto(id) {
   const r = reelRange(), k = reelPicked.indexOf(id);
   if (k >= 0) reelPicked.splice(k, 1);

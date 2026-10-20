@@ -314,8 +314,9 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
         <input type="file" id="reelFileInput" accept="image/*" multiple>
         <div class="upload-zone-icon">&#128193;</div>
         <div class="upload-zone-text">Drop photos here or click to browse</div>
-        <div class="upload-zone-hint" id="reelUploadHint">From your device — tagged "Professional Photography."</div>
+        <div class="upload-zone-hint" id="reelUploadHint">From your device — tagged "Professional Photography." Label each photo so the AI can place it.</div>
       </div>
+      <div class="thumb-grid" id="reelPendingGrid"></div>
       <div id="reelPlanBox" class="hidden">
         <div class="ri-group-title">Storyboard</div>
         <div class="ri-help" id="reelPlanNote"></div>
@@ -3578,44 +3579,89 @@ function renderReelPhotos() {
   cnt.textContent = n + " selected \u00b7 need " + window.ReelIntake.photoRangeText(r) + (n > r.max ? " (too many)" : n < r.min ? " (pick " + (r.min - n) + " more)" : " \u2713");
   document.getElementById("reelPlanBtn").disabled = !ok;
 }
-// Camera-ready photos from the device: hosted via upload-original (hosting only, no AB 723 original),
-// then saved to the listing with add-external-photo so reel-plan and reel-render resolve them like any other
-// outside photo. A new upload is picked automatically while the Reel has room.
-async function addReelUploads(fileList) {
-  const hint = document.getElementById("reelUploadHint");
+// Camera-ready photos from the device: hosted via upload-original (hosting only, no AB 723 original). Each one waits
+// as a card where the user labels it (room + Interior/Exterior) like the video picker, because the label feeds the AI
+// storyboard sort. "Add to Reel" then saves it to the listing (add-external-photo) and selects it.
+let reelPending = [], reelPendingSeq = 0;
+function reelPendingReady(f) { return f.status === "ready" && !!f.room && (f.room !== "Other" || f.roomOther.trim().length > 0); }
+function renderReelPending() {
+  const box = document.getElementById("reelPendingGrid");
+  box.innerHTML = reelPending.map(f => {
+    const ready = reelPendingReady(f);
+    return '<div class="thumb-card" data-pid="' + f.pid + '">' +
+      '<div class="thumb-preview"><img src="' + f.dataUrl + '" alt="">' +
+      '<button class="thumb-remove" data-act="rm">&times;</button>' +
+      (f.status === "uploading" ? '<div class="thumb-untagged-flag" style="background:#fff8e7;color:#5c4a1f;">Uploading&hellip;</div>' : "") +
+      (f.status === "error" ? '<div class="thumb-untagged-flag">Upload failed \u2014 remove and try again</div>' : "") +
+      (f.status === "ready" && !ready ? '<div class="thumb-untagged-flag">Untagged</div>' : "") + '</div>' +
+      '<div class="thumb-fields"><select class="thumb-room-select" data-act="room"><option value=""' + (f.room ? "" : " selected") + ' disabled>Choose room...</option>' +
+      ROOM_TYPES.map(r => '<option value="' + r + '"' + (f.room === r ? " selected" : "") + '>' + r + '</option>').join("") + '</select>' +
+      (f.room === "Other" ? '<input class="thumb-other-input" type="text" data-act="other" placeholder="Name this room..." value="' + escHtml(f.roomOther) + '">' : "") +
+      '<div class="thumb-io-toggle"><button class="thumb-io-btn' + (!f.exterior ? " active" : "") + '" data-act="int">Interior</button>' +
+      '<button class="thumb-io-btn' + (f.exterior ? " active" : "") + '" data-act="ext">Exterior</button></div>' +
+      '<button class="btn btn-primary" style="width:100%;margin-top:6px;padding:7px;font-size:0.72rem;" data-act="add"' + (ready ? "" : " disabled") + '>Add to Reel</button></div></div>';
+  }).join("");
+}
+async function hostReelUpload(f, file) {
+  try {
+    const up = await fetch("/.netlify/functions/upload-original", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ imageBase64: f.dataUrl.split(",")[1], mimeType: file.type, listingId: REAL_LISTING_ID }),
+    });
+    const ud = await up.json();
+    if (!up.ok || !ud.publicUrl) throw new Error(ud.error || "Upload failed");
+    f.url = ud.publicUrl; f.status = "ready";
+  } catch (e) { f.status = "error"; console.error("reel photo upload:", e.message); }
+  renderReelPending();
+}
+function addReelUploads(fileList) {
   const files = Array.from(fileList).filter(f => f.type.startsWith("image/"));
   if (!files.length) { alert("No image files found in that selection."); return; }
   if (!REAL_LISTING_ID) { alert("Open this from a listing to add photos."); return; }
-  const r = reelRange();
-  let ok = 0, fail = 0;
-  for (let i = 0; i < files.length; i++) {
-    hint.textContent = "Adding photo " + (i + 1) + " of " + files.length + "…";
-    try {
-      const dataUrl = await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = () => rej(new Error("Could not read file")); fr.readAsDataURL(files[i]); });
-      const up = await fetch("/.netlify/functions/upload-original", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ imageBase64: dataUrl.split(",")[1], mimeType: files[i].type, listingId: REAL_LISTING_ID }),
-      });
-      const ud = await up.json();
-      if (!up.ok || !ud.publicUrl) throw new Error(ud.error || "Upload failed");
-      const add = await fetch(API_BASE + "?action=add-external-photo", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ listingId: REAL_LISTING_ID, userId: REAL_USER_ID, imageUrl: ud.publicUrl, roomType: null, sourceLabel: "Professional Photography" }),
-      });
-      const ad = await add.json();
-      if (!add.ok || !ad.id) throw new Error(ad.error || "Could not save photo");
-      galleryExternalFrames.push({ id: ad.id, imageUrl: ud.publicUrl, roomType: null, sourceLabel: "Professional Photography", roomLabel: "Professional Photography" });
-      if (reelPicked.length < r.max) reelPicked.push(ad.id);
-      ok++;
-    } catch (e) { fail++; console.error("reel photo upload:", e.message); }
-  }
-  hint.textContent = (ok ? ok + " added. " : "") + (fail ? fail + " failed — try again. " : "") + 'Add more any time — tagged "Professional Photography."';
-  reelPlan = null;
-  document.getElementById("reelPlanBox").classList.add("hidden");
-  document.getElementById("reelNextBtn").classList.add("hidden");
-  { const pb = document.getElementById("reelPlanBtn"); pb.textContent = "Build storyboard"; pb.classList.add("btn-primary"); pb.classList.remove("btn-ghost"); }
-  renderReelPhotos();
+  files.forEach(file => {
+    const fr = new FileReader();
+    fr.onload = () => {
+      const f = { pid: ++reelPendingSeq, dataUrl: fr.result, url: null, status: "uploading", room: "", roomOther: "", exterior: false };
+      reelPending.push(f); renderReelPending(); hostReelUpload(f, file);
+    };
+    fr.readAsDataURL(file);
+  });
 }
+async function commitReelPending(f) {
+  if (!reelPendingReady(f)) return;
+  f.status = "saving"; renderReelPending();
+  try {
+    const name = (f.room === "Other" ? f.roomOther.trim() : f.room) + (f.exterior ? " (exterior)" : "");
+    const add = await fetch(API_BASE + "?action=add-external-photo", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ listingId: REAL_LISTING_ID, userId: REAL_USER_ID, imageUrl: f.url, roomType: name, sourceLabel: "Professional Photography" }),
+    });
+    const ad = await add.json();
+    if (!add.ok || !ad.id) throw new Error(ad.error || "Could not save photo");
+    galleryExternalFrames.push({ id: ad.id, imageUrl: f.url, roomType: name, sourceLabel: "Professional Photography", roomLabel: name });
+    reelPending = reelPending.filter(x => x !== f);
+    if (reelPicked.length < reelRange().max) reelPicked.push(ad.id);
+    reelPlan = null;
+    document.getElementById("reelPlanBox").classList.add("hidden");
+    document.getElementById("reelNextBtn").classList.add("hidden");
+    { const pb = document.getElementById("reelPlanBtn"); pb.textContent = "Build storyboard"; pb.classList.add("btn-primary"); pb.classList.remove("btn-ghost"); }
+    renderReelPending(); renderReelPhotos();
+  } catch (e) { f.status = "ready"; renderReelPending(); alert(e.message); }
+}
+(function wireReelPending() {
+  const box = document.getElementById("reelPendingGrid");
+  const find = (el) => { const c = el.closest("[data-pid]"); return c && reelPending.find(x => x.pid === Number(c.getAttribute("data-pid"))); };
+  box.addEventListener("click", (e) => {
+    const t = e.target.closest("[data-act]"); if (!t) return; const f = find(t); if (!f) return;
+    const a = t.getAttribute("data-act");
+    if (a === "rm") reelPending = reelPending.filter(x => x !== f);
+    else if (a === "int") f.exterior = false; else if (a === "ext") f.exterior = true;
+    else if (a === "add") { commitReelPending(f); return; } else return;
+    renderReelPending();
+  });
+  box.addEventListener("change", (e) => { const f = find(e.target); if (f && e.target.getAttribute("data-act") === "room") { f.room = e.target.value; if (f.room !== "Other") f.roomOther = ""; renderReelPending(); } });
+  box.addEventListener("input", (e) => { const f = find(e.target); if (f && e.target.getAttribute("data-act") === "other") { f.roomOther = e.target.value; const c = e.target.closest("[data-pid]"); const ready = reelPendingReady(f); c.querySelector('[data-act="add"]').disabled = !ready; } });
+})();
 (function wireReelUpload() {
   const z = document.getElementById("reelUploadZone"), inp = document.getElementById("reelFileInput");
   inp.addEventListener("change", () => { const f = Array.from(inp.files); inp.value = ""; addReelUploads(f); });

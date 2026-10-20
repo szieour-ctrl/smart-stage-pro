@@ -71,11 +71,13 @@ async function resolveScenes(listingId, slots) {
   (Array.isArray(ex.data) ? ex.data : []).forEach((r) => byId.set(r.id, { kind: "external", r }));
   const warnings = [];
   const scenes = [];
+  const sources = []; // Oct 20, 2026: which photos built this Reel, for the compliance page's source-photo grid
   for (const s of slots) {
     const wantReveal = PRESETS.includes(s.reveal) ? s.reveal : null;
     const hit = byId.get(s.photoId);
     if (!hit) throw new Error("One of the selected photos is no longer available for this listing");
     const label = (hit.r.room_type || "").replace(/_/g, " ");
+    sources.push({ id: s.photoId, kind: hit.kind });
     if (hit.kind === "external") {
       scenes.push({ imageUrl: hit.r.image_url, motion: s.motion || "auto", badgeType: "none", roomLabel: label });
     } else if (hit.r.clean_s3_key && hit.r.badge_type) {
@@ -88,7 +90,7 @@ async function resolveScenes(listingId, slots) {
       scenes.push({ imageUrl: hit.r.cloudinary_staged_url, motion: s.motion || "auto", badgeType: "none", roomLabel: label, ...revealFor(hit.r, wantReveal, warnings) });
     }
   }
-  return { scenes, warnings };
+  return { scenes, warnings, sources };
 }
 
 exports.handler = async (event) => {
@@ -151,7 +153,7 @@ exports.handler = async (event) => {
     const owed = await quota.settleOwed(userId);
     if (owed) return reply(owed.status, { error: owed.message, code: owed.error });
 
-    const { scenes, warnings } = await resolveScenes(listingId, slots);
+    const { scenes, warnings, sources } = await resolveScenes(listingId, slots);
     const revealFlags = scenes.map((sc) => !!sc.reveal);
     if (!allocateDurations(Number(lengthSec), revealFlags)) {
       const n = revealFlags.filter(Boolean).length;
@@ -171,11 +173,18 @@ exports.handler = async (event) => {
     const jobId = `reel-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     // Register the render BEFORE dispatch so a user who leaves the page is still counted when Railway reports back.
     const jobRow = { id: jobId, user_id: userId, listing_id: listingId, event: evKey, length_sec: Number(lengthSec) };
-    let ins = await supabase("POST", "reel_jobs", { ...jobRow, advertising_confirmed_at: new Date().toISOString() });
-    if (ins.status >= 300 && /advertising_confirmed_at/.test(JSON.stringify(ins.data || ""))) {
-      // Column not added yet: do not block the render; the confirmation is still enforced above.
-      console.error("reel_jobs.advertising_confirmed_at is missing; run the migration. Rendering without recording it.");
-      ins = await supabase("POST", "reel_jobs", jobRow);
+    // Optional columns (advertising_confirmed_at, source_photos): if a migration has not been run yet, drop just
+    // that column and retry so a missing migration never blocks a render.
+    const extras = { advertising_confirmed_at: new Date().toISOString(), source_photos: sources };
+    let ins;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      ins = await supabase("POST", "reel_jobs", { ...jobRow, ...extras });
+      if (ins.status < 300) break;
+      const msg = JSON.stringify(ins.data || "");
+      const missing = Object.keys(extras).find((k) => msg.includes(k));
+      if (!missing) break;
+      console.error(`reel_jobs.${missing} is missing; run the migration. Rendering without recording it.`);
+      delete extras[missing];
     }
     if (ins.status >= 300) { console.error("reel_jobs insert failed:", ins.status, JSON.stringify(ins.data).slice(0, 200)); return reply(500, { error: "Could not start the render" }); }
     const r = await railway("POST", "/render-reel", { jobId, event: evKey, lengthSec, data, scenes, brand, qrUrl: projectId ? `${base}/compliance/${projectId}` : base, musicStyle: music });

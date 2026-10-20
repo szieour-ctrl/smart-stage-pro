@@ -1853,6 +1853,15 @@ async function fetchAddressPredictions(input) {
 // null if what was typed doesn't yet look like a street address plus city.
 function buildManualAddress(raw) {
   let t = (raw || '').trim().replace(/\s+/g, ' ');
+  // Oct 20, 2026 — the option used to require a comma between street and
+  // city, so "123 Demo St Roseville" never got a "Use as entered" row and the
+  // hint pointed at an option that wasn't there. If there's no comma, split
+  // after the street-type word (optionally followed by a unit) and treat the
+  // remainder as the city.
+  if (!/,/.test(t)) {
+    const m = t.match(/^(\d+[A-Za-z]?\s+.+?\b(?:St|Street|Ave|Avenue|Blvd|Boulevard|Dr|Drive|Rd|Road|Ln|Lane|Ct|Court|Cir|Circle|Way|Pl|Place|Ter|Terrace|Trl|Trail|Pkwy|Parkway|Loop|Hwy|Highway|Sq|Square|Cv|Cove|Run|Path|Pass|Ridge|Xing|Crossing)\b\.?(?:\s+(?:#|Apt\.?|Unit|Ste\.?|Suite)\s*\w+)?)\s+([A-Za-z][A-Za-z .'-]*)$/i);
+    if (m) t = m[1] + ', ' + m[2].trim();
+  }
   if (!/^\d+[A-Za-z]?\s+[^,]+,\s*[^,]+/.test(t)) return null;
   if (!/,\s*(CA|California)\b/i.test(t)) t += ', CA';
   if (!/,\s*USA$/i.test(t)) t += ', USA';
@@ -1879,7 +1888,7 @@ function renderAddressDropdown(predictions) {
   if (!predictions.length) {
     // Nothing from Google and not yet a full address: hint instead of vanishing
     if (typed.length >= 5 && /^\d/.test(typed)) {
-      dd.innerHTML = '<div style="padding:12px 16px;font-size:12px;color:var(--muted);">No match yet. For a new build, type the full address with city — e.g. 123 Main St, Roseville — and choose “Use as entered.”</div>';
+      dd.innerHTML = '<div style="padding:12px 16px;font-size:12px;color:var(--muted);">No match yet. For a new build, type the street address followed by the city — e.g. 123 Main St, Roseville — and choose “Use as entered.”</div>';
       dd.style.display = 'block';
     } else {
       dd.style.display = 'none';

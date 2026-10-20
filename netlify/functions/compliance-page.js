@@ -151,6 +151,31 @@ async function getDisclosedVideoJobs(projectId) {
   return jobsWithFrames;
 }
 
+// ── LISTING REELS (Oct 20, 2026) ─────────────────────────────────────────
+// A downloaded Listing Reel is an AB 723 record, so it lives on the property compliance page. reel-download.js
+// copies it from the 7-day draft area to smart-stage-reel-finals/ (no expiry; lifetime = the page's lifetime)
+// and stamps reel_jobs.final_*_key. Only downloaded (paid) Reels with a permanent copy ever appear here.
+// The page shows the Branded version (compliance pages always keep branding); the Unbranded (MLS) file is
+// offered as a download, same as videos. Non-fatal: a failure here never takes down the page.
+function prettyEvent(ev) {
+  return String(ev || "").replace(/[_-]+/g, " ").trim().replace(/\b\w/g, (c) => c.toUpperCase());
+}
+async function getDisclosedReels(projectId) {
+  const l = await supabaseGet("listings", `?project_id=eq.${encodeURIComponent(projectId)}&select=id&limit=1`);
+  const listingId = l.data?.[0]?.id;
+  if (!listingId) return [];
+  const r = await supabaseGet(
+    "reel_jobs",
+    `?listing_id=eq.${listingId}&status=eq.complete&downloaded_at=not.is.null&final_branded_key=not.is.null&select=id,event,length_sec,final_branded_key,final_unbranded_key,downloaded_at&order=downloaded_at.asc`
+  );
+  if (r.status !== 200 || !Array.isArray(r.data)) return [];
+  return Promise.all(r.data.map(async (j) => ({
+    ...j,
+    brandedUrl: await signVideoUrl(j.final_branded_key),
+    unbrandedUrl: await signVideoUrl(j.final_unbranded_key),
+  })));
+}
+
 // ── 30-day post-cancellation window (ToS §6, Sep 22, 2026) ────────────────
 // A compliance page stays live while its owner's subscription is active and
 // for 30 days after the paid period ends (users.data_expires_at, stamped by
@@ -202,7 +227,7 @@ function formatDate(isoString) {
   });
 }
 
-function renderPage(project, projectId, videoJobs, branding, listingDetails) {
+function renderPage(project, projectId, videoJobs, branding, listingDetails, reels) {
   // Oct 16, 2026 — Marketing Profile. Branding now comes from the listing
   // owner's profile (see lib/marketing-profile-lib.js), resolved at request time.
   // A user with no profile gets a NEUTRAL Smart Stage PRO header: the old
@@ -275,6 +300,31 @@ function renderPage(project, projectId, videoJobs, branding, listingDetails) {
       <div class="video-tour-sources-label">Original, unaltered photographs used to generate this video (${job.frames.length})</div>
       <div class="video-tour-sources-grid">
         ${sourceThumbs}
+      </div>
+    </div>`;
+  }).join("\n");
+
+  const reelList = reels || [];
+  const reelSections = reelList.map((rl, i) => {
+    if (!rl.brandedUrl) return "";
+    return `
+    <div class="video-tour-section">
+      <div class="video-tour-header">
+        <span class="video-tour-label">Social Reel — ${escBrand(prettyEvent(rl.event) || "Listing Reel")}${reelList.length > 1 ? ` (Reel ${i + 1})` : ""}</span>
+        <span class="video-tour-date">Created ${formatDate(rl.downloaded_at)}${rl.length_sec ? ` · ${Number(rl.length_sec)}s` : ""}</span>
+      </div>
+      <div style="background:#000;text-align:center;">
+        <video class="video-tour-player" style="margin:0 auto;max-width:360px;" controls preload="metadata" playsinline>
+          <source src="${rl.brandedUrl}" type="video/mp4">
+          Your browser does not support embedded video. <a href="${rl.brandedUrl}">Download the Reel directly</a>.
+        </video>
+      </div>
+      <div style="padding:10px 12px;background:#f7f4ef;border-top:1px solid #e0d8ce;font-size:11px;display:flex;gap:16px;flex-wrap:wrap;">
+        <a href="${rl.brandedUrl}" download class="dl-link">↓ Download Reel (Branded)</a>
+        ${rl.unbrandedUrl ? `<a href="${rl.unbrandedUrl}" download class="dl-link">↓ Download Reel (Unbranded, MLS)</a>` : ""}
+      </div>
+      <div style="padding:10px 18px 14px;background:#fff;border:1px solid #e0d8ce;border-top:0;border-radius:0 0 8px 8px;font-size:11px;color:#7a6f63;line-height:1.5;">
+        Images in this Reel are labeled Virtually Staged or Digitally Enhanced where applicable (California AB 723). The original photographs and the corresponding altered images are provided above for reference.
       </div>
     </div>`;
   }).join("\n");
@@ -513,6 +563,8 @@ function renderPage(project, projectId, videoJobs, branding, listingDetails) {
 
 ${videoTourSections}
 
+${reelSections}
+
 <!-- LEGAL FOOTER -->
 <footer class="legal-footer">
   <div class="legal-grid">
@@ -706,6 +758,14 @@ exports.handler = async (event) => {
       console.error("compliance-page video fetch error (non-fatal):", videoErr.message);
     }
 
+    // Oct 20, 2026 — downloaded Listing Reels (AB 723 records). Non-fatal, same reasoning as video above.
+    let reels = [];
+    try {
+      reels = await getDisclosedReels(projectId);
+    } catch (reelErr) {
+      console.error("compliance-page reel fetch error (non-fatal):", reelErr.message);
+    }
+
     // Never throws: falls back to the neutral Smart Stage PRO header.
     const branding = await brandingForProject(project);
 
@@ -719,7 +779,7 @@ exports.handler = async (event) => {
       console.error("compliance-page listing details fetch error (non-fatal):", detailsErr.message);
     }
 
-    return { statusCode: 200, headers: htmlHeaders, body: renderPage(project, projectId, videoJobs, branding, listingDetails) };
+    return { statusCode: 200, headers: htmlHeaders, body: renderPage(project, projectId, videoJobs, branding, listingDetails, reels) };
 
   } catch (err) {
     console.error("compliance-page error:", err.message);

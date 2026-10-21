@@ -52,7 +52,7 @@ exports.handler = async (event) => {
       (Array.isArray(l.data) ? l.data : []).forEach((x) => addr.set(x.id, x.address));
     }
     return reply(200, { reels: jobs.map((j) => ({
-      jobId: j.id, event: j.event, lengthSec: j.length_sec, createdAt: j.created_at, downloaded: !!j.downloaded_at,
+      jobId: j.id, event: j.event, lengthSec: j.length_sec, createdAt: j.created_at, downloaded: !!j.downloaded_at, downloadedAt: j.downloaded_at || null,
       listingId: j.listing_id, address: addr.get(j.listing_id) || null, hasBranded: !!j.branded_key, hasUnbranded: !!j.unbranded_key,
     })) });
   } catch (e) {

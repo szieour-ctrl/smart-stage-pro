@@ -188,6 +188,29 @@ function cleanAddress(address) {
   return (address || "").replace(/,\s*USA\s*$/i, "").trim();
 }
 
+// Oct 21, 2026 — same street in a DIFFERENT city is a different property. addressHash() drops the
+// city on purpose (Google formats city/state inconsistently), so "123 Demo St, Rocklin" used to hit
+// the saved record for "123 Demo St, Roseville" and open THAT listing (wrong city, old photos, even
+// when the old one was archived). City is only used to tell the two apart when a record already
+// exists under the street-only key and its city differs; otherwise the key is unchanged, so every
+// existing project keeps resolving exactly as before.
+function cityOf(address) {
+  const parts = cleanAddress(address).split(",");
+  return parts.length >= 3 ? parts[1].trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").trim() : "";
+}
+async function addrKeyFor(store, userId, address) {
+  const base = "addr_" + (userId || "anon") + "_" + addressHash(address);
+  const city = cityOf(address);
+  if (!city) return base;
+  try {
+    const raw = await store.get(base);
+    if (!raw) return base;
+    const other = cityOf(JSON.parse(raw).address);
+    if (other && other !== city) return base + "_" + city.replace(/\s+/g, "-");
+  } catch (e) { /* unreadable record: fall back to the street-only key */ }
+  return base;
+}
+
 function addressHash(address) {
   // FIX (Sep 10, 2026 — real bug: same physical property got 3 separate
   // listing rows in one evening, none of them duplicates of each other by
@@ -339,7 +362,7 @@ async function lookupProject(address, userId, env) {
   // "anon" fallback covers the (currently rare/legacy) case of a lookup
   // with no logged-in session; it deliberately does NOT collide with any
   // real userId's keyspace.
-  const key = "addr_" + (userId || "anon") + "_" + addressHash(address);
+  const key = await addrKeyFor(store, userId, address);
   try {
     const raw = await store.get(key);
     if (!raw) return { exists: false };
@@ -443,7 +466,7 @@ async function createProject(address, agentInfo, siteUrl, userId, env) {
   address = cleanAddress(address);
   const store   = getProjectStore(env);
   // Scoped by userId — see matching fix + comment in lookupProject above.
-  const addrKey = "addr_" + (userId || "anon") + "_" + addressHash(address);
+  const addrKey = await addrKeyFor(store, userId, address);
 
   let tier = "solo";
   let userContext = null;
@@ -671,7 +694,7 @@ async function addImage(projectId, imageData, userId, ab723Prompt, env) {
     // Scoped by userId — must match the key scheme in lookupProject/
     // createProject above, or this secondary index silently falls out of
     // sync with the primary pidKey record.
-    const addrKey = "addr_" + (project.userId || "anon") + "_" + addressHash(project.address);
+    const addrKey = await addrKeyFor(store, project.userId, project.address);
     await store.set(addrKey, updated);
     console.log(
       "Image added to project:", projectId, "room:", imageEntry.roomName,

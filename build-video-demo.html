@@ -170,6 +170,9 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
 .rp-card .rp-num{position:absolute;top:6px;left:6px;background:var(--gold);color:var(--ink);font-weight:700;font-size:0.72rem;border-radius:50%;width:22px;height:22px;line-height:22px;text-align:center;}
 .rp-card .rp-label{font-size:0.72rem;padding:5px 7px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .rp-count{font-size:0.85rem;margin-top:10px;}
+.pro-remove{position:absolute;right:6px;bottom:6px;width:26px;height:26px;border-radius:50%;border:1px solid var(--border);background:rgba(255,255,255,0.95);color:#b3261e;font-size:1rem;line-height:1;cursor:pointer;padding:0;display:flex;align-items:center;justify-content:center;z-index:2;}
+.pro-remove:hover{background:#b3261e;color:#fff;border-color:#b3261e;}
+.pro-remove:disabled{opacity:.5;cursor:wait;}
 .rp-count.ok{color:var(--ink);}
 .rp-board{display:flex;flex-direction:column;gap:10px;margin-top:14px;}
 .rp-slot{display:grid;grid-template-columns:34px 120px 1fr auto;gap:12px;align-items:center;border:1px solid var(--border);border-radius:6px;padding:8px 10px;background:#fff;}
@@ -1653,12 +1656,43 @@ function renderGallery() {
       <div class="gallery-thumb"><img src="${thumbUrl}" alt="${item.roomLabel}" loading="lazy"></div>
       ${item.hasPair ? `<div class="gallery-pair-badge">&#10003; Pair available</div>` : ""}
       <div class="gallery-select-check">&#10003;</div>
+      ${item.source === "staged" ? "" : `<button type="button" class="pro-remove" title="Remove this photo" aria-label="Remove this photo" onclick="removeProPhoto('${item.id}', event)">&times;</button>`}
       <div class="gallery-info">
         <div class="gallery-room">${item.roomLabel}</div>
         <div class="gallery-source">${item.source === "staged" ? "Virtually Staged" : "Professional Photography"}</div>
       </div>
     </div>`;
   }).join("");
+}
+
+// Remove an uploaded professional photo that hasn't been used in any Video or Reel. The server refuses
+// (409) when it is already used, so finished videos and compliance pages keep their original image.
+async function removeProPhoto(photoId, ev) {
+  if (ev) { ev.stopPropagation(); ev.preventDefault(); }
+  if (!galleryExternalFrames.some(f => f.id === photoId)) return;
+  if (!confirm("Remove this photo from your listing? You can upload it again later.")) return;
+  const btn = ev && ev.currentTarget;
+  if (btn) btn.disabled = true;
+  try {
+    const res = await reelFetch(API_BASE + "?action=remove-external-photo", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ photoId }),
+    });
+    let out = {};
+    try { out = await res.json(); } catch (e) { /* non-JSON error */ }
+    if (!res.ok) throw new Error(out.error || "Could not remove the photo. Please try again.");
+    galleryExternalFrames = galleryExternalFrames.filter(f => f.id !== photoId);
+    gallerySelectedIds.delete(photoId);
+    frames = frames.filter(f => f.galleryId !== photoId);
+    const k = reelPicked.indexOf(photoId);
+    if (k >= 0) { reelPicked.splice(k, 1); reelPlan = null; const box = document.getElementById("reelPlanBox"); if (box) box.classList.add("hidden"); }
+    renderGallery();
+    renderUpload();
+    if (typeof renderReelPhotos === "function" && document.getElementById("reelPhotoGrid")) renderReelPhotos();
+  } catch (e) {
+    if (btn) btn.disabled = false;
+    alert(e.message || "Could not remove the photo.");
+  }
 }
 
 function toggleGalleryItem(itemId) {
@@ -3655,9 +3689,11 @@ function renderReelPhotos() {
     const k = reelPicked.indexOf(p.id);
     return '<div class="rp-card' + (k >= 0 ? " on" : "") + '" data-id="' + escHtml(p.id) + '">' +
       (k >= 0 ? '<div class="rp-num">' + (k + 1) + '</div>' : "") +
-      '<img src="' + escHtml(p.url) + '" alt="" loading="lazy"><div class="rp-label">' + escHtml(p.label) + '</div></div>';
+      '<img src="' + escHtml(p.url) + '" alt="" loading="lazy"><div class="rp-label">' + escHtml(p.label) + '</div>' +
+      (galleryExternalFrames.some(f => f.id === p.id) ? '<button type="button" class="pro-remove" title="Remove this photo" aria-label="Remove this photo" data-remove="' + escHtml(p.id) + '">&times;</button>' : "") + '</div>';
   }).join("") : '<div class="gallery-loading">No photos found for this listing yet. Stage or add photos in Smart Stage PRO first.</div>';
   grid.querySelectorAll(".rp-card").forEach(el => el.addEventListener("click", () => toggleReelPhoto(el.getAttribute("data-id"))));
+  grid.querySelectorAll(".pro-remove").forEach(el => el.addEventListener("click", ev => removeProPhoto(el.getAttribute("data-remove"), ev)));
   const n = reelPicked.length, ok = n >= r.min && n <= r.max;
   const cnt = document.getElementById("reelPhotoCount");
   cnt.className = "rp-count" + (ok ? " ok" : "");

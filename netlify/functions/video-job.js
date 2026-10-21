@@ -2536,6 +2536,43 @@ exports.handler = async (event) => {
       return { statusCode: 200, headers, body: JSON.stringify(result) };
     }
 
+    // Oct 21, 2026 — remove an uploaded professional photo that was only "picked",
+    // never used. Login token required (same rules as the Reel endpoints). A photo
+    // already used by any Video or Reel is refused (409) so compliance pages and
+    // finished videos never lose their "original" image.
+    if (action === "remove-external-photo") {
+      const { requireUser, canAccessListing, UUID_RE } = require("./lib/reel-auth-lib");
+      const auth = await requireUser(event);
+      if (auth.error) return { statusCode: auth.error.status, headers, body: JSON.stringify(auth.error.body) };
+      const body = JSON.parse(event.body || "{}");
+      const photoId = String(body.photoId || "");
+      if (!UUID_RE.test(photoId)) {
+        return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing photoId" }) };
+      }
+      const pr = await supabase("GET", "external_photos", null, `?id=eq.${photoId}&select=id,listing_id,image_url&limit=1`);
+      const photo = Array.isArray(pr.data) ? pr.data[0] : null;
+      if (!photo) return { statusCode: 200, headers, body: JSON.stringify({ removed: true, alreadyGone: true }) };
+      const lr = await supabase("GET", "listings", null, `?id=eq.${photo.listing_id}&select=id,user_id,team_id,brokerage_id&limit=1`);
+      const listing = Array.isArray(lr.data) ? lr.data[0] : null;
+      if (!(await canAccessListing(auth.user.id, listing))) {
+        return { statusCode: 403, headers, body: JSON.stringify({ error: "You don't have access to this photo." }) };
+      }
+      const inUse = { error: "This photo is already used in a video or Reel, so it can't be removed.", code: "photo_in_use" };
+      // Reels reference photos by id in reel_jobs.source_photos.
+      const rr = await supabase("GET", "reel_jobs", null, `?listing_id=eq.${photo.listing_id}&select=source_photos`);
+      if (rr.status >= 300) throw new Error("Could not check Reel usage");
+      const usedByReel = (Array.isArray(rr.data) ? rr.data : []).some(j =>
+        Array.isArray(j.source_photos) && j.source_photos.some(p => p && p.id === photoId));
+      if (usedByReel) return { statusCode: 409, headers, body: JSON.stringify(inUse) };
+      // Videos copy the image URL into video_job_frames.
+      const vr = await supabase("GET", "video_job_frames", null, `?image_url=eq.${encodeURIComponent(photo.image_url)}&select=id&limit=1`);
+      if (vr.status >= 300) throw new Error("Could not check Video usage");
+      if (Array.isArray(vr.data) && vr.data.length) return { statusCode: 409, headers, body: JSON.stringify(inUse) };
+      const del = await supabase("DELETE", "external_photos", null, `?id=eq.${photoId}`);
+      if (del.status >= 300) throw new Error("Could not remove photo");
+      return { statusCode: 200, headers, body: JSON.stringify({ removed: true }) };
+    }
+
     if (action === "autoSelect") {
       // CHANGED (this session — real bug found via browser console:
       // "Unexpected token '<', <HE... is not valid JSON"). This used to

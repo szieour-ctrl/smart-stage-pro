@@ -11517,6 +11517,27 @@ function toggleFaqItem(id, btn) {
   btn.classList.toggle('open', isOpen);
 }
 
+// Landing page media: remove the easy ways to save videos and images (download button, right-click
+// save, drag-out, iOS long-press, Picture-in-Picture). Deterrent only: the files are still public URLs.
+function protectLandingMedia(page) {
+  if (!page) return;
+  if (!document.getElementById('lp-protect-css')) {
+    const st = document.createElement('style');
+    st.id = 'lp-protect-css';
+    st.textContent = '#landing-page img,#landing-page video{-webkit-user-drag:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;}';
+    document.head.appendChild(st);
+  }
+  page.querySelectorAll('video').forEach(v => {
+    v.setAttribute('controlsList', 'nodownload noremoteplayback');
+    v.setAttribute('disablePictureInPicture', '');
+    v.setAttribute('disableRemotePlayback', '');
+  });
+  page.querySelectorAll('img').forEach(i => i.setAttribute('draggable', 'false'));
+  const isMedia = t => t && t.closest && (t.closest('img,video,canvas') || t.closest('[style*="background-image"]'));
+  page.addEventListener('contextmenu', e => { if (isMedia(e.target)) e.preventDefault(); });
+  page.addEventListener('dragstart', e => { if (isMedia(e.target)) e.preventDefault(); });
+}
+
 function showLandingPage() {
   document.getElementById('landing-page')?.remove();
   document.querySelector('.compliance-bar').style.display = 'none';
@@ -14426,6 +14447,7 @@ function showLandingPage() {
   initHeroSliders();
     initTrSliders();
     initPsTopSlider();
+  protectLandingMedia(page);
 
   // NEW (Aug 16, 2026) — scroll to a #section if the URL arrived with one
   // already in it (e.g. a prospecting email's "?src=...#pricing" link).

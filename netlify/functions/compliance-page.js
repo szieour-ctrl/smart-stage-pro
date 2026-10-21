@@ -160,6 +160,35 @@ async function getDisclosedVideoJobs(projectId) {
 function prettyEvent(ev) {
   return String(ev || "").replace(/[_-]+/g, " ").trim().replace(/\b\w/g, (c) => c.toUpperCase());
 }
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// Resolves each Reel's recorded source photos (reel_jobs.source_photos, written at render time) to their
+// ORIGINAL, unaltered image URLs: a staged photo's original, or an uploaded camera-ready photo itself.
+// Returns Map(reelJobId -> [{url, room}]). Reels rendered before source_photos existed are absent from the map
+// (the caller falls back to the listing's originals). Non-fatal: any failure just means no entry.
+async function getReelSources(jobIds) {
+  const map = new Map();
+  const ids = jobIds.filter((i) => /^[\w-]+$/.test(String(i)));
+  if (!ids.length) return map;
+  const sp = await supabaseGet("reel_jobs", `?id=in.(${ids.join(",")})&select=id,source_photos`);
+  if (sp.status !== 200 || !Array.isArray(sp.data)) return map;
+  const wantStaged = new Set(), wantExt = new Set();
+  for (const row of sp.data) for (const p of (Array.isArray(row.source_photos) ? row.source_photos : [])) {
+    if (!p || !UUID_RE.test(String(p.id || ""))) continue;
+    (p.kind === "external" ? wantExt : wantStaged).add(p.id);
+  }
+  const [st, ex] = await Promise.all([
+    wantStaged.size ? supabaseGet("staged_images", `?id=in.(${[...wantStaged].join(",")})&select=id,cloudinary_original_url,room_type`) : { data: [] },
+    wantExt.size ? supabaseGet("external_photos", `?id=in.(${[...wantExt].join(",")})&select=id,image_url,room_type`) : { data: [] },
+  ]);
+  const byId = new Map();
+  (Array.isArray(st.data) ? st.data : []).forEach((r) => { if (/^https?:\/\//.test(r.cloudinary_original_url || "")) byId.set(r.id, { url: r.cloudinary_original_url, room: r.room_type }); });
+  (Array.isArray(ex.data) ? ex.data : []).forEach((r) => { if (/^https?:\/\//.test(r.image_url || "")) byId.set(r.id, { url: r.image_url, room: r.room_type }); });
+  for (const row of sp.data) {
+    if (!Array.isArray(row.source_photos)) continue;
+    map.set(row.id, row.source_photos.map((p) => byId.get(p && p.id)).filter(Boolean));
+  }
+  return map;
+}
 async function getDisclosedReels(projectId) {
   const l = await supabaseGet("listings", `?project_id=eq.${encodeURIComponent(projectId)}&select=id&limit=1`);
   const listingId = l.data?.[0]?.id;
@@ -169,8 +198,12 @@ async function getDisclosedReels(projectId) {
     `?listing_id=eq.${listingId}&status=eq.complete&downloaded_at=not.is.null&final_branded_key=not.is.null&select=id,event,length_sec,final_branded_key,final_unbranded_key,downloaded_at&order=downloaded_at.asc`
   );
   if (r.status !== 200 || !Array.isArray(r.data)) return [];
+  let sources = new Map();
+  try { sources = await getReelSources(r.data.map((j) => j.id)); }
+  catch (e) { console.error("compliance-page reel sources error (non-fatal):", e.message); }
   return Promise.all(r.data.map(async (j) => ({
     ...j,
+    sources: sources.has(j.id) ? sources.get(j.id) : null,
     brandedUrl: await signVideoUrl(j.final_branded_key),
     unbrandedUrl: await signVideoUrl(j.final_unbranded_key),
   })));
@@ -323,9 +356,22 @@ function renderPage(project, projectId, videoJobs, branding, listingDetails, ree
         <a href="${rl.brandedUrl}" download class="dl-link">↓ Download Reel (Branded)</a>
         ${rl.unbrandedUrl ? `<a href="${rl.unbrandedUrl}" download class="dl-link">↓ Download Reel (Unbranded, MLS)</a>` : ""}
       </div>
-      <div style="padding:10px 18px 14px;background:#fff;border:1px solid #e0d8ce;border-top:0;border-radius:0 0 8px 8px;font-size:11px;color:#7a6f63;line-height:1.5;">
+      <div style="padding:10px 18px 12px;background:#fff;border-left:1px solid #e0d8ce;border-right:1px solid #e0d8ce;font-size:11px;color:#7a6f63;line-height:1.5;">
         Images in this Reel are labeled Virtually Staged or Digitally Enhanced where applicable (California AB 723). The original photographs and the corresponding altered images are provided above for reference.
       </div>
+      ${(() => {
+        // Recorded sources when known; Reels rendered before sources were recorded fall back to every original
+        // photograph on this listing (the same set shown in the image pairs above), labeled honestly.
+        const recorded = Array.isArray(rl.sources);
+        const thumbs = recorded
+          ? rl.sources.map((x) => x.url)
+          : images.map((im) => im.originalUrl).filter((u) => /^https?:\/\//.test(u || ""));
+        if (!thumbs.length) return `<div class="video-tour-sources-label" style="border-radius:0 0 8px 8px;border-bottom:1px solid #e0d8ce;">Original photographs: see the image sets above</div>`;
+        return `<div class="video-tour-sources-label">${recorded ? "Original, unaltered photographs used to generate this Reel" : "Original, unaltered photographs for this listing"} (${thumbs.length})</div>
+      <div class="video-tour-sources-grid">
+        ${thumbs.map((u) => `<img src="${escBrand(u)}" alt="Original photograph${recorded ? " used in this Reel" : " of this listing"}" loading="lazy">`).join("\n        ")}
+      </div>`;
+      })()}
     </div>`;
   }).join("\n");
 

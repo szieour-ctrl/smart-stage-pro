@@ -291,6 +291,10 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
       <div class="eyebrow">Reel &middot; Step 1</div>
       <div class="panel-title">What kind of Reel?</div>
       <div class="panel-sub" style="margin-bottom:16px;">Pick a Reel type. Each one asks only for what it needs.</div>
+      <div id="reelRecent" class="hidden" style="margin-bottom:18px;">
+        <div class="ri-group-title">Your recent Reels <span class="ri-help" style="font-weight:400;">&middot; kept for 7 days</span></div>
+        <div id="reelRecentList"></div>
+      </div>
       <div id="reelIntakeMount"></div>
       <div class="ri-brand" id="reelBrandNote"></div>
       <div id="reelIntakeSaved" class="hidden"></div>
@@ -3479,6 +3483,7 @@ function enterReelMode() {
   document.getElementById("modeVideoBtn").classList.remove("on");
   document.getElementById("reelIntakeSaved").classList.add("hidden");
   renderReelBrandNote();
+  loadRecentReels();
   window.ReelIntake.render(document.getElementById("reelIntakeMount"), reelOpts());
   // Oct 19, 2026: come back to the Reel step the user left (photos / motion / review) instead of the intake form.
   // Their picks and Vision plan are still in memory; going through Intake -> Photos again wiped the plan
@@ -3935,7 +3940,7 @@ function renderReelMotion() {
 }
 
 // ── Step 4: review + render (beta, no charging yet) ──
-let reelRendering = false, reelRenderJobId = null, reelResult = null, reelPollTimer = null, reelCurVariant = null, reelDownloaded = {};
+let reelResumed = false, reelRendering = false, reelRenderJobId = null, reelResult = null, reelPollTimer = null, reelCurVariant = null, reelDownloaded = {};
 function enterReelReview() {
   reelPlanSync();
   try { sessionStorage.setItem("reelPlan_" + (REAL_LISTING_ID || "none"), JSON.stringify({ intake: window._reelIntake, plan: reelPlan })); } catch (e) { /* non-fatal */ }
@@ -3955,6 +3960,7 @@ function enterReelReview() {
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 function reelBackToMotion() {
+  if (reelResumed) { leaveResumedReel(); return; }
   if (reelPollTimer) { clearTimeout(reelPollTimer); reelPollTimer = null; reelRendering = false; }
   document.getElementById("stepReelReview").classList.add("hidden");
   document.getElementById("stepReelMotion").classList.remove("hidden");
@@ -4050,6 +4056,81 @@ function setReelVariant(which) {
     ? "Branded: includes your call to action, name, DRE, brokerage and logo."
     : "Unbranded (MLS): no call to action, name, brokerage or logo \u2014 safe for MLS and portals.";
 }
+// Fills the result area (variant tabs, player, download/share) from reelResult. Used after a render finishes
+// and when reopening a Reel from "Your recent Reels".
+// "Your recent Reels": the user's own finished renders from the last 7 days, so a Reel is never lost to a reload or logout.
+const REEL_EVENT_NAMES = { teaser: "Teaser", coming_soon: "Coming Soon", just_listed: "Just Listed", for_sale: "For Sale", for_lease: "For Lease", feature_spotlight: "Feature Spotlight", under_contract: "Under Contract", back_on_market: "Back on Market", price_drop: "Price Drop", price_improvement: "Price Improvement", open_house: "Open House Invite", just_sold: "Just Sold Recap" };
+async function loadRecentReels() {
+  const box = document.getElementById("reelRecent"), list = document.getElementById("reelRecentList");
+  if (!box || !list) return;
+  try {
+    const r = await reelFetch("/.netlify/functions/reel-recent");
+    const d = await r.json();
+    const reels = (r.ok && d.reels) || [];
+    if (!reels.length) { box.classList.add("hidden"); return; }
+    list.innerHTML = reels.map(x => {
+      const when = new Date(x.createdAt).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+      const name = REEL_EVENT_NAMES[x.event] || String(x.event || "Reel").replace(/_/g, " ");
+      return '<div class="ri-brand" style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px;">' +
+        '<div><b>' + escHtml(name) + '</b> &middot; ' + escHtml(String(x.lengthSec)) + 's' + (x.address ? ' &middot; ' + escHtml(x.address) : '') +
+        '<div class="ri-help">' + escHtml(when) + ' &middot; ' + (x.downloaded ? 'Downloaded' : '<b>Not downloaded yet</b>') + '</div></div>' +
+        '<button type="button" class="btn btn-ghost" data-job="' + escHtml(x.jobId) + '">Open</button></div>';
+    }).join("");
+    list.querySelectorAll("button[data-job]").forEach(b => b.addEventListener("click", () => openRecentReel(b.getAttribute("data-job"), b)));
+    box.classList.remove("hidden");
+  } catch (e) { box.classList.add("hidden"); /* non-fatal */ }
+}
+async function openRecentReel(jobId, btn) {
+  const label = btn.textContent; btn.disabled = true; btn.textContent = "Opening\u2026";
+  try {
+    const r = await reelFetch("/.netlify/functions/reel-recent?jobId=" + encodeURIComponent(jobId));
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || "Could not open this Reel");
+    if (reelPollTimer) { clearTimeout(reelPollTimer); reelPollTimer = null; }
+    reelResumed = true; reelRendering = false;
+    reelRenderJobId = jobId;
+    reelResult = { status: "done", branded: d.branded, unbranded: d.unbranded, keys: d.keys, durationSec: d.durationSec, warnings: [], counter: null };
+    reelDownloaded = d.downloaded ? { branded: true, unbranded: true } : {};
+    document.getElementById("stepReelIntake").classList.add("hidden");
+    document.getElementById("stepReelReview").classList.remove("hidden");
+    document.getElementById("reelRenderErr").textContent = "";
+    ["reelRenderBtn", "reelAdConfirm"].forEach(id => { const el = document.getElementById(id); if (el) el.closest(id === "reelAdConfirm" ? "label" : "button, .btn").style.display = "none"; });
+    showReelResult();
+  } catch (e) {
+    btn.textContent = label; btn.disabled = false;
+    const l = document.getElementById("reelRecentList");
+    let m = document.getElementById("reelRecentErr");
+    if (!m) { m = document.createElement("div"); m.id = "reelRecentErr"; m.className = "ri-errors"; l.appendChild(m); }
+    m.textContent = e.message;
+    return;
+  }
+  btn.disabled = false; btn.textContent = label;
+}
+// Leaving a reopened Reel: back to the Reel list with a clean slate (no plan exists for it in this session).
+function leaveResumedReel() {
+  reelResumed = false; reelResult = null; reelRenderJobId = null; reelDownloaded = {};
+  document.getElementById("reelResult").classList.add("hidden");
+  const btn = document.getElementById("reelRenderBtn"); if (btn) btn.style.display = "";
+  const c = document.getElementById("reelAdConfirm"); if (c && c.closest("label")) c.closest("label").style.display = "";
+  document.getElementById("stepReelReview").classList.add("hidden");
+  document.getElementById("stepReelIntake").classList.remove("hidden");
+  loadRecentReels();
+}
+function showReelResult() {
+    const tabs = document.getElementById("reelVariantTabs");
+    tabs.innerHTML = (reelResult.branded ? '<button class="motion-btn kenburns" data-v="branded">Branded</button>' : "") +
+      (reelResult.unbranded ? '<button class="motion-btn kenburns" data-v="unbranded">Unbranded (MLS)</button>' : "");
+    tabs.querySelectorAll("button").forEach(b => b.addEventListener("click", () => setReelVariant(b.getAttribute("data-v"))));
+    document.getElementById("reelDownload").onclick = downloadReel;
+    document.getElementById("reelShareBtn").onclick = shareReel;
+    const cn = reelResult.counter;
+    const wasteMsg = cn && cn.wasteCharged ? "Your " + cn.threshold + "th undownloaded render used 1 Image. " : (cn && cn.wasteOwed ? "Your " + cn.threshold + "th undownloaded render costs 1 Image, but you have none left. It will be collected before your next render. " : "");
+    document.getElementById("reelResultNote").textContent = wasteMsg + (reelResumed ? "This preview link lasts about an hour; reopen the Reel from Your recent Reels for a fresh one. " : "The preview plays for about an hour; Download keeps working while this page is open. ") + ((reelResult.warnings || []).join(" "));
+    loadReelQuota();
+    document.getElementById("reelResult").classList.remove("hidden");
+    setReelVariant(reelResult.branded ? "branded" : "unbranded");
+    document.getElementById("reelResult").scrollIntoView({ behavior: "smooth", block: "start" });
+}
 async function startReelRender() {
   const btn = document.getElementById("reelRenderBtn"), err = document.getElementById("reelRenderErr"), st = document.getElementById("reelRenderStatus");
   err.textContent = "";
@@ -4090,19 +4171,7 @@ async function startReelRender() {
       if (Date.now() - t0 > 600000) throw new Error("This is taking longer than expected. Please try again.");
     }
     st.classList.add("hidden");
-    const tabs = document.getElementById("reelVariantTabs");
-    tabs.innerHTML = (reelResult.branded ? '<button class="motion-btn kenburns" data-v="branded">Branded</button>' : "") +
-      (reelResult.unbranded ? '<button class="motion-btn kenburns" data-v="unbranded">Unbranded (MLS)</button>' : "");
-    tabs.querySelectorAll("button").forEach(b => b.addEventListener("click", () => setReelVariant(b.getAttribute("data-v"))));
-    document.getElementById("reelDownload").onclick = downloadReel;
-    document.getElementById("reelShareBtn").onclick = shareReel;
-    const cn = reelResult.counter;
-    const wasteMsg = cn && cn.wasteCharged ? "Your " + cn.threshold + "th undownloaded render used 1 Image. " : (cn && cn.wasteOwed ? "Your " + cn.threshold + "th undownloaded render costs 1 Image, but you have none left. It will be collected before your next render. " : "");
-    document.getElementById("reelResultNote").textContent = wasteMsg + "The preview plays for about an hour; Download keeps working while this page is open. " + ((reelResult.warnings || []).join(" "));
-    loadReelQuota();
-    document.getElementById("reelResult").classList.remove("hidden");
-    setReelVariant(reelResult.branded ? "branded" : "unbranded");
-    document.getElementById("reelResult").scrollIntoView({ behavior: "smooth", block: "start" });
+    showReelResult();
   } catch (e) {
     st.classList.add("hidden");
     err.textContent = e.message;

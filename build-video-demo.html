@@ -4060,23 +4060,31 @@ function setReelVariant(which) {
 // and when reopening a Reel from "Your recent Reels".
 // "Your recent Reels": the user's own finished renders from the last 7 days, so a Reel is never lost to a reload or logout.
 const REEL_EVENT_NAMES = { teaser: "Teaser", coming_soon: "Coming Soon", just_listed: "Just Listed", for_sale: "For Sale", for_lease: "For Lease", feature_spotlight: "Feature Spotlight", under_contract: "Under Contract", back_on_market: "Back on Market", price_drop: "Price Drop", price_improvement: "Price Improvement", open_house: "Open House Invite", just_sold: "Just Sold Recap" };
+let reelRecentAll = false;
 async function loadRecentReels() {
   const box = document.getElementById("reelRecent"), list = document.getElementById("reelRecentList");
   if (!box || !list) return;
   try {
-    const r = await reelFetch("/.netlify/functions/reel-recent");
+    const [r] = await Promise.all([reelFetch("/.netlify/functions/reel-recent"), loadReelQuota()]);
     const d = await r.json();
-    const reels = (r.ok && d.reels) || [];
+    const reels = ((r.ok && d.reels) || []).slice().sort((x, y) => (x.downloaded === y.downloaded ? 0 : x.downloaded ? 1 : -1));
     if (!reels.length) { box.classList.add("hidden"); return; }
-    list.innerHTML = reels.map(x => {
+    const SHOW = 3, shown = reelRecentAll ? reels : reels.slice(0, SHOW);
+    const q = reelQuota, undl = reels.filter(x => !x.downloaded).length;
+    const counter = (q && typeof q.undownloaded === "number")
+      ? '<div class="ri-help" style="margin:2px 0 8px;">Rendered, not downloaded: <b>' + q.undownloaded + ' of ' + q.threshold + '</b> &middot; every ' + q.threshold + ' you don&rsquo;t download uses 1 Image; downloading any Reel resets it.</div>'
+      : (undl ? '<div class="ri-help" style="margin:2px 0 8px;">' + undl + ' not downloaded yet.</div>' : '');
+    list.innerHTML = counter + shown.map(x => {
       const when = new Date(x.createdAt).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
       const name = REEL_EVENT_NAMES[x.event] || String(x.event || "Reel").replace(/_/g, " ");
-      return '<div class="ri-brand" style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px;">' +
-        '<div><b>' + escHtml(name) + '</b> &middot; ' + escHtml(String(x.lengthSec)) + 's' + (x.address ? ' &middot; ' + escHtml(x.address) : '') +
-        '<div class="ri-help">' + escHtml(when) + ' &middot; ' + (x.downloaded ? 'Downloaded' : '<b>Not downloaded yet</b>') + '</div></div>' +
-        '<button type="button" class="btn btn-ghost" data-job="' + escHtml(x.jobId) + '">Open</button></div>';
-    }).join("");
+      return '<div class="ri-brand" style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:6px;padding:7px 10px;">' +
+        '<div style="min-width:0;"><b>' + escHtml(name) + '</b> &middot; ' + escHtml(String(x.lengthSec)) + 's &middot; ' + escHtml(when) + ' &middot; ' + (x.downloaded ? 'Downloaded' : '<b>Not downloaded</b>') +
+        (x.address ? '<div class="ri-help" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escHtml(x.address) + '</div>' : '') + '</div>' +
+        '<button type="button" class="btn btn-ghost" style="flex:none;padding:6px 14px;" data-job="' + escHtml(x.jobId) + '">Open</button></div>';
+    }).join("") + (reels.length > SHOW ? '<button type="button" class="btn btn-ghost" id="reelRecentMore" style="width:100%;padding:6px;">' + (reelRecentAll ? "Show fewer" : "Show all " + reels.length) + '</button>' : "");
     list.querySelectorAll("button[data-job]").forEach(b => b.addEventListener("click", () => openRecentReel(b.getAttribute("data-job"), b)));
+    const more = document.getElementById("reelRecentMore");
+    if (more) more.addEventListener("click", () => { reelRecentAll = !reelRecentAll; loadRecentReels(); });
     box.classList.remove("hidden");
   } catch (e) { box.classList.add("hidden"); /* non-fatal */ }
 }

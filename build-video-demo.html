@@ -291,6 +291,10 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
       <div class="eyebrow">Reel &middot; Step 1</div>
       <div class="panel-title">What kind of Reel?</div>
       <div class="panel-sub" style="margin-bottom:16px;">Pick a Reel type. Each one asks only for what it needs.</div>
+      <div id="reelRecent" class="hidden" style="margin-bottom:18px;">
+        <div class="ri-group-title">Your recent Reels &ndash; kept for 7 days &ndash; then deleted</div>
+        <div id="reelRecentList"></div>
+      </div>
       <div id="reelIntakeMount"></div>
       <div class="ri-brand" id="reelBrandNote"></div>
       <div id="reelIntakeSaved" class="hidden"></div>
@@ -3479,6 +3483,7 @@ function enterReelMode() {
   document.getElementById("modeVideoBtn").classList.remove("on");
   document.getElementById("reelIntakeSaved").classList.add("hidden");
   renderReelBrandNote();
+  loadRecentReels();
   window.ReelIntake.render(document.getElementById("reelIntakeMount"), reelOpts());
   // Oct 19, 2026: come back to the Reel step the user left (photos / motion / review) instead of the intake form.
   // Their picks and Vision plan are still in memory; going through Intake -> Photos again wiped the plan
@@ -3935,7 +3940,7 @@ function renderReelMotion() {
 }
 
 // ── Step 4: review + render (beta, no charging yet) ──
-let reelRendering = false, reelRenderJobId = null, reelResult = null, reelPollTimer = null, reelCurVariant = null, reelDownloaded = {};
+let reelResumed = false, reelRendering = false, reelRenderJobId = null, reelResult = null, reelPollTimer = null, reelCurVariant = null, reelDownloaded = {};
 function enterReelReview() {
   reelPlanSync();
   try { sessionStorage.setItem("reelPlan_" + (REAL_LISTING_ID || "none"), JSON.stringify({ intake: window._reelIntake, plan: reelPlan })); } catch (e) { /* non-fatal */ }
@@ -3955,6 +3960,7 @@ function enterReelReview() {
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 function reelBackToMotion() {
+  if (reelResumed) { leaveResumedReel(); return; }
   if (reelPollTimer) { clearTimeout(reelPollTimer); reelPollTimer = null; reelRendering = false; }
   document.getElementById("stepReelReview").classList.add("hidden");
   document.getElementById("stepReelMotion").classList.remove("hidden");
@@ -4050,6 +4056,124 @@ function setReelVariant(which) {
     ? "Branded: includes your call to action, name, DRE, brokerage and logo."
     : "Unbranded (MLS): no call to action, name, brokerage or logo \u2014 safe for MLS and portals.";
 }
+// Fills the result area (variant tabs, player, download/share) from reelResult. Used after a render finishes
+// and when reopening a Reel from "Your recent Reels".
+// "Your recent Reels": the user's own finished renders from the last 7 days, so a Reel is never lost to a reload or logout.
+const REEL_EVENT_NAMES = { teaser: "Teaser", coming_soon: "Coming Soon", just_listed: "Just Listed", for_sale: "For Sale", for_lease: "For Lease", feature_spotlight: "Feature Spotlight", under_contract: "Under Contract", back_on_market: "Back on Market", price_drop: "Price Drop", price_improvement: "Price Improvement", open_house: "Open House Invite", just_sold: "Just Sold Recap" };
+let reelRecentData = [];
+// Not-downloaded renders made AFTER the user's latest download are the ones counting toward the waste fee;
+// any download resets that count, so older not-downloaded renders no longer count (downloading them later still uses 1 Reel).
+function reelRecentSplit() {
+  let last = 0;
+  reelRecentData.forEach(x => { if (x.downloadedAt) last = Math.max(last, new Date(x.downloadedAt).getTime()); });
+  const open = reelRecentData.filter(x => !x.downloaded);
+  return { counting: open.filter(x => new Date(x.createdAt).getTime() > last), older: open.filter(x => new Date(x.createdAt).getTime() <= last) };
+}
+// One button on the Reel start step; the full list (with expiry dates) lives in a modal.
+async function loadRecentReels() {
+  const box = document.getElementById("reelRecent"), list = document.getElementById("reelRecentList");
+  if (!box || !list) return;
+  try {
+    const [r] = await Promise.all([reelFetch("/.netlify/functions/reel-recent"), loadReelQuota()]);
+    const d = await r.json();
+    reelRecentData = ((r.ok && d.reels) || []).slice().sort((x, y) => new Date(y.createdAt) - new Date(x.createdAt));
+    const sp = reelRecentSplit();
+    if (!sp.counting.length && !sp.older.length) { box.classList.add("hidden"); return; }
+    const total = sp.counting.length + sp.older.length;
+    // Red only while renders are counting toward the waste fee; a download resets that to 0 and the button turns neutral
+    // (the older Reels are still waiting, so the number stays).
+    const hot = (reelQuota && typeof reelQuota.undownloaded === "number") ? reelQuota.undownloaded > 0 : sp.counting.length > 0;
+    const look = hot ? "background:#c00000;border:2px solid #1f3a5f;color:#fff;" : "background:#ece7dc;border:2px solid #b8a98a;color:#2b2b2b;";
+    list.innerHTML = '<button type="button" id="reelRecentBtn" class="btn" style="width:100%;padding:16px 14px;white-space:normal;line-height:1.5;' + look + 'font-weight:700;font-size:1.05rem;letter-spacing:.04em;text-transform:uppercase;">(' + total + ') Reel' + (total === 1 ? '' : 's') + ' awaiting download<br>Click to view</button>';
+    document.getElementById("reelRecentBtn").addEventListener("click", showRecentReelsModal);
+    box.classList.remove("hidden");
+  } catch (e) { box.classList.add("hidden"); /* non-fatal */ }
+}
+function closeRecentReelsModal() { const m = document.getElementById("reelRecentModal"); if (m) m.remove(); }
+function showRecentReelsModal() {
+  closeRecentReelsModal();
+  const q = reelQuota, th = (q && q.threshold) || 5;
+  const sp = reelRecentSplit();
+  const n = (q && typeof q.undownloaded === "number") ? q.undownloaded : sp.counting.length;
+  const row = (x, counting) => {
+    const made = new Date(x.createdAt), exp = new Date(made.getTime() + 7 * 24 * 3600 * 1000);
+    const fmt = (dt, o) => dt.toLocaleString([], o);
+    const name = REEL_EVENT_NAMES[x.event] || String(x.event || "Reel").replace(/_/g, " ");
+    return '<div class="ri-brand" style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px;">' +
+      '<div style="min-width:0;"><b>' + escHtml(name) + '</b> &middot; ' + escHtml(String(x.lengthSec)) + 's &middot; ' +
+      (counting ? '<b style="color:#b3261e;">Counting toward ' + th + '</b>' : '<b>Not counted</b> (count was reset by a download)') +
+      (x.address ? '<div class="ri-help">' + escHtml(x.address) + '</div>' : '') +
+      '<div class="ri-help">Made ' + escHtml(fmt(made, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })) + ' &middot; Expires ' + escHtml(fmt(exp, { month: "short", day: "numeric" })) + '</div></div>' +
+      '<button type="button" class="btn btn-ghost" style="flex:none;padding:6px 14px;" data-job="' + escHtml(x.jobId) + '">Open</button></div>';
+  };
+  const meter = '<div style="margin:10px 0 4px;padding:10px 12px;border-radius:8px;background:' + (n > 0 ? '#fbe9e7;border:1px solid #b3261e;' : '#f0ece4;border:1px solid #d9d2c3;') + '">' +
+    '<b' + (n > 0 ? ' style="color:#b3261e;"' : '') + '>Renders not downloaded: ' + n + ' of ' + th + '</b>' +
+    '<div class="ri-help" style="margin-top:3px;">' + (n >= th - 1 ? 'Your next render without a download uses 1 Image. ' : 'At ' + th + ', 1 Image is charged. ') + 'Downloading any Reel resets this count to 0.</div></div>';
+  const body = (sp.counting.length ? '<div class="ri-group-title">Counting toward the ' + th + '</div>' + sp.counting.map(x => row(x, true)).join("") : "") +
+    (sp.older.length ? '<div class="ri-group-title" style="margin-top:10px;">Not counted &middot; kept until they expire</div>' + sp.older.map(x => row(x, false)).join("") : "");
+  const m = document.createElement("div");
+  m.id = "reelRecentModal";
+  m.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;";
+  m.innerHTML = '<div style="background:var(--cream,#f6f2ec);border-radius:10px;max-width:560px;width:100%;max-height:85vh;display:flex;flex-direction:column;">' +
+    '<div style="padding:18px 18px 4px;"><div class="panel-title" style="margin:0 0 6px;">Reels waiting to download</div>' + meter +
+    '<div class="ri-help">Reels are kept for 7 days after they\u2019re made, then removed. Downloaded Reels are not listed here. Downloading a Reel uses 1 of your included Reels (or 1 Image).</div></div>' +
+    '<div style="padding:8px 18px;overflow:auto;">' + body + '<div id="reelRecentErr" class="ri-errors"></div></div>' +
+    '<div style="padding:10px 18px 16px;text-align:right;"><button type="button" class="btn btn-ghost" id="reelRecentClose">Close</button></div></div>';
+  document.body.appendChild(m);
+  m.addEventListener("click", ev => { if (ev.target === m) closeRecentReelsModal(); });
+  document.getElementById("reelRecentClose").addEventListener("click", closeRecentReelsModal);
+  m.querySelectorAll("button[data-job]").forEach(b => b.addEventListener("click", () => openRecentReel(b.getAttribute("data-job"), b)));
+}
+async function openRecentReel(jobId, btn) {
+  const label = btn.textContent; btn.disabled = true; btn.textContent = "Opening\u2026";
+  try {
+    const r = await reelFetch("/.netlify/functions/reel-recent?jobId=" + encodeURIComponent(jobId));
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || "Could not open this Reel");
+    if (reelPollTimer) { clearTimeout(reelPollTimer); reelPollTimer = null; }
+    reelResumed = true; reelRendering = false;
+    reelRenderJobId = jobId;
+    reelResult = { status: "done", branded: d.branded, unbranded: d.unbranded, keys: d.keys, durationSec: d.durationSec, warnings: [], counter: null };
+    reelDownloaded = d.downloaded ? { branded: true, unbranded: true } : {};
+    closeRecentReelsModal();
+    document.getElementById("stepReelIntake").classList.add("hidden");
+    document.getElementById("stepReelReview").classList.remove("hidden");
+    document.getElementById("reelRenderErr").textContent = "";
+    ["reelRenderBtn", "reelAdConfirm"].forEach(id => { const el = document.getElementById(id); if (el) el.closest(id === "reelAdConfirm" ? "label" : "button, .btn").style.display = "none"; });
+    showReelResult();
+  } catch (e) {
+    btn.textContent = label; btn.disabled = false;
+    const m = document.getElementById("reelRecentErr");
+    if (m) m.textContent = e.message;
+    return;
+  }
+  btn.disabled = false; btn.textContent = label;
+}
+// Leaving a reopened Reel: back to the Reel list with a clean slate (no plan exists for it in this session).
+function leaveResumedReel() {
+  reelResumed = false; reelResult = null; reelRenderJobId = null; reelDownloaded = {};
+  document.getElementById("reelResult").classList.add("hidden");
+  const btn = document.getElementById("reelRenderBtn"); if (btn) btn.style.display = "";
+  const c = document.getElementById("reelAdConfirm"); if (c && c.closest("label")) c.closest("label").style.display = "";
+  document.getElementById("stepReelReview").classList.add("hidden");
+  document.getElementById("stepReelIntake").classList.remove("hidden");
+  loadRecentReels();
+}
+function showReelResult() {
+    const tabs = document.getElementById("reelVariantTabs");
+    tabs.innerHTML = (reelResult.branded ? '<button class="motion-btn kenburns" data-v="branded">Branded</button>' : "") +
+      (reelResult.unbranded ? '<button class="motion-btn kenburns" data-v="unbranded">Unbranded (MLS)</button>' : "");
+    tabs.querySelectorAll("button").forEach(b => b.addEventListener("click", () => setReelVariant(b.getAttribute("data-v"))));
+    document.getElementById("reelDownload").onclick = downloadReel;
+    document.getElementById("reelShareBtn").onclick = shareReel;
+    const cn = reelResult.counter;
+    const wasteMsg = cn && cn.wasteCharged ? "Your " + cn.threshold + "th undownloaded render used 1 Image. " : (cn && cn.wasteOwed ? "Your " + cn.threshold + "th undownloaded render costs 1 Image, but you have none left. It will be collected before your next render. " : "");
+    document.getElementById("reelResultNote").textContent = wasteMsg + (reelResumed ? "This preview link lasts about an hour; reopen the Reel from Your recent Reels for a fresh one. " : "The preview plays for about an hour; Download keeps working while this page is open. ") + ((reelResult.warnings || []).join(" "));
+    loadReelQuota();
+    document.getElementById("reelResult").classList.remove("hidden");
+    setReelVariant(reelResult.branded ? "branded" : "unbranded");
+    document.getElementById("reelResult").scrollIntoView({ behavior: "smooth", block: "start" });
+}
 async function startReelRender() {
   const btn = document.getElementById("reelRenderBtn"), err = document.getElementById("reelRenderErr"), st = document.getElementById("reelRenderStatus");
   err.textContent = "";
@@ -4090,19 +4214,7 @@ async function startReelRender() {
       if (Date.now() - t0 > 600000) throw new Error("This is taking longer than expected. Please try again.");
     }
     st.classList.add("hidden");
-    const tabs = document.getElementById("reelVariantTabs");
-    tabs.innerHTML = (reelResult.branded ? '<button class="motion-btn kenburns" data-v="branded">Branded</button>' : "") +
-      (reelResult.unbranded ? '<button class="motion-btn kenburns" data-v="unbranded">Unbranded (MLS)</button>' : "");
-    tabs.querySelectorAll("button").forEach(b => b.addEventListener("click", () => setReelVariant(b.getAttribute("data-v"))));
-    document.getElementById("reelDownload").onclick = downloadReel;
-    document.getElementById("reelShareBtn").onclick = shareReel;
-    const cn = reelResult.counter;
-    const wasteMsg = cn && cn.wasteCharged ? "Your " + cn.threshold + "th undownloaded render used 1 Image. " : (cn && cn.wasteOwed ? "Your " + cn.threshold + "th undownloaded render costs 1 Image, but you have none left. It will be collected before your next render. " : "");
-    document.getElementById("reelResultNote").textContent = wasteMsg + "The preview plays for about an hour; Download keeps working while this page is open. " + ((reelResult.warnings || []).join(" "));
-    loadReelQuota();
-    document.getElementById("reelResult").classList.remove("hidden");
-    setReelVariant(reelResult.branded ? "branded" : "unbranded");
-    document.getElementById("reelResult").scrollIntoView({ behavior: "smooth", block: "start" });
+    showReelResult();
   } catch (e) {
     st.classList.add("hidden");
     err.textContent = e.message;

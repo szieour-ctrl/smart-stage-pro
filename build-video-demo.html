@@ -1767,7 +1767,7 @@ function handleFiles(fileList) {
       };
       frames.push(newFrame);
       renderUpload();
-      uploadAsIsPhoto(newFrame, file, dataUrl);
+      queueUpload(() => uploadAsIsPhoto(newFrame, file, dataUrl));
     };
     reader.readAsDataURL(file);
   });
@@ -1802,11 +1802,33 @@ async function compressImageForUpload(base64, mimeType, maxDim = 3000, maxKB = 4
     canvas.getContext("2d").drawImage(img, 0, 0, w, h);
     const out = canvas.toDataURL("image/jpeg", 0.88).split(",")[1];
     console.log(`Client compress: ${rawSizeKB}KB → ${Math.round((out.length * 3) / 4 / 1024)}KB (${img.naturalWidth}x${img.naturalHeight} → ${w}x${h})`);
+    // Release the pixel buffers right away instead of waiting for garbage collection. Phone browsers (iOS Safari
+    // in particular) cap total canvas memory and are slow to reclaim it, which matters when many photos go through.
+    canvas.width = 0; canvas.height = 0; img.src = "";
     return { base64: out, mimeType: "image/jpeg" };
   } catch (e) {
     console.warn("Client compression failed, sending original:", e.message);
     return { base64, mimeType };
   }
+}
+
+// Upload queue (Oct 21, 2026): at most UPLOAD_CONCURRENCY photo uploads run at once, shared by the Video
+// picker and the Reel picker. Selecting 15 photos used to start all 15 uploads in the same instant, and now
+// that each one also decodes a full-resolution image to shrink it, that stacked up to ~1GB of browser memory
+// in a desktop test (23 photos at once). That is risky on phones. Photos beyond the limit simply wait and
+// keep showing "Uploading..." until their turn. A failed upload never blocks the queue.
+const UPLOAD_CONCURRENCY = 3;
+let _uploadActive = 0;
+const _uploadWaiting = [];
+function queueUpload(job) {
+  return new Promise((resolve) => {
+    const run = async () => {
+      _uploadActive++;
+      try { resolve(await job()); } catch (e) { console.error("queued upload:", e && e.message); resolve(); }
+      finally { _uploadActive--; const next = _uploadWaiting.shift(); if (next) next(); }
+    };
+    if (_uploadActive < UPLOAD_CONCURRENCY) run(); else _uploadWaiting.push(run);
+  });
 }
 
 // Uploads one as-is photo to Cloudinary via the existing upload-original.js
@@ -3687,7 +3709,7 @@ function addReelUploads(fileList) {
     const fr = new FileReader();
     fr.onload = () => {
       const f = { pid: ++reelPendingSeq, dataUrl: fr.result, url: null, status: "uploading", room: "", roomOther: "", exterior: false };
-      reelPending.push(f); renderReelPending(); hostReelUpload(f, file);
+      reelPending.push(f); renderReelPending(); queueUpload(() => hostReelUpload(f, file));
     };
     fr.readAsDataURL(file);
   });

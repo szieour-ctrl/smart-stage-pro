@@ -3535,6 +3535,26 @@ function saveReelIntake() {
 
 // ── REEL PHOTO PICKER + VISION PLAN ──
 let reelPicked = [];      // selected gallery ids
+// Oct 20, 2026: Reel endpoints verify the login token (they no longer trust a userId from the page).
+// Reads the live Supabase session this site already stores in localStorage; no token = not logged in / expired.
+function reelAccessToken() {
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!/^sb-.+-auth-token/.test(k)) continue;
+      const p = JSON.parse(localStorage.getItem(k) || "null");
+      if (p && p.access_token && p.expires_at && p.expires_at * 1000 > Date.now() + 15000) return p.access_token;
+    }
+  } catch (e) { /* storage blocked or unreadable */ }
+  return null;
+}
+async function reelFetch(url, opts) {
+  const token = reelAccessToken();
+  if (!token) throw new Error("Your session has expired. Please log in again at smartstagepro.com, then reopen this page.");
+  const o = Object.assign({}, opts || {});
+  o.headers = Object.assign({}, o.headers || {}, { Authorization: "Bearer " + token });
+  return fetch(url, o);
+}
 let reelPlan = null;      // normalized plan from reel-plan.js
 function reelRange() {
   const i = window._reelIntake || {};
@@ -3686,17 +3706,18 @@ async function buildReelPlan() {
   const intake = window._reelIntake;
   btn.disabled = true; btn.textContent = "Reading your photos\u2026";
   try {
-    const res = await fetch("/.netlify/functions/reel-plan", {
+    const res = await reelFetch("/.netlify/functions/reel-plan", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ listingId: REAL_LISTING_ID, userId: REAL_USER_ID, event: intake.event, lengthSec: intake.lengthSec, photos, intake: { highlights: intake.highlights || [], supporting: intake.supporting || [] } }),
+      body: JSON.stringify({ listingId: REAL_LISTING_ID, event: intake.event, lengthSec: intake.lengthSec, photos, intake: { highlights: intake.highlights || [], supporting: intake.supporting || [] } }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Couldn't start the storyboard");
     const deadline = Date.now() + 180000;
     for (;;) {
       await new Promise(r => setTimeout(r, 2500));
-      const pr = await fetch("/.netlify/functions/reel-plan?jobId=" + encodeURIComponent(data.jobId));
+      const pr = await reelFetch("/.netlify/functions/reel-plan?jobId=" + encodeURIComponent(data.jobId));
       const pd = await pr.json();
+      if (!pr.ok) throw new Error(pd.error || "Storyboard failed");
       if (pd.status === "done") { reelPlan = pd.plan; break; }
       if (pd.status === "error") throw new Error(pd.error || "Storyboard failed");
       if (Date.now() > deadline) throw new Error("This is taking longer than expected. Please try again.");
@@ -3950,7 +3971,7 @@ let reelQuota = null;
 async function loadReelQuota() {
   if (!REAL_USER_ID) return;
   try {
-    const r = await fetch("/.netlify/functions/reel-quota?userId=" + encodeURIComponent(REAL_USER_ID));
+    const r = await reelFetch("/.netlify/functions/reel-quota");
     if (r.ok) reelQuota = await r.json();
   } catch (e) { /* non-fatal: the box just stays hidden */ }
   renderReelQuota();
@@ -3977,9 +3998,9 @@ async function downloadReel(ev) {
   if (!a || a.dataset.busy || !reelRenderJobId) return;
   a.dataset.busy = "1"; const label = a.textContent; a.textContent = "Preparing\u2026"; err.textContent = "";
   try {
-    const r = await fetch("/.netlify/functions/reel-download", {
+    const r = await reelFetch("/.netlify/functions/reel-download", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ jobId: reelRenderJobId, userId: REAL_USER_ID }),
+      body: JSON.stringify({ jobId: reelRenderJobId }),
     });
     const d = await r.json();
     if (r.status === 402) throw new Error(d.error === "no_active_subscription" ? "Your plan doesn\u2019t include Reel downloads right now." : "Not enough Images to download this Reel (1 Image needed). Add Images and try again.");
@@ -4007,7 +4028,7 @@ async function shareReel() {
   if (!key || !reelDownloaded[reelCurVariant]) return;
   b.disabled = true; n.textContent = "Creating link\u2026";
   try {
-    const r = await fetch("/.netlify/functions/reel-share", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key }) });
+    const r = await reelFetch("/.netlify/functions/reel-share", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key }) });
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || "Could not create the link");
     let copied = false;
@@ -4044,10 +4065,10 @@ async function startReelRender() {
   st.classList.remove("hidden"); st.textContent = "Starting\u2026";
   reelRendering = true;
   try {
-    const res = await fetch("/.netlify/functions/reel-render", {
+    const res = await reelFetch("/.netlify/functions/reel-render", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        listingId: REAL_LISTING_ID, projectId: REAL_PROJECT_ID, userId: REAL_USER_ID, event: i.event, lengthSec: i.lengthSec, intake, advertisingConfirmed: true,
+        listingId: REAL_LISTING_ID, projectId: REAL_PROJECT_ID, event: i.event, lengthSec: i.lengthSec, intake, advertisingConfirmed: true,
         musicStyle: document.getElementById("reelMusic").value,
         plan: { slots: reelPlan.slots.map(s => ({ photoId: s.photoId, motion: s.motion || "auto", role: s.role, reveal: s.reveal || "none" })), highlights: reelPlan.highlights, supporting: reelPlan.supporting },
       }),
@@ -4061,7 +4082,7 @@ async function startReelRender() {
       // Oct 18, 2026: a mode toggle (Video <-> Reels) hides the review step but must not
       // abandon the render. Keep polling; the result is written to the DOM when ready.
       let pd;
-      try { const pr = await fetch("/.netlify/functions/reel-render?jobId=" + encodeURIComponent(reelRenderJobId)); pd = await pr.json(); misses = 0; }
+      try { const pr = await reelFetch("/.netlify/functions/reel-render?jobId=" + encodeURIComponent(reelRenderJobId)); pd = await pr.json(); if (!pr.ok) pd = { status: "error", error: pd.error || "Render check failed" }; misses = 0; }
       catch (e) { if (++misses > 5) throw new Error("Lost connection while rendering. Please try again."); continue; }
       if (pd.status === "error") throw new Error(pd.error || "Render failed");
       if (pd.status === "done") { reelResult = pd; break; }

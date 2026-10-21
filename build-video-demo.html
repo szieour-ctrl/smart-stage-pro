@@ -1767,9 +1767,67 @@ function handleFiles(fileList) {
       };
       frames.push(newFrame);
       renderUpload();
-      uploadAsIsPhoto(newFrame, file, dataUrl);
+      queueUpload(() => uploadAsIsPhoto(newFrame, file, dataUrl));
     };
     reader.readAsDataURL(file);
+  });
+}
+
+// Client-side size guard for camera-ready uploads (Oct 21, 2026). Same logic and same 3000px / 4000KB
+// target as compressImageForUpload() in index.html, which already protects the compliance-original upload
+// there; this page is a separate document, so it needs its own copy. Why: a full-resolution photographer
+// file (for example 5712x4284, often 8-20MB) sent raw as base64 in a JSON body blows past Netlify's ~6MB
+// request ceiling (base64 adds ~33%) and the upload fails. Photos at or under maxKB are returned untouched.
+// Larger ones are scaled so the long edge is at most maxDim and re-encoded as JPEG (quality 0.88). If the
+// browser cannot decode the file (for example HEIC outside Safari) the original is sent unchanged, exactly
+// as before. Used by BOTH the Video photo picker and the Reel photo picker.
+async function compressImageForUpload(base64, mimeType, maxDim = 3000, maxKB = 4000) {
+  const rawSizeKB = Math.round((base64.length * 3) / 4 / 1024);
+  if (rawSizeKB <= maxKB) return { base64, mimeType };
+  try {
+    const img = new Image();
+    await new Promise((resolve, reject) => {
+      img.onload = resolve;
+      img.onerror = reject;
+      img.src = `data:${mimeType};base64,${base64}`;
+    });
+    let w = img.naturalWidth, h = img.naturalHeight;
+    if (Math.max(w, h) > maxDim) {
+      const scale = maxDim / Math.max(w, h);
+      w = Math.round(w * scale);
+      h = Math.round(h * scale);
+    }
+    const canvas = document.createElement("canvas");
+    canvas.width = w; canvas.height = h;
+    canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+    const out = canvas.toDataURL("image/jpeg", 0.88).split(",")[1];
+    console.log(`Client compress: ${rawSizeKB}KB → ${Math.round((out.length * 3) / 4 / 1024)}KB (${img.naturalWidth}x${img.naturalHeight} → ${w}x${h})`);
+    // Release the pixel buffers right away instead of waiting for garbage collection. Phone browsers (iOS Safari
+    // in particular) cap total canvas memory and are slow to reclaim it, which matters when many photos go through.
+    canvas.width = 0; canvas.height = 0; img.src = "";
+    return { base64: out, mimeType: "image/jpeg" };
+  } catch (e) {
+    console.warn("Client compression failed, sending original:", e.message);
+    return { base64, mimeType };
+  }
+}
+
+// Upload queue (Oct 21, 2026): at most UPLOAD_CONCURRENCY photo uploads run at once, shared by the Video
+// picker and the Reel picker. Selecting 15 photos used to start all 15 uploads in the same instant, and now
+// that each one also decodes a full-resolution image to shrink it, that stacked up to ~1GB of browser memory
+// in a desktop test (23 photos at once). That is risky on phones. Photos beyond the limit simply wait and
+// keep showing "Uploading..." until their turn. A failed upload never blocks the queue.
+const UPLOAD_CONCURRENCY = 3;
+let _uploadActive = 0;
+const _uploadWaiting = [];
+function queueUpload(job) {
+  return new Promise((resolve) => {
+    const run = async () => {
+      _uploadActive++;
+      try { resolve(await job()); } catch (e) { console.error("queued upload:", e && e.message); resolve(); }
+      finally { _uploadActive--; const next = _uploadWaiting.shift(); if (next) next(); }
+    };
+    if (_uploadActive < UPLOAD_CONCURRENCY) run(); else _uploadWaiting.push(run);
   });
 }
 
@@ -1781,11 +1839,13 @@ function handleFiles(fileList) {
 // exactly the one thing needed here (base64 in, real Cloudinary URL out).
 async function uploadAsIsPhoto(frame, file, dataUrl) {
   try {
-    const base64 = dataUrl.split(",")[1];
+    // Oct 21, 2026: shrink full-resolution photographer files before they go to upload-original
+    // (see compressImageForUpload below). Small photos pass through byte-for-byte.
+    const { base64, mimeType: upMime } = await compressImageForUpload(dataUrl.split(",")[1], file.type, 3000, 4000);
     const res = await fetch("/.netlify/functions/upload-original", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ imageBase64: base64, mimeType: file.type, listingId: REAL_LISTING_ID || null }),
+      body: JSON.stringify({ imageBase64: base64, mimeType: upMime, listingId: REAL_LISTING_ID || null }),
     });
     const data = await res.json();
     if (!res.ok || !data.publicUrl) throw new Error(data.error || "Upload failed");
@@ -3629,9 +3689,11 @@ function renderReelPending() {
 }
 async function hostReelUpload(f, file) {
   try {
+    // Oct 21, 2026: same size guard as the Video picker (compressImageForUpload, 3000px / 4000KB).
+    const { base64: upBase64, mimeType: upMime } = await compressImageForUpload(f.dataUrl.split(",")[1], file.type, 3000, 4000);
     const up = await fetch("/.netlify/functions/upload-original", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ imageBase64: f.dataUrl.split(",")[1], mimeType: file.type, listingId: REAL_LISTING_ID }),
+      body: JSON.stringify({ imageBase64: upBase64, mimeType: upMime, listingId: REAL_LISTING_ID }),
     });
     const ud = await up.json();
     if (!up.ok || !ud.publicUrl) throw new Error(ud.error || "Upload failed");
@@ -3647,7 +3709,7 @@ function addReelUploads(fileList) {
     const fr = new FileReader();
     fr.onload = () => {
       const f = { pid: ++reelPendingSeq, dataUrl: fr.result, url: null, status: "uploading", room: "", roomOther: "", exterior: false };
-      reelPending.push(f); renderReelPending(); hostReelUpload(f, file);
+      reelPending.push(f); renderReelPending(); queueUpload(() => hostReelUpload(f, file));
     };
     fr.readAsDataURL(file);
   });

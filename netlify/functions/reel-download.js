@@ -6,6 +6,7 @@ const { S3Client, GetObjectCommand, CopyObjectCommand } = require("@aws-sdk/clie
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 const quota = require("./lib/reel-quota-lib");
 const { supabase } = require("./lib/marketing-profile-lib");
+const { requireUser } = require("./lib/reel-auth-lib");
 
 const headers = { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json", "Cache-Control": "no-store" };
 const reply = (statusCode, obj) => ({ statusCode, headers, body: JSON.stringify(obj) });
@@ -50,11 +51,14 @@ async function persistFinals(jobId, keys) {
 const STATUS = { job_not_found: 404, forbidden: 403, not_ready: 409, insufficient_credits: 402, no_active_subscription: 402 };
 
 exports.handler = async (event) => {
-  if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: { ...headers, "Access-Control-Allow-Headers": "Content-Type", "Access-Control-Allow-Methods": "POST, OPTIONS" }, body: "" };
+  if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: { ...headers, "Access-Control-Allow-Headers": "Content-Type, Authorization", "Access-Control-Allow-Methods": "POST, OPTIONS" }, body: "" };
   if (event.httpMethod !== "POST") return reply(405, { error: "Method not allowed" });
   let b; try { b = JSON.parse(event.body || "{}"); } catch { return reply(400, { error: "Invalid JSON" }); }
-  const { jobId, userId } = b;
-  if (!/^[\w-]{6,80}$/.test(String(jobId || "")) || !userId) return reply(400, { error: "Missing jobId or userId" });
+  const auth = await requireUser(event);
+  if (auth.error) return reply(auth.error.status, auth.error.body);
+  const userId = auth.user.id; // never the body's userId
+  const { jobId } = b;
+  if (!/^[\w-]{6,80}$/.test(String(jobId || ""))) return reply(400, { error: "Missing jobId" });
   try {
     const r = await quota.chargeDownload(jobId, userId);
     if (r.error) return reply(STATUS[r.error] || 500, { error: r.error, required: r.required, balance: r.balance });

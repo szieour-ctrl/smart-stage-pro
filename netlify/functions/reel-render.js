@@ -14,6 +14,7 @@ const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 const { supabase, brandingForUser } = require("./lib/marketing-profile-lib");
 const { SLOTS } = require("./lib/reel-plan-lib");
 const quota = require("./lib/reel-quota-lib");
+const { requireUser, canAccessListing } = require("./lib/reel-auth-lib");
 
 const headers = { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json", "Cache-Control": "no-store" };
 const reply = (statusCode, obj) => ({ statusCode, headers, body: JSON.stringify(obj) });
@@ -94,13 +95,21 @@ async function resolveScenes(listingId, slots) {
 }
 
 exports.handler = async (event) => {
-  if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: { ...headers, "Access-Control-Allow-Headers": "Content-Type", "Access-Control-Allow-Methods": "GET, POST, OPTIONS" }, body: "" };
+  if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: { ...headers, "Access-Control-Allow-Headers": "Content-Type, Authorization", "Access-Control-Allow-Methods": "GET, POST, OPTIONS" }, body: "" };
   if (!process.env.RAILWAY_RENDER_URL || !process.env.RAILWAY_SECRET) return reply(500, { error: "Reel rendering is not configured" });
+
+  const auth = await requireUser(event);
+  if (auth.error) return reply(auth.error.status, auth.error.body);
+  const userId = auth.user.id;
 
   if (event.httpMethod === "GET") {
     const jobId = event.queryStringParameters && event.queryStringParameters.jobId;
     if (!jobId || !/^[\w-]{6,80}$/.test(jobId)) return reply(400, { error: "Missing or invalid jobId" });
     try {
+      const own = await supabase("GET", "reel_jobs", null, `?id=eq.${encodeURIComponent(jobId)}&select=user_id&limit=1`);
+      const ownerRow = Array.isArray(own.data) ? own.data[0] : null;
+      if (!ownerRow) return reply(404, { error: "Render not found" });
+      if (ownerRow.user_id !== userId) return reply(403, { error: "This render belongs to another account" });
       const r = await railway("GET", `/reel-status/${encodeURIComponent(jobId)}`);
       if (r.status === 404) return reply(200, { status: "error", error: "This render was interrupted. Please try again." });
       if (r.status !== 200 || !r.json) return reply(200, { status: "running", step: "Rendering" }); // transient; client keeps polling
@@ -132,10 +141,10 @@ exports.handler = async (event) => {
   if (event.httpMethod !== "POST") return reply(405, { error: "Method not allowed" });
   let b;
   try { b = JSON.parse(event.body || "{}"); } catch { return reply(400, { error: "Invalid JSON" }); }
-  const { listingId, projectId, userId, event: evKey, lengthSec } = b;
+  const { listingId, projectId, event: evKey, lengthSec } = b; // userId comes from the login token, never the body
   const plan = b.plan || {};
   const slots = Array.isArray(plan.slots) ? plan.slots : [];
-  if (!UUID_RE.test(String(listingId || "")) || !userId) return reply(400, { error: "Missing listingId or userId" });
+  if (!UUID_RE.test(String(listingId || ""))) return reply(400, { error: "Missing listingId" });
   // The user is the advertiser; SSP is the tool. Every render needs their confirmation.
   if (b.advertisingConfirmed !== true) return reply(400, { error: "Please confirm that the property details, amenities and marketing claims in this Reel are accurate and comply with applicable advertising requirements." });
   if (!SLOTS.events[evKey]) return reply(400, { error: `Unknown Reel event "${evKey}"` });
@@ -146,8 +155,9 @@ exports.handler = async (event) => {
   if (new Set(slots.map((s) => s.photoId)).size !== slots.length) return reply(400, { error: "Duplicate photo in selection" });
 
   try {
-    const lst = await supabase("GET", "listings", null, `?id=eq.${listingId}&select=id,user_id&limit=1`);
+    const lst = await supabase("GET", "listings", null, `?id=eq.${listingId}&select=id,user_id,team_id,brokerage_id&limit=1`);
     if (!Array.isArray(lst.data) || !lst.data[0]) return reply(404, { error: "Listing not found" });
+    if (!(await canAccessListing(userId, lst.data[0]))) return reply(403, { error: "You do not have access to this listing" });
 
     // Collect any waste fee (5 renders not downloaded = 1 Image) that could not be charged earlier.
     const owed = await quota.settleOwed(userId);

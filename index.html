@@ -13833,7 +13833,7 @@ function showLandingPage() {
       <div class="pp-reels-modal-box">
         <button type="button" class="pp-reels-modal-x" onclick="closePpReel()" aria-label="Close preview">&times;</button>
         <div class="pp-reels-modal-stage" id="pp-reels-stage">
-          <video id="pp-reels-video" controls playsinline loop></video>
+          <video id="pp-reels-video" controls controlsList="nodownload noremoteplayback" disablePictureInPicture disableRemotePlayback playsinline loop oncontextmenu="return false"></video>
           <div class="pp-reels-modal-overlay" aria-hidden="false">
             <span class="pp-sample-badge"><span aria-hidden="true">&#10022;</span> Sample Reel</span>
             <span class="pp-demo-prop">Demonstration Property</span>

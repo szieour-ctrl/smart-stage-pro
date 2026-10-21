@@ -4080,7 +4080,11 @@ async function loadRecentReels() {
     const sp = reelRecentSplit();
     if (!sp.counting.length && !sp.older.length) { box.classList.add("hidden"); return; }
     const total = sp.counting.length + sp.older.length;
-    list.innerHTML = '<button type="button" id="reelRecentBtn" class="btn" style="width:100%;padding:16px 14px;white-space:normal;line-height:1.5;background:#c00000;border:2px solid #1f3a5f;color:#fff;font-weight:700;font-size:1.05rem;letter-spacing:.04em;text-transform:uppercase;">(' + total + ') Reel' + (total === 1 ? '' : 's') + ' awaiting download<br>Click to view</button>';
+    // Red only while renders are counting toward the waste fee; a download resets that to 0 and the button turns neutral
+    // (the older Reels are still waiting, so the number stays).
+    const hot = (reelQuota && typeof reelQuota.undownloaded === "number") ? reelQuota.undownloaded > 0 : sp.counting.length > 0;
+    const look = hot ? "background:#c00000;border:2px solid #1f3a5f;color:#fff;" : "background:#ece7dc;border:2px solid #b8a98a;color:#2b2b2b;";
+    list.innerHTML = '<button type="button" id="reelRecentBtn" class="btn" style="width:100%;padding:16px 14px;white-space:normal;line-height:1.5;' + look + 'font-weight:700;font-size:1.05rem;letter-spacing:.04em;text-transform:uppercase;">(' + total + ') Reel' + (total === 1 ? '' : 's') + ' awaiting download<br>Click to view</button>';
     document.getElementById("reelRecentBtn").addEventListener("click", showRecentReelsModal);
     box.classList.remove("hidden");
   } catch (e) { box.classList.add("hidden"); /* non-fatal */ }

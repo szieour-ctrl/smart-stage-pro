@@ -253,11 +253,25 @@ const STAGE = {
 
 async function logAttempt(rowId, fields) {
   try {
+    // listing_id is a uuid column; a non-UUID value makes the whole insert
+    // fail with a 400 (which this helper used to swallow silently).
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const safeFields = { ...fields };
+    if ("listing_id" in safeFields && !UUID_RE.test(String(safeFields.listing_id || ""))) {
+      safeFields.listing_id = null;
+    }
     if (!rowId) {
-      const res = await supabase("POST", "narration_attempts", { ...fields, updated_at: new Date().toISOString() });
+      const res = await supabase("POST", "narration_attempts", { ...safeFields, updated_at: new Date().toISOString() });
+      if (res.status < 200 || res.status >= 300) {
+        console.error(`narration_attempts insert failed (non-fatal): HTTP ${res.status}`, JSON.stringify(res.data).slice(0, 300));
+        return null;
+      }
       return res.data?.[0]?.id || null;
     }
-    await supabase("PATCH", "narration_attempts", { ...fields, updated_at: new Date().toISOString() }, `?id=eq.${rowId}`);
+    const res = await supabase("PATCH", "narration_attempts", { ...safeFields, updated_at: new Date().toISOString() }, `?id=eq.${rowId}`);
+    if (res.status < 200 || res.status >= 300) {
+      console.error(`narration_attempts update failed (non-fatal): HTTP ${res.status}`, JSON.stringify(res.data).slice(0, 300));
+    }
     return rowId;
   } catch (e) {
     // Audit logging itself failing should never take down the real

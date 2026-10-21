@@ -292,7 +292,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
       <div class="panel-title">What kind of Reel?</div>
       <div class="panel-sub" style="margin-bottom:16px;">Pick a Reel type. Each one asks only for what it needs.</div>
       <div id="reelRecent" class="hidden" style="margin-bottom:18px;">
-        <div class="ri-group-title">Your recent Reels <span class="ri-help" style="font-weight:400;">&middot; kept for 7 days</span></div>
+        <div class="ri-group-title">Your recent Reels &ndash; kept for 7 days &ndash; then deleted</div>
         <div id="reelRecentList"></div>
       </div>
       <div id="reelIntakeMount"></div>
@@ -4079,15 +4079,8 @@ async function loadRecentReels() {
     reelRecentData = ((r.ok && d.reels) || []).slice().sort((x, y) => new Date(y.createdAt) - new Date(x.createdAt));
     const sp = reelRecentSplit();
     if (!sp.counting.length && !sp.older.length) { box.classList.add("hidden"); return; }
-    const q = reelQuota, th = (q && q.threshold) || 5;
-    const n = (q && typeof q.undownloaded === "number") ? q.undownloaded : sp.counting.length;
     const total = sp.counting.length + sp.older.length;
-    const hot = n > 0;
-    const label = hot
-      ? "\u26A0 Renders not downloaded: " + n + " of " + th + ". At " + th + ", 1 Image is charged. Download a Reel to reset the count. Click to view."
-      : "Reels waiting to download (" + total + "). Counting toward the " + th + ": 0 of " + th + ". Click to view.";
-    list.innerHTML = '<button type="button" id="reelRecentBtn" class="btn" style="width:100%;padding:11px 14px;white-space:normal;line-height:1.35;' +
-      (hot ? 'background:#b3261e;border-color:#b3261e;color:#fff;' : '') + '">' + escHtml(label) + '</button>';
+    list.innerHTML = '<button type="button" id="reelRecentBtn" class="btn" style="width:100%;padding:16px 14px;white-space:normal;line-height:1.5;background:#c00000;border:2px solid #1f3a5f;color:#fff;font-weight:700;font-size:1.05rem;letter-spacing:.04em;text-transform:uppercase;">(' + total + ') Reel' + (total === 1 ? '' : 's') + ' awaiting download<br>Click to view</button>';
     document.getElementById("reelRecentBtn").addEventListener("click", showRecentReelsModal);
     box.classList.remove("hidden");
   } catch (e) { box.classList.add("hidden"); /* non-fatal */ }

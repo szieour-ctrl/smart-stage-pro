@@ -1773,6 +1773,42 @@ function handleFiles(fileList) {
   });
 }
 
+// Client-side size guard for camera-ready uploads (Oct 21, 2026). Same logic and same 3000px / 4000KB
+// target as compressImageForUpload() in index.html, which already protects the compliance-original upload
+// there; this page is a separate document, so it needs its own copy. Why: a full-resolution photographer
+// file (for example 5712x4284, often 8-20MB) sent raw as base64 in a JSON body blows past Netlify's ~6MB
+// request ceiling (base64 adds ~33%) and the upload fails. Photos at or under maxKB are returned untouched.
+// Larger ones are scaled so the long edge is at most maxDim and re-encoded as JPEG (quality 0.88). If the
+// browser cannot decode the file (for example HEIC outside Safari) the original is sent unchanged, exactly
+// as before. Used by BOTH the Video photo picker and the Reel photo picker.
+async function compressImageForUpload(base64, mimeType, maxDim = 3000, maxKB = 4000) {
+  const rawSizeKB = Math.round((base64.length * 3) / 4 / 1024);
+  if (rawSizeKB <= maxKB) return { base64, mimeType };
+  try {
+    const img = new Image();
+    await new Promise((resolve, reject) => {
+      img.onload = resolve;
+      img.onerror = reject;
+      img.src = `data:${mimeType};base64,${base64}`;
+    });
+    let w = img.naturalWidth, h = img.naturalHeight;
+    if (Math.max(w, h) > maxDim) {
+      const scale = maxDim / Math.max(w, h);
+      w = Math.round(w * scale);
+      h = Math.round(h * scale);
+    }
+    const canvas = document.createElement("canvas");
+    canvas.width = w; canvas.height = h;
+    canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+    const out = canvas.toDataURL("image/jpeg", 0.88).split(",")[1];
+    console.log(`Client compress: ${rawSizeKB}KB → ${Math.round((out.length * 3) / 4 / 1024)}KB (${img.naturalWidth}x${img.naturalHeight} → ${w}x${h})`);
+    return { base64: out, mimeType: "image/jpeg" };
+  } catch (e) {
+    console.warn("Client compression failed, sending original:", e.message);
+    return { base64, mimeType };
+  }
+}
+
 // Uploads one as-is photo to Cloudinary via the existing upload-original.js
 // endpoint, purely as a hosting mechanism to get a real, fetchable URL —
 // NOT registering it as an AB 723 compliance original (this photo was
@@ -1781,11 +1817,13 @@ function handleFiles(fileList) {
 // exactly the one thing needed here (base64 in, real Cloudinary URL out).
 async function uploadAsIsPhoto(frame, file, dataUrl) {
   try {
-    const base64 = dataUrl.split(",")[1];
+    // Oct 21, 2026: shrink full-resolution photographer files before they go to upload-original
+    // (see compressImageForUpload below). Small photos pass through byte-for-byte.
+    const { base64, mimeType: upMime } = await compressImageForUpload(dataUrl.split(",")[1], file.type, 3000, 4000);
     const res = await fetch("/.netlify/functions/upload-original", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ imageBase64: base64, mimeType: file.type, listingId: REAL_LISTING_ID || null }),
+      body: JSON.stringify({ imageBase64: base64, mimeType: upMime, listingId: REAL_LISTING_ID || null }),
     });
     const data = await res.json();
     if (!res.ok || !data.publicUrl) throw new Error(data.error || "Upload failed");
@@ -3629,9 +3667,11 @@ function renderReelPending() {
 }
 async function hostReelUpload(f, file) {
   try {
+    // Oct 21, 2026: same size guard as the Video picker (compressImageForUpload, 3000px / 4000KB).
+    const { base64: upBase64, mimeType: upMime } = await compressImageForUpload(f.dataUrl.split(",")[1], file.type, 3000, 4000);
     const up = await fetch("/.netlify/functions/upload-original", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ imageBase64: f.dataUrl.split(",")[1], mimeType: file.type, listingId: REAL_LISTING_ID }),
+      body: JSON.stringify({ imageBase64: upBase64, mimeType: upMime, listingId: REAL_LISTING_ID }),
     });
     const ud = await up.json();
     if (!up.ok || !ud.publicUrl) throw new Error(ud.error || "Upload failed");

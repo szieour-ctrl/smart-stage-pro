@@ -43,7 +43,7 @@ exports.handler = async (event) => {
       return reply(200, { jobId: qs.jobId, branded, unbranded, keys: { branded: job.branded_key || null, unbranded: job.unbranded_key || null }, durationSec: job.length_sec, downloaded: !!job.downloaded_at });
     }
 
-    const r = await supabase("GET", "reel_jobs", null, `?user_id=eq.${userId}&status=eq.complete&created_at=gte.${encodeURIComponent(since)}&select=id,event,length_sec,created_at,downloaded_at,listing_id,branded_key,unbranded_key&order=created_at.desc&limit=10`);
+    const r = await supabase("GET", "reel_jobs", null, `?user_id=eq.${userId}&status=eq.complete&listing_id=not.is.null&created_at=gte.${encodeURIComponent(since)}&select=id,event,length_sec,created_at,downloaded_at,listing_id,branded_key,unbranded_key&order=created_at.desc&limit=10`);
     const jobs = Array.isArray(r.data) ? r.data : [];
     const ids = [...new Set(jobs.map((j) => j.listing_id).filter((x) => UUID_RE.test(String(x || ""))))];
     const addr = new Map();

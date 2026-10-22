@@ -11,7 +11,7 @@ const UPLOAD_ATTESTATION_TEXT = "I own this photo or have permission to use it i
 const SELECTABLE_STATUSES = ["narrative_approved", "images", "ready_to_render"];
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-function uploadKeyPrefix(userId, projectId) { return `agent-marketing-uploads/${userId}/${projectId}/`; }
+function libraryKeyPrefix(userId) { return `agent-marketing-library/${userId}/`; }
 
 // Scenes that need a real photo (the planner marks concept scenes GPT_IMAGE_2_CONCEPT).
 function photoSceneIndexes(narrative) {
@@ -44,18 +44,23 @@ function assetRowFor(kind, ctx) {
     if (!/^https?:\/\//.test(r.image_url || "")) return { error: "That photo is not available." };
     return { row: { ...base, source: "gallery", external_photo_id: r.id, source_listing_id: r.listing_id || null, original_url: r.image_url, staged_url: null, asset_key: null, rights: { route: "gallery_external", sourceLabel: r.source_label || null } } };
   }
+  if (kind === "library") {
+    const r = ctx.row;
+    return { row: { ...base, source: "upload", library_id: r.id, asset_key: r.asset_key, original_url: null, staged_url: null, ai_generated: r.kind === "generated", rights: { ...(r.rights || {}), route: "library", libraryId: r.id } } };
+  }
   return { error: "Unknown photo source." };
 }
 
-// Upload confirmation: the key must live in this user's folder for this project, and the attestation is required.
-function validateUpload(body, userId, projectId) {
+// Adding to the library: the key must live in this user's library folder, and the attestation is required.
+function validateUpload(body, userId) {
   const b = body && typeof body === "object" ? body : {};
   const key = String(b.key || "");
-  if (!key.startsWith(uploadKeyPrefix(userId, projectId)) || key.includes("..")) return { error: "Please upload the photo again." };
+  if (!key.startsWith(libraryKeyPrefix(userId)) || key.includes("..")) return { error: "Please upload the photo again." };
   if (b.ownerConfirmed !== true) return { error: "Please confirm you own this photo or have permission to use it." };
   const source = UPLOAD_SOURCES.includes(b.source) ? b.source : "own_camera";
+  const label = String(b.label || "").replace(/[\u0000-\u001f]/g, " ").trim().slice(0, 80);
   const note = String(b.note || "").replace(/[\u0000-\u001f]/g, " ").trim().slice(0, 200);
-  return { key, rights: { route: "upload", source, note: note || null, attestationVersion: UPLOAD_ATTESTATION_VERSION, attestationText: UPLOAD_ATTESTATION_TEXT, attestedAt: new Date().toISOString() } };
+  return { key, label: label || null, rights: { route: "upload", source, note: note || null, attestationVersion: UPLOAD_ATTESTATION_VERSION, attestationText: UPLOAD_ATTESTATION_TEXT, attestedAt: new Date().toISOString() } };
 }
 
-module.exports = { UPLOAD_TYPES, UPLOAD_SOURCES, UPLOAD_ATTESTATION_VERSION, UPLOAD_ATTESTATION_TEXT, SELECTABLE_STATUSES, UUID_RE, uploadKeyPrefix, photoSceneIndexes, validateSceneIndex, assetRowFor, validateUpload };
+module.exports = { UPLOAD_TYPES, UPLOAD_SOURCES, UPLOAD_ATTESTATION_VERSION, UPLOAD_ATTESTATION_TEXT, SELECTABLE_STATUSES, UUID_RE, libraryKeyPrefix, photoSceneIndexes, validateSceneIndex, assetRowFor, validateUpload };

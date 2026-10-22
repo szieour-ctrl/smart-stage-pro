@@ -5,8 +5,11 @@
 //   GET  ?projectId=&source=gallery    → the caller's own originals and external photos
 //   GET  ?projectId=&source=selected   → photos already chosen for this project, per scene
 //   POST { action: "select", projectId, sceneIndex, kind: "staged"|"gallery_original"|"gallery_external", id }
-//   POST { action: "presign_upload", projectId, contentType }
-//   POST { action: "confirm_upload", projectId, sceneIndex, key, ownerConfirmed: true, source?, note? }
+//   GET  ?source=library               → "My Marketing Photos": the caller's saved uploads (no project needed)
+//   POST { action: "presign_upload", contentType }                       → library upload link (no project needed)
+//   POST { action: "library_add", key, ownerConfirmed: true, label?, source?, note? }
+//   POST { action: "library_delete", id }                                → soft delete; past projects keep their copy
+//   (select also accepts kind "library" with the library item id)
 //   POST { action: "clear", projectId, sceneIndex }
 //
 // Only the caller's own photos are ever listed or accepted (user_id / added_by_user_id = the login token's user).
@@ -56,6 +59,11 @@ exports.handler = async (event) => {
   try {
     if (event.httpMethod === "GET") {
       const qs = event.queryStringParameters || {};
+      if (qs.source === "library") {
+        const r = await supabase("GET", "agent_marketing_library", null, `?user_id=eq.${userId}&deleted_at=is.null&select=id,kind,asset_key,label,created_at&order=created_at.desc&limit=200`);
+        const items = await Promise.all(rowsOf(r).map(async (x) => ({ kind: "library", id: x.id, libraryKind: x.kind, label: x.label || "", createdAt: x.created_at, thumbUrl: await presignGet(x.asset_key, 3600) })));
+        return reply(200, { items: items.filter((i) => i.thumbUrl) });
+      }
       const p = await loadProject(qs.projectId, userId);
       if (p.error) return p.error;
 
@@ -86,20 +94,34 @@ exports.handler = async (event) => {
     if (event.httpMethod !== "POST") return reply(405, { error: "Method not allowed" });
     let b;
     try { b = JSON.parse(event.body || "{}"); } catch { return reply(400, { error: "Invalid JSON" }); }
-    const p = await loadProject(b.projectId, userId);
-    if (p.error) return p.error;
-    const project = p.row;
 
     if (b.action === "presign_upload") {
       const ext = media.UPLOAD_TYPES[b.contentType];
       if (!ext) return reply(400, { error: "Upload a PNG, JPG or WebP image." });
       if (!process.env.S3_BUCKET_NAME || !process.env.S3_REGION) return reply(500, { error: "Storage is not configured." });
-      const key = `${media.uploadKeyPrefix(userId, project.id)}${Date.now()}_${crypto.randomBytes(3).toString("hex")}.${ext}`;
+      const key = `${media.libraryKeyPrefix(userId)}${Date.now()}_${crypto.randomBytes(3).toString("hex")}.${ext}`;
       const uploadUrl = await getSignedUrl(s3, new PutObjectCommand({ Bucket: process.env.S3_BUCKET_NAME, Key: key, ContentType: b.contentType }), { expiresIn: 300 });
       return reply(200, { uploadUrl, key, attestation: { version: media.UPLOAD_ATTESTATION_VERSION, text: media.UPLOAD_ATTESTATION_TEXT } });
     }
+    if (b.action === "library_add") {
+      const v = media.validateUpload(b, userId);
+      if (v.error) return reply(400, { error: v.error });
+      const ins = await supabase("POST", "agent_marketing_library", { user_id: userId, kind: "upload", asset_key: v.key, label: v.label, rights: v.rights });
+      const row = rowsOf(ins)[0];
+      if (!dbOk(ins) || !row) return reply(500, { error: "Could not save that photo" });
+      return reply(200, { item: { kind: "library", id: row.id, libraryKind: "upload", label: row.label || "", createdAt: row.created_at, thumbUrl: await presignGet(row.asset_key, 3600) } });
+    }
+    if (b.action === "library_delete") {
+      if (!media.UUID_RE.test(String(b.id || ""))) return reply(400, { error: "Invalid photo" });
+      await supabase("PATCH", "agent_marketing_library", { deleted_at: new Date().toISOString() }, `?id=eq.${b.id}&user_id=eq.${userId}`);
+      return reply(200, { ok: true });
+    }
 
-    if (!["select", "confirm_upload", "clear"].includes(b.action)) return reply(400, { error: "Unknown action" });
+    const p = await loadProject(b.projectId, userId);
+    if (p.error) return p.error;
+    const project = p.row;
+
+    if (!["select", "clear"].includes(b.action)) return reply(400, { error: "Unknown action" });
     if (!media.SELECTABLE_STATUSES.includes(project.status)) return reply(409, { error: "Approve your script before choosing photos." });
     const sc = media.validateSceneIndex(project.narrative, b.sceneIndex);
     if (sc.error) return reply(400, { error: sc.error });
@@ -114,7 +136,7 @@ exports.handler = async (event) => {
     const version = ((rowsOf(prev)[0] || {}).version || 0) + 1;
     const ctx = { projectId: project.id, userId, sceneIndex: sc.index, version };
 
-    if (b.action === "select") {
+    {
       const id = String(b.id || "");
       if (!media.UUID_RE.test(id)) return reply(400, { error: "Invalid photo" });
       if (b.kind === "staged" || b.kind === "gallery_original") {
@@ -127,12 +149,13 @@ exports.handler = async (event) => {
         const row = rowsOf(r)[0];
         if (!row) return reply(404, { error: "Photo not found" });
         built = media.assetRowFor("gallery_external", { ...ctx, row });
+      } else if (b.kind === "library") {
+        const r = await supabase("GET", "agent_marketing_library", null, `?id=eq.${id}&user_id=eq.${userId}&deleted_at=is.null&select=id,kind,asset_key,rights&limit=1`);
+        const row = rowsOf(r)[0];
+        if (!row) return reply(404, { error: "Photo not found" });
+        built = media.assetRowFor("library", { ...ctx, row });
       } else return reply(400, { error: "Unknown photo source" });
       if (built.error) return reply(400, { error: built.error });
-    } else {
-      const v = media.validateUpload(b, userId, project.id);
-      if (v.error) return reply(400, { error: v.error });
-      built = { row: { project_id: project.id, user_id: userId, scene_index: sc.index, version, source: "upload", asset_key: v.key, original_url: null, staged_url: null, ai_generated: false, rights: v.rights, status: "approved" } };
     }
 
     // One approved photo per scene: retire the previous pick, then record the new one.

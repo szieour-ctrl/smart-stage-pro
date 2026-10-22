@@ -14,13 +14,14 @@ const db = {
     { id: S2, user_id: U2, listing_id: null, clean_s3_key: "clean/b.png", badge_type: "x", cloudinary_original_url: "https://x/p.jpg", hidden: false },
   ],
   external_photos: [],
+  agent_marketing_library: [],
 };
 const libPath = require.resolve("../netlify/functions/lib/marketing-profile-lib");
 const authPath = require.resolve("../netlify/functions/lib/reel-auth-lib");
 function fake(method, table, body, qs = "") {
   const q = new URLSearchParams(qs.replace(/^\?/, "")); const t = db[table];
   const eq = (k) => (q.get(k) || "").replace(/^eq\./, "");
-  let rows = t.filter((r) => (!q.get("id") || r.id === eq("id")) && (!q.get("user_id") || r.user_id === eq("user_id")) && (!q.get("project_id") || r.project_id === eq("project_id")) && (!q.get("scene_index") || String(r.scene_index) === eq("scene_index")) && (!q.get("status") || r.status === eq("status")));
+  let rows = t.filter((r) => (!q.get("id") || r.id === eq("id")) && (!q.get("user_id") || r.user_id === eq("user_id")) && (!q.get("project_id") || r.project_id === eq("project_id")) && (!q.get("scene_index") || String(r.scene_index) === eq("scene_index")) && (!q.get("status") || r.status === eq("status")) && (q.get("deleted_at") !== "is.null" || !r.deleted_at));
   if (method === "POST") { const row = { id: "dddddddd-dddd-4ddd-8ddd-" + String(t.length + 1).padStart(12, "0"), ...body }; t.push(row); return Promise.resolve({ status: 201, data: [row] }); }
   if (method === "PATCH") { rows.forEach((r) => Object.assign(r, body)); return Promise.resolve({ status: 200, data: rows }); }
   return Promise.resolve({ status: 200, data: rows });
@@ -54,17 +55,28 @@ test("cannot use another user's photo, a concept scene, or a project that isn't 
   user = U1;
 });
 
-test("upload route needs the attestation and a key inside the caller's project folder", async () => {
-  const p = await call("POST", { action: "presign_upload", projectId: P1, contentType: "image/png" });
+test("library: presign, attestation required, key must be in caller's folder, reuse across scenes, soft delete", async () => {
+  const p = await call("POST", { action: "presign_upload", contentType: "image/png" });
   assert.strictEqual(p.status, 200);
-  assert.ok(p.json.key.startsWith(`agent-marketing-uploads/${U1}/${P1}/`));
-  assert.strictEqual((await call("POST", { action: "presign_upload", projectId: P1, contentType: "image/gif" })).status, 400);
-  assert.strictEqual((await call("POST", { action: "confirm_upload", projectId: P1, sceneIndex: 0, key: p.json.key })).status, 400);
-  assert.strictEqual((await call("POST", { action: "confirm_upload", projectId: P1, sceneIndex: 0, key: `agent-marketing-uploads/${U2}/${P1}/x.png`, ownerConfirmed: true })).status, 400);
-  const ok = await call("POST", { action: "confirm_upload", projectId: P1, sceneIndex: 0, key: p.json.key, ownerConfirmed: true, source: "own_camera" });
-  assert.strictEqual(ok.status, 200);
+  assert.ok(p.json.key.startsWith(`agent-marketing-library/${U1}/`));
+  assert.strictEqual((await call("POST", { action: "presign_upload", contentType: "image/gif" })).status, 400);
+  assert.strictEqual((await call("POST", { action: "library_add", key: p.json.key })).status, 400);
+  assert.strictEqual((await call("POST", { action: "library_add", key: `agent-marketing-library/${U2}/x.png`, ownerConfirmed: true })).status, 400);
+  const add = await call("POST", { action: "library_add", key: p.json.key, ownerConfirmed: true, source: "own_camera", label: "Headshot" });
+  assert.strictEqual(add.status, 200);
+  const lib = db.agent_marketing_library[0];
+  assert.strictEqual(lib.rights.attestationVersion, "agent-upload-1"); assert.ok(lib.rights.attestedAt);
+  assert.strictEqual((await call("GET", null, { source: "library" })).json.items.length, 1);
+  const pick = await call("POST", { action: "select", projectId: P1, sceneIndex: 0, kind: "library", id: lib.id });
+  assert.strictEqual(pick.status, 200);
   const row = db.agent_marketing_assets.at(-1);
-  assert.strictEqual(row.source, "upload"); assert.strictEqual(row.rights.attestationVersion, "agent-upload-1"); assert.ok(row.rights.attestedAt);
+  assert.strictEqual(row.library_id, lib.id); assert.strictEqual(row.asset_key, lib.asset_key); assert.strictEqual(row.rights.attestationVersion, "agent-upload-1");
+  user = U2;
+  assert.strictEqual((await call("GET", null, { source: "library" })).json.items.length, 0);
+  assert.strictEqual((await call("POST", { action: "select", projectId: P1, sceneIndex: 0, kind: "library", id: lib.id })).status, 404);
+  user = U1;
+  assert.strictEqual((await call("POST", { action: "library_delete", id: lib.id })).status, 200);
+  assert.ok(lib.deleted_at);
 });
 
 test("clear retires the pick; unapproved script blocks picking", async () => {

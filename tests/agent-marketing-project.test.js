@@ -110,3 +110,115 @@ test("a finished piece cannot be edited", async () => {
   rows.find((r) => r.id === id).status = "rendering";
   assert.strictEqual((await call("POST", { action: "save_intake", id, intake })).status, 409);
 });
+
+// ── plan action + background planner ───────────────────────────────────────────────────────────────────────────
+const planLib = require("../netlify/functions/lib/agent-marketing-plan-lib");
+const bg = require("../netlify/functions/agent-marketing-plan-background");
+
+const planExcerpts = [
+  "Is new construction helping or hurting your resale home?",
+  "Here's what I see near new communities. More interested buyers come in, and that can help.",
+  "But it also puts your home next to brand new competition.",
+  "Builders often have incentives and rate buydowns, which changes how buyers compare.",
+  "So don't judge your value on resale listings alone.",
+  "Compare the full picture, and ask me for a local perspective.",
+];
+const planJson = JSON.stringify({
+  editorial_angle: "a", hook: planExcerpts[0],
+  narration_with_audio_tags: "[conversational] " + planExcerpts.join(" "),
+  scenes: planExcerpts.map((t, i) => ({ role: "r" + i, narration_excerpt: t, purpose: "p", visual_source: i === 1 || i === 3 ? "GPT_IMAGE_2_CONCEPT" : "AUTHENTIC_AGENT_ASSET", visual_brief: "b",
+    authentic_photo_request: { best_image: "x", should_contain: "y", avoid: "z", if_unavailable: "w" }, ai_generation_prompt: "Photorealistic tabletop models, no people, no text", camera_motion: "push_in", framing_9x16: "a", framing_16x9: "b", text_safe_placement: "c" })),
+  cta_suggestion: "Ask me for a local perspective.", claims_to_verify: [], missing_agent_inputs: [],
+});
+
+test("plan: dispatches once, rejects duplicates, and the background run fills in the script", async () => {
+  process.env.AGENT_MARKETING_ENABLED = "true";
+  process.env.ANTHROPIC_API_KEY = "test"; process.env.INTERNAL_API_KEY = "secret"; process.env.URL = "https://example.test";
+  currentUser = U1;
+  const id = (await call("POST", { action: "create" })).json.project.id;
+  assert.strictEqual((await call("POST", { action: "plan", id })).status, 409); // no intake yet
+  await call("POST", { action: "save_intake", id, intake });
+
+  const calls = [];
+  const realFetch = global.fetch;
+  global.fetch = async (url, opts) => { calls.push({ url, opts }); return { ok: true, status: 202 }; };
+  try {
+    const p = await call("POST", { action: "plan", id });
+    assert.strictEqual(p.status, 202);
+    assert.strictEqual(calls.length, 1);
+    assert.match(calls[0].url, /agent-marketing-plan-background$/);
+    assert.strictEqual(calls[0].opts.headers["x-internal-key"], "secret");
+    const row = rows.find((r) => r.id === id);
+    assert.strictEqual(row.narrative.status, "planning");
+    assert.strictEqual((await call("POST", { action: "plan", id })).status, 409); // already planning
+
+    // the background function: wrong key is refused
+    assert.strictEqual((await bg.handler({ headers: { "x-internal-key": "nope" }, body: JSON.stringify({ projectId: id, owner: U1 }) })).statusCode, 401);
+    // wrong owner does nothing
+    assert.strictEqual((await bg.handler({ headers: { "x-internal-key": "secret" }, body: JSON.stringify({ projectId: id, owner: U2 }) })).statusCode, 404);
+    assert.strictEqual(row.narrative.status, "planning");
+
+    // right key and owner: Claude is called once and the script is saved
+    let claudeCalls = 0;
+    const realCall = planLib.callClaudeText;
+    planLib.callClaudeText = async () => { claudeCalls++; return planJson; };
+    try {
+      await bg.handler({ headers: { "x-internal-key": "secret" }, body: JSON.stringify({ projectId: id, owner: U1 }) });
+      await bg.handler({ headers: { "x-internal-key": "secret" }, body: JSON.stringify({ projectId: id, owner: U1 }) }); // duplicate delivery
+    } finally { planLib.callClaudeText = realCall; }
+    assert.strictEqual(claudeCalls, 1);
+    assert.strictEqual(row.status, "narrative_ready");
+    assert.strictEqual(row.narrative.status, "ready");
+    assert.strictEqual(row.narrative.source, "claude");
+    assert.strictEqual(row.narrative.scenes.length, 6);
+    assert.strictEqual(row.narrative.attempts, 1);
+
+    // same answers: no second purchase of a plan; changed answers: allowed again
+    assert.strictEqual((await call("POST", { action: "plan", id })).status, 409);
+    await call("POST", { action: "save_intake", id, intake: { ...intake, observation: intake.observation + " I also see buyers comparing monthly payments." } });
+    assert.strictEqual((await call("POST", { action: "plan", id })).status, 202);
+    assert.strictEqual(row.narrative.attempts, 2);
+
+    // approving a planned (Claude) script works and uses the strict rules
+    row.narrative = { ...JSON.parse(JSON.stringify(row.narrative)), status: "ready", source: "claude", narrationTagged: "[conversational] " + planExcerpts.join(" "), captionText: planExcerpts.join(" "), scenes: planExcerpts.map((t) => ({ narrationExcerpt: t })), cta: { text: "Ask me for a local perspective.", source: "claude" } };
+    assert.strictEqual((await call("POST", { action: "approve_narrative", id })).status, 200);
+  } finally { global.fetch = realFetch; }
+});
+
+test("plan: a failed Claude call is recorded as an error and can be retried, up to the attempt cap", async () => {
+  process.env.AGENT_MARKETING_ENABLED = "true";
+  process.env.ANTHROPIC_API_KEY = "test"; process.env.INTERNAL_API_KEY = "secret"; process.env.URL = "https://example.test";
+  currentUser = U1;
+  const id = (await call("POST", { action: "create" })).json.project.id;
+  await call("POST", { action: "save_intake", id, intake });
+  const row = rows.find((r) => r.id === id);
+  const realFetch = global.fetch; global.fetch = async () => ({ ok: true });
+  const realCall = planLib.callClaudeText;
+  try {
+    for (let n = 1; n <= planLib.MAX_ATTEMPTS; n++) {
+      assert.strictEqual((await call("POST", { action: "plan", id })).status, 202);
+      planLib.callClaudeText = async () => { throw new Error("boom"); };
+      await bg.handler({ headers: { "x-internal-key": "secret" }, body: JSON.stringify({ projectId: id, owner: U1 }) });
+      assert.strictEqual(row.narrative.status, "error");
+      assert.strictEqual(row.narrative.attempts, n);
+    }
+    assert.strictEqual((await call("POST", { action: "plan", id })).status, 429);
+  } finally { global.fetch = realFetch; planLib.callClaudeText = realCall; }
+});
+
+test("edits keep the planner's scenes and counters and flag stale scenes", async () => {
+  process.env.AGENT_MARKETING_ENABLED = "true";
+  currentUser = U1;
+  const id = (await call("POST", { action: "create" })).json.project.id;
+  await call("POST", { action: "save_intake", id, intake });
+  const row = rows.find((r) => r.id === id);
+  row.narrative = { status: "ready", source: "claude", narrationTagged: "[warm] Original words here.", scenes: [{ index: 0, narrationExcerpt: "Original words here." }], attempts: 1, intakeHash: "abc", claimsToVerify: ["x"] };
+  const r = await call("POST", { action: "save_narrative", id, narrative: { narrationTagged: "[warm] My own edited words here." } });
+  assert.strictEqual(r.status, 200);
+  assert.strictEqual(row.narrative.source, "edited");
+  assert.strictEqual(row.narrative.scenes.length, 1);
+  assert.strictEqual(row.narrative.attempts, 1);
+  assert.strictEqual(row.narrative.intakeHash, "abc");
+  assert.strictEqual(row.narrative.scenesStale, true);
+  assert.deepStrictEqual(row.narrative.claimsToVerify, ["x"]);
+});

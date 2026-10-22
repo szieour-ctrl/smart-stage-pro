@@ -8,6 +8,8 @@
 //   POST { action: "create", template?, durationSec?, formats?, voice? }
 //   POST { action: "save_intake", id, intake }          → validates + runs the content gate
 //   POST { action: "save_narrative", id, narrative }    → the agent's own edit of the script (Claude's plan is saved by the planner)
+//   POST { action: "plan", id }                         → starts the ONE Claude planning call (background); poll GET ?id= until
+//                                                          project.narrative.status is "ready" or "error"
 //   POST { action: "approve_narrative", id }            → gate again, then freezes narrative_approved
 //
 // The user always comes from the login token. A project is only visible to its owner. No listing, address, price or MLS
@@ -17,6 +19,7 @@ const { requireUser } = require("./lib/reel-auth-lib");
 const gate = require("./lib/agent-marketing-gate");
 const intakeLib = require("./lib/agent-marketing-intake");
 const am = require("./lib/agent-marketing-lib");
+const planLib = require("./lib/agent-marketing-plan-lib");
 
 const headers = { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json", "Cache-Control": "no-store" };
 const reply = (statusCode, obj) => ({ statusCode, headers, body: JSON.stringify(obj) });
@@ -93,7 +96,7 @@ exports.handler = async (event) => {
       return reply(200, { project: forClient(row) });
     }
 
-    if (!["save_intake", "save_narrative", "approve_narrative"].includes(action)) return reply(400, { error: "Unknown action" });
+    if (!["save_intake", "save_narrative", "approve_narrative", "plan"].includes(action)) return reply(400, { error: "Unknown action" });
     const o = await loadOwned(b.id, userId);
     if (o.error) return o.error;
     const project = o.row;
@@ -116,10 +119,47 @@ exports.handler = async (event) => {
       if (v.error) return reply(400, { error: v.error });
       const g = gate.evaluate(am.gateInputFor(project, v.narrative, "edited"));
       if (!g.ok) return reply(422, { error: gate.explain(g), gate: gateSummary(g) });
-      const narrative = { ...v.narrative, source: "edited", savedAt: new Date().toISOString() };
+      // Keep what the planner produced (scene plan, photo shopping list, claims to verify, planning counters) and replace only
+      // what the agent edited. If the words changed, the scene excerpts no longer match them: flag that for the next step.
+      const prev = project.narrative && typeof project.narrative === "object" ? project.narrative : {};
+      const clientScenes = v.narrative.scenes && v.narrative.scenes.length ? v.narrative.scenes : (prev.scenes || []);
+      const narrative = {
+        editorialAngle: prev.editorialAngle, hook: prev.hook, claimsToVerify: prev.claimsToVerify, missingAgentInputs: prev.missingAgentInputs,
+        attempts: prev.attempts, intakeHash: prev.intakeHash,
+        ...v.narrative, scenes: clientScenes, cta: v.narrative.cta || prev.cta || null,
+        scenesStale: !!(prev.narrationTagged && prev.narrationTagged !== v.narrative.narrationTagged) || !!prev.scenesStale,
+        source: "edited", status: "ready", savedAt: new Date().toISOString(),
+      };
       const saved = await patch(project.id, userId, { narrative, status: "narrative_ready", gate_version: g.version, gate_result: gateSummary(g) });
       if (!saved) return reply(500, { error: "Could not save the script" });
       return reply(200, { project: forClient(saved), warnings: v.warnings, gate: gateSummary(g) });
+    }
+
+    if (action === "plan") {
+      if (!project.intake || !project.intake.angle) return reply(409, { error: "Answer the intake questions first." });
+      if (!process.env.ANTHROPIC_API_KEY || !process.env.INTERNAL_API_KEY) return reply(500, { error: "Planning is not configured." });
+      const n = project.narrative;
+      const hash = planLib.intakeHash(project.intake);
+      const attempts = (n && Number(n.attempts)) || 0;
+      if (n && n.status === "planning" && Date.now() - Number(n.startedAt || 0) < planLib.STALE_PLANNING_MS) return reply(409, { error: "Your script is already being written." });
+      // One planning call per distinct set of answers: a ready script for the same answers is reused, not re-bought.
+      if (n && n.narrationTagged && n.intakeHash === hash) return reply(409, { error: "A script already exists for these answers. Edit it, or change your answers to plan again." });
+      if (attempts >= planLib.MAX_ATTEMPTS) return reply(429, { error: "This project has used all of its planning attempts. Start a new one." });
+      const stub = { status: "planning", startedAt: Date.now(), attempts: attempts + 1, intakeHash: hash };
+      const saved = await patch(project.id, userId, { narrative: stub });
+      if (!saved) return reply(500, { error: "Could not start planning" });
+      const siteUrl = process.env.URL || `https://${event.headers && event.headers.host}`;
+      try {
+        await fetch(`${siteUrl}/.netlify/functions/agent-marketing-plan-background`, {
+          method: "POST", headers: { "Content-Type": "application/json", "x-internal-key": process.env.INTERNAL_API_KEY },
+          body: JSON.stringify({ projectId: project.id, owner: userId }),
+        });
+      } catch (e) {
+        console.error("agent-marketing plan dispatch failed:", e.message);
+        await patch(project.id, userId, { narrative: { status: "error", error: "Planning failed to start.", attempts: stub.attempts, intakeHash: hash } });
+        return reply(502, { error: "Planning failed to start. Please try again." });
+      }
+      return reply(202, { project: forClient(saved) });
     }
 
     // approve_narrative

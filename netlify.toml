@@ -29,6 +29,10 @@
 [functions."reel-plan-background"]
   timeout = 900
 
+# Oct 22, 2026: Agent Marketing planner (one Claude text call, writes to the project row).
+[functions."agent-marketing-plan-background"]
+  timeout = 900
+
 [functions."reel-plan"]
   timeout = 10
 

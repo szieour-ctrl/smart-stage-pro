@@ -13,16 +13,16 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 function libraryKeyPrefix(userId) { return `agent-marketing-library/${userId}/`; }
 
-// Scenes that need a real photo (the planner marks concept scenes GPT_IMAGE_2_CONCEPT).
+// Scenes that can take an (optional) real photo. Concept, re-used concept, profile and brand-card scenes cannot.
 function photoSceneIndexes(narrative) {
   const scenes = (narrative && Array.isArray(narrative.scenes)) ? narrative.scenes : [];
-  return scenes.map((s, i) => (s && s.visualSource !== "GPT_IMAGE_2_CONCEPT" ? i : -1)).filter((i) => i >= 0);
+  return scenes.map((s, i) => (s && s.visualSource === "AUTHENTIC_AGENT_ASSET" ? i : -1)).filter((i) => i >= 0);
 }
 
 function validateSceneIndex(narrative, idx) {
   const n = Number(idx);
   if (!Number.isInteger(n) || n < 0) return { error: "Choose a scene first." };
-  if (!photoSceneIndexes(narrative).includes(n)) return { error: "That scene uses a concept image, not a real photo." };
+  if (!photoSceneIndexes(narrative).includes(n)) return { error: "That scene does not take a real photo." };
   return { index: n };
 }
 

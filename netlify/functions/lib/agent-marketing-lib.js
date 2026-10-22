@@ -74,7 +74,7 @@ function validateNarrative(body, durationSec) {
     index: i,
     role: intakeLib.cleanText(s && s.role, 40),
     narrationExcerpt: intakeLib.cleanText(s && s.narrationExcerpt, 400),
-    visualSource: s && s.visualSource === "GPT_IMAGE_2_CONCEPT" ? "GPT_IMAGE_2_CONCEPT" : "AUTHENTIC_AGENT_ASSET",
+    visualSource: s && ["GPT_IMAGE_2_CONCEPT", "CONCEPT_REUSE", "AGENT_PROFILE", "BRAND_CARD"].includes(s.visualSource) ? s.visualSource : "AUTHENTIC_AGENT_ASSET",
     visualBrief: intakeLib.cleanText(s && s.visualBrief, 400),
   })) : [];
   return {

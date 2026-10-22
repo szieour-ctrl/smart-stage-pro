@@ -727,11 +727,16 @@ function computeKlingBilledFlags(frames, framesFromPool) {
 // narrated bookend override, so the real infra-cost difference stops being
 // silently absorbed by the business on every video that does this.
 //
-// PLACEHOLDER AMOUNT — CONFIRM WITH SAM BEFORE SHIPPING: 3 Images. Picked
-// as a round number roughly proportional to the real ~$0.50 delta at
-// today's Images pricing, but this is a genuine pricing decision, not a
-// derived constant — do not treat 3 as final without explicit sign-off.
-const BOOKEND_OVERRIDE_SURCHARGE_IMAGES = 3;
+// DECISION (Oct 21, 2026, Sam): NO surcharge. An AI Motion bookend frame
+// is billed exactly like any other AI Motion frame — free while the
+// monthly pool covers it, the standard per-frame Image charge once the
+// pool is depleted. The 3-Image placeholder above was never itemized on
+// the Review Cost screen (users consented to a total that didn't add up),
+// and the real per-clip cost delta is absorbed instead. Kept at 0 rather
+// than deleting the function so create / regenerate / quote all keep
+// one code path; set a non-zero amount here only together with an
+// itemized line in build-video-demo.html's cost breakdown.
+const BOOKEND_OVERRIDE_SURCHARGE_IMAGES = 0;
 
 // A bookend frame counts as an "override" for surcharge purposes only when
 // BOTH true: (1) it's actually using AI Motion (not Ken Burns, not the

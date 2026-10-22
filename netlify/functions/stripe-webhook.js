@@ -392,6 +392,7 @@ async function sendListingPackageReceipt({ email, amount, balance, accessUntil, 
       ['Download your images by', escHtmlLocal(fmtEmailDate(exportUntil))],
       ['Your image balance', `<strong>${escHtmlLocal(balance)}</strong>`],
     ],
+    extraHtml: '<p style="font-size:13.5px;line-height:1.6;color:#555;margin:20px 0 0;">Your Listing Package also includes <strong>Reels</strong> &mdash; short vertical videos for social media &mdash; to use during your access window. See the Terms of Service for details.</p>',
     sessionId,
   });
   await postTransactionalEmail({
@@ -425,6 +426,12 @@ ${step(2, 'Search your listing address', 'This creates your AB 723 compliance pr
 ${step(3, 'Upload your photos and choose a staging style', 'The engine reads your space and builds a Master Staging Plan across all rooms.')}
 ${step(4, 'Generate Final &mdash; MLS Ready', 'Your compliant, watermark-free staged image is ready to upload to MetroList.')}
 </table>
+<div style="background:#f5f0e8;border-radius:4px;padding:20px 22px;margin:8px 0 24px;">
+<div style="font-family:Georgia,serif;font-size:17px;color:#1a1a1a;margin-bottom:8px;">Then bring your listing to life with PRO Plus</div>
+<p style="font-size:14.5px;line-height:1.65;color:#444;margin:0 0 10px;"><strong>Videos</strong> &mdash; turn your staged photos into a polished 16:9 listing video with music, ready for your MLS and website. Narration and AI Motion are available as optional extras.</p>
+<p style="font-size:14.5px;line-height:1.65;color:#444;margin:0 0 10px;"><strong>Reels</strong> &mdash; short vertical 9:16 videos built for Instagram, Facebook and TikTok, in your own branding.</p>
+<p style="font-size:13px;line-height:1.6;color:#777;margin:0;">Your plan includes a monthly allotment of each. See your plan details and the Terms of Service for the current amounts and how additional Videos and Reels are charged.</p>
+</div>
 <div style="text-align:center;margin:12px 0 8px;"><a href="https://smartstagepro.com" style="background:#c9a84c;color:#1a1a1a;padding:14px 36px;text-decoration:none;font-weight:700;font-size:15px;border-radius:3px;display:inline-block;letter-spacing:0.04em;">Go to Smart Stage PRO&trade; &rarr;</a></div>
 </div>
 <div style="height:1px;background:#e8e0d0;margin:0 32px;"></div>

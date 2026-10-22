@@ -12,7 +12,15 @@ const https = require('https');
 // 'listing_package' (Sep 24, 2026) is the $59 one-time Listing Package —
 // Stripe mode 'payment', price STRIPE_PRICE_LISTING_PACKAGE. stripe-webhook.js
 // routes it by metadata.plan.
-const VALID_PLANS = ['solo', 'team', 'brokerage', 'listing_package'];
+const VALID_PLANS = ['solo', 'team', 'brokerage', 'listing_package', 'image_pack'];
+
+// Image packs: one-time purchase, tier chosen SERVER-SIDE from the user's role
+// (the client only ever sends plan 'image_pack'). Image counts live in the webhook.
+const PACK_BY_ROLE = {
+  individual_agent: { pack: 'solo',      env: 'STRIPE_PRICE_PACK_SOLO' },
+  team_lead:        { pack: 'team',      env: 'STRIPE_PRICE_PACK_TEAM' },
+  broker_admin:     { pack: 'brokerage', env: 'STRIPE_PRICE_PACK_BROKERAGE' },
+};
 
 // ── Supabase: verify JWT and get user record ─────────────
 function verifyJWT(authHeader) {
@@ -47,7 +55,7 @@ function verifyJWT(authHeader) {
 
 function getUser(userId) {
   return new Promise((resolve) => {
-    const url = new URL(`${process.env.SUPABASE_URL}/rest/v1/users?id=eq.${userId}&select=terms_accepted_at,terms_version,stripe_customer_id,stripe_subscription_id,subscription_status`);
+    const url = new URL(`${process.env.SUPABASE_URL}/rest/v1/users?id=eq.${userId}&select=role,terms_accepted_at,terms_version,stripe_customer_id,stripe_subscription_id,subscription_status`);
     const req = https.request({
       hostname: url.hostname, path: url.pathname + url.search, method: 'GET',
       headers: {
@@ -160,7 +168,7 @@ exports.handler = async function(event) {
   const { plan, teamName, brokerageName, promo } = body;
 
   if (!VALID_PLANS.includes(plan)) {
-    return { statusCode: 400, body: JSON.stringify({ error: `Invalid plan: ${plan}. Must be solo, team, brokerage, or listing_package.` }) };
+    return { statusCode: 400, body: JSON.stringify({ error: `Invalid plan: ${plan}. Must be solo, team, brokerage, listing_package, or image_pack.` }) };
   }
 
   // ToS acceptance is REQUIRED and must be verifiable from the database.
@@ -173,6 +181,45 @@ exports.handler = async function(event) {
   }
   if (!userRecord.terms_accepted_at) {
     return { statusCode: 403, body: JSON.stringify({ error: 'Please accept the Terms of Service before subscribing.' }) };
+  }
+
+  // ── Image Pack: one-time payment, live subscribers only ──
+  if (plan === 'image_pack') {
+    if (!userRecord.stripe_subscription_id || !['active', 'past_due'].includes(userRecord.subscription_status)) {
+      return { statusCode: 403, body: JSON.stringify({ error: 'Image packs are available to subscribers. Choose a plan first.' }) };
+    }
+    if (userRecord.subscription_status === 'past_due') {
+      return { statusCode: 409, body: JSON.stringify({ error: 'Your last payment failed. Update your card in Billing first.' }) };
+    }
+    const cfg = PACK_BY_ROLE[userRecord.role];
+    const packPrice = cfg && process.env[cfg.env];
+    if (!cfg || !packPrice) {
+      return { statusCode: 500, body: JSON.stringify({ error: 'Image pack is not available for this account right now.' }) };
+    }
+    const BASE = process.env.SITE_URL || 'https://smartstagepro.com';
+    const iParams = {
+      'mode':                                   'payment',
+      'payment_method_types[]':                 'card',
+      'customer':                               userRecord.stripe_customer_id,
+      'line_items[0][price]':                   packPrice,
+      'line_items[0][quantity]':                '1',
+      'success_url':                            `${BASE}?pack=success`,
+      'cancel_url':                             `${BASE}?pack=cancelled`,
+      'metadata[user_id]':                      authUser.id,
+      'metadata[plan]':                         'image_pack',
+      'metadata[pack]':                         cfg.pack,
+      'payment_intent_data[metadata][user_id]': authUser.id,
+      'payment_intent_data[metadata][plan]':    'image_pack',
+    };
+    if (!userRecord.stripe_customer_id) {
+      return { statusCode: 500, body: JSON.stringify({ error: 'No billing profile found. Contact support.' }) };
+    }
+    const iResult = await stripePost('checkout/sessions', iParams);
+    if (iResult.status !== 200) {
+      console.error('Stripe image pack checkout error:', JSON.stringify(iResult.data));
+      return { statusCode: 500, body: JSON.stringify({ error: 'Stripe checkout session creation failed', detail: iResult.data?.error?.message }) };
+    }
+    return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: iResult.data.url, sessionId: iResult.data.id }) };
   }
 
   // Never start a second subscription on top of a live one (e.g. a

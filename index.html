@@ -8349,6 +8349,7 @@ function resetSession(){
 }
 function showToast(msg,type=''){const t=document.getElementById('toast');t.textContent=msg;t.className='show '+(type||'');setTimeout(()=>{t.className='';},4000);}
 
+const IMAGE_PACKS = { individual_agent: { images: 20, price: 25 }, team_lead: { images: 50, price: 45 }, broker_admin: { images: 100, price: 75 } };
 function showOverageModal(balance, cost, actionLabel = 'Final') {
   // Remove any existing modal
   document.getElementById('overage-modal')?.remove();
@@ -8373,6 +8374,11 @@ function showOverageModal(balance, cost, actionLabel = 'Final') {
           style="background:transparent;color:#c9a84c;border:1px solid #c9a84c;border-radius:3px;padding:11px 24px;font-weight:600;font-size:0.85rem;cursor:pointer;">
           Get a Listing Package — $59 (18 images)
         </button>` : ''}
+        ${(() => { const pk = IMAGE_PACKS[_userRecord?.role]; return (pk && _userRecord?.subscription_status === 'active') ? `
+        <button onclick="document.getElementById('overage-modal').remove();startCheckout('image_pack');"
+          style="background:transparent;color:#c9a84c;border:1px solid #c9a84c;border-radius:3px;padding:11px 24px;font-weight:600;font-size:0.85rem;cursor:pointer;">
+          Add ${pk.images} images — $${pk.price}
+        </button>` : ''; })()}
         <button onclick="document.getElementById('overage-modal').remove();"
           style="background:transparent;color:#888;border:1px solid #333;border-radius:3px;padding:10px 24px;font-size:0.85rem;cursor:pointer;">
           Cancel
@@ -8380,7 +8386,7 @@ function showOverageModal(balance, cost, actionLabel = 'Final') {
       </div>
       <div style="margin-top:20px;font-size:0.72rem;color:#666;line-height:1.5;">
         Overage packs: Solo +20 images $25 · Team +50 images $45 · Brokerage +100 images $75<br>
-        Contact <a href="mailto:support@smartstagepro.com" style="color:#c9a84c;">support@smartstagepro.com</a> to add images.
+        Questions? <a href="mailto:support@smartstagepro.com" style="color:#c9a84c;">support@smartstagepro.com</a>
       </div>
     </div>`;
   document.body.appendChild(m);
@@ -8866,6 +8872,16 @@ async function handleAuthenticatedUser(user) {
     if (!error) userRec = data;
   } catch(e) { console.warn('User lookup error:', e.message); }
   _userRecord = userRec;
+
+  {
+    const packQ = new URLSearchParams(window.location.search).get('pack');
+    if (packQ) {
+      window.history.replaceState({}, '', window.location.pathname);
+      setTimeout(() => showToast(packQ === 'success'
+        ? 'Thanks! Your images will appear in your balance in a moment.'
+        : 'Image pack purchase cancelled.', packQ === 'success' ? 'success' : 'info'), 1500);
+    }
+  }
 
   // If user record not readable, route to pricing (safe default — never grant free access)
   if (!userRec) {
@@ -10330,6 +10346,7 @@ async function startCheckout(plan) {
 
 function checkoutButtonLabel(plan) {
   if (plan === 'listing_package') return 'Get the Listing Package →';
+  if (plan === 'image_pack') return 'Add images →';
   return `Subscribe — ${plan.charAt(0).toUpperCase() + plan.slice(1)} →`;
 }
 

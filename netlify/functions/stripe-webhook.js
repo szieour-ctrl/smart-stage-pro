@@ -244,8 +244,9 @@ async function onImagePackPurchased(session) {
     console.log(`stripe-webhook: image pack ${session.id} not paid (${session.payment_status}) — skipping`);
     return;
   }
-  const uRes = await db('GET', 'users', null, `?id=eq.${userId}&select=id`);
-  if (!uRes.data?.[0]) throw new Error(`image pack purchase for unknown user ${userId}`); // 500 → Stripe retries
+  const uRes = await db('GET', 'users', null, `?id=eq.${userId}&select=id,email,stripe_customer_id`);
+  const user = uRes.data?.[0];
+  if (!user) throw new Error(`image pack purchase for unknown user ${userId}`); // 500 → Stripe retries
   if (await alreadyCredited(session.id, 'purchase')) {
     console.log(`stripe-webhook: image pack ${session.id} already credited — skipping`);
     return;
@@ -261,6 +262,61 @@ async function onImagePackPurchased(session) {
     description:       `Image Pack (${session.metadata.pack}) — ${images} Images`
   });
   console.log(`stripe-webhook: image pack — user ${userId}, +${images} images`);
+
+  // Remember the Stripe customer (created at checkout for accounts without one)
+  // so Billing/receipts line up. Best-effort: the images are already granted.
+  if (session.customer && !user.stripe_customer_id) {
+    try { await db('PATCH', `users?id=eq.${userId}`, { stripe_customer_id: session.customer }); }
+    catch (e) { console.error('stripe-webhook: could not save stripe_customer_id:', e.message); }
+  }
+
+  // Receipt email via Pabbly (sent once, on first fulfilment). Non-fatal.
+  await sendImagePackReceipt({
+    email:  user.email || session.customer_details?.email || session.customer_email,
+    images, pack: session.metadata.pack,
+    amount: session.amount_total, balance: balance + images, sessionId: session.id
+  });
+}
+
+function escHtmlLocal(v) {
+  return String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// Pabbly maps `to`, `subject` and `emailHtml` straight into its Gmail step.
+// Set PABBLY_IMAGE_PACK_WEBHOOK_URL in Netlify; without it no email is sent.
+async function sendImagePackReceipt({ email, images, pack, amount, balance, sessionId }) {
+  const hook = process.env.PABBLY_IMAGE_PACK_WEBHOOK_URL;
+  if (!hook) { console.warn('stripe-webhook: PABBLY_IMAGE_PACK_WEBHOOK_URL not set — no pack receipt email sent'); return; }
+  if (!email) { console.error('stripe-webhook: image pack receipt skipped — no recipient email for', sessionId); return; }
+  try {
+    const url = new URL(hook);
+    const price = amount != null ? `$${(amount / 100).toFixed(2)}` : '';
+    const emailHtml = `<div style="font-family:Arial,Helvetica,sans-serif;max-width:520px;margin:0 auto;color:#1a1a1a;line-height:1.6;">
+<h2 style="font-weight:600;">Your Smart Stage PRO image pack</h2>
+<p>Thank you! We added <strong>${escHtmlLocal(images)} images</strong> to your account${price ? ` (${escHtmlLocal(price)})` : ''}.</p>
+<p>Your image balance is now <strong>${escHtmlLocal(balance)}</strong>. Purchased images are added to your balance right away.</p>
+<p style="font-size:13px;color:#666;">Receipt reference: ${escHtmlLocal(sessionId)}<br>Questions? Reply to this email or write support@smartstagepro.com.</p>
+</div>`;
+    const body = JSON.stringify({
+      to: email, subject: `Your Smart Stage PRO image pack: ${images} images added`,
+      images, pack, amountCents: amount ?? null, balance, sessionId, emailHtml
+    });
+    await new Promise((resolve) => {
+      const req = https.request({
+        hostname: url.hostname, path: url.pathname + url.search, method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+        timeout: 5000,
+      }, (res) => {
+        res.resume();
+        res.on('end', () => { if (res.statusCode >= 400) console.error('stripe-webhook: pack receipt Pabbly returned HTTP', res.statusCode); resolve(); });
+      });
+      req.on('timeout', () => { console.error('stripe-webhook: pack receipt Pabbly timed out (non-fatal)'); req.destroy(); resolve(); });
+      req.on('error', (e) => { console.error('stripe-webhook: pack receipt Pabbly failed (non-fatal):', e.message); resolve(); });
+      req.write(body); req.end();
+    });
+  } catch (e) {
+    console.error('stripe-webhook: pack receipt setup error (non-fatal):', e.message);
+  }
 }
 
 // ── EVENT: checkout.session.completed — Listing Package ───

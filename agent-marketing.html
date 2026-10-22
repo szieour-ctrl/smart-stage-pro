@@ -58,6 +58,19 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--gold-light);outl
 .scene dl{display:grid;grid-template-columns:110px 1fr;gap:4px 10px;font-size:0.8rem;}
 .scene dt{color:var(--muted);font-weight:600;}
 ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
+.pick{margin-top:12px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;}
+.pick img.sel{width:96px;height:64px;object-fit:cover;border-radius:4px;border:1px solid var(--border);}
+.picker{border:2px solid var(--gold-light);}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0;}
+.tab{border:1px solid var(--border);background:#fff;border-radius:14px;padding:6px 12px;font:600 0.75rem 'DM Sans',sans-serif;cursor:pointer;}
+.tab.on{background:var(--ink);color:#fff;border-color:var(--ink);}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;}
+.tile{border:1px solid var(--border);border-radius:5px;padding:0;background:#fff;cursor:pointer;overflow:hidden;text-align:left;font:inherit;}
+.tile img{width:100%;height:84px;object-fit:cover;display:block;}
+.tile span{display:block;font-size:0.7rem;padding:4px 6px;color:var(--muted);}
+.tile:hover{border-color:var(--gold);}
+.tile .del{float:right;color:var(--danger);}
+.attest{display:flex;gap:8px;align-items:flex-start;font-size:0.82rem;margin-top:12px;}
 @media(max-width:560px){.scene dl{grid-template-columns:1fr;} .stage{padding:0 14px 80px;}}
 </style>
 </head>
@@ -153,10 +166,17 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     <section class="panel hidden" id="stepBoard">
       <div class="eyebrow">04 / Storyboard</div>
       <div class="panel-title">Your script is approved</div>
-      <div class="panel-sub">Here is the scene plan and the real photos to gather. Choosing photos and approving concept images comes next.</div>
+      <div class="panel-sub">Choose a real photo for each scene. Concept images come in the next step.</div>
       <div id="boardWarn" class="note hidden"></div>
       <div id="scenes"></div>
       <div id="missingBox" class="note hidden"></div>
+      <div id="picker" class="panel picker hidden">
+        <div class="eyebrow" id="pickerTitle">Choose a photo</div>
+        <div class="tabs" id="pickerTabs"></div>
+        <div id="pickerBody"></div>
+        <div class="msg" id="pickerMsg" role="status"></div>
+        <div class="actions"><button class="btn ghost" type="button" id="pickerClose">Close</button></div>
+      </div>
     </section>
   </div>
 </main>
@@ -183,10 +203,12 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     } catch (e) { /* storage blocked */ }
     return null;
   }
-  async function api(method, qs, body) {
+  var MEDIA = "/.netlify/functions/agent-marketing-media";
+  function mapi(method, qs, body) { return api(method, qs, body, MEDIA); }
+  async function api(method, qs, body, base) {
     var t = token();
     if (!t) throw new Error("Your session has expired. Please log in again at smartstagepro.com, then reopen this page.");
-    var res = await fetch(API + (qs || ""), { method: method, headers: { Authorization: "Bearer " + t, "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+    var res = await fetch((base || API) + (qs || ""), { method: method, headers: { Authorization: "Bearer " + t, "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
     var json = {}; try { json = await res.json(); } catch (e) { /* non-JSON */ }
     return { status: res.status, ok: res.ok, json: json };
   }
@@ -349,11 +371,89 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
       var fr = s.framing || {};
       return '<div class="scene"><h4>Scene ' + (i + 1) + ' · ' + esc(String(s.role || "").replace(/_/g, " ")) + ' <span class="pill ' + (real ? "real" : "concept") + '">' + (real ? "Your real photo" : "Concept image") + '</span><span class="pill">about ' + esc(s.provisionalSeconds) + 's</span></h4>' +
         '<div class="q">“' + esc(s.narrationExcerpt) + '”</div><dl>' + rows +
-        (fr["9x16"] ? "<dt>9:16 framing</dt><dd>" + esc(fr["9x16"]) + "</dd>" : "") + (fr["16x9"] ? "<dt>16:9 framing</dt><dd>" + esc(fr["16x9"]) + "</dd>" : "") + "</dl></div>";
+        (fr["9x16"] ? "<dt>9:16 framing</dt><dd>" + esc(fr["9x16"]) + "</dd>" : "") + (fr["16x9"] ? "<dt>16:9 framing</dt><dd>" + esc(fr["16x9"]) + "</dd>" : "") + "</dl>" + (real ? '<div class="pick" id="pick' + i + '"></div>' : "") + "</div>";
     }).join("") || '<div class="hint">No scene plan yet.</div>';
     var m = n.missingAgentInputs || [];
     $("missingBox").classList.toggle("hidden", !m.length);
     $("missingBox").innerHTML = "<strong>Still needed from you:</strong><ul class='plain'>" + m.map(function (x) { return "<li>" + esc(x) + "</li>"; }).join("") + "</ul>";
+    loadSelected();
+  }
+
+  // ── Photos ──
+  var picked = {}, pickScene = null, pickTab = "library";
+  async function loadSelected() {
+    picked = {};
+    var r = await mapi("GET", "?projectId=" + state.project.id + "&source=selected");
+    ((r.ok && r.json.items) || []).forEach(function (it) { picked[it.sceneIndex] = it; });
+    Array.prototype.forEach.call(document.querySelectorAll(".pick"), function (el) { paintPick(Number(el.id.replace("pick", ""))); });
+  }
+  function paintPick(i) {
+    var el = $("pick" + i); if (!el) return;
+    var it = picked[i];
+    el.innerHTML = (it && it.url ? '<img class="sel" alt="Selected photo" src="' + esc(it.url) + '">' : "") +
+      '<button class="btn ' + (it ? "ghost" : "gold") + '" type="button" data-scene="' + i + '">' + (it ? "Change photo" : "Choose photo") + "</button>" +
+      (it ? '<button class="link-btn" type="button" data-clear="' + i + '">Remove</button>' : "");
+    el.querySelector("[data-scene]").addEventListener("click", function () { openPicker(i); });
+    var c = el.querySelector("[data-clear]");
+    if (c) c.addEventListener("click", async function () { await mapi("POST", "", { action: "clear", projectId: state.project.id, sceneIndex: i }); delete picked[i]; paintPick(i); });
+  }
+  var TABS = [["library", "My Marketing Photos"], ["staged", "Virtually Staged"], ["gallery", "My originals"], ["upload", "Upload new"]];
+  function openPicker(i) {
+    pickScene = i; $("picker").classList.remove("hidden");
+    $("pickerTitle").textContent = "Scene " + (i + 1) + ": choose a photo";
+    $("pickerTabs").innerHTML = TABS.map(function (t) { return '<button type="button" class="tab" data-tab="' + t[0] + '">' + t[1] + "</button>"; }).join("");
+    Array.prototype.forEach.call($("pickerTabs").querySelectorAll(".tab"), function (b) { b.addEventListener("click", function () { showTab(b.getAttribute("data-tab")); }); });
+    showTab(pickTab); $("picker").scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+  function showTab(t) {
+    pickTab = t; say("pickerMsg", "");
+    Array.prototype.forEach.call($("pickerTabs").querySelectorAll(".tab"), function (b) { b.classList.toggle("on", b.getAttribute("data-tab") === t); });
+    if (t === "upload") return renderUpload();
+    $("pickerBody").innerHTML = '<span class="spinner"></span>Loading…';
+    mapi("GET", "?projectId=" + state.project.id + "&source=" + t).then(function (r) {
+      var items = (r.ok && r.json.items) || [];
+      var empty = { library: "Nothing saved yet. Use Upload new to add your first photo.", staged: "No Virtually Staged images are available. Only images saved with a clean copy can be used here.", gallery: "No originals found." }[t];
+      $("pickerBody").innerHTML = items.length ? '<div class="grid">' + items.map(function (it, k) {
+        return '<button type="button" class="tile" data-k="' + k + '"><img alt="" loading="lazy" src="' + esc(it.thumbUrl) + '"><span>' + esc(it.label || String(it.roomType || "Photo").replace(/_/g, " ")) + (t === "library" ? ' <b class="del" data-del="' + k + '" title="Remove from library">✕</b>' : "") + "</span></button>";
+      }).join("") + "</div>" : '<div class="hint">' + empty + "</div>";
+      Array.prototype.forEach.call($("pickerBody").querySelectorAll(".tile"), function (b) {
+        b.addEventListener("click", function (ev) {
+          var it = items[Number(b.getAttribute("data-k"))];
+          if (ev.target && ev.target.getAttribute && ev.target.getAttribute("data-del") != null) { ev.stopPropagation(); return removeFromLibrary(it); }
+          choose(it);
+        });
+      });
+    });
+  }
+  async function removeFromLibrary(it) { await mapi("POST", "", { action: "library_delete", id: it.id }); showTab("library"); }
+  async function choose(it) {
+    say("pickerMsg", "Saving…");
+    var r = await mapi("POST", "", { action: "select", projectId: state.project.id, sceneIndex: pickScene, kind: it.kind, id: it.id });
+    if (!r.ok) return say("pickerMsg", r.json.error || "Could not use that photo", "err");
+    picked[pickScene] = r.json.item; paintPick(pickScene); $("picker").classList.add("hidden");
+  }
+  function renderUpload() {
+    $("pickerBody").innerHTML = '<input type="file" id="upFile" accept="image/png,image/jpeg,image/webp"><label class="lbl" for="upLabel">Name (optional)</label><input type="text" id="upLabel" maxlength="80" placeholder="e.g. Me at the community clubhouse">' +
+      '<label class="attest"><input type="checkbox" id="upOwn"><span id="upAttest"></span></label><div class="hint">Saved to My Marketing Photos so you can reuse it in other projects.</div>' +
+      '<div class="actions"><button class="btn gold" type="button" id="upGo">Upload and use this photo</button></div>';
+    $("upAttest").textContent = (state.schema.uploadAttestation && state.schema.uploadAttestation.text) || "I own this photo or have permission to use it in my own marketing.";
+    $("upGo").addEventListener("click", upload);
+  }
+  async function upload() {
+    var f = $("upFile").files[0];
+    if (!f) return say("pickerMsg", "Choose a photo first.", "err");
+    if (!$("upOwn").checked) return say("pickerMsg", "Please confirm you own this photo or have permission to use it.", "err");
+    $("upGo").disabled = true; say("pickerMsg", "Uploading…");
+    try {
+      var p = await mapi("POST", "", { action: "presign_upload", contentType: f.type });
+      if (!p.ok) throw new Error(p.json.error || "Could not start the upload");
+      var put = await fetch(p.json.uploadUrl, { method: "PUT", headers: { "Content-Type": f.type }, body: f });
+      if (!put.ok) throw new Error("The upload did not finish. Please try again.");
+      var a = await mapi("POST", "", { action: "library_add", key: p.json.key, ownerConfirmed: true, label: $("upLabel").value });
+      if (!a.ok) throw new Error(a.json.error || "Could not save the photo");
+      await choose(a.json.item);
+    } catch (e) { say("pickerMsg", e.message, "err"); }
+    $("upGo").disabled = false;
   }
 
   // ── Projects list ──
@@ -385,6 +485,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     $("intakeBtn").addEventListener("click", saveIntake);
     $("observation").addEventListener("input", countObs);
     $("planBtn").addEventListener("click", plan);
+    $("pickerClose").addEventListener("click", function () { $("picker").classList.add("hidden"); });
     $("narration").addEventListener("input", refreshPreview);
     $("saveScriptBtn").addEventListener("click", function () { saveScript(false); });
     $("approveBtn").addEventListener("click", function () { saveScript(true); });

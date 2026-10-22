@@ -20,6 +20,7 @@ const gate = require("./lib/agent-marketing-gate");
 const intakeLib = require("./lib/agent-marketing-intake");
 const am = require("./lib/agent-marketing-lib");
 const planLib = require("./lib/agent-marketing-plan-lib");
+const mediaLib = require("./lib/agent-marketing-media-lib");
 
 const headers = { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json", "Cache-Control": "no-store" };
 const reply = (statusCode, obj) => ({ statusCode, headers, body: JSON.stringify(obj) });
@@ -70,6 +71,7 @@ exports.handler = async (event) => {
           audiences: intakeLib.AUDIENCES, actions: intakeLib.ACTIONS, limits: intakeLib.LIMITS,
           durations: am.DURATIONS, formats: am.FORMATS, voices: am.VOICES, wordTargets: am.WORD_TARGETS,
           attestation: { version: gate.ATTESTATION_VERSION, text: gate.ATTESTATION_TEXT },
+          uploadAttestation: { version: mediaLib.UPLOAD_ATTESTATION_VERSION, text: mediaLib.UPLOAD_ATTESTATION_TEXT },
         });
       }
       if (qs.id) {

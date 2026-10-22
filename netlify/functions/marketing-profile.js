@@ -126,7 +126,10 @@ function validateProfile(body, userId) {
   };
   const logo = keyOrNull(body.logoKey);
   const headshot = keyOrNull(body.headshotKey);
-  if (!logo.ok || !headshot.ok) return { error: "Invalid image reference. Please upload the image again." };
+  // Oct 22, 2026: optional real full-body photo of the agent (Agent Marketing). Only written when the client sends
+  // the field, so existing Save buttons that don't know about it never touch it (or the column, before its migration).
+  const fullbody = keyOrNull(body.fullbodyKey);
+  if (!logo.ok || !headshot.ok || !fullbody.ok) return { error: "Invalid image reference. Please upload the image again." };
 
   return {
     row: {
@@ -144,6 +147,7 @@ function validateProfile(body, userId) {
       brand_secondary: brandSecondary,
       brand_border: brandBorder,
       brand_font: brandFont,
+      ...(body.fullbodyKey !== undefined ? { fullbody_key: fullbody.value } : {}),
     },
   };
 }
@@ -161,8 +165,10 @@ function profileForClient(row) {
     website: b.website,
     logoKey: row.logo_key || "",
     headshotKey: row.headshot_key || "",
+    fullbodyKey: row.fullbody_key || "",
     logoUrl: b.logoUrl,
     headshotUrl: b.headshotUrl,
+    fullbodyUrl: b.fullbodyUrl,
     brandTheme: b.brandTheme,
     brandPrimary: b.brandPrimary,
     brandSecondary: b.brandSecondary,
@@ -216,7 +222,7 @@ exports.handler = async (event) => {
     try { body = JSON.parse(event.body || "{}"); } catch { return reply(400, { error: "Invalid request." }); }
 
     if (action === "presign") {
-      const kind = body.kind === "headshot" ? "headshot" : body.kind === "logo" ? "logo" : null;
+      const kind = body.kind === "headshot" ? "headshot" : body.kind === "logo" ? "logo" : body.kind === "fullbody" ? "fullbody" : null;
       const ext = ALLOWED_IMAGE_TYPES[body.contentType];
       if (!kind || !ext) return reply(400, { error: "Upload a PNG, JPG or WebP image." });
       const bucket = process.env.S3_BUCKET_NAME;

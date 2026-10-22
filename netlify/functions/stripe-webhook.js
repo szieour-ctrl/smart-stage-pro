@@ -186,6 +186,7 @@ async function onCheckoutComplete(session) {
   });
 
   // 2. Add initial credit allotment to ledger (once per checkout session)
+  let freshGrant = false;
   if (await alreadyCredited(session.id)) {
     console.log(`stripe-webhook: checkout ${session.id} already credited — skipping grant`);
   } else {
@@ -199,6 +200,7 @@ async function onCheckoutComplete(session) {
       stripe_payment_id: session.id,
       description:       `Initial ${plan} plan — ${credits} credits`
     });
+    freshGrant = true;
   }
 
   // 3. Team plan — reuse this lead's existing team on resubscribe
@@ -230,6 +232,17 @@ async function onCheckoutComplete(session) {
   }
 
   console.log(`stripe-webhook: checkout complete — user ${userId}, plan ${plan}, +${credits} credits`);
+
+  // Welcome email — first fulfilment of this checkout session only. Non-fatal.
+  if (freshGrant) {
+    const wRes = await db('GET', 'users', null, `?id=eq.${userId}&select=email,full_name`);
+    const w = wRes.data?.[0] || {};
+    await sendWelcomeEmail({
+      email: w.email || session.customer_details?.email || session.customer_email,
+      name:  w.full_name || session.customer_details?.name || '',
+      plan, images: credits, sessionId: session.id
+    });
+  }
 }
 
 // ── EVENT: checkout.session.completed — Image Pack ────────
@@ -282,42 +295,20 @@ function escHtmlLocal(v) {
   return String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-// Pabbly maps `to`, `subject` and `emailHtml` straight into its Gmail step.
-// Set PABBLY_IMAGE_PACK_WEBHOOK_URL in Netlify; without it no email is sent.
-async function sendImagePackReceipt({ email, images, pack, amount, balance, sessionId }) {
-  const hook = process.env.PABBLY_IMAGE_PACK_WEBHOOK_URL;
-  if (!hook) { console.warn('stripe-webhook: PABBLY_IMAGE_PACK_WEBHOOK_URL not set — no pack receipt email sent'); return; }
-  if (!email) { console.error('stripe-webhook: image pack receipt skipped — no recipient email for', sessionId); return; }
+// ── Transactional email via Pabbly ────────────────────────
+// One Pabbly workflow sends every email: it maps `to`, `subject` and
+// `emailHtml` from this payload into a Gmail step. Env var (new name first,
+// old name still honoured): PABBLY_TRANSACTIONAL_EMAIL_WEBHOOK_URL or
+// PABBLY_IMAGE_PACK_WEBHOOK_URL. The call is awaited with a 5s cap (Netlify can
+// freeze a function once it returns) and is NEVER fatal: purchases are already
+// fulfilled before any email is attempted.
+async function postTransactionalEmail({ to, subject, emailHtml, kind, extra }) {
+  const hook = process.env.PABBLY_TRANSACTIONAL_EMAIL_WEBHOOK_URL || process.env.PABBLY_IMAGE_PACK_WEBHOOK_URL;
+  if (!hook) { console.warn(`stripe-webhook: no Pabbly email webhook configured — ${kind} email not sent`); return; }
+  if (!to) { console.error(`stripe-webhook: ${kind} email skipped — no recipient address`); return; }
   try {
     const url = new URL(hook);
-    const price = amount != null ? `$${(amount / 100).toFixed(2)}` : '';
-    const packName = { solo: 'Solo', team: 'Team', brokerage: 'Brokerage' }[pack] || '';
-    const paidOn = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'America/Los_Angeles' });
-    const row = (label, value, bold) => `<tr><td style="padding:10px 0;border-bottom:1px solid #eee;color:#666;font-size:14px;">${label}</td><td style="padding:10px 0;border-bottom:1px solid #eee;text-align:right;font-size:14px;color:#1a1a1a;${bold ? 'font-weight:700;' : ''}">${value}</td></tr>`;
-    const emailHtml = `<div style="background:#f5f3ef;padding:24px 12px;font-family:Arial,Helvetica,sans-serif;">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:6px;overflow:hidden;">
-<tr><td style="background:#1a1a1a;padding:22px 28px;text-align:center;"><span style="font-family:Georgia,'Times New Roman',serif;font-size:22px;letter-spacing:3px;color:#c9a84c;">SMART STAGE PRO</span></td></tr>
-<tr><td style="padding:30px 28px 8px;">
-<h1 style="font-family:Georgia,'Times New Roman',serif;font-size:24px;font-weight:600;margin:0 0 12px;color:#1a1a1a;">Your images have been added</h1>
-<p style="font-size:15px;line-height:1.6;color:#333;margin:0 0 20px;">Thank you for your purchase. Your image pack is on your account and ready to use now.</p>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #eee;">
-${row('Item', `${escHtmlLocal(packName)} Image Pack`.trim())}
-${row('Images added', `+${escHtmlLocal(images)}`, true)}
-${price ? row('Amount paid', escHtmlLocal(price)) : ''}
-${row('Date', escHtmlLocal(paidOn))}
-${row('Your new image balance', `<strong>${escHtmlLocal(balance)}</strong>`)}
-</table>
-<p style="text-align:center;margin:28px 0 8px;"><a href="https://smartstagepro.com" style="display:inline-block;background:#c9a84c;color:#1a1a1a;text-decoration:none;font-weight:700;font-size:15px;padding:13px 28px;border-radius:4px;">Open Smart Stage PRO</a></p>
-</td></tr>
-<tr><td style="padding:18px 28px 28px;font-size:12px;color:#888;line-height:1.6;border-top:1px solid #f0f0f0;">
-Receipt reference: ${escHtmlLocal(sessionId)}<br>
-Questions about this purchase? Reply to this email or write <a href="mailto:support@smartstagepro.com" style="color:#b8963e;">support@smartstagepro.com</a>.<br>
-Smart Stage PRO &middot; smartstagepro.com
-</td></tr></table></div>`;
-    const body = JSON.stringify({
-      to: email, subject: `Your Smart Stage PRO image pack: ${images} images added`,
-      images, pack, amountCents: amount ?? null, balance, sessionId, emailHtml
-    });
+    const body = JSON.stringify({ to, subject, emailHtml, kind, ...(extra || {}) });
     await new Promise((resolve) => {
       const req = https.request({
         hostname: url.hostname, path: url.pathname + url.search, method: 'POST',
@@ -325,15 +316,131 @@ Smart Stage PRO &middot; smartstagepro.com
         timeout: 5000,
       }, (res) => {
         res.resume();
-        res.on('end', () => { if (res.statusCode >= 400) console.error('stripe-webhook: pack receipt Pabbly returned HTTP', res.statusCode); resolve(); });
+        res.on('end', () => { if (res.statusCode >= 400) console.error(`stripe-webhook: ${kind} email Pabbly returned HTTP`, res.statusCode); resolve(); });
       });
-      req.on('timeout', () => { console.error('stripe-webhook: pack receipt Pabbly timed out (non-fatal)'); req.destroy(); resolve(); });
-      req.on('error', (e) => { console.error('stripe-webhook: pack receipt Pabbly failed (non-fatal):', e.message); resolve(); });
+      req.on('timeout', () => { console.error(`stripe-webhook: ${kind} email Pabbly timed out (non-fatal)`); req.destroy(); resolve(); });
+      req.on('error', (e) => { console.error(`stripe-webhook: ${kind} email Pabbly failed (non-fatal):`, e.message); resolve(); });
       req.write(body); req.end();
     });
   } catch (e) {
-    console.error('stripe-webhook: pack receipt setup error (non-fatal):', e.message);
+    console.error(`stripe-webhook: ${kind} email setup error (non-fatal):`, e.message);
   }
+}
+
+function emailDate() {
+  return new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'America/Los_Angeles' });
+}
+function fmtEmailDate(d) {
+  return new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'America/Los_Angeles' });
+}
+
+// Branded receipt layout shared by the image pack and Listing Package emails.
+function receiptEmailHtml({ heading, intro, rows, extraHtml, sessionId }) {
+  const row = ([label, value, bold]) => `<tr><td style="padding:10px 0;border-bottom:1px solid #eee;color:#666;font-size:14px;">${label}</td><td style="padding:10px 0;border-bottom:1px solid #eee;text-align:right;font-size:14px;color:#1a1a1a;${bold ? 'font-weight:700;' : ''}">${value}</td></tr>`;
+  return `<div style="background:#f5f3ef;padding:24px 12px;font-family:Arial,Helvetica,sans-serif;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:6px;overflow:hidden;">
+<tr><td style="background:#1a1a1a;padding:22px 28px;text-align:center;"><span style="font-family:Georgia,'Times New Roman',serif;font-size:22px;letter-spacing:3px;color:#c9a84c;">SMART STAGE PRO</span></td></tr>
+<tr><td style="padding:30px 28px 8px;">
+<h1 style="font-family:Georgia,'Times New Roman',serif;font-size:24px;font-weight:600;margin:0 0 12px;color:#1a1a1a;">${escHtmlLocal(heading)}</h1>
+<p style="font-size:15px;line-height:1.6;color:#333;margin:0 0 20px;">${escHtmlLocal(intro)}</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #eee;">
+${rows.filter(Boolean).map(row).join('\n')}
+</table>
+${extraHtml || ''}
+<p style="text-align:center;margin:28px 0 8px;"><a href="https://smartstagepro.com" style="display:inline-block;background:#c9a84c;color:#1a1a1a;text-decoration:none;font-weight:700;font-size:15px;padding:13px 28px;border-radius:4px;">Open Smart Stage PRO</a></p>
+</td></tr>
+<tr><td style="padding:18px 28px 28px;font-size:12px;color:#888;line-height:1.6;border-top:1px solid #f0f0f0;">
+Receipt reference: ${escHtmlLocal(sessionId)}<br>
+Questions about this purchase? Reply to this email or write <a href="mailto:support@smartstagepro.com" style="color:#b8963e;">support@smartstagepro.com</a>.<br>
+Smart Stage PRO &middot; smartstagepro.com
+</td></tr></table></div>`;
+}
+
+async function sendImagePackReceipt({ email, images, pack, amount, balance, sessionId }) {
+  const packName = { solo: 'Solo', team: 'Team', brokerage: 'Brokerage' }[pack] || '';
+  const price = amount != null ? `$${(amount / 100).toFixed(2)}` : '';
+  const emailHtml = receiptEmailHtml({
+    heading: 'Your images have been added',
+    intro: 'Thank you for your purchase. Your image pack is on your account and ready to use now.',
+    rows: [
+      ['Item', `${escHtmlLocal(packName)} Image Pack`.trim()],
+      ['Images added', `+${escHtmlLocal(images)}`, true],
+      price && ['Amount paid', escHtmlLocal(price)],
+      ['Date', escHtmlLocal(emailDate())],
+      ['Your new image balance', `<strong>${escHtmlLocal(balance)}</strong>`],
+    ],
+    sessionId,
+  });
+  await postTransactionalEmail({
+    to: email, kind: 'image_pack',
+    subject: `Your Smart Stage PRO image pack: ${images} images added`,
+    emailHtml, extra: { images, pack, amountCents: amount ?? null, balance, sessionId },
+  });
+}
+
+async function sendListingPackageReceipt({ email, amount, balance, accessUntil, exportUntil, sessionId }) {
+  const price = amount != null ? `$${(amount / 100).toFixed(2)}` : '';
+  const emailHtml = receiptEmailHtml({
+    heading: 'Your Listing Package is ready',
+    intro: 'Thank you for your purchase. Your images are on your account and you can start staging your listing now.',
+    rows: [
+      ['Item', 'Listing Package'],
+      ['Images added', `+${PACKAGE_IMAGES}`, true],
+      price && ['Amount paid', escHtmlLocal(price)],
+      ['Date', escHtmlLocal(emailDate())],
+      ['Tools and images available through', escHtmlLocal(fmtEmailDate(accessUntil))],
+      ['Download your images by', escHtmlLocal(fmtEmailDate(exportUntil))],
+      ['Your image balance', `<strong>${escHtmlLocal(balance)}</strong>`],
+    ],
+    sessionId,
+  });
+  await postTransactionalEmail({
+    to: email, kind: 'listing_package',
+    subject: `Your Smart Stage PRO Listing Package: ${PACKAGE_IMAGES} images added`,
+    emailHtml, extra: { images: PACKAGE_IMAGES, amountCents: amount ?? null, balance, sessionId },
+  });
+}
+
+// Welcome email for a new subscription (sent once per checkout session).
+async function sendWelcomeEmail({ email, name, plan, images, sessionId }) {
+  const planLabel = { solo: 'Solo', team: 'Team', brokerage: 'Brokerage' }[plan] || '';
+  const step = (n, title, body) => `<tr><td valign="top" style="padding:0 14px 18px 0;width:26px;"><div style="background:#c9a84c;color:#1a1a1a;font-weight:700;font-size:13px;width:26px;height:26px;line-height:26px;border-radius:13px;text-align:center;">${n}</div></td><td style="padding:0 0 18px;"><div style="font-weight:700;margin-bottom:3px;">${title}</div><div style="color:#555;font-size:14.5px;line-height:1.6;">${body}</div></td></tr>`;
+  const emailHtml = `<div style="max-width:600px;margin:0 auto;font-family:Georgia,serif;color:#1a1a1a;background:#fff;">
+<div style="background:#1a1a1a;padding:28px 32px;text-align:center;">
+<div style="font-family:Georgia,serif;font-size:22px;color:#c9a84c;letter-spacing:0.08em;">SMART STAGE PRO&trade;</div>
+<div style="font-size:11.5px;color:#888;letter-spacing:0.12em;margin-top:4px;">BY SZ REAL ESTATE GROUP</div>
+</div>
+<div style="padding:36px 32px 24px;">
+<p style="font-size:16.5px;line-height:1.7;margin:0 0 16px;">Hi ${escHtmlLocal(name || 'there')},</p>
+<p style="font-size:16.5px;line-height:1.7;margin:0 0 16px;">Welcome aboard &mdash; I'm genuinely glad you're here.</p>
+<p style="font-size:16.5px;line-height:1.7;margin:0 0 16px;">I built Smart Stage PRO&trade; out of my own frustration as a listing agent. Virtual staging tools weren't built for how we actually work &mdash; and none of them were built with California AB 723 compliance in mind. This one is.</p>
+<p style="font-size:16.5px;line-height:1.7;margin:0 0 32px;">Your${planLabel ? ' ' + escHtmlLocal(planLabel) + ' plan' : ' account'} is active${images ? ` and ${escHtmlLocal(images)} images have been added to your balance` : ''}. Let's get your first listing staged.</p>
+</div>
+<div style="height:1px;background:#e8e0d0;margin:0 32px;"></div>
+<div style="padding:32px;">
+<div style="font-family:Georgia,serif;font-size:18px;color:#1a1a1a;margin-bottom:20px;">Getting Started in 4 Steps</div>
+<table role="presentation" cellpadding="0" cellspacing="0" width="100%">
+${step(1, 'Sign in at smartstagepro.com', 'Use the email and password you created at checkout.')}
+${step(2, 'Search your listing address', 'This creates your AB 723 compliance project and permanent QR code.')}
+${step(3, 'Upload your photos and choose a staging style', 'The engine reads your space and builds a Master Staging Plan across all rooms.')}
+${step(4, 'Generate Final &mdash; MLS Ready', 'Your compliant, watermark-free staged image is ready to upload to MetroList.')}
+</table>
+<div style="text-align:center;margin:12px 0 8px;"><a href="https://smartstagepro.com" style="background:#c9a84c;color:#1a1a1a;padding:14px 36px;text-decoration:none;font-weight:700;font-size:15px;border-radius:3px;display:inline-block;letter-spacing:0.04em;">Go to Smart Stage PRO&trade; &rarr;</a></div>
+</div>
+<div style="height:1px;background:#e8e0d0;margin:0 32px;"></div>
+<div style="padding:28px 32px 36px;">
+<p style="font-size:16px;line-height:1.7;margin:0 0 16px;">Questions? Reply to this email &mdash; it comes straight to me.</p>
+<p style="font-size:16px;line-height:1.7;margin:0 0 4px;">Sam Zieour</p>
+<p style="font-size:13.5px;color:#888;margin:0;">SZ Real Estate Group &middot; DRE #01397303 &middot; smartstagepro.com</p>
+</div>
+<div style="background:#f5f0e8;padding:16px 32px;text-align:center;">
+<p style="font-size:11.5px;color:#888;margin:0;line-height:1.6;">California AB 723 &sect;10140.6 Compliant &middot; MetroList Rule 11.6.1<br>SZ Real Estate Group &middot; Sacramento, CA</p>
+</div></div>`;
+  await postTransactionalEmail({
+    to: email, kind: 'welcome',
+    subject: 'Welcome to Smart Stage PRO',
+    emailHtml, extra: { plan, images: images || null, sessionId },
+  });
 }
 
 // ── EVENT: checkout.session.completed — Listing Package ───
@@ -349,7 +456,7 @@ async function onPackagePurchased(session) {
   }
 
   const uRes = await db('GET', 'users', null,
-    `?id=eq.${userId}&select=id,subscription_status,created_at,package_access_expires_at,data_expires_at,stripe_customer_id`);
+    `?id=eq.${userId}&select=id,email,subscription_status,created_at,package_access_expires_at,data_expires_at,stripe_customer_id`);
   const user = uRes.data?.[0];
   if (!user) throw new Error(`package purchase for unknown user ${userId}`); // 500 → Stripe retries
 
@@ -367,6 +474,7 @@ async function onPackagePurchased(session) {
   const packageLive = status === 'package' && user.package_access_expires_at &&
                       new Date(user.package_access_expires_at).getTime() > now;
 
+  let pkgFresh = false, pkgBalance = null;
   if (await alreadyCredited(session.id, 'purchase')) {
     console.log(`stripe-webhook: package ${session.id} already credited — skipping grant`);
   } else {
@@ -393,6 +501,7 @@ async function onPackagePurchased(session) {
       stripe_payment_id: session.id,
       description:       `Listing Package — ${PACKAGE_IMAGES} Images`
     });
+    pkgFresh = true; pkgBalance = balance + PACKAGE_IMAGES;
   }
 
   // The slot. ignore-duplicates on the UNIQUE stripe_session_id makes this retry-safe.
@@ -444,6 +553,15 @@ async function onPackagePurchased(session) {
   await dbStrict('PATCH', `users?id=eq.${userId}`, userPatch);
 
   console.log(`stripe-webhook: listing package — user ${userId}, +${PACKAGE_IMAGES} Images, access until ${accessUntil.toISOString()}, compliance until ${complianceUntil.toISOString()}`);
+
+  // Receipt email — first fulfilment only. Non-fatal.
+  if (pkgFresh) {
+    await sendListingPackageReceipt({
+      email: user.email || session.customer_details?.email || session.customer_email,
+      amount: session.amount_total, balance: pkgBalance,
+      accessUntil, exportUntil, sessionId: session.id
+    });
+  }
 }
 
 // ── EVENT: invoice.paid ───────────────────────────────────

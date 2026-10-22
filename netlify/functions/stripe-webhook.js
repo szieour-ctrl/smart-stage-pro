@@ -147,6 +147,9 @@ async function onCheckoutComplete(session) {
   if (session.mode === 'payment' && session.metadata?.plan === 'listing_package') {
     return onPackagePurchased(session);
   }
+  if (session.mode === 'payment' && session.metadata?.plan === 'image_pack') {
+    return onImagePackPurchased(session);
+  }
   if (session.mode === 'payment') {
     console.log(`stripe-webhook: payment-mode checkout ${session.id} with no known plan — ignored`);
     return;
@@ -227,6 +230,37 @@ async function onCheckoutComplete(session) {
   }
 
   console.log(`stripe-webhook: checkout complete — user ${userId}, plan ${plan}, +${credits} credits`);
+}
+
+// ── EVENT: checkout.session.completed — Image Pack ────────
+// One-time add-on for live subscribers. Image counts are fixed HERE (never read
+// from Stripe metadata). Retry-safe: grant is keyed on the checkout session id.
+const IMAGE_PACK_IMAGES = { solo: 20, team: 50, brokerage: 100 };
+async function onImagePackPurchased(session) {
+  const userId = session.metadata?.user_id;
+  const images = IMAGE_PACK_IMAGES[session.metadata?.pack];
+  if (!userId || !images) { console.error('stripe-webhook: image pack checkout missing user_id/pack', session.id); return; }
+  if (session.payment_status !== 'paid') {
+    console.log(`stripe-webhook: image pack ${session.id} not paid (${session.payment_status}) — skipping`);
+    return;
+  }
+  const uRes = await db('GET', 'users', null, `?id=eq.${userId}&select=id`);
+  if (!uRes.data?.[0]) throw new Error(`image pack purchase for unknown user ${userId}`); // 500 → Stripe retries
+  if (await alreadyCredited(session.id, 'purchase')) {
+    console.log(`stripe-webhook: image pack ${session.id} already credited — skipping`);
+    return;
+  }
+  const balance = await getCurrentBalance(userId);
+  await dbStrict('POST', 'credit_ledger', {
+    user_id:           userId,
+    type:              'purchase',
+    reason:            'image_pack',
+    amount:            images,
+    balance_after:     balance + images,
+    stripe_payment_id: session.id,
+    description:       `Image Pack (${session.metadata.pack}) — ${images} Images`
+  });
+  console.log(`stripe-webhook: image pack — user ${userId}, +${images} images`);
 }
 
 // ── EVENT: checkout.session.completed — Listing Package ───

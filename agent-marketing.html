@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex">
+<title>Smart Stage PRO Plus — Agent Marketing (beta)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--ink:#1a1714;--cream:#f7f4ef;--warm:#e8e0d4;--gold:#b8975a;--gold-light:#d4b87a;--muted:#7a6f63;--danger:#c0392b;--success:#2d6a4f;--border:#ddd5c8;--shadow:0 2px 20px rgba(26,23,20,0.08);}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);min-height:100vh;font-size:15px;line-height:1.6;}
+.stage{max-width:720px;margin:0 auto;padding:0 20px 100px;}
+.banner{background:var(--ink);color:var(--warm);font-size:0.7rem;letter-spacing:0.08em;text-transform:uppercase;text-align:center;padding:8px 12px;}
+.banner b{color:var(--gold-light);}
+.app-header{display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;row-gap:10px;padding:24px 0 18px;border-bottom:1px solid var(--border);margin-bottom:20px;}
+.app-title{font-family:'Cormorant Garamond',serif;font-size:1.5rem;font-weight:500;}
+.app-title em{color:var(--gold);font-style:normal;}
+.link-btn{background:none;border:none;color:var(--muted);font:inherit;font-size:0.8rem;cursor:pointer;text-decoration:underline;}
+.steps{display:flex;gap:6px;margin-bottom:22px;}
+.step-pill{flex:1;text-align:center;font-size:0.68rem;text-transform:uppercase;letter-spacing:0.06em;font-weight:600;padding:7px 4px;border-radius:14px;background:var(--warm);color:var(--muted);border:none;font-family:inherit;}
+.step-pill.active{background:var(--ink);color:var(--cream);}
+.step-pill.done{background:#eaf3ee;color:var(--success);cursor:pointer;}
+.panel{background:#fff;border:1px solid var(--border);border-radius:6px;box-shadow:var(--shadow);margin-bottom:18px;padding:22px;}
+.eyebrow{font-size:0.68rem;text-transform:uppercase;letter-spacing:0.12em;color:var(--gold);font-weight:600;margin-bottom:6px;}
+.panel-title{font-family:'Cormorant Garamond',serif;font-size:1.35rem;font-weight:500;margin-bottom:4px;}
+.panel-sub{font-size:0.85rem;color:var(--muted);margin-bottom:14px;}
+label.lbl{display:block;font-size:0.78rem;font-weight:600;margin:16px 0 6px;}
+input[type=text],select,textarea{width:100%;border:1px solid var(--border);border-radius:4px;padding:10px 12px;font:inherit;color:var(--ink);background:#fff;}
+textarea{resize:vertical;min-height:110px;}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--gold-light);outline-offset:1px;}
+.choices{display:grid;gap:8px;}
+.choices.row{grid-template-columns:repeat(auto-fit,minmax(150px,1fr));}
+.choice{display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:5px;padding:10px 12px;cursor:pointer;background:#fff;font-size:0.9rem;}
+.choice:has(input:checked){border-color:var(--gold);background:#fdf9f0;box-shadow:inset 0 0 0 1px var(--gold);}
+.choice input{accent-color:#ad864b;}
+.hint{font-size:0.75rem;color:var(--muted);margin-top:5px;}
+.btn{background:var(--ink);color:#fff;border:0;padding:11px 18px;border-radius:5px;font:600 0.85rem 'DM Sans',sans-serif;cursor:pointer;}
+.btn.gold{background:#ad864b;}
+.btn.ghost{background:#eee7dc;color:var(--ink);}
+.btn:disabled{opacity:0.5;cursor:default;}
+.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:20px;align-items:center;}
+.msg{font-size:0.85rem;margin-top:12px;min-height:1.2em;}
+.msg.err{color:var(--danger);} .msg.ok{color:var(--success);}
+.note{padding:12px 14px;background:var(--cream);border-radius:5px;font-size:0.8rem;color:#625a50;margin-top:14px;}
+.hidden{display:none !important;}
+.spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--gold);border-radius:50%;animation:spin 0.8s linear infinite;vertical-align:-2px;margin-right:8px;}
+@keyframes spin{to{transform:rotate(360deg);}}
+.proj{display:flex;justify-content:space-between;align-items:center;gap:10px;border:1px solid var(--border);border-radius:5px;padding:10px 12px;margin-top:8px;font-size:0.85rem;}
+.proj small{color:var(--muted);}
+.caption-preview{background:#1a1714;color:#fff;border-radius:6px;padding:14px 16px;font-weight:600;line-height:1.5;font-size:0.95rem;}
+.pill{display:inline-block;font-size:0.65rem;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;padding:2px 8px;border-radius:10px;background:var(--warm);color:var(--muted);}
+.pill.real{background:#eaf3ee;color:var(--success);} .pill.concept{background:#fdf3d8;color:#8a6d1d;}
+.scene{border:1px solid var(--border);border-radius:6px;padding:14px;margin-top:12px;}
+.scene h4{font-size:0.9rem;margin-bottom:4px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+.scene .q{font-style:italic;color:#4a423a;font-size:0.88rem;margin:4px 0 8px;}
+.scene dl{display:grid;grid-template-columns:110px 1fr;gap:4px 10px;font-size:0.8rem;}
+.scene dt{color:var(--muted);font-weight:600;}
+ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
+@media(max-width:560px){.scene dl{grid-template-columns:1fr;} .stage{padding:0 14px 80px;}}
+</style>
+</head>
+<body>
+<div class="banner">Smart Stage PRO Plus · Agent Marketing · <b>Private beta</b></div>
+<main class="stage">
+  <header class="app-header">
+    <div class="app-title">Agent <em>Marketing</em> · Local Market Insider</div>
+    <button class="link-btn hidden" id="myProjectsBtn" type="button">My projects</button>
+  </header>
+
+  <div id="gateMsg" class="panel hidden"></div>
+
+  <div id="app" class="hidden">
+    <nav class="steps" id="steps" aria-label="Progress"></nav>
+
+    <!-- Projects -->
+    <section class="panel hidden" id="stepProjects">
+      <div class="eyebrow">Your projects</div>
+      <div class="panel-title">Pick up where you left off</div>
+      <div id="projList"></div>
+      <div class="actions"><button class="btn gold" type="button" id="newBtn">Start a new one</button></div>
+    </section>
+
+    <!-- 1. Setup -->
+    <section class="panel hidden" id="stepSetup">
+      <div class="eyebrow">01 / Setup</div>
+      <div class="panel-title">How long, and where will it play?</div>
+      <div class="panel-sub">One story, built once for each format you choose. Each format is composed on its own, never cropped from the other.</div>
+      <label class="lbl">Length</label>
+      <div class="choices row" id="durChoices"></div>
+      <label class="lbl">Format</label>
+      <div class="choices row" id="fmtChoices"></div>
+      <label class="lbl">Narration voice</label>
+      <div class="choices row" id="voiceChoices"></div>
+      <div class="actions"><button class="btn gold" type="button" id="createBtn">Continue</button></div>
+      <div class="msg" id="setupMsg" role="status"></div>
+    </section>
+
+    <!-- 2. Intake -->
+    <section class="panel hidden" id="stepIntake">
+      <div class="eyebrow">02 / Your insight</div>
+      <div class="panel-title">What do you want people to know?</div>
+      <div class="panel-sub">Your own observation is what makes this credible. We never invent a story, a statistic or a result for you.</div>
+      <label class="lbl">Choose your insider angle</label>
+      <div class="choices" id="angleChoices"></div>
+      <label class="lbl" for="market">Market or neighborhood</label>
+      <input type="text" id="market" maxlength="60" placeholder="e.g. Roseville, CA">
+      <label class="lbl" for="audience">Who is this for?</label>
+      <select id="audience"></select>
+      <label class="lbl" for="issue" id="issueLbl">Main issue</label>
+      <select id="issue"></select>
+      <label class="lbl" for="observation" id="obsLbl">What have you noticed?</label>
+      <textarea id="observation" maxlength="600"></textarea>
+      <div class="hint"><span id="obsHint"></span> <span id="obsCount"></span></div>
+      <label class="lbl" for="action">What should viewers do?</label>
+      <select id="action"></select>
+      <div class="note">Agent Marketing is for your expertise and services. To promote a specific home, price, address or open house, use a Listing Reel.</div>
+      <div class="actions"><button class="btn gold" type="button" id="intakeBtn">Save and continue</button></div>
+      <div class="msg" id="intakeMsg" role="status"></div>
+    </section>
+
+    <!-- 3. Script -->
+    <section class="panel hidden" id="stepScript">
+      <div class="eyebrow">03 / Your script</div>
+      <div class="panel-title">Review and approve what will be said</div>
+      <div id="scriptEmpty">
+        <div class="panel-sub">We'll write a short, first-person script from your answers. You can edit every word before approving.</div>
+        <div class="actions"><button class="btn gold" type="button" id="planBtn">Write my script</button></div>
+      </div>
+      <div id="scriptWait" class="hidden"><span class="spinner"></span>Writing your script… this usually takes under a minute.</div>
+      <div id="scriptReady" class="hidden">
+        <p class="panel-sub" id="angleLine"></p>
+        <label class="lbl" for="narration">Narration</label>
+        <textarea id="narration" style="min-height:190px"></textarea>
+        <div class="hint">Words in [brackets] are delivery cues for the narrator. They never appear in captions. <span id="wordInfo"></span></div>
+        <label class="lbl">Captions (what viewers will read)</label>
+        <div class="caption-preview" id="captionPreview"></div>
+        <label class="lbl" for="cta">Closing call to action</label>
+        <input type="text" id="cta" maxlength="80">
+        <div class="hint">Keep it about your expertise, such as comparing options or asking for a local perspective.</div>
+        <div id="warnBox" class="note hidden"></div>
+        <div id="verifyBox" class="note hidden"></div>
+        <div class="actions">
+          <button class="btn ghost" type="button" id="saveScriptBtn">Save edits</button>
+          <button class="btn gold" type="button" id="approveBtn">Approve script</button>
+        </div>
+      </div>
+      <div class="msg" id="scriptMsg" role="status"></div>
+    </section>
+
+    <!-- 4. Storyboard -->
+    <section class="panel hidden" id="stepBoard">
+      <div class="eyebrow">04 / Storyboard</div>
+      <div class="panel-title">Your script is approved</div>
+      <div class="panel-sub">Here is the scene plan and the real photos to gather. Choosing photos and approving concept images comes next.</div>
+      <div id="boardWarn" class="note hidden"></div>
+      <div id="scenes"></div>
+      <div id="missingBox" class="note hidden"></div>
+    </section>
+  </div>
+</main>
+
+<script>
+(function () {
+  "use strict";
+  var API = "/.netlify/functions/agent-marketing-project";
+  var state = { schema: null, project: null, angle: null, poll: null };
+  var $ = function (id) { return document.getElementById(id); };
+  function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
+  function stripTags(t) { return String(t || "").replace(/\[[^\]\n]{1,40}\]/g, " ").replace(/[ \t]+/g, " ").replace(/\s+([,.;:!?])/g, "$1").trim(); }
+  function words(t) { var m = stripTags(t).replace(/\.{2,}/g, " ").match(/[A-Za-z0-9À-ɏ][A-Za-z0-9À-ɏ'’\-]*/g); return m ? m.length : 0; }
+
+  // Same login the rest of the site uses (the live Supabase session in localStorage).
+  function token() {
+    try {
+      for (var i = 0; i < localStorage.length; i++) {
+        var k = localStorage.key(i);
+        if (!/^sb-.+-auth-token/.test(k)) continue;
+        var p = JSON.parse(localStorage.getItem(k) || "null");
+        if (p && p.access_token && p.expires_at && p.expires_at * 1000 > Date.now() + 15000) return p.access_token;
+      }
+    } catch (e) { /* storage blocked */ }
+    return null;
+  }
+  async function api(method, qs, body) {
+    var t = token();
+    if (!t) throw new Error("Your session has expired. Please log in again at smartstagepro.com, then reopen this page.");
+    var res = await fetch(API + (qs || ""), { method: method, headers: { Authorization: "Bearer " + t, "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+    var json = {}; try { json = await res.json(); } catch (e) { /* non-JSON */ }
+    return { status: res.status, ok: res.ok, json: json };
+  }
+  function say(id, text, kind) { var el = $(id); el.textContent = text || ""; el.className = "msg" + (kind ? " " + kind : ""); }
+  function show(ids) { ["stepProjects", "stepSetup", "stepIntake", "stepScript", "stepBoard"].forEach(function (s) { $(s).classList.toggle("hidden", ids.indexOf(s) < 0); }); }
+
+  // ── Progress pills ──
+  function stage() {
+    var p = state.project;
+    if (!p) return 1;
+    if (!p.intake || !p.intake.angle) return 2;
+    if (p.status !== "narrative_approved" && p.status !== "images" && p.status !== "ready_to_render") return 3;
+    return 4;
+  }
+  var STEP_NAMES = ["Setup", "Your insight", "Script", "Storyboard"], STEP_IDS = ["stepSetup", "stepIntake", "stepScript", "stepBoard"];
+  function renderSteps(active) {
+    var max = stage();
+    $("steps").innerHTML = STEP_NAMES.map(function (n, i) {
+      var cls = i + 1 === active ? "active" : (i + 1 < max || (i + 1 <= max && i + 1 !== active) ? "done" : "");
+      return '<button type="button" class="step-pill ' + cls + '" data-step="' + (i + 1) + '"' + (cls === "" ? " disabled" : "") + ">" + n + "</button>";
+    }).join("");
+    Array.prototype.forEach.call($("steps").querySelectorAll(".step-pill.done"), function (b) { b.addEventListener("click", function () { go(Number(b.getAttribute("data-step"))); }); });
+  }
+  function go(step) { show([STEP_IDS[step - 1]]); renderSteps(step); if (step === 2) fillIntake(); if (step === 3) renderScript(); if (step === 4) renderBoard(); window.scrollTo({ top: 0, behavior: "smooth" }); }
+  function setProject(p) { state.project = p; if (p) { try { history.replaceState(null, "", "#p=" + p.id); } catch (e) { /* ignore */ } } }
+
+  // ── Setup ──
+  function radios(el, name, items, checked) {
+    el.innerHTML = items.map(function (it) { return '<label class="choice"><input type="radio" name="' + name + '" value="' + esc(it.value) + '"' + (it.value === checked ? " checked" : "") + "><span>" + esc(it.label) + "</span></label>"; }).join("");
+  }
+  function pickedValue(name) { var el = document.querySelector('input[name="' + name + '"]:checked'); return el ? el.value : null; }
+  function buildSetup() {
+    radios($("durChoices"), "dur", state.schema.durations.map(function (d) { return { value: String(d), label: d + " seconds" }; }), "45");
+    radios($("fmtChoices"), "fmt", [{ value: "both", label: "Both" }, { value: "9x16", label: "9:16 vertical" }, { value: "16x9", label: "16:9 horizontal" }], "both");
+    radios($("voiceChoices"), "voice", [{ value: "ssp_male", label: "SSP Male" }, { value: "ssp_female", label: "SSP Female" }], "ssp_male");
+  }
+  async function createProject() {
+    $("createBtn").disabled = true; say("setupMsg", "");
+    try {
+      var f = pickedValue("fmt");
+      var r = await api("POST", "", { action: "create", template: "local_market_insider", durationSec: Number(pickedValue("dur")), formats: f === "both" ? ["9x16", "16x9"] : [f], voice: pickedValue("voice") });
+      if (!r.ok) throw new Error(r.json.error || "Could not start");
+      setProject(r.json.project); go(2);
+    } catch (e) { say("setupMsg", e.message, "err"); }
+    $("createBtn").disabled = false;
+  }
+
+  // ── Intake ──
+  function tmpl() { return state.schema.templates[0]; }
+  function fillIntake() {
+    var t = tmpl(), i = (state.project && state.project.intake) || {};
+    state.angle = i.angle || state.angle || null;
+    $("angleChoices").innerHTML = Object.keys(t.angles).map(function (k) { return '<label class="choice"><input type="radio" name="angle" value="' + esc(k) + '"' + (k === state.angle ? " checked" : "") + "><span>" + esc(t.angles[k].label) + "</span></label>"; }).join("");
+    Array.prototype.forEach.call(document.querySelectorAll('input[name="angle"]'), function (el) { el.addEventListener("change", function () { state.angle = el.value; applyAngle(); }); });
+    $("audience").innerHTML = state.schema.audiences.map(function (a) { return '<option value="' + esc(a) + '">' + esc(a) + "</option>"; }).join("");
+    $("action").innerHTML = state.schema.actions.map(function (a) { return '<option value="' + esc(a) + '">' + esc(a) + "</option>"; }).join("");
+    $("market").value = i.market || ""; $("observation").value = i.observation || "";
+    if (i.audience) $("audience").value = i.audience; if (i.action) $("action").value = i.action;
+    applyAngle(i.issue); countObs(); say("intakeMsg", "");
+  }
+  function applyAngle(issue) {
+    var a = state.angle && tmpl().angles[state.angle];
+    $("issue").innerHTML = a ? a.issues.map(function (x) { return '<option value="' + esc(x) + '">' + esc(x) + "</option>"; }).join("") : '<option value="">Choose an angle first</option>';
+    if (issue && a && a.issues.indexOf(issue) >= 0) $("issue").value = issue;
+    $("issueLbl").textContent = a ? a.issueQuestion : "Main issue";
+    $("obsLbl").textContent = a ? a.observationPrompt : "What have you noticed?";
+    $("obsHint").textContent = a ? a.observationHint + "." : "";
+    $("observation").placeholder = a ? a.observationHint : "";
+  }
+  function countObs() { $("obsCount").textContent = $("observation").value.length + " / " + state.schema.limits.observation; }
+  async function saveIntake() {
+    $("intakeBtn").disabled = true; say("intakeMsg", "");
+    try {
+      var intake = { angle: state.angle || "", market: $("market").value, audience: $("audience").value, issue: $("issue").value, observation: $("observation").value, action: $("action").value };
+      var r = await api("POST", "", { action: "save_intake", id: state.project.id, intake: intake });
+      if (!r.ok) throw new Error(r.json.error || "Could not save");
+      setProject(r.json.project);
+      if (r.json.needsInput && r.json.needsInput.length) say("intakeMsg", "Saved. Without your own observation, the script will stay general.", "ok");
+      go(3);
+    } catch (e) { say("intakeMsg", e.message, "err"); }
+    $("intakeBtn").disabled = false;
+  }
+
+  // ── Script ──
+  function narr() { return state.project && state.project.narrative; }
+  function renderScript() {
+    stopPoll();
+    var n = narr(), planning = n && n.status === "planning", ready = n && n.narrationTagged;
+    $("scriptEmpty").classList.toggle("hidden", !!(planning || ready));
+    $("scriptWait").classList.toggle("hidden", !planning);
+    $("scriptReady").classList.toggle("hidden", !ready || planning);
+    say("scriptMsg", "");
+    if (n && n.status === "error") { say("scriptMsg", n.error || "The script could not be written.", "err"); $("planBtn").textContent = "Try again"; }
+    if (planning) startPoll();
+    if (ready && !planning) {
+      $("narration").value = n.narrationTagged;
+      $("cta").value = (n.cta && n.cta.text) || "";
+      $("angleLine").textContent = n.editorialAngle || "";
+      var w = n.warnings || [];
+      $("warnBox").classList.toggle("hidden", !w.length); $("warnBox").innerHTML = w.map(esc).join("<br>");
+      var c = n.claimsToVerify || [];
+      $("verifyBox").classList.toggle("hidden", !c.length);
+      $("verifyBox").innerHTML = "<strong>Please verify before you publish:</strong><ul class='plain'>" + c.map(function (x) { return "<li>" + esc(x) + "</li>"; }).join("") + "</ul>";
+      refreshPreview();
+    }
+  }
+  function refreshPreview() {
+    var t = $("narration").value, target = state.schema.wordTargets[state.project.durationSec] || [0, 0], w = words(t);
+    $("captionPreview").textContent = stripTags(t) || " ";
+    $("wordInfo").textContent = "About " + w + " spoken words (a " + state.project.durationSec + "-second piece usually runs " + target[0] + "–" + target[1] + ").";
+  }
+  async function plan() {
+    $("planBtn").disabled = true; say("scriptMsg", "");
+    try {
+      var r = await api("POST", "", { action: "plan", id: state.project.id });
+      if (!r.ok) throw new Error(r.json.error || "Could not start");
+      setProject(r.json.project); renderScript();
+    } catch (e) { say("scriptMsg", e.message, "err"); }
+    $("planBtn").disabled = false;
+  }
+  function startPoll() {
+    var started = Date.now();
+    state.poll = setInterval(async function () {
+      if (Date.now() - started > 330000) { stopPoll(); say("scriptMsg", "This is taking longer than expected. Please reload in a minute.", "err"); return; }
+      try {
+        var r = await api("GET", "?id=" + encodeURIComponent(state.project.id));
+        if (r.ok && r.json.project) { setProject(r.json.project); var n = narr(); if (!n || n.status !== "planning") { stopPoll(); renderScript(); } }
+      } catch (e) { /* keep polling */ }
+    }, 3000);
+  }
+  function stopPoll() { if (state.poll) { clearInterval(state.poll); state.poll = null; } }
+  function scriptBody() { return { narrationTagged: $("narration").value, cta: { text: $("cta").value, source: "user_edited" } }; }
+  async function saveScript(thenApprove) {
+    $("saveScriptBtn").disabled = true; $("approveBtn").disabled = true; say("scriptMsg", "");
+    try {
+      var r = await api("POST", "", { action: "save_narrative", id: state.project.id, narrative: scriptBody() });
+      if (!r.ok) throw new Error(r.json.error || "Could not save");
+      setProject(r.json.project);
+      if (thenApprove) {
+        var a = await api("POST", "", { action: "approve_narrative", id: state.project.id });
+        if (!a.ok) throw new Error(a.json.error || "Could not approve");
+        setProject(a.json.project); go(4);
+      } else {
+        say("scriptMsg", "Saved." + (r.json.warnings && r.json.warnings.length ? " " + r.json.warnings.join(" ") : ""), "ok");
+      }
+    } catch (e) { say("scriptMsg", e.message, "err"); }
+    $("saveScriptBtn").disabled = false; $("approveBtn").disabled = false;
+  }
+
+  // ── Storyboard (read-only for now) ──
+  function renderBoard() {
+    var n = (state.project && (state.project.narrative)) || {}, scenes = n.scenes || [];
+    $("boardWarn").classList.toggle("hidden", !n.scenesStale);
+    if (n.scenesStale) $("boardWarn").textContent = "You edited the script after the scene plan was written, so the scene text below may no longer match your wording. We'll re-match it in the next step.";
+    $("scenes").innerHTML = scenes.map(function (s, i) {
+      var real = s.visualSource !== "GPT_IMAGE_2_CONCEPT", pr = s.photoRequest || {};
+      var rows = real
+        ? "<dt>Photo to provide</dt><dd>" + esc(pr.bestImage) + "</dd>" + (pr.shouldContain ? "<dt>Should show</dt><dd>" + esc(pr.shouldContain) + "</dd>" : "") + (pr.avoid ? "<dt>Avoid</dt><dd>" + esc(pr.avoid) + "</dd>" : "") + (pr.ifUnavailable ? "<dt>If you don't have it</dt><dd>" + esc(pr.ifUnavailable) + "</dd>" : "")
+        : "<dt>Concept image</dt><dd>" + esc(s.visualBrief) + " (an illustration, not a real place)</dd>";
+      var fr = s.framing || {};
+      return '<div class="scene"><h4>Scene ' + (i + 1) + ' · ' + esc(String(s.role || "").replace(/_/g, " ")) + ' <span class="pill ' + (real ? "real" : "concept") + '">' + (real ? "Your real photo" : "Concept image") + '</span><span class="pill">about ' + esc(s.provisionalSeconds) + 's</span></h4>' +
+        '<div class="q">“' + esc(s.narrationExcerpt) + '”</div><dl>' + rows +
+        (fr["9x16"] ? "<dt>9:16 framing</dt><dd>" + esc(fr["9x16"]) + "</dd>" : "") + (fr["16x9"] ? "<dt>16:9 framing</dt><dd>" + esc(fr["16x9"]) + "</dd>" : "") + "</dl></div>";
+    }).join("") || '<div class="hint">No scene plan yet.</div>';
+    var m = n.missingAgentInputs || [];
+    $("missingBox").classList.toggle("hidden", !m.length);
+    $("missingBox").innerHTML = "<strong>Still needed from you:</strong><ul class='plain'>" + m.map(function (x) { return "<li>" + esc(x) + "</li>"; }).join("") + "</ul>";
+  }
+
+  // ── Projects list ──
+  async function showProjects() {
+    var r = await api("GET", "");
+    var list = (r.ok && r.json.projects) || [];
+    $("projList").innerHTML = list.length ? list.map(function (p) {
+      var t = (p.intake && p.intake.market) || "New project", d = new Date(p.createdAt).toLocaleDateString();
+      return '<div class="proj"><div>' + esc(t) + " · " + esc(p.durationSec) + 's<br><small>' + esc(String(p.status).replace(/_/g, " ")) + " · " + esc(d) + '</small></div><button class="btn ghost" type="button" data-id="' + esc(p.id) + '">Open</button></div>';
+    }).join("") : '<div class="hint">No projects yet.</div>';
+    Array.prototype.forEach.call($("projList").querySelectorAll("button"), function (b) {
+      b.addEventListener("click", async function () { var x = await api("GET", "?id=" + encodeURIComponent(b.getAttribute("data-id"))); if (x.ok) { setProject(x.json.project); go(stage()); } });
+    });
+    show(["stepProjects"]); $("steps").innerHTML = "";
+  }
+
+  function block(msg) { $("gateMsg").classList.remove("hidden"); $("gateMsg").innerHTML = "<div class='panel-title'>" + esc(msg) + "</div>"; }
+  async function init() {
+    if (!token()) return block("Please log in at smartstagepro.com, then reopen this page.");
+    var r;
+    try { r = await api("GET", "?schema=1"); } catch (e) { return block(e.message); }
+    if (r.status === 404) return block("Agent Marketing isn't available on your account yet.");
+    if (!r.ok) return block("Something went wrong loading Agent Marketing. Please try again.");
+    state.schema = r.json; buildSetup();
+    $("app").classList.remove("hidden"); $("myProjectsBtn").classList.remove("hidden");
+    $("myProjectsBtn").addEventListener("click", showProjects);
+    $("newBtn").addEventListener("click", function () { setProject(null); state.angle = null; try { history.replaceState(null, "", location.pathname); } catch (e) { /* ignore */ } go(1); });
+    $("createBtn").addEventListener("click", createProject);
+    $("intakeBtn").addEventListener("click", saveIntake);
+    $("observation").addEventListener("input", countObs);
+    $("planBtn").addEventListener("click", plan);
+    $("narration").addEventListener("input", refreshPreview);
+    $("saveScriptBtn").addEventListener("click", function () { saveScript(false); });
+    $("approveBtn").addEventListener("click", function () { saveScript(true); });
+    var m = /#p=([0-9a-f-]{36})/i.exec(location.hash || "");
+    if (m) { var x = await api("GET", "?id=" + m[1]); if (x.ok) { setProject(x.json.project); return go(stage()); } }
+    var l = await api("GET", "");
+    if (l.ok && l.json.projects && l.json.projects.length) return showProjects();
+    go(1);
+  }
+  init();
+})();
+</script>
+</body>
+</html>

@@ -31,7 +31,7 @@ function assetRowFor(kind, ctx) {
   const base = { project_id: ctx.projectId, user_id: ctx.userId, scene_index: ctx.sceneIndex, version: ctx.version, ai_generated: false, status: "approved" };
   if (kind === "staged") {
     const r = ctx.row;
-    if (!r.clean_s3_key) return { error: "That staged image has no clean copy. Re-run Generate Final on it first." };
+    if (!r.clean_s3_key) return { error: "That staged image was saved with its badge built in, so it cannot be used here. Upload or pick a different photo." };
     return { row: { ...base, source: "staged", staged_image_id: r.id, source_listing_id: r.listing_id || null, original_url: r.cloudinary_original_url || null, staged_url: null, asset_key: r.clean_s3_key, rights: { route: "staged", badgeType: r.badge_type || null } } };
   }
   if (kind === "gallery_original") {

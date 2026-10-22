@@ -291,12 +291,29 @@ async function sendImagePackReceipt({ email, images, pack, amount, balance, sess
   try {
     const url = new URL(hook);
     const price = amount != null ? `$${(amount / 100).toFixed(2)}` : '';
-    const emailHtml = `<div style="font-family:Arial,Helvetica,sans-serif;max-width:520px;margin:0 auto;color:#1a1a1a;line-height:1.6;">
-<h2 style="font-weight:600;">Your Smart Stage PRO image pack</h2>
-<p>Thank you! We added <strong>${escHtmlLocal(images)} images</strong> to your account${price ? ` (${escHtmlLocal(price)})` : ''}.</p>
-<p>Your image balance is now <strong>${escHtmlLocal(balance)}</strong>. Purchased images are added to your balance right away.</p>
-<p style="font-size:13px;color:#666;">Receipt reference: ${escHtmlLocal(sessionId)}<br>Questions? Reply to this email or write support@smartstagepro.com.</p>
-</div>`;
+    const packName = { solo: 'Solo', team: 'Team', brokerage: 'Brokerage' }[pack] || '';
+    const paidOn = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'America/Los_Angeles' });
+    const row = (label, value, bold) => `<tr><td style="padding:10px 0;border-bottom:1px solid #eee;color:#666;font-size:14px;">${label}</td><td style="padding:10px 0;border-bottom:1px solid #eee;text-align:right;font-size:14px;color:#1a1a1a;${bold ? 'font-weight:700;' : ''}">${value}</td></tr>`;
+    const emailHtml = `<div style="background:#f5f3ef;padding:24px 12px;font-family:Arial,Helvetica,sans-serif;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:6px;overflow:hidden;">
+<tr><td style="background:#1a1a1a;padding:22px 28px;text-align:center;"><span style="font-family:Georgia,'Times New Roman',serif;font-size:22px;letter-spacing:3px;color:#c9a84c;">SMART STAGE PRO</span></td></tr>
+<tr><td style="padding:30px 28px 8px;">
+<h1 style="font-family:Georgia,'Times New Roman',serif;font-size:24px;font-weight:600;margin:0 0 12px;color:#1a1a1a;">Your images have been added</h1>
+<p style="font-size:15px;line-height:1.6;color:#333;margin:0 0 20px;">Thank you for your purchase. Your image pack is on your account and ready to use now.</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #eee;">
+${row('Item', `${escHtmlLocal(packName)} Image Pack`.trim())}
+${row('Images added', `+${escHtmlLocal(images)}`, true)}
+${price ? row('Amount paid', escHtmlLocal(price)) : ''}
+${row('Date', escHtmlLocal(paidOn))}
+${row('Your new image balance', `<strong>${escHtmlLocal(balance)}</strong>`)}
+</table>
+<p style="text-align:center;margin:28px 0 8px;"><a href="https://smartstagepro.com" style="display:inline-block;background:#c9a84c;color:#1a1a1a;text-decoration:none;font-weight:700;font-size:15px;padding:13px 28px;border-radius:4px;">Open Smart Stage PRO</a></p>
+</td></tr>
+<tr><td style="padding:18px 28px 28px;font-size:12px;color:#888;line-height:1.6;border-top:1px solid #f0f0f0;">
+Receipt reference: ${escHtmlLocal(sessionId)}<br>
+Questions about this purchase? Reply to this email or write <a href="mailto:support@smartstagepro.com" style="color:#b8963e;">support@smartstagepro.com</a>.<br>
+Smart Stage PRO &middot; smartstagepro.com
+</td></tr></table></div>`;
     const body = JSON.stringify({
       to: email, subject: `Your Smart Stage PRO image pack: ${images} images added`,
       images, pack, amountCents: amount ?? null, balance, sessionId, emailHtml

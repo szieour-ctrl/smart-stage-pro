@@ -1,0 +1,138 @@
+// agent-marketing-project.js — Netlify Function. Agent Marketing project model (Oct 22, 2026).
+// Behind AGENT_MARKETING_ENABLED (see lib/agent-marketing-lib.js): when the switch is off, or the user is not allowed,
+// every call answers 404 as if the endpoint did not exist.
+//
+//   GET  ?schema=1                          → intake schema for the page (no project needed)
+//   GET  ?id=<uuid>                         → one of the caller's projects
+//   GET                                     → the caller's latest projects
+//   POST { action: "create", template?, durationSec?, formats?, voice? }
+//   POST { action: "save_intake", id, intake }          → validates + runs the content gate
+//   POST { action: "save_narrative", id, narrative }    → the agent's own edit of the script (Claude's plan is saved by the planner)
+//   POST { action: "approve_narrative", id }            → gate again, then freezes narrative_approved
+//
+// The user always comes from the login token. A project is only visible to its owner. No listing, address, price or MLS
+// field is accepted anywhere (the gate rejects them structurally).
+const { supabase } = require("./lib/marketing-profile-lib");
+const { requireUser } = require("./lib/reel-auth-lib");
+const gate = require("./lib/agent-marketing-gate");
+const intakeLib = require("./lib/agent-marketing-intake");
+const am = require("./lib/agent-marketing-lib");
+
+const headers = { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json", "Cache-Control": "no-store" };
+const reply = (statusCode, obj) => ({ statusCode, headers, body: JSON.stringify(obj) });
+const PUBLIC_COLS = "id,template,angle,formats,duration_sec,voice,intake,narrative,narrative_approved_at,storyboard,status,gate_version,gate_result,created_at,updated_at";
+
+function forClient(row) {
+  if (!row) return null;
+  return {
+    id: row.id, template: row.template, angle: row.angle, formats: row.formats, durationSec: row.duration_sec, voice: row.voice,
+    intake: row.intake || {}, narrative: row.narrative || null, narrativeApprovedAt: row.narrative_approved_at || null,
+    storyboard: row.storyboard || null, status: row.status, gate: row.gate_result || null,
+    createdAt: row.created_at, updatedAt: row.updated_at,
+  };
+}
+
+async function loadOwned(id, userId) {
+  if (!am.UUID_RE.test(String(id || ""))) return { error: reply(400, { error: "Missing or invalid project id" }) };
+  const r = await supabase("GET", "agent_marketing_projects", null, `?id=eq.${id}&user_id=eq.${userId}&select=*&limit=1`);
+  const row = Array.isArray(r.data) ? r.data[0] : null;
+  if (!row) return { error: reply(404, { error: "Project not found" }) };
+  return { row };
+}
+
+async function patch(id, userId, fields) {
+  const r = await supabase("PATCH", "agent_marketing_projects", { ...fields, updated_at: new Date().toISOString() }, `?id=eq.${id}&user_id=eq.${userId}`);
+  const row = Array.isArray(r.data) ? r.data[0] : null;
+  if (r.status >= 300 || !row) { console.error("agent-marketing patch failed:", r.status, JSON.stringify(r.data).slice(0, 200)); return null; }
+  return row;
+}
+
+function gateSummary(result) {
+  return { ok: result.ok, version: result.version, blocks: result.blocks, warnings: result.warnings, agentSuppliedClaims: result.agentSuppliedClaims };
+}
+
+exports.handler = async (event) => {
+  if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: { ...headers, "Access-Control-Allow-Headers": "Content-Type, Authorization", "Access-Control-Allow-Methods": "GET, POST, OPTIONS" }, body: "" };
+  const auth = await requireUser(event);
+  if (auth.error) return reply(auth.error.status, auth.error.body);
+  const userId = auth.user.id;
+  if (!am.isEnabledFor(userId)) return reply(404, { error: "Not found" });
+
+  try {
+    if (event.httpMethod === "GET") {
+      const qs = event.queryStringParameters || {};
+      if (qs.schema) {
+        return reply(200, {
+          templates: gate.ENABLED_TEMPLATES.map((t) => ({ key: t, ...intakeLib.schemaFor(t) })),
+          audiences: intakeLib.AUDIENCES, actions: intakeLib.ACTIONS, limits: intakeLib.LIMITS,
+          durations: am.DURATIONS, formats: am.FORMATS, voices: am.VOICES, wordTargets: am.WORD_TARGETS,
+          attestation: { version: gate.ATTESTATION_VERSION, text: gate.ATTESTATION_TEXT },
+        });
+      }
+      if (qs.id) {
+        const o = await loadOwned(qs.id, userId);
+        return o.error || reply(200, { project: forClient(o.row) });
+      }
+      const r = await supabase("GET", "agent_marketing_projects", null, `?user_id=eq.${userId}&select=${PUBLIC_COLS}&order=created_at.desc&limit=20`);
+      return reply(200, { projects: (Array.isArray(r.data) ? r.data : []).map(forClient) });
+    }
+
+    if (event.httpMethod !== "POST") return reply(405, { error: "Method not allowed" });
+    let b;
+    try { b = JSON.parse(event.body || "{}"); } catch { return reply(400, { error: "Invalid JSON" }); }
+    const action = String(b.action || "");
+
+    if (action === "create") {
+      const v = am.validateCreate(b);
+      if (v.error) return reply(400, { error: v.error });
+      const g = gate.evaluate({ template: v.row.template, payload: b });
+      if (!g.ok) return reply(422, { error: gate.explain(g), gate: gateSummary(g) });
+      const ins = await supabase("POST", "agent_marketing_projects", { ...v.row, user_id: userId });
+      const row = Array.isArray(ins.data) ? ins.data[0] : null;
+      if (ins.status >= 300 || !row) { console.error("agent-marketing create failed:", ins.status, JSON.stringify(ins.data).slice(0, 200)); return reply(500, { error: "Could not start the project" }); }
+      return reply(200, { project: forClient(row) });
+    }
+
+    if (!["save_intake", "save_narrative", "approve_narrative"].includes(action)) return reply(400, { error: "Unknown action" });
+    const o = await loadOwned(b.id, userId);
+    if (o.error) return o.error;
+    const project = o.row;
+    if (am.NOT_EDITABLE_AFTER.includes(project.status)) return reply(409, { error: "This piece is already rendering or finished. Start a new one to change it." });
+
+    if (action === "save_intake") {
+      const v = intakeLib.validateIntake(project.template, b.intake);
+      if (!v.ok) return reply(400, { error: v.errors[0].message, errors: v.errors });
+      const g = gate.evaluate({ template: project.template, payload: b.intake, intake: v.clean });
+      if (!g.ok) return reply(422, { error: gate.explain(g), gate: gateSummary(g) });
+      // New facts mean any earlier script is stale: keep it as a draft, drop back to "draft", never touch narrative_approved.
+      const saved = await patch(project.id, userId, { intake: v.clean, angle: v.clean.angle, status: "draft", gate_version: g.version, gate_result: gateSummary(g) });
+      if (!saved) return reply(500, { error: "Could not save your answers" });
+      return reply(200, { project: forClient(saved), needsInput: v.needsInput, gate: gateSummary(g) });
+    }
+
+    if (action === "save_narrative") {
+      if (!project.intake || !project.intake.angle) return reply(409, { error: "Answer the intake questions first." });
+      const v = am.validateNarrative(b.narrative, project.duration_sec);
+      if (v.error) return reply(400, { error: v.error });
+      const g = gate.evaluate(am.gateInputFor(project, v.narrative, "edited"));
+      if (!g.ok) return reply(422, { error: gate.explain(g), gate: gateSummary(g) });
+      const narrative = { ...v.narrative, source: "edited", savedAt: new Date().toISOString() };
+      const saved = await patch(project.id, userId, { narrative, status: "narrative_ready", gate_version: g.version, gate_result: gateSummary(g) });
+      if (!saved) return reply(500, { error: "Could not save the script" });
+      return reply(200, { project: forClient(saved), warnings: v.warnings, gate: gateSummary(g) });
+    }
+
+    // approve_narrative
+    const n = project.narrative;
+    if (!n || !n.narrationTagged) return reply(409, { error: "There is no script to approve yet." });
+    const g = gate.evaluate(am.gateInputFor(project, n, n.source === "claude" ? "claude" : "edited"));
+    if (!g.ok) return reply(422, { error: gate.explain(g), gate: gateSummary(g) });
+    const now = new Date().toISOString();
+    const saved = await patch(project.id, userId, { narrative_approved: { ...n, approvedAt: now, gateVersion: g.version }, narrative_approved_at: now, status: "narrative_approved", gate_version: g.version, gate_result: gateSummary(g) });
+    if (!saved) return reply(500, { error: "Could not approve the script" });
+    return reply(200, { project: forClient(saved), gate: gateSummary(g) });
+  } catch (e) {
+    console.error("agent-marketing-project error:", e.message);
+    return reply(500, { error: "Something went wrong. Please try again." });
+  }
+};

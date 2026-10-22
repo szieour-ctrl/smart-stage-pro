@@ -185,11 +185,13 @@ exports.handler = async function(event) {
 
   // ── Image Pack: one-time payment, live subscribers only ──
   if (plan === 'image_pack') {
-    if (!userRecord.stripe_subscription_id || !['active', 'past_due'].includes(userRecord.subscription_status)) {
-      return { statusCode: 403, body: JSON.stringify({ error: 'Image packs are available to subscribers. Choose a plan first.' }) };
-    }
+    // Active accounts only (trial/package/cancelled are excluded). A Stripe
+    // subscription is NOT required: comped/owner accounts can buy packs too.
     if (userRecord.subscription_status === 'past_due') {
       return { statusCode: 409, body: JSON.stringify({ error: 'Your last payment failed. Update your card in Billing first.' }) };
+    }
+    if (userRecord.subscription_status !== 'active') {
+      return { statusCode: 403, body: JSON.stringify({ error: 'Image packs are available to subscribers. Choose a plan first.' }) };
     }
     const cfg = PACK_BY_ROLE[userRecord.role];
     const packPrice = cfg && process.env[cfg.env];
@@ -200,7 +202,6 @@ exports.handler = async function(event) {
     const iParams = {
       'mode':                                   'payment',
       'payment_method_types[]':                 'card',
-      'customer':                               userRecord.stripe_customer_id,
       'line_items[0][price]':                   packPrice,
       'line_items[0][quantity]':                '1',
       'success_url':                            `${BASE}?pack=success`,
@@ -211,8 +212,11 @@ exports.handler = async function(event) {
       'payment_intent_data[metadata][user_id]': authUser.id,
       'payment_intent_data[metadata][plan]':    'image_pack',
     };
-    if (!userRecord.stripe_customer_id) {
-      return { statusCode: 500, body: JSON.stringify({ error: 'No billing profile found. Contact support.' }) };
+    if (userRecord.stripe_customer_id) {
+      iParams['customer'] = userRecord.stripe_customer_id;
+    } else {
+      iParams['customer_email'] = authUser.email;
+      iParams['customer_creation'] = 'always';
     }
     const iResult = await stripePost('checkout/sessions', iParams);
     if (iResult.status !== 200) {

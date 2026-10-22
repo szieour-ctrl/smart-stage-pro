@@ -166,7 +166,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     <section class="panel hidden" id="stepBoard">
       <div class="eyebrow">04 / Storyboard</div>
       <div class="panel-title">Your script is approved</div>
-      <div class="panel-sub">Choose a real photo for each scene. Concept images come in the next step.</div>
+      <div class="panel-sub">Your Reel works without any photos: concept images, your profile photos and brand cards fill every scene. Where a scene offers an optional real photo, you can add one.</div>
       <div id="boardWarn" class="note hidden"></div>
       <div id="scenes"></div>
       <div id="missingBox" class="note hidden"></div>
@@ -364,12 +364,16 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     $("boardWarn").classList.toggle("hidden", !n.scenesStale);
     if (n.scenesStale) $("boardWarn").textContent = "You edited the script after the scene plan was written, so the scene text below may no longer match your wording. We'll re-match it in the next step.";
     $("scenes").innerHTML = scenes.map(function (s, i) {
-      var real = s.visualSource !== "GPT_IMAGE_2_CONCEPT", pr = s.photoRequest || {};
-      var rows = real
-        ? "<dt>Photo to provide</dt><dd>" + esc(pr.bestImage) + "</dd>" + (pr.shouldContain ? "<dt>Should show</dt><dd>" + esc(pr.shouldContain) + "</dd>" : "") + (pr.avoid ? "<dt>Avoid</dt><dd>" + esc(pr.avoid) + "</dd>" : "") + (pr.ifUnavailable ? "<dt>If you don't have it</dt><dd>" + esc(pr.ifUnavailable) + "</dd>" : "")
-        : "<dt>Concept image</dt><dd>" + esc(s.visualBrief) + " (an illustration, not a real place)</dd>";
+      var vs = s.visualSource, real = vs === "AUTHENTIC_AGENT_ASSET", pr = s.photoRequest || {};
+      var label = { GPT_IMAGE_2_CONCEPT: "Concept image", CONCEPT_REUSE: "Concept image (re-framed)", AGENT_PROFILE: "Your profile photo", BRAND_CARD: "Brand card", AUTHENTIC_AGENT_ASSET: "Optional real photo" }[vs] || "Scene";
+      var rows;
+      if (real) rows = "<dt>Optional photo</dt><dd>" + esc(pr.bestImage) + "</dd>" + (pr.shouldContain ? "<dt>Should show</dt><dd>" + esc(pr.shouldContain) + "</dd>" : "") + (pr.avoid ? "<dt>Avoid</dt><dd>" + esc(pr.avoid) + "</dd>" : "") + "<dt>If you skip it</dt><dd>" + esc(pr.ifUnavailable || "A concept image is used instead.") + "</dd>";
+      else if (vs === "GPT_IMAGE_2_CONCEPT") rows = "<dt>Concept image</dt><dd>" + esc(s.visualBrief) + " (an illustration, not a real place)</dd>";
+      else if (vs === "CONCEPT_REUSE") rows = "<dt>Visual</dt><dd>Re-uses the concept image from scene " + ((Number(s.reuseOfScene) || 0) + 1) + " with a different crop and motion.</dd>";
+      else if (vs === "AGENT_PROFILE") rows = "<dt>Visual</dt><dd>" + esc(s.visualBrief || "Your headshot or full-body photo from your Marketing Profile.") + "</dd>";
+      else rows = "<dt>On-screen text</dt><dd>" + esc(s.cardText || s.visualBrief) + "</dd>";
       var fr = s.framing || {};
-      return '<div class="scene"><h4>Scene ' + (i + 1) + ' · ' + esc(String(s.role || "").replace(/_/g, " ")) + ' <span class="pill ' + (real ? "real" : "concept") + '">' + (real ? "Your real photo" : "Concept image") + '</span><span class="pill">about ' + esc(s.provisionalSeconds) + 's</span></h4>' +
+      return '<div class="scene"><h4>Scene ' + (i + 1) + ' · ' + esc(String(s.role || "").replace(/_/g, " ")) + ' <span class="pill ' + (real || vs === "AGENT_PROFILE" ? "real" : "concept") + '">' + label + '</span><span class="pill">about ' + esc(s.provisionalSeconds) + 's</span></h4>' +
         '<div class="q">“' + esc(s.narrationExcerpt) + '”</div><dl>' + rows +
         (fr["9x16"] ? "<dt>9:16 framing</dt><dd>" + esc(fr["9x16"]) + "</dd>" : "") + (fr["16x9"] ? "<dt>16:9 framing</dt><dd>" + esc(fr["16x9"]) + "</dd>" : "") + "</dl>" + (real ? '<div class="pick" id="pick' + i + '"></div>' : "") + "</div>";
     }).join("") || '<div class="hint">No scene plan yet.</div>';
@@ -391,7 +395,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     var el = $("pick" + i); if (!el) return;
     var it = picked[i];
     el.innerHTML = (it && it.url ? '<img class="sel" alt="Selected photo" src="' + esc(it.url) + '">' : "") +
-      '<button class="btn ' + (it ? "ghost" : "gold") + '" type="button" data-scene="' + i + '">' + (it ? "Change photo" : "Choose photo") + "</button>" +
+      '<button class="btn ' + (it ? "ghost" : "gold") + '" type="button" data-scene="' + i + '">' + (it ? "Change photo" : "Add optional photo") + "</button>" +
       (it ? '<button class="link-btn" type="button" data-clear="' + i + '">Remove</button>' : "");
     el.querySelector("[data-scene]").addEventListener("click", function () { openPicker(i); });
     var c = el.querySelector("[data-clear]");

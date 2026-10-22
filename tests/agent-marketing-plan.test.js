@@ -18,16 +18,16 @@ const excerpts = [
   "Compare the full picture, and ask me for a local perspective.",
 ];
 const tagged = `[conversational] ${excerpts[0]} [thoughtful] ${excerpts[1]} ${excerpts[2]} [emphasis] ${excerpts[3]} [confident] ${excerpts[4]} [warm] ${excerpts[5]}`;
-const scene = (i, gpt) => ({
+const scene = (i, kind) => { const gpt = kind === true; const k = gpt ? "GPT_IMAGE_2_CONCEPT" : (kind || "CONCEPT_REUSE"); return {
   role: ["local_hook", "tension", "insight", "comparison", "advice", "cta"][i], narration_excerpt: excerpts[i], purpose: "p" + i,
-  visual_source: gpt ? "GPT_IMAGE_2_CONCEPT" : "AUTHENTIC_AGENT_ASSET", visual_brief: "brief " + i,
-  authentic_photo_request: gpt ? null : { best_image: "A real Roseville street of established homes", should_contain: "Street context, room to crop", avoid: "Mislabeling a neighborhood", if_unavailable: "Substitute an accurate photo" },
+  visual_source: k, visual_brief: "brief " + i, reuse_of_scene: k === "CONCEPT_REUSE" ? 2 : null, card_text: k === "BRAND_CARD" ? "Ask me for a local view" : null,
+  authentic_photo_request: k !== "AUTHENTIC_AGENT_ASSET" ? null : { best_image: "A real Roseville street of established homes", should_contain: "Street context, room to crop", avoid: "Mislabeling a neighborhood", if_unavailable: "Substitute an accurate photo" },
   ai_generation_prompt: gpt ? "Photorealistic editorial tabletop with two architectural home models, soft light, no people, no text, vertical 9:16 composition" : null,
   camera_motion: "push_in", framing_9x16: "keep homes visible", framing_16x9: "keep wide street", text_safe_placement: "lower middle",
-});
+}; };
 const goodPlan = () => ({
   editorial_angle: "New construction is both an advantage and a challenge.", hook: excerpts[0], narration_with_audio_tags: tagged,
-  scenes: [scene(0, false), scene(1, true), scene(2, false), scene(3, true), scene(4, false), scene(5, false)],
+  scenes: [scene(0, "AGENT_PROFILE"), scene(1, true), scene(2, "CONCEPT_REUSE"), scene(3, true), scene(4, "AUTHENTIC_AGENT_ASSET"), scene(5, "BRAND_CARD")],
   cta_suggestion: "Ask me for a local perspective.", claims_to_verify: ["Which builders currently offer incentives"], missing_agent_inputs: [],
 });
 
@@ -38,10 +38,13 @@ test("a good plan is normalized: captions derived, scenes timed to the duration,
   assert.ok(!/[\[\]]/.test(n.captionText));
   assert.strictEqual(n.scenes.length, 6);
   assert.strictEqual(n.scenes.filter((s) => s.visualSource === "GPT_IMAGE_2_CONCEPT").length, 2);
-  assert.ok(n.scenes.every((s) => s.visualSource === "GPT_IMAGE_2_CONCEPT" ? s.aiGenerationPrompt : s.photoRequest.bestImage));
+  assert.ok(n.scenes.filter((s) => s.visualSource === "GPT_IMAGE_2_CONCEPT").every((s) => s.aiGenerationPrompt));
+  assert.strictEqual(n.scenes[2].reuseOfScene, 1); // "scene 2" in the plan = index 1, the first concept image
+  assert.strictEqual(n.scenes[5].cardText, "Ask me for a local view");
+  assert.strictEqual(n.scenes[4].optional, true);
   assert.ok(Math.abs(n.scenes.reduce((a, s) => a + s.provisionalSeconds, 0) - 45) < 0.6);
   assert.deepStrictEqual(n.cta, { text: "Ask me for a local perspective.", source: "claude" });
-  assert.ok(n.missingAgentInputs.some((m) => /authentic photo/.test(m)));
+  assert.ok(n.missingAgentInputs.some((m) => /Optional: one real photo/.test(m)));
   assert.strictEqual(out.gate.ok, true);
 });
 
@@ -92,4 +95,15 @@ test("the prompt carries the rules and never includes the agent's profile or con
 test("intake hash changes only when the answers change", () => {
   assert.strictEqual(planLib.intakeHash(intake), planLib.intakeHash({ ...intake }));
   assert.notStrictEqual(planLib.intakeHash(intake), planLib.intakeHash({ ...intake, observation: intake.observation + " More." }));
+});
+
+test("a plan with no real photos at all is fine, and extra optional scenes fall back to re-using a concept image", () => {
+  const p = goodPlan(); p.scenes[4] = scene(4, "CONCEPT_REUSE");
+  const n = planLib.normalizePlan(p, project).narrative;
+  assert.ok(!n.scenes.some((s) => s.visualSource === "AUTHENTIC_AGENT_ASSET"));
+  assert.ok(!n.missingAgentInputs.some((m) => /Optional: one real photo/.test(m)));
+  const q = goodPlan(); q.scenes[2] = scene(2, "AUTHENTIC_AGENT_ASSET"); // a second optional photo exceeds the limit of 1
+  const m = planLib.normalizePlan(q, project).narrative;
+  assert.strictEqual(m.scenes.filter((s) => s.visualSource === "AUTHENTIC_AGENT_ASSET").length, 1);
+  assert.strictEqual(m.scenes[4].visualSource, "CONCEPT_REUSE"); // the later one is demoted
 });

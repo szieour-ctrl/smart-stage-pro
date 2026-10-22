@@ -392,7 +392,7 @@ async function sendListingPackageReceipt({ email, amount, balance, accessUntil, 
       ['Download your images by', escHtmlLocal(fmtEmailDate(exportUntil))],
       ['Your image balance', `<strong>${escHtmlLocal(balance)}</strong>`],
     ],
-    extraHtml: '<p style="font-size:13.5px;line-height:1.6;color:#555;margin:20px 0 0;">Your Listing Package also includes <strong>Reels</strong> &mdash; short vertical videos for social media &mdash; to use during your access window. See the Terms of Service for details.</p>',
+    extraHtml: '<p style="font-size:13.5px;line-height:1.6;color:#555;margin:20px 0 0;">Your Listing Package also includes <strong>1 PRO Plus Video</strong> (a 16:9 listing video with music) and <strong>3 Reels</strong> (short vertical videos for social media) to use during your access window. See the Terms of Service for details.</p>',
     sessionId,
   });
   await postTransactionalEmail({

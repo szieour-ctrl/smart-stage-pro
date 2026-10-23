@@ -77,10 +77,10 @@ async function rpc(name, args) {
   return r.data;
 }
 
-function callDebitCredit(userId, cost, reason) {
+function callDebitCredit(userId, cost, reason, isRefund) {
   return new Promise((resolve, reject) => {
     const url = new URL(`${process.env.SITE_URL}/.netlify/functions/debit-credit`);
-    const bodyStr = JSON.stringify({ userId, cost, reason, isRefund: false });
+    const bodyStr = JSON.stringify({ userId, cost, reason, isRefund: !!isRefund });
     const req = https.request({
       hostname: url.hostname, path: url.pathname, method: "POST",
       headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(bodyStr), "x-internal-key": process.env.INTERNAL_API_KEY || "" },
@@ -167,5 +167,5 @@ async function chargeDownload(jobId, userId) {
 
 module.exports = {
   MONTHLY_REEL_LIMIT, TRIAL_REEL_LIMIT, PACKAGE_REELS_PER_PACKAGE, WASTE_RENDER_THRESHOLD,
-  getPlanContext, limitFor, periodFor, rpc, getCounter, countCompletion, settleOwed, getQuotaSummary, chargeDownload,
+  getPlanContext, limitFor, periodFor, rpc, callDebitCredit, getCounter, countCompletion, settleOwed, getQuotaSummary, chargeDownload,
 };

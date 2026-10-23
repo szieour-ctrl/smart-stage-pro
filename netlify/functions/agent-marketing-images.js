@@ -85,7 +85,7 @@ exports.handler = async (event) => {
           slots.push({ sceneIndex: index, kind: scene.visualSource, format, latest: latest ? await viewOf(latest) : null, approved: approved ? await viewOf(approved) : null, used: q.used, included: q.included, nextCredits: q.credits, capReached: q.capReached });
         }
       }
-      return reply(200, { slots, projectTotal: assets.filter(img.counts).length, projectCap: st.projectCap, creditsPerExtra: st.credits });
+      return reply(200, { slots, projectTotal: assets.filter(img.counts).length, projectCap: st.projectCap, creditsPerExtra: st.credits, charging: st.charging });
     }
 
     if (event.httpMethod !== "POST") return reply(405, { error: "Method not allowed" });

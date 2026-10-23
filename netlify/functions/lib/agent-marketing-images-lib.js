@@ -8,6 +8,7 @@
 //   AGENT_MARKETING_IMAGE_PROJECT_CAP   default 12   (generations per project, errors that were refunded excluded)
 //   AGENT_MARKETING_IMAGE_CREDITS       default 1    (Images charged per extra generation)
 //   AGENT_MARKETING_IMAGE_QUALITY       default "medium"  (low | medium | high)
+//   AGENT_MARKETING_IMAGE_CHARGING      default "on"      ("off" = every try is free during beta; the project cap still applies)
 "use strict";
 
 const SIZES = { "9x16": "1024x1536", "16x9": "1536x1024" };
@@ -23,6 +24,7 @@ function settings(env) {
     projectCap: num(e.AGENT_MARKETING_IMAGE_PROJECT_CAP, 12, 1, 60),
     credits: num(e.AGENT_MARKETING_IMAGE_CREDITS, 1, 1, 20),
     quality: ["low", "medium", "high"].includes(q) ? q : "medium",
+    charging: String(e.AGENT_MARKETING_IMAGE_CHARGING || "on").trim().toLowerCase() !== "off",
   };
 }
 
@@ -47,7 +49,7 @@ function quote(assets, sceneIndex, format, env) {
   const used = slotAssets(assets, sceneIndex, format).length;
   const projectTotal = (assets || []).filter(counts).length;
   const included = 1 + st.freeRedos;
-  const charged = used >= included;
+  const charged = st.charging && used >= included;
   return {
     used, included, charged, credits: charged ? st.credits : 0,
     capReached: projectTotal >= st.projectCap, projectTotal, projectCap: st.projectCap,

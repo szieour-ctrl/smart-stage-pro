@@ -6,9 +6,18 @@ process.env.OPENAI_API_KEY = "x"; process.env.INTERNAL_API_KEY = "ik"; process.e
 const img = require("../netlify/functions/lib/agent-marketing-images-lib");
 
 test("settings defaults and clamping", () => {
-  assert.deepStrictEqual(img.settings({}), { freeRedos: 1, projectCap: 12, credits: 1, quality: "medium" });
+  assert.deepStrictEqual(img.settings({}), { freeRedos: 1, projectCap: 12, credits: 1, quality: "medium", charging: true });
   assert.strictEqual(img.settings({ AGENT_MARKETING_IMAGE_PROJECT_CAP: "999" }).projectCap, 12);
   assert.strictEqual(img.settings({ AGENT_MARKETING_IMAGE_QUALITY: "high", AGENT_MARKETING_IMAGE_FREE_REDOS: "0" }).freeRedos, 0);
+});
+
+test("beta switch: AGENT_MARKETING_IMAGE_CHARGING=off makes every try free but keeps the project cap", () => {
+  const a = (i, f) => ({ source: "gpt_image_2", scene_index: i, generation: { format: f, state: "done" } });
+  const many = [a(1, "9x16"), a(1, "9x16"), a(1, "9x16"), a(1, "9x16")];
+  assert.strictEqual(img.quote(many, 1, "9x16", {}).charged, true);
+  const q = img.quote(many, 1, "9x16", { AGENT_MARKETING_IMAGE_CHARGING: "off" });
+  assert.deepStrictEqual([q.charged, q.credits], [false, 0]);
+  assert.strictEqual(img.quote(Array.from({ length: 12 }, (_, i) => a(i, "9x16")), 0, "16x9", { AGENT_MARKETING_IMAGE_CHARGING: "off" }).capReached, true);
 });
 
 test("quote: first image and one redo included, then charged; failed attempts do not use up the allowance; cap", () => {

@@ -6,11 +6,15 @@
 //   POST { action: "generate", projectId, sceneIndex, format, confirmCharge? }
 //        Starts one generation. The first image of a slot and one redo are included; later redos cost Images and are only
 //        started when confirmCharge is true (otherwise the call answers 402 with the exact price so the page can ask).
+//   POST { action: "elaborate", projectId, sceneIndex, kind: "concept"|"agent_scene", note? }
+//        Turns the agent's optional note into one scrubbed image description (Claude + the content gate). Spends no try.
+//        generate then accepts that text as `description` (it is re-checked on the server) plus `kind` and the raw `note`.
 //   POST { action: "accept", projectId, assetId }            → makes it the approved image for that scene + format
 //   POST { action: "reject", projectId, assetId }            → discards a draft
 //   POST { action: "keep", projectId, assetId }              → saves an image to My Marketing Photos for reuse
 //
-// Rules in code: only scenes the planner marked as new images (GPT_IMAGE_2_CONCEPT or AGENT_SCENE); the agent scene needs a
+// Rules in code: any scene can get a generated image (the agent chooses concept image or image of you; their own photo is the
+// other choice, in agent-marketing-media). The agent scene needs a
 // photo in the user's Marketing Profile; the 16:9 version of a scene is built from the approved 9:16 image when there is one;
 // a hard cap on generations per project; charges are made before the call and refunded if it fails.
 const { S3Client, GetObjectCommand } = require("@aws-sdk/client-s3");
@@ -20,6 +24,8 @@ const { requireUser } = require("./lib/reel-auth-lib");
 const quota = require("./lib/reel-quota-lib");
 const am = require("./lib/agent-marketing-lib");
 const img = require("./lib/agent-marketing-images-lib");
+const elab = require("./lib/agent-marketing-image-elaborate-lib");
+const gate = require("./lib/agent-marketing-gate");
 
 const headers = { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json", "Cache-Control": "no-store" };
 const reply = (statusCode, obj) => ({ statusCode, headers, body: JSON.stringify(obj) });
@@ -32,7 +38,7 @@ const SELECTABLE = ["narrative_approved", "images", "ready_to_render"];
 
 async function loadProject(id, userId) {
   if (!am.UUID_RE.test(String(id || ""))) return { error: reply(400, { error: "Missing or invalid project id" }) };
-  const r = await supabase("GET", "agent_marketing_projects", null, `?id=eq.${id}&user_id=eq.${userId}&select=id,status,formats,narrative&limit=1`);
+  const r = await supabase("GET", "agent_marketing_projects", null, `?id=eq.${id}&user_id=eq.${userId}&select=id,status,formats,narrative,template,intake&limit=1`);
   const row = rowsOf(r)[0];
   if (!row) return { error: reply(404, { error: "Project not found" }) };
   return { row };
@@ -58,7 +64,7 @@ async function reapStale(assets, userId) {
 
 async function viewOf(a) {
   const g = a.generation || {};
-  return { id: a.id, sceneIndex: a.scene_index, format: g.format, state: g.state, status: a.status, version: a.version, error: g.state === "error" ? g.error : null, url: g.state === "done" && a.asset_key ? await presignGet(a.asset_key) : null };
+  return { id: a.id, sceneIndex: a.scene_index, format: g.format, kind: g.kind || null, state: g.state, status: a.status, version: a.version, error: g.state === "error" ? g.error : null, url: g.state === "done" && a.asset_key ? await presignGet(a.asset_key) : null };
 }
 
 exports.handler = async (event) => {
@@ -76,13 +82,13 @@ exports.handler = async (event) => {
       await reapStale(assets, userId);
       const st = img.settings();
       const slots = [];
-      for (const { index, scene } of img.imageScenes(p.row.narrative)) {
+      for (const { index, scene } of img.allScenes(p.row.narrative)) {
         for (const format of p.row.formats || []) {
           const mine = assets.filter((a) => a.scene_index === index && img.fmtOf(a) === format);
           const latest = mine[mine.length - 1];
           const approved = mine.filter((a) => a.status === "approved").pop();
           const q = img.quote(assets, index, format);
-          slots.push({ sceneIndex: index, kind: scene.visualSource, format, latest: latest ? await viewOf(latest) : null, approved: approved ? await viewOf(approved) : null, used: q.used, included: q.included, nextCredits: q.credits, capReached: q.capReached });
+          slots.push({ sceneIndex: index, kind: scene.visualSource, plannedKind: img.plannedKind(scene), format, latest: latest ? await viewOf(latest) : null, approved: approved ? await viewOf(approved) : null, used: q.used, included: q.included, nextCredits: q.credits, capReached: q.capReached });
         }
       }
       return reply(200, { slots, projectTotal: assets.filter(img.counts).length, projectCap: st.projectCap, creditsPerExtra: st.credits, charging: st.charging });
@@ -109,17 +115,36 @@ exports.handler = async (event) => {
       for (const o of assets) {
         if (o.id !== a.id && o.scene_index === a.scene_index && img.fmtOf(o) === img.fmtOf(a) && o.status === "approved") await supabase("PATCH", "agent_marketing_assets", { status: "rejected" }, `?id=eq.${o.id}&user_id=eq.${userId}`);
       }
+      // A scene has ONE source: accepting a generated image retires an approved own photo (choosing an own photo in
+      // agent-marketing-media likewise retires the generated approvals).
+      await supabase("PATCH", "agent_marketing_assets", { status: "rejected" }, `?project_id=eq.${project.id}&user_id=eq.${userId}&scene_index=eq.${a.scene_index}&status=eq.approved&source=neq.gpt_image_2`);
       await supabase("PATCH", "agent_marketing_assets", { status: "approved" }, `?id=eq.${a.id}&user_id=eq.${userId}`);
       if (project.status === "narrative_approved") await supabase("PATCH", "agent_marketing_projects", { status: "images", updated_at: new Date().toISOString() }, `?id=eq.${project.id}&user_id=eq.${userId}`);
       return reply(200, { ok: true });
+    }
+
+    if (b.action === "elaborate") {
+      if (!SELECTABLE.includes(project.status)) return reply(409, { error: "Approve your script before creating images." });
+      if (!process.env.ANTHROPIC_API_KEY) return reply(500, { error: "Image descriptions are not configured." });
+      const tgt = img.allScenes(project.narrative).find((x) => x.index === Number(b.sceneIndex));
+      if (!tgt) return reply(400, { error: "Unknown scene." });
+      try {
+        const out = await elab.elaborate({ project, scene: tgt.scene, kind: b.kind, note: b.note, anthropicKey: process.env.ANTHROPIC_API_KEY });
+        return reply(200, { description: out.description, removed: out.removed, warnings: out.warnings, kind: b.kind });
+      } catch (e) {
+        if (e.code) return reply(e.code === "bad_kind" ? 400 : 422, { error: e.message, code: e.code });
+        console.error("agent-marketing-images elaborate error:", e.message);
+        return reply(502, { error: "Could not write the description. Please try again." });
+      }
     }
 
     if (b.action !== "generate") return reply(400, { error: "Unknown action" });
     if (!SELECTABLE.includes(project.status)) return reply(409, { error: "Approve your script before creating images." });
     if (!process.env.OPENAI_API_KEY) return reply(500, { error: "Image generation is not configured." });
     const sceneIndex = Number(b.sceneIndex), format = String(b.format || "");
-    const target = img.imageScenes(project.narrative).find((x) => x.index === sceneIndex);
-    if (!target) return reply(400, { error: "That scene does not use a generated image." });
+    const target = img.allScenes(project.narrative).find((x) => x.index === sceneIndex);
+    if (!target) return reply(400, { error: "Unknown scene." });
+    if (b.kind != null && !elab.KINDS.includes(b.kind)) return reply(400, { error: "Choose a concept image or an image of you." });
     if (!(project.formats || []).includes(format) || !img.SIZES[format]) return reply(400, { error: "Choose one of this project's formats." });
     if ((assets.filter((a) => a.scene_index === sceneIndex && img.fmtOf(a) === format && img.stateOf(a) === "generating")).length) return reply(409, { error: "This image is already being created." });
 
@@ -128,16 +153,30 @@ exports.handler = async (event) => {
 
     // Reference: the agent scene uses the agent's own profile photo; a 16:9 version uses the approved 9:16 image.
     let referenceKey = null, fromApproved = false;
+    const planned = img.plannedKind(target.scene);
+    let kind = b.kind || planned || (target.scene.visualSource === "AGENT_SCENE" ? "agent_scene" : "concept");
     const approvedPortrait = assets.filter((a) => a.scene_index === sceneIndex && img.fmtOf(a) === "9x16" && a.status === "approved" && img.stateOf(a) === "done" && a.asset_key).pop();
-    if (format === "16x9" && approvedPortrait) { referenceKey = approvedPortrait.asset_key; fromApproved = true; }
-    else if (target.scene.visualSource === "AGENT_SCENE") {
+    if (format === "16x9" && approvedPortrait) { referenceKey = approvedPortrait.asset_key; fromApproved = true; kind = (approvedPortrait.generation || {}).kind || kind; }
+    else if (kind === "agent_scene") {
       const pr = rowsOf(await supabase("GET", "marketing_profiles", null, `?user_id=eq.${userId}&select=headshot_key,fullbody_key&limit=1`))[0];
       referenceKey = img.pickReferenceKey(pr);
       if (!referenceKey) return reply(409, { error: "Add a headshot or full-body photo to your Marketing Profile first.", code: "profile_photo_needed" });
     }
+    // What the image should show. The planner's own prompt is used only when it was written for this kind of image;
+    // otherwise (another kind, or a scene the planner gave no image prompt) the agent's elaborated description is needed.
+    // Whatever text we use is checked again here, so a hand-built request cannot skip the scrub.
+    let scenePrompt = planned === kind ? (target.scene.aiGenerationPrompt || null) : null;
+    const note = elab.cleanNote(b.note);
+    if (typeof b.description === "string" && b.description.trim()) {
+      const d = elab.cleanDescription(b.description);
+      const g = elab.checkText(project, d, false);
+      if (!g.ok) return reply(422, { error: gate.explain(g), code: "description_blocked" });
+      scenePrompt = d;
+    }
+    if (!scenePrompt && !fromApproved) return reply(400, { error: "Use Elaborate with AI first so we can describe this image.", code: "description_needed" });
     if (q.charged && b.confirmCharge !== true) return reply(402, { error: "This image costs extra.", code: "confirm_charge", credits: q.credits });
     const st = img.settings();
-    const prompt = img.buildPrompt({ kind: target.scene.visualSource === "AGENT_SCENE" ? "agent_scene" : "concept", scenePrompt: target.scene.aiGenerationPrompt, format, fromApproved });
+    const prompt = img.buildPrompt({ kind, scenePrompt, format, fromApproved });
 
     // Charge first (only for extras); refunded by the worker or the stale check if the image never arrives.
     let charged = null;
@@ -151,7 +190,7 @@ exports.handler = async (event) => {
     const version = Math.max(0, ...assets.filter((a) => a.scene_index === sceneIndex).map((a) => a.version || 0)) + 1;
     // A new draft replaces any unaccepted earlier draft for this slot.
     for (const o of assets) if (o.scene_index === sceneIndex && img.fmtOf(o) === format && o.status === "proposed") await supabase("PATCH", "agent_marketing_assets", { status: "rejected" }, `?id=eq.${o.id}&user_id=eq.${userId}`);
-    const generation = { state: "generating", format, kind: target.scene.visualSource === "AGENT_SCENE" ? "agent_scene" : "concept", prompt, scenePrompt: target.scene.aiGenerationPrompt || null, referenceKey, fromApproved, quality: st.quality, size: img.SIZES[format], charged, startedAt: new Date().toISOString(), attempt: q.used + 1 };
+    const generation = { state: "generating", format, kind, prompt, scenePrompt: scenePrompt || null, note: note || null, elaborated: !!(b.description && String(b.description).trim()), referenceKey, fromApproved, quality: st.quality, size: img.SIZES[format], charged, startedAt: new Date().toISOString(), attempt: q.used + 1 };
     const ins = await supabase("POST", "agent_marketing_assets", { project_id: project.id, user_id: userId, scene_index: sceneIndex, version, source: "gpt_image_2", ai_generated: true, status: "proposed", asset_key: null, generation, rights: { route: "generated", aiGenerated: true } });
     const row = rowsOf(ins)[0];
     if (!ins || ins.status >= 300 || !row) {

@@ -34,6 +34,18 @@ function imageScenes(narrative) {
   return scenes.map((s, i) => (s && IMAGE_SOURCES.includes(s.visualSource) ? { index: i, scene: s } : null)).filter(Boolean);
 }
 
+// Every scene, in story order. Since Oct 23 the agent can choose to generate an image for ANY scene (or use their own
+// photo), so the Images step lists all of them; imageScenes() above is only what the planner itself asked for.
+function allScenes(narrative) {
+  const scenes = (narrative && Array.isArray(narrative.scenes)) ? narrative.scenes : [];
+  return scenes.map((s, i) => (s ? { index: i, scene: s } : null)).filter(Boolean);
+}
+// "concept" | "agent_scene" when the planner wrote a ready image prompt for this scene, else null.
+function plannedKind(scene) {
+  if (!scene || !scene.aiGenerationPrompt) return null;
+  return scene.visualSource === "AGENT_SCENE" ? "agent_scene" : scene.visualSource === "GPT_IMAGE_2_CONCEPT" ? "concept" : null;
+}
+
 const fmtOf = (a) => (a && a.generation && a.generation.format) || null;
 const stateOf = (a) => (a && a.generation && a.generation.state) || null;
 // An attempt "counts" unless it failed (failed attempts are refunded, so they never use up a free redo or the cap).
@@ -91,4 +103,4 @@ function pickReferenceKey(profileRow) {
   return r.fullbody_key || r.headshot_key || null;
 }
 
-module.exports = { SIZES, IMAGE_SOURCES, STALE_GENERATING_MS, settings, imageScenes, slotAssets, quote, buildPrompt, pickReferenceKey, counts, fmtOf, stateOf };
+module.exports = { SIZES, IMAGE_SOURCES, STALE_GENERATING_MS, settings, imageScenes, allScenes, plannedKind, slotAssets, quote, buildPrompt, pickReferenceKey, counts, fmtOf, stateOf };

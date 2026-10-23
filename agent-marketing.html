@@ -71,6 +71,21 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
 .tile:hover{border-color:var(--gold);}
 .tile .del{float:right;color:var(--danger);}
 .attest{display:flex;gap:8px;align-items:flex-start;font-size:0.82rem;margin-top:12px;}
+.btn.sm{padding:7px 12px;font-size:0.78rem;}
+.slot-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;margin-top:10px;}
+.slot{border:1px solid var(--border);border-radius:6px;padding:12px;background:#fff;}
+.slot h5{font-size:0.8rem;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;gap:8px;}
+.frame{background:var(--warm);border-radius:4px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:0.78rem;text-align:center;overflow:hidden;}
+.frame>span{padding:8px;}
+.frame.p9{aspect-ratio:2/3;} .frame.p16{aspect-ratio:3/2;}
+.frame img{width:100%;height:100%;object-fit:cover;display:block;}
+.slot .row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;align-items:center;}
+.slot .smsg{font-size:0.78rem;margin-top:8px;color:var(--muted);}
+.slot .smsg.err{color:var(--danger);} .slot .smsg.ok{color:var(--success);}
+.confirm{margin-top:10px;padding:10px 12px;background:#fdf3d8;border-radius:5px;font-size:0.8rem;}
+.pill.ok{background:#eaf3ee;color:var(--success);}
+.img-scene{margin-top:16px;padding-top:14px;border-top:1px solid var(--border);}
+.img-scene:first-of-type{border-top:0;padding-top:0;}
 @media(max-width:560px){.scene dl{grid-template-columns:1fr;} .stage{padding:0 14px 80px;}}
 </style>
 </head>
@@ -177,6 +192,19 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
         <div class="msg" id="pickerMsg" role="status"></div>
         <div class="actions"><button class="btn ghost" type="button" id="pickerClose">Close</button></div>
       </div>
+      <div class="actions"><button class="btn gold" type="button" id="toImagesBtn">Continue to images</button></div>
+    </section>
+
+    <!-- 5. Images -->
+    <section class="panel hidden" id="stepImages">
+      <div class="eyebrow">05 / Images</div>
+      <div class="panel-title">Create and approve your concept images</div>
+      <div class="panel-sub" id="imagesSub">Review each image and approve the ones you want. Nothing is used in your Reel until you accept it.</div>
+      <div class="note" id="imagesCount"></div>
+      <div id="imageSlots"></div>
+      <div id="imagesDone" class="note hidden"></div>
+      <div class="actions"><button class="btn ghost" type="button" id="backToBoardBtn">Back to storyboard</button></div>
+      <div class="msg" id="imagesMsg" role="status"></div>
     </section>
   </div>
 </main>
@@ -185,7 +213,8 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
 (function () {
   "use strict";
   var API = "/.netlify/functions/agent-marketing-project";
-  var state = { schema: null, project: null, angle: null, poll: null };
+  var state = { schema: null, project: null, angle: null, poll: null, imgPoll: null };
+  var IMG = "/.netlify/functions/agent-marketing-images";
   var $ = function (id) { return document.getElementById(id); };
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
   function stripTags(t) { return String(t || "").replace(/\[[^\]\n]{1,40}\]/g, " ").replace(/[ \t]+/g, " ").replace(/\s+([,.;:!?])/g, "$1").trim(); }
@@ -213,17 +242,18 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     return { status: res.status, ok: res.ok, json: json };
   }
   function say(id, text, kind) { var el = $(id); el.textContent = text || ""; el.className = "msg" + (kind ? " " + kind : ""); }
-  function show(ids) { ["stepProjects", "stepSetup", "stepIntake", "stepScript", "stepBoard"].forEach(function (s) { $(s).classList.toggle("hidden", ids.indexOf(s) < 0); }); }
+  function show(ids) { ["stepProjects", "stepSetup", "stepIntake", "stepScript", "stepBoard", "stepImages"].forEach(function (s) { $(s).classList.toggle("hidden", ids.indexOf(s) < 0); }); }
 
   // ── Progress pills ──
   function stage() {
     var p = state.project;
     if (!p) return 1;
     if (!p.intake || !p.intake.angle) return 2;
-    if (p.status !== "narrative_approved" && p.status !== "images" && p.status !== "ready_to_render") return 3;
+    if (p.status === "images" || p.status === "ready_to_render") return 5;
+    if (p.status !== "narrative_approved") return 3;
     return 4;
   }
-  var STEP_NAMES = ["Setup", "Your insight", "Script", "Storyboard"], STEP_IDS = ["stepSetup", "stepIntake", "stepScript", "stepBoard"];
+  var STEP_NAMES = ["Setup", "Your insight", "Script", "Storyboard", "Images"], STEP_IDS = ["stepSetup", "stepIntake", "stepScript", "stepBoard", "stepImages"];
   function renderSteps(active) {
     var max = stage();
     $("steps").innerHTML = STEP_NAMES.map(function (n, i) {
@@ -232,7 +262,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     }).join("");
     Array.prototype.forEach.call($("steps").querySelectorAll(".step-pill.done"), function (b) { b.addEventListener("click", function () { go(Number(b.getAttribute("data-step"))); }); });
   }
-  function go(step) { show([STEP_IDS[step - 1]]); renderSteps(step); if (step === 2) fillIntake(); if (step === 3) renderScript(); if (step === 4) renderBoard(); window.scrollTo({ top: 0, behavior: "smooth" }); }
+  function go(step) { stopImgPoll(); show([STEP_IDS[step - 1]]); renderSteps(step); if (step === 2) fillIntake(); if (step === 3) renderScript(); if (step === 4) renderBoard(); if (step === 5) renderImages(); window.scrollTo({ top: 0, behavior: "smooth" }); }
   function setProject(p) { state.project = p; if (p) { try { history.replaceState(null, "", "#p=" + p.id); } catch (e) { /* ignore */ } } }
 
   // ── Setup ──
@@ -365,10 +395,11 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     if (n.scenesStale) $("boardWarn").textContent = "You edited the script after the scene plan was written, so the scene text below may no longer match your wording. We'll re-match it in the next step.";
     $("scenes").innerHTML = scenes.map(function (s, i) {
       var vs = s.visualSource, real = vs === "AUTHENTIC_AGENT_ASSET", pr = s.photoRequest || {};
-      var label = { GPT_IMAGE_2_CONCEPT: "Concept image", CONCEPT_REUSE: "Concept image (re-framed)", AGENT_PROFILE: "Your profile photo", BRAND_CARD: "Brand card", AUTHENTIC_AGENT_ASSET: "Optional real photo" }[vs] || "Scene";
+      var label = { GPT_IMAGE_2_CONCEPT: "Concept image", AGENT_SCENE: "Image of you", CONCEPT_REUSE: "Concept image (re-framed)", AGENT_PROFILE: "Your profile photo", BRAND_CARD: "Brand card", AUTHENTIC_AGENT_ASSET: "Optional real photo" }[vs] || "Scene";
       var rows;
       if (real) rows = "<dt>Optional photo</dt><dd>" + esc(pr.bestImage) + "</dd>" + (pr.shouldContain ? "<dt>Should show</dt><dd>" + esc(pr.shouldContain) + "</dd>" : "") + (pr.avoid ? "<dt>Avoid</dt><dd>" + esc(pr.avoid) + "</dd>" : "") + "<dt>If you skip it</dt><dd>" + esc(pr.ifUnavailable || "A concept image is used instead.") + "</dd>";
       else if (vs === "GPT_IMAGE_2_CONCEPT") rows = "<dt>Concept image</dt><dd>" + esc(s.visualBrief) + " (an illustration, not a real place)</dd>";
+      else if (vs === "AGENT_SCENE") rows = "<dt>Image of you</dt><dd>" + esc(s.visualBrief) + " (created from your Marketing Profile photo in a generic setting, not a real place)</dd>";
       else if (vs === "CONCEPT_REUSE") rows = "<dt>Visual</dt><dd>Re-uses the concept image from scene " + ((Number(s.reuseOfScene) || 0) + 1) + " with a different crop and motion.</dd>";
       else if (vs === "AGENT_PROFILE") rows = "<dt>Visual</dt><dd>" + esc(s.visualBrief || "Your headshot or full-body photo from your Marketing Profile.") + "</dd>";
       else rows = "<dt>On-screen text</dt><dd>" + esc(s.cardText || s.visualBrief) + "</dd>";
@@ -460,6 +491,130 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     $("upGo").disabled = false;
   }
 
+  // ── Images (concept images and the agent scene) ──
+  var im = { slots: [], total: 0, cap: 0, per: 1, confirming: {}, msgs: {}, kept: {}, busy: {} };
+  function slotKey(s) { return s.sceneIndex + "_" + s.format; }
+  function fmtName(f) { return f === "9x16" ? "9:16 vertical" : "16:9 horizontal"; }
+  function plural(n) { return n + " Image" + (n === 1 ? "" : "s"); }
+  function stopImgPoll() { if (state.imgPoll) { clearInterval(state.imgPoll); state.imgPoll = null; } }
+  function anyGenerating() { return im.slots.some(function (s) { return s.latest && s.latest.state === "generating"; }); }
+  function manageImgPoll() {
+    if (!anyGenerating()) return stopImgPoll();
+    if (state.imgPoll) return;
+    var started = Date.now();
+    state.imgPoll = setInterval(function () {
+      if (Date.now() - started > 540000) { stopImgPoll(); say("imagesMsg", "This is taking longer than expected. Please reload in a minute.", "err"); return; }
+      loadImages();
+    }, 4000);
+  }
+  async function renderImages() {
+    say("imagesMsg", "");
+    $("imageSlots").innerHTML = '<span class="spinner"></span>Loading your images…';
+    await loadImages();
+  }
+  async function loadImages() {
+    try {
+      var r = await api("GET", "?projectId=" + encodeURIComponent(state.project.id), null, IMG);
+      if (!r.ok) { stopImgPoll(); return say("imagesMsg", r.json.error || "Could not load your images.", "err"); }
+      im.slots = r.json.slots || []; im.total = r.json.projectTotal || 0; im.cap = r.json.projectCap || 0; im.per = r.json.creditsPerExtra || 1;
+      paintImages(); manageImgPoll();
+    } catch (e) { /* a poll tick can fail quietly; the next one retries */ }
+  }
+  function slotView(s, scene) {
+    var k = slotKey(s), L = s.latest, A = s.approved, both = (state.project.formats || []).length > 1;
+    var generating = !!(L && L.state === "generating");
+    var draft = L && L.status === "proposed" && L.state === "done" ? L : null;
+    var failed = L && L.state === "error" ? L : null;
+    var shown = draft || A;
+    var portraitOk = true;
+    if (s.format === "16x9" && both) portraitOk = im.slots.some(function (x) { return x.sceneIndex === s.sceneIndex && x.format === "9x16" && x.approved; });
+    var blocked = !portraitOk || (s.capReached && !generating);
+    var charged = s.nextCredits > 0;
+    var html = '<div class="slot"><h5><span>' + fmtName(s.format) + '</span>' + (A && !draft ? '<span class="pill ok">Approved</span>' : (draft ? '<span class="pill concept">Needs your OK</span>' : "")) + '</h5>';
+    html += '<div class="frame ' + (s.format === "9x16" ? "p9" : "p16") + '">' + (shown && shown.url ? '<img alt="Concept image ' + esc(fmtName(s.format)) + '" src="' + esc(shown.url) + '">' : (generating ? '<span><span class="spinner"></span>Creating…</span>' : "<span>No image yet</span>")) + "</div>";
+    if (draft && A) html += '<div class="smsg">Your currently approved image stays in use until you accept this new one.</div>';
+    var act = function (a, label, cls, extra) { return '<button type="button" class="btn sm ' + cls + '" data-act="' + a + '" data-scene="' + s.sceneIndex + '" data-format="' + s.format + '"' + (extra || "") + ">" + label + "</button>"; };
+    if (im.confirming[k]) {
+      html += '<div class="confirm">This extra try costs <b>' + plural(im.confirming[k]) + "</b> from your balance. Continue?" +
+        '<div class="row">' + act("confirm", "Yes, create it", "gold") + act("cancel", "Cancel", "ghost") + "</div></div>";
+    } else if (generating) {
+      html += '<div class="smsg">This usually takes under a minute. You can leave this page and come back.</div>';
+    } else {
+      var row = "";
+      var redoLabel = charged ? "Redo (" + plural(s.nextCredits) + ")" : "Redo (included)";
+      if (!shown) row += act("generate", charged ? "Create image (" + plural(s.nextCredits) + ")" : "Create image", "gold", blocked ? " disabled" : "");
+      else {
+        if (draft) row += act("accept", "Accept", "gold", ' data-asset="' + esc(draft.id) + '"');
+        row += act("generate", redoLabel, "ghost", blocked ? " disabled" : "");
+        if (draft) row += act("reject", "Discard", "ghost", ' data-asset="' + esc(draft.id) + '"');
+        if (A && !draft) row += act("keep", im.kept[A.id] ? "Saved ✓" : "Save to My Marketing Photos", "ghost", ' data-asset="' + esc(A.id) + '"' + (im.kept[A.id] ? " disabled" : ""));
+      }
+      html += '<div class="row">' + row + "</div>";
+      var info = s.used < s.included ? (s.included - s.used) + " of " + s.included + " included tries left" : "Included tries used. Each extra try costs " + plural(s.nextCredits || im.per) + ".";
+      html += '<div class="smsg">' + esc(info) + "</div>";
+      if (!portraitOk) html += '<div class="smsg">Approve the 9:16 image first. This version is built from it so the two match.</div>';
+      else if (s.capReached) html += '<div class="smsg err">This project has reached its limit of ' + im.cap + " generated images.</div>";
+    }
+    if (failed && !generating && !draft) html += '<div class="smsg err">The last try did not finish' + (failed.error ? " (" + esc(failed.error) + ")" : "") + ". It was not counted or charged.</div>";
+    if (im.msgs[k]) html += '<div class="smsg ' + (im.msgs[k].kind || "") + '">' + esc(im.msgs[k].text) + "</div>";
+    return html + "</div>";
+  }
+  function paintImages() {
+    var n = (state.project && state.project.narrative) || {}, scenes = n.scenes || [], bySceneIdx = {}, order = [];
+    im.slots.forEach(function (s) { if (!bySceneIdx[s.sceneIndex]) { bySceneIdx[s.sceneIndex] = []; order.push(s.sceneIndex); } bySceneIdx[s.sceneIndex].push(s); });
+    $("imagesCount").innerHTML = "Tries used in this project: <b>" + im.total + " of " + im.cap + "</b>. The first image of each version and one redo are included. Any extra redo shows its price and asks you first, and a try that fails is never charged.";
+    var both = (state.project.formats || []).length > 1;
+    $("imagesSub").textContent = both ? "Create the 9:16 version first. Once you approve it, the 16:9 version is built from it so the two match. Nothing is used in your Reel until you accept it." : "Review each image and approve the ones you want. Nothing is used in your Reel until you accept it.";
+    $("imageSlots").innerHTML = order.map(function (idx) {
+      var sc = scenes[idx] || {}, agent = sc.visualSource === "AGENT_SCENE";
+      var slots = bySceneIdx[idx].slice().sort(function (a, b) { return a.format === "9x16" ? -1 : (b.format === "9x16" ? 1 : 0); });
+      return '<div class="img-scene"><h4>Scene ' + (idx + 1) + " · " + esc(String(sc.role || "").replace(/_/g, " ")) + ' <span class="pill ' + (agent ? "real" : "concept") + '">' + (agent ? "Image of you" : "Concept image") + "</span></h4>" +
+        '<div class="q" style="font-style:italic;color:#4a423a;font-size:0.88rem;margin:4px 0 2px">“' + esc(sc.narrationExcerpt) + "”</div>" +
+        '<div class="hint">' + esc(sc.visualBrief) + (agent ? " Created from your Marketing Profile photo in a generic setting." : " An illustration, not a real place.") + "</div>" +
+        '<div class="slot-grid">' + slots.map(function (s) { return slotView(s, sc); }).join("") + "</div></div>";
+    }).join("") || '<div class="hint">This project does not use any generated images.</div>';
+    var all = im.slots.length && im.slots.every(function (s) { return s.approved; });
+    $("imagesDone").classList.toggle("hidden", !all);
+    if (all) $("imagesDone").textContent = "All of your images are approved. Narration and captions come next.";
+  }
+  function setSlotMsg(k, text, kind) { if (text) im.msgs[k] = { text: text, kind: kind || "" }; else delete im.msgs[k]; }
+  async function genSlot(sceneIndex, format, confirmCharge) {
+    var k = sceneIndex + "_" + format;
+    if (im.busy[k]) return; im.busy[k] = true; setSlotMsg(k, ""); delete im.confirming[k];
+    try {
+      var r = await api("POST", "", { action: "generate", projectId: state.project.id, sceneIndex: sceneIndex, format: format, confirmCharge: confirmCharge === true }, IMG);
+      var code = r.json && r.json.code;
+      if (r.status === 402 && code === "confirm_charge") im.confirming[k] = r.json.credits || im.per;
+      else if (r.status === 402 && code === "insufficient_credits") setSlotMsg(k, "You don't have enough Images for this (it costs " + plural(r.json.credits || im.per) + "). Add Images to your balance and try again.", "err");
+      else if (!r.ok) setSlotMsg(k, r.json.error || "Could not start the image.", "err");
+    } catch (e) { setSlotMsg(k, e.message, "err"); }
+    im.busy[k] = false;
+    await loadImages();
+  }
+  async function imageAction(act, assetId, k) {
+    setSlotMsg(k, "");
+    try {
+      var r = await api("POST", "", { action: act, projectId: state.project.id, assetId: assetId }, IMG);
+      if (!r.ok) setSlotMsg(k, r.json.error || "That did not work. Please try again.", "err");
+      else if (act === "keep") { im.kept[assetId] = true; setSlotMsg(k, "Saved to My Marketing Photos.", "ok"); }
+      else if (act === "accept" && state.project.status === "narrative_approved") { state.project.status = "images"; renderSteps(5); }
+    } catch (e) { setSlotMsg(k, e.message, "err"); }
+    await loadImages();
+  }
+  function onImageClick(ev) {
+    var b = ev.target && ev.target.closest ? ev.target.closest("button[data-act]") : null;
+    if (!b || b.disabled) return;
+    var act = b.getAttribute("data-act"), si = Number(b.getAttribute("data-scene")), f = b.getAttribute("data-format"), k = si + "_" + f;
+    if (act === "cancel") { delete im.confirming[k]; return paintImages(); }
+    if (act === "confirm") return genSlot(si, f, true);
+    if (act === "generate") {
+      var s = im.slots.filter(function (x) { return x.sceneIndex === si && x.format === f; })[0];
+      if (s && s.nextCredits > 0) { im.confirming[k] = s.nextCredits; return paintImages(); }
+      return genSlot(si, f, false);
+    }
+    imageAction(act, b.getAttribute("data-asset"), k);
+  }
+
   // ── Projects list ──
   async function showProjects() {
     var r = await api("GET", "");
@@ -490,6 +645,9 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     $("observation").addEventListener("input", countObs);
     $("planBtn").addEventListener("click", plan);
     $("pickerClose").addEventListener("click", function () { $("picker").classList.add("hidden"); });
+    $("toImagesBtn").addEventListener("click", function () { go(5); });
+    $("backToBoardBtn").addEventListener("click", function () { go(4); });
+    $("imageSlots").addEventListener("click", onImageClick);
     $("narration").addEventListener("input", refreshPreview);
     $("saveScriptBtn").addEventListener("click", function () { saveScript(false); });
     $("approveBtn").addEventListener("click", function () { saveScript(true); });

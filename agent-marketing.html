@@ -492,7 +492,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
   }
 
   // ── Images (concept images and the agent scene) ──
-  var im = { slots: [], total: 0, cap: 0, per: 1, confirming: {}, msgs: {}, kept: {}, busy: {} };
+  var im = { slots: [], total: 0, cap: 0, per: 1, charging: true, sig: "", urls: {}, confirming: {}, msgs: {}, kept: {}, busy: {} };
   function slotKey(s) { return s.sceneIndex + "_" + s.format; }
   function fmtName(f) { return f === "9x16" ? "9:16 vertical" : "16:9 horizontal"; }
   function plural(n) { return n + " Image" + (n === 1 ? "" : "s"); }
@@ -516,8 +516,14 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     try {
       var r = await api("GET", "?projectId=" + encodeURIComponent(state.project.id), null, IMG);
       if (!r.ok) { stopImgPoll(); return say("imagesMsg", r.json.error || "Could not load your images.", "err"); }
-      im.slots = r.json.slots || []; im.total = r.json.projectTotal || 0; im.cap = r.json.projectCap || 0; im.per = r.json.creditsPerExtra || 1;
-      paintImages(); manageImgPoll();
+      im.slots = r.json.slots || []; im.total = r.json.projectTotal || 0; im.cap = r.json.projectCap || 0; im.per = r.json.creditsPerExtra || 1; im.charging = r.json.charging !== false;
+      // Every GET returns freshly signed image links. Keep the first link seen per image so the browser does not
+      // re-download (and flash) a picture that has not changed, and skip repainting when nothing visible changed.
+      var view = function (v) { if (v && v.id && v.url) { if (!im.urls[v.id]) im.urls[v.id] = v.url; v.url = im.urls[v.id]; } return v; };
+      im.slots.forEach(function (s) { view(s.latest); view(s.approved); });
+      var sig = JSON.stringify([im.total, im.cap, im.charging, Object.keys(im.confirming), Object.keys(im.msgs).map(function (k) { return k + im.msgs[k].text; }), Object.keys(im.kept), im.slots.map(function (s) { return [s.sceneIndex, s.format, s.latest && [s.latest.id, s.latest.state, s.latest.status, s.latest.error], s.approved && s.approved.id, s.used, s.included, s.nextCredits, s.capReached]; })]);
+      if (sig !== im.sig) { im.sig = sig; paintImages(); }
+      manageImgPoll();
     } catch (e) { /* a poll tick can fail quietly; the next one retries */ }
   }
   function slotView(s, scene) {
@@ -550,7 +556,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
         if (A && !draft) row += act("keep", im.kept[A.id] ? "Saved ✓" : "Save to My Marketing Photos", "ghost", ' data-asset="' + esc(A.id) + '"' + (im.kept[A.id] ? " disabled" : ""));
       }
       html += '<div class="row">' + row + "</div>";
-      var info = s.used < s.included ? (s.included - s.used) + " of " + s.included + " included tries left" : "Included tries used. Each extra try costs " + plural(s.nextCredits || im.per) + ".";
+      var info = !im.charging ? "Beta: tries are free (the project limit still applies)." : (s.used < s.included ? (s.included - s.used) + " of " + s.included + " included tries left" : "Included tries used. Each extra try costs " + plural(s.nextCredits || im.per) + ".");
       html += '<div class="smsg">' + esc(info) + "</div>";
       if (!portraitOk) html += '<div class="smsg">Approve the 9:16 image first. This version is built from it so the two match.</div>';
       else if (s.capReached) html += '<div class="smsg err">This project has reached its limit of ' + im.cap + " generated images.</div>";
@@ -577,14 +583,14 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     $("imagesDone").classList.toggle("hidden", !all);
     if (all) $("imagesDone").textContent = "All of your images are approved. Narration and captions come next.";
   }
-  function setSlotMsg(k, text, kind) { if (text) im.msgs[k] = { text: text, kind: kind || "" }; else delete im.msgs[k]; }
+  function setSlotMsg(k, text, kind) { im.sig = ""; if (text) im.msgs[k] = { text: text, kind: kind || "" }; else delete im.msgs[k]; }
   async function genSlot(sceneIndex, format, confirmCharge) {
     var k = sceneIndex + "_" + format;
     if (im.busy[k]) return; im.busy[k] = true; setSlotMsg(k, ""); delete im.confirming[k];
     try {
       var r = await api("POST", "", { action: "generate", projectId: state.project.id, sceneIndex: sceneIndex, format: format, confirmCharge: confirmCharge === true }, IMG);
       var code = r.json && r.json.code;
-      if (r.status === 402 && code === "confirm_charge") im.confirming[k] = r.json.credits || im.per;
+      if (r.status === 402 && code === "confirm_charge") { im.confirming[k] = r.json.credits || im.per; im.sig = ""; }
       else if (r.status === 402 && code === "insufficient_credits") setSlotMsg(k, "You don't have enough Images for this (it costs " + plural(r.json.credits || im.per) + "). Add Images to your balance and try again.", "err");
       else if (!r.ok) setSlotMsg(k, r.json.error || "Could not start the image.", "err");
     } catch (e) { setSlotMsg(k, e.message, "err"); }
@@ -605,11 +611,11 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     var b = ev.target && ev.target.closest ? ev.target.closest("button[data-act]") : null;
     if (!b || b.disabled) return;
     var act = b.getAttribute("data-act"), si = Number(b.getAttribute("data-scene")), f = b.getAttribute("data-format"), k = si + "_" + f;
-    if (act === "cancel") { delete im.confirming[k]; return paintImages(); }
+    if (act === "cancel") { delete im.confirming[k]; im.sig = ""; return paintImages(); }
     if (act === "confirm") return genSlot(si, f, true);
     if (act === "generate") {
       var s = im.slots.filter(function (x) { return x.sceneIndex === si && x.format === f; })[0];
-      if (s && s.nextCredits > 0) { im.confirming[k] = s.nextCredits; return paintImages(); }
+      if (s && s.nextCredits > 0) { im.confirming[k] = s.nextCredits; im.sig = ""; return paintImages(); }
       return genSlot(si, f, false);
     }
     imageAction(act, b.getAttribute("data-asset"), k);

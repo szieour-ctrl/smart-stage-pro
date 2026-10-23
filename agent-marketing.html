@@ -185,13 +185,6 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
       <div id="boardWarn" class="note hidden"></div>
       <div id="scenes"></div>
       <div id="missingBox" class="note hidden"></div>
-      <div id="picker" class="panel picker hidden">
-        <div class="eyebrow" id="pickerTitle">Choose a photo</div>
-        <div class="tabs" id="pickerTabs"></div>
-        <div id="pickerBody"></div>
-        <div class="msg" id="pickerMsg" role="status"></div>
-        <div class="actions"><button class="btn ghost" type="button" id="pickerClose">Close</button></div>
-      </div>
       <div class="actions"><button class="btn gold" type="button" id="toImagesBtn">Continue to images</button></div>
     </section>
 
@@ -206,6 +199,14 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
       <div class="actions"><button class="btn ghost" type="button" id="backToBoardBtn">Back to storyboard</button></div>
       <div class="msg" id="imagesMsg" role="status"></div>
     </section>
+
+    <div id="picker" class="panel picker hidden">
+      <div class="eyebrow" id="pickerTitle">Choose a photo</div>
+      <div class="tabs" id="pickerTabs"></div>
+      <div id="pickerBody"></div>
+      <div class="msg" id="pickerMsg" role="status"></div>
+      <div class="actions"><button class="btn ghost" type="button" id="pickerClose">Close</button></div>
+    </div>
   </div>
 </main>
 
@@ -262,7 +263,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     }).join("");
     Array.prototype.forEach.call($("steps").querySelectorAll(".step-pill.done"), function (b) { b.addEventListener("click", function () { go(Number(b.getAttribute("data-step"))); }); });
   }
-  function go(step) { stopImgPoll(); show([STEP_IDS[step - 1]]); renderSteps(step); if (step === 2) fillIntake(); if (step === 3) renderScript(); if (step === 4) renderBoard(); if (step === 5) renderImages(); window.scrollTo({ top: 0, behavior: "smooth" }); }
+  function go(step) { stopImgPoll(); $("picker").classList.add("hidden"); show([STEP_IDS[step - 1]]); renderSteps(step); if (step === 2) fillIntake(); if (step === 3) renderScript(); if (step === 4) renderBoard(); if (step === 5) renderImages(); window.scrollTo({ top: 0, behavior: "smooth" }); }
   function setProject(p) { state.project = p; if (p) { try { history.replaceState(null, "", "#p=" + p.id); } catch (e) { /* ignore */ } } }
 
   // ── Setup ──
@@ -420,17 +421,19 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     picked = {};
     var r = await mapi("GET", "?projectId=" + state.project.id + "&source=selected");
     ((r.ok && r.json.items) || []).forEach(function (it) { picked[it.sceneIndex] = it; });
-    Array.prototype.forEach.call(document.querySelectorAll(".pick"), function (el) { paintPick(Number(el.id.replace("pick", ""))); });
+    Array.prototype.forEach.call(document.querySelectorAll(".pick"), function (el) { paintPick(Number(el.id.replace(/^i?pick/, ""))); });
   }
   function paintPick(i) {
-    var el = $("pick" + i); if (!el) return;
-    var it = picked[i];
-    el.innerHTML = (it && it.url ? '<img class="sel" alt="Selected photo" src="' + esc(it.url) + '">' : "") +
-      '<button class="btn ' + (it ? "ghost" : "gold") + '" type="button" data-scene="' + i + '">' + (it ? "Change photo" : "Add optional photo") + "</button>" +
-      (it ? '<button class="link-btn" type="button" data-clear="' + i + '">Remove</button>' : "");
-    el.querySelector("[data-scene]").addEventListener("click", function () { openPicker(i); });
-    var c = el.querySelector("[data-clear]");
-    if (c) c.addEventListener("click", async function () { await mapi("POST", "", { action: "clear", projectId: state.project.id, sceneIndex: i }); delete picked[i]; paintPick(i); });
+    ["pick", "ipick"].forEach(function (pre) {
+      var el = $(pre + i); if (!el) return;
+      var it = picked[i];
+      el.innerHTML = (it && it.url ? '<img class="sel" alt="Selected photo" src="' + esc(it.url) + '">' : "") +
+        '<button class="btn ' + (it ? "ghost" : "gold") + '" type="button" data-scene="' + i + '">' + (it ? "Change photo" : (pre === "ipick" ? "Choose or upload my photo" : "Add optional photo")) + "</button>" +
+        (it ? '<button class="link-btn" type="button" data-clear="' + i + '">Remove</button>' : "");
+      el.querySelector("[data-scene]").addEventListener("click", function () { openPicker(i); });
+      var c = el.querySelector("[data-clear]");
+      if (c) c.addEventListener("click", async function () { await mapi("POST", "", { action: "clear", projectId: state.project.id, sceneIndex: i }); delete picked[i]; paintPick(i); if (pre === "ipick") { im.sig = ""; loadImages(); } });
+    });
   }
   var TABS = [["library", "My Marketing Photos"], ["staged", "Virtually Staged"], ["gallery", "My originals"], ["upload", "Upload new"]];
   function openPicker(i) {
@@ -466,6 +469,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     var r = await mapi("POST", "", { action: "select", projectId: state.project.id, sceneIndex: pickScene, kind: it.kind, id: it.id });
     if (!r.ok) return say("pickerMsg", r.json.error || "Could not use that photo", "err");
     picked[pickScene] = r.json.item; paintPick(pickScene); $("picker").classList.add("hidden");
+    if (!$("stepImages").classList.contains("hidden")) { im.src[pickScene] = "own"; im.sig = ""; loadImages(); }
   }
   function renderUpload() {
     $("pickerBody").innerHTML = '<input type="file" id="upFile" accept="image/png,image/jpeg,image/webp"><label class="lbl" for="upLabel">Name (optional)</label><input type="text" id="upLabel" maxlength="80" placeholder="e.g. Me at the community clubhouse">' +
@@ -491,8 +495,11 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     $("upGo").disabled = false;
   }
 
-  // ── Images (concept images and the agent scene) ──
-  var im = { slots: [], total: 0, cap: 0, per: 1, charging: true, sig: "", urls: {}, confirming: {}, msgs: {}, kept: {}, busy: {} };
+  // ── Images: for every scene the agent picks a source ──
+  var im = { slots: [], total: 0, cap: 0, per: 1, charging: true, sig: "", urls: {}, src: {}, note: {}, desc: {}, working: {}, confirming: {}, msgs: {}, kept: {}, busy: {} };
+  var SRC_NAME = { own: "Use my own photo instead", concept: "Generate concept image", agent: "Generate image of you" };
+  var KIND_OF = { concept: "concept", agent: "agent_scene" };
+  var PLANNED_NAME = { GPT_IMAGE_2_CONCEPT: "a concept image", AGENT_SCENE: "an image of you", CONCEPT_REUSE: "a re-framed copy of an earlier image", AGENT_PROFILE: "your profile photo", BRAND_CARD: "a brand card", AUTHENTIC_AGENT_ASSET: "an optional photo of yours" };
   function slotKey(s) { return s.sceneIndex + "_" + s.format; }
   function fmtName(f) { return f === "9x16" ? "9:16 vertical" : "16:9 horizontal"; }
   function plural(n) { return n + " Image" + (n === 1 ? "" : "s"); }
@@ -507,9 +514,23 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
       loadImages();
     }, 4000);
   }
+  function sceneAt(i) { var n = (state.project && state.project.narrative) || {}; return (n.scenes || [])[i] || {}; }
+  function plannedSrc(sc) { return sc.visualSource === "AGENT_SCENE" ? "agent" : sc.visualSource === "GPT_IMAGE_2_CONCEPT" ? "concept" : sc.visualSource === "AUTHENTIC_AGENT_ASSET" ? "own" : null; }
+  // The source in use for a scene: an approved own photo, else the kind of the generated image, else what the planner chose.
+  function activeSrc(i) {
+    if (im.src[i]) return im.src[i];
+    if (picked[i]) return "own";
+    var mine = im.slots.filter(function (s) { return s.sceneIndex === i; });
+    for (var k = 0; k < mine.length; k++) {
+      var v = mine[k].approved || (mine[k].latest && mine[k].latest.state !== "error" ? mine[k].latest : null);
+      if (v && v.kind === "agent_scene") return "agent"; if (v && v.kind === "concept") return "concept";
+    }
+    return plannedSrc(sceneAt(i));
+  }
   async function renderImages() {
     say("imagesMsg", "");
     $("imageSlots").innerHTML = '<span class="spinner"></span>Loading your images…';
+    try { await loadSelected(); } catch (e) { /* photos are optional; keep going */ }
     await loadImages();
   }
   async function loadImages() {
@@ -521,23 +542,28 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
       // re-download (and flash) a picture that has not changed, and skip repainting when nothing visible changed.
       var view = function (v) { if (v && v.id && v.url) { if (!im.urls[v.id]) im.urls[v.id] = v.url; v.url = im.urls[v.id]; } return v; };
       im.slots.forEach(function (s) { view(s.latest); view(s.approved); });
-      var sig = JSON.stringify([im.total, im.cap, im.charging, Object.keys(im.confirming), Object.keys(im.msgs).map(function (k) { return k + im.msgs[k].text; }), Object.keys(im.kept), im.slots.map(function (s) { return [s.sceneIndex, s.format, s.latest && [s.latest.id, s.latest.state, s.latest.status, s.latest.error], s.approved && s.approved.id, s.used, s.included, s.nextCredits, s.capReached]; })]);
+      var sig = JSON.stringify([im.total, im.cap, im.charging, Object.keys(im.confirming), Object.keys(im.msgs).map(function (k) { return k + im.msgs[k].text; }), Object.keys(im.kept), Object.keys(im.working), Object.keys(im.desc).map(function (k) { return k + im.desc[k].description; }), im.src, Object.keys(picked), im.slots.map(function (s) { return [s.sceneIndex, s.format, s.latest && [s.latest.id, s.latest.state, s.latest.status, s.latest.error, s.latest.kind], s.approved && s.approved.id, s.used, s.included, s.nextCredits, s.capReached]; })]);
       if (sig !== im.sig) { im.sig = sig; paintImages(); }
       manageImgPoll();
     } catch (e) { /* a poll tick can fail quietly; the next one retries */ }
   }
-  function slotView(s, scene) {
-    var k = slotKey(s), L = s.latest, A = s.approved, both = (state.project.formats || []).length > 1;
+  function repaint() { im.sig = ""; paintImages(); }
+  function descFor(i, src) { var d = im.desc[i]; return d && KIND_OF[src] && d.kind === KIND_OF[src] ? d : null; }
+
+  function slotView(s, src) {
+    var k = slotKey(s), L = s.latest, A = s.approved, both = (state.project.formats || []).length > 1, kind = KIND_OF[src];
     var generating = !!(L && L.state === "generating");
     var draft = L && L.status === "proposed" && L.state === "done" ? L : null;
     var failed = L && L.state === "error" ? L : null;
     var shown = draft || A;
-    var portraitOk = true;
-    if (s.format === "16x9" && both) portraitOk = im.slots.some(function (x) { return x.sceneIndex === s.sceneIndex && x.format === "9x16" && x.approved; });
-    var blocked = !portraitOk || (s.capReached && !generating);
+    var portraitApproved = s.format === "16x9" && im.slots.some(function (x) { return x.sceneIndex === s.sceneIndex && x.format === "9x16" && x.approved; });
+    var portraitOk = !(s.format === "16x9" && both) || portraitApproved;
+    var needDesc = s.plannedKind !== kind && !descFor(s.sceneIndex, src) && !portraitApproved;
+    var blocked = !portraitOk || (s.capReached && !generating) || needDesc;
     var charged = s.nextCredits > 0;
-    var html = '<div class="slot"><h5><span>' + fmtName(s.format) + '</span>' + (A && !draft ? '<span class="pill ok">Approved</span>' : (draft ? '<span class="pill concept">Needs your OK</span>' : "")) + '</h5>';
-    html += '<div class="frame ' + (s.format === "9x16" ? "p9" : "p16") + '">' + (shown && shown.url ? '<img alt="Concept image ' + esc(fmtName(s.format)) + '" src="' + esc(shown.url) + '">' : (generating ? '<span><span class="spinner"></span>Creating…</span>' : "<span>No image yet</span>")) + "</div>";
+    var shownKind = shown && shown.kind === "agent_scene" ? "Image of you" : (shown && shown.kind === "concept" ? "Concept image" : "");
+    var html = '<div class="slot"><h5><span>' + fmtName(s.format) + (shownKind ? " · " + shownKind : "") + '</span>' + (A && !draft ? '<span class="pill ok">Approved</span>' : (draft ? '<span class="pill concept">Needs your OK</span>' : "")) + '</h5>';
+    html += '<div class="frame ' + (s.format === "9x16" ? "p9" : "p16") + '">' + (shown && shown.url ? '<img alt="Generated image ' + esc(fmtName(s.format)) + '" src="' + esc(shown.url) + '">' : (generating ? '<span><span class="spinner"></span>Creating…</span>' : "<span>No image yet</span>")) + "</div>";
     if (draft && A) html += '<div class="smsg">Your currently approved image stays in use until you accept this new one.</div>';
     var act = function (a, label, cls, extra) { return '<button type="button" class="btn sm ' + cls + '" data-act="' + a + '" data-scene="' + s.sceneIndex + '" data-format="' + s.format + '"' + (extra || "") + ">" + label + "</button>"; };
     if (im.confirming[k]) {
@@ -560,35 +586,79 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
       html += '<div class="smsg">' + esc(info) + "</div>";
       if (!portraitOk) html += '<div class="smsg">Approve the 9:16 image first. This version is built from it so the two match.</div>';
       else if (s.capReached) html += '<div class="smsg err">This project has reached its limit of ' + im.cap + " generated images.</div>";
+      else if (needDesc) html += '<div class="smsg">Use Elaborate with AI above first, so we can describe this image.</div>';
     }
     if (failed && !generating && !draft) html += '<div class="smsg err">The last try did not finish' + (failed.error ? " (" + esc(failed.error) + ")" : "") + ". It was not counted or charged.</div>";
     if (im.msgs[k]) html += '<div class="smsg ' + (im.msgs[k].kind || "") + '">' + esc(im.msgs[k].text) + "</div>";
     return html + "</div>";
   }
-  function paintImages() {
-    var n = (state.project && state.project.narrative) || {}, scenes = n.scenes || [], bySceneIdx = {}, order = [];
-    im.slots.forEach(function (s) { if (!bySceneIdx[s.sceneIndex]) { bySceneIdx[s.sceneIndex] = []; order.push(s.sceneIndex); } bySceneIdx[s.sceneIndex].push(s); });
-    $("imagesCount").innerHTML = "Tries used in this project: <b>" + im.total + " of " + im.cap + "</b>. The first image of each version and one redo are included. Any extra redo shows its price and asks you first, and a try that fails is never charged.";
-    var both = (state.project.formats || []).length > 1;
-    $("imagesSub").textContent = both ? "Create the 9:16 version first. Once you approve it, the 16:9 version is built from it so the two match. Nothing is used in your Reel until you accept it." : "Review each image and approve the ones you want. Nothing is used in your Reel until you accept it.";
-    $("imageSlots").innerHTML = order.map(function (idx) {
-      var sc = scenes[idx] || {}, agent = sc.visualSource === "AGENT_SCENE";
-      var slots = bySceneIdx[idx].slice().sort(function (a, b) { return a.format === "9x16" ? -1 : (b.format === "9x16" ? 1 : 0); });
-      return '<div class="img-scene"><h4>Scene ' + (idx + 1) + " · " + esc(String(sc.role || "").replace(/_/g, " ")) + ' <span class="pill ' + (agent ? "real" : "concept") + '">' + (agent ? "Image of you" : "Concept image") + "</span></h4>" +
-        '<div class="q" style="font-style:italic;color:#4a423a;font-size:0.88rem;margin:4px 0 2px">“' + esc(sc.narrationExcerpt) + "”</div>" +
-        '<div class="hint">' + esc(sc.visualBrief) + (agent ? " Created from your Marketing Profile photo in a generic setting." : " An illustration, not a real place.") + "</div>" +
-        '<div class="slot-grid">' + slots.map(function (s) { return slotView(s, sc); }).join("") + "</div></div>";
-    }).join("") || '<div class="hint">This project does not use any generated images.</div>';
-    var all = im.slots.length && im.slots.every(function (s) { return s.approved; });
-    $("imagesDone").classList.toggle("hidden", !all);
-    if (all) $("imagesDone").textContent = "All of your images are approved. Narration and captions come next.";
+
+  function noteArea(idx, src, planned) {
+    var kind = KIND_OF[src], d = descFor(idx, src), working = !!im.working[idx];
+    var h = '<label class="lbl" for="note' + idx + '">' + (src === "agent" ? "Anything specific about this image of you? (optional)" : "Anything specific you want this image to show? (optional)") + '</label>' +
+      '<textarea id="note' + idx + '" maxlength="300" style="min-height:64px" placeholder="e.g. mature trees, soft evening light">' + esc(im.note[idx] || "") + "</textarea>" +
+      '<div class="hint">Your note is rewritten by AI into a full image description and checked against advertising and Fair Housing rules before anything is created. Nothing you type goes straight to the image model.</div>' +
+      '<div class="actions" style="margin-top:8px"><button type="button" class="btn sm ghost" data-act="elaborate" data-scene="' + idx + '"' + (working ? " disabled" : "") + ">" + (working ? "Writing…" : "Elaborate with AI") + "</button>" +
+      (planned !== kind ? '<span class="hint">Needed for this scene, because the plan did not include this kind of image.</span>' : "") + "</div>";
+    if (d) h += '<div class="confirm" style="background:#eaf3ee">What we will create: <i>' + esc(d.description) + "</i>" + ((d.removed || []).length ? "<br><b>Left out:</b> " + d.removed.map(esc).join(" ") : "") + ((d.warnings || []).length ? "<br><b>Please check:</b> " + d.warnings.map(esc).join(" ") : "") + "</div>";
+    if (im.msgs["n" + idx]) h += '<div class="smsg ' + (im.msgs["n" + idx].kind || "") + '">' + esc(im.msgs["n" + idx].text) + "</div>";
+    return h;
   }
+
+  function sceneBlock(idx, slots) {
+    var sc = sceneAt(idx), src = activeSrc(idx), planned = slots[0] ? slots[0].plannedKind : null;
+    var sorted = slots.slice().sort(function (a, b) { return a.format === "9x16" ? -1 : (b.format === "9x16" ? 1 : 0); });
+    var h = '<div class="img-scene"><h4>Scene ' + (idx + 1) + " · " + esc(String(sc.role || "").replace(/_/g, " ")) + ' <span class="pill">Planned: ' + esc(PLANNED_NAME[sc.visualSource] || "a scene") + "</span></h4>" +
+      '<div class="q" style="font-style:italic;color:#4a423a;font-size:0.88rem;margin:4px 0 2px">“' + esc(sc.narrationExcerpt) + "”</div>" +
+      '<div class="tabs" role="group" aria-label="Image source for scene ' + (idx + 1) + '">' + ["own", "concept", "agent"].map(function (k) { return '<button type="button" class="tab' + (src === k ? " on" : "") + '" data-src="' + k + '" data-scene="' + idx + '">' + SRC_NAME[k] + "</button>"; }).join("") + "</div>";
+    if (src === "own") h += '<div class="pick" id="ipick' + idx + '"></div><div class="hint">Your photo is used for this scene in every format. Only use photos you own or have permission to use.</div>';
+    else if (src === "concept" || src === "agent") h += '<div class="hint">' + esc(sc.visualBrief || "") + (src === "agent" ? " Created from your Marketing Profile photo in a generic setting." : " An illustration, not a real place.") + "</div>" + noteArea(idx, src, planned) + '<div class="slot-grid">' + sorted.map(function (s) { return slotView(s, src); }).join("") + "</div>";
+    else h += '<div class="hint">Planned as ' + esc(PLANNED_NAME[sc.visualSource] || "a scene") + ". Pick a source above to replace it, or leave it as planned.</div>";
+    return h + "</div>";
+  }
+
+  function paintImages() {
+    var ae = document.activeElement, keep = ae && ae.id && /^note\d+$/.test(ae.id) && $("imageSlots").contains(ae) ? { id: ae.id, s: ae.selectionStart, e: ae.selectionEnd } : null;
+    var by = {}, order = [];
+    im.slots.forEach(function (s) { if (!by[s.sceneIndex]) { by[s.sceneIndex] = []; order.push(s.sceneIndex); } by[s.sceneIndex].push(s); });
+    $("imagesCount").innerHTML = "Tries used in this project: <b>" + im.total + " of " + im.cap + "</b>. " + (im.charging ? "The first image of each version and one redo are included. Any extra redo shows its price and asks you first, and a try that fails is never charged." : "During the beta, tries are free. A try that fails is not counted.");
+    var both = (state.project.formats || []).length > 1;
+    $("imagesSub").textContent = "Choose where each scene's image comes from: your own photo, a generated concept image, or a generated image of you. " + (both ? "Create the 9:16 version first; once you approve it, the 16:9 version is built from it so the two match. " : "") + "Nothing is used in your Reel until you accept it.";
+    $("imageSlots").innerHTML = order.map(function (idx) { return sceneBlock(idx, by[idx]); }).join("") || '<div class="hint">There are no scenes yet.</div>';
+    order.forEach(function (idx) { paintPick(idx); });
+    var all = order.length && order.every(function (idx) {
+      var src = activeSrc(idx);
+      if (src === "concept" || src === "agent") return by[idx].every(function (s) { return s.approved; });
+      if (src === "own") return !!picked[idx] || ["concept", "agent"].indexOf(plannedSrc(sceneAt(idx))) < 0;
+      return true;
+    });
+    $("imagesDone").classList.toggle("hidden", !all);
+    if (all) $("imagesDone").textContent = "Every scene has its image. Narration and captions come next.";
+    if (keep) { var el = $(keep.id); if (el) { el.focus(); try { el.setSelectionRange(keep.s, keep.e); } catch (e) { /* ignore */ } } }
+  }
+
   function setSlotMsg(k, text, kind) { im.sig = ""; if (text) im.msgs[k] = { text: text, kind: kind || "" }; else delete im.msgs[k]; }
-  async function genSlot(sceneIndex, format, confirmCharge) {
-    var k = sceneIndex + "_" + format;
-    if (im.busy[k]) return; im.busy[k] = true; setSlotMsg(k, ""); delete im.confirming[k];
+  async function elaborateScene(idx) {
+    var src = activeSrc(idx), kind = KIND_OF[src]; if (!kind || im.working[idx]) return;
+    var note = (im.note[idx] || "").trim();
+    im.working[idx] = true; setSlotMsg("n" + idx, ""); repaint();
     try {
-      var r = await api("POST", "", { action: "generate", projectId: state.project.id, sceneIndex: sceneIndex, format: format, confirmCharge: confirmCharge === true }, IMG);
+      var r = await api("POST", "", { action: "elaborate", projectId: state.project.id, sceneIndex: idx, kind: kind, note: note }, IMG);
+      if (r.ok) im.desc[idx] = { kind: kind, description: r.json.description, removed: r.json.removed || [], warnings: r.json.warnings || [], note: note };
+      else setSlotMsg("n" + idx, r.json.error || "Could not write the description. Please try again.", "err");
+    } catch (e) { setSlotMsg("n" + idx, e.message, "err"); }
+    delete im.working[idx]; repaint();
+  }
+  async function genSlot(sceneIndex, format, confirmCharge) {
+    var k = sceneIndex + "_" + format, src = activeSrc(sceneIndex), kind = KIND_OF[src];
+    if (!kind || im.busy[k]) return;
+    var d = descFor(sceneIndex, src);
+    if (!d && (im.note[sceneIndex] || "").trim()) { delete im.confirming[k]; return setSlotMsg(k, "Click Elaborate with AI first, so your note is checked before anything is created.", "err"), repaint(); }
+    im.busy[k] = true; setSlotMsg(k, ""); delete im.confirming[k];
+    try {
+      var body = { action: "generate", projectId: state.project.id, sceneIndex: sceneIndex, format: format, kind: kind, confirmCharge: confirmCharge === true };
+      if (d) { body.description = d.description; body.note = d.note; }
+      var r = await api("POST", "", body, IMG);
       var code = r.json && r.json.code;
       if (r.status === 402 && code === "confirm_charge") { im.confirming[k] = r.json.credits || im.per; im.sig = ""; }
       else if (r.status === 402 && code === "insufficient_credits") setSlotMsg(k, "You don't have enough Images for this (it costs " + plural(r.json.credits || im.per) + "). Add Images to your balance and try again.", "err");
@@ -603,22 +673,36 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
       var r = await api("POST", "", { action: act, projectId: state.project.id, assetId: assetId }, IMG);
       if (!r.ok) setSlotMsg(k, r.json.error || "That did not work. Please try again.", "err");
       else if (act === "keep") { im.kept[assetId] = true; setSlotMsg(k, "Saved to My Marketing Photos.", "ok"); }
-      else if (act === "accept" && state.project.status === "narrative_approved") { state.project.status = "images"; renderSteps(5); }
+      else if (act === "accept") {
+        var si = Number(String(k).split("_")[0]);
+        delete picked[si]; // accepting a generated image retires an own photo for that scene
+        if (state.project.status === "narrative_approved") { state.project.status = "images"; renderSteps(5); }
+      }
     } catch (e) { setSlotMsg(k, e.message, "err"); }
     await loadImages();
   }
   function onImageClick(ev) {
-    var b = ev.target && ev.target.closest ? ev.target.closest("button[data-act]") : null;
+    var t = ev.target && ev.target.closest ? ev.target : null; if (!t) return;
+    var tab = t.closest("button[data-src]");
+    if (tab) { im.src[Number(tab.getAttribute("data-scene"))] = tab.getAttribute("data-src"); return repaint(); }
+    var b = t.closest("button[data-act]");
     if (!b || b.disabled) return;
     var act = b.getAttribute("data-act"), si = Number(b.getAttribute("data-scene")), f = b.getAttribute("data-format"), k = si + "_" + f;
-    if (act === "cancel") { delete im.confirming[k]; im.sig = ""; return paintImages(); }
+    if (act === "elaborate") return elaborateScene(si);
+    if (act === "cancel") { delete im.confirming[k]; return repaint(); }
     if (act === "confirm") return genSlot(si, f, true);
     if (act === "generate") {
       var s = im.slots.filter(function (x) { return x.sceneIndex === si && x.format === f; })[0];
-      if (s && s.nextCredits > 0) { im.confirming[k] = s.nextCredits; im.sig = ""; return paintImages(); }
+      if (s && s.nextCredits > 0) { im.confirming[k] = s.nextCredits; return repaint(); }
       return genSlot(si, f, false);
     }
     imageAction(act, b.getAttribute("data-asset"), k);
+  }
+  function onImageInput(ev) {
+    var t = ev.target; if (!t || !/^note\d+$/.test(t.id || "")) return;
+    var idx = Number(t.id.slice(4)); im.note[idx] = t.value;
+    // Editing the note makes the elaborated description stale: it must be elaborated again.
+    if (im.desc[idx] && im.desc[idx].note !== t.value.trim()) { delete im.desc[idx]; repaint(); }
   }
 
   // ── Projects list ──
@@ -654,6 +738,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     $("toImagesBtn").addEventListener("click", function () { go(5); });
     $("backToBoardBtn").addEventListener("click", function () { go(4); });
     $("imageSlots").addEventListener("click", onImageClick);
+    $("imageSlots").addEventListener("input", onImageInput);
     $("narration").addEventListener("input", refreshPreview);
     $("saveScriptBtn").addEventListener("click", function () { saveScript(false); });
     $("approveBtn").addEventListener("click", function () { saveScript(true); });

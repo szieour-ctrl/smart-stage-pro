@@ -50,7 +50,7 @@ test("reference photo: full body first, else headshot, else none", () => {
 const U1 = "11111111-1111-4111-8111-111111111111";
 const P1 = "aaaaaaaa-aaaa-4aaa-8aaa-000000000001";
 const db = {
-  agent_marketing_projects: [{ id: P1, user_id: U1, status: "narrative_approved", formats: ["9x16", "16x9"], narrative: { scenes: [
+  agent_marketing_projects: [{ id: P1, user_id: U1, status: "narrative_approved", formats: ["9x16", "16x9"], template: "local_market_insider", intake: { angle: "neighborhood", market: "Roseville, CA", audience: "Home sellers", issue: "Supply and buyer demand", action: "Understand the trade-off", observation: "Check the commute at rush hour." }, narrative: { scenes: [
     { visualSource: "AGENT_SCENE", aiGenerationPrompt: "agent on a quiet street" }, { visualSource: "GPT_IMAGE_2_CONCEPT", aiGenerationPrompt: "keys on cushion" }, { visualSource: "BRAND_CARD" }] } }],
   agent_marketing_assets: [], agent_marketing_library: [], marketing_profiles: [{ user_id: U1, headshot_key: "agent-marketing/h.jpg", fullbody_key: null }],
 };
@@ -61,7 +61,8 @@ const quotaPath = require.resolve("../netlify/functions/lib/reel-quota-lib");
 function fake(method, table, body, qs = "") {
   const q = new URLSearchParams(qs.replace(/^\?/, "")); const t = db[table];
   const eq = (k) => (q.get(k) || "").replace(/^eq\./, "");
-  const rows = t.filter((r) => ["id", "user_id", "project_id", "source"].every((k) => !q.get(k) || String(r[k]) === eq(k)));
+  const keep = (r, k) => { const v = q.get(k); if (!v) return true; return v.startsWith("neq.") ? String(r[k]) !== v.slice(4) : String(r[k]) === eq(k); };
+  const rows = t.filter((r) => ["id", "user_id", "project_id", "source", "scene_index", "status"].every((k) => keep(r, k)));
   if (method === "POST") { const row = { id: "dddddddd-dddd-4ddd-8ddd-" + String(n++).padStart(12, "0"), created_at: String(n), ...body }; t.push(row); return Promise.resolve({ status: 201, data: [row] }); }
   if (method === "PATCH") { rows.forEach((r) => Object.assign(r, body)); return Promise.resolve({ status: 200, data: rows }); }
   return Promise.resolve({ status: 200, data: rows });
@@ -78,10 +79,11 @@ const finish = (a) => { a.generation.state = "done"; a.asset_key = "agent-market
 
 test("off by default", async () => { delete process.env.AGENT_MARKETING_ENABLED; assert.strictEqual((await call("GET", null, { projectId: P1 })).status, 404); });
 
-test("slots list only generated-image scenes; first generation is free, dispatches the worker with the internal key", async () => {
+test("slots list every scene (any scene can get a generated image); first generation is free, dispatches the worker with the internal key", async () => {
   process.env.AGENT_MARKETING_ENABLED = "true";
   const l = await call("GET", null, { projectId: P1 });
-  assert.deepStrictEqual(l.json.slots.map((s) => `${s.sceneIndex}:${s.format}`), ["0:9x16", "0:16x9", "1:9x16", "1:16x9"]);
+  assert.deepStrictEqual(l.json.slots.map((s) => `${s.sceneIndex}:${s.format}`), ["0:9x16", "0:16x9", "1:9x16", "1:16x9", "2:9x16", "2:16x9"]);
+  assert.deepStrictEqual(l.json.slots.filter((x) => x.format === "9x16").map((x) => x.plannedKind), ["agent_scene", "concept", null]);
   const g = await call("POST", { action: "generate", projectId: P1, sceneIndex: 0, format: "9x16" });
   assert.strictEqual(g.status, 202); assert.strictEqual(g.json.charged, false); assert.strictEqual(debits.length, 0);
   assert.strictEqual(dispatched[0].key, "ik"); assert.ok(dispatched[0].url.endsWith("agent-marketing-image-background"));
@@ -126,8 +128,10 @@ test("accept approves one image per slot; 16:9 is built from the approved 9:16; 
   assert.strictEqual(db.agent_marketing_library[0].kind, "generated"); assert.strictEqual(db.agent_marketing_library[0].rights.aiGenerated, true);
 });
 
-test("guards: not an image scene, wrong format, no profile photo, script not approved, cap", async () => {
-  assert.strictEqual((await call("POST", { action: "generate", projectId: P1, sceneIndex: 2, format: "9x16" })).status, 400);
+test("guards: no prompt for the scene, wrong format, no profile photo, script not approved, cap", async () => {
+  const np0 = await call("POST", { action: "generate", projectId: P1, sceneIndex: 2, format: "9x16" });
+  assert.strictEqual(np0.status, 400); assert.strictEqual(np0.json.code, "description_needed"); // brand-card scene: the planner gave no image prompt
+  assert.strictEqual((await call("POST", { action: "generate", projectId: P1, sceneIndex: 9, format: "9x16" })).status, 400);
   assert.strictEqual((await call("POST", { action: "generate", projectId: P1, sceneIndex: 1, format: "1x1" })).status, 400);
   const prof = db.marketing_profiles[0]; const h = prof.headshot_key; prof.headshot_key = null;
   const np = await call("POST", { action: "generate", projectId: P1, sceneIndex: 0, format: "9x16" });
@@ -147,4 +151,53 @@ test("a generation that never finishes is closed out and refunded", async () => 
   const l = await call("GET", null, { projectId: P1 });
   assert.strictEqual(a.generation.state, "error"); assert.strictEqual(a.generation.refunded, true);
   assert.deepStrictEqual(debits.map((d) => d.refund), [true]); assert.ok(l.json.slots.length);
+});
+
+// ── Oct 23: choose the source of any scene, and AI-elaborated notes ──
+const planLib = require("../netlify/functions/lib/agent-marketing-plan-lib");
+const mark = () => db.agent_marketing_assets.length;
+
+test("elaborate: returns a scrubbed description, spends no try and creates no draft", async () => {
+  process.env.ANTHROPIC_API_KEY = "ak";
+  const orig = planLib.callClaudeText; let seen;
+  planLib.callClaudeText = async (sys, user) => { seen = JSON.parse(user); return JSON.stringify({ description: "A bright front walk in soft morning light with mature trees.", removed: [] }); };
+  const before = mark();
+  const r = await call("POST", { action: "elaborate", projectId: P1, sceneIndex: 2, kind: "agent_scene", note: "mature trees" });
+  assert.strictEqual(r.status, 200); assert.match(r.json.description, /mature trees/); assert.strictEqual(seen.agent_note, "mature trees");
+  assert.strictEqual(mark(), before);
+  const bad = await call("POST", { action: "elaborate", projectId: P1, sceneIndex: 2, kind: "concept", note: "Just listed 1234 Oak Street" });
+  assert.strictEqual(bad.status, 422); assert.strictEqual(bad.json.code, "note_blocked");
+  assert.strictEqual((await call("POST", { action: "elaborate", projectId: P1, sceneIndex: 2, kind: "nope", note: "" })).status, 400);
+  assert.strictEqual((await call("POST", { action: "elaborate", projectId: P1, sceneIndex: 9, kind: "concept", note: "" })).status, 400);
+  planLib.callClaudeText = orig;
+});
+
+test("generate on a scene the planner gave no image: needs a description, checks it again on the server, records kind and note", async () => {
+  const ok = await call("POST", { action: "generate", projectId: P1, sceneIndex: 2, format: "9x16", kind: "concept", note: "mature trees", description: "A calm street lined with mature trees in soft light." });
+  assert.strictEqual(ok.status, 202);
+  const a = db.agent_marketing_assets.at(-1);
+  assert.strictEqual(a.generation.kind, "concept"); assert.strictEqual(a.generation.note, "mature trees"); assert.strictEqual(a.generation.elaborated, true);
+  assert.match(a.generation.prompt, /mature trees/); assert.match(a.generation.prompt, /No people at all/);
+  const before = mark();
+  const tampered = await call("POST", { action: "generate", projectId: P1, sceneIndex: 2, format: "16x9", kind: "concept", description: "A yard sign that says Just Listed with an open house banner" });
+  assert.strictEqual(tampered.status, 422); assert.strictEqual(tampered.json.code, "description_blocked"); assert.strictEqual(mark(), before);
+  assert.strictEqual((await call("POST", { action: "generate", projectId: P1, sceneIndex: 2, format: "9x16", kind: "sketch", description: "x" })).status, 400);
+});
+
+test("choosing the other kind on a planned scene does not reuse the planner's prompt; the same kind does", async () => {
+  const wrong = await call("POST", { action: "generate", projectId: P1, sceneIndex: 1, format: "9x16", kind: "agent_scene" }); // scene 1 is a planned concept image
+  assert.strictEqual(wrong.status, 400); assert.strictEqual(wrong.json.code, "description_needed");
+  const withDesc = await call("POST", { action: "generate", projectId: P1, sceneIndex: 1, format: "9x16", kind: "agent_scene", description: "The agent sits at a bright kitchen table, relaxed." });
+  assert.strictEqual(withDesc.status, 202);
+  const a = db.agent_marketing_assets.at(-1);
+  assert.strictEqual(a.generation.kind, "agent_scene"); assert.strictEqual(a.generation.referenceKey, "agent-marketing/h.jpg"); assert.match(a.generation.prompt, /ONLY person/);
+});
+
+test("accepting a generated image retires an approved own photo for that scene (one source per scene)", async () => {
+  const own = { id: "eeeeeeee-eeee-4eee-8eee-000000000001", project_id: P1, user_id: U1, scene_index: 1, source: "library", status: "approved", generation: null };
+  db.agent_marketing_assets.push(own);
+  const g = db.agent_marketing_assets.filter((a) => a.source === "gpt_image_2" && a.scene_index === 1).pop();
+  finish(g);
+  assert.strictEqual((await call("POST", { action: "accept", projectId: P1, assetId: g.id })).status, 200);
+  assert.strictEqual(g.status, "approved"); assert.strictEqual(own.status, "rejected");
 });

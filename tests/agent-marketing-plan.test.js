@@ -107,3 +107,16 @@ test("a plan with no real photos at all is fine, and extra optional scenes fall 
   assert.strictEqual(m.scenes.filter((s) => s.visualSource === "AUTHENTIC_AGENT_ASSET").length, 1);
   assert.strictEqual(m.scenes[4].visualSource, "CONCEPT_REUSE"); // the later one is demoted
 });
+
+test("an agent-in-scene image counts toward the included images, needs a prompt, and is limited to one", () => {
+  const p = goodPlan(); p.scenes[1] = scene(1, "AGENT_SCENE"); p.scenes[1].ai_generation_prompt = "agent on a quiet street, relaxed";
+  const n = planLib.normalizePlan(p, project).narrative;
+  assert.strictEqual(n.scenes[1].visualSource, "AGENT_SCENE"); assert.ok(n.scenes[1].aiGenerationPrompt);
+  const two = goodPlan(); two.scenes[1] = scene(1, "AGENT_SCENE"); two.scenes[3] = scene(3, "AGENT_SCENE");
+  two.scenes[1].ai_generation_prompt = two.scenes[3].ai_generation_prompt = "agent scene";
+  const m = planLib.normalizePlan(two, project).narrative;
+  assert.deepStrictEqual(m.scenes.filter((s) => s.visualSource === "AGENT_SCENE").length, 1);
+  assert.strictEqual(m.scenes[3].visualSource, "GPT_IMAGE_2_CONCEPT"); // the second one becomes a plain concept image
+  const noPrompt = goodPlan(); noPrompt.scenes[1] = scene(1, "AGENT_SCENE"); noPrompt.scenes[1].ai_generation_prompt = "";
+  assert.throws(() => planLib.normalizePlan(noPrompt, project), /image prompt/);
+});

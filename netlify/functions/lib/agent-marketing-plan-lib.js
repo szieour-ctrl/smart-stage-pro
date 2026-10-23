@@ -24,11 +24,13 @@ const GPT_RANGE = { 30: [2, 2], 45: [2, 2], 60: [2, 3] };
 // Most agents have no on-point photos, so a Reel must be finishable with none. Scenes are one of:
 //   GPT_IMAGE_2_CONCEPT  new concept image (the included allowance)
 //   CONCEPT_REUSE        an earlier concept image re-framed with different motion
+//   AGENT_SCENE          concept image of the AGENT (their own profile photo as the reference) in a generic setting; counts as one of the included images
 //   AGENT_PROFILE        headshot / full-body from the agent's Marketing Profile
 //   BRAND_CARD           brand-colored text card (name, logo, short line)
 //   AUTHENTIC_AGENT_ASSET  an optional real photo the agent may supply
-const VISUAL_SOURCES = ["GPT_IMAGE_2_CONCEPT", "CONCEPT_REUSE", "AGENT_PROFILE", "BRAND_CARD", "AUTHENTIC_AGENT_ASSET"];
-const SOURCE_MAX = { AUTHENTIC_AGENT_ASSET: 1, AGENT_PROFILE: 2, BRAND_CARD: 2 };
+const VISUAL_SOURCES = ["GPT_IMAGE_2_CONCEPT", "AGENT_SCENE", "CONCEPT_REUSE", "AGENT_PROFILE", "BRAND_CARD", "AUTHENTIC_AGENT_ASSET"];
+const SOURCE_MAX = { AUTHENTIC_AGENT_ASSET: 1, AGENT_PROFILE: 2, BRAND_CARD: 2, AGENT_SCENE: 1 };
+const NEW_IMAGE_SOURCES = ["GPT_IMAGE_2_CONCEPT", "AGENT_SCENE"]; // both are generated images and count toward the included total
 const ALLOWED_TAGS = new Set(["conversational", "emphasis", "warm", "thoughtful", "confident", "pauses"]);
 const MAX_TAGS = 6;
 
@@ -52,8 +54,8 @@ function buildSystemPrompt() {
     "5. narration_with_audio_tags is for ElevenLabs v3. Use only these audio tags, sparingly (at most 5 in total): [conversational] [emphasis] [warm] [thoughtful] [confident]. Never put tags inside words. Write for the ear: short sentences, natural pacing, a clear hook first, one practical insight, a low-pressure close. Avoid clichés and self-congratulation.",
     "6. Spoken words must fit the requested word range. The narration must end on a complete sentence.",
     "7. Storyboard: the number of scenes you are given, in story order: local hook, tension or misconception, grounded insight and consequence, then solution plus the branded call to action (add comparison/context scenes between them for longer pieces). Every scene has a narration_excerpt that is an exact consecutive slice of your narration (tags removed); together the excerpts cover the whole narration in order.",
-    "8. Most agents have NO suitable photos, so the video must work with none. visual_source is one of: GPT_IMAGE_2_CONCEPT (a new conceptual illustration, never presented as documentary evidence; use exactly the number you are given), CONCEPT_REUSE (re-uses an earlier concept image with a different crop and camera motion; set reuse_of_scene to that scene's number), AGENT_PROFILE (the agent's own headshot or full-body photo from their profile; use only for a personal beat such as the opening or the close; at most 2), BRAND_CARD (a brand-colored text card with the agent's name and a short line; set card_text to at most 8 words; at most 2, typically the closing call to action), or AUTHENTIC_AGENT_ASSET (an optional real photo, at most 1, only if one specific real photo would clearly strengthen that beat; never ask for a person, client, event, closing or place the agent may not have; always give an if_unavailable fallback). Every remaining scene must be CONCEPT_REUSE.",
-    "9. AI_generation_prompt (GPT scenes only): photorealistic editorial still life or tabletop concept, California residential aesthetic, no people, no text, no logos, no readable rates or prices, no charts, no identifiable addresses, no real development or builder names, no real landmarks. Describe the composition so it can be re-framed independently for both 9:16 and 16:9.",
+    "8. Most agents have NO suitable photos, so the video must work with none. visual_source is one of: GPT_IMAGE_2_CONCEPT (a new conceptual illustration, never presented as documentary evidence; use exactly the number you are given, counting AGENT_SCENE toward that number), AGENT_SCENE (a generated image of the agent themself in a generic setting such as a tree-lined street, a bright empty room or a desk, created from their own profile photo; at most 1; ai_generation_prompt describes ONLY the setting, pose and mood; never other people), CONCEPT_REUSE (re-uses an earlier concept image with a different crop and camera motion; set reuse_of_scene to that scene's number, which must be a GPT_IMAGE_2_CONCEPT or AGENT_SCENE scene), AGENT_PROFILE (the agent's own headshot or full-body photo from their profile; use only for a personal beat such as the opening or the close; at most 2), BRAND_CARD (a brand-colored text card with the agent's name and a short line; set card_text to at most 8 words; at most 2, typically the closing call to action), or AUTHENTIC_AGENT_ASSET (an optional real photo, at most 1, only if one specific real photo would clearly strengthen that beat; never ask for a person, client, event, closing or place the agent may not have; always give an if_unavailable fallback). Every remaining scene must be CONCEPT_REUSE.",
+    "9. ai_generation_prompt (GPT_IMAGE_2_CONCEPT and AGENT_SCENE only): photorealistic editorial still life or tabletop concept, California residential aesthetic, no people (for AGENT_SCENE the only person is the agent, described only by setting, pose and mood, never by appearance), no text, no logos, no readable rates or prices, no charts, no identifiable addresses, no real development or builder names, no real landmarks. Describe the composition so it can be re-framed independently for both 9:16 and 16:9.",
     "10. Provide framing notes for each requested format separately. The two formats are composed independently from the original images; never plan a crop of a finished video.",
     "11. Camera motion is Ken Burns only (slow, deliberate, minimal): choose from push_in, pull_back, pan_left, pan_right, tilt_up, tilt_down, static_hold.",
     "12. The CTA is low-pressure and about the agent's expertise (for example comparing options or asking for a local perspective). No property-sale CTA.",
@@ -61,7 +63,7 @@ function buildSystemPrompt() {
     "",
     "Return ONLY a JSON object, no commentary, with exactly these keys:",
     "{ \"editorial_angle\": string (1-2 sentences), \"hook\": string, \"narration_with_audio_tags\": string,",
-    "  \"scenes\": [ { \"role\": string, \"narration_excerpt\": string, \"purpose\": string, \"visual_source\": \"GPT_IMAGE_2_CONCEPT\"|\"CONCEPT_REUSE\"|\"AGENT_PROFILE\"|\"BRAND_CARD\"|\"AUTHENTIC_AGENT_ASSET\", \"reuse_of_scene\": number | null, \"card_text\": string | null,",
+    "  \"scenes\": [ { \"role\": string, \"narration_excerpt\": string, \"purpose\": string, \"visual_source\": \"GPT_IMAGE_2_CONCEPT\"|\"AGENT_SCENE\"|\"CONCEPT_REUSE\"|\"AGENT_PROFILE\"|\"BRAND_CARD\"|\"AUTHENTIC_AGENT_ASSET\", \"reuse_of_scene\": number | null, \"card_text\": string | null,",
     "    \"visual_brief\": string, \"authentic_photo_request\": { \"best_image\": string, \"should_contain\": string, \"avoid\": string, \"if_unavailable\": string } | null,",
     "    \"ai_generation_prompt\": string | null, \"camera_motion\": string, \"framing_9x16\": string, \"framing_16x9\": string, \"text_safe_placement\": string } ],",
     "  \"cta_suggestion\": string, \"claims_to_verify\": [string], \"missing_agent_inputs\": [string] }",
@@ -166,12 +168,12 @@ function normalizePlan(raw, project) {
   if (rawScenes.length < smin || rawScenes.length > smax) throw new Error(`The planner returned ${rawScenes.length} scenes; ${smin === smax ? smin : `${smin}–${smax}`} are needed`);
 
   const gptIdx = [];
-  rawScenes.forEach((s, i) => { if (s && s.visual_source === "GPT_IMAGE_2_CONCEPT") gptIdx.push(i); });
+  rawScenes.forEach((s, i) => { if (s && NEW_IMAGE_SOURCES.includes(s.visual_source)) gptIdx.push(i); });
   const used = {};
   const scenes = rawScenes.map((s, i) => {
     let src = VISUAL_SOURCES.includes(s && s.visual_source) ? s.visual_source : "CONCEPT_REUSE";
     // Over-limit optional sources fall back to re-using a concept image instead of failing the whole plan.
-    if (SOURCE_MAX[src] != null) { used[src] = (used[src] || 0) + 1; if (used[src] > SOURCE_MAX[src]) src = "CONCEPT_REUSE"; }
+    if (SOURCE_MAX[src] != null) { used[src] = (used[src] || 0) + 1; if (used[src] > SOURCE_MAX[src]) src = src === "AGENT_SCENE" ? "GPT_IMAGE_2_CONCEPT" : "CONCEPT_REUSE"; }
     const req = s && s.authentic_photo_request && typeof s.authentic_photo_request === "object" ? s.authentic_photo_request : null;
     const out = {
       index: i,
@@ -184,7 +186,7 @@ function normalizePlan(raw, project) {
       framing: { "9x16": str(s && s.framing_9x16, 300), "16x9": str(s && s.framing_16x9, 300) },
       textSafePlacement: str(s && s.text_safe_placement, 200),
     };
-    if (src === "GPT_IMAGE_2_CONCEPT") {
+    if (NEW_IMAGE_SOURCES.includes(src)) {
       out.aiGenerationPrompt = str(s.ai_generation_prompt, 900);
       if (!out.aiGenerationPrompt) throw new Error(`Scene ${i + 1} is a concept image but has no image prompt`);
     } else if (src === "CONCEPT_REUSE") {
@@ -262,6 +264,6 @@ async function generatePlan({ project, anthropicKey, callFn }) {
 }
 
 module.exports = {
-  MODEL, SCENE_RANGE, GPT_RANGE, VISUAL_SOURCES, SOURCE_MAX, MAX_ATTEMPTS, STALE_PLANNING_MS, ALLOWED_TAGS,
+  MODEL, SCENE_RANGE, GPT_RANGE, NEW_IMAGE_SOURCES, VISUAL_SOURCES, SOURCE_MAX, MAX_ATTEMPTS, STALE_PLANNING_MS, ALLOWED_TAGS,
   intakeHash, buildSystemPrompt, buildUserMessage, callClaudeText, extractJsonObject, sanitizeTags, normalizePlan, generatePlan,
 };

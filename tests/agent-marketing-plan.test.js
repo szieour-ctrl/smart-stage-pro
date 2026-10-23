@@ -54,11 +54,22 @@ test("unknown or excess audio tags are removed", () => {
   assert.ok((t.match(/\[/g) || []).length <= 6);
 });
 
-test("wrong scene count, too many concept images, or a missing image prompt make the plan unusable", () => {
+test("extra generated images are demoted to concept re-use instead of failing or adding paid generations", () => {
+  const p = goodPlan();
+  p.scenes = p.scenes.map((s) => ({ ...s, visual_source: "GPT_IMAGE_2_CONCEPT", ai_generation_prompt: "x" }));
+  const n = planLib.normalizePlan(p, project).narrative;
+  assert.strictEqual(n.scenes.filter((s) => s.visualSource === "GPT_IMAGE_2_CONCEPT").length, 2);
+  assert.ok(n.scenes.filter((s) => s.visualSource === "CONCEPT_REUSE").every((s) => n.scenes[s.reuseOfScene].aiGenerationPrompt));
+  // 2 concept images + 1 agent scene = 3 generated: the agent scene must not be turned into a third concept image
+  const q = goodPlan();
+  q.scenes[2] = { ...q.scenes[2], visual_source: "AGENT_SCENE", reuse_of_scene: null, ai_generation_prompt: "Agent at a desk, bright room" };
+  const m = planLib.normalizePlan(q, project).narrative;
+  assert.strictEqual(m.scenes.filter((s) => ["GPT_IMAGE_2_CONCEPT", "AGENT_SCENE"].includes(s.visualSource)).length, 2);
+});
+
+test("wrong scene count or a missing image prompt make the plan unusable", () => {
   const p1 = goodPlan(); p1.scenes = p1.scenes.slice(0, 3);
   assert.throws(() => planLib.normalizePlan(p1, project), /scenes/);
-  const p2 = goodPlan(); p2.scenes = p2.scenes.map((s) => ({ ...s, visual_source: "GPT_IMAGE_2_CONCEPT", ai_generation_prompt: "x" }));
-  assert.throws(() => planLib.normalizePlan(p2, project), /concept images/);
   const p3 = goodPlan(); p3.scenes[1].ai_generation_prompt = "";
   assert.throws(() => planLib.normalizePlan(p3, project), /image prompt/);
 });

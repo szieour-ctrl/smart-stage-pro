@@ -4,7 +4,7 @@ const assert = require("node:assert");
 const run = require("../netlify/functions/lib/agent-marketing-research-run-lib");
 
 const NOW = "2026-10-24T17:00:00Z";
-const ENV = {}; // defaults: sonar-pro, medium context, one corrective retry, $0.025 target
+const ENV = {}; // defaults: perplexity/sonar, medium context, one corrective retry, $0.025 target
 const row = { id: "r1", mode: "market_update", audience: "sellers", geography: { type: "city", name: "Roseville", city: "", state: "CA", label: "Roseville, CA" }, focus: {}, upload_refs: [] };
 const noSleep = async () => {};
 
@@ -20,16 +20,14 @@ const topic = (n) => ({ question: Q[n - 1], why_it_matters: "It changes how sell
 const five = () => [1, 2, 3, 4, 5].map(topic);
 const reply = (topics, extra) => ({
   status: 200,
-  json: { choices: [{ message: { content: "```json\n" + JSON.stringify({ topics }) + "\n```" } }], citations: [1, 2, 3, 4, 5].map(url), usage: { prompt_tokens: 600, completion_tokens: 1500 }, ...(extra || {}) },
+  json: { output: [{ type: "search_results", results: [1, 2, 3, 4, 5].map((i) => ({ url: url(i) })) }, { type: "message", content: [{ type: "output_text", text: "```json\n" + JSON.stringify({ topics }) + "\n```" }] }], usage: { input_tokens: 600, output_tokens: 1500, tool_calls_details: { search_web: { invocation: 2 } } }, ...(extra || {}) },
 });
 
 test("cost: estimated from the published rates when the provider sends none", () => {
-  assert.strictEqual(run.estimateCostUsd("sonar-pro", { promptTokens: 600, completionTokens: 1500 }), 0.0243);
-  assert.strictEqual(run.estimateCostUsd("perplexity/sonar-pro", { promptTokens: 600, completionTokens: 1500 }), 0.0243);
-  assert.strictEqual(run.estimateCostUsd("sonar", { promptTokens: 1000, completionTokens: 2000 }), 0.003);
-  assert.strictEqual(run.estimateCostUsd("sonar-deep-research", { promptTokens: 1000, completionTokens: 2000, reasoningTokens: 100000, citationTokens: 5000, searchQueries: 20 }), 0.428);
+  assert.strictEqual(run.estimateCostUsd("perplexity/sonar", { promptTokens: 600, completionTokens: 1500, searchQueries: 2 }), 0.0089);
+  assert.strictEqual(run.estimateCostUsd("openai/gpt-6-luna", { promptTokens: 10000, completionTokens: 2000, searchQueries: 3 }), 0.0095);
   assert.strictEqual(run.estimateCostUsd("mystery-model", { promptTokens: 1, completionTokens: 1 }), null);
-  assert.strictEqual(run.estimateCostUsd("sonar-pro", {}), null);
+  assert.strictEqual(run.estimateCostUsd("perplexity/sonar", {}), null);
 });
 
 test("today is the Pacific calendar day", () => {
@@ -52,18 +50,15 @@ test("grounding: a source the provider never found is dropped; the provider's ow
 test("provider: busy answers are retried, a rejected model spelling is tried once, a bad key is a plain message", async () => {
   let calls = [];
   const seq = (answers) => async (payload) => { calls.push(payload.model); return answers.shift(); };
-  const ok = { status: 200, json: { choices: [] } };
+  const ok = { status: 200, json: { output: [] } };
   calls = [];
-  const a = await run.askProvider({ payload: { model: "sonar-pro" }, apiKey: "k", callFn: seq([{ status: 429, json: {} }, { status: 503, json: {} }, ok]), sleepFn: noSleep, retries: 2 });
+  const a = await run.askProvider({ payload: { model: "perplexity/sonar" }, apiKey: "k", callFn: seq([{ status: 429, json: {} }, { status: 503, json: {} }, ok]), sleepFn: noSleep, retries: 2 });
   assert.strictEqual(a.resp, ok.json);
   assert.strictEqual(calls.length, 3);
   calls = [];
-  const b = await run.askProvider({ payload: { model: "sonar-pro" }, apiKey: "k", callFn: seq([{ status: 400, json: { error: { message: "Invalid model 'sonar-pro'" } } }, ok]), sleepFn: noSleep, retries: 0 });
-  assert.deepStrictEqual(calls, ["sonar-pro", "perplexity/sonar-pro"]);
-  assert.strictEqual(b.modelUsed, "perplexity/sonar-pro");
-  await assert.rejects(run.askProvider({ payload: { model: "sonar-pro" }, apiKey: "SECRET-KEY", callFn: seq([{ status: 401, json: { error: "bad key SECRET-KEY" } }]), sleepFn: noSleep, retries: 2 }), (e) => !/SECRET-KEY/.test(e.message) && /not set up/.test(e.message));
-  await assert.rejects(run.askProvider({ payload: { model: "sonar-pro" }, apiKey: "k", callFn: async () => { throw new Error("socket hang up"); }, sleepFn: noSleep, retries: 1 }), /busy|timed out/);
-  await assert.rejects(run.askProvider({ payload: { model: "sonar-pro" }, apiKey: "k", callFn: seq([{ status: 422, json: {} }]), sleepFn: noSleep, retries: 2 }), /not accepted/);
+  await assert.rejects(run.askProvider({ payload: { model: "perplexity/sonar" }, apiKey: "SECRET-KEY", callFn: seq([{ status: 401, json: { error: "bad key SECRET-KEY" } }]), sleepFn: noSleep, retries: 2 }), (e) => !/SECRET-KEY/.test(e.message) && /not set up/.test(e.message));
+  await assert.rejects(run.askProvider({ payload: { model: "perplexity/sonar" }, apiKey: "k", callFn: async () => { throw new Error("socket hang up"); }, sleepFn: noSleep, retries: 1 }), /busy|timed out/);
+  await assert.rejects(run.askProvider({ payload: { model: "perplexity/sonar" }, apiKey: "k", callFn: seq([{ status: 422, json: {} }]), sleepFn: noSleep, retries: 2 }), /not accepted/);
 });
 
 test("run: five grounded topics are delivered and charged; cost is estimated and compared with the $0.025 target", async () => {
@@ -74,16 +69,17 @@ test("run: five grounded topics are delivered and charged; cost is estimated and
   assert.strictEqual(r.fields.charged_at, "2026-10-24T17:00:00.000Z");
   assert.strictEqual(r.fields.research_date, "2026-10-24");
   assert.strictEqual(r.attempts, 1);
-  assert.strictEqual(r.fields.usage.costUsd, 0.0243);
+  assert.strictEqual(r.fields.usage.costUsd, 0.0089);
   assert.strictEqual(r.fields.usage.costEstimated, true);
   assert.strictEqual(r.fields.usage.withinTarget, true);
   assert.strictEqual(r.fields.usage.grounded, true);
-  assert.match(sent.messages[1].content, /Roseville, CA/);
-  assert.strictEqual(sent.model, "sonar-pro");
+  assert.match(sent.input, /Roseville, CA/);
+  assert.strictEqual(sent.model, "perplexity/sonar");
+  assert.strictEqual(sent.tools[0].type, "web_search");
 });
 
 test("run: a provider-reported cost beats the estimate and can miss the target", async () => {
-  const r = await run.runResearch({ row, apiKey: "k", now: NOW, env: ENV, sleepFn: noSleep, callFn: async () => reply(five(), { usage: { prompt_tokens: 600, completion_tokens: 1500, cost: { total_cost: 0.06 } } }) });
+  const r = await run.runResearch({ row, apiKey: "k", now: NOW, env: ENV, sleepFn: noSleep, callFn: async () => reply(five(), { usage: { input_tokens: 600, output_tokens: 1500, cost: { total_cost: 0.06 } } }) });
   assert.strictEqual(r.fields.usage.costUsd, 0.06);
   assert.strictEqual(r.fields.usage.costEstimated, false);
   assert.strictEqual(r.fields.usage.withinTarget, false);
@@ -97,8 +93,9 @@ test("run: an unusable first answer gets one corrective retry; both attempts' co
   assert.strictEqual(r.attempts, 2);
   assert.strictEqual(r.fields.usage.promptTokens, 1200);
   assert.strictEqual(r.fields.usage.completionTokens, 3000);
-  assert.match(sent[1].messages[2].content, /rejected/);
-  assert.match(sent[1].messages[2].content, /expected 5 topics/);
+  assert.match(sent[1].input, /rejected/);
+  assert.ok(sent[1].input.indexOf("rejected") === sent[1].input.lastIndexOf("rejected"));
+  assert.match(sent[1].input, /expected 5 topics/);
 });
 
 test("run: two unusable answers fail the session and never charge it", async () => {
@@ -113,7 +110,7 @@ test("run: two unusable answers fail the session and never charge it", async () 
 });
 
 test("run: prose instead of JSON, invented sources and a dead provider all fail uncharged", async () => {
-  const prose = await run.runResearch({ row, apiKey: "k", now: NOW, env: { AGENT_MARKETING_RESEARCH_RETRIES: "0" }, sleepFn: noSleep, callFn: async () => ({ status: 200, json: { choices: [{ message: { content: "I could not find anything." } }], usage: { prompt_tokens: 10, completion_tokens: 10 } } }) });
+  const prose = await run.runResearch({ row, apiKey: "k", now: NOW, env: { AGENT_MARKETING_RESEARCH_RETRIES: "0" }, sleepFn: noSleep, callFn: async () => ({ status: 200, json: { output_text: "I could not find anything.", usage: { input_tokens: 10, output_tokens: 10 } } }) });
   assert.strictEqual(prose.fields.status, "failed");
   assert.strictEqual(prose.fields.charged_at, null);
   const invented = five(); invented[2].sources = [{ title: "Fake", url: "https://made-up.example/report", published: "2026-10-20" }];
@@ -143,7 +140,7 @@ test("run: events mode asks for events and accepts a verified upcoming set", asy
   let sent;
   const r = await run.runResearch({ row: { ...row, mode: "local_events", audience: "general" }, apiKey: "k", now: NOW, env: ENV, sleepFn: noSleep, callFn: async (p) => { sent = p; return reply([1, 2, 3, 4, 5].map(ev)); } });
   assert.strictEqual(r.fields.status, "ready", r.problems.join("; "));
-  assert.match(sent.messages[0].content, /MODE: Local Events/);
+  assert.match(sent.instructions, /MODE: Local Events/);
   assert.strictEqual(r.fields.topics[0].event.organizer, "City of Roseville");
 });
 

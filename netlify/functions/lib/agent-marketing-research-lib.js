@@ -108,13 +108,17 @@ function requestKey(request) {
   return JSON.stringify([r.mode, r.audience, g.type, String(g.name || "").toLowerCase(), String(g.city || "").toLowerCase(), !!(r.focus && r.focus.active_adult_55), !!(r.focus && r.focus.new_construction), (r.uploadIds || []).slice().sort()]);
 }
 
-// ── Provider request (Perplexity chat-completions shape) ────────────────────────────────────────────────────────
+// ── Provider request (Perplexity Agent API, POST /v1/agent) ────────────────────────────────────────────────────────
 // Sam's starting point (Oct 24): "enhanced local research" at about $0.025 per run, NOT sonar-deep-research (which costs far more per
 // call). That is a mid-tier search model, a bounded search context and a capped answer size. Every knob is an environment setting so
 // it can be tuned from the Netlify dashboard once real cost is measured; usage is stored per session and compared with the target.
-const DEFAULT_MODEL = "sonar-pro";
+// Perplexity retired the Sonar endpoint (Oct 24, 2026); research now runs on the Agent API with a web_search tool. Model IDs are the Agent API
+// ones (e.g. "perplexity/sonar", "openai/gpt-6-luna", "anthropic/claude-haiku-5-5"). Tune with AGENT_MARKETING_RESEARCH_MODEL.
+const DEFAULT_MODEL = "perplexity/sonar";
 const DEFAULT_COST_TARGET_USD = 0.025;
 const CONTEXT_SIZES = ["low", "medium", "high"];
+// How much the web_search tool may read: results per search and total search-context tokens. Bounded so cost stays near the target.
+const SEARCH_LIMITS = { low: { maxResults: 6, maxTokens: 3000 }, medium: { maxResults: 10, maxTokens: 6000 }, high: { maxResults: 20, maxTokens: 10000 } };
 function researchModel(env) { return String((env || process.env).AGENT_MARKETING_RESEARCH_MODEL || DEFAULT_MODEL).trim() || DEFAULT_MODEL; }
 function researchSettings(env) {
   const e = env || process.env;
@@ -177,13 +181,18 @@ function buildResearchPayload({ request, today, uploadContext, env }) {
     `Goal: ${TOPIC_COUNT} timely topics for a short educational video that shows what this agent knows about the local market right now.`,
   ].filter(Boolean);
   const cfg = researchSettings(env);
+  const lim = SEARCH_LIMITS[cfg.searchContextSize];
   return {
     model: cfg.model,
-    temperature: 0.2,
-    max_tokens: cfg.maxTokens,
-    search_recency_filter: "month",          // matches the 30-day freshness rule; the validator still checks every date
-    web_search_options: { search_context_size: cfg.searchContextSize },
-    messages: [{ role: "system", content: systemPrompt(r.mode) }, { role: "user", content: lines.join("\n") }],
+    instructions: systemPrompt(r.mode),
+    input: lines.join("\n"),
+    max_output_tokens: cfg.maxTokens,       // bounds output cost; Anthropic models require it
+    tools: [{
+      type: "web_search",
+      max_results: lim.maxResults,
+      max_tokens: lim.maxTokens,
+      filters: { search_recency_filter: "month" }, // matches the 30-day freshness rule; the validator still checks every date
+    }],
   };
 }
 
@@ -316,9 +325,11 @@ function usageSummary(resp, targetUsd) {
   const num = (v) => (Number.isFinite(Number(v)) && v !== null && v !== "" ? Number(v) : null);
   const cost = u.cost && typeof u.cost === "object" ? num(u.cost.total_cost) : null;
   const target = Number.isFinite(Number(targetUsd)) && Number(targetUsd) > 0 ? Number(targetUsd) : DEFAULT_COST_TARGET_USD;
+  const details = u.tool_calls_details && typeof u.tool_calls_details === "object" ? u.tool_calls_details : {};
+  const searches = Object.keys(details).filter((k) => /search/i.test(k)).reduce((n, k) => n + (num(details[k] && details[k].invocation) || 0), 0);
   return {
-    promptTokens: num(u.prompt_tokens), completionTokens: num(u.completion_tokens), citationTokens: num(u.citation_tokens),
-    reasoningTokens: num(u.reasoning_tokens), searchQueries: num(u.num_search_queries), costUsd: cost,
+    promptTokens: num(u.input_tokens), completionTokens: num(u.output_tokens), citationTokens: null,
+    reasoningTokens: num(u.output_tokens_details && u.output_tokens_details.reasoning_tokens), searchQueries: Object.keys(details).length ? searches : null, costUsd: cost,
     targetUsd: target, withinTarget: cost == null ? null : cost <= target, // null = the provider did not report a cost
   };
 }

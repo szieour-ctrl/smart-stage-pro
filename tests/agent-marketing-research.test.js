@@ -72,36 +72,33 @@ test("request key: same request, same key; a different place or focus changes it
 test("payload: exact market, never widened; mode rules; model comes from the environment", () => {
   const request = r.validateResearchRequest({ mode: "market_update", audience: "sellers", geography: { type: "neighborhood", name: "Crocker Ranch", city: "Roseville" }, focus: { active_adult_55: true } }).request;
   const p = r.buildResearchPayload({ request, today: TODAY, env: {} });
-  assert.strictEqual(p.model, "sonar-pro");
-  assert.strictEqual(p.temperature, 0.2);
-  assert.strictEqual(p.max_tokens, 2200);                                    // bounds output cost
-  assert.deepStrictEqual(p.web_search_options, { search_context_size: "medium" });
-  assert.strictEqual(p.search_recency_filter, "month");
-  assert.strictEqual(p.messages[0].role, "system");
-  const user = p.messages[1].content;
+  assert.strictEqual(p.model, "perplexity/sonar");
+  assert.strictEqual(p.max_output_tokens, 2200);                             // bounds output cost
+  assert.deepStrictEqual(p.tools, [{ type: "web_search", max_results: 10, max_tokens: 6000, filters: { search_recency_filter: "month" } }]);
+  const user = p.input;
   assert.match(user, /Crocker Ranch, Roseville, CA/);
   assert.match(user, /do not broaden/i);
   assert.match(user, /55\+ active adult/);
   assert.match(user, /Today: 2026-10-24/);
-  assert.match(p.messages[0].content, /EXACTLY 5/);
-  assert.match(p.messages[0].content, /broader_context/);
-  assert.strictEqual(r.buildResearchPayload({ request, today: TODAY, env: { AGENT_MARKETING_RESEARCH_MODEL: "sonar-deep-research" } }).model, "sonar-deep-research");
+  assert.match(p.instructions, /EXACTLY 5/);
+  assert.match(p.instructions, /broader_context/);
+  assert.strictEqual(r.buildResearchPayload({ request, today: TODAY, env: { AGENT_MARKETING_RESEARCH_MODEL: "openai/gpt-6-luna" } }).model, "openai/gpt-6-luna");
   const ev = r.buildResearchPayload({ request: { ...request, mode: "local_events" }, today: TODAY, env: {} });
-  assert.match(ev.messages[0].content, /MODE: Local Events/);
-  assert.match(ev.messages[0].content, /upcoming" or "ongoing"/);
+  assert.match(ev.instructions, /MODE: Local Events/);
+  assert.match(ev.instructions, /upcoming" or "ongoing"/);
   const up = r.buildResearchPayload({ request, today: TODAY, uploadContext: "CMA, Crocker Ranch, 12 comps, Aug-Oct 2026", env: {} });
-  assert.match(up.messages[1].content, /12 comps/);
+  assert.match(up.input, /12 comps/);
 });
 
 test("settings: enhanced local research at a $0.025 target by default, every knob tunable, bad values ignored", () => {
   const d = r.researchSettings({});
-  assert.deepStrictEqual(d, { model: "sonar-pro", searchContextSize: "medium", maxTokens: 2200, costTargetUsd: 0.025 });
-  const t = r.researchSettings({ AGENT_MARKETING_RESEARCH_MODEL: "sonar", AGENT_MARKETING_RESEARCH_CONTEXT: "LOW", AGENT_MARKETING_RESEARCH_MAX_TOKENS: "1500", AGENT_MARKETING_RESEARCH_COST_TARGET_USD: "0.04" });
-  assert.deepStrictEqual(t, { model: "sonar", searchContextSize: "low", maxTokens: 1500, costTargetUsd: 0.04 });
+  assert.deepStrictEqual(d, { model: "perplexity/sonar", searchContextSize: "medium", maxTokens: 2200, costTargetUsd: 0.025 });
+  const t = r.researchSettings({ AGENT_MARKETING_RESEARCH_MODEL: "openai/gpt-6-luna", AGENT_MARKETING_RESEARCH_CONTEXT: "LOW", AGENT_MARKETING_RESEARCH_MAX_TOKENS: "1500", AGENT_MARKETING_RESEARCH_COST_TARGET_USD: "0.04" });
+  assert.deepStrictEqual(t, { model: "openai/gpt-6-luna", searchContextSize: "low", maxTokens: 1500, costTargetUsd: 0.04 });
   assert.deepStrictEqual(r.researchSettings({ AGENT_MARKETING_RESEARCH_CONTEXT: "huge", AGENT_MARKETING_RESEARCH_MAX_TOKENS: "99999", AGENT_MARKETING_RESEARCH_COST_TARGET_USD: "-1" }), d);
   assert.notStrictEqual(r.researchSettings({}).model, "sonar-deep-research"); // deep research is opt-in only, never the default
   const lowCtx = r.buildResearchPayload({ request: r.validateResearchRequest({ mode: "market_update", audience: "sellers", geography: { type: "city", name: "Roseville" } }).request, today: TODAY, env: { AGENT_MARKETING_RESEARCH_CONTEXT: "high" } });
-  assert.strictEqual(lowCtx.web_search_options.search_context_size, "high");
+  assert.strictEqual(lowCtx.tools[0].max_results, 20);
 });
 
 test("topics: exactly five distinct sourced market topics are accepted", () => {
@@ -191,8 +188,8 @@ test("extractTopics: reads a fenced or bare JSON response, rejects prose", () =>
 });
 
 test("usage: measured tokens and cost are kept when present and null when not", () => {
-  const u = r.usageSummary({ usage: { prompt_tokens: 100, completion_tokens: 900, citation_tokens: 50, reasoning_tokens: 0, num_search_queries: 3, cost: { total_cost: 0.0421 } } });
-  assert.deepStrictEqual(u, { promptTokens: 100, completionTokens: 900, citationTokens: 50, reasoningTokens: 0, searchQueries: 3, costUsd: 0.0421, targetUsd: 0.025, withinTarget: false });
+  const u = r.usageSummary({ usage: { input_tokens: 100, output_tokens: 900, output_tokens_details: { reasoning_tokens: 0 }, tool_calls_details: { search_web: { invocation: 3 } }, cost: { total_cost: 0.0421 } } });
+  assert.deepStrictEqual(u, { promptTokens: 100, completionTokens: 900, citationTokens: null, reasoningTokens: 0, searchQueries: 3, costUsd: 0.0421, targetUsd: 0.025, withinTarget: false });
   assert.strictEqual(r.usageSummary({ usage: { cost: { total_cost: 0.019 } } }).withinTarget, true);
   assert.strictEqual(r.usageSummary({ usage: { cost: { total_cost: 0.04 } } }, 0.05).withinTarget, true);
   assert.deepStrictEqual(r.usageSummary({}), { promptTokens: null, completionTokens: null, citationTokens: null, reasoningTokens: null, searchQueries: null, costUsd: null, targetUsd: 0.025, withinTarget: null });
@@ -230,7 +227,7 @@ test("sessions: 10 down to 0 stops new runs; reopening saved research needs no s
 
 test("outcome: charged only for a validated five-topic set; failures, timeouts and unusable results are never charged", () => {
   const good = r.validateTopics(fiveMarket(), { mode: "market_update", today: TODAY });
-  const ok = r.outcomeFields({ validation: good, usage: { costUsd: 0.04 }, model: "sonar-pro", today: TODAY, now: "2026-10-24T17:00:00Z" });
+  const ok = r.outcomeFields({ validation: good, usage: { costUsd: 0.04 }, model: "perplexity/sonar", today: TODAY, now: "2026-10-24T17:00:00Z" });
   assert.strictEqual(ok.status, "ready");
   assert.strictEqual(ok.topics.length, 5);
   assert.strictEqual(ok.charged_at, "2026-10-24T17:00:00.000Z");

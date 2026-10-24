@@ -200,3 +200,22 @@ test("the agent's own typed text and structural property keys are unchanged by v
   const r2 = gate.evaluate(base({ verified: gate.verifiedFromProject(lmi(eventTopic)), payload: { address: "1550 Maidu Dr" } }));
   assert.ok(r2.blocks.some((b) => b.rule === "property_field"));
 });
+
+test("market vocabulary the verified facts use ('list price', 'price reduction') is allowed; listing-specific wording still blocks", () => {
+  const topic = {
+    id: "t1", kind: "market_update", question: "Are sellers cutting the list price? 4 of 12 active listings have a price reduction.", whyItMatters: "Median list price of active listings is 659,000.",
+    trendSignals: [], scope: "selected", scopeNote: "", sources: [{ title: "r", url: "https://example.com/r", domain: "example.com", published: "2026-10-20" }], event: null,
+  };
+  const v = gate.verifiedFromProject({ template: "local_market_insider", selected_topic: topic });
+  const ev = (text, verified) => gate.evaluate(base({ verified, generated: { narration: text, captions: "" } }));
+  const ok = ev("Of 12 active listings, 4 have a price reduction, and the median list price is $659,000.", v);
+  assert.deepStrictEqual(ok.blocks, []);
+  assert.ok(ok.sourcedFacts.some((f) => /list price/i.test(f)) && ok.sourcedFacts.some((f) => /price reduction/i.test(f)));
+  // without verified facts the same sentence still blocks, exactly as before
+  assert.ok(ev("Of 12 active listings, 4 have a price reduction.", null).blocks.some((b) => b.rule === "listing_announcement"));
+  // an allowed phrase does not hide a bad one in the same text
+  const mixed = ev("The median list price is $659,000. Just listed at $689,000, open house Saturday.", v);
+  for (const rule of ["listing_announcement", "listing_price"]) assert.ok(mixed.blocks.some((b) => b.rule === rule), rule);
+  // a phrase the verified facts do NOT use is still blocked
+  assert.ok(ev("This is a price drop you should not miss.", v).blocks.some((b) => b.rule === "listing_announcement"));
+});

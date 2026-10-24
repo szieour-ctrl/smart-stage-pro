@@ -40,6 +40,13 @@
 [functions."agent-marketing-research-background"]
   timeout = 900
 
+# Oct 24, 2026: Local Market Insider report upload (reads a PDF/CSV/Excel in memory, keeps only the figures). PDF text extraction can take
+# several seconds on a multi-page report. unpdf and read-excel-file ship un-bundled, same reason as pdfkit below: they load their own
+# files at runtime and must not be inlined by esbuild.
+[functions."agent-marketing-report"]
+  timeout = 26
+  external_node_modules = ["unpdf", "pdfjs-dist", "read-excel-file"]
+
 [functions."reel-plan"]
   timeout = 10
 

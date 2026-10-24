@@ -60,7 +60,7 @@ function normalize(raw) {
 
 /** The deterministic gate for image text: property-sale, address, Fair Housing, invented claims and numbers. */
 function checkText(project, text, asAgentText) {
-  const input = { template: project.template, intake: project.intake || {} };
+  const input = { template: project.template, intake: project.intake || {}, verified: gate.verifiedFromProject(project) };
   if (asAgentText) input.userText = { imageNote: text };
   else input.generated = { sceneTexts: [text] };
   return gate.evaluate(input);

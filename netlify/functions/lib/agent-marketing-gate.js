@@ -21,7 +21,7 @@
 
 "use strict";
 
-const GATE_VERSION = "2026-10-22.1";
+const GATE_VERSION = "2026-10-24.1";
 
 // One checkbox, extending the existing Reel advertising-accuracy confirmation. Store the version with the timestamp.
 const ATTESTATION_VERSION = "agent-marketing-1";
@@ -112,6 +112,70 @@ function scan(text, field, rules, bucket) {
   }
 }
 
+// ── Verified facts (Local Market Insider only, Oct 24) ──────────────────────────────────────────────────────────
+// Local Market Insider scripts are built on a research topic whose sources were checked server-side (https, dated,
+// fresh, not paywalled; events with a real date, time, venue and organizer). Text that traces to that frozen topic is
+// "verified": its figures, market vocabulary and event venue address are allowed in Claude's output. Everything that
+// does NOT trace to the topic (or to what the agent typed) is still blocked exactly as before. Other templates never
+// receive verified facts, and the client cannot supply them: callers derive them from the stored project row.
+const VERIFIED_TEMPLATE = "local_market_insider";
+
+/**
+ * verifiedFromTopic(topic) → { texts: [string], addresses: [string] } | null
+ * `topic` is the frozen selected_topic saved by agent-marketing-research.js (question, whyItMatters, trendSignals,
+ * scopeNote, sources, event). Only fields the research validator already checked are used.
+ */
+function verifiedFromTopic(topic) {
+  const t = topic && typeof topic === "object" ? topic : null;
+  if (!t || !Array.isArray(t.sources) || t.sources.length === 0) return null; // no validated source, nothing is verified
+  const texts = [t.question, t.whyItMatters, t.scopeNote, ...(Array.isArray(t.trendSignals) ? t.trendSignals : [])];
+  const addresses = [];
+  const e = t.event && typeof t.event === "object" ? t.event : null;
+  if (e) {
+    texts.push(e.name, e.date, e.endDate, e.time, e.location, e.organizer);
+    if (e.location) addresses.push(e.location);
+  }
+  const clean = texts.filter((x) => typeof x === "string" && x.trim()).map(norm);
+  return clean.length ? { texts: clean, addresses: addresses.map(norm) } : null;
+}
+
+/** verifiedFromProject(project) → verified facts for a stored project row, or null (any other template, no topic). */
+function verifiedFromProject(project) {
+  const p = project && typeof project === "object" ? project : null;
+  if (!p || p.template !== VERIFIED_TEMPLATE) return null;
+  return verifiedFromTopic(p.selected_topic);
+}
+
+// An address in Claude's text is a verified event venue when its house number and street-name words all appear in the
+// venue address the research validated ("1550 Maidu Drive" matches "1550 Maidu Dr, Roseville").
+function addressIsVerified(matchText, addresses) {
+  if (!addresses.length) return false;
+  const words = lower(matchText).replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter(Boolean);
+  if (words.length < 2) return false;
+  const name = words.slice(0, -1); // drop the street-suffix word ("drive" / "dr"), which may be abbreviated differently
+  return addresses.some((a) => {
+    const have = new Set(lower(a).replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter(Boolean));
+    return name.every((w) => have.has(w));
+  });
+}
+
+// Same as scan(text, field, BLOCK_RULES, ...) but a street address that matches the verified event venue is allowed
+// (and recorded). Every match is checked, so an unverified address next to the venue is still blocked.
+function scanBlocksWithVenue(text, field, addresses, blocks, sourcedFacts) {
+  const t = norm(text);
+  if (!t) return;
+  for (const r of BLOCK_RULES) {
+    if (r.rule !== "street_address") { scan(t, field, [r], blocks); continue; }
+    const re = new RegExp(r.re.source, r.re.flags.includes("g") ? r.re.flags : r.re.flags + "g");
+    let m;
+    while ((m = re.exec(t))) {
+      if (addressIsVerified(m[0], addresses)) sourcedFacts.push(`${field}: ${snippet(m)}`);
+      else blocks.push({ rule: r.rule, field, match: snippet(m), message: r.message });
+      if (m[0].length === 0) re.lastIndex++;
+    }
+  }
+}
+
 // Numeric tokens such as 55, 55+, 3.5%, 4,000. Used to stop Claude inventing figures.
 function numberTokens(text) {
   const out = new Set();
@@ -131,6 +195,7 @@ function numberTokens(text) {
  *     generated: { narration, captions, sceneTexts: [], overlays: [] },   // text written by Claude
  *     cta: { text, source },          // final CTA; source = template_default | claude | user_edited | user_inserted
  *     userText: { field: string },    // any other agent-typed text (titles, overlay edits)
+ *     verified: { texts, addresses }, // Local Market Insider only: facts from the validated research topic (verifiedFromProject)
  *   }
  */
 function evaluate(input) {
@@ -168,8 +233,18 @@ function evaluate(input) {
     }
   }
 
+  // Verified facts: honored only for Local Market Insider, and only in the shape verifiedFromTopic() produces.
+  const vIn = i.template === VERIFIED_TEMPLATE && i.verified && typeof i.verified === "object" ? i.verified : null;
+  const vTexts = vIn && Array.isArray(vIn.texts) ? vIn.texts.filter((x) => typeof x === "string" && x.trim()).map(norm) : [];
+  const vAddresses = vIn && Array.isArray(vIn.addresses) ? vIn.addresses.filter((x) => typeof x === "string" && x.trim()).map(norm) : [];
+  const hasVerified = vTexts.length > 0;
+  const verifiedText = vTexts.join(" \n ");
+  const verifiedLower = verifiedText.toLowerCase();
+  const verifiedNumbers = numberTokens(verifiedText);
+  const sourcedFacts = [];
+
   // Everything CLAUDE wrote (and the default CTA): property-sale rules block, Fair Housing blocks, and Claude may not
-  // add claims or numbers the agent did not supply.
+  // add claims or numbers the agent did not supply. Local Market Insider text may also use what traces to the verified topic.
   const g = i.generated || {};
   const genFields = {
     "narration": g.narration, "captions": g.captions,
@@ -179,24 +254,29 @@ function evaluate(input) {
   if (i.cta && i.cta.source !== "user_edited" && i.cta.source !== "user_inserted") genFields["cta"] = i.cta.text;
   for (const [field, text] of Object.entries(genFields)) {
     if (!text) continue;
-    scan(text, field, BLOCK_RULES, blocks);
+    if (vAddresses.length) scanBlocksWithVenue(text, field, vAddresses, blocks, sourcedFacts);
+    else scan(text, field, BLOCK_RULES, blocks);
     scan(text, field, WARN_RULES, warnings);
     scan(text, field, FAIR_HOUSING, blocks);
     for (const r of CLAIM_RULES) {
       const m = norm(text).match(r.re);
       if (!m) continue;
       if (intakeLower.includes(lower(m[0]))) agentSuppliedClaims.push(`${field}: ${snippet(m)}`); // the agent said it first
-      else blocks.push({ rule: r.rule, field, match: snippet(m), message: r.message });
+      else if (hasVerified && r.rule === "transaction_result" && (verifiedLower.includes(lower(m[0])) || /^days on market$/i.test(m[0]))) {
+        sourcedFacts.push(`${field}: ${snippet(m)}`); // market vocabulary that the sourced topic itself uses
+      } else blocks.push({ rule: r.rule, field, match: snippet(m), message: r.message });
     }
     for (const n of numberTokens(text)) {
-      if (!intakeNumbers.has(n)) blocks.push({ rule: "invented_number", field, match: n, message: "Contains a number the agent did not provide." });
+      if (intakeNumbers.has(n)) continue;
+      if (hasVerified && verifiedNumbers.has(n)) sourcedFacts.push(`${field}: ${n}`); // the figure is in the validated source topic
+      else blocks.push({ rule: "invented_number", field, match: n, message: "Contains a number the agent did not provide." });
     }
   }
 
   // De-duplicate identical issues
   const uniq = (arr) => { const seen = new Set(); return arr.filter((x) => { const k = `${x.rule}|${x.field}|${x.match}`; if (seen.has(k)) return false; seen.add(k); return true; }); };
   const b = uniq(blocks);
-  return { ok: b.length === 0, version: GATE_VERSION, blocks: b, warnings: uniq(warnings), agentSuppliedClaims: [...new Set(agentSuppliedClaims)] };
+  return { ok: b.length === 0, version: GATE_VERSION, blocks: b, warnings: uniq(warnings), agentSuppliedClaims: [...new Set(agentSuppliedClaims)], sourcedFacts: [...new Set(sourcedFacts)] };
 }
 
 // Friendly message for the UI when the gate blocks.
@@ -208,4 +288,4 @@ function explain(result) {
   return `${first.message}${where}${first.match ? ` — “${first.match}”` : ""}${more}. Agent Marketing is for your expertise and services; use a Listing Reel to advertise a specific home.`;
 }
 
-module.exports = { GATE_VERSION, ATTESTATION_VERSION, ATTESTATION_TEXT, TEMPLATES, ENABLED_TEMPLATES, evaluate, explain };
+module.exports = { GATE_VERSION, ATTESTATION_VERSION, ATTESTATION_TEXT, TEMPLATES, ENABLED_TEMPLATES, evaluate, explain, verifiedFromTopic, verifiedFromProject };

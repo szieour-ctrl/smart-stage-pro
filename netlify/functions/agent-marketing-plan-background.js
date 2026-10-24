@@ -33,7 +33,7 @@ exports.handler = async (event) => {
       return { statusCode: 200, body: "" };
     }
     const { narrative, warnings, gate } = await planLib.generatePlan({ project, anthropicKey: process.env.ANTHROPIC_API_KEY });
-    const gateSummary = { ok: gate.ok, version: gate.version, blocks: gate.blocks, warnings: gate.warnings, agentSuppliedClaims: gate.agentSuppliedClaims };
+    const gateSummary = { ok: gate.ok, version: gate.version, blocks: gate.blocks, warnings: gate.warnings, agentSuppliedClaims: gate.agentSuppliedClaims, sourcedFacts: gate.sourcedFacts || [] };
     await writeNarrative(id, userId, { ...narrative, warnings, attempts: stub.attempts, intakeHash: stub.intakeHash },
       { status: "narrative_ready", gate_version: gate.version, gate_result: gateSummary });
   } catch (err) {

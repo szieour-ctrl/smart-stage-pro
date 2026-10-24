@@ -39,7 +39,7 @@ const SELECTABLE = ["narrative_approved", "images", "ready_to_render"];
 
 async function loadProject(id, userId) {
   if (!am.UUID_RE.test(String(id || ""))) return { error: reply(400, { error: "Missing or invalid project id" }) };
-  const r = await supabase("GET", "agent_marketing_projects", null, `?id=eq.${id}&user_id=eq.${userId}&select=id,status,formats,narrative,template,intake&limit=1`);
+  const r = await supabase("GET", "agent_marketing_projects", null, `?id=eq.${id}&user_id=eq.${userId}&select=id,status,formats,narrative,template,intake,selected_topic&limit=1`);
   const row = rowsOf(r)[0];
   if (!row) return { error: reply(404, { error: "Project not found" }) };
   return { row };

@@ -115,3 +115,88 @@ test("attestation text and version are exported for the single checkbox", () => 
   assert.match(gate.ATTESTATION_TEXT, /right to use the submitted images/);
   assert.ok(gate.ATTESTATION_VERSION);
 });
+
+// ── Verified facts: Local Market Insider only (Oct 24) ─────────────────────────────────────────────────────────
+const marketTopic = {
+  id: "t1", kind: "market_update",
+  question: "Are Roseville homes taking longer to sell? Median days on market reached 31 in October.",
+  whyItMatters: "Sellers pricing now should know the median price was 742,000 with 2.4 months of inventory.",
+  trendSignals: ["Median days on market 31 (up from 24)"], scope: "broader_context", scopeNote: "Data covers Roseville, not Crocker Ranch.",
+  sources: [{ title: "Roseville market report", url: "https://example.com/r", domain: "example.com", published: "2026-10-20" }], event: null,
+};
+const eventTopic = {
+  id: "t2", kind: "local_events", question: "What is happening in Old Roseville this weekend?", whyItMatters: "Neighbors gather downtown.", trendSignals: [], scope: "selected", scopeNote: "",
+  sources: [{ title: "City events", url: "https://example.com/e", domain: "example.com", published: null }],
+  event: { name: "Harvest Festival", date: "2026-10-31", endDate: null, time: "10:00 AM to 4:00 PM", location: "Maidu Community Center, 1550 Maidu Dr, Roseville", organizer: "City of Roseville", status: "upcoming" },
+};
+const lmi = (topic) => ({ template: "local_market_insider", selected_topic: topic });
+const withVerified = (topic, narration, over = {}) => base({ verified: gate.verifiedFromProject(lmi(topic)), generated: { narration, captions: "" }, ...over });
+
+test("sourced figures and days-on-market vocabulary pass when they trace to the verified topic", () => {
+  const text = "Median days on market reached 31 in October, and the median price was 742,000 with 2.4 months of inventory.";
+  const r = gate.evaluate(withVerified(marketTopic, text));
+  assert.deepStrictEqual(r.blocks, []);
+  assert.ok(r.sourcedFacts.some((f) => f.endsWith(": 31")));
+  assert.ok(r.sourcedFacts.some((f) => /days on market/i.test(f)));
+});
+
+test("without a verified topic the same figures are still blocked", () => {
+  const text = "Median days on market reached 31 in October.";
+  const r = gate.evaluate(base({ generated: { narration: text, captions: "" } }));
+  assert.ok(r.blocks.some((b) => b.rule === "invented_number" && b.match === "31"));
+  assert.ok(r.blocks.some((b) => b.rule === "transaction_result"));
+});
+
+test("a number that is not in the verified topic is still blocked", () => {
+  const r = gate.evaluate(withVerified(marketTopic, "Median days on market reached 31, and prices rose 12% this year."));
+  assert.ok(r.blocks.some((b) => b.rule === "invented_number" && b.match === "12"));
+  assert.ok(!r.blocks.some((b) => b.match === "31"));
+});
+
+test("sale-result claims and client stories still need the agent or the topic to have said them", () => {
+  const r = gate.evaluate(withVerified(marketTopic, "Homes here sold over asking and my clients loved it."));
+  assert.ok(r.blocks.some((b) => b.rule === "transaction_result"));
+  assert.ok(r.blocks.some((b) => b.rule === "client_story"));
+});
+
+test("an event venue address that matches the verified event is allowed; any other address is blocked", () => {
+  const ok = gate.evaluate(withVerified(eventTopic, "Join the Harvest Festival on October 31 at the Maidu Community Center, 1550 Maidu Drive, from 10:00 AM to 4:00 PM."));
+  assert.deepStrictEqual(ok.blocks, []);
+  assert.ok(ok.sourcedFacts.some((f) => /1550 Maidu/i.test(f)));
+  const bad = gate.evaluate(withVerified(eventTopic, "Join the festival at 1550 Maidu Drive, then see 1234 Oak Ridge Drive."));
+  assert.ok(bad.blocks.some((b) => b.rule === "street_address" && /1234 Oak Ridge/.test(b.match)));
+  assert.ok(!bad.blocks.some((b) => /1550 Maidu/.test(b.match)));
+});
+
+test("event addresses are blocked when no event was verified", () => {
+  const r = gate.evaluate(withVerified(marketTopic, "Come to 1550 Maidu Drive."));
+  assert.ok(r.blocks.some((b) => b.rule === "street_address"));
+});
+
+test("property-sale rules and Fair Housing still block, even with verified facts", () => {
+  const r = gate.evaluate(withVerified(marketTopic, "Just listed! A safe neighborhood, perfect for families. Schedule a private tour."));
+  for (const rule of ["listing_announcement", "fair_housing", "property_sale_cta"]) assert.ok(r.blocks.some((b) => b.rule === rule), rule);
+});
+
+test("verified facts are honored for Local Market Insider only", () => {
+  const verified = gate.verifiedFromProject(lmi(marketTopic));
+  assert.ok(verified);
+  assert.strictEqual(gate.verifiedFromProject({ template: "meet_your_agent", selected_topic: marketTopic }), null);
+  const r = gate.evaluate(base({ template: "meet_your_agent", verified, generated: { narration: "Median days on market reached 31.", captions: "" } }));
+  assert.ok(r.blocks.some((b) => b.rule === "template"));
+  assert.ok(r.blocks.some((b) => b.rule === "invented_number" && b.match === "31"));
+  assert.deepStrictEqual(r.sourcedFacts, []);
+});
+
+test("a topic with no validated source verifies nothing, and a client-sent verified block is ignored for other templates", () => {
+  assert.strictEqual(gate.verifiedFromTopic({ ...marketTopic, sources: [] }), null);
+  assert.strictEqual(gate.verifiedFromTopic(null), null);
+  assert.strictEqual(gate.verifiedFromProject(null), null);
+});
+
+test("the agent's own typed text and structural property keys are unchanged by verified facts", () => {
+  const r = gate.evaluate(base({ verified: gate.verifiedFromProject(lmi(eventTopic)), intake: { ...intake, observation: "See 1550 Maidu Drive today" } }));
+  assert.ok(r.blocks.some((b) => b.rule === "street_address" && b.field === "intake.observation"));
+  const r2 = gate.evaluate(base({ verified: gate.verifiedFromProject(lmi(eventTopic)), payload: { address: "1550 Maidu Dr" } }));
+  assert.ok(r2.blocks.some((b) => b.rule === "property_field"));
+});

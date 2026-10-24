@@ -109,7 +109,7 @@ function validateNarrative(body, durationSec) {
 // text Claude wrote (source "claude") is held to the stricter rules (no invented claims or numbers).
 function gateInputFor(project, narrative, source) {
   const n = narrative || {};
-  const base = { template: project.template, intake: project.intake || {} };
+  const base = { template: project.template, intake: project.intake || {}, verified: gate.verifiedFromProject(project) }; // verified: Local Market Insider only, from the stored research topic
   const sceneTexts = (n.scenes || []).map((s) => s.narrationExcerpt).filter(Boolean);
   if (source === "claude") {
     return { ...base, generated: { narration: n.captionText || stripAudioTags(n.narrationTagged), captions: n.captionText, sceneTexts, overlays: [] }, cta: n.cta || null };

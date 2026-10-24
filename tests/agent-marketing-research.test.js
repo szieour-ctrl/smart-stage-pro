@@ -165,6 +165,16 @@ test("events: upcoming or ongoing with organizer, place, date and time are accep
   assert.strictEqual(r.validateTopics(ongoing, { mode: "local_events", today: TODAY }).ok, true);
 });
 
+test("events: placeholders like 'Not stated in the source' or 'venue not stated' do not count as details", () => {
+  const run = (over) => { const t = fiveEvents(); t[0] = rawEvent(1, over); return r.validateTopics(t, { mode: "local_events", today: TODAY }); };
+  assert.strictEqual(run({ time: "Not stated in the source" }).ok, false);
+  assert.strictEqual(run({ location: "Roseville, CA; venue not stated" }).ok, false);
+  assert.strictEqual(run({ organizer: "TBD" }).ok, false);
+  assert.strictEqual(run({ time: "N/A" }).ok, false);
+  assert.strictEqual(run({ time: "5:30–7:30 PM" }).ok, true);
+  assert.match(run({ time: "Not stated in the source" }).problems.join(" "), /time is not confirmed/);
+});
+
 test("events: past, canceled, postponed and incomplete events fail the set", () => {
   const run = (over) => { const t = fiveEvents(); t[0] = rawEvent(1, over); return r.validateTopics(t, { mode: "local_events", today: TODAY }); };
   assert.strictEqual(run({ date: "2026-10-01" }).ok, false);

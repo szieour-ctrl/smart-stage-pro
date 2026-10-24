@@ -4,6 +4,7 @@
 //
 //   GET  ?projectId=<uuid>   → { research: [saved sets, newest first], session: { used, allowance, remaining, canStart } }
 //                               Reopening saved research never costs a session.
+//   GET  ?schema=1           → the choices the page shows (modes, audiences, geography types)
 //   GET  ?id=<uuid>          → one saved set
 //   POST { action: "start", projectId, request: { mode, audience, geography, focus?, uploadIds? } }
 //        → 202 { research, session } and the work continues in the background; poll GET until status is not "running".
@@ -95,6 +96,14 @@ exports.handler = async (event) => {
   try {
     if (event.httpMethod === "GET") {
       const qs = event.queryStringParameters || {};
+      if (qs.schema) {
+        // One copy of the choices lives in the research lib; the page reads it here instead of keeping its own.
+        const GEO = { neighborhood: "Neighborhood", city: "City", zip: "ZIP code", county: "County", metro: "Metro area" };
+        return reply(200, {
+          modes: rl.MODES.map((k) => ({ key: k, label: rl.MODE_LABELS[k] })), audiences: rl.AUDIENCES,
+          geoTypes: rl.GEO_TYPES.map((k) => ({ key: k, label: GEO[k] })), topicCount: rl.TOPIC_COUNT, maxUploads: rl.MAX_UPLOADS,
+        });
+      }
       if (qs.id) {
         if (!am.UUID_RE.test(String(qs.id))) return reply(400, { error: "Invalid id" });
         const r = await supabase("GET", "agent_marketing_research", null, `?id=eq.${qs.id}&user_id=eq.${userId}&select=*&limit=1`);

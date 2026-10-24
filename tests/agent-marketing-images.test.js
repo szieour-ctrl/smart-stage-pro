@@ -35,7 +35,7 @@ test("prompts: one wide 16:9 frame with the subject in the middle third; concept
   const c = img.buildPrompt({ kind: "concept", scenePrompt: "keys on a cushion" });
   assert.match(c, /No people at all/); assert.match(c, /16:9/); assert.match(c, /central third/); assert.match(c, /9:16 vertical window/); assert.match(c, /No text/);
   const ag = img.buildPrompt({ kind: "agent_scene", scenePrompt: "standing on a tree-lined street" });
-  assert.match(ag, /ONLY person/); assert.match(ag, /reference photo/); assert.match(ag, /No real landmarks/); assert.match(ag, /central third/);
+  assert.match(ag, /ONLY person/); assert.match(ag, /reference photo/); assert.match(ag, /No real landmarks/); assert.match(ag, /NOT a portrait/); assert.match(ag, /one third of the way in/); assert.match(ag, /55 to 65 percent/);
 });
 
 test("wide size: default 2560x1440; a custom size must be 16:9 with edges that are multiples of 16 and within OpenAI's limits", () => {
@@ -45,6 +45,12 @@ test("wide size: default 2560x1440; a custom size must be 16:9 with edges that a
   assert.strictEqual(img.validWideSize("1000x562"), null); // not multiples of 16
   assert.strictEqual(img.validWideSize("4096x2304"), null); // longer than 3840
   assert.strictEqual(img.validWideSize("nope"), null);
+});
+
+test("crop window: clamped inside the image; agent scenes default left of centre, concepts centred", () => {
+  assert.strictEqual(img.defaultCropX("concept"), 0.5); assert.ok(img.defaultCropX("agent_scene") < 0.4);
+  const half = img.CROP_WIDTH / 2;
+  assert.strictEqual(img.clampCrop(-3), half); assert.strictEqual(img.clampCrop(9), 1 - half); assert.strictEqual(img.clampCrop(0.4), 0.4); assert.strictEqual(img.clampCrop("x"), 0.5);
 });
 
 test("reference photo: full body first, else headshot, else none", () => {
@@ -131,8 +137,11 @@ test("accept approves one image per scene; a redo of an approved scene is a new 
   const g = await call("POST", { action: "generate", projectId: P1, sceneIndex: 0, format: "9x16", confirmCharge: true }); // a requested format is ignored: still the wide image
   assert.strictEqual(g.status, 202);
   const w = db.agent_marketing_assets.at(-1);
-  assert.strictEqual(w.generation.format, "16x9"); assert.strictEqual(w.generation.fromApproved, false); assert.match(w.generation.prompt, /central third/);
+  assert.strictEqual(w.generation.format, "16x9"); assert.strictEqual(w.generation.fromApproved, false); assert.match(w.generation.prompt, /NOT a portrait/);
   assert.strictEqual(done.status, "approved"); // the approved image stays until the new one is accepted
+  const cr = await call("POST", { action: "crop", projectId: P1, assetId: done.id, cropX: 0.9 });
+  assert.strictEqual(cr.status, 200); assert.ok(Math.abs(cr.json.cropX - (1 - img.CROP_WIDTH / 2)) < 1e-9); assert.strictEqual(done.generation.cropX, cr.json.cropX);
+  assert.strictEqual((await call("POST", { action: "crop", projectId: P1, assetId: done.id })).status, 400);
   assert.strictEqual((await call("POST", { action: "keep", projectId: P1, assetId: done.id })).status, 200);
   assert.strictEqual(db.agent_marketing_library[0].kind, "generated"); assert.strictEqual(db.agent_marketing_library[0].rights.aiGenerated, true);
 });

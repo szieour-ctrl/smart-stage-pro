@@ -11,6 +11,7 @@
 //        generate then accepts that text as `description` (it is re-checked on the server) plus `kind` and the raw `note`.
 //   POST { action: "accept", projectId, assetId }            → makes it the approved image for that scene + format
 //   POST { action: "reject", projectId, assetId }            → discards a draft
+//   POST { action: "crop", projectId, assetId, cropX }       → saves where the vertical 9:16 window sits (centre, 0..1)
 //   POST { action: "keep", projectId, assetId }              → saves an image to My Marketing Photos for reuse
 //
 // Rules in code: any scene can get a generated image (the agent chooses concept image or image of you; their own photo is the
@@ -64,7 +65,7 @@ async function reapStale(assets, userId) {
 
 async function viewOf(a) {
   const g = a.generation || {};
-  return { id: a.id, sceneIndex: a.scene_index, format: g.format, kind: g.kind || null, state: g.state, status: a.status, version: a.version, error: g.state === "error" ? g.error : null, description: g.scenePrompt || null, note: g.note || null, fullPrompt: g.prompt || null, url: g.state === "done" && a.asset_key ? await presignGet(a.asset_key) : null };
+  return { id: a.id, sceneIndex: a.scene_index, format: g.format, kind: g.kind || null, state: g.state, status: a.status, version: a.version, error: g.state === "error" ? g.error : null, description: g.scenePrompt || null, note: g.note || null, fullPrompt: g.prompt || null, cropX: typeof g.cropX === "number" ? img.clampCrop(g.cropX) : img.defaultCropX(g.kind), url: g.state === "done" && a.asset_key ? await presignGet(a.asset_key) : null };
 }
 
 exports.handler = async (event) => {
@@ -102,10 +103,16 @@ exports.handler = async (event) => {
     const assets = await loadAssets(project.id, userId);
     await reapStale(assets, userId);
 
-    if (["accept", "reject", "keep"].includes(b.action)) {
+    if (["accept", "reject", "keep", "crop"].includes(b.action)) {
       const a = assets.find((x) => x.id === b.assetId);
       if (!a) return reply(404, { error: "Image not found" });
       if (img.stateOf(a) !== "done") return reply(409, { error: "That image is not ready." });
+      if (b.action === "crop") {
+        if (typeof b.cropX !== "number" || !isFinite(b.cropX)) return reply(400, { error: "Missing crop position." });
+        const cropX = img.clampCrop(b.cropX);
+        await supabase("PATCH", "agent_marketing_assets", { generation: { ...(a.generation || {}), cropX } }, `?id=eq.${a.id}&user_id=eq.${userId}`);
+        return reply(200, { ok: true, cropX });
+      }
       if (b.action === "reject") { await supabase("PATCH", "agent_marketing_assets", { status: "rejected" }, `?id=eq.${a.id}&user_id=eq.${userId}`); return reply(200, { ok: true }); }
       if (b.action === "keep") {
         const ins = await supabase("POST", "agent_marketing_library", { user_id: userId, kind: "generated", asset_key: a.asset_key, content_type: "image/png", label: null, rights: { route: "generated", model: (a.generation || {}).model || null, aiGenerated: true, sourceProject: project.id }, project_id: project.id, generation: { prompt: (a.generation || {}).prompt || null, format: img.fmtOf(a) } });

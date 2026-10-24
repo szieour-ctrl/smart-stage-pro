@@ -47,9 +47,9 @@ test("staged route lists only the caller's clean copies, select records provenan
   assert.strictEqual(db.agent_marketing_assets[1].version, 2);
 });
 
-test("cannot use another user's photo, a concept scene, or a project that isn't yours", async () => {
+test("cannot use another user's photo, a scene that does not exist, or a project that isn't yours", async () => {
   assert.strictEqual((await call("POST", { action: "select", projectId: P1, sceneIndex: 0, kind: "staged", id: S2 })).status, 404);
-  assert.strictEqual((await call("POST", { action: "select", projectId: P1, sceneIndex: 1, kind: "staged", id: S1 })).status, 400);
+  assert.strictEqual((await call("POST", { action: "select", projectId: P1, sceneIndex: 9, kind: "staged", id: S1 })).status, 400);
   user = U2;
   assert.strictEqual((await call("GET", null, { projectId: P1, source: "staged" })).status, 404);
   user = U1;

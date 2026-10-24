@@ -60,7 +60,20 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--gold-light);outl
 ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
 .pick{margin-top:12px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;}
 .pick img.sel{width:96px;height:64px;object-fit:cover;border-radius:4px;border:1px solid var(--border);}
-.picker{border:2px solid var(--gold-light);}
+.picker{border:2px solid var(--gold-light);position:fixed;z-index:60;top:5vh;left:50%;transform:translateX(-50%);width:min(720px,92vw);max-height:88vh;overflow:auto;margin:0;box-shadow:0 0 0 100vmax rgba(26,23,20,0.55);}
+.picker.hidden{display:none;}
+.frame img,.frame.click{cursor:pointer;}
+.frame.busy{aspect-ratio:auto;min-height:96px;}
+.frame.empty{aspect-ratio:auto;min-height:96px;border:1px dashed var(--border);}
+#imgModal{position:fixed;inset:0;background:rgba(10,8,6,0.92);z-index:80;display:flex;align-items:center;justify-content:center;padding:20px;}
+#imgModal.hidden{display:none!important;}
+.imgm-inner{background:#fff;border-radius:6px;overflow:hidden;max-width:860px;width:100%;max-height:92vh;display:flex;flex-direction:column;}
+.imgm-wrap{flex-shrink:0;display:flex;align-items:center;justify-content:center;background:#111;max-height:52vh;min-height:120px;color:#cfc7ba;font-size:0.85rem;overflow:hidden;}
+.imgm-wrap img{max-width:100%;max-height:52vh;object-fit:contain;display:block;}
+.imgm-body{padding:18px 24px;overflow-y:auto;}
+.imgm-title{font-family:'Cormorant Garamond',serif;font-size:1.2rem;margin-bottom:4px;}
+.imgm-foot{display:flex;gap:8px;justify-content:flex-end;align-items:center;flex-wrap:wrap;padding:12px 24px;border-top:1px solid var(--border);background:var(--cream);flex-shrink:0;}
+.elab-row{display:flex;align-items:center;gap:10px;margin:10px 0;flex-wrap:wrap;}
 .tabs{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0;}
 .tab{border:1px solid var(--border);background:#fff;border-radius:14px;padding:6px 12px;font:600 0.75rem 'DM Sans',sans-serif;cursor:pointer;}
 .tab.on{background:var(--ink);color:#fff;border-color:var(--ink);}
@@ -72,7 +85,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
 .tile .del{float:right;color:var(--danger);}
 .attest{display:flex;gap:8px;align-items:flex-start;font-size:0.82rem;margin-top:12px;}
 .btn.sm{padding:7px 12px;font-size:0.78rem;}
-.slot-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;margin-top:10px;}
+.slot-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,280px));gap:14px;margin-top:10px;}
 .slot{border:1px solid var(--border);border-radius:6px;padding:12px;background:#fff;}
 .slot h5{font-size:0.8rem;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;gap:8px;}
 .frame{background:var(--warm);border-radius:4px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:0.78rem;text-align:center;overflow:hidden;}
@@ -200,7 +213,21 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
       <div class="msg" id="imagesMsg" role="status"></div>
     </section>
 
-    <div id="picker" class="panel picker hidden">
+    <div id="imgModal" class="hidden" role="dialog" aria-modal="true" aria-labelledby="imgmTitle">
+      <div class="imgm-inner">
+        <div class="imgm-wrap" id="imgmWrap"></div>
+        <div class="imgm-body">
+          <div class="imgm-title" id="imgmTitle"></div>
+          <div class="hint" id="imgmSub"></div>
+          <div class="elab-row"><button type="button" class="btn sm ghost" id="imgmElab" data-act="elaborate">&#10024; Elaborate with AI</button><span class="hint">AI writing aid. It rewrites your note into a safe description and checks it before anything is created.</span></div>
+          <textarea id="imgmNote" maxlength="300" style="min-height:90px" placeholder='Optional, e.g. "mature trees, soft evening light"'></textarea>
+          <div id="imgmDesc"></div>
+          <div class="smsg" id="imgmMsg"></div>
+        </div>
+        <div class="imgm-foot" id="imgmFoot"></div>
+      </div>
+    </div>
+    <div id="picker" class="panel picker hidden" role="dialog" aria-modal="true">
       <div class="eyebrow" id="pickerTitle">Choose a photo</div>
       <div class="tabs" id="pickerTabs"></div>
       <div id="pickerBody"></div>
@@ -263,7 +290,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     }).join("");
     Array.prototype.forEach.call($("steps").querySelectorAll(".step-pill.done"), function (b) { b.addEventListener("click", function () { go(Number(b.getAttribute("data-step"))); }); });
   }
-  function go(step) { stopImgPoll(); $("picker").classList.add("hidden"); show([STEP_IDS[step - 1]]); renderSteps(step); if (step === 2) fillIntake(); if (step === 3) renderScript(); if (step === 4) renderBoard(); if (step === 5) renderImages(); window.scrollTo({ top: 0, behavior: "smooth" }); }
+  function go(step) { stopImgPoll(); $("picker").classList.add("hidden"); if (typeof closeModal === "function") closeModal(); show([STEP_IDS[step - 1]]); renderSteps(step); if (step === 2) fillIntake(); if (step === 3) renderScript(); if (step === 4) renderBoard(); if (step === 5) renderImages(); window.scrollTo({ top: 0, behavior: "smooth" }); }
   function setProject(p) { state.project = p; if (p) { try { history.replaceState(null, "", "#p=" + p.id); } catch (e) { /* ignore */ } } }
 
   // ── Setup ──
@@ -441,7 +468,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     $("pickerTitle").textContent = "Scene " + (i + 1) + ": choose a photo";
     $("pickerTabs").innerHTML = TABS.map(function (t) { return '<button type="button" class="tab" data-tab="' + t[0] + '">' + t[1] + "</button>"; }).join("");
     Array.prototype.forEach.call($("pickerTabs").querySelectorAll(".tab"), function (b) { b.addEventListener("click", function () { showTab(b.getAttribute("data-tab")); }); });
-    showTab(pickTab); $("picker").scrollIntoView({ behavior: "smooth", block: "center" });
+    showTab(pickTab);
   }
   function showTab(t) {
     pickTab = t; say("pickerMsg", "");
@@ -550,80 +577,65 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
   function repaint() { im.sig = ""; paintImages(); }
   function descFor(i, src) { var d = im.desc[i]; return d && KIND_OF[src] && d.kind === KIND_OF[src] ? d : null; }
 
-  function slotView(s, src) {
-    var k = slotKey(s), L = s.latest, A = s.approved, both = (state.project.formats || []).length > 1, kind = KIND_OF[src];
+  function slotOf(si, f) { return im.slots.filter(function (x) { return x.sceneIndex === si && x.format === f; })[0]; }
+  function slotState(s, src) {
+    var kind = KIND_OF[src], both = (state.project.formats || []).length > 1, L = s.latest, A = s.approved;
     var generating = !!(L && L.state === "generating");
     var draft = L && L.status === "proposed" && L.state === "done" ? L : null;
     var failed = L && L.state === "error" ? L : null;
-    var shown = draft || A;
     var portraitApproved = s.format === "16x9" && im.slots.some(function (x) { return x.sceneIndex === s.sceneIndex && x.format === "9x16" && x.approved; });
     var portraitOk = !(s.format === "16x9" && both) || portraitApproved;
     var needDesc = s.plannedKind !== kind && !descFor(s.sceneIndex, src) && !portraitApproved;
-    var blocked = !portraitOk || (s.capReached && !generating) || needDesc;
-    var charged = s.nextCredits > 0;
-    var shownKind = shown && shown.kind === "agent_scene" ? "Image of you" : (shown && shown.kind === "concept" ? "Concept image" : "");
-    var html = '<div class="slot"><h5><span>' + fmtName(s.format) + (shownKind ? " · " + shownKind : "") + '</span>' + (A && !draft ? '<span class="pill ok">Approved</span>' : (draft ? '<span class="pill concept">Needs your OK</span>' : "")) + '</h5>';
-    html += '<div class="frame ' + (s.format === "9x16" ? "p9" : "p16") + '">' + (shown && shown.url ? '<img alt="Generated image ' + esc(fmtName(s.format)) + '" src="' + esc(shown.url) + '">' : (generating ? '<span><span class="spinner"></span>Creating…</span>' : "<span>No image yet</span>")) + "</div>";
-    if (draft && A) html += '<div class="smsg">Your currently approved image stays in use until you accept this new one.</div>';
-    var act = function (a, label, cls, extra) { return '<button type="button" class="btn sm ' + cls + '" data-act="' + a + '" data-scene="' + s.sceneIndex + '" data-format="' + s.format + '"' + (extra || "") + ">" + label + "</button>"; };
-    if (im.confirming[k]) {
-      html += '<div class="confirm">This extra try costs <b>' + plural(im.confirming[k]) + "</b> from your balance. Continue?" +
-        '<div class="row">' + act("confirm", "Yes, create it", "gold") + act("cancel", "Cancel", "ghost") + "</div></div>";
-    } else if (generating) {
-      html += '<div class="smsg">This usually takes under a minute. You can leave this page and come back.</div>';
-    } else {
+    return { kind: kind, generating: generating, draft: draft, failed: failed, A: A, shown: draft || A, portraitOk: portraitOk, needDesc: needDesc,
+      blocked: !portraitOk || (s.capReached && !generating) || needDesc, charged: s.nextCredits > 0 };
+  }
+  function kindLabel(v) { return v && v.kind === "agent_scene" ? "Image of you" : (v && v.kind === "concept" ? "Concept image" : ""); }
+  function actBtn(a, label, cls, s, extra) { return '<button type="button" class="btn sm ' + cls + '" data-act="' + a + '" data-scene="' + s.sceneIndex + '" data-format="' + s.format + '"' + (extra || "") + ">" + label + "</button>"; }
+
+  // Slot card: a thumbnail (or compact status while the image is being made). Click it to open the full-size window.
+  function slotView(s, src) {
+    var k = slotKey(s), st = slotState(s, src), shown = st.shown, both = (state.project.formats || []).length > 1;
+    var html = '<div class="slot"><h5><span>' + fmtName(s.format) + (kindLabel(shown) ? " · " + kindLabel(shown) : "") + "</span>" +
+      (st.generating ? '<span class="pill">Creating…</span>' : (st.draft ? '<span class="pill concept">Complete</span>' : (st.A ? '<span class="pill ok">Approved</span>' : ""))) + "</h5>";
+    var open = ' data-open="1" data-scene="' + s.sceneIndex + '" data-format="' + s.format + '"';
+    if (st.generating) html += '<div class="frame busy"><span><span class="spinner"></span>Creating your image…</span></div>';
+    else if (shown && shown.url) html += '<div class="frame ' + (s.format === "9x16" ? "p9" : "p16") + '"><img alt="Generated image ' + esc(fmtName(s.format)) + '" src="' + esc(shown.url) + '"' + open + ' title="Click to open"></div>';
+    else html += '<div class="frame empty click"' + open + "><span>No image yet. Click to start.</span></div>";
+    if (st.generating) html += '<div class="smsg">This usually takes under a minute. You can leave this page and come back.</div>';
+    else {
+      if (st.draft) html += '<div class="smsg ok"><b>Complete.</b> Click the image to review it' + (st.A ? ". Your approved image stays in use until you accept this one" : "") + ".</div>";
       var row = "";
-      var redoLabel = charged ? "Redo (" + plural(s.nextCredits) + ")" : "Redo (included)";
-      if (!shown) row += act("generate", charged ? "Create image (" + plural(s.nextCredits) + ")" : "Create image", "gold", blocked ? " disabled" : "");
-      else {
-        if (draft) row += act("accept", "Accept", "gold", ' data-asset="' + esc(draft.id) + '"');
-        row += act("generate", redoLabel, "ghost", blocked ? " disabled" : "");
-        if (draft) row += act("reject", "Discard", "ghost", ' data-asset="' + esc(draft.id) + '"');
-        if (A && !draft) row += act("keep", im.kept[A.id] ? "Saved ✓" : "Save to My Marketing Photos", "ghost", ' data-asset="' + esc(A.id) + '"' + (im.kept[A.id] ? " disabled" : ""));
-      }
+      if (st.draft) row += actBtn("accept", "Accept", "gold", s, ' data-asset="' + esc(st.draft.id) + '"') + '<button type="button" class="btn sm ghost"' + open + ">Review / revise</button>" + actBtn("reject", "Discard", "ghost", s, ' data-asset="' + esc(st.draft.id) + '"');
+      else if (st.A) row += '<button type="button" class="btn sm ghost"' + open + ">Revise…</button>" + actBtn("keep", im.kept[st.A.id] ? "Saved ✓" : "Save to My Marketing Photos", "ghost", s, ' data-asset="' + esc(st.A.id) + '"' + (im.kept[st.A.id] ? " disabled" : ""));
+      else row += actBtn("generate", st.charged ? "Create image (" + plural(s.nextCredits) + ")" : "Create image", "gold", s, st.blocked ? " disabled" : "") + '<button type="button" class="btn sm ghost"' + open + ">Add a note…</button>";
       html += '<div class="row">' + row + "</div>";
-      var info = !im.charging ? "Beta: tries are free (the project limit still applies)." : (s.used < s.included ? (s.included - s.used) + " of " + s.included + " included tries left" : "Included tries used. Each extra try costs " + plural(s.nextCredits || im.per) + ".");
-      html += '<div class="smsg">' + esc(info) + "</div>";
-      if (!portraitOk) html += '<div class="smsg">Approve the 9:16 image first. This version is built from it so the two match.</div>';
+      if (st.failed && !st.draft) html += '<div class="smsg err">The last try did not finish' + (st.failed.error ? " (" + esc(st.failed.error) + ")" : "") + ". It was not counted or charged.</div>";
+      if (!st.portraitOk) html += '<div class="smsg">Approve the 9:16 image first. This version is built from it so the two match.</div>';
       else if (s.capReached) html += '<div class="smsg err">This project has reached its limit of ' + im.cap + " generated images.</div>";
-      else if (needDesc) html += '<div class="smsg">Use Elaborate with AI above first, so we can describe this image.</div>';
+      else if (st.needDesc && !st.shown) html += '<div class="smsg">This scene needs a short description first. Click “Add a note…” and use Elaborate with AI.</div>';
     }
-    if (failed && !generating && !draft) html += '<div class="smsg err">The last try did not finish' + (failed.error ? " (" + esc(failed.error) + ")" : "") + ". It was not counted or charged.</div>";
     if (im.msgs[k]) html += '<div class="smsg ' + (im.msgs[k].kind || "") + '">' + esc(im.msgs[k].text) + "</div>";
     return html + "</div>";
   }
 
-  function noteArea(idx, src, planned) {
-    var kind = KIND_OF[src], d = descFor(idx, src), working = !!im.working[idx];
-    var h = '<label class="lbl" for="note' + idx + '">' + (src === "agent" ? "Anything specific about this image of you? (optional)" : "Anything specific you want this image to show? (optional)") + '</label>' +
-      '<textarea id="note' + idx + '" maxlength="300" style="min-height:64px" placeholder="e.g. mature trees, soft evening light">' + esc(im.note[idx] || "") + "</textarea>" +
-      '<div class="hint">Your note is rewritten by AI into a full image description and checked against advertising and Fair Housing rules before anything is created. Nothing you type goes straight to the image model.</div>' +
-      '<div class="actions" style="margin-top:8px"><button type="button" class="btn sm ghost" data-act="elaborate" data-scene="' + idx + '"' + (working ? " disabled" : "") + ">" + (working ? "Writing…" : "Elaborate with AI") + "</button>" +
-      (planned !== kind ? '<span class="hint">Needed for this scene, because the plan did not include this kind of image.</span>' : "") + "</div>";
-    if (d) h += '<div class="confirm" style="background:#eaf3ee">What we will create: <i>' + esc(d.description) + "</i>" + ((d.removed || []).length ? "<br><b>Left out:</b> " + d.removed.map(esc).join(" ") : "") + ((d.warnings || []).length ? "<br><b>Please check:</b> " + d.warnings.map(esc).join(" ") : "") + "</div>";
-    if (im.msgs["n" + idx]) h += '<div class="smsg ' + (im.msgs["n" + idx].kind || "") + '">' + esc(im.msgs["n" + idx].text) + "</div>";
-    return h;
-  }
-
   function sceneBlock(idx, slots) {
-    var sc = sceneAt(idx), src = activeSrc(idx), planned = slots[0] ? slots[0].plannedKind : null;
+    var sc = sceneAt(idx), src = activeSrc(idx);
     var sorted = slots.slice().sort(function (a, b) { return a.format === "9x16" ? -1 : (b.format === "9x16" ? 1 : 0); });
     var h = '<div class="img-scene"><h4>Scene ' + (idx + 1) + " · " + esc(String(sc.role || "").replace(/_/g, " ")) + ' <span class="pill">Planned: ' + esc(PLANNED_NAME[sc.visualSource] || "a scene") + "</span></h4>" +
       '<div class="q" style="font-style:italic;color:#4a423a;font-size:0.88rem;margin:4px 0 2px">“' + esc(sc.narrationExcerpt) + "”</div>" +
       '<div class="tabs" role="group" aria-label="Image source for scene ' + (idx + 1) + '">' + ["own", "concept", "agent"].map(function (k) { return '<button type="button" class="tab' + (src === k ? " on" : "") + '" data-src="' + k + '" data-scene="' + idx + '">' + SRC_NAME[k] + "</button>"; }).join("") + "</div>";
     if (src === "own") h += '<div class="pick" id="ipick' + idx + '"></div><div class="hint">Your photo is used for this scene in every format. Only use photos you own or have permission to use.</div>';
-    else if (src === "concept" || src === "agent") h += '<div class="hint">' + esc(sc.visualBrief || "") + (src === "agent" ? " Created from your Marketing Profile photo in a generic setting." : " An illustration, not a real place.") + "</div>" + noteArea(idx, src, planned) + '<div class="slot-grid">' + sorted.map(function (s) { return slotView(s, src); }).join("") + "</div>";
+    else if (src === "concept" || src === "agent") h += '<div class="hint">' + esc(sc.visualBrief || "") + (src === "agent" ? " Created from your Marketing Profile photo in a generic setting." : " An illustration, not a real place.") + '</div><div class="slot-grid">' + sorted.map(function (s) { return slotView(s, src); }).join("") + "</div>";
     else h += '<div class="hint">Planned as ' + esc(PLANNED_NAME[sc.visualSource] || "a scene") + ". Pick a source above to replace it, or leave it as planned.</div>";
     return h + "</div>";
   }
 
   function paintImages() {
-    var ae = document.activeElement, keep = ae && ae.id && /^note\d+$/.test(ae.id) && $("imageSlots").contains(ae) ? { id: ae.id, s: ae.selectionStart, e: ae.selectionEnd } : null;
     var by = {}, order = [];
     im.slots.forEach(function (s) { if (!by[s.sceneIndex]) { by[s.sceneIndex] = []; order.push(s.sceneIndex); } by[s.sceneIndex].push(s); });
     $("imagesCount").innerHTML = "Tries used in this project: <b>" + im.total + " of " + im.cap + "</b>. " + (im.charging ? "The first image of each version and one redo are included. Any extra redo shows its price and asks you first, and a try that fails is never charged." : "During the beta, tries are free. A try that fails is not counted.");
     var both = (state.project.formats || []).length > 1;
-    $("imagesSub").textContent = "Choose where each scene's image comes from: your own photo, a generated concept image, or a generated image of you. " + (both ? "Create the 9:16 version first; once you approve it, the 16:9 version is built from it so the two match. " : "") + "Nothing is used in your Reel until you accept it.";
+    $("imagesSub").textContent = "Choose where each scene's image comes from: your own photo, a generated concept image, or a generated image of you. " + (both ? "Create the 9:16 version first; once you approve it, the 16:9 version is built from it so the two match. " : "") + "Click any image to open it full size, revise it and use Elaborate with AI. Nothing is used in your Reel until you accept it.";
     $("imageSlots").innerHTML = order.map(function (idx) { return sceneBlock(idx, by[idx]); }).join("") || '<div class="hint">There are no scenes yet.</div>';
     order.forEach(function (idx) { paintPick(idx); });
     var all = order.length && order.every(function (idx) {
@@ -634,7 +646,45 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     });
     $("imagesDone").classList.toggle("hidden", !all);
     if (all) $("imagesDone").textContent = "Every scene has its image. Narration and captions come next.";
-    if (keep) { var el = $(keep.id); if (el) { el.focus(); try { el.setSelectionRange(keep.s, keep.e); } catch (e) { /* ignore */ } } }
+    if (im.modal) paintModal();
+  }
+
+  // ── Full-size window (same pattern as the staging side): image, Elaborate with AI, revise ──
+  function openModal(si, f) {
+    var s = slotOf(si, f); if (!s) return;
+    im.modal = { scene: si, format: f };
+    var src = activeSrc(si);
+    $("imgmNote").value = im.note[si] || "";
+    $("imgModal").classList.remove("hidden");
+    paintModal();
+  }
+  function closeModal() { im.modal = null; $("imgModal").classList.add("hidden"); }
+  function paintModal() {
+    var m = im.modal; if (!m) return;
+    var s = slotOf(m.scene, m.format); if (!s) return closeModal();
+    var src = activeSrc(m.scene), st = slotState(s, src), k = slotKey(s), sc = sceneAt(m.scene), d = descFor(m.scene, src), working = !!im.working[m.scene];
+    $("imgmTitle").textContent = "Scene " + (m.scene + 1) + " · " + fmtName(s.format) + " · " + (src === "agent" ? "Image of you" : "Concept image");
+    $("imgmSub").textContent = (sc.visualBrief || "") + (st.shown ? "" : " (No image yet. Add an optional note, or create it from the plan as is.)");
+    var wrap = $("imgmWrap");
+    var want = st.generating ? "g" : (st.shown && st.shown.url ? "i:" + st.shown.url : "n");
+    if (wrap.getAttribute("data-w") !== want) {
+      wrap.setAttribute("data-w", want);
+      wrap.innerHTML = st.generating ? '<span><span class="spinner"></span>Creating your image…</span>' : (st.shown && st.shown.url ? '<img alt="Generated image" src="' + esc(st.shown.url) + '">' : "<span>No image yet</span>");
+    }
+    $("imgmElab").disabled = working; $("imgmElab").setAttribute("data-scene", m.scene); $("imgmElab").innerHTML = working ? "Elaborating…" : "&#10024; Elaborate with AI";
+    $("imgmDesc").innerHTML = d ? '<div class="confirm" style="background:#eaf3ee">What we will create: <i>' + esc(d.description) + "</i>" + ((d.removed || []).length ? "<br><b>Left out:</b> " + d.removed.map(esc).join(" ") : "") + ((d.warnings || []).length ? "<br><b>Please check:</b> " + d.warnings.map(esc).join(" ") : "") + "</div>" : "";
+    var msg = (im.msgs["n" + m.scene] || im.msgs[k]);
+    $("imgmMsg").className = "smsg " + (msg && msg.kind || ""); $("imgmMsg").textContent = msg ? msg.text : (st.failed && !st.draft ? "The last try did not finish. It was not counted or charged." : "");
+    var foot = '<button type="button" class="btn ghost" data-close="1">Close</button>';
+    if (im.confirming[k]) foot += '<span class="hint" style="margin:0 auto 0 8px">This extra try costs <b>' + plural(im.confirming[k]) + "</b>. Continue?</span>" + actBtn("cancel", "Cancel", "ghost", s) + actBtn("confirm", "Yes, create it", "gold", s);
+    else if (st.generating) foot += '<span class="hint" style="margin:0 auto 0 8px">Creating… you can close this window.</span>';
+    else {
+      if (st.draft) foot += actBtn("reject", "Discard", "ghost", s, ' data-asset="' + esc(st.draft.id) + '"') + actBtn("accept", "Accept this image", "gold", s, ' data-asset="' + esc(st.draft.id) + '"');
+      var label = st.shown ? "Re-create image" : "Create image";
+      label += st.charged ? " (" + plural(s.nextCredits) + ")" : (st.shown ? " (included)" : "");
+      foot += actBtn("generate", label + " →", st.draft ? "ghost" : "gold", s, st.blocked ? " disabled" : "");
+    }
+    $("imgmFoot").innerHTML = foot;
   }
 
   function setSlotMsg(k, text, kind) { im.sig = ""; if (text) im.msgs[k] = { text: text, kind: kind || "" }; else delete im.msgs[k]; }
@@ -653,7 +703,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     var k = sceneIndex + "_" + format, src = activeSrc(sceneIndex), kind = KIND_OF[src];
     if (!kind || im.busy[k]) return;
     var d = descFor(sceneIndex, src);
-    if (!d && (im.note[sceneIndex] || "").trim()) { delete im.confirming[k]; return setSlotMsg(k, "Click Elaborate with AI first, so your note is checked before anything is created.", "err"), repaint(); }
+    if (!d && (im.note[sceneIndex] || "").trim()) { delete im.confirming[k]; setSlotMsg("n" + sceneIndex, "Click Elaborate with AI first, so your note is checked before anything is created.", "err"); return repaint(); }
     im.busy[k] = true; setSlotMsg(k, ""); delete im.confirming[k];
     try {
       var body = { action: "generate", projectId: state.project.id, sceneIndex: sceneIndex, format: format, kind: kind, confirmCharge: confirmCharge === true };
@@ -663,6 +713,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
       if (r.status === 402 && code === "confirm_charge") { im.confirming[k] = r.json.credits || im.per; im.sig = ""; }
       else if (r.status === 402 && code === "insufficient_credits") setSlotMsg(k, "You don't have enough Images for this (it costs " + plural(r.json.credits || im.per) + "). Add Images to your balance and try again.", "err");
       else if (!r.ok) setSlotMsg(k, r.json.error || "Could not start the image.", "err");
+      else closeModal();
     } catch (e) { setSlotMsg(k, e.message, "err"); }
     im.busy[k] = false;
     await loadImages();
@@ -681,28 +732,40 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     } catch (e) { setSlotMsg(k, e.message, "err"); }
     await loadImages();
   }
-  function onImageClick(ev) {
-    var t = ev.target && ev.target.closest ? ev.target : null; if (!t) return;
-    var tab = t.closest("button[data-src]");
-    if (tab) { im.src[Number(tab.getAttribute("data-scene"))] = tab.getAttribute("data-src"); return repaint(); }
-    var b = t.closest("button[data-act]");
-    if (!b || b.disabled) return;
+  function handleAct(b) {
     var act = b.getAttribute("data-act"), si = Number(b.getAttribute("data-scene")), f = b.getAttribute("data-format"), k = si + "_" + f;
     if (act === "elaborate") return elaborateScene(si);
     if (act === "cancel") { delete im.confirming[k]; return repaint(); }
     if (act === "confirm") return genSlot(si, f, true);
     if (act === "generate") {
-      var s = im.slots.filter(function (x) { return x.sceneIndex === si && x.format === f; })[0];
-      if (s && s.nextCredits > 0) { im.confirming[k] = s.nextCredits; return repaint(); }
+      var s = slotOf(si, f);
+      if (s && s.nextCredits > 0) { im.confirming[k] = s.nextCredits; if (!im.modal) { openModal(si, f); return; } return repaint(); }
       return genSlot(si, f, false);
     }
     imageAction(act, b.getAttribute("data-asset"), k);
   }
-  function onImageInput(ev) {
-    var t = ev.target; if (!t || !/^note\d+$/.test(t.id || "")) return;
-    var idx = Number(t.id.slice(4)); im.note[idx] = t.value;
+  function onImageClick(ev) {
+    var t = ev.target && ev.target.closest ? ev.target : null; if (!t) return;
+    var tab = t.closest("button[data-src]");
+    if (tab) { im.src[Number(tab.getAttribute("data-scene"))] = tab.getAttribute("data-src"); return repaint(); }
+    var op = t.closest("[data-open]");
+    if (op) return openModal(Number(op.getAttribute("data-scene")), op.getAttribute("data-format"));
+    var b = t.closest("button[data-act]");
+    if (!b || b.disabled) return;
+    handleAct(b);
+  }
+  function onModalClick(ev) {
+    var t = ev.target && ev.target.closest ? ev.target : null;
+    if (!t) return;
+    if (t.id === "imgModal" || t.closest("[data-close]")) return closeModal();
+    var b = t.closest("button[data-act]");
+    if (b && !b.disabled) handleAct(b);
+  }
+  function onModalInput() {
+    var m = im.modal; if (!m) return;
+    im.note[m.scene] = $("imgmNote").value;
     // Editing the note makes the elaborated description stale: it must be elaborated again.
-    if (im.desc[idx] && im.desc[idx].note !== t.value.trim()) { delete im.desc[idx]; repaint(); }
+    if (im.desc[m.scene] && im.desc[m.scene].note !== $("imgmNote").value.trim()) { delete im.desc[m.scene]; im.sig = ""; paintModal(); }
   }
 
   // ── Projects list ──
@@ -738,7 +801,9 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     $("toImagesBtn").addEventListener("click", function () { go(5); });
     $("backToBoardBtn").addEventListener("click", function () { go(4); });
     $("imageSlots").addEventListener("click", onImageClick);
-    $("imageSlots").addEventListener("input", onImageInput);
+    $("imgModal").addEventListener("click", onModalClick);
+    $("imgmNote").addEventListener("input", onModalInput);
+    document.addEventListener("keydown", function (e) { if (e.key === "Escape") { closeModal(); $("picker").classList.add("hidden"); } });
     $("narration").addEventListener("input", refreshPreview);
     $("saveScriptBtn").addEventListener("click", function () { saveScript(false); });
     $("approveBtn").addEventListener("click", function () { saveScript(true); });

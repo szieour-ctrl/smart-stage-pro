@@ -22,7 +22,9 @@ function photoSceneIndexes(narrative) {
 function validateSceneIndex(narrative, idx) {
   const n = Number(idx);
   if (!Number.isInteger(n) || n < 0) return { error: "Choose a scene first." };
-  if (!photoSceneIndexes(narrative).includes(n)) return { error: "That scene does not take a real photo." };
+  // Oct 23: every scene can use the agent's own photo instead of a generated image.
+  const count = (narrative && Array.isArray(narrative.scenes)) ? narrative.scenes.length : 0;
+  if (n >= count) return { error: "That scene does not exist." };
   return { index: n };
 }
 

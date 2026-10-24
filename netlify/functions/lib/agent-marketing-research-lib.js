@@ -35,7 +35,7 @@ const LIMITS = { name: 60, question: 200, why: 400, signal: 160, scopeNote: 240,
 const ALLOWANCE_BY_PLAN = { solo: 10, team: 30, brokerage: 100 };
 
 // Sources behind a hard paywall cannot be checked by the agent or a viewer. Kept short and conservative; extend as needed.
-const PAYWALLED_DOMAINS = ["wsj.com", "ft.com", "bloomberg.com", "nytimes.com", "washingtonpost.com", "economist.com", "barrons.com", "sacbee.com"];
+const PAYWALLED_DOMAINS = ["wsj.com", "ft.com", "bloomberg.com", "nytimes.com", "washingtonpost.com", "economist.com", "barrons.com"];
 
 const clean = (v, n) => intakeLib.cleanText(v, n);
 const isTrue = (v) => v === true || String(v).toLowerCase() === "true";

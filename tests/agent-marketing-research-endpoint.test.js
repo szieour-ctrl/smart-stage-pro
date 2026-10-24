@@ -61,7 +61,8 @@ test("start: validates, saves a running row, dispatches the worker with the inte
   const r = await call("POST", { action: "start", projectId: p.id, request: REQ });
   assert.strictEqual(r.status, 202);
   assert.strictEqual(r.json.research.status, "running");
-  assert.deepStrictEqual(r.json.session, { used: 0, allowance: 10, remaining: 10, canStart: true });
+  assert.deepStrictEqual(r.json.session, { used: 0, allowance: 10, remaining: 10, canStart: true, shared: false, pool: "user" });
+  assert.strictEqual(db.agent_marketing_research[0].pool_user_id, U1); // a Solo user is their own pool
   assert.strictEqual(db.agent_marketing_research.length, 1);
   assert.strictEqual(db.agent_marketing_research[0].charged_at, null); // nothing is charged at the start
   assert.strictEqual(fetched.length, 1);
@@ -116,18 +117,58 @@ test("allowance: ten charged sessions this month stops a new run; failed runs do
   reset();
   const p = mkProject();
   const chargedNow = () => new Date().toISOString();
-  for (let i = 0; i < 9; i++) db.agent_marketing_research.push({ id: uuid(nextId++), user_id: U1, project_id: p.id, status: "ready", charged_at: chargedNow(), created_at: chargedNow() });
-  db.agent_marketing_research.push({ id: uuid(nextId++), user_id: U1, project_id: p.id, status: "failed", charged_at: null, created_at: chargedNow() });
+  for (let i = 0; i < 9; i++) db.agent_marketing_research.push({ id: uuid(nextId++), user_id: U1, pool_user_id: U1, project_id: p.id, status: "ready", charged_at: chargedNow(), created_at: chargedNow() });
+  db.agent_marketing_research.push({ id: uuid(nextId++), user_id: U1, pool_user_id: U1, project_id: p.id, status: "failed", charged_at: null, created_at: chargedNow() });
   const nine = await call("POST", { action: "start", projectId: p.id, request: REQ });
   assert.strictEqual(nine.status, 202);
   assert.strictEqual(nine.json.session.used, 9);
   db.agent_marketing_research.find((r) => r.status === "running").status = "failed";
-  db.agent_marketing_research.push({ id: uuid(nextId++), user_id: U1, project_id: p.id, status: "ready", charged_at: chargedNow(), created_at: chargedNow() });
+  db.agent_marketing_research.push({ id: uuid(nextId++), user_id: U1, pool_user_id: U1, project_id: p.id, status: "ready", charged_at: chargedNow(), created_at: chargedNow() });
   const none = await call("POST", { action: "start", projectId: p.id, request: { ...REQ, audience: "buyers" } });
   assert.strictEqual(none.status, 429);
   assert.strictEqual(none.json.session.remaining, 0);
-  planCtx = { poolKind: "team" };
+  planCtx = { poolKind: "team", poolUserId: U1 };
   assert.strictEqual((await call("POST", { action: "start", projectId: p.id, request: { ...REQ, audience: "investors" } })).status, 202);
+});
+
+test("shared pools: a team's 30 and a brokerage's 100 are drawn down by every member; Solo users are unaffected", async () => {
+  reset();
+  const LEAD = "33333333-3333-4333-8333-333333333333";
+  const now = () => new Date().toISOString();
+  const seed = (n, pool, by) => { for (let i = 0; i < n; i++) db.agent_marketing_research.push({ id: uuid(nextId++), user_id: by, pool_user_id: pool, project_id: uuid(999), status: "ready", charged_at: now(), created_at: now() }); };
+  // 29 of the team's 30 were used by the lead and a teammate; U1 is another member of the same team
+  seed(20, LEAD, LEAD); seed(9, LEAD, U2);
+  planCtx = { poolKind: "team", poolUserId: LEAD };
+  const p = mkProject();
+  const first = await call("POST", { action: "start", projectId: p.id, request: REQ });
+  assert.strictEqual(first.status, 202);
+  assert.deepStrictEqual(first.json.session, { used: 29, allowance: 30, remaining: 1, canStart: true, shared: true, pool: "team" });
+  assert.strictEqual(db.agent_marketing_research.find((r) => r.status === "running").pool_user_id, LEAD);
+  // the 30th session is charged (as the worker would) and the next member is stopped, with a message that names the team
+  const run = db.agent_marketing_research.find((r) => r.status === "running");
+  Object.assign(run, { status: "ready", charged_at: now() });
+  const stopped = await call("POST", { action: "start", projectId: p.id, request: { ...REQ, audience: "buyers" } });
+  assert.strictEqual(stopped.status, 429);
+  assert.match(stopped.json.error, /Your team has used all 30/);
+  assert.strictEqual(stopped.json.session.remaining, 0);
+  // the same on the GET the page reads
+  assert.strictEqual((await call("GET", null, { projectId: p.id })).json.session.pool, "team");
+  // brokerage members draw on 100
+  planCtx = { poolKind: "brokerage", poolUserId: LEAD };
+  const b = await call("GET", null, { projectId: p.id });
+  assert.strictEqual(b.json.session.allowance, 100);
+  assert.strictEqual(b.json.session.used, 30);
+  // a Solo user's own sessions are separate from the team's pool
+  planCtx = { poolKind: "user" };
+  const solo = await call("GET", null, { projectId: p.id });
+  assert.deepStrictEqual(solo.json.session, { used: 0, allowance: 10, remaining: 10, canStart: true, shared: false, pool: "user" });
+  // a plan lookup failure falls back to the user's own Solo pool rather than blocking or over-granting
+  stub("../netlify/functions/lib/reel-quota-lib", { getPlanContext: async () => { throw new Error("db down"); } });
+  delete require.cache[require.resolve("../netlify/functions/agent-marketing-research")];
+  const h2 = require("../netlify/functions/agent-marketing-research").handler;
+  const res = await h2({ httpMethod: "GET", headers: {}, queryStringParameters: { projectId: p.id } });
+  assert.strictEqual(JSON.parse(res.body).session.pool, "user");
+  stub("../netlify/functions/lib/reel-quota-lib", { getPlanContext: async () => planCtx });
 });
 
 test("worker: five grounded topics are saved and charged once; the page then reads them with no new session", async () => {

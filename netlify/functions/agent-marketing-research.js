@@ -58,13 +58,26 @@ async function settleStale(rows) {
   return rows;
 }
 
-async function sessionFor(userId) {
-  let planKey = "solo";
-  try { planKey = runLib.planKeyFromContext(await quota.getPlanContext(userId)); } catch (e) { console.error("research plan lookup failed:", e.message); }
-  const since = new Date(Date.now() - CHARGE_LOOKBACK_MS).toISOString();
-  const r = await supabase("GET", "agent_marketing_research", null, `?user_id=eq.${userId}&charged_at=gte.${encodeURIComponent(since)}&select=charged_at`);
-  return rl.sessionStatus({ rows: Array.isArray(r.data) ? r.data : [], planKey });
+// Which allowance applies, and whose pool it is drawn from. Same rule as Reels (Sam, Oct 24): a team's 30 and a brokerage's 100 are SHARED
+// pools that every member draws from; everyone else (including trials and packages, for now) has their own 10. The pool is identified by
+// its owner (team lead / brokerage admin, from getPlanContext), and each research row records it in pool_user_id.
+async function poolFor(userId) {
+  try {
+    const ctx = await quota.getPlanContext(userId);
+    return { planKey: runLib.planKeyFromContext(ctx), poolUserId: (ctx && ctx.poolUserId) || userId, kind: (ctx && ctx.poolKind) || "user" };
+  } catch (e) {
+    console.error("research plan lookup failed:", e.message);
+    return { planKey: "solo", poolUserId: userId, kind: "user" };
+  }
 }
+
+async function sessionFor(pool) {
+  const since = new Date(Date.now() - CHARGE_LOOKBACK_MS).toISOString();
+  const r = await supabase("GET", "agent_marketing_research", null, `?pool_user_id=eq.${pool.poolUserId}&charged_at=gte.${encodeURIComponent(since)}&select=charged_at`);
+  return { ...rl.sessionStatus({ rows: Array.isArray(r.data) ? r.data : [], planKey: pool.planKey }), shared: pool.kind !== "user", pool: pool.kind };
+}
+
+const who = (session) => (session.pool === "brokerage" ? "Your brokerage has" : session.pool === "team" ? "Your team has" : "You've");
 
 // The same request, rebuilt from a saved row, so "same request on the same project" is recognised without a second purchase.
 function keyOfRow(row) {
@@ -92,7 +105,7 @@ exports.handler = async (event) => {
       if (p.error) return p.error;
       const r = await supabase("GET", "agent_marketing_research", null, `?project_id=eq.${p.row.id}&user_id=eq.${userId}&select=*&order=created_at.desc&limit=10`);
       const rows = await settleStale(Array.isArray(r.data) ? r.data : []);
-      return reply(200, { research: rows.map(forClient), selectedResearchId: p.row.selected_research_id || null, selectedTopic: p.row.selected_topic || null, session: await sessionFor(userId) });
+      return reply(200, { research: rows.map(forClient), selectedResearchId: p.row.selected_research_id || null, selectedTopic: p.row.selected_topic || null, session: await sessionFor(await poolFor(userId)) });
     }
 
     if (event.httpMethod !== "POST") return reply(405, { error: "Method not allowed" });
@@ -127,15 +140,16 @@ exports.handler = async (event) => {
     const wantKey = rl.requestKey(v.request);
     // Saved results are reused, never re-bought. The agent asks for a NEW set with a different request (or "New Topics", below).
     const reuse = !b.newTopics && existing.find((r) => r.status === "ready" && keyOfRow(r) === wantKey);
-    if (reuse) return reply(200, { research: forClient(reuse), reused: true, session: await sessionFor(userId) });
+    const pool = await poolFor(userId);
+    if (reuse) return reply(200, { research: forClient(reuse), reused: true, session: await sessionFor(pool) });
     const mine = await supabase("GET", "agent_marketing_research", null, `?user_id=eq.${userId}&status=eq.running&created_at=gte.${encodeURIComponent(new Date(Date.now() - STALE_RUNNING_MS).toISOString())}&select=id&limit=1`);
     if (Array.isArray(mine.data) && mine.data[0]) return reply(409, { error: "A research request is already running. Please wait for it to finish." });
-    const session = await sessionFor(userId);
-    if (!session.canStart) return reply(429, { error: `You've used all ${session.allowance} research sessions included this month.`, session });
+    const session = await sessionFor(pool);
+    if (!session.canStart) return reply(429, { error: `${who(session)} used all ${session.allowance} research sessions included this month.`, session });
     if (!process.env.PERPLEXITY_API_KEY || !process.env.INTERNAL_API_KEY) return reply(500, { error: "Research is not set up yet." });
 
     const ins = await supabase("POST", "agent_marketing_research", {
-      project_id: project.id, user_id: userId, mode: v.request.mode, geography: v.request.geography, audience: v.request.audience, focus: v.request.focus,
+      project_id: project.id, user_id: userId, pool_user_id: pool.poolUserId, mode: v.request.mode, geography: v.request.geography, audience: v.request.audience, focus: v.request.focus,
       upload_refs: v.request.uploadIds.map((id) => ({ id })), status: "running", model: rl.researchModel(),
     });
     const row = Array.isArray(ins.data) ? ins.data[0] : null;

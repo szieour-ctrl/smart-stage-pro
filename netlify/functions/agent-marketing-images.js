@@ -64,7 +64,7 @@ async function reapStale(assets, userId) {
 
 async function viewOf(a) {
   const g = a.generation || {};
-  return { id: a.id, sceneIndex: a.scene_index, format: g.format, kind: g.kind || null, state: g.state, status: a.status, version: a.version, error: g.state === "error" ? g.error : null, url: g.state === "done" && a.asset_key ? await presignGet(a.asset_key) : null };
+  return { id: a.id, sceneIndex: a.scene_index, format: g.format, kind: g.kind || null, state: g.state, status: a.status, version: a.version, error: g.state === "error" ? g.error : null, description: g.scenePrompt || null, note: g.note || null, fullPrompt: g.prompt || null, url: g.state === "done" && a.asset_key ? await presignGet(a.asset_key) : null };
 }
 
 exports.handler = async (event) => {

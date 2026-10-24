@@ -81,6 +81,9 @@ input:focus,select:focus{outline:2px solid var(--gold-light);outline-offset:1px;
 .modal-x{border:1px solid var(--border) !important;border-radius:50%;width:34px;height:34px;display:flex;align-items:center;justify-content:center;flex:none;color:var(--ink) !important;background:#fff !important;font-size:1.3rem !important;}
 .modal-foot{display:flex;justify-content:flex-end;margin-top:14px;border-top:1px solid var(--border);padding-top:14px;}
 .panel{position:relative;}
+.closepill{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--ink);background:#fff;color:var(--ink);border-radius:18px;padding:5px 8px 5px 14px;font:600 0.8rem 'DM Sans',sans-serif;cursor:pointer;flex:none;}
+.closepill i{font-style:normal;font-size:1.05rem;line-height:1;width:20px;height:20px;border-radius:50%;background:var(--ink);color:#fff;display:inline-flex;align-items:center;justify-content:center;}
+.closepill:hover{background:var(--warm);}
 .res-x{position:absolute;top:14px;right:14px;}
 </style>
 </head>
@@ -149,7 +152,7 @@ input:focus,select:focus{outline:2px solid var(--gold-light);outline-offset:1px;
     </section>
 
     <section class="panel hidden" id="resultPanel">
-      <button class="xbtn res-x" type="button" id="resX" aria-label="Close these results" title="Close these results">&times;</button>
+      <button class="closepill res-x" type="button" id="resX" aria-label="Close these results" title="Close these results"><span>Close</span><i>&times;</i></button>
       <div class="eyebrow" id="resEyebrow">Result</div>
       <div class="panel-title" id="resTitle"></div>
       <div id="resWait" class="hidden"><span class="spinner"></span><span id="resWaitText">Researching… this usually takes under a minute.</span></div>
@@ -166,7 +169,7 @@ input:focus,select:focus{outline:2px solid var(--gold-light);outline-offset:1px;
   <div class="modal">
     <div class="modal-head">
       <div><div class="eyebrow">Saved research</div><div class="panel-title" id="libTitle">Research Library</div><div class="panel-sub">Opening a saved set never uses a session.</div></div>
-      <button class="modal-x" type="button" id="libX" aria-label="Close">&times;</button>
+      <button class="closepill" type="button" id="libX" aria-label="Close"><span>Close</span><i>&times;</i></button>
     </div>
     <div class="modal-list" id="savedList"></div>
     <div class="modal-foot"><button class="btn ghost small" type="button" id="libClose">Close</button></div>

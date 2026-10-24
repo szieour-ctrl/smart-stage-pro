@@ -83,7 +83,7 @@ exports.handler = async (event) => {
       const st = img.settings();
       const slots = [];
       for (const { index, scene } of img.allScenes(p.row.narrative)) {
-        for (const format of p.row.formats || []) {
+        for (const format of [img.WIDE]) {
           const mine = assets.filter((a) => a.scene_index === index && img.fmtOf(a) === format);
           const latest = mine[mine.length - 1];
           const approved = mine.filter((a) => a.status === "approved").pop();
@@ -141,23 +141,20 @@ exports.handler = async (event) => {
     if (b.action !== "generate") return reply(400, { error: "Unknown action" });
     if (!SELECTABLE.includes(project.status)) return reply(409, { error: "Approve your script before creating images." });
     if (!process.env.OPENAI_API_KEY) return reply(500, { error: "Image generation is not configured." });
-    const sceneIndex = Number(b.sceneIndex), format = String(b.format || "");
+    const sceneIndex = Number(b.sceneIndex), format = img.WIDE; // one wide image per scene; the vertical Reel version is cropped from it
     const target = img.allScenes(project.narrative).find((x) => x.index === sceneIndex);
     if (!target) return reply(400, { error: "Unknown scene." });
     if (b.kind != null && !elab.KINDS.includes(b.kind)) return reply(400, { error: "Choose a concept image or an image of you." });
-    if (!(project.formats || []).includes(format) || !img.SIZES[format]) return reply(400, { error: "Choose one of this project's formats." });
     if ((assets.filter((a) => a.scene_index === sceneIndex && img.fmtOf(a) === format && img.stateOf(a) === "generating")).length) return reply(409, { error: "This image is already being created." });
 
     const q = img.quote(assets, sceneIndex, format);
     if (q.capReached) return reply(409, { error: `This project has reached its limit of ${q.projectCap} generated images.`, code: "cap_reached" });
 
-    // Reference: the agent scene uses the agent's own profile photo; a 16:9 version uses the approved 9:16 image.
-    let referenceKey = null, fromApproved = false;
+    // Reference: the agent scene uses the agent's own profile photo.
+    let referenceKey = null; const fromApproved = false;
     const planned = img.plannedKind(target.scene);
     let kind = b.kind || planned || (target.scene.visualSource === "AGENT_SCENE" ? "agent_scene" : "concept");
-    const approvedPortrait = assets.filter((a) => a.scene_index === sceneIndex && img.fmtOf(a) === "9x16" && a.status === "approved" && img.stateOf(a) === "done" && a.asset_key).pop();
-    if (format === "16x9" && approvedPortrait) { referenceKey = approvedPortrait.asset_key; fromApproved = true; kind = (approvedPortrait.generation || {}).kind || kind; }
-    else if (kind === "agent_scene") {
+    if (kind === "agent_scene") {
       const pr = rowsOf(await supabase("GET", "marketing_profiles", null, `?user_id=eq.${userId}&select=headshot_key,fullbody_key&limit=1`))[0];
       referenceKey = img.pickReferenceKey(pr);
       if (!referenceKey) return reply(409, { error: "Add a headshot or full-body photo to your Marketing Profile first.", code: "profile_photo_needed" });
@@ -176,7 +173,7 @@ exports.handler = async (event) => {
     if (!scenePrompt && !fromApproved) return reply(400, { error: "Use Elaborate with AI first so we can describe this image.", code: "description_needed" });
     if (q.charged && b.confirmCharge !== true) return reply(402, { error: "This image costs extra.", code: "confirm_charge", credits: q.credits });
     const st = img.settings();
-    const prompt = img.buildPrompt({ kind, scenePrompt, format, fromApproved });
+    const prompt = img.buildPrompt({ kind, scenePrompt });
 
     // Charge first (only for extras); refunded by the worker or the stale check if the image never arrives.
     let charged = null;

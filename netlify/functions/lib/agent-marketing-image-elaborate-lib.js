@@ -27,7 +27,7 @@ function buildSystemPrompt() {
     "1. Describe only what is visible: setting, subject, composition, light and mood. 2 to 4 sentences, under 450 characters.",
     "2. kind \"concept\": a conceptual still life or scene with NO people at all. kind \"agent_scene\": exactly ONE person, the agent, described only by setting, pose and mood and never by appearance (no age, hair, build, clothing details); no other people.",
     "3. Believable, safe settings. The agent is never standing in a roadway, never at the wheel of a car, never in a dark place or at night. Prefer daylight, golden hour or soft interior light: a sidewalk, front walk, porch, bright room, home office, desk or kitchen table.",
-    "4. Compose so the image can be cropped more than one way: a wide, uncluttered scene with a clear main subject and calm areas above and below it (the lower third is kept for captions).",
+    "4. Compose ONE wide 16:9 frame that is also cropped to a tall 9:16 window from its middle: put the main subject and key details in the central third of the width, keep the left and right thirds as simple calm scenery, and keep the lower third uncluttered (captions go there).",
     "5. No text, signs, letters, numbers, logos, brand names, watermarks, charts, rates or prices. No real landmarks, real buildings, addresses, named streets, neighborhoods or developments.",
     "6. Nothing about a specific home for sale or lease, a price, an open house, a sold result, a testimonial or a client. Nothing that compares named areas.",
     "7. No Fair Housing steering: do not depict or imply who a neighborhood is for, no families, children or seniors as a target audience, no \"safe\" or \"exclusive\" areas, nothing about schools.",

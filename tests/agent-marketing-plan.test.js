@@ -22,12 +22,12 @@ const scene = (i, kind) => { const gpt = kind === true; const k = gpt ? "GPT_IMA
   role: ["local_hook", "tension", "insight", "comparison", "advice", "cta"][i], narration_excerpt: excerpts[i], purpose: "p" + i,
   visual_source: k, visual_brief: "brief " + i, reuse_of_scene: k === "CONCEPT_REUSE" ? 2 : null, card_text: k === "BRAND_CARD" ? "Ask me for a local view" : null,
   authentic_photo_request: k !== "AUTHENTIC_AGENT_ASSET" ? null : { best_image: "A real Roseville street of established homes", should_contain: "Street context, room to crop", avoid: "Mislabeling a neighborhood", if_unavailable: "Substitute an accurate photo" },
-  ai_generation_prompt: gpt ? "Photorealistic editorial tabletop with two architectural home models, soft light, no people, no text, vertical 9:16 composition" : null,
+  ai_generation_prompt: gpt ? "Photorealistic editorial tabletop with two architectural home models, soft light, no people, no text, wide composition" : null,
   camera_motion: "push_in", framing_9x16: "keep homes visible", framing_16x9: "keep wide street", text_safe_placement: "lower middle",
 }; };
 const goodPlan = () => ({
   editorial_angle: "New construction is both an advantage and a challenge.", hook: excerpts[0], narration_with_audio_tags: tagged,
-  scenes: [scene(0, "AGENT_PROFILE"), scene(1, true), scene(2, "CONCEPT_REUSE"), scene(3, true), scene(4, "AUTHENTIC_AGENT_ASSET"), scene(5, "BRAND_CARD")],
+  scenes: [scene(0, true), scene(1, true), scene(2, "CONCEPT_REUSE"), scene(3, true), scene(4, "AUTHENTIC_AGENT_ASSET"), scene(5, "BRAND_CARD")],
   cta_suggestion: "Ask me for a local perspective.", claims_to_verify: ["Which builders currently offer incentives"], missing_agent_inputs: [],
 });
 
@@ -37,7 +37,7 @@ test("a good plan is normalized: captions derived, scenes timed to the duration,
   assert.strictEqual(n.source, "claude");
   assert.ok(!/[\[\]]/.test(n.captionText));
   assert.strictEqual(n.scenes.length, 6);
-  assert.strictEqual(n.scenes.filter((s) => s.visualSource === "GPT_IMAGE_2_CONCEPT").length, 2);
+  assert.strictEqual(n.scenes.filter((s) => s.visualSource === "GPT_IMAGE_2_CONCEPT").length, 3); // one wide image per scene: a 45s Reel gets 3-4 different images
   assert.ok(n.scenes.filter((s) => s.visualSource === "GPT_IMAGE_2_CONCEPT").every((s) => s.aiGenerationPrompt));
   assert.strictEqual(n.scenes[2].reuseOfScene, 1); // "scene 2" in the plan = index 1, the first concept image
   assert.strictEqual(n.scenes[5].cardText, "Ask me for a local view");
@@ -58,13 +58,14 @@ test("extra generated images are demoted to concept re-use instead of failing or
   const p = goodPlan();
   p.scenes = p.scenes.map((s) => ({ ...s, visual_source: "GPT_IMAGE_2_CONCEPT", ai_generation_prompt: "x" }));
   const n = planLib.normalizePlan(p, project).narrative;
-  assert.strictEqual(n.scenes.filter((s) => s.visualSource === "GPT_IMAGE_2_CONCEPT").length, 2);
+  assert.strictEqual(n.scenes.filter((s) => s.visualSource === "GPT_IMAGE_2_CONCEPT").length, 4); // 45s allows at most 4 generated images
   assert.ok(n.scenes.filter((s) => s.visualSource === "CONCEPT_REUSE").every((s) => n.scenes[s.reuseOfScene].aiGenerationPrompt));
-  // 2 concept images + 1 agent scene = 3 generated: the agent scene must not be turned into a third concept image
+  // 3 concept images + 1 agent scene = 4 generated (the limit): the agent scene is kept, not turned into a concept image
   const q = goodPlan();
   q.scenes[2] = { ...q.scenes[2], visual_source: "AGENT_SCENE", reuse_of_scene: null, ai_generation_prompt: "Agent at a desk, bright room" };
   const m = planLib.normalizePlan(q, project).narrative;
-  assert.strictEqual(m.scenes.filter((s) => ["GPT_IMAGE_2_CONCEPT", "AGENT_SCENE"].includes(s.visualSource)).length, 2);
+  assert.strictEqual(m.scenes.filter((s) => ["GPT_IMAGE_2_CONCEPT", "AGENT_SCENE"].includes(s.visualSource)).length, 4);
+  assert.strictEqual(m.scenes[2].visualSource, "AGENT_SCENE");
 });
 
 test("wrong scene count or a missing image prompt make the plan unusable", () => {
@@ -99,7 +100,7 @@ test("the prompt carries the rules and never includes the agent's profile or con
   const user = JSON.parse(planLib.buildUserMessage(project));
   assert.deepStrictEqual(user.spoken_word_range, am.WORD_TARGETS[45]);
   assert.deepStrictEqual(user.scene_count_range, [5, 6]);
-  assert.deepStrictEqual(user.gpt_image_2_scene_count, [2, 2]);
+  assert.deepStrictEqual(user.gpt_image_2_scene_count, [3, 4]);
   assert.ok(!/dre|license|phone|email/i.test(JSON.stringify(user)));
 });
 
@@ -130,4 +131,13 @@ test("an agent-in-scene image counts toward the included images, needs a prompt,
   assert.strictEqual(m.scenes[3].visualSource, "GPT_IMAGE_2_CONCEPT"); // the second one becomes a plain concept image
   const noPrompt = goodPlan(); noPrompt.scenes[1] = scene(1, "AGENT_SCENE"); noPrompt.scenes[1].ai_generation_prompt = "";
   assert.throws(() => planLib.normalizePlan(noPrompt, project), /image prompt/);
+});
+
+test("a re-used scene that names no valid source falls back to the nearest EARLIER generated image, not blindly scene 1; the rules tell the planner to describe only what the source shows", () => {
+  const p = goodPlan(); p.scenes[2].reuse_of_scene = null; // reuse scene at index 2, earlier generated images at 0 and 1
+  assert.strictEqual(planLib.normalizePlan(p, project).narrative.scenes[2].reuseOfScene, 1);
+  const sys = planLib.buildSystemPrompt();
+  assert.match(sys, /ONLY what is visibly present in that source image/); assert.match(sys, /do NOT point every reuse at scene 1/);
+  assert.match(sys, /central third/); assert.match(sys, /ONCE as a wide 16:9/);
+  assert.deepStrictEqual(planLib.GPT_RANGE, { 30: [2, 3], 45: [3, 4], 60: [4, 6] });
 });

@@ -126,7 +126,7 @@ const planExcerpts = [
 const planJson = JSON.stringify({
   editorial_angle: "a", hook: planExcerpts[0],
   narration_with_audio_tags: "[conversational] " + planExcerpts.join(" "),
-  scenes: planExcerpts.map((t, i) => ({ role: "r" + i, narration_excerpt: t, purpose: "p", visual_source: i === 1 || i === 3 ? "GPT_IMAGE_2_CONCEPT" : "AUTHENTIC_AGENT_ASSET", visual_brief: "b",
+  scenes: planExcerpts.map((t, i) => ({ role: "r" + i, narration_excerpt: t, purpose: "p", visual_source: i === 1 || i === 3 || i === 4 ? "GPT_IMAGE_2_CONCEPT" : "AUTHENTIC_AGENT_ASSET", visual_brief: "b",
     authentic_photo_request: { best_image: "x", should_contain: "y", avoid: "z", if_unavailable: "w" }, ai_generation_prompt: "Photorealistic tabletop models, no people, no text", camera_motion: "push_in", framing_9x16: "a", framing_16x9: "b", text_safe_placement: "c" })),
   cta_suggestion: "Ask me for a local perspective.", claims_to_verify: [], missing_agent_inputs: [],
 });

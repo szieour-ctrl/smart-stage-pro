@@ -73,6 +73,8 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
 .imgm-body{padding:18px 24px;overflow-y:auto;}
 .imgm-title{font-family:'Cormorant Garamond',serif;font-size:1.2rem;margin-bottom:4px;}
 .imgm-foot{display:flex;gap:8px;justify-content:flex-end;align-items:center;flex-wrap:wrap;padding:12px 24px;border-top:1px solid var(--border);background:var(--cream);flex-shrink:0;}
+.cropwrap{position:relative;display:inline-block;line-height:0;overflow:hidden;max-width:100%;}
+.cropbox{position:absolute;top:0;bottom:0;left:34.2%;width:31.6%;border:2px dashed rgba(255,255,255,0.95);box-shadow:0 0 0 100vmax rgba(0,0,0,0.38);pointer-events:none;}
 .elab-row{display:flex;align-items:center;gap:10px;margin:10px 0;flex-wrap:wrap;}
 .tabs{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0;}
 .tab{border:1px solid var(--border);background:#fff;border-radius:14px;padding:6px 12px;font:600 0.75rem 'DM Sans',sans-serif;cursor:pointer;}
@@ -127,7 +129,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     <section class="panel hidden" id="stepSetup">
       <div class="eyebrow">01 / Setup</div>
       <div class="panel-title">How long, and where will it play?</div>
-      <div class="panel-sub">One story, built once for each format you choose. Each format is composed on its own, never cropped from the other.</div>
+      <div class="panel-sub">One story. Each scene gets one wide 16:9 image, and the vertical 9:16 version is cropped from the best part of that same image, so you get both formats without paying twice.</div>
       <label class="lbl">Length</label>
       <div class="choices row" id="durChoices"></div>
       <label class="lbl">Format</label>
@@ -225,6 +227,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
         <div class="imgm-body">
           <div class="imgm-title" id="imgmTitle"></div>
           <div class="hint" id="imgmSub"></div>
+          <div class="hint" id="imgmCrop"></div>
           <div class="elab-row"><button type="button" class="btn sm ghost" id="imgmElab" data-act="elaborate">&#10024; Elaborate with AI</button><span class="hint">AI writing aid. It rewrites your note into a safe description and checks it before anything is created.</span></div>
           <textarea id="imgmNote" maxlength="300" style="min-height:90px" placeholder='Optional, e.g. "mature trees, soft evening light"'></textarea>
           <div class="hint" id="imgmCount" style="text-align:right">0 / 300</div>
@@ -436,13 +439,13 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
       if (real) rows = "<dt>Optional photo</dt><dd>" + esc(pr.bestImage) + "</dd>" + (pr.shouldContain ? "<dt>Should show</dt><dd>" + esc(pr.shouldContain) + "</dd>" : "") + (pr.avoid ? "<dt>Avoid</dt><dd>" + esc(pr.avoid) + "</dd>" : "") + "<dt>If you skip it</dt><dd>" + esc(pr.ifUnavailable || "A concept image is used instead.") + "</dd>";
       else if (vs === "GPT_IMAGE_2_CONCEPT") rows = "<dt>Concept image</dt><dd>" + esc(s.visualBrief) + " (an illustration, not a real place)</dd>";
       else if (vs === "AGENT_SCENE") rows = "<dt>Image of you</dt><dd>" + esc(s.visualBrief) + " (created from your Marketing Profile photo in a generic setting, not a real place)</dd>";
-      else if (vs === "CONCEPT_REUSE") rows = "<dt>Visual</dt><dd>Re-uses the concept image from scene " + ((Number(s.reuseOfScene) || 0) + 1) + " with a different crop and motion.</dd>";
+      else if (vs === "CONCEPT_REUSE") rows = "<dt>Visual</dt><dd>A different crop and motion of Scene " + ((Number(s.reuseOfScene) || 0) + 1) + "'s image (" + (((state.project.narrative.scenes || [])[Number(s.reuseOfScene) || 0] || {}).visualSource === "AGENT_SCENE" ? "image of you" : "concept image") + "), using only what that image shows.</dd>";
       else if (vs === "AGENT_PROFILE") rows = "<dt>Visual</dt><dd>" + esc(s.visualBrief || "Your headshot or full-body photo from your Marketing Profile.") + "</dd>";
       else rows = "<dt>On-screen text</dt><dd>" + esc(s.cardText || s.visualBrief) + "</dd>";
       var fr = s.framing || {};
       return '<div class="scene"><h4>Scene ' + (i + 1) + ' · ' + esc(String(s.role || "").replace(/_/g, " ")) + ' <span class="pill ' + (real || vs === "AGENT_PROFILE" ? "real" : "concept") + '">' + label + '</span><span class="pill">about ' + esc(s.provisionalSeconds) + 's</span></h4>' +
         '<div class="q">“' + esc(s.narrationExcerpt) + '”</div><dl>' + rows +
-        (fr["9x16"] ? "<dt>9:16 framing</dt><dd>" + esc(fr["9x16"]) + "</dd>" : "") + (fr["16x9"] ? "<dt>16:9 framing</dt><dd>" + esc(fr["16x9"]) + "</dd>" : "") + "</dl>" + (real ? '<div class="pick" id="pick' + i + '"></div>' : "") + "</div>";
+        (fr["9x16"] ? "<dt>Vertical crop</dt><dd>" + esc(fr["9x16"]) + "</dd>" : "") + (fr["16x9"] ? "<dt>Wide frame</dt><dd>" + esc(fr["16x9"]) + "</dd>" : "") + "</dl>" + (real ? '<div class="pick" id="pick' + i + '"></div>' : "") + "</div>";
     }).join("") || '<div class="hint">No scene plan yet.</div>';
     var m = n.missingAgentInputs || [];
     $("missingBox").classList.toggle("hidden", !m.length);
@@ -537,7 +540,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
   var KIND_OF = { concept: "concept", agent: "agent_scene" };
   var PLANNED_NAME = { GPT_IMAGE_2_CONCEPT: "a concept image", AGENT_SCENE: "an image of you", CONCEPT_REUSE: "a re-framed copy of an earlier image", AGENT_PROFILE: "your profile photo", BRAND_CARD: "a brand card", AUTHENTIC_AGENT_ASSET: "an optional photo of yours" };
   function slotKey(s) { return s.sceneIndex + "_" + s.format; }
-  function fmtName(f) { return f === "9x16" ? "9:16 vertical" : "16:9 horizontal"; }
+  function fmtName() { return "Wide image (16:9)"; } // one wide image per scene; the vertical version is cropped from it
   function plural(n) { return n + " Image" + (n === 1 ? "" : "s"); }
   function stopImgPoll() { if (state.imgPoll) { clearInterval(state.imgPoll); state.imgPoll = null; } }
   function anyGenerating() { return im.slots.some(function (s) { return s.latest && s.latest.state === "generating"; }); }
@@ -606,8 +609,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     var generating = !!(L && L.state === "generating");
     var draft = L && L.status === "proposed" && L.state === "done" ? L : null;
     var failed = L && L.state === "error" ? L : null;
-    var portraitApproved = s.format === "16x9" && im.slots.some(function (x) { return x.sceneIndex === s.sceneIndex && x.format === "9x16" && x.approved; });
-    var portraitOk = !(s.format === "16x9" && both) || portraitApproved;
+    var portraitApproved = false, portraitOk = true; // one wide image per scene: nothing has to be approved first
     var needDesc = false; // Create writes a description itself when the scene has no prompt of its own
     return { kind: kind, generating: generating, draft: draft, failed: failed, A: A, shown: draft || A, portraitOk: portraitOk, needDesc: needDesc,
       blocked: !portraitOk || (s.capReached && !generating) || needDesc, charged: s.nextCredits > 0 };
@@ -624,7 +626,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     var starting = !!im.busy[k] && !st.generating;
     if (st.generating) html += '<div class="frame busy"><span><span class="spinner"></span>Creating your image…</span></div>';
     else if (starting) html += '<div class="frame busy"><span><span class="spinner"></span>' + esc((im.msgs[k] && im.msgs[k].text) || "Sending…") + "</span></div>";
-    else if (shown && shown.url) html += '<div class="frame ' + (s.format === "9x16" ? "p9" : "p16") + '"><img alt="Generated image ' + esc(fmtName(s.format)) + '" src="' + esc(shown.url) + '"' + open + ' title="Click to open"></div>';
+    else if (shown && shown.url) html += '<div class="frame p16"><img alt="Generated image ' + esc(fmtName(s.format)) + '" src="' + esc(shown.url) + '"' + open + ' title="Click to open"></div>';
     else html += '<div class="frame empty click"' + open + "><span>No image yet. Click to start.</span></div>";
     if (st.generating) html += '<div class="smsg">This usually takes under a minute. You can leave this page and come back.</div>';
     else if (starting) html += '<div class="smsg">Starting… please wait.</div>';
@@ -636,8 +638,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
       else row += actBtn("generate", st.charged ? "Create image (" + plural(s.nextCredits) + ")" : "Create image", "gold", s, st.blocked ? " disabled" : "") + '<button type="button" class="btn sm ghost"' + open + ">Add a note…</button>";
       html += '<div class="row">' + row + "</div>";
       if (st.failed && !st.draft) html += '<div class="smsg err">The last try did not finish' + (st.failed.error ? " (" + esc(st.failed.error) + ")" : "") + ". It was not counted or charged.</div>";
-      if (!st.portraitOk) html += '<div class="smsg">Approve the 9:16 image first. This version is built from it so the two match.</div>';
-      else if (s.capReached) html += '<div class="smsg err">This project has reached its limit of ' + im.cap + " generated images.</div>";
+      if (s.capReached) html += '<div class="smsg err">This project has reached its limit of ' + im.cap + " generated images.</div>";
     }
     if (im.msgs[k] && !starting) html += '<div class="smsg ' + (im.msgs[k].kind || "") + '">' + esc(im.msgs[k].text) + "</div>";
     return html + "</div>";
@@ -666,7 +667,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     im.slots.forEach(function (s) { if (!by[s.sceneIndex]) { by[s.sceneIndex] = []; order.push(s.sceneIndex); } by[s.sceneIndex].push(s); });
     $("imagesCount").innerHTML = "Tries used in this project: <b>" + im.total + " of " + im.cap + "</b>. " + (im.charging ? "The first image of each version and one redo are included. Any extra redo shows its price and asks you first, and a try that fails is never charged." : "During the beta, tries are free. A try that fails is not counted.");
     var both = (state.project.formats || []).length > 1;
-    $("imagesSub").textContent = "Choose where each scene's image comes from: your own photo, a generated concept image, or a generated image of you. " + (both ? "Create the 9:16 version first; once you approve it, the 16:9 version is built from it so the two match. " : "") + "Click any image to open it full size, revise it and use Elaborate with AI. Nothing is used in your Reel until you accept it.";
+    $("imagesSub").textContent = "Choose where each scene's image comes from: your own photo, a generated concept image, or a generated image of you. Each generated image is one wide 16:9 picture; the vertical 9:16 Reel version is cropped from the best part of it. Click any image to open it full size, revise it and use Elaborate with AI. Nothing is used in your Reel until you accept it.";
     $("imageSlots").innerHTML = order.map(function (idx) { return sceneBlock(idx, by[idx]); }).join("") || '<div class="hint">There are no scenes yet.</div>';
     order.forEach(function (idx) { paintPick(idx); });
     var all = order.length && order.every(function (idx) {
@@ -700,7 +701,9 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     var want = st.generating ? "g" : (st.shown && st.shown.url ? "i:" + st.shown.url : "n");
     if (wrap.getAttribute("data-w") !== want) {
       wrap.setAttribute("data-w", want);
-      wrap.innerHTML = st.generating ? '<span><span class="spinner"></span>Creating your image…</span>' : (st.shown && st.shown.url ? '<img alt="Generated image" src="' + esc(st.shown.url) + '">' : "<span>No image yet</span>");
+      var vertical = (state.project.formats || []).indexOf("9x16") >= 0;
+      wrap.innerHTML = st.generating ? '<span><span class="spinner"></span>Creating your image…</span>' : (st.shown && st.shown.url ? '<span class="cropwrap"><img alt="Generated image" src="' + esc(st.shown.url) + '">' + (vertical ? '<span class="cropbox"></span>' : "") + "</span>" : "<span>No image yet</span>");
+      $("imgmCrop").textContent = !st.generating && st.shown && st.shown.url && vertical ? "Dashed box: the part used for the vertical 9:16 Reel. It is centered for now and will be fine-tuned to the best part of the image when your Reel is made." : "";
     }
     var v = st.shown, used = "";
     if (v && (v.description || v.note)) {

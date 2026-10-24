@@ -31,13 +31,20 @@ test("quote: first image and one redo included, then charged; failed attempts do
   assert.strictEqual(img.quote(Array.from({ length: 12 }, (_, i) => a(i, "9x16", "done")), 0, "16x9", {}).capReached, true);
 });
 
-test("prompts: concept has no people; agent scene has only the agent; 16:9 from approved keeps the same scene; all forbid text and real places", () => {
-  const c = img.buildPrompt({ kind: "concept", scenePrompt: "keys on a cushion", format: "9x16" });
-  assert.match(c, /No people at all/); assert.match(c, /9:16/); assert.match(c, /No text/);
-  const ag = img.buildPrompt({ kind: "agent_scene", scenePrompt: "standing on a tree-lined street", format: "9x16" });
-  assert.match(ag, /ONLY person/); assert.match(ag, /reference photo/); assert.match(ag, /No real landmarks/);
-  const re = img.buildPrompt({ kind: "agent_scene", scenePrompt: "x", format: "16x9", fromApproved: true });
-  assert.match(re, /Recompose the reference/); assert.match(re, /16:9/); assert.match(re, /same person/);
+test("prompts: one wide 16:9 frame with the subject in the middle third; concept has no people; agent scene has only the agent; all forbid text and real places", () => {
+  const c = img.buildPrompt({ kind: "concept", scenePrompt: "keys on a cushion" });
+  assert.match(c, /No people at all/); assert.match(c, /16:9/); assert.match(c, /central third/); assert.match(c, /9:16 vertical window/); assert.match(c, /No text/);
+  const ag = img.buildPrompt({ kind: "agent_scene", scenePrompt: "standing on a tree-lined street" });
+  assert.match(ag, /ONLY person/); assert.match(ag, /reference photo/); assert.match(ag, /No real landmarks/); assert.match(ag, /central third/);
+});
+
+test("wide size: default 2560x1440; a custom size must be 16:9 with edges that are multiples of 16 and within OpenAI's limits", () => {
+  assert.strictEqual(img.SIZES["16x9"], "2560x1440"); assert.strictEqual(img.WIDE, "16x9");
+  assert.strictEqual(img.validWideSize("2048x1152"), "2048x1152"); assert.strictEqual(img.validWideSize("3840x2160"), "3840x2160");
+  assert.strictEqual(img.validWideSize("1536x1024"), null); // 3:2, not 16:9
+  assert.strictEqual(img.validWideSize("1000x562"), null); // not multiples of 16
+  assert.strictEqual(img.validWideSize("4096x2304"), null); // longer than 3840
+  assert.strictEqual(img.validWideSize("nope"), null);
 });
 
 test("reference photo: full body first, else headshot, else none", () => {
@@ -82,8 +89,8 @@ test("off by default", async () => { delete process.env.AGENT_MARKETING_ENABLED;
 test("slots list every scene (any scene can get a generated image); first generation is free, dispatches the worker with the internal key", async () => {
   process.env.AGENT_MARKETING_ENABLED = "true";
   const l = await call("GET", null, { projectId: P1 });
-  assert.deepStrictEqual(l.json.slots.map((s) => `${s.sceneIndex}:${s.format}`), ["0:9x16", "0:16x9", "1:9x16", "1:16x9", "2:9x16", "2:16x9"]);
-  assert.deepStrictEqual(l.json.slots.filter((x) => x.format === "9x16").map((x) => x.plannedKind), ["agent_scene", "concept", null]);
+  assert.deepStrictEqual(l.json.slots.map((s) => `${s.sceneIndex}:${s.format}`), ["0:16x9", "1:16x9", "2:16x9"]);
+  assert.deepStrictEqual(l.json.slots.map((x) => x.plannedKind), ["agent_scene", "concept", null]);
   const g = await call("POST", { action: "generate", projectId: P1, sceneIndex: 0, format: "9x16" });
   assert.strictEqual(g.status, 202); assert.strictEqual(g.json.charged, false); assert.strictEqual(debits.length, 0);
   assert.strictEqual(dispatched[0].key, "ik"); assert.ok(dispatched[0].url.endsWith("agent-marketing-image-background"));
@@ -116,23 +123,24 @@ test("insufficient Images blocks without creating a draft", async () => {
   assert.strictEqual(db.agent_marketing_assets.length, before); debitStatus = 200;
 });
 
-test("accept approves one image per slot; 16:9 is built from the approved 9:16; keep saves to the library", async () => {
+test("accept approves one image per scene; a redo of an approved scene is a new draft until accepted; keep saves to the library", async () => {
   const done = db.agent_marketing_assets.filter((a) => a.generation.state === "done").pop();
   assert.strictEqual((await call("POST", { action: "accept", projectId: P1, assetId: done.id })).status, 200);
   assert.strictEqual(done.status, "approved");
-  const g = await call("POST", { action: "generate", projectId: P1, sceneIndex: 0, format: "16x9" });
+  assert.strictEqual(done.generation.format, "16x9"); // every generation is the one wide image
+  const g = await call("POST", { action: "generate", projectId: P1, sceneIndex: 0, format: "9x16", confirmCharge: true }); // a requested format is ignored: still the wide image
   assert.strictEqual(g.status, 202);
   const w = db.agent_marketing_assets.at(-1);
-  assert.strictEqual(w.generation.fromApproved, true); assert.strictEqual(w.generation.referenceKey, done.asset_key); assert.match(w.generation.prompt, /Recompose/);
+  assert.strictEqual(w.generation.format, "16x9"); assert.strictEqual(w.generation.fromApproved, false); assert.match(w.generation.prompt, /central third/);
+  assert.strictEqual(done.status, "approved"); // the approved image stays until the new one is accepted
   assert.strictEqual((await call("POST", { action: "keep", projectId: P1, assetId: done.id })).status, 200);
   assert.strictEqual(db.agent_marketing_library[0].kind, "generated"); assert.strictEqual(db.agent_marketing_library[0].rights.aiGenerated, true);
 });
 
-test("guards: no prompt for the scene, wrong format, no profile photo, script not approved, cap", async () => {
+test("guards: no prompt for the scene, unknown scene, no profile photo, script not approved, cap", async () => {
   const np0 = await call("POST", { action: "generate", projectId: P1, sceneIndex: 2, format: "9x16" });
   assert.strictEqual(np0.status, 400); assert.strictEqual(np0.json.code, "description_needed"); // brand-card scene: the planner gave no image prompt
   assert.strictEqual((await call("POST", { action: "generate", projectId: P1, sceneIndex: 9, format: "9x16" })).status, 400);
-  assert.strictEqual((await call("POST", { action: "generate", projectId: P1, sceneIndex: 1, format: "1x1" })).status, 400);
   const prof = db.marketing_profiles[0]; const h = prof.headshot_key; prof.headshot_key = null;
   const np = await call("POST", { action: "generate", projectId: P1, sceneIndex: 0, format: "9x16" });
   assert.strictEqual(np.json.code === "profile_photo_needed" || np.status === 409, true); prof.headshot_key = h;
@@ -181,10 +189,10 @@ test("generate on a scene the planner gave no image: needs a description, checks
   // The page can show what an image was created from: the description, the agent's note and the full prompt.
   a.generation.state = "done"; a.asset_key = "k/done.png";
   const lst = await call("GET", null, { projectId: P1 });
-  const lat = lst.json.slots.find((x) => x.sceneIndex === 2 && x.format === "9x16").latest;
+  const lat = lst.json.slots.find((x) => x.sceneIndex === 2 && x.format === "16x9").latest;
   assert.strictEqual(lat.description, "A calm street lined with mature trees in soft light."); assert.strictEqual(lat.note, "mature trees"); assert.match(lat.fullPrompt, /mature trees/);
-  a.generation.state = "generating"; a.asset_key = null;
-  const before = mark();
+  const before = mark(); // the first image stays finished, so the next request is checked on its own merits
+
   const tampered = await call("POST", { action: "generate", projectId: P1, sceneIndex: 2, format: "16x9", kind: "concept", description: "A yard sign that says Just Listed with an open house banner" });
   assert.strictEqual(tampered.status, 422); assert.strictEqual(tampered.json.code, "description_blocked"); assert.strictEqual(mark(), before);
   assert.strictEqual((await call("POST", { action: "generate", projectId: P1, sceneIndex: 2, format: "9x16", kind: "sketch", description: "x" })).status, 400);

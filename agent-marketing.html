@@ -776,6 +776,15 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     } catch (e) { setSlotMsg(k, e.message, "err"); }
     await loadImages();
   }
+  function startIfEmpty(si) {
+    var first = im.slots.filter(function (x) { return x.sceneIndex === si; }).sort(function (a, b) { return a.format === "9x16" ? -1 : (b.format === "9x16" ? 1 : 0); })[0];
+    if (!first) return;
+    var src = activeSrc(si), st = slotState(first, src), k = slotKey(first);
+    if (st.shown || st.generating || st.blocked || im.busy[k]) return;
+    if ((im.note[si] || "").trim() && !descFor(si, src)) return; // a typed note must be elaborated first
+    if (first.nextCredits > 0) { im.confirming[k] = first.nextCredits; return openModal(si, first.format); }
+    genSlot(si, first.format, false);
+  }
   function handleAct(b) {
     var act = b.getAttribute("data-act"), si = Number(b.getAttribute("data-scene")), f = b.getAttribute("data-format"), k = si + "_" + f;
     if (act === "elaborate") return elaborateScene(si);
@@ -792,7 +801,13 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
   function onImageClick2(ev) {
     var t = ev.target && ev.target.closest ? ev.target : null; if (!t) return;
     var tab = t.closest("button[data-src]");
-    if (tab) { im.src[Number(tab.getAttribute("data-scene"))] = tab.getAttribute("data-src"); return repaint(); }
+    if (tab) {
+      var ts = Number(tab.getAttribute("data-scene")), tk = tab.getAttribute("data-src");
+      im.src[ts] = tk; repaint();
+      // "Generate concept image" / "Generate image of you" start the image right away when this scene has none yet.
+      if (KIND_OF[tk]) startIfEmpty(ts);
+      return;
+    }
     var op = t.closest("[data-open]");
     if (op) return openModal(Number(op.getAttribute("data-scene")), op.getAttribute("data-format"));
     var b = t.closest("button[data-act]");

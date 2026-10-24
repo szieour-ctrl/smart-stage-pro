@@ -15,8 +15,14 @@
     "archiver": "^8.0.0",
     "cloudinary": "^2.10.0",
     "heic-convert": "^2.1.0",
+    "pdfjs-dist": "^4.10.38",
     "pdfkit": "^0.15.0",
     "qrcode": "^1.5.4",
-    "sharp": "^0.34.5"
+    "read-excel-file": "^9.3.12",
+    "sharp": "^0.34.5",
+    "unpdf": "^1.9.1"
+  },
+  "devDependencies": {
+    "write-excel-file": "^4.1.1"
   }
 }

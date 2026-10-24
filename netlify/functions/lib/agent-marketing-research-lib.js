@@ -145,7 +145,7 @@ function systemPrompt(mode) {
   const specific = mode === "local_events"
     ? [
       "MODE: Local Events. Each topic is a verified upcoming or ongoing happening in the market: a festival, gathering, civic event, seasonal activity or community announcement.",
-      "Each topic must include an \"event\" object: name, date (YYYY-MM-DD, today or later), end_date (or null), time (as published), location (venue and city), organizer, status (\"upcoming\" or \"ongoing\"). Confirm these from the organizer's or an official page. Skip anything canceled, postponed or already over.",
+      "Each topic must include an \"event\" object: name, date (YYYY-MM-DD, today or later), end_date (or null), time (as published), location (venue and city), organizer, status (\"upcoming\" or \"ongoing\"). Confirm these from the organizer's or an official page. Skip anything canceled, postponed or already over. Skip any event whose date, time, venue or organizer you cannot confirm from a page: never write \"not stated\", \"TBD\" or a guess, and find a different event instead. The organizer is who runs the event, not the venue's store or the page that lists it.",
       "The question is how the event is phrased for neighbors (for example \"What is happening in Old Roseville this weekend?\"). why_it_matters says why it matters to people living in or moving to the area.",
     ]
     : [
@@ -233,6 +233,9 @@ function cleanSource(s, mode, todayN) {
   return { title, url: href, domain: host, published: pn == null ? null : published };
 }
 
+// "Not stated in the source", "TBD", "N/A" and the like are not details. An event without a real time and place is not shown to an agent.
+const PLACEHOLDER = /\b(?:not\s+(?:stated|specified|available|provided|listed|given|confirmed)|unknown|tbd|tba|to\s+be\s+(?:determined|announced)|n\/a|none)\b|^\s*[-–—?]*\s*$/i;
+
 function cleanEvent(e, todayN) {
   if (!e || typeof e !== "object") return { problem: "event details are missing" };
   const date = String(e.date || "").trim();
@@ -245,7 +248,10 @@ function cleanEvent(e, todayN) {
   const status = String(e.status || "").toLowerCase();
   if (!["upcoming", "ongoing"].includes(status)) return { problem: `the event status is "${status || "unknown"}", not upcoming or ongoing` };
   const out = { name: clean(e.name, LIMITS.eventText), date, endDate: endRaw, time: clean(e.time, 80), location: clean(e.location, LIMITS.eventText), organizer: clean(e.organizer, LIMITS.eventText), status };
-  for (const [k, label] of [["time", "time"], ["location", "location"], ["organizer", "organizer"], ["name", "name"]]) if (!out[k]) return { problem: `the event ${label} is missing` };
+  for (const [k, label] of [["time", "time"], ["location", "location"], ["organizer", "organizer"], ["name", "name"]]) {
+    if (!out[k]) return { problem: `the event ${label} is missing` };
+    if (PLACEHOLDER.test(out[k])) return { problem: `the event ${label} is not confirmed ("${out[k].slice(0, 40)}"); only use events whose ${label} is published` };
+  }
   return { event: out };
 }
 

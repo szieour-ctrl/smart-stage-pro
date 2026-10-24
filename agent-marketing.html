@@ -134,6 +134,9 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
       <div class="choices row" id="fmtChoices"></div>
       <label class="lbl">Narration voice</label>
       <div class="choices row" id="voiceChoices"></div>
+      <label class="lbl" for="musicSelect">Music</label>
+      <select id="musicSelect" aria-describedby="musicHint"></select>
+      <div class="hint" id="musicHint">Plays softly under the narration. You can pick "No music (silent)".</div>
       <div class="actions"><button class="btn gold" type="button" id="createBtn">Continue</button></div>
       <div class="msg" id="setupMsg" role="status"></div>
     </section>
@@ -310,12 +313,13 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     radios($("durChoices"), "dur", state.schema.durations.map(function (d) { return { value: String(d), label: d + " seconds" }; }), "45");
     radios($("fmtChoices"), "fmt", [{ value: "both", label: "Both" }, { value: "9x16", label: "9:16 vertical" }, { value: "16x9", label: "16:9 horizontal" }], "both");
     radios($("voiceChoices"), "voice", [{ value: "ssp_male", label: "SSP Male" }, { value: "ssp_female", label: "SSP Female" }], "ssp_male");
+    $("musicSelect").innerHTML = (state.schema.music || [{ key: "default", label: "Default: Neutral Ambient" }]).map(function (m) { return '<option value="' + esc(m.key) + '">' + esc(m.label) + "</option>"; }).join("");
   }
   async function createProject() {
     $("createBtn").disabled = true; say("setupMsg", "");
     try {
       var f = pickedValue("fmt");
-      var r = await api("POST", "", { action: "create", template: "local_market_insider", durationSec: Number(pickedValue("dur")), formats: f === "both" ? ["9x16", "16x9"] : [f], voice: pickedValue("voice") });
+      var r = await api("POST", "", { action: "create", template: "local_market_insider", durationSec: Number(pickedValue("dur")), formats: f === "both" ? ["9x16", "16x9"] : [f], voice: pickedValue("voice"), music: $("musicSelect").value });
       if (!r.ok) throw new Error(r.json.error || "Could not start");
       setProject(r.json.project); go(2);
     } catch (e) { say("setupMsg", e.message, "err"); }

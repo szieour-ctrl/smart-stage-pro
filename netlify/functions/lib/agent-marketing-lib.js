@@ -11,6 +11,26 @@ const FORMATS = ["9x16", "16x9"];
 // v1 voices: SSP Male / SSP Female. "custom" (subscriber's own ElevenLabs voice) is in the table's check constraint
 // already but is rejected here until the encrypted-credential work is built.
 const VOICES = ["ssp_male", "ssp_female"];
+// Music choices. Keys MUST match MUSIC_LIBRARY in build-video-demo.html (the renderer's music library).
+const MUSIC = [
+  { key: "default", label: "Default: Neutral Ambient" },
+  { key: "japandi_calm", label: "Calm Piano" },
+  { key: "luxury_cinematic", label: "Cinematic Strings" },
+  { key: "modern_uplifting", label: "Warm & Uplifting" },
+  { key: "farmhouse_acoustic", label: "Light Acoustic" },
+  { key: "paper_lantern_court", label: "Paper Lantern Court" },
+  { key: "breezy", label: "Breezy" },
+  { key: "aperture_rising", label: "Aperture Rising" },
+  { key: "open_house_glow", label: "Open House Glow" },
+  { key: "open_door_plans", label: "Open Door Plans" },
+  { key: "fresh_keyframes", label: "Fresh Keyframes" },
+  { key: "twilight_terrace", label: "Twilight Terrace" },
+  { key: "sunshine_tour", label: "Sunshine Tour" },
+  { key: "sunshine", label: "Sunshine" },
+  { key: "sunlit_keychain", label: "Sunlit Keychain" },
+  { key: "none", label: "No music (silent)" },
+];
+const MUSIC_KEYS = MUSIC.map((m) => m.key);
 // Spoken words per duration (addendum A2). Guidance only; the audio length decides final timing.
 const WORD_TARGETS = { 30: [55, 70], 45: [85, 100], 60: [110, 130] };
 const CTA_SOURCES_FROM_CLIENT = ["user_edited", "user_inserted"];
@@ -39,7 +59,9 @@ function validateCreate(body) {
   formats = FORMATS.filter((f) => formats.includes(f)); // stable order, no duplicates
   const voice = String(b.voice || "ssp_male");
   if (!VOICES.includes(voice)) return { error: voice === "custom" ? "Your own ElevenLabs voice is coming soon." : "Choose SSP Male or SSP Female." };
-  return { row: { template, duration_sec: duration, formats, voice } };
+  const music = String(b.music == null || b.music === "" ? "default" : b.music);
+  if (!MUSIC_KEYS.includes(music)) return { error: "Choose one of the music options." };
+  return { row: { template, duration_sec: duration, formats, voice, music } };
 }
 
 // Audio tags such as [warm] or [emphasis] are delivery cues for ElevenLabs. They must never reach a caption.
@@ -98,6 +120,6 @@ function gateInputFor(project, narrative, source) {
 const NOT_EDITABLE_AFTER = ["rendering", "rendered", "published"];
 
 module.exports = {
-  DURATIONS, FORMATS, VOICES, WORD_TARGETS, UUID_RE, NOT_EDITABLE_AFTER,
+  DURATIONS, FORMATS, VOICES, MUSIC, WORD_TARGETS, UUID_RE, NOT_EDITABLE_AFTER,
   isEnabledFor, validateCreate, stripAudioTags, countWords, validateNarrative, gateInputFor,
 };

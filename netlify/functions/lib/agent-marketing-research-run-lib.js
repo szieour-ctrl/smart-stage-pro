@@ -1,0 +1,197 @@
+// lib/agent-marketing-research-run-lib.js — Netlify (shared). Runs ONE Local Market Insider research session (Oct 24, 2026).
+//
+// Calls Perplexity, then holds the answer to the rules in agent-marketing-research-lib.js. The only network call is
+// callPerplexity(); tests pass their own callFn. The API key is used in one header and is never logged or returned.
+//
+//   runResearch({ row, apiKey }) → { fields, problems, attempts }
+//     `fields` is exactly what to PATCH onto the agent_marketing_research row: status "ready" with five topics and charged_at,
+//     or status "failed" with charged_at null. A session is never charged unless five validated topics were delivered.
+"use strict";
+
+const https = require("https");
+const rl = require("./agent-marketing-research-lib");
+
+const API_HOST = "api.perplexity.ai";
+const API_PATH = "/chat/completions";
+const CALL_TIMEOUT_MS = 120000;
+
+// USD per 1M tokens, from the Perplexity pricing page Sam shared on Oct 24, 2026. Used ONLY to estimate cost when the provider
+// does not report one; a provider-reported cost always wins. Extra per-request fees (if any) are not in these numbers.
+const PRICES = {
+  "sonar": { in: 1, out: 1 },
+  "sonar-pro": { in: 3, out: 15 },
+  "sonar-reasoning-pro": { in: 2, out: 8 },
+  "sonar-deep-research": { in: 2, out: 8, reasoning: 3, citation: 2, perQuery: 0.005 },
+};
+const baseModel = (m) => String(m || "").replace(/^perplexity\//, "");
+
+function estimateCostUsd(model, usage) {
+  const p = PRICES[baseModel(model)];
+  const u = usage || {};
+  if (!p || u.promptTokens == null || u.completionTokens == null) return null;
+  const n = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+  const usd = (n(u.promptTokens) * p.in + n(u.completionTokens) * p.out + n(u.reasoningTokens) * (p.reasoning || 0) + n(u.citationTokens) * (p.citation || 0)) / 1e6 + n(u.searchQueries) * (p.perQuery || 0);
+  return Math.round(usd * 1e6) / 1e6;
+}
+
+function todayPT(now) {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit" }).format(now ? new Date(now) : new Date());
+}
+
+// ── The one network call ────────────────────────────────────────────────────────────────────────────────────────
+// Resolves { status, json } for ANY HTTP status; rejects only on a network error or timeout (marked retryable).
+function callPerplexity(payload, apiKey) {
+  return new Promise((resolve, reject) => {
+    const bodyStr = JSON.stringify(payload);
+    const req = https.request({
+      hostname: API_HOST, path: API_PATH, method: "POST",
+      headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json", "Content-Length": Buffer.byteLength(bodyStr) },
+    }, (res) => {
+      let data = "";
+      res.on("data", (c) => (data += c));
+      res.on("end", () => { let json = null; try { json = JSON.parse(data); } catch { /* leave null */ } resolve({ status: res.statusCode, json }); });
+    });
+    req.setTimeout(CALL_TIMEOUT_MS, () => { const e = new Error("Research timed out"); e.retryable = true; req.destroy(e); });
+    req.on("error", (e) => { e.retryable = true; reject(e); });
+    req.write(bodyStr);
+    req.end();
+  });
+}
+
+const defaultSleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const errText = (j) => String((j && (j.error && (j.error.message || j.error) || j.message)) || "").slice(0, 200);
+
+/**
+ * askProvider({ payload, apiKey, callFn, sleepFn, retries }) → { resp, modelUsed }  (throws a user-safe Error)
+ * Retries only busy/network failures (429, 5xx, timeouts). If the model name is rejected (Perplexity's pricing page lists
+ * "perplexity/sonar-pro", the classic Sonar API says "sonar-pro"), the other spelling is tried once.
+ */
+async function askProvider({ payload, apiKey, callFn, sleepFn, retries }) {
+  const call = callFn || module.exports.callPerplexity; // looked up at call time so tests can replace it
+  const sleep = sleepFn || defaultSleep;
+  const delays = [1500, 4000, 8000];
+  let body = payload, flipped = false;
+  for (let attempt = 0; ; attempt++) {
+    let res;
+    try { res = await call(body, apiKey); }
+    catch (e) {
+      if (attempt < retries) { await sleep(delays[attempt] || 8000); continue; }
+      throw new Error("Research is busy right now or timed out.");
+    }
+    const status = res && res.status;
+    if (status >= 200 && status < 300 && res.json) return { resp: res.json, modelUsed: body.model };
+    if (status === 400 && !flipped && /model/i.test(errText(res.json))) {
+      flipped = true;
+      const m = body.model;
+      body = { ...body, model: /^perplexity\//.test(m) ? baseModel(m) : `perplexity/${m}` };
+      attempt--; // the spelling retry is free
+      continue;
+    }
+    if ((status === 429 || status >= 500) && attempt < retries) { await sleep(delays[attempt] || 8000); continue; }
+    console.error(`[agent-marketing-research] provider answered ${status}: ${errText(res && res.json)}`);
+    if (status === 401 || status === 403) throw new Error("Research is not set up correctly yet.");
+    if (status === 429 || status >= 500) throw new Error("Research is busy right now. Please try again.");
+    throw new Error("The research request was not accepted.");
+  }
+}
+
+// ── Grounding: only trust sources the provider itself found ─────────────────────────────────────────────────────
+// Perplexity returns the pages it actually read (citations / search_results). A source the model names that is NOT in that list
+// may be invented, so it is dropped. When the provider sends a publish date for a page, that date replaces the model's claim.
+function urlKey(u) {
+  try { const x = new URL(String(u)); return `${x.hostname.toLowerCase().replace(/^www\./, "")}${x.pathname.replace(/\/+$/, "")}`; } catch { return ""; }
+}
+function providerDay(v) { const m = /^(\d{4}-\d{2}-\d{2})/.exec(String(v || "")); return m ? m[1] : null; }
+
+function groundTopics(rawTopics, resp) {
+  const known = new Map();
+  const add = (url, date) => { const k = urlKey(url); if (k && !known.has(k)) known.set(k, providerDay(date)); };
+  (Array.isArray(resp && resp.citations) ? resp.citations : []).forEach((c) => add(typeof c === "string" ? c : c && c.url));
+  (Array.isArray(resp && resp.search_results) ? resp.search_results : []).forEach((s) => s && add(s.url, s.date || s.last_updated));
+  if (known.size === 0) return { topics: rawTopics, grounded: false }; // the provider gave nothing to check against
+  const topics = (Array.isArray(rawTopics) ? rawTopics : []).map((t) => {
+    if (!t || typeof t !== "object") return t;
+    const sources = (Array.isArray(t.sources) ? t.sources : []).filter((s) => s && known.has(urlKey(s.url))).map((s) => {
+      const d = known.get(urlKey(s.url));
+      return d ? { ...s, published: d } : s;
+    });
+    return { ...t, sources };
+  });
+  return { topics, grounded: true };
+}
+
+// ── Usage across attempts ───────────────────────────────────────────────────────────────────────────────────────
+const SUM_FIELDS = ["promptTokens", "completionTokens", "citationTokens", "reasoningTokens", "searchQueries", "costUsd"];
+function addUsage(total, u) {
+  const out = { ...total };
+  SUM_FIELDS.forEach((k) => { if (u[k] != null) out[k] = (out[k] == null ? 0 : out[k]) + u[k]; });
+  return out;
+}
+
+function requestFromRow(row) {
+  const refs = Array.isArray(row.upload_refs) ? row.upload_refs : [];
+  return {
+    request: { mode: row.mode, audience: row.audience, geography: row.geography, focus: row.focus || {}, uploadIds: refs.map((r) => r && r.id).filter(Boolean) },
+    uploadContext: refs.map((r) => r && r.scope_note).filter(Boolean).join("; "),
+  };
+}
+
+/**
+ * runResearch({ row, apiKey, callFn, sleepFn, now, env }) → { fields, problems, attempts }
+ * Up to 1 + AGENT_MARKETING_RESEARCH_RETRIES (default 1, max 2) answers are tried. A retry tells the provider why the previous
+ * answer was rejected. All attempts' usage is added together, so the stored cost is the real cost of the session.
+ */
+async function runResearch({ row, apiKey, callFn, sleepFn, now, env }) {
+  const e = env || process.env;
+  const cfg = rl.researchSettings(e);
+  const extra = Number(e.AGENT_MARKETING_RESEARCH_RETRIES);
+  const maxAttempts = 1 + (Number.isInteger(extra) && extra >= 0 && extra <= 2 ? extra : 1);
+  const providerRetries = 2;
+  const today = todayPT(now);
+  const { request, uploadContext } = requestFromRow(row);
+  let payload = rl.buildResearchPayload({ request, today, uploadContext, env: e });
+  let usage = { promptTokens: null, completionTokens: null, citationTokens: null, reasoningTokens: null, searchQueries: null, costUsd: null };
+  let modelUsed = payload.model, grounded = null, attempts = 0, problems = [], validation = null, error = null;
+
+  try {
+    while (attempts < maxAttempts) {
+      attempts++;
+      const { resp, modelUsed: m } = await askProvider({ payload, apiKey, callFn, sleepFn, retries: providerRetries });
+      modelUsed = m;
+      usage = addUsage(usage, rl.usageSummary(resp, cfg.costTargetUsd));
+      const text = resp && resp.choices && resp.choices[0] && resp.choices[0].message && resp.choices[0].message.content;
+      try {
+        const g = groundTopics(rl.extractTopics(text), resp);
+        grounded = g.grounded;
+        validation = rl.validateTopics(g.topics, { mode: request.mode, today });
+        problems = validation.problems;
+      } catch (parseErr) {
+        validation = { ok: false, topics: [], problems: [parseErr.message] };
+        problems = validation.problems;
+      }
+      if (validation.ok) break;
+      if (attempts < maxAttempts) {
+        payload = { ...payload, model: modelUsed, messages: [...payload.messages.slice(0, 2), { role: "user", content: `Your previous answer was rejected: ${problems.slice(0, 6).join("; ").slice(0, 600)}. Return the JSON again with exactly 5 topics that fix this. Do not invent sources, dates or events.` }] };
+      }
+    }
+  } catch (err) {
+    error = err.message;
+  }
+
+  // Cost: the provider's own figure when it sent one, otherwise an estimate from tokens (flagged as an estimate).
+  const estimated = usage.costUsd == null ? estimateCostUsd(modelUsed, usage) : null;
+  const costUsd = usage.costUsd != null ? usage.costUsd : estimated;
+  const finalUsage = { ...usage, costUsd, costEstimated: usage.costUsd == null && estimated != null, targetUsd: cfg.costTargetUsd, withinTarget: costUsd == null ? null : costUsd <= cfg.costTargetUsd, attempts, grounded };
+  const fields = rl.outcomeFields({ validation: error ? null : validation, usage: finalUsage, model: modelUsed, today, now, error });
+  return { fields, problems, attempts };
+}
+
+// Which allowance size applies: a brokerage or team member draws on that tier's number; everyone else (including trials and
+// packages, for now) gets the Solo number. Mirrors getPlanContext in reel-quota-lib.js.
+function planKeyFromContext(ctx) {
+  if (ctx && ctx.poolKind === "brokerage") return "brokerage";
+  if (ctx && ctx.poolKind === "team") return "team";
+  return "solo";
+}
+
+module.exports = { PRICES, estimateCostUsd, todayPT, callPerplexity, askProvider, groundTopics, urlKey, requestFromRow, runResearch, planKeyFromContext };

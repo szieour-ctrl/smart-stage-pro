@@ -36,6 +36,10 @@
 [functions."agent-marketing-plan-background"]
   timeout = 900
 
+# Oct 24, 2026: Local Market Insider research (one Perplexity call, up to two attempts, writes to the research row).
+[functions."agent-marketing-research-background"]
+  timeout = 900
+
 [functions."reel-plan"]
   timeout = 10
 

@@ -74,6 +74,9 @@ test("payload: exact market, never widened; mode rules; model comes from the env
   const p = r.buildResearchPayload({ request, today: TODAY, env: {} });
   assert.strictEqual(p.model, "sonar-pro");
   assert.strictEqual(p.temperature, 0.2);
+  assert.strictEqual(p.max_tokens, 2200);                                    // bounds output cost
+  assert.deepStrictEqual(p.web_search_options, { search_context_size: "medium" });
+  assert.strictEqual(p.search_recency_filter, "month");
   assert.strictEqual(p.messages[0].role, "system");
   const user = p.messages[1].content;
   assert.match(user, /Crocker Ranch, Roseville, CA/);
@@ -88,6 +91,17 @@ test("payload: exact market, never widened; mode rules; model comes from the env
   assert.match(ev.messages[0].content, /upcoming" or "ongoing"/);
   const up = r.buildResearchPayload({ request, today: TODAY, uploadContext: "CMA, Crocker Ranch, 12 comps, Aug-Oct 2026", env: {} });
   assert.match(up.messages[1].content, /12 comps/);
+});
+
+test("settings: enhanced local research at a $0.025 target by default, every knob tunable, bad values ignored", () => {
+  const d = r.researchSettings({});
+  assert.deepStrictEqual(d, { model: "sonar-pro", searchContextSize: "medium", maxTokens: 2200, costTargetUsd: 0.025 });
+  const t = r.researchSettings({ AGENT_MARKETING_RESEARCH_MODEL: "sonar", AGENT_MARKETING_RESEARCH_CONTEXT: "LOW", AGENT_MARKETING_RESEARCH_MAX_TOKENS: "1500", AGENT_MARKETING_RESEARCH_COST_TARGET_USD: "0.04" });
+  assert.deepStrictEqual(t, { model: "sonar", searchContextSize: "low", maxTokens: 1500, costTargetUsd: 0.04 });
+  assert.deepStrictEqual(r.researchSettings({ AGENT_MARKETING_RESEARCH_CONTEXT: "huge", AGENT_MARKETING_RESEARCH_MAX_TOKENS: "99999", AGENT_MARKETING_RESEARCH_COST_TARGET_USD: "-1" }), d);
+  assert.notStrictEqual(r.researchSettings({}).model, "sonar-deep-research"); // deep research is opt-in only, never the default
+  const lowCtx = r.buildResearchPayload({ request: r.validateResearchRequest({ mode: "market_update", audience: "sellers", geography: { type: "city", name: "Roseville" } }).request, today: TODAY, env: { AGENT_MARKETING_RESEARCH_CONTEXT: "high" } });
+  assert.strictEqual(lowCtx.web_search_options.search_context_size, "high");
 });
 
 test("topics: exactly five distinct sourced market topics are accepted", () => {
@@ -178,8 +192,10 @@ test("extractTopics: reads a fenced or bare JSON response, rejects prose", () =>
 
 test("usage: measured tokens and cost are kept when present and null when not", () => {
   const u = r.usageSummary({ usage: { prompt_tokens: 100, completion_tokens: 900, citation_tokens: 50, reasoning_tokens: 0, num_search_queries: 3, cost: { total_cost: 0.0421 } } });
-  assert.deepStrictEqual(u, { promptTokens: 100, completionTokens: 900, citationTokens: 50, reasoningTokens: 0, searchQueries: 3, costUsd: 0.0421 });
-  assert.deepStrictEqual(r.usageSummary({}), { promptTokens: null, completionTokens: null, citationTokens: null, reasoningTokens: null, searchQueries: null, costUsd: null });
+  assert.deepStrictEqual(u, { promptTokens: 100, completionTokens: 900, citationTokens: 50, reasoningTokens: 0, searchQueries: 3, costUsd: 0.0421, targetUsd: 0.025, withinTarget: false });
+  assert.strictEqual(r.usageSummary({ usage: { cost: { total_cost: 0.019 } } }).withinTarget, true);
+  assert.strictEqual(r.usageSummary({ usage: { cost: { total_cost: 0.04 } } }, 0.05).withinTarget, true);
+  assert.deepStrictEqual(r.usageSummary({}), { promptTokens: null, completionTokens: null, citationTokens: null, reasoningTokens: null, searchQueries: null, costUsd: null, targetUsd: 0.025, withinTarget: null });
   assert.strictEqual(r.usageSummary(null).costUsd, null);
 });
 

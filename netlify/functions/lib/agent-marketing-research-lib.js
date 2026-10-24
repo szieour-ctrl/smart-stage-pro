@@ -109,8 +109,25 @@ function requestKey(request) {
 }
 
 // ── Provider request (Perplexity chat-completions shape) ────────────────────────────────────────────────────────
-const DEFAULT_MODEL = "sonar-pro"; // the GPT uses sonar-deep-research; its cost per call is far above the brief's planning estimate and must be measured first
+// Sam's starting point (Oct 24): "enhanced local research" at about $0.025 per run, NOT sonar-deep-research (which costs far more per
+// call). That is a mid-tier search model, a bounded search context and a capped answer size. Every knob is an environment setting so
+// it can be tuned from the Netlify dashboard once real cost is measured; usage is stored per session and compared with the target.
+const DEFAULT_MODEL = "sonar-pro";
+const DEFAULT_COST_TARGET_USD = 0.025;
+const CONTEXT_SIZES = ["low", "medium", "high"];
 function researchModel(env) { return String((env || process.env).AGENT_MARKETING_RESEARCH_MODEL || DEFAULT_MODEL).trim() || DEFAULT_MODEL; }
+function researchSettings(env) {
+  const e = env || process.env;
+  const ctx = String(e.AGENT_MARKETING_RESEARCH_CONTEXT || "medium").trim().toLowerCase();
+  const maxTokens = Number(e.AGENT_MARKETING_RESEARCH_MAX_TOKENS);
+  const target = Number(e.AGENT_MARKETING_RESEARCH_COST_TARGET_USD);
+  return {
+    model: researchModel(e),
+    searchContextSize: CONTEXT_SIZES.includes(ctx) ? ctx : "medium",
+    maxTokens: Number.isInteger(maxTokens) && maxTokens >= 500 && maxTokens <= 8000 ? maxTokens : 2200, // five topics with sources fit comfortably; the cap bounds output cost
+    costTargetUsd: Number.isFinite(target) && target > 0 && target <= 10 ? target : DEFAULT_COST_TARGET_USD,
+  };
+}
 
 function systemPrompt(mode) {
   const common = [
@@ -159,9 +176,13 @@ function buildResearchPayload({ request, today, uploadContext, env }) {
     `Today: ${today}.`,
     `Goal: ${TOPIC_COUNT} timely topics for a short educational video that shows what this agent knows about the local market right now.`,
   ].filter(Boolean);
+  const cfg = researchSettings(env);
   return {
-    model: researchModel(env),
+    model: cfg.model,
     temperature: 0.2,
+    max_tokens: cfg.maxTokens,
+    search_recency_filter: "month",          // matches the 30-day freshness rule; the validator still checks every date
+    web_search_options: { search_context_size: cfg.searchContextSize },
     messages: [{ role: "system", content: systemPrompt(r.mode) }, { role: "user", content: lines.join("\n") }],
   };
 }
@@ -290,13 +311,15 @@ function validateTopics(rawTopics, { mode, today } = {}) {
 }
 
 // Measured provider usage (tokens, search queries, cost) stored with each session so real cost can be benchmarked.
-function usageSummary(resp) {
+function usageSummary(resp, targetUsd) {
   const u = resp && typeof resp === "object" && resp.usage && typeof resp.usage === "object" ? resp.usage : {};
   const num = (v) => (Number.isFinite(Number(v)) && v !== null && v !== "" ? Number(v) : null);
   const cost = u.cost && typeof u.cost === "object" ? num(u.cost.total_cost) : null;
+  const target = Number.isFinite(Number(targetUsd)) && Number(targetUsd) > 0 ? Number(targetUsd) : DEFAULT_COST_TARGET_USD;
   return {
     promptTokens: num(u.prompt_tokens), completionTokens: num(u.completion_tokens), citationTokens: num(u.citation_tokens),
     reasoningTokens: num(u.reasoning_tokens), searchQueries: num(u.num_search_queries), costUsd: cost,
+    targetUsd: target, withinTarget: cost == null ? null : cost <= target, // null = the provider did not report a cost
   };
 }
 
@@ -341,7 +364,7 @@ function outcomeFields({ validation, usage, model, today, now, error }) {
 }
 
 module.exports = {
-  MODES, MODE_LABELS, GEO_TYPES, AUDIENCES, AUDIENCE_KEYS, TOPIC_COUNT, MAX_UPLOADS, FRESH_DAYS, ALLOWANCE_BY_PLAN, PAYWALLED_DOMAINS, DEFAULT_MODEL,
-  validateGeography, geoLabel, validateResearchRequest, requestKey, researchModel, systemPrompt, buildResearchPayload,
+  MODES, MODE_LABELS, GEO_TYPES, AUDIENCES, AUDIENCE_KEYS, TOPIC_COUNT, MAX_UPLOADS, FRESH_DAYS, ALLOWANCE_BY_PLAN, PAYWALLED_DOMAINS, DEFAULT_MODEL, DEFAULT_COST_TARGET_USD,
+  validateGeography, geoLabel, validateResearchRequest, requestKey, researchModel, researchSettings, systemPrompt, buildResearchPayload,
   extractTopics, validateTopics, usageSummary, monthKeyPT, allowanceFor, sessionStatus, outcomeFields,
 };

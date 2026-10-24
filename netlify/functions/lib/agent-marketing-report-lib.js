@@ -27,10 +27,10 @@ const PRICE_MIN = 20000, PRICE_MAX = 60000000;
 const MLS_SOURCES = ["MetroList", "CRMLS", "MLSListings", "bridgeMLS", "Rapattoni"]; // only these names are ever kept from a report
 const PROPERTY_TYPES = { RESI: "Residential", RESIDENTIAL: "Residential", COND: "Condo", CONDO: "Condo", MFR: "Multi-family", MULTI: "Multi-family", LAND: "Land", LOT: "Land" };
 
-const STATUS_ORDER = ["active", "coming_soon", "contingent", "pending", "closed", "expired", "canceled", "withdrawn", "unknown", "other"];
-const STATUS_PLURAL = { active: "active listings", coming_soon: "coming-soon listings", contingent: "contingent listings", pending: "pending listings", closed: "closed sales", expired: "expired listings", canceled: "canceled listings", withdrawn: "withdrawn listings", unknown: "listings", other: "other listings" };
-const STATUS_HEADING = { active: "Active", coming_soon: "Coming soon", contingent: "Contingent", pending: "Pending", closed: "Closed", expired: "Expired", canceled: "Canceled", withdrawn: "Withdrawn", unknown: "Listings", other: "Other" };
-const DATE_MEANING = { active: "listed", coming_soon: "listed", contingent: "listed", pending: "listed", closed: "closed", expired: "expired", canceled: "canceled", withdrawn: "withdrawn", unknown: "dated", other: "dated" };
+const STATUS_ORDER = ["active", "coming_soon", "contingent", "pending", "closed", "expired", "canceled", "withdrawn", "unknown", "other", "market"];
+const STATUS_PLURAL = { active: "active listings", coming_soon: "coming-soon listings", contingent: "contingent listings", pending: "pending listings", closed: "closed sales", expired: "expired listings", canceled: "canceled listings", withdrawn: "withdrawn listings", unknown: "listings", other: "other listings", market: "market measures" };
+const STATUS_HEADING = { active: "Active", coming_soon: "Coming soon", contingent: "Contingent", pending: "Pending", closed: "Closed", expired: "Expired", canceled: "Canceled", withdrawn: "Withdrawn", unknown: "Listings", other: "Other", market: "Market overview" };
+const DATE_MEANING = { active: "listed", coming_soon: "listed", contingent: "listed", pending: "listed", closed: "closed", expired: "expired", canceled: "canceled", withdrawn: "withdrawn", unknown: "dated", other: "dated", market: "reported" };
 
 const STREET_SUFFIX = "St|Street|Ave|Avenue|Blvd|Boulevard|Dr|Drive|Rd|Road|Ln|Lane|Ct|Court|Way|Pl|Place|Cir|Circle|Ter|Terrace|Pkwy|Parkway|Hwy|Loop|Trl|Trail";
 
@@ -192,6 +192,7 @@ function formatFigure(f) {
     case "usd_per_sqft": return `${usd(f.value)} per sq ft`;
     case "pct": return `${round(f.value, 1)}%`;
     case "days": return `${Math.round(f.value)} days`;
+    case "months": return `${round(f.value, 1)} months`;
     default: return Math.round(f.value).toLocaleString("en-US");
   }
 }
@@ -211,6 +212,10 @@ function placesOf(facts) {
  */
 function scopeSentence(facts) {
   const f = facts || {};
+  if (f.layout === "market_trends" && f.period) {
+    const where = placesOf(f);
+    return `This ${f.mlsSource ? f.mlsSource + " " : ""}market-trends report covers ${where.length ? listText(where) : "an area it does not name"}${(f.propertyTypes || []).length ? ` (${f.propertyTypes.join(", ")})` : ""}, for ${f.period.label}. It shows ${f.period.months} months of history; the latest month has ${f.sample ? Number(f.sample.closed).toLocaleString("en-US") : "?"} closed ${f.sample && f.sample.closed === 1 ? "sale" : "sales"}.`;
+  }
   const parts = [];
   const places = placesOf(f);
   const src = f.mlsSource ? `${f.mlsSource} report` : "report";
@@ -231,6 +236,11 @@ function scopeSentence(facts) {
 function scopeNote(facts) {
   const f = facts || {};
   const places = placesOf(f);
+  if (f.layout === "market_trends" && f.period) {
+    const bits = [`${f.mlsSource ? f.mlsSource + " " : ""}market-trends report`, places.length ? `covering ${listText(places)}` : null, (f.propertyTypes || []).length ? f.propertyTypes.join(", ") : null, `for ${f.period.label}`];
+    if (f.sample && f.sample.small) bits.push("a small sample of closed sales");
+    return bits.filter(Boolean).join(", ").slice(0, 400);
+  }
   const bits = [`${f.mlsSource ? f.mlsSource + " " : ""}market report`, places.length ? `covering ${listText(places)}` : null, f.reportDate ? `as of ${f.reportDate}` : null];
   const st = f.statuses || {};
   const order = STATUS_ORDER.filter((k) => st[k]);
@@ -240,12 +250,22 @@ function scopeNote(facts) {
 }
 
 /** Display rows for the confirmation screen: grouped by status, each figure with its sample size. */
+/** "vs $652,000 in August 2026 and $620,000 in September 2025" for figures that carry a prior month / year-ago value. */
+function compareText(facts, f) {
+  const p = facts && facts.period;
+  if (!p || !f) return "";
+  const at = (v) => formatFigure({ ...f, value: v });
+  const bits = [];
+  if (f.prior != null) bits.push(`${at(f.prior)} in ${p.priorLabel}`);
+  if (f.yearAgo != null) bits.push(`${at(f.yearAgo)} in ${p.yearAgoLabel}`);
+  return bits.length ? `vs ${bits.join(" and ")}` : "";
+}
 function displayFigures(facts) {
   const figs = (facts && facts.figures) || [];
   return STATUS_ORDER.filter((k) => figs.some((f) => f.status === k)).map((k) => ({
     status: k, heading: STATUS_HEADING[k],
     window: (facts.statuses && facts.statuses[k] && facts.statuses[k].dateRange) ? `Dates ${DATE_MEANING[k]}: ${windowText(facts.statuses[k].dateRange)}` : "",
-    figures: figs.filter((f) => f.status === k).map((f) => ({ id: f.id, label: f.label, display: formatFigure(f), n: f.n, small: !!f.small })),
+    figures: figs.filter((f) => f.status === k).map((f) => ({ id: f.id, label: f.label, display: formatFigure(f), compare: compareText(facts, f), n: f.n, small: !!f.small })),
   }));
 }
 
@@ -261,7 +281,8 @@ function verifiedFromReport(facts) {
   (f.figures || []).forEach((fig) => {
     const shown = formatFigure(fig);
     const rounded = fig.unit === "usd" || fig.unit === "usd_per_sqft" ? "" : Number.isInteger(fig.value) ? "" : ` (${Math.round(fig.value)})`;
-    texts.push(`${fig.label}: ${shown}${rounded}${fig.window ? ` (${windowText(fig.window)})` : ""}`);
+    const cmp = compareText(f, fig);
+    texts.push(`${fig.label}: ${shown}${rounded}${fig.window ? ` (${windowText(fig.window)})` : ""}${cmp ? ` ${cmp}` : ""}`);
   });
   if (f.reportDate) texts.push(`Report date: ${longDate(f.reportDate)}`);
   const c = f.statuses && f.statuses.closed;
@@ -408,6 +429,7 @@ function extractLabeledMetrics(lines) {
       if (!hit) continue;
       const v = firstNumberAfter(line, hit.index + hit[0].length);
       if (!v) continue;
+      if (/\d/.test(line.slice(v.end))) continue; // more numbers follow (a table row or a sentence): the first one may be the wrong column, so do not guess
       let value = v.value;
       if (m.unit === "pct" && value <= 1.5) value *= 100; // 0.991 → 99.1
       const [lo, hi] = RANGE[m.unit] || [0, Infinity];
@@ -420,7 +442,7 @@ function extractLabeledMetrics(lines) {
 
 function metricFigures(metrics, startId) {
   let n = startId || 1;
-  return metrics.map((m) => ({ id: `f${n++}`, status: m.status || "all", key: m.key, label: m.months ? "Months of inventory" : m.label, value: m.value, unit: m.months ? "months" : m.unit, n: 0, small: false, reported: true }));
+  return metrics.map((m) => ({ id: `f${n++}`, status: m.status || "market", key: m.key, label: m.months ? "Months of inventory" : m.label, value: m.value, unit: m.months ? "months" : m.unit, n: 0, small: false, reported: true }));
 }
 
 // ── MLS CMA PDFs (the MetroList / Rapattoni layout) ────────────────────────────────────────────────────────────────
@@ -576,11 +598,138 @@ function analyzeRows(rows, kind) {
   return buildFacts({ kind, records: t.records, metrics: t.records.length ? [] : metrics, meta, skipped: t.skipped || 0, layout: t.records.length ? "listing_table" : "labeled_metrics" });
 }
 
+
+// ── Monthly market-trends reports (TrendGraphix "TrendVision", as MetroList subscribers receive them) ─────────────────
+// Ten pages: a written overview, charts, a "VS PREV MONTH / VS SAME MONTH 1 YR AGO" table per chart, a "Today's Stats" page that covers
+// only the month so far, and a two-part Data Table with every measure for the last 15 months. The Data Table is the source: its last
+// column is the latest full month. The summary tables are used only to check it; "Today's Stats" is never used, because mixing a
+// part-month with full months gives false comparisons.
+const TV_ROWS = [
+  { label: "For Sale", key: "count_active", name: "Active listings", status: "active", unit: "count" },
+  { label: "New Listing", key: "count_new", name: "New listings", status: "active", unit: "count" },
+  { label: "Sold", key: "count_closed", name: "Closed sales", status: "closed", unit: "count" },
+  { label: "Pended", key: "count_pending", name: "Pended sales", status: "pending", unit: "count" },
+  { label: "Months of Inventory (Closed Sales)", key: "months_supply", name: "Months of inventory (closed-sales basis)", status: "market", unit: "months" },
+  { label: "Months of Inventory (Pended Sales)", key: "months_supply_pended", name: "Months of inventory (pended-sales basis)", status: "market", unit: "months" },
+  { label: "Absorption Rate (Closed Sales) %", key: "absorption_closed", name: "Absorption rate (closed sales)", status: "market", unit: "pct" },
+  { label: "Absorption Rate (Pended Sales) %", key: "absorption_pended", name: "Absorption rate (pended sales)", status: "market", unit: "pct" },
+  { label: "Avg. Active Price", key: "avg_list_price", name: "Average active price", status: "active", unit: "usd", scale: 1000 },
+  { label: "Avg. Sold Price", key: "avg_close_price", name: "Average sold price", status: "closed", unit: "usd", scale: 1000 },
+  { label: "Avg. Sq. Ft. Price (Sold)", key: "avg_ppsf", name: "Average sold price per square foot", status: "closed", unit: "usd_per_sqft" },
+  { label: "Median Active Price", key: "median_list_price", name: "Median active price", status: "active", unit: "usd", scale: 1000 },
+  { label: "Median Sold Price", key: "median_close_price", name: "Median sold price", status: "closed", unit: "usd", scale: 1000 },
+  { label: "Sold/List Diff. %", key: "avg_close_to_list_pct", name: "Sold price as a percent of list price", status: "closed", unit: "pct" },
+  { label: "Sold/Orig LP Diff. %", key: "avg_close_to_orig_list_pct", name: "Sold price as a percent of original list price", status: "closed", unit: "pct" },
+  { label: "Avg Days on Market", key: "avg_dom", name: "Average days on market", status: "market", unit: "days" },
+  { label: "Avg CDOM", key: "avg_cdom", name: "Average cumulative days on market", status: "market", unit: "days" },
+];
+// The same measures as they are worded in the per-chart summary tables, for the cross-check.
+const TV_CHECKS = [
+  ["count_active", /For Sale (-?[\d,.]+) (-?[\d,.]+) -?[\d.,]+%/], ["count_pending", /Pended (-?[\d,.]+) (-?[\d,.]+) -?[\d.,]+%/], ["count_closed", /Sold (-?[\d,.]+) (-?[\d,.]+) -?[\d.,]+%/],
+  ["months_supply", /Months of Inventory \(Closed\) (-?[\d,.]+) (-?[\d,.]+) -?[\d.,]+%/], ["avg_close_price", /Avg Sold Price (-?[\d,.]+) (-?[\d,.]+) -?[\d.,]+%/],
+  ["avg_list_price", /Avg Active Price (-?[\d,.]+) (-?[\d,.]+) -?[\d.,]+%/], ["avg_close_to_list_pct", /Sold\/List Price Diff % (-?[\d,.]+) (-?[\d,.]+) -?[\d.,]+%/],
+  ["avg_dom", /Avg Days on Market (-?[\d,.]+) (-?[\d,.]+) -?[\d.,]+%/],
+];
+const TV_NUM = "-?[\\d,]+(?:\\.\\d+)?";
+
+function tvHeaderValue(page, heading, next) {
+  const m = new RegExp(`${heading}\\s*\\n([\\s\\S]*?)\\n\\s*${next}`, "i").exec(page);
+  return m ? m[1].split(/\n/).map((x) => x.trim()).filter(Boolean) : [];
+}
+function tvLocation(first) {
+  const lines = tvHeaderValue(first, "LOCATION", "PROPERTY TYPE");
+  const label = lines.join(" ").replace(/\s+/g, " ").trim();
+  if (!label || label.length > 90 || !/^[A-Za-z0-9 ,.&'\/-]+$/.test(label)) return { cities: [], zips: [] };
+  const zips = Array.from(new Set((label.match(/\b\d{5}\b/g) || [])));
+  if (zips.length) return { cities: [], zips: zips.slice(0, 8) };
+  return { cities: [label], zips: [] };
+}
+
+/** analyzeTrendReport(pages) → { facts } | { error } | null (null = not this layout) */
+function analyzeTrendReport(pages) {
+  const list = Array.isArray(pages) ? pages : [];
+  const all = list.join("\n");
+  if (!/TRENDVISION/i.test(all) || !/Data Table/i.test(all)) return null;
+  const tables = list.filter((p) => /Data Table \(Part/i.test(p));
+  if (!tables.length) return null;
+  // Read every Data Table page: a header row of months, then one row per measure.
+  const series = {};
+  let months = [];
+  for (const raw of tables) {
+    const text = String(raw).replace(/\n(?=\((?:Closed|Pended) Sales\)|Sales\) %)/g, " ");
+    const lines = text.split(/\n/).map((l) => l.trim());
+    const hdr = lines.find((l) => /^Metric\s/.test(l));
+    if (!hdr) return { error: "no_figures" };
+    const cols = Array.from(hdr.matchAll(/\b(\d{1,2})\/(\d{2})\b/g)).map((m) => ({ m: Number(m[1]), y: 2000 + Number(m[2]) }));
+    if (!cols.length || cols.some((c) => c.m < 1 || c.m > 12)) return { error: "no_figures" };
+    months = months.concat(cols);
+    for (const row of TV_ROWS) {
+      const line = lines.find((l) => l.startsWith(row.label + " "));
+      if (!line) continue;
+      const nums = line.slice(row.label.length).trim().replace(/\s+Trend$/, "").split(/\s+/);
+      if (nums.length !== cols.length || !nums.every((n) => new RegExp(`^${TV_NUM}$`).test(n))) continue;
+      series[row.key] = (series[row.key] || []).concat(nums.map((n) => Number(n.replace(/,/g, ""))));
+    }
+  }
+  const N = months.length;
+  // The months must run one after another with no gaps, or "prior month" and "year ago" would point at the wrong column.
+  for (let i = 1; i < N; i++) { const a = months[i - 1], b = months[i]; if (b.y * 12 + b.m !== a.y * 12 + a.m + 1) return { error: "no_figures" }; }
+  const last = months[N - 1];
+  const rows = TV_ROWS.filter((r) => series[r.key] && series[r.key].length === N);
+  if (N < 2 || rows.length < 8) return { error: "no_figures" };
+  const mkLabel = (c) => `${MONTH_NAMES[c.m - 1]} ${c.y}`;
+  const ago = months.findIndex((c) => c.y === last.y - 1 && c.m === last.m);
+  const start = isoDay(last.y, last.m, 1);
+  const end = isoDay(last.y, last.m, new Date(Date.UTC(last.y, last.m, 0)).getUTCDate());
+  const window = { start, end };
+  const figures = rows.map((r, i) => {
+    const sc = r.scale || 1, ser = series[r.key];
+    const f = { id: `f${i + 1}`, status: r.status, key: r.key, label: r.name, value: ser[N - 1] * sc, unit: r.unit, n: 0, small: false, reported: true, window, prior: ser[N - 2] * sc };
+    if (ago >= 0) f.yearAgo = ser[ago] * sc;
+    return f;
+  });
+  // Check the Data Table against the report's own per-chart tables (latest and prior month).
+  const warnings = [];
+  const flat = list.filter((p) => !/Data Table \(Part|Today's Stats/i.test(p)).map((p) => p.replace(/\s+/g, " ")).join(" ");
+  let checked = 0; const bad = [];
+  TV_CHECKS.forEach(([key, re]) => {
+    const fig = figures.find((x) => x.key === key), m = re.exec(flat);
+    if (!fig || !m) return;
+    const sc = (TV_ROWS.find((r) => r.key === key) || {}).scale || 1;
+    checked++;
+    const cur = Number(m[1].replace(/,/g, "")) * sc, prev = Number(m[2].replace(/,/g, "")) * sc;
+    if (cur !== fig.value || prev !== fig.prior) bad.push(fig.label.toLowerCase());
+  });
+  if (bad.length) warnings.push(`The report's summary tables and its data table disagree on ${listText(bad)}. Please check those figures against the report.`);
+  const loc = tvLocation(String(list[0] || ""));
+  const first = String(list[0] || "");
+  const ptLines = tvHeaderValue(first, "PROPERTY TYPE", "Special Listing|PRICE / SQFT");
+  const pt = (ptLines[0] || "").trim();
+  const mls = MLS_SOURCES.find((n) => new RegExp(`\\b${n}\\b`, "i").test(all)) || null;
+  const closed = (figures.find((f) => f.key === "count_closed") || {}).value;
+  const small = closed != null && closed < SMALL_SAMPLE_BELOW;
+  if (small) warnings.push(`Only ${closed} closed ${closed === 1 ? "sale" : "sales"} in ${mkLabel(last)}: a small sample. Topics will say so and will not claim a trend.`);
+  if (!loc.cities.length && !loc.zips.length) warnings.push("I couldn't read the area this report covers. Check it before using it.");
+  const facts = {
+    version: FACTS_VERSION, kind: "pdf", layout: "market_trends", reportDate: null, mlsSource: mls,
+    propertyTypes: /^[A-Za-z ,\/-]{3,40}$/.test(pt) ? [pt] : [], criteria: { closedSince: null },
+    geography: { cities: loc.cities, zips: loc.zips, drawnOnMap: false },
+    period: { label: mkLabel(last), start, end, priorLabel: mkLabel(months[N - 2]), yearAgoLabel: ago >= 0 ? mkLabel(months[ago]) : null, months: N },
+    statuses: {}, figures,
+    sample: { total: closed != null ? closed : 0, closed: closed != null ? closed : 0, small, broadWindow: false, windowDays: 29 },
+    reportedTotal: null, checks: { checked, mismatched: bad.length }, warnings,
+    notes: ["Only market-level figures were kept. The partial-month \"Today's Stats\" page was not used."],
+  };
+  return { facts };
+}
+
 /** analyzePages(pages) → { facts } | { error }  for PDF text. */
 function analyzePages(pages) {
   const list = Array.isArray(pages) ? pages : [String(pages || "")];
   const text = list.join("\n");
   if (text.replace(/\s+/g, "").length < 150) return { error: "no_text" };
+  const trend = analyzeTrendReport(list);
+  if (trend) return trend;
   const meta = cmaMeta(text);
   const cma = analyzeCmaPages(list);
   if (cma) return buildFacts({ kind: "pdf", records: cma.records, reported: cma.reported, reportedTotal: cma.reportedTotal, meta, layout: cma.layout });
@@ -604,11 +753,24 @@ const errorMessage = (code) => ERROR_MESSAGES[code] || ERROR_MESSAGES.unreadable
 /**
  * summarize(facts, { geography }) → what the confirmation screen shows. Derived on every read, never stored, so wording can improve.
  */
+/**
+ * attributionNotice(facts) → the line MetroList Rule 12.9 requires on advertising that uses its statistics, or null when this is not a
+ * MetroList report or the report states no period. Rule 12.9: "Based on information from MetroList Services, Inc. for the period (date)
+ * through (date)." The period is the month a trends report covers, or the closed-sales window of a CMA.
+ */
+function attributionNotice(facts) {
+  const f = facts || {};
+  if (f.mlsSource !== "MetroList") return null;
+  const w = f.period ? { start: f.period.start, end: f.period.end } : f.statuses && f.statuses.closed && f.statuses.closed.dateRange;
+  if (!w || !w.start || !w.end) return null;
+  return `Based on information from MetroList Services, Inc. for the period ${shortDate(w.start, true)} through ${shortDate(w.end, true)}.`;
+}
+
 function summarize(facts, opts) {
   const f = facts || {};
   const geo = geographyCheck(f, opts && opts.geography);
   return {
-    scopeSentence: scopeSentence(f), scopeNote: scopeNote(f), groups: displayFigures(f),
+    scopeSentence: scopeSentence(f), scopeNote: scopeNote(f), notice: attributionNotice(f), groups: displayFigures(f),
     warnings: [...(f.warnings || []), ...(geo.message ? [geo.message] : [])], geography: geo.status, notes: f.notes || [],
     sample: f.sample || null, layout: f.layout, reportDate: f.reportDate || null,
   };
@@ -617,6 +779,6 @@ function summarize(facts, opts) {
 module.exports = {
   FACTS_VERSION, PERMISSION_VERSION, PERMISSION_TEXT, SMALL_SAMPLE_BELOW, BROAD_WINDOW_DAYS, MAX_RECORDS, STATUS_ORDER, STATUS_PLURAL,
   normStatus, parseMoney, parseDom, parseDate, parseSqft, median, mean, statsFromRecords, formatFigure, scopeSentence, scopeNote, displayFigures,
-  verifiedFromReport, geographyCheck, recordsFromRows, extractLabeledMetrics, analyzeCmaPages, cmaMeta, buildFacts, analyzeRows, analyzePages,
+  verifiedFromReport, attributionNotice, analyzeTrendReport, geographyCheck, recordsFromRows, extractLabeledMetrics, analyzeCmaPages, cmaMeta, buildFacts, analyzeRows, analyzePages,
   errorMessage, summarize,
 };

@@ -191,10 +191,10 @@ test("labeled market statistics are read when there are no listing rows", () => 
   assert.ok(r.facts, JSON.stringify(r));
   const f = r.facts;
   assert.strictEqual(f.layout, "labeled_metrics");
-  assert.strictEqual(fig(f, "all", "median_close_price"), 742000);
-  assert.strictEqual(fig(f, "all", "avg_dom"), 31);
-  assert.strictEqual(fig(f, "all", "months_supply"), 2.4);
-  assert.strictEqual(fig(f, "all", "avg_close_to_list_pct"), 99.1);
+  assert.strictEqual(fig(f, "market", "median_close_price"), 742000);
+  assert.strictEqual(fig(f, "market", "avg_dom"), 31);
+  assert.strictEqual(fig(f, "market", "months_supply"), 2.4);
+  assert.strictEqual(fig(f, "market", "avg_close_to_list_pct"), 99.1);
   assert.strictEqual(fig(f, "active", "count_active"), 118);
   assert.strictEqual(fig(f, "closed", "count_closed"), 96);
   assert.ok(!JSON.stringify(f).includes("jane@example.com"));

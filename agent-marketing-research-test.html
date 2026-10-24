@@ -58,6 +58,18 @@ input:focus,select:focus{outline:2px solid var(--gold-light);outline-offset:1px;
 .cost.over .big{color:var(--danger);} .cost.under .big{color:var(--success);}
 .saved{display:flex;justify-content:space-between;align-items:center;gap:10px;border-top:1px solid var(--border);padding:10px 0;font-size:0.84rem;}
 .saved:first-of-type{border-top:0;}
+.upload{border:1.5px dashed var(--border);border-radius:6px;background:#fbfaf7;padding:16px;text-align:center;margin-top:6px;}
+.upload.locked{opacity:0.55;}
+.upload .ut{font-weight:600;font-size:0.9rem;margin-top:2px;} .upload .us{font-size:0.78rem;color:var(--muted);margin-top:2px;}
+.upload input[type=file]{margin-top:10px;font-size:0.8rem;max-width:100%;}
+.upload .fname{font-size:0.8rem;margin-top:8px;color:var(--ink);word-break:break-all;}
+.attest{display:flex;gap:10px;align-items:flex-start;font-size:0.8rem;margin-top:10px;cursor:pointer;}
+.attest input{margin-top:2px;accent-color:#ad864b;}
+.modal-back{position:fixed;inset:0;background:rgba(30,26,20,0.45);display:flex;align-items:flex-start;justify-content:center;padding:6vh 16px;z-index:50;overflow:auto;}
+.modal{background:#fff;border-radius:8px;box-shadow:0 18px 50px rgba(0,0,0,0.25);width:100%;max-width:560px;padding:22px;}
+.modal-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;}
+.modal-x{background:none;border:0;font-size:1.5rem;line-height:1;cursor:pointer;color:var(--muted);padding:2px 6px;}
+.modal-list{max-height:55vh;overflow:auto;margin-top:6px;}
 </style>
 </head>
 <body>
@@ -95,9 +107,27 @@ input:focus,select:focus{outline:2px solid var(--gold-light);outline-offset:1px;
         <label class="choice"><input type="checkbox" id="fNew"><span>New Construction</span></label>
       </div>
 
+      <label class="lbl">Your MLS market report or CMA <span style="font-weight:400;color:var(--muted)">(optional)</span></label>
+      <div class="upload locked" id="uploadBox">
+        <div class="ut">Upload MLS Report</div>
+        <div class="us">PDF, Excel or CSV</div>
+        <div class="us">Test layout only. The file is not sent or stored anywhere yet.</div>
+        <input type="file" id="upFile" accept=".pdf,.csv,.xls,.xlsx" disabled>
+      </div>
+      <label class="attest"><input type="checkbox" id="upOk"><span>I am permitted to use this data in my marketing, and it excludes confidential client information.</span></label>
+      <div id="dataChoice" class="hidden">
+        <label class="lbl">Select what data you want to use</label>
+        <div class="choices row">
+          <label class="choice"><input type="radio" name="dataSrc" value="upload"><span>Use my upload only</span></label>
+          <label class="choice"><input type="radio" name="dataSrc" value="research"><span>Use web research only</span></label>
+          <label class="choice"><input type="radio" name="dataSrc" value="both" checked><span>Both</span></label>
+        </div>
+        <div class="hint">With both, your report's figures take priority over web figures.</div>
+      </div>
+
       <label class="lbl" style="margin-top:18px"><span class="choice" style="display:inline-flex"><input type="checkbox" id="newTopics"><span>Get a fresh set even if I already have one for this request (uses a session)</span></span></label>
 
-      <div class="actions"><button class="btn gold" type="button" id="startBtn">Research this market</button></div>
+      <div class="actions"><button class="btn gold" type="button" id="startBtn">Research this market</button><button class="btn ghost" type="button" id="libBtn">Browse Research Library</button></div>
       <div class="msg" id="startMsg" role="status"></div>
     </section>
 
@@ -111,13 +141,18 @@ input:focus,select:focus{outline:2px solid var(--gold-light);outline-offset:1px;
       <div class="msg" id="selMsg" role="status"></div>
     </section>
 
-    <section class="panel hidden" id="savedPanel">
-      <div class="eyebrow">Saved research</div>
-      <div class="panel-sub">Reopening a saved set never uses a session.</div>
-      <div id="savedList"></div>
-    </section>
   </div>
 </main>
+
+<div class="modal-back hidden" id="libModal" role="dialog" aria-modal="true" aria-labelledby="libTitle">
+  <div class="modal">
+    <div class="modal-head">
+      <div><div class="eyebrow">Saved research</div><div class="panel-title" id="libTitle">Research Library</div><div class="panel-sub">Opening a saved set never uses a session.</div></div>
+      <button class="modal-x" type="button" id="libX" aria-label="Close">&times;</button>
+    </div>
+    <div class="modal-list" id="savedList"></div>
+  </div>
+</div>
 
 <script>
 (function () {
@@ -255,15 +290,32 @@ input:focus,select:focus{outline:2px solid var(--gold-light);outline-offset:1px;
     } catch (e) { say("selMsg", e.message, "err"); }
   }
   function renderSaved(list) {
-    $("savedPanel").classList.toggle("hidden", !list.length);
-    $("savedList").innerHTML = list.map(function (r) {
+    $("savedList").innerHTML = !list.length ? '<div class="hint" style="padding:14px 0">No saved research yet. Run a request and it will appear here.</div>' : list.map(function (r) {
       return '<div class="saved"><div><b>' + esc(r.mode === "local_events" ? "Local Events" : "Market Update") + "</b> · " + esc(r.geography && r.geography.label) + " · " + esc(r.audience) +
         '<div class="hint">' + esc(r.status === "ready" ? "Five topics, " + (r.researchDate || "") : r.status === "failed" ? "Failed, not charged" : "Running") + "</div></div>" +
         '<button class="btn ghost small" type="button" data-open="' + esc(r.id) + '">Open</button></div>';
     }).join("");
     Array.prototype.forEach.call($("savedList").querySelectorAll("[data-open]"), function (b) {
-      b.addEventListener("click", function () { var r = list.filter(function (x) { return x.id === b.getAttribute("data-open"); })[0]; if (r) { showResult(r); if (r.status === "running") startPoll(r.id); } });
+      b.addEventListener("click", function () { var r = list.filter(function (x) { return x.id === b.getAttribute("data-open"); })[0]; if (r) { closeLib(); showResult(r); if (r.status === "running") startPoll(r.id); } });
     });
+  }
+  function openLib() { $("libModal").classList.remove("hidden"); $("libX").focus(); }
+  function closeLib() { $("libModal").classList.add("hidden"); $("libBtn").focus(); }
+  function wireIntakeExtras() {
+    $("libBtn").addEventListener("click", openLib);
+    $("libX").addEventListener("click", closeLib);
+    $("libModal").addEventListener("click", function (e) { if (e.target === $("libModal")) closeLib(); });
+    document.addEventListener("keydown", function (e) { if (e.key === "Escape" && !$("libModal").classList.contains("hidden")) closeLib(); });
+    function syncUpload() {
+      var ok = $("upOk").checked;
+      $("upFile").disabled = !ok;
+      $("uploadBox").classList.toggle("locked", !ok);
+      if (!ok) { $("upFile").value = ""; }
+      var has = ok && $("upFile").files && $("upFile").files.length > 0;
+      $("dataChoice").classList.toggle("hidden", !has);
+    }
+    $("upOk").addEventListener("change", syncUpload);
+    $("upFile").addEventListener("change", syncUpload);
   }
   async function refreshSaved() {
     var g = await api(API, "GET", "?projectId=" + encodeURIComponent(state.projectId));
@@ -284,7 +336,7 @@ input:focus,select:focus{outline:2px solid var(--gold-light);outline-offset:1px;
       try {
         var g = await api(API, "GET", "?id=" + encodeURIComponent(id));
         if (g.ok && g.json.research && g.json.research.status !== "running") { showResult(g.json.research); $("startBtn").disabled = false; await refreshSaved(); }
-        else if (tries > 100) { stopPoll(); $("startBtn").disabled = false; say("startMsg", "Still waiting. Check Saved research in a minute.", "err"); }
+        else if (tries > 100) { stopPoll(); $("startBtn").disabled = false; say("startMsg", "Still waiting. Check the Research Library in a minute.", "err"); }
       } catch (e) { /* keep polling */ }
     }, 4000);
   }
@@ -311,6 +363,7 @@ input:focus,select:focus{outline:2px solid var(--gold-light);outline-offset:1px;
       $("app").classList.remove("hidden");
       buildForm();
       $("startBtn").addEventListener("click", start);
+      wireIntakeExtras();
       var list = await refreshSaved();
       var running = (list || []).filter(function (r) { return r.status === "running"; })[0];
       if (running) { showResult(running); $("startBtn").disabled = true; startPoll(running.id); }

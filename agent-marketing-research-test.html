@@ -70,6 +70,18 @@ input:focus,select:focus{outline:2px solid var(--gold-light);outline-offset:1px;
 .modal-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;}
 .modal-x{background:none;border:0;font-size:1.5rem;line-height:1;cursor:pointer;color:var(--muted);padding:2px 6px;}
 .modal-list{max-height:55vh;overflow:auto;margin-top:6px;}
+.pills{display:flex;gap:6px;flex-wrap:wrap;}
+.pills .choice{padding:5px 10px;font-size:0.78rem;gap:6px;border-radius:14px;}
+.filerow{display:inline-flex;align-items:center;gap:8px;margin-top:10px;border:1px solid var(--border);border-radius:14px;background:#fff;padding:3px 6px 3px 12px;font-size:0.8rem;max-width:100%;}
+.filerow span{word-break:break-all;}
+.xbtn{border:0;background:var(--warm);color:var(--ink);width:22px;height:22px;border-radius:50%;font-size:1rem;line-height:1;cursor:pointer;flex:none;}
+.xbtn:hover{background:var(--border);}
+.attest-box{border:1px solid var(--gold);background:#fdf9f0;border-radius:6px;padding:12px 14px;margin-top:10px;}
+.attest-box .attest{margin-top:0;}
+.modal-x{border:1px solid var(--border) !important;border-radius:50%;width:34px;height:34px;display:flex;align-items:center;justify-content:center;flex:none;color:var(--ink) !important;background:#fff !important;font-size:1.3rem !important;}
+.modal-foot{display:flex;justify-content:flex-end;margin-top:14px;border-top:1px solid var(--border);padding-top:14px;}
+.panel{position:relative;}
+.res-x{position:absolute;top:14px;right:14px;}
 </style>
 </head>
 <body>
@@ -108,16 +120,21 @@ input:focus,select:focus{outline:2px solid var(--gold-light);outline-offset:1px;
       </div>
 
       <label class="lbl">Your MLS market report or CMA <span style="font-weight:400;color:var(--muted)">(optional)</span></label>
-      <div class="upload locked" id="uploadBox">
-        <div class="ut">Upload MLS Report</div>
+      <div class="upload" id="uploadBox">
+        <div class="ut">Upload MLS Report or CMA</div>
         <div class="us">PDF, Excel or CSV</div>
         <div class="us">Test layout only. The file is not sent or stored anywhere yet.</div>
-        <input type="file" id="upFile" accept=".pdf,.csv,.xls,.xlsx" disabled>
+        <input type="file" id="upFile" accept=".pdf,.csv,.xls,.xlsx">
+        <div class="filerow hidden" id="upRow"><span id="upName"></span><button type="button" class="xbtn" id="upX" aria-label="Remove this file" title="Remove this file">&times;</button></div>
       </div>
-      <label class="attest"><input type="checkbox" id="upOk"><span>I am permitted to use this data in my marketing, and it excludes confidential client information.</span></label>
+      <div class="attest-box hidden" id="attestBox">
+        <label class="attest"><input type="checkbox" id="upOk"><span><b>Please confirm before this file can be used:</b> I am permitted to use this data in my marketing, and it excludes confidential client information.</span></label>
+        <div class="hint">Client names, phone numbers, emails and street addresses in a report are never used in your topics. Only market-level figures (counts, medians, days on market, price ranges) are.</div>
+        <div class="msg err" id="attestMsg"></div>
+      </div>
       <div id="dataChoice" class="hidden">
-        <label class="lbl">Select what data you want to use</label>
-        <div class="choices row">
+        <label class="lbl" style="margin-top:14px">Select what data you want to use</label>
+        <div class="pills">
           <label class="choice"><input type="radio" name="dataSrc" value="upload"><span>Use my upload only</span></label>
           <label class="choice"><input type="radio" name="dataSrc" value="research"><span>Use web research only</span></label>
           <label class="choice"><input type="radio" name="dataSrc" value="both" checked><span>Both</span></label>
@@ -132,6 +149,7 @@ input:focus,select:focus{outline:2px solid var(--gold-light);outline-offset:1px;
     </section>
 
     <section class="panel hidden" id="resultPanel">
+      <button class="xbtn res-x" type="button" id="resX" aria-label="Close these results" title="Close these results">&times;</button>
       <div class="eyebrow" id="resEyebrow">Result</div>
       <div class="panel-title" id="resTitle"></div>
       <div id="resWait" class="hidden"><span class="spinner"></span><span id="resWaitText">Researching… this usually takes under a minute.</span></div>
@@ -151,6 +169,7 @@ input:focus,select:focus{outline:2px solid var(--gold-light);outline-offset:1px;
       <button class="modal-x" type="button" id="libX" aria-label="Close">&times;</button>
     </div>
     <div class="modal-list" id="savedList"></div>
+    <div class="modal-foot"><button class="btn ghost small" type="button" id="libClose">Close</button></div>
   </div>
 </div>
 
@@ -307,15 +326,25 @@ input:focus,select:focus{outline:2px solid var(--gold-light);outline-offset:1px;
     $("libModal").addEventListener("click", function (e) { if (e.target === $("libModal")) closeLib(); });
     document.addEventListener("keydown", function (e) { if (e.key === "Escape" && !$("libModal").classList.contains("hidden")) closeLib(); });
     function syncUpload() {
-      var ok = $("upOk").checked;
-      $("upFile").disabled = !ok;
-      $("uploadBox").classList.toggle("locked", !ok);
-      if (!ok) { $("upFile").value = ""; }
-      var has = ok && $("upFile").files && $("upFile").files.length > 0;
-      $("dataChoice").classList.toggle("hidden", !has);
+      var has = !!($("upFile").files && $("upFile").files.length > 0);
+      var ok = has && $("upOk").checked;
+      $("upRow").classList.toggle("hidden", !has);
+      if (has) $("upName").textContent = $("upFile").files[0].name;
+      $("attestBox").classList.toggle("hidden", !has);
+      if (!has) { $("upOk").checked = false; $("attestMsg").textContent = ""; }
+      if (ok) $("attestMsg").textContent = "";
+      $("dataChoice").classList.toggle("hidden", !ok);
     }
     $("upOk").addEventListener("change", syncUpload);
-    $("upFile").addEventListener("change", syncUpload);
+    $("upFile").addEventListener("change", function () { $("upOk").checked = false; syncUpload(); if ($("upFile").files.length) $("attestBox").scrollIntoView({ behavior: "smooth", block: "nearest" }); });
+    $("upX").addEventListener("click", function () { $("upFile").value = ""; syncUpload(); });
+    $("libClose").addEventListener("click", closeLib);
+    $("resX").addEventListener("click", function () { $("resultPanel").classList.add("hidden"); });
+    state.uploadReady = function () {
+      var has = $("upFile").files && $("upFile").files.length > 0;
+      if (has && !$("upOk").checked) { $("attestMsg").textContent = "Tick the box to use this file, or remove it with the \u00d7."; $("attestBox").scrollIntoView({ behavior: "smooth", block: "center" }); return false; }
+      return true;
+    };
   }
   async function refreshSaved() {
     var g = await api(API, "GET", "?projectId=" + encodeURIComponent(state.projectId));
@@ -341,6 +370,7 @@ input:focus,select:focus{outline:2px solid var(--gold-light);outline-offset:1px;
     }, 4000);
   }
   async function start() {
+    if (state.uploadReady && !state.uploadReady()) return;
     $("startBtn").disabled = true; say("startMsg", "");
     try {
       var body = { action: "start", projectId: state.projectId, request: collect(), newTopics: $("newTopics").checked };

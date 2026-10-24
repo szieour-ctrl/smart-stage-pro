@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex">
+<title>Agent Marketing — Research test (beta)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--ink:#1a1714;--cream:#f7f4ef;--warm:#e8e0d4;--gold:#b8975a;--gold-light:#d4b87a;--muted:#7a6f63;--danger:#c0392b;--success:#2d6a4f;--border:#ddd5c8;--shadow:0 2px 20px rgba(26,23,20,0.08);}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);min-height:100vh;font-size:15px;line-height:1.6;}
+.stage{max-width:760px;margin:0 auto;padding:0 20px 100px;}
+.banner{background:var(--ink);color:var(--warm);font-size:0.7rem;letter-spacing:0.08em;text-transform:uppercase;text-align:center;padding:8px 12px;}
+.banner b{color:var(--gold-light);}
+.app-header{padding:24px 0 18px;border-bottom:1px solid var(--border);margin-bottom:20px;}
+.app-title{font-family:'Cormorant Garamond',serif;font-size:1.5rem;font-weight:500;}
+.app-title em{color:var(--gold);font-style:normal;}
+.app-sub{font-size:0.82rem;color:var(--muted);margin-top:4px;}
+.panel{background:#fff;border:1px solid var(--border);border-radius:6px;box-shadow:var(--shadow);margin-bottom:18px;padding:22px;}
+.eyebrow{font-size:0.68rem;text-transform:uppercase;letter-spacing:0.12em;color:var(--gold);font-weight:600;margin-bottom:6px;}
+.panel-title{font-family:'Cormorant Garamond',serif;font-size:1.35rem;font-weight:500;margin-bottom:4px;}
+.panel-sub{font-size:0.85rem;color:var(--muted);margin-bottom:14px;}
+label.lbl{display:block;font-size:0.78rem;font-weight:600;margin:16px 0 6px;}
+input[type=text],select{width:100%;border:1px solid var(--border);border-radius:4px;padding:10px 12px;font:inherit;color:var(--ink);background:#fff;}
+input:focus,select:focus{outline:2px solid var(--gold-light);outline-offset:1px;}
+.choices{display:grid;gap:8px;}
+.choices.row{grid-template-columns:repeat(auto-fit,minmax(170px,1fr));}
+.choice{display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:5px;padding:10px 12px;cursor:pointer;background:#fff;font-size:0.9rem;}
+.choice:has(input:checked){border-color:var(--gold);background:#fdf9f0;box-shadow:inset 0 0 0 1px var(--gold);}
+.choice input{accent-color:#ad864b;}
+.hint{font-size:0.75rem;color:var(--muted);margin-top:5px;}
+.btn{background:var(--ink);color:#fff;border:0;padding:11px 18px;border-radius:5px;font:600 0.85rem 'DM Sans',sans-serif;cursor:pointer;}
+.btn.gold{background:#ad864b;}
+.btn.ghost{background:#fff;color:var(--ink);border:1px solid var(--border);}
+.btn:disabled{opacity:0.5;cursor:default;}
+.btn.small{padding:7px 12px;font-size:0.78rem;}
+.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px;}
+.msg{margin-top:12px;font-size:0.85rem;min-height:1.2em;}
+.msg.err{color:var(--danger);} .msg.ok{color:var(--success);}
+.hidden{display:none !important;}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+@media(max-width:560px){.row2{grid-template-columns:1fr;} .stage{padding:0 14px 80px;}}
+.spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--warm);border-top-color:var(--gold);border-radius:50%;animation:spin 0.8s linear infinite;vertical-align:-2px;margin-right:8px;}
+@keyframes spin{to{transform:rotate(360deg);}}
+.topic{border:1px solid var(--border);border-radius:6px;padding:14px 16px;margin-top:12px;background:#fff;}
+.topic.picked{border-color:var(--gold);background:#fdf9f0;box-shadow:inset 0 0 0 1px var(--gold);}
+.topic h3{font-family:'Cormorant Garamond',serif;font-size:1.15rem;font-weight:600;line-height:1.3;}
+.topic .why{font-size:0.85rem;margin:6px 0;}
+.tags{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0;}
+.tag{font-size:0.68rem;text-transform:uppercase;letter-spacing:0.06em;font-weight:600;padding:3px 8px;border-radius:10px;background:var(--warm);color:var(--muted);}
+.tag.warn{background:#fdf3d8;color:#7a5a12;} .tag.ok{background:#eaf3ee;color:var(--success);}
+.kv{font-size:0.8rem;color:var(--muted);margin:2px 0;} .kv b{color:var(--ink);font-weight:600;}
+.src{font-size:0.8rem;margin:3px 0;} .src a{color:#7a5a12;word-break:break-all;} .src span{color:var(--muted);}
+.cost{border:1px dashed var(--gold);border-radius:6px;background:#fffdf8;padding:12px 14px;margin-top:14px;font-size:0.82rem;}
+.cost b{font-weight:600;} .cost .big{font-family:'Cormorant Garamond',serif;font-size:1.5rem;font-weight:600;}
+.cost.over .big{color:var(--danger);} .cost.under .big{color:var(--success);}
+.saved{display:flex;justify-content:space-between;align-items:center;gap:10px;border-top:1px solid var(--border);padding:10px 0;font-size:0.84rem;}
+.saved:first-of-type{border-top:0;}
+</style>
+</head>
+<body>
+<div class="banner">Smart Stage PRO Plus · Agent Marketing · <b>Research test</b> · internal beta</div>
+<main class="stage">
+  <header class="app-header">
+    <div class="app-title">Local Market Insider <em>· Research test</em></div>
+    <div class="app-sub">Try a live research request and see the five topics, their sources and what it cost. Nothing here is published. It uses one test project, so it will not clutter your Reels.</div>
+  </header>
+
+  <div id="gateMsg" class="panel hidden"></div>
+
+  <div id="app" class="hidden">
+    <section class="panel">
+      <div class="eyebrow">Research request</div>
+      <div class="panel-title">What are people in this market interested in right now?</div>
+      <div class="panel-sub" id="sessionLine"></div>
+
+      <label class="lbl">Content type</label>
+      <div class="choices row" id="modeChoices"></div>
+
+      <div class="row2">
+        <div><label class="lbl" for="geoType">Market type</label><select id="geoType"></select></div>
+        <div><label class="lbl" for="geoName" id="geoNameLbl">Place</label><input type="text" id="geoName" maxlength="60" placeholder="e.g. Roseville"></div>
+      </div>
+      <div id="cityWrap" class="hidden"><label class="lbl" for="geoCity">City this neighborhood is in</label><input type="text" id="geoCity" maxlength="60" placeholder="e.g. Roseville"></div>
+      <div class="hint">The research stays inside exactly this place. It is never widened to the city or county for you.</div>
+
+      <label class="lbl" for="audience">Who is this for?</label>
+      <select id="audience"></select>
+
+      <label class="lbl">Optional focus</label>
+      <div class="choices row">
+        <label class="choice"><input type="checkbox" id="f55"><span>55+ Active Adult</span></label>
+        <label class="choice"><input type="checkbox" id="fNew"><span>New Construction</span></label>
+      </div>
+
+      <label class="lbl" style="margin-top:18px"><span class="choice" style="display:inline-flex"><input type="checkbox" id="newTopics"><span>Get a fresh set even if I already have one for this request (uses a session)</span></span></label>
+
+      <div class="actions"><button class="btn gold" type="button" id="startBtn">Research this market</button></div>
+      <div class="msg" id="startMsg" role="status"></div>
+    </section>
+
+    <section class="panel hidden" id="resultPanel">
+      <div class="eyebrow" id="resEyebrow">Result</div>
+      <div class="panel-title" id="resTitle"></div>
+      <div id="resWait" class="hidden"><span class="spinner"></span><span id="resWaitText">Researching… this usually takes under a minute.</span></div>
+      <div id="resError" class="msg err hidden"></div>
+      <div id="resTopics"></div>
+      <div id="resCost"></div>
+      <div class="msg" id="selMsg" role="status"></div>
+    </section>
+
+    <section class="panel hidden" id="savedPanel">
+      <div class="eyebrow">Saved research</div>
+      <div class="panel-sub">Reopening a saved set never uses a session.</div>
+      <div id="savedList"></div>
+    </section>
+  </div>
+</main>
+
+<script>
+(function () {
+  "use strict";
+  var API = "/.netlify/functions/agent-marketing-research";
+  var PROJ = "/.netlify/functions/agent-marketing-project";
+  var STORE = "amResearchTestProject";
+  var state = { schema: null, projectId: null, selected: null, poll: null, session: null };
+  var $ = function (id) { return document.getElementById(id); };
+  function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
+  function say(id, text, kind) { var el = $(id); el.textContent = text || ""; el.className = "msg" + (kind ? " " + kind : ""); }
+
+  // Same login the rest of the site uses (the live Supabase session in localStorage).
+  function token() {
+    try {
+      for (var i = 0; i < localStorage.length; i++) {
+        var k = localStorage.key(i);
+        if (!/^sb-.+-auth-token/.test(k)) continue;
+        var p = JSON.parse(localStorage.getItem(k) || "null");
+        if (p && p.access_token && p.expires_at && p.expires_at * 1000 > Date.now() + 15000) return p.access_token;
+      }
+    } catch (e) { /* storage blocked */ }
+    return null;
+  }
+  async function api(base, method, qs, body) {
+    var t = token();
+    if (!t) throw new Error("Your session has expired. Please log in again at smartstagepro.com, then reopen this page.");
+    var res = await fetch(base + (qs || ""), { method: method, headers: { Authorization: "Bearer " + t, "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+    var json = {}; try { json = await res.json(); } catch (e) { /* non-JSON */ }
+    return { status: res.status, ok: res.ok, json: json };
+  }
+  function block(msg) { $("gateMsg").classList.remove("hidden"); $("gateMsg").innerHTML = "<div class='panel-title'>" + esc(msg) + "</div>"; }
+
+  // ── The one test project (kept in this browser) ──
+  async function ensureProject() {
+    var id = null; try { id = localStorage.getItem(STORE); } catch (e) { /* ignore */ }
+    if (id) {
+      var g = await api(PROJ, "GET", "?id=" + encodeURIComponent(id));
+      if (g.ok && g.json.project && ["rendering", "rendered", "published"].indexOf(g.json.project.status) < 0) return id;
+    }
+    var c = await api(PROJ, "POST", "", { action: "create" });
+    if (!c.ok || !c.json.project) throw new Error((c.json && c.json.error) || "Could not set up the test project.");
+    try { localStorage.setItem(STORE, c.json.project.id); } catch (e) { /* ignore */ }
+    return c.json.project.id;
+  }
+
+  // ── Form ──
+  function radios(el, name, items, checked) {
+    el.innerHTML = items.map(function (it) { return '<label class="choice"><input type="radio" name="' + name + '" value="' + esc(it.key) + '"' + (it.key === checked ? " checked" : "") + "><span>" + esc(it.label) + "</span></label>"; }).join("");
+  }
+  function picked(name) { var el = document.querySelector('input[name="' + name + '"]:checked'); return el ? el.value : null; }
+  function buildForm() {
+    var s = state.schema;
+    radios($("modeChoices"), "mode", s.modes, "market_update");
+    $("geoType").innerHTML = s.geoTypes.map(function (g) { return '<option value="' + esc(g.key) + '"' + (g.key === "city" ? " selected" : "") + ">" + esc(g.label) + "</option>"; }).join("");
+    $("audience").innerHTML = s.audiences.map(function (a) { return '<option value="' + esc(a.key) + '">' + esc(a.label) + "</option>"; }).join("");
+    $("geoType").addEventListener("change", applyGeo); applyGeo();
+  }
+  function applyGeo() {
+    var t = $("geoType").value;
+    $("cityWrap").classList.toggle("hidden", t !== "neighborhood");
+    $("geoNameLbl").textContent = t === "zip" ? "ZIP code" : t === "neighborhood" ? "Neighborhood" : t === "county" ? "County" : t === "metro" ? "Metro area" : "City";
+    $("geoName").placeholder = t === "zip" ? "e.g. 95678" : t === "neighborhood" ? "e.g. Crocker Ranch" : t === "county" ? "e.g. Placer" : t === "metro" ? "e.g. Sacramento" : "e.g. Roseville";
+  }
+  function collect() {
+    var type = $("geoType").value;
+    return {
+      mode: picked("mode"), audience: $("audience").value,
+      geography: { type: type, name: $("geoName").value, city: type === "neighborhood" ? $("geoCity").value : "" },
+      focus: { active_adult_55: $("f55").checked, new_construction: $("fNew").checked },
+    };
+  }
+
+  // ── Session line ──
+  function renderSession(s) {
+    state.session = s || state.session;
+    var x = state.session;
+    if (!x) { $("sessionLine").textContent = ""; return; }
+    var who = x.pool === "team" ? "Your team has" : x.pool === "brokerage" ? "Your brokerage has" : "You have";
+    $("sessionLine").textContent = who + " " + x.remaining + " of " + x.allowance + " included research sessions left this month" + (x.shared ? " (shared)." : ".") + " A session is used only when five sourced topics are delivered.";
+  }
+
+  // ── Results ──
+  function money(n) { return n == null ? "n/a" : "$" + Number(n).toFixed(4); }
+  function renderCost(r) {
+    var u = r.usage;
+    if (!u) { $("resCost").innerHTML = '<div class="hint" style="margin-top:12px">Cost is hidden. To see it here while testing, set <b>AGENT_MARKETING_RESEARCH_DEBUG</b> to <b>true</b> in Netlify and redeploy.</div>'; return; }
+    var cls = u.withinTarget === true ? "under" : u.withinTarget === false ? "over" : "";
+    $("resCost").innerHTML = '<div class="cost ' + cls + '"><div class="eyebrow">What this run cost</div><div class="big">' + money(u.costUsd) + "</div>" +
+      "<div>" + (u.costEstimated ? "Estimated from tokens (Perplexity did not report a cost). " : "Reported by Perplexity. ") +
+      "Target " + money(u.targetUsd) + (u.withinTarget === true ? " · <b>within target</b>" : u.withinTarget === false ? " · <b>over target</b>" : "") + "</div>" +
+      '<div class="hint">Model ' + esc(r.model || "?") + " · attempts " + esc(u.attempts) + " · tokens in " + esc(u.promptTokens) + " / out " + esc(u.completionTokens) +
+      (u.searchQueries != null ? " · searches " + esc(u.searchQueries) : "") + " · sources checked against the provider: " + (u.grounded === true ? "yes" : u.grounded === false ? "no (provider sent none)" : "n/a") + "</div></div>";
+  }
+  function srcLine(s) {
+    return '<div class="src"><a href="' + esc(s.url) + '" target="_blank" rel="noopener noreferrer">' + esc(s.title) + '</a> <span>· ' + esc(s.domain) + (s.published ? " · " + esc(s.published) : "") + "</span></div>";
+  }
+  function renderTopic(t, pickedId) {
+    var ev = t.event;
+    return '<div class="topic' + (t.id === pickedId ? " picked" : "") + '"><div class="tags"><span class="tag">' + esc(t.id.toUpperCase()) + "</span>" +
+      '<span class="tag ' + (t.scope === "selected" ? "ok" : "warn") + '">' + (t.scope === "selected" ? "Your exact market" : "Broader context") + "</span>" +
+      (t.localIntent ? '<span class="tag ok">Local intent</span>' : "") + "</div><h3>" + esc(t.question) + '</h3><div class="why">' + esc(t.whyItMatters) + "</div>" +
+      (t.scope !== "selected" ? '<div class="kv"><b>Data covers:</b> ' + esc(t.scopeNote) + "</div>" : "") +
+      (t.trendSignals && t.trendSignals.length ? '<div class="kv"><b>Trend signals:</b> ' + t.trendSignals.map(esc).join(" · ") + "</div>" : "") +
+      (ev ? '<div class="kv"><b>' + esc(ev.name) + "</b> · " + esc(ev.date) + (ev.endDate ? " to " + esc(ev.endDate) : "") + " · " + esc(ev.time) + "</div>" +
+        '<div class="kv"><b>Where:</b> ' + esc(ev.location) + " · <b>Organizer:</b> " + esc(ev.organizer) + " · <b>Status:</b> " + esc(ev.status) + "</div>" : "") +
+      "<div style=\"margin-top:6px\">" + (t.sources || []).map(srcLine).join("") + "</div>" +
+      '<div class="actions" style="margin-top:10px"><button class="btn small ' + (t.id === pickedId ? "" : "gold") + '" type="button" data-pick="' + esc(t.id) + '">' + (t.id === pickedId ? "Selected" : "Select this topic") + "</button></div></div>";
+  }
+  function showResult(r) {
+    stopPoll();
+    $("resultPanel").classList.remove("hidden");
+    state.current = r;
+    $("resEyebrow").textContent = (r.mode === "local_events" ? "Local Events" : "Local Market Update") + " · " + (r.geography && r.geography.label || "");
+    $("resTitle").textContent = r.status === "ready" ? "Five topics" + (r.researchDate ? " from " + r.researchDate : "") : r.status === "failed" ? "No topics this time" : "Researching…";
+    $("resWait").classList.toggle("hidden", r.status !== "running");
+    $("resError").classList.toggle("hidden", r.status !== "failed");
+    if (r.status === "failed") $("resError").textContent = (r.error || "The research could not be completed.") + " This did not use a session.";
+    var pickedId = state.selected && state.selected.researchId === r.id ? state.selected.id : null;
+    $("resTopics").innerHTML = r.status === "ready" ? r.topics.map(function (t) { return renderTopic(t, pickedId); }).join("") : "";
+    renderCost(r);
+    say("selMsg", "");
+    Array.prototype.forEach.call($("resTopics").querySelectorAll("[data-pick]"), function (b) { b.addEventListener("click", function () { pick(r.id, b.getAttribute("data-pick")); }); });
+    $("resultPanel").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  async function pick(researchId, topicId) {
+    say("selMsg", "Saving your choice…");
+    try {
+      var r = await api(API, "POST", "", { action: "select", projectId: state.projectId, researchId: researchId, topicId: topicId });
+      if (!r.ok) return say("selMsg", r.json.error || "Could not save your choice.", "err");
+      state.selected = r.json.selectedTopic;
+      showResult(state.current);
+      say("selMsg", "Saved. Resuming this project later restores this topic without a new research call.", "ok");
+    } catch (e) { say("selMsg", e.message, "err"); }
+  }
+  function renderSaved(list) {
+    $("savedPanel").classList.toggle("hidden", !list.length);
+    $("savedList").innerHTML = list.map(function (r) {
+      return '<div class="saved"><div><b>' + esc(r.mode === "local_events" ? "Local Events" : "Market Update") + "</b> · " + esc(r.geography && r.geography.label) + " · " + esc(r.audience) +
+        '<div class="hint">' + esc(r.status === "ready" ? "Five topics, " + (r.researchDate || "") : r.status === "failed" ? "Failed, not charged" : "Running") + "</div></div>" +
+        '<button class="btn ghost small" type="button" data-open="' + esc(r.id) + '">Open</button></div>';
+    }).join("");
+    Array.prototype.forEach.call($("savedList").querySelectorAll("[data-open]"), function (b) {
+      b.addEventListener("click", function () { var r = list.filter(function (x) { return x.id === b.getAttribute("data-open"); })[0]; if (r) { showResult(r); if (r.status === "running") startPoll(r.id); } });
+    });
+  }
+  async function refreshSaved() {
+    var g = await api(API, "GET", "?projectId=" + encodeURIComponent(state.projectId));
+    if (!g.ok) return;
+    state.selected = g.json.selectedTopic || null;
+    renderSession(g.json.session);
+    renderSaved(g.json.research || []);
+    return g.json.research || [];
+  }
+
+  // ── Running a request ──
+  function stopPoll() { if (state.poll) { clearInterval(state.poll); state.poll = null; } }
+  function startPoll(id) {
+    stopPoll();
+    var tries = 0;
+    state.poll = setInterval(async function () {
+      tries++;
+      try {
+        var g = await api(API, "GET", "?id=" + encodeURIComponent(id));
+        if (g.ok && g.json.research && g.json.research.status !== "running") { showResult(g.json.research); $("startBtn").disabled = false; await refreshSaved(); }
+        else if (tries > 100) { stopPoll(); $("startBtn").disabled = false; say("startMsg", "Still waiting. Check Saved research in a minute.", "err"); }
+      } catch (e) { /* keep polling */ }
+    }, 4000);
+  }
+  async function start() {
+    $("startBtn").disabled = true; say("startMsg", "");
+    try {
+      var body = { action: "start", projectId: state.projectId, request: collect(), newTopics: $("newTopics").checked };
+      var r = await api(API, "POST", "", body);
+      if (r.json && r.json.session) renderSession(r.json.session);
+      if (r.status === 202) { showResult(r.json.research); startPoll(r.json.research.id); return; }
+      $("startBtn").disabled = false;
+      if (r.status === 200) { showResult(r.json.research); say("startMsg", r.json.reused ? "You already had this set, so it was reopened and no session was used." : "", "ok"); return; }
+      say("startMsg", (r.json && r.json.error) || "Something went wrong.", "err");
+    } catch (e) { $("startBtn").disabled = false; say("startMsg", e.message, "err"); }
+  }
+
+  async function init() {
+    try {
+      var s = await api(API, "GET", "?schema=1");
+      if (s.status === 404) return block("Agent Marketing isn't available on your account yet.");
+      if (!s.ok) return block((s.json && s.json.error) || "Could not load the research test.");
+      state.schema = s.json;
+      state.projectId = await ensureProject();
+      $("app").classList.remove("hidden");
+      buildForm();
+      $("startBtn").addEventListener("click", start);
+      var list = await refreshSaved();
+      var running = (list || []).filter(function (r) { return r.status === "running"; })[0];
+      if (running) { showResult(running); $("startBtn").disabled = true; startPoll(running.id); }
+    } catch (e) { block(e.message); }
+  }
+  init();
+})();
+</script>
+</body>
+</html>

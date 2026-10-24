@@ -53,6 +53,16 @@ test("switch off: every call answers 404", async () => {
   assert.strictEqual((await call("POST", { action: "start" })).status, 404);
 });
 
+test("schema: the page reads its choices from the server", async () => {
+  reset();
+  const r = await call("GET", null, { schema: "1" });
+  assert.strictEqual(r.status, 200);
+  assert.deepStrictEqual(r.json.modes.map((m) => m.key), ["market_update", "local_events"]);
+  assert.deepStrictEqual(r.json.audiences.map((a) => a.key), ["buyers", "sellers", "both", "investors", "general"]);
+  assert.deepStrictEqual(r.json.geoTypes.map((g) => g.key), ["neighborhood", "city", "zip", "county", "metro"]);
+  assert.strictEqual(r.json.topicCount, 5);
+});
+
 test("start: validates, saves a running row, dispatches the worker with the internal key, and reports the session balance", async () => {
   reset();
   const p = mkProject();

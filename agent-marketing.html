@@ -59,14 +59,14 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--gold-light);outl
 .scene dt{color:var(--muted);font-weight:600;}
 ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
 .pick{margin-top:12px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;}
-.pick img.sel{width:96px;height:64px;object-fit:cover;border-radius:4px;border:1px solid var(--border);}
+.pick img.sel{width:140px;height:94px;object-fit:cover;border-radius:4px;border:1px solid var(--border);cursor:pointer;}
 .picker{border:2px solid var(--gold-light);position:fixed;z-index:60;top:5vh;left:50%;transform:translateX(-50%);width:min(720px,92vw);max-height:88vh;overflow:auto;margin:0;box-shadow:0 0 0 100vmax rgba(26,23,20,0.55);}
 .picker.hidden{display:none;}
 .frame img,.frame.click{cursor:pointer;}
 .frame.busy{aspect-ratio:auto;min-height:96px;}
 .frame.empty{aspect-ratio:auto;min-height:96px;border:1px dashed var(--border);}
-#imgModal{position:fixed;inset:0;background:rgba(10,8,6,0.92);z-index:80;display:flex;align-items:center;justify-content:center;padding:20px;}
-#imgModal.hidden{display:none!important;}
+#imgModal,#photoView{position:fixed;inset:0;background:rgba(10,8,6,0.92);z-index:80;display:flex;align-items:center;justify-content:center;padding:20px;}
+#imgModal.hidden,#photoView.hidden{display:none!important;}
 .imgm-inner{background:#fff;border-radius:6px;overflow:hidden;max-width:860px;width:100%;max-height:92vh;display:flex;flex-direction:column;}
 .imgm-wrap{flex-shrink:0;display:flex;align-items:center;justify-content:center;background:#111;max-height:52vh;min-height:120px;color:#cfc7ba;font-size:0.85rem;overflow:hidden;}
 .imgm-wrap img{max-width:100%;max-height:52vh;object-fit:contain;display:block;}
@@ -213,6 +213,12 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
       <div class="msg" id="imagesMsg" role="status"></div>
     </section>
 
+    <div id="photoView" class="hidden" role="dialog" aria-modal="true" aria-label="Your photo">
+      <div class="imgm-inner">
+        <div class="imgm-wrap"><img id="photoViewImg" alt="Your photo" src=""></div>
+        <div class="imgm-foot" id="photoViewFoot"></div>
+      </div>
+    </div>
     <div id="imgModal" class="hidden" role="dialog" aria-modal="true" aria-labelledby="imgmTitle">
       <div class="imgm-inner">
         <div class="imgm-wrap" id="imgmWrap"></div>
@@ -290,7 +296,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     }).join("");
     Array.prototype.forEach.call($("steps").querySelectorAll(".step-pill.done"), function (b) { b.addEventListener("click", function () { go(Number(b.getAttribute("data-step"))); }); });
   }
-  function go(step) { stopImgPoll(); $("picker").classList.add("hidden"); if (typeof closeModal === "function") closeModal(); show([STEP_IDS[step - 1]]); renderSteps(step); if (step === 2) fillIntake(); if (step === 3) renderScript(); if (step === 4) renderBoard(); if (step === 5) renderImages(); window.scrollTo({ top: 0, behavior: "smooth" }); }
+  function go(step) { stopImgPoll(); $("picker").classList.add("hidden"); if (typeof closeModal === "function") { closeModal(); $("photoView").classList.add("hidden"); } show([STEP_IDS[step - 1]]); renderSteps(step); if (step === 2) fillIntake(); if (step === 3) renderScript(); if (step === 4) renderBoard(); if (step === 5) renderImages(); window.scrollTo({ top: 0, behavior: "smooth" }); }
   function setProject(p) { state.project = p; if (p) { try { history.replaceState(null, "", "#p=" + p.id); } catch (e) { /* ignore */ } } }
 
   // ── Setup ──
@@ -454,10 +460,11 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     ["pick", "ipick"].forEach(function (pre) {
       var el = $(pre + i); if (!el) return;
       var it = picked[i];
-      el.innerHTML = (it && it.url ? '<img class="sel" alt="Selected photo" src="' + esc(it.url) + '">' : "") +
+      el.innerHTML = (it && it.url ? '<img class="sel" alt="Selected photo" title="Click to view full size" data-view="' + i + '" src="' + esc(it.url) + '">' : "") +
         '<button class="btn ' + (it ? "ghost" : "gold") + '" type="button" data-scene="' + i + '">' + (it ? "Change photo" : (pre === "ipick" ? "Choose or upload my photo" : "Add optional photo")) + "</button>" +
         (it ? '<button class="link-btn" type="button" data-clear="' + i + '">Remove</button>' : "");
       el.querySelector("[data-scene]").addEventListener("click", function () { openPicker(i); });
+      var vw = el.querySelector("[data-view]"); if (vw) vw.addEventListener("click", function () { openPhotoView(i); });
       var c = el.querySelector("[data-clear]");
       if (c) c.addEventListener("click", async function () { await mapi("POST", "", { action: "clear", projectId: state.project.id, sceneIndex: i }); delete picked[i]; paintPick(i); if (pre === "ipick") { im.sig = ""; loadImages(); } });
     });
@@ -577,6 +584,19 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
   function repaint() { im.sig = ""; paintImages(); }
   function descFor(i, src) { var d = im.desc[i]; return d && KIND_OF[src] && d.kind === KIND_OF[src] ? d : null; }
 
+  function openPhotoView(i) {
+    var it = picked[i]; if (!it || !it.url) return;
+    $("photoViewImg").src = it.url;
+    $("photoViewFoot").innerHTML = '<button type="button" class="btn ghost" data-pv="close">Close</button><button type="button" class="btn ghost" data-pv="remove">Remove photo</button><button type="button" class="btn gold" data-pv="change">Change photo</button>';
+    $("photoView").setAttribute("data-scene", i); $("photoView").classList.remove("hidden");
+  }
+  function onPhotoViewClick(ev) {
+    var t = ev.target; if (!t) return;
+    var i = Number($("photoView").getAttribute("data-scene")), a = t.getAttribute && t.getAttribute("data-pv");
+    if (t.id === "photoView" || a === "close") return $("photoView").classList.add("hidden");
+    if (a === "change") { $("photoView").classList.add("hidden"); return openPicker(i); }
+    if (a === "remove") { $("photoView").classList.add("hidden"); var c = document.querySelector('#ipick' + i + " [data-clear], #pick" + i + " [data-clear]"); if (c) c.click(); }
+  }
   function slotOf(si, f) { return im.slots.filter(function (x) { return x.sceneIndex === si && x.format === f; })[0]; }
   function slotState(s, src) {
     var kind = KIND_OF[src], both = (state.project.formats || []).length > 1, L = s.latest, A = s.approved;
@@ -817,8 +837,9 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     $("backToBoardBtn").addEventListener("click", function () { go(4); });
     $("imageSlots").addEventListener("click", onImageClick);
     $("imgModal").addEventListener("click", onModalClick);
+    $("photoView").addEventListener("click", onPhotoViewClick);
     $("imgmNote").addEventListener("input", onModalInput);
-    document.addEventListener("keydown", function (e) { if (e.key === "Escape") { closeModal(); $("picker").classList.add("hidden"); } });
+    document.addEventListener("keydown", function (e) { if (e.key === "Escape") { closeModal(); $("photoView").classList.add("hidden"); $("picker").classList.add("hidden"); } });
     $("narration").addEventListener("input", refreshPreview);
     $("saveScriptBtn").addEventListener("click", function () { saveScript(false); });
     $("approveBtn").addEventListener("click", function () { saveScript(true); });

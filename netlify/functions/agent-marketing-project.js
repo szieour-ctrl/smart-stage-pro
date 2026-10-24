@@ -52,7 +52,7 @@ async function patch(id, userId, fields) {
 }
 
 function gateSummary(result) {
-  return { ok: result.ok, version: result.version, blocks: result.blocks, warnings: result.warnings, agentSuppliedClaims: result.agentSuppliedClaims };
+  return { ok: result.ok, version: result.version, blocks: result.blocks, warnings: result.warnings, agentSuppliedClaims: result.agentSuppliedClaims, sourcedFacts: result.sourcedFacts || [] };
 }
 
 exports.handler = async (event) => {

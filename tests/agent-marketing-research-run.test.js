@@ -127,6 +127,17 @@ test("run: prose instead of JSON, invented sources and a dead provider all fail 
   assert.match(dead.fields.error, /busy/);
 });
 
+test("run: when the provider rejects the key, the reason is kept with the failed session and the key never is", async () => {
+  const r = await run.runResearch({ row, apiKey: "pplx-SECRET123", now: NOW, env: ENV, sleepFn: noSleep, callFn: async () => ({ status: 401, json: { error: { message: "Invalid API key pplx-SECRET123 for Bearer pplx-SECRET123" } } }) });
+  assert.strictEqual(r.fields.status, "failed");
+  assert.strictEqual(r.fields.charged_at, null);
+  assert.match(r.fields.error, /not set up correctly/);
+  assert.match(r.fields.usage.providerError, /^401: Invalid API key/);
+  assert.ok(!/SECRET123|pplx-/.test(JSON.stringify(r.fields)));
+  const ok = await run.runResearch({ row, apiKey: "k", now: NOW, env: ENV, sleepFn: noSleep, callFn: async () => reply(five()) });
+  assert.strictEqual(ok.fields.usage.providerError, null);
+});
+
 test("run: events mode asks for events and accepts a verified upcoming set", async () => {
   const ev = (n) => ({ question: ["Is the harvest festival at the town square this weekend?", "When does the lantern walk start downtown?", "Where is the chili cook-off being held?", "What time is the jazz concert in the park?", "Does the holiday tree lighting need tickets?"][n - 1], why_it_matters: "Neighbors can plan around it.", trend_signals: [], local_intent: true, scope: "selected", event: { name: `Event ${n}`, date: "2026-10-31", end_date: null, time: "10am to 4pm", location: "Town Square, Roseville", organizer: "City of Roseville", status: "upcoming" }, sources: [{ title: "City page", url: url(n), published: null }] });
   let sent;

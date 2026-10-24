@@ -43,7 +43,9 @@ function buildUserMessage({ scene, kind, note }) {
   return JSON.stringify({
     image_kind: kind,
     scene_narration: clean(s.narrationExcerpt, 400),
-    planner_visual_brief: clean(s.visualBrief, 400),
+    // A re-used or brand-card scene's brief is an instruction about OTHER images ("reuse the street scene…"), so it is
+    // only passed along for scenes the planner meant to generate.
+    planner_visual_brief: (s.visualSource === "GPT_IMAGE_2_CONCEPT" || s.visualSource === "AGENT_SCENE") ? clean(s.visualBrief, 400) : null,
     agent_note: cleanNote(note) || null,
   }, null, 2);
 }

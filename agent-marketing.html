@@ -59,14 +59,14 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--gold-light);outl
 .scene dt{color:var(--muted);font-weight:600;}
 ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
 .pick{margin-top:12px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;}
-.pick img.sel{width:96px;height:64px;object-fit:cover;border-radius:4px;border:1px solid var(--border);}
+.pick img.sel{width:140px;height:94px;object-fit:cover;border-radius:4px;border:1px solid var(--border);cursor:pointer;}
 .picker{border:2px solid var(--gold-light);position:fixed;z-index:60;top:5vh;left:50%;transform:translateX(-50%);width:min(720px,92vw);max-height:88vh;overflow:auto;margin:0;box-shadow:0 0 0 100vmax rgba(26,23,20,0.55);}
 .picker.hidden{display:none;}
 .frame img,.frame.click{cursor:pointer;}
 .frame.busy{aspect-ratio:auto;min-height:96px;}
 .frame.empty{aspect-ratio:auto;min-height:96px;border:1px dashed var(--border);}
-#imgModal{position:fixed;inset:0;background:rgba(10,8,6,0.92);z-index:80;display:flex;align-items:center;justify-content:center;padding:20px;}
-#imgModal.hidden{display:none!important;}
+#imgModal,#photoView{position:fixed;inset:0;background:rgba(10,8,6,0.92);z-index:80;display:flex;align-items:center;justify-content:center;padding:20px;}
+#imgModal.hidden,#photoView.hidden{display:none!important;}
 .imgm-inner{background:#fff;border-radius:6px;overflow:hidden;max-width:860px;width:100%;max-height:92vh;display:flex;flex-direction:column;}
 .imgm-wrap{flex-shrink:0;display:flex;align-items:center;justify-content:center;background:#111;max-height:52vh;min-height:120px;color:#cfc7ba;font-size:0.85rem;overflow:hidden;}
 .imgm-wrap img{max-width:100%;max-height:52vh;object-fit:contain;display:block;}
@@ -213,6 +213,12 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
       <div class="msg" id="imagesMsg" role="status"></div>
     </section>
 
+    <div id="photoView" class="hidden" role="dialog" aria-modal="true" aria-label="Your photo">
+      <div class="imgm-inner">
+        <div class="imgm-wrap"><img id="photoViewImg" alt="Your photo" src=""></div>
+        <div class="imgm-foot" id="photoViewFoot"></div>
+      </div>
+    </div>
     <div id="imgModal" class="hidden" role="dialog" aria-modal="true" aria-labelledby="imgmTitle">
       <div class="imgm-inner">
         <div class="imgm-wrap" id="imgmWrap"></div>
@@ -290,7 +296,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     }).join("");
     Array.prototype.forEach.call($("steps").querySelectorAll(".step-pill.done"), function (b) { b.addEventListener("click", function () { go(Number(b.getAttribute("data-step"))); }); });
   }
-  function go(step) { stopImgPoll(); $("picker").classList.add("hidden"); if (typeof closeModal === "function") closeModal(); show([STEP_IDS[step - 1]]); renderSteps(step); if (step === 2) fillIntake(); if (step === 3) renderScript(); if (step === 4) renderBoard(); if (step === 5) renderImages(); window.scrollTo({ top: 0, behavior: "smooth" }); }
+  function go(step) { stopImgPoll(); $("picker").classList.add("hidden"); if (typeof closeModal === "function") { closeModal(); $("photoView").classList.add("hidden"); } show([STEP_IDS[step - 1]]); renderSteps(step); if (step === 2) fillIntake(); if (step === 3) renderScript(); if (step === 4) renderBoard(); if (step === 5) renderImages(); window.scrollTo({ top: 0, behavior: "smooth" }); }
   function setProject(p) { state.project = p; if (p) { try { history.replaceState(null, "", "#p=" + p.id); } catch (e) { /* ignore */ } } }
 
   // ── Setup ──
@@ -454,10 +460,11 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     ["pick", "ipick"].forEach(function (pre) {
       var el = $(pre + i); if (!el) return;
       var it = picked[i];
-      el.innerHTML = (it && it.url ? '<img class="sel" alt="Selected photo" src="' + esc(it.url) + '">' : "") +
+      el.innerHTML = (it && it.url ? '<img class="sel" alt="Selected photo" title="Click to view full size" data-view="' + i + '" src="' + esc(it.url) + '">' : "") +
         '<button class="btn ' + (it ? "ghost" : "gold") + '" type="button" data-scene="' + i + '">' + (it ? "Change photo" : (pre === "ipick" ? "Choose or upload my photo" : "Add optional photo")) + "</button>" +
         (it ? '<button class="link-btn" type="button" data-clear="' + i + '">Remove</button>' : "");
       el.querySelector("[data-scene]").addEventListener("click", function () { openPicker(i); });
+      var vw = el.querySelector("[data-view]"); if (vw) vw.addEventListener("click", function () { openPhotoView(i); });
       var c = el.querySelector("[data-clear]");
       if (c) c.addEventListener("click", async function () { await mapi("POST", "", { action: "clear", projectId: state.project.id, sceneIndex: i }); delete picked[i]; paintPick(i); if (pre === "ipick") { im.sig = ""; loadImages(); } });
     });
@@ -577,6 +584,19 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
   function repaint() { im.sig = ""; paintImages(); }
   function descFor(i, src) { var d = im.desc[i]; return d && KIND_OF[src] && d.kind === KIND_OF[src] ? d : null; }
 
+  function openPhotoView(i) {
+    var it = picked[i]; if (!it || !it.url) return;
+    $("photoViewImg").src = it.url;
+    $("photoViewFoot").innerHTML = '<button type="button" class="btn ghost" data-pv="close">Close</button><button type="button" class="btn ghost" data-pv="remove">Remove photo</button><button type="button" class="btn gold" data-pv="change">Change photo</button>';
+    $("photoView").setAttribute("data-scene", i); $("photoView").classList.remove("hidden");
+  }
+  function onPhotoViewClick(ev) {
+    var t = ev.target; if (!t) return;
+    var i = Number($("photoView").getAttribute("data-scene")), a = t.getAttribute && t.getAttribute("data-pv");
+    if (t.id === "photoView" || a === "close") return $("photoView").classList.add("hidden");
+    if (a === "change") { $("photoView").classList.add("hidden"); return openPicker(i); }
+    if (a === "remove") { $("photoView").classList.add("hidden"); var c = document.querySelector('#ipick' + i + " [data-clear], #pick" + i + " [data-clear]"); if (c) c.click(); }
+  }
   function slotOf(si, f) { return im.slots.filter(function (x) { return x.sceneIndex === si && x.format === f; })[0]; }
   function slotState(s, src) {
     var kind = KIND_OF[src], both = (state.project.formats || []).length > 1, L = s.latest, A = s.approved;
@@ -585,7 +605,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     var failed = L && L.state === "error" ? L : null;
     var portraitApproved = s.format === "16x9" && im.slots.some(function (x) { return x.sceneIndex === s.sceneIndex && x.format === "9x16" && x.approved; });
     var portraitOk = !(s.format === "16x9" && both) || portraitApproved;
-    var needDesc = s.plannedKind !== kind && !descFor(s.sceneIndex, src) && !portraitApproved;
+    var needDesc = false; // Create writes a description itself when the scene has no prompt of its own
     return { kind: kind, generating: generating, draft: draft, failed: failed, A: A, shown: draft || A, portraitOk: portraitOk, needDesc: needDesc,
       blocked: !portraitOk || (s.capReached && !generating) || needDesc, charged: s.nextCredits > 0 };
   }
@@ -612,12 +632,17 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
       if (st.failed && !st.draft) html += '<div class="smsg err">The last try did not finish' + (st.failed.error ? " (" + esc(st.failed.error) + ")" : "") + ". It was not counted or charged.</div>";
       if (!st.portraitOk) html += '<div class="smsg">Approve the 9:16 image first. This version is built from it so the two match.</div>';
       else if (s.capReached) html += '<div class="smsg err">This project has reached its limit of ' + im.cap + " generated images.</div>";
-      else if (st.needDesc && !st.shown) html += '<div class="smsg">This scene needs a short description first. Click “Add a note…” and use Elaborate with AI.</div>';
     }
     if (im.msgs[k]) html += '<div class="smsg ' + (im.msgs[k].kind || "") + '">' + esc(im.msgs[k].text) + "</div>";
     return html + "</div>";
   }
 
+  // Only scenes planned as generated images carry an image brief. A re-used or brand-card scene's brief is an
+  // instruction about other images, so it is replaced with a plain description of what Create will do.
+  function briefFor(sc) {
+    if (sc.visualSource === "GPT_IMAGE_2_CONCEPT" || sc.visualSource === "AGENT_SCENE") return sc.visualBrief || "";
+    return "A new image will be created for this scene from its narration. Add a note to steer it.";
+  }
   function sceneBlock(idx, slots) {
     var sc = sceneAt(idx), src = activeSrc(idx);
     var sorted = slots.slice().sort(function (a, b) { return a.format === "9x16" ? -1 : (b.format === "9x16" ? 1 : 0); });
@@ -625,7 +650,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
       '<div class="q" style="font-style:italic;color:#4a423a;font-size:0.88rem;margin:4px 0 2px">“' + esc(sc.narrationExcerpt) + "”</div>" +
       '<div class="tabs" role="group" aria-label="Image source for scene ' + (idx + 1) + '">' + ["own", "concept", "agent"].map(function (k) { return '<button type="button" class="tab' + (src === k ? " on" : "") + '" data-src="' + k + '" data-scene="' + idx + '">' + SRC_NAME[k] + "</button>"; }).join("") + "</div>";
     if (src === "own") h += '<div class="pick" id="ipick' + idx + '"></div><div class="hint">Your photo is used for this scene in every format. Only use photos you own or have permission to use.</div>';
-    else if (src === "concept" || src === "agent") h += '<div class="hint">' + esc(sc.visualBrief || "") + (src === "agent" ? " Created from your Marketing Profile photo in a generic setting." : " An illustration, not a real place.") + '</div><div class="slot-grid">' + sorted.map(function (s) { return slotView(s, src); }).join("") + "</div>";
+    else if (src === "concept" || src === "agent") h += '<div class="hint">' + esc(briefFor(sc)) + (src === "agent" ? " Created from your Marketing Profile photo in a generic setting." : " An illustration, not a real place.") + '</div><div class="slot-grid">' + sorted.map(function (s) { return slotView(s, src); }).join("") + "</div>";
     else h += '<div class="hint">Planned as ' + esc(PLANNED_NAME[sc.visualSource] || "a scene") + ". Pick a source above to replace it, or leave it as planned.</div>";
     return h + "</div>";
   }
@@ -664,7 +689,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     var s = slotOf(m.scene, m.format); if (!s) return closeModal();
     var src = activeSrc(m.scene), st = slotState(s, src), k = slotKey(s), sc = sceneAt(m.scene), d = descFor(m.scene, src), working = !!im.working[m.scene];
     $("imgmTitle").textContent = "Scene " + (m.scene + 1) + " · " + fmtName(s.format) + " · " + (src === "agent" ? "Image of you" : "Concept image");
-    $("imgmSub").textContent = (sc.visualBrief || "") + (st.shown ? "" : " (No image yet. Add an optional note, or create it from the plan as is.)");
+    $("imgmSub").textContent = briefFor(sc) + (st.shown ? "" : " (No image yet. Add an optional note, or just create it.)");
     var wrap = $("imgmWrap");
     var want = st.generating ? "g" : (st.shown && st.shown.url ? "i:" + st.shown.url : "n");
     if (wrap.getAttribute("data-w") !== want) {
@@ -680,6 +705,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     else if (st.generating) foot += '<span class="hint" style="margin:0 auto 0 8px">Creating… you can close this window.</span>';
     else {
       if (st.draft) foot += actBtn("reject", "Discard", "ghost", s, ' data-asset="' + esc(st.draft.id) + '"') + actBtn("accept", "Accept this image", "gold", s, ' data-asset="' + esc(st.draft.id) + '"');
+      if (!st.draft && st.A) foot += actBtn("reject", "Remove image", "ghost", s, ' data-asset="' + esc(st.A.id) + '"');
       var label = st.shown ? "Re-create image" : "Create image";
       label += st.charged ? " (" + plural(s.nextCredits) + ")" : (st.shown ? " (included)" : "");
       foot += actBtn("generate", label + " →", st.draft ? "ghost" : "gold", s, st.blocked ? " disabled" : "");
@@ -702,7 +728,16 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
   async function genSlot(sceneIndex, format, confirmCharge) {
     var k = sceneIndex + "_" + format, src = activeSrc(sceneIndex), kind = KIND_OF[src];
     if (!kind || im.busy[k]) return;
-    var d = descFor(sceneIndex, src);
+    var d = descFor(sceneIndex, src), sl = slotOf(sceneIndex, format);
+    if (!d && !(im.note[sceneIndex] || "").trim() && sl && sl.plannedKind !== kind && !slotState(sl, src).portraitApproved) {
+      // Scene has no image prompt of its own (re-used or brand-card scene): write one from the narration, scrubbed, then create.
+      im.busy[k] = true; setSlotMsg(k, "Writing the image description…"); repaint();
+      var er = null; try { er = await api("POST", "", { action: "elaborate", projectId: state.project.id, sceneIndex: sceneIndex, kind: kind, note: "" }, IMG); } catch (e) { er = { ok: false, json: { error: e.message } }; }
+      im.busy[k] = false;
+      if (!er.ok) { setSlotMsg(k, er.json.error || "Could not write the image description. Please try again.", "err"); return repaint(); }
+      d = im.desc[sceneIndex] = { kind: kind, description: er.json.description, removed: er.json.removed || [], warnings: er.json.warnings || [], note: "" };
+      setSlotMsg(k, "");
+    }
     if (!d && (im.note[sceneIndex] || "").trim()) { delete im.confirming[k]; setSlotMsg("n" + sceneIndex, "Click Elaborate with AI first, so your note is checked before anything is created.", "err"); return repaint(); }
     im.busy[k] = true; setSlotMsg(k, ""); delete im.confirming[k];
     try {
@@ -802,8 +837,9 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     $("backToBoardBtn").addEventListener("click", function () { go(4); });
     $("imageSlots").addEventListener("click", onImageClick);
     $("imgModal").addEventListener("click", onModalClick);
+    $("photoView").addEventListener("click", onPhotoViewClick);
     $("imgmNote").addEventListener("input", onModalInput);
-    document.addEventListener("keydown", function (e) { if (e.key === "Escape") { closeModal(); $("picker").classList.add("hidden"); } });
+    document.addEventListener("keydown", function (e) { if (e.key === "Escape") { closeModal(); $("photoView").classList.add("hidden"); $("picker").classList.add("hidden"); } });
     $("narration").addEventListener("input", refreshPreview);
     $("saveScriptBtn").addEventListener("click", function () { saveScript(false); });
     $("approveBtn").addEventListener("click", function () { saveScript(true); });

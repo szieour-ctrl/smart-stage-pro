@@ -205,6 +205,7 @@ input:focus,select:focus{outline:2px solid var(--gold-light);outline-offset:1px;
   function renderCost(r) {
     var u = r.usage;
     if (!u) { $("resCost").innerHTML = '<div class="hint" style="margin-top:12px">Cost is hidden. To see it here while testing, set <b>AGENT_MARKETING_RESEARCH_DEBUG</b> to <b>true</b> in Netlify and redeploy.</div>'; return; }
+    if (u.providerError) { $("resCost").innerHTML = '<div class="cost over"><div class="eyebrow">Why it failed</div><div><b>Perplexity said:</b> ' + esc(u.providerError) + '</div><div class="hint">Model ' + esc(r.model || "?") + " · attempts " + esc(u.attempts) + ". No session was used and nothing was charged.</div></div>"; return; }
     var cls = u.withinTarget === true ? "under" : u.withinTarget === false ? "over" : "";
     $("resCost").innerHTML = '<div class="cost ' + cls + '"><div class="eyebrow">What this run cost</div><div class="big">' + money(u.costUsd) + "</div>" +
       "<div>" + (u.costEstimated ? "Estimated from tokens (Perplexity did not report a cost). " : "Reported by Perplexity. ") +

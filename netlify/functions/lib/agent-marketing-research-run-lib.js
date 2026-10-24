@@ -58,6 +58,14 @@ function callPerplexity(payload, apiKey) {
   });
 }
 
+// A short, safe description of what the provider said ("401: Invalid API key"), kept with the failed session so the cause can be seen in
+// the test page while debugging. Anything that looks like a key, and the key itself, is removed.
+function providerDetail(status, json, apiKey) {
+  let t = `${status}: ${errText(json) || "no message"}`;
+  if (apiKey) t = t.split(String(apiKey)).join("[key]");
+  return t.replace(/pplx-[A-Za-z0-9_-]+/g, "[key]").replace(/Bearer\s+\S+/gi, "Bearer [key]").slice(0, 240);
+}
+
 const defaultSleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const errText = (j) => String((j && (j.error && (j.error.message || j.error) || j.message)) || "").slice(0, 200);
 
@@ -88,10 +96,12 @@ async function askProvider({ payload, apiKey, callFn, sleepFn, retries }) {
       continue;
     }
     if ((status === 429 || status >= 500) && attempt < retries) { await sleep(delays[attempt] || 8000); continue; }
-    console.error(`[agent-marketing-research] provider answered ${status}: ${errText(res && res.json)}`);
-    if (status === 401 || status === 403) throw new Error("Research is not set up correctly yet.");
-    if (status === 429 || status >= 500) throw new Error("Research is busy right now. Please try again.");
-    throw new Error("The research request was not accepted.");
+    const detail = providerDetail(status, res && res.json, apiKey);
+    console.error(`[agent-marketing-research] provider answered ${detail}`);
+    const fail = (msg) => { const e = new Error(msg); e.providerDetail = detail; return e; };
+    if (status === 401 || status === 403) throw fail("Research is not set up correctly yet.");
+    if (status === 429 || status >= 500) throw fail("Research is busy right now. Please try again.");
+    throw fail("The research request was not accepted.");
   }
 }
 
@@ -151,7 +161,7 @@ async function runResearch({ row, apiKey, callFn, sleepFn, now, env }) {
   const { request, uploadContext } = requestFromRow(row);
   let payload = rl.buildResearchPayload({ request, today, uploadContext, env: e });
   let usage = { promptTokens: null, completionTokens: null, citationTokens: null, reasoningTokens: null, searchQueries: null, costUsd: null };
-  let modelUsed = payload.model, grounded = null, attempts = 0, problems = [], validation = null, error = null;
+  let modelUsed = payload.model, grounded = null, attempts = 0, problems = [], validation = null, error = null, providerError = null;
 
   try {
     while (attempts < maxAttempts) {
@@ -176,12 +186,13 @@ async function runResearch({ row, apiKey, callFn, sleepFn, now, env }) {
     }
   } catch (err) {
     error = err.message;
+    providerError = err.providerDetail || null;
   }
 
   // Cost: the provider's own figure when it sent one, otherwise an estimate from tokens (flagged as an estimate).
   const estimated = usage.costUsd == null ? estimateCostUsd(modelUsed, usage) : null;
   const costUsd = usage.costUsd != null ? usage.costUsd : estimated;
-  const finalUsage = { ...usage, costUsd, costEstimated: usage.costUsd == null && estimated != null, targetUsd: cfg.costTargetUsd, withinTarget: costUsd == null ? null : costUsd <= cfg.costTargetUsd, attempts, grounded };
+  const finalUsage = { ...usage, costUsd, costEstimated: usage.costUsd == null && estimated != null, targetUsd: cfg.costTargetUsd, withinTarget: costUsd == null ? null : costUsd <= cfg.costTargetUsd, attempts, grounded, providerError };
   const fields = rl.outcomeFields({ validation: error ? null : validation, usage: finalUsage, model: modelUsed, today, now, error });
   return { fields, problems, attempts };
 }

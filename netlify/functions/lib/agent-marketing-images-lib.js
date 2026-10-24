@@ -87,12 +87,17 @@ const NO_REAL_THINGS = "No text, letters, numbers, signs, house numbers, street 
 // The prompt actually sent. `kind` is "concept" or "agent_scene". Always ONE wide 16:9 frame: the vertical 9:16 Reel version is a
 // window cropped from the middle of it, so the subject must sit in the central third and the sides must be plain scenery.
 const WIDE_RULES = "Wide horizontal 16:9 landscape composition. IMPORTANT: a tall 9:16 vertical window will also be cropped from this same image, so place the main subject and every key detail inside the central third of the width; the left and right thirds should be simple, calm scenery that still reads well as a wide establishing view. Keep the lower third calm and uncluttered (captions go there).";
+const AGENT_RULES = "Wide horizontal 16:9 landscape composition shot like a real editorial photo, NOT a portrait or headshot. A tall 9:16 vertical window will also be cropped from this same image, so place the person about one third of the way in from the left edge, standing or seated naturally and shown full length or at least to the knees, filling only about 55 to 65 percent of the frame height. Show plenty of the surrounding environment on both sides and above them. Keep the lower third calm and uncluttered (captions go there).";
+// The vertical 9:16 window is 81/256 of the wide image's width. Its centre (0..1) is saved per image; the agent can slide it.
+const CROP_WIDTH = 81 / 256;
+function clampCrop(x) { const n = Number(x); if (!isFinite(n)) return 0.5; return Math.min(1 - CROP_WIDTH / 2, Math.max(CROP_WIDTH / 2, Math.round(n * 1000) / 1000)); }
+function defaultCropX(kind) { return kind === "agent_scene" ? 0.34 : 0.5; }
 function buildPrompt({ kind, scenePrompt }) {
   const base = String(scenePrompt || "").replace(/\s+/g, " ").trim().slice(0, 900);
   if (kind === "agent_scene") {
     return [
       "Create a photorealistic editorial photograph showing the real person in the reference photo in this generic setting: " + base,
-      WIDE_RULES + " Show the person standing or seated in the center of the frame, head to at least mid-thigh, filling a good part of the frame height.",
+      AGENT_RULES,
       "The person must look exactly like the reference photo: same face, hair, beard, age and build, natural skin texture, natural relaxed expression. Keep their clothing simple and similar to the reference. The person is the ONLY person in the image.",
       "Natural light, California residential aesthetic, believable proportions and hands.",
       NO_REAL_THINGS,
@@ -112,4 +117,4 @@ function pickReferenceKey(profileRow) {
   return r.fullbody_key || r.headshot_key || null;
 }
 
-module.exports = { WIDE, DEFAULT_SIZE, validWideSize, SIZES, IMAGE_SOURCES, STALE_GENERATING_MS, settings, imageScenes, allScenes, plannedKind, slotAssets, quote, buildPrompt, pickReferenceKey, counts, fmtOf, stateOf };
+module.exports = { CROP_WIDTH, clampCrop, defaultCropX, WIDE, DEFAULT_SIZE, validWideSize, SIZES, IMAGE_SOURCES, STALE_GENERATING_MS, settings, imageScenes, allScenes, plannedKind, slotAssets, quote, buildPrompt, pickReferenceKey, counts, fmtOf, stateOf };

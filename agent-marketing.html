@@ -74,7 +74,8 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
 .imgm-title{font-family:'Cormorant Garamond',serif;font-size:1.2rem;margin-bottom:4px;}
 .imgm-foot{display:flex;gap:8px;justify-content:flex-end;align-items:center;flex-wrap:wrap;padding:12px 24px;border-top:1px solid var(--border);background:var(--cream);flex-shrink:0;}
 .cropwrap{position:relative;display:inline-block;line-height:0;overflow:hidden;max-width:100%;}
-.cropbox{position:absolute;top:0;bottom:0;left:34.2%;width:31.6%;border:2px dashed rgba(255,255,255,0.95);box-shadow:0 0 0 100vmax rgba(0,0,0,0.38);pointer-events:none;}
+.cropbox{position:absolute;top:0;bottom:0;left:34.2%;width:31.64%;border:2px dashed rgba(255,255,255,0.95);box-shadow:0 0 0 100vmax rgba(0,0,0,0.38);cursor:ew-resize;touch-action:none;}
+.cropbox::after{content:"\2194  drag";position:absolute;left:50%;top:8px;transform:translateX(-50%);background:rgba(0,0,0,0.6);color:#fff;font:600 0.72rem sans-serif;padding:2px 8px;border-radius:10px;line-height:1.4;white-space:nowrap;}
 .elab-row{display:flex;align-items:center;gap:10px;margin:10px 0;flex-wrap:wrap;}
 .tabs{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0;}
 .tab{border:1px solid var(--border);background:#fff;border-radius:14px;padding:6px 12px;font:600 0.75rem 'DM Sans',sans-serif;cursor:pointer;}
@@ -236,6 +237,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
           <div class="hint" id="imgmCount" style="text-align:right">0 / 300</div>
           <div id="imgmUsed"></div>
           <div id="imgmDesc"></div>
+          <div id="imgmEditWrap" class="hidden"><label class="lbl" for="imgmEdit" style="margin-top:10px;display:block"><b>Image description</b> <span class="hint" style="display:inline">(you can edit this before anything is created)</span></label><textarea id="imgmEdit" maxlength="600" style="min-height:110px"></textarea><div class="hint" id="imgmEditCount" style="text-align:right"></div></div>
           <div class="smsg" id="imgmMsg"></div>
         </div>
         <div class="imgm-foot" id="imgmFoot"></div>
@@ -539,7 +541,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
   }
 
   // ── Images: for every scene the agent picks a source ──
-  var im = { slots: [], total: 0, cap: 0, per: 1, charging: true, sig: "", urls: {}, src: {}, note: {}, desc: {}, working: {}, confirming: {}, msgs: {}, kept: {}, busy: {} };
+  var im = { slots: [], total: 0, cap: 0, per: 1, charging: true, sig: "", urls: {}, src: {}, note: {}, desc: {}, edit: {}, crops: {}, working: {}, confirming: {}, msgs: {}, kept: {}, busy: {} };
   var SRC_NAME = { own: "Use my own photo instead", concept: "Generate concept image", agent: "Generate image of you" };
   var KIND_OF = { concept: "concept", agent: "agent_scene" };
   var PLANNED_NAME = { GPT_IMAGE_2_CONCEPT: "a concept image", AGENT_SCENE: "an image of you", CONCEPT_REUSE: "a re-framed copy of an earlier image", AGENT_PROFILE: "your profile photo", BRAND_CARD: "a brand card", AUTHENTIC_AGENT_ASSET: "an optional photo of yours" };
@@ -592,6 +594,12 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     } catch (e) { /* a poll tick can fail quietly; the next one retries */ }
   }
   function repaint() { im.sig = ""; paintImages(); }
+  function editText(i, src) {
+    var e = im.edit[i], sc = sceneAt(i), kind = KIND_OF[src];
+    if (e && e.kind === kind) return e.text;
+    var d = descFor(i, src); if (d) return d.description;
+    return (kind && sc && ((kind === "concept" && sc.visualSource === "GPT_IMAGE_2_CONCEPT") || (kind === "agent_scene" && sc.visualSource === "AGENT_SCENE"))) ? (sc.visualBrief || "") : "";
+  }
   function descFor(i, src) { var d = im.desc[i]; return d && KIND_OF[src] && d.kind === KIND_OF[src] ? d : null; }
 
   function openPhotoView(i) {
@@ -706,8 +714,8 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     if (wrap.getAttribute("data-w") !== want) {
       wrap.setAttribute("data-w", want);
       var vertical = (state.project.formats || []).indexOf("9x16") >= 0;
-      wrap.innerHTML = st.generating ? '<span><span class="spinner"></span>Creating your image…</span>' : (st.shown && st.shown.url ? '<span class="cropwrap"><img alt="Generated image" src="' + esc(st.shown.url) + '">' + (vertical ? '<span class="cropbox"></span>' : "") + "</span>" : "<span>No image yet</span>");
-      $("imgmCrop").textContent = !st.generating && st.shown && st.shown.url && vertical ? "Dashed box: the part used for the vertical 9:16 Reel. It is centered for now and will be fine-tuned to the best part of the image when your Reel is made." : "";
+      wrap.innerHTML = st.generating ? '<span><span class="spinner"></span>Creating your image…</span>' : (st.shown && st.shown.url ? '<span class="cropwrap"><img alt="Generated image" src="' + esc(st.shown.url) + '">' + (vertical ? '<span class="cropbox" id="cropBox" style="left:' + ((cropOf(st.shown) - CROPW / 2) * 100).toFixed(2) + '%"></span>' : "") + "</span>" : "<span>No image yet</span>");
+      $("imgmCrop").textContent = !st.generating && st.shown && st.shown.url && vertical ? "Dashed box: the part used for the vertical 9:16 Reel. Drag it left or right to choose what the vertical version shows. The wide 16:9 version always shows the whole image." : "";
     }
     var v = st.shown, used = "";
     if (v && (v.description || v.note)) {
@@ -718,7 +726,10 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     }
     $("imgmUsed").innerHTML = used;
     $("imgmElab").disabled = working; $("imgmElab").setAttribute("data-scene", m.scene); $("imgmElab").innerHTML = working ? "Elaborating…" : "&#10024; Elaborate with AI";
-    $("imgmDesc").innerHTML = d ? '<div class="confirm" style="background:#eaf3ee">What we will create: <i>' + esc(d.description) + "</i>" + ((d.removed || []).length ? "<br><b>Left out:</b> " + d.removed.map(esc).join(" ") : "") + ((d.warnings || []).length ? "<br><b>Please check:</b> " + d.warnings.map(esc).join(" ") : "") + "</div>" : "";
+    var ek = m.scene + ":" + src + ":" + (d ? d.description.length : 0), ew = $("imgmEditWrap");
+    ew.classList.toggle("hidden", !KIND_OF[src] || st.generating);
+    if (ew.getAttribute("data-k") !== ek && document.activeElement !== $("imgmEdit")) { ew.setAttribute("data-k", ek); $("imgmEdit").value = editText(m.scene, src); $("imgmEditCount").textContent = $("imgmEdit").value.length + " / 600"; }
+    $("imgmDesc").innerHTML = d ? '<div class="confirm" style="background:#eaf3ee">Checked and cleaned up by AI.' + ((d.removed || []).length ? "<br><b>Left out:</b> " + d.removed.map(esc).join(" ") : "") + ((d.warnings || []).length ? "<br><b>Please check:</b> " + d.warnings.map(esc).join(" ") : "") + "</div>" : "";
     var msg = (im.msgs["n" + m.scene] || im.msgs[k]);
     $("imgmMsg").className = "smsg " + (msg && msg.kind || ""); $("imgmMsg").textContent = msg ? msg.text : (st.failed && !st.draft ? "The last try did not finish. It was not counted or charged." : "");
     var foot = '<button type="button" class="btn ghost" data-close="1">Close</button>';
@@ -741,6 +752,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     im.working[idx] = true; setSlotMsg("n" + idx, ""); repaint();
     try {
       var r = await api("POST", "", { action: "elaborate", projectId: state.project.id, sceneIndex: idx, kind: kind, note: note }, IMG);
+      if (r.ok) delete im.edit[idx];
       if (r.ok) im.desc[idx] = { kind: kind, description: r.json.description, removed: r.json.removed || [], warnings: r.json.warnings || [], note: note };
       else setSlotMsg("n" + idx, r.json.error || "Could not write the description. Please try again.", "err");
     } catch (e) { setSlotMsg("n" + idx, e.message, "err"); }
@@ -754,17 +766,19 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     // The spinner shows the moment the button is clicked, before anything is sent.
     im.busy[k] = true; delete im.confirming[k]; setSlotMsg(k, "Sending…"); repaint();
     try {
-      if (!d && !(im.note[sceneIndex] || "").trim() && sl && sl.plannedKind !== kind && !slotState(sl, src).portraitApproved) {
+      var et = (im.edit[sceneIndex] && im.edit[sceneIndex].kind === kind) ? String(im.edit[sceneIndex].text || "").trim() : "";
+      if (!d && !et && !(im.note[sceneIndex] || "").trim() && sl && sl.plannedKind !== kind && !slotState(sl, src).portraitApproved) {
         // Scene has no image prompt of its own (re-used or brand-card scene): write one from the narration, scrubbed, then create.
         setSlotMsg(k, "Writing the image description…"); repaint();
         var er = await api("POST", "", { action: "elaborate", projectId: state.project.id, sceneIndex: sceneIndex, kind: kind, note: "" }, IMG);
         if (!er.ok) { setSlotMsg(k, er.json.error || "Could not write the image description (error " + er.status + "). Please try again.", "err"); return; }
         d = im.desc[sceneIndex] = { kind: kind, description: er.json.description, removed: er.json.removed || [], warnings: er.json.warnings || [], note: "" };
       }
-      if (!d && (im.note[sceneIndex] || "").trim()) { setSlotMsg("n" + sceneIndex, "Click Elaborate with AI first, so your note is checked before anything is created.", "err"); setSlotMsg(k, ""); return; }
+      if (!d && !et && (im.note[sceneIndex] || "").trim()) { setSlotMsg("n" + sceneIndex, "Click Elaborate with AI first, so your note is checked before anything is created.", "err"); setSlotMsg(k, ""); return; }
       setSlotMsg(k, "Starting your image…"); repaint();
       var body = { action: "generate", projectId: state.project.id, sceneIndex: sceneIndex, format: format, kind: kind, confirmCharge: confirmCharge === true };
       if (d) { body.description = d.description; body.note = d.note; }
+      if (et) { body.description = et; body.note = d ? d.note : (im.note[sceneIndex] || "").trim(); }
       var r = await api("POST", "", body, IMG);
       var code = r.json && r.json.code;
       setSlotMsg(k, "");
@@ -842,6 +856,26 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     var b = t.closest("button[data-act]");
     if (b && !b.disabled) handleAct(b);
   }
+  var CROPW = 81 / 256;
+  function cropOf(v) { var x = v && (im.crops[v.id] != null ? im.crops[v.id] : v.cropX); return typeof x === "number" ? x : 0.5; }
+  function startCropDrag(e) {
+    var box = $("cropBox"), m = im.modal; if (!box || !m || e.target !== box) return;
+    var wrap = box.parentNode, st = slotState(slotOf(m.scene, m.format), activeSrc(m.scene)), v = st.shown; if (!v) return;
+    e.preventDefault(); try { box.setPointerCapture(e.pointerId); } catch (x) {}
+    var rect = wrap.getBoundingClientRect(), startX = e.clientX, startC = cropOf(v), cur = startC;
+    function move(ev) { cur = Math.min(1 - CROPW / 2, Math.max(CROPW / 2, startC + (ev.clientX - startX) / rect.width)); box.style.left = ((cur - CROPW / 2) * 100).toFixed(2) + "%"; }
+    async function up() {
+      box.removeEventListener("pointermove", move); box.removeEventListener("pointerup", up); box.removeEventListener("pointercancel", up);
+      im.crops[v.id] = cur;
+      try { await api("POST", "", { action: "crop", projectId: state.project.id, assetId: v.id, cropX: cur }, IMG); } catch (x) {}
+    }
+    box.addEventListener("pointermove", move); box.addEventListener("pointerup", up); box.addEventListener("pointercancel", up);
+  }
+  function onEditInput() {
+    var m = im.modal; if (!m) return;
+    var src = activeSrc(m.scene), v = $("imgmEdit").value;
+    im.edit[m.scene] = { kind: KIND_OF[src], text: v }; $("imgmEditCount").textContent = v.length + " / 600";
+  }
   function onModalInput() {
     var m = im.modal; if (!m) return;
     im.note[m.scene] = $("imgmNote").value; $("imgmCount").textContent = $("imgmNote").value.length + " / 300";
@@ -885,6 +919,8 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     $("imgModal").addEventListener("click", onModalClick);
     $("photoView").addEventListener("click", onPhotoViewClick);
     $("imgmNote").addEventListener("input", onModalInput);
+    $("imgmEdit").addEventListener("input", onEditInput);
+    $("imgmWrap").addEventListener("pointerdown", startCropDrag);
     document.addEventListener("keydown", function (e) { if (e.key === "Escape") { closeModal(); $("photoView").classList.add("hidden"); $("picker").classList.add("hidden"); } });
     $("narration").addEventListener("input", refreshPreview);
     $("saveScriptBtn").addEventListener("click", function () { saveScript(false); });

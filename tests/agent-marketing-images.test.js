@@ -178,6 +178,12 @@ test("generate on a scene the planner gave no image: needs a description, checks
   const a = db.agent_marketing_assets.at(-1);
   assert.strictEqual(a.generation.kind, "concept"); assert.strictEqual(a.generation.note, "mature trees"); assert.strictEqual(a.generation.elaborated, true);
   assert.match(a.generation.prompt, /mature trees/); assert.match(a.generation.prompt, /No people at all/);
+  // The page can show what an image was created from: the description, the agent's note and the full prompt.
+  a.generation.state = "done"; a.asset_key = "k/done.png";
+  const lst = await call("GET", null, { projectId: P1 });
+  const lat = lst.json.slots.find((x) => x.sceneIndex === 2 && x.format === "9x16").latest;
+  assert.strictEqual(lat.description, "A calm street lined with mature trees in soft light."); assert.strictEqual(lat.note, "mature trees"); assert.match(lat.fullPrompt, /mature trees/);
+  a.generation.state = "generating"; a.asset_key = null;
   const before = mark();
   const tampered = await call("POST", { action: "generate", projectId: P1, sceneIndex: 2, format: "16x9", kind: "concept", description: "A yard sign that says Just Listed with an open house banner" });
   assert.strictEqual(tampered.status, 422); assert.strictEqual(tampered.json.code, "description_blocked"); assert.strictEqual(mark(), before);

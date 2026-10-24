@@ -227,6 +227,8 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
           <div class="hint" id="imgmSub"></div>
           <div class="elab-row"><button type="button" class="btn sm ghost" id="imgmElab" data-act="elaborate">&#10024; Elaborate with AI</button><span class="hint">AI writing aid. It rewrites your note into a safe description and checks it before anything is created.</span></div>
           <textarea id="imgmNote" maxlength="300" style="min-height:90px" placeholder='Optional, e.g. "mature trees, soft evening light"'></textarea>
+          <div class="hint" id="imgmCount" style="text-align:right">0 / 300</div>
+          <div id="imgmUsed"></div>
           <div id="imgmDesc"></div>
           <div class="smsg" id="imgmMsg"></div>
         </div>
@@ -563,6 +565,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
   }
   async function renderImages() {
     say("imagesMsg", "");
+    im.sig = "";
     $("imageSlots").innerHTML = '<span class="spinner"></span>Loading your images…';
     try { await loadSelected(); } catch (e) { /* photos are optional; keep going */ }
     await loadImages();
@@ -574,7 +577,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
       im.slots = r.json.slots || []; im.total = r.json.projectTotal || 0; im.cap = r.json.projectCap || 0; im.per = r.json.creditsPerExtra || 1; im.charging = r.json.charging !== false;
       // Every GET returns freshly signed image links. Keep the first link seen per image so the browser does not
       // re-download (and flash) a picture that has not changed, and skip repainting when nothing visible changed.
-      var view = function (v) { if (v && v.id && v.url) { if (!im.urls[v.id]) im.urls[v.id] = v.url; v.url = im.urls[v.id]; } return v; };
+      var view = function (v) { if (v && v.id && v.url) { var c = im.urls[v.id]; if (!c || Date.now() - c.at > 40 * 60 * 1000) c = im.urls[v.id] = { url: v.url, at: Date.now() }; v.url = c.url; } return v; };
       im.slots.forEach(function (s) { view(s.latest); view(s.approved); });
       var sig = JSON.stringify([im.total, im.cap, im.charging, Object.keys(im.confirming), Object.keys(im.msgs).map(function (k) { return k + im.msgs[k].text; }), Object.keys(im.kept), Object.keys(im.working), Object.keys(im.desc).map(function (k) { return k + im.desc[k].description; }), im.src, Object.keys(picked), im.slots.map(function (s) { return [s.sceneIndex, s.format, s.latest && [s.latest.id, s.latest.state, s.latest.status, s.latest.error, s.latest.kind], s.approved && s.approved.id, s.used, s.included, s.nextCredits, s.capReached]; })]);
       if (sig !== im.sig) { im.sig = sig; paintImages(); }
@@ -682,7 +685,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     var s = slotOf(si, f); if (!s) return;
     im.modal = { scene: si, format: f };
     var src = activeSrc(si);
-    $("imgmNote").value = im.note[si] || "";
+    $("imgmNote").value = im.note[si] || ""; $("imgmCount").textContent = $("imgmNote").value.length + " / 300";
     $("imgModal").classList.remove("hidden");
     paintModal();
   }
@@ -699,6 +702,14 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
       wrap.setAttribute("data-w", want);
       wrap.innerHTML = st.generating ? '<span><span class="spinner"></span>Creating your image…</span>' : (st.shown && st.shown.url ? '<img alt="Generated image" src="' + esc(st.shown.url) + '">' : "<span>No image yet</span>");
     }
+    var v = st.shown, used = "";
+    if (v && (v.description || v.note)) {
+      used = '<div class="confirm" style="background:#f3efe8"><b>What this image was created from</b>' +
+        (v.description ? "<br><i>" + esc(v.description) + "</i>" : "") +
+        (v.note ? "<br><b>Your note:</b> " + esc(v.note) : "") +
+        (v.fullPrompt ? '<details style="margin-top:6px"><summary style="cursor:pointer">Show the full prompt sent to the image model</summary><div style="white-space:pre-wrap;font-size:0.78rem;margin-top:6px">' + esc(v.fullPrompt) + "</div></details>" : "") + "</div>";
+    }
+    $("imgmUsed").innerHTML = used;
     $("imgmElab").disabled = working; $("imgmElab").setAttribute("data-scene", m.scene); $("imgmElab").innerHTML = working ? "Elaborating…" : "&#10024; Elaborate with AI";
     $("imgmDesc").innerHTML = d ? '<div class="confirm" style="background:#eaf3ee">What we will create: <i>' + esc(d.description) + "</i>" + ((d.removed || []).length ? "<br><b>Left out:</b> " + d.removed.map(esc).join(" ") : "") + ((d.warnings || []).length ? "<br><b>Please check:</b> " + d.warnings.map(esc).join(" ") : "") + "</div>" : "";
     var msg = (im.msgs["n" + m.scene] || im.msgs[k]);
@@ -768,9 +779,11 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
       var r = await api("POST", "", { action: act, projectId: state.project.id, assetId: assetId }, IMG);
       if (!r.ok) setSlotMsg(k, r.json.error || "That did not work. Please try again.", "err");
       else if (act === "keep") { im.kept[assetId] = true; setSlotMsg(k, "Saved to My Marketing Photos.", "ok"); }
+      else if (act === "reject") closeModal();
       else if (act === "accept") {
         var si = Number(String(k).split("_")[0]);
         delete picked[si]; // accepting a generated image retires an own photo for that scene
+        closeModal();
         if (state.project.status === "narrative_approved") { state.project.status = "images"; renderSteps(5); }
       }
     } catch (e) { setSlotMsg(k, e.message, "err"); }
@@ -824,7 +837,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
   }
   function onModalInput() {
     var m = im.modal; if (!m) return;
-    im.note[m.scene] = $("imgmNote").value;
+    im.note[m.scene] = $("imgmNote").value; $("imgmCount").textContent = $("imgmNote").value.length + " / 300";
     // Editing the note makes the elaborated description stale: it must be elaborated again.
     if (im.desc[m.scene] && im.desc[m.scene].note !== $("imgmNote").value.trim()) { delete im.desc[m.scene]; im.sig = ""; paintModal(); }
   }

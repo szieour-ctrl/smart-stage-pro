@@ -5,7 +5,7 @@
 //   GET  ?schema=1                          → intake schema for the page (no project needed)
 //   GET  ?id=<uuid>                         → one of the caller's projects
 //   GET                                     → the caller's latest projects
-//   POST { action: "create", template?, durationSec?, formats?, voice? }
+//   POST { action: "create", template?, durationSec?, formats?, voice?, music? }
 //   POST { action: "save_intake", id, intake }          → validates + runs the content gate
 //   POST { action: "save_narrative", id, narrative }    → the agent's own edit of the script (Claude's plan is saved by the planner)
 //   POST { action: "plan", id }                         → starts the ONE Claude planning call (background); poll GET ?id= until
@@ -24,12 +24,12 @@ const mediaLib = require("./lib/agent-marketing-media-lib");
 
 const headers = { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json", "Cache-Control": "no-store" };
 const reply = (statusCode, obj) => ({ statusCode, headers, body: JSON.stringify(obj) });
-const PUBLIC_COLS = "id,template,angle,formats,duration_sec,voice,intake,narrative,narrative_approved_at,storyboard,status,gate_version,gate_result,created_at,updated_at";
+const PUBLIC_COLS = "id,template,angle,formats,duration_sec,voice,music,intake,narrative,narrative_approved_at,storyboard,status,gate_version,gate_result,created_at,updated_at";
 
 function forClient(row) {
   if (!row) return null;
   return {
-    id: row.id, template: row.template, angle: row.angle, formats: row.formats, durationSec: row.duration_sec, voice: row.voice,
+    id: row.id, template: row.template, angle: row.angle, formats: row.formats, durationSec: row.duration_sec, voice: row.voice, music: row.music || "default",
     intake: row.intake || {}, narrative: row.narrative || null, narrativeApprovedAt: row.narrative_approved_at || null,
     storyboard: row.storyboard || null, status: row.status, gate: row.gate_result || null,
     createdAt: row.created_at, updatedAt: row.updated_at,
@@ -69,7 +69,7 @@ exports.handler = async (event) => {
         return reply(200, {
           templates: gate.ENABLED_TEMPLATES.map((t) => ({ key: t, ...intakeLib.schemaFor(t) })),
           audiences: intakeLib.AUDIENCES, actions: intakeLib.ACTIONS, limits: intakeLib.LIMITS,
-          durations: am.DURATIONS, formats: am.FORMATS, voices: am.VOICES, wordTargets: am.WORD_TARGETS,
+          durations: am.DURATIONS, formats: am.FORMATS, voices: am.VOICES, music: am.MUSIC, wordTargets: am.WORD_TARGETS,
           attestation: { version: gate.ATTESTATION_VERSION, text: gate.ATTESTATION_TEXT },
           uploadAttestation: { version: mediaLib.UPLOAD_ATTESTATION_VERSION, text: mediaLib.UPLOAD_ATTESTATION_TEXT },
         });

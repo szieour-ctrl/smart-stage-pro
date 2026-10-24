@@ -16,11 +16,14 @@ test("feature switch: off by default, on only with the flag, optionally limited 
 
 test("create: defaults, validation and the not-yet-available cases", () => {
   const ok = am.validateCreate({});
-  assert.deepStrictEqual(ok.row, { template: "local_market_insider", duration_sec: 45, formats: ["9x16", "16x9"], voice: "ssp_male" });
+  assert.deepStrictEqual(ok.row, { template: "local_market_insider", duration_sec: 45, formats: ["9x16", "16x9"], voice: "ssp_male", music: "default" });
   assert.deepStrictEqual(am.validateCreate({ formats: "9x16", durationSec: 30, voice: "ssp_female" }).row.formats, ["9x16"]);
   assert.ok(am.validateCreate({ durationSec: 20 }).error);
   assert.ok(am.validateCreate({ formats: ["4x3"] }).error);
   assert.match(am.validateCreate({ voice: "custom" }).error, /coming soon/);
+  assert.strictEqual(am.validateCreate({ music: "luxury_cinematic" }).row.music, "luxury_cinematic");
+  assert.strictEqual(am.validateCreate({ music: "none" }).row.music, "none");
+  assert.match(am.validateCreate({ music: "dubstep" }).error, /music/);
   assert.ok(am.validateCreate({ template: "meet_your_agent" }).error);
   assert.ok(am.validateCreate({ template: "bogus" }).error);
 });

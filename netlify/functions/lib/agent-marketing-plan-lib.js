@@ -256,6 +256,10 @@ async function generatePlan({ project, anthropicKey, callFn }) {
   const call = callFn || module.exports.callClaudeText; // looked up at call time so tests can replace it
   const text = await call(buildSystemPrompt(), buildUserMessage(project), anthropicKey);
   const { narrative, warnings } = normalizePlan(extractJsonObject(text), project);
+  // A piece built on a MetroList report must carry MetroList's required notice (Rule 12.9). The notice comes from the frozen topic and is
+  // attached here by code, never left to the model; the overlay step shows it on screen.
+  const topicNotice = project.template === "local_market_insider" && project.selected_topic && typeof project.selected_topic.reportNotice === "string" ? project.selected_topic.reportNotice : "";
+  if (topicNotice) narrative.notice = topicNotice;
   // Spoken text is held to the strict "Claude wrote it" rules. Visual briefs and image prompts are checked only for
   // property-sale content (they legitimately contain things like "9:16").
   const visualText = {};

@@ -21,7 +21,7 @@
 
 "use strict";
 
-const GATE_VERSION = "2026-10-24.1";
+const GATE_VERSION = "2026-10-24.2";
 
 // One checkbox, extending the existing Reel advertising-accuracy confirmation. Store the version with the timestamp.
 const ATTESTATION_VERSION = "agent-marketing-1";
@@ -129,6 +129,11 @@ function verifiedFromTopic(topic) {
   const t = topic && typeof topic === "object" ? topic : null;
   if (!t || !Array.isArray(t.sources) || t.sources.length === 0) return null; // no validated source, nothing is verified
   const texts = [t.question, t.whyItMatters, t.scopeNote, ...(Array.isArray(t.trendSignals) ? t.trendSignals : [])];
+  // A topic written from the agent's own MLS report carries the exact figures it cited (frozen by agent-marketing-research-report-lib.js)
+  // and, for MetroList data, the notice Rule 12.9 requires on anything published with them. Only those figures are verified, not the whole report.
+  (Array.isArray(t.reportFigures) ? t.reportFigures : []).forEach((f) => { if (f && typeof f.text === "string") texts.push(f.text); });
+  const reportNotice = typeof t.reportNotice === "string" ? norm(t.reportNotice) : "";
+  if (reportNotice) texts.push(reportNotice);
   const addresses = [];
   const e = t.event && typeof t.event === "object" ? t.event : null;
   if (e) {
@@ -136,7 +141,7 @@ function verifiedFromTopic(topic) {
     if (e.location) addresses.push(e.location);
   }
   const clean = texts.filter((x) => typeof x === "string" && x.trim()).map(norm);
-  return clean.length ? { texts: clean, addresses: addresses.map(norm) } : null;
+  return clean.length ? { texts: clean, addresses: addresses.map(norm), reportNotice } : null;
 }
 
 /** verifiedFromProject(project) → verified facts for a stored project row, or null (any other template, no topic). */
@@ -281,6 +286,14 @@ function evaluate(input) {
       if (hasVerified && verifiedNumbers.has(n)) sourcedFacts.push(`${field}: ${n}`); // the figure is in the validated source topic
       else blocks.push({ rule: "invented_number", field, match: n, message: "Contains a number the agent did not provide." });
     }
+  }
+
+  // MetroList Rule 12.9: advertising that uses its statistics must carry "Based on information from MetroList Services, Inc. for the period
+  // (date) through (date)." When the verified topic came from a MetroList report, a complete piece must contain that notice. Callers that
+  // check a whole piece pass fullPiece: true (a partial check, such as one image caption, is not held to it).
+  if (vIn && typeof vIn.reportNotice === "string" && vIn.reportNotice && i.fullPiece === true) {
+    const everything = lower([...Object.values(genFields), ...Object.values(userFields), i.cta && i.cta.text].filter((x) => typeof x === "string").map(norm).join(" \n "));
+    if (!everything.includes(lower(norm(vIn.reportNotice)))) blocks.push({ rule: "missing_notice", field: "notice", match: "", message: "A piece that uses MetroList report figures must carry MetroList's required notice." });
   }
 
   // De-duplicate identical issues

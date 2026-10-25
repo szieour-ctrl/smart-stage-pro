@@ -112,9 +112,9 @@ function gateInputFor(project, narrative, source) {
   const base = { template: project.template, intake: project.intake || {}, verified: gate.verifiedFromProject(project) }; // verified: Local Market Insider only, from the stored research topic
   const sceneTexts = (n.scenes || []).map((s) => s.narrationExcerpt).filter(Boolean);
   if (source === "claude") {
-    return { ...base, generated: { narration: n.captionText || stripAudioTags(n.narrationTagged), captions: n.captionText, sceneTexts, overlays: [] }, cta: n.cta || null };
+    return { ...base, fullPiece: true, generated: { narration: n.captionText || stripAudioTags(n.narrationTagged), captions: n.captionText, sceneTexts, overlays: n.notice ? [n.notice] : [] }, cta: n.cta || null };
   }
-  return { ...base, userText: { narration: n.captionText || stripAudioTags(n.narrationTagged), ...Object.fromEntries(sceneTexts.map((t, i) => [`sceneText[${i}]`, t])) }, cta: n.cta || null };
+  return { ...base, fullPiece: true, userText: { narration: n.captionText || stripAudioTags(n.narrationTagged), ...Object.fromEntries(sceneTexts.map((t, i) => [`sceneText[${i}]`, t])), ...(n.notice ? { notice: n.notice } : {}) }, cta: n.cta || null };
 }
 
 const NOT_EDITABLE_AFTER = ["rendering", "rendered", "published"];

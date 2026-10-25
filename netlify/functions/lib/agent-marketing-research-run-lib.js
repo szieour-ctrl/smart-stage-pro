@@ -10,6 +10,8 @@
 
 const https = require("https");
 const rl = require("./agent-marketing-research-lib");
+const reportTopics = require("./agent-marketing-research-report-lib");
+const planLib = require("./agent-marketing-plan-lib");
 
 const API_HOST = "api.perplexity.ai";
 const API_PATH = "/v1/agent";
@@ -151,17 +153,23 @@ function addUsage(total, u) {
 function requestFromRow(row) {
   const refs = Array.isArray(row.upload_refs) ? row.upload_refs : [];
   return {
-    request: { mode: row.mode, audience: row.audience, geography: row.geography, focus: row.focus || {}, uploadIds: refs.map((r) => r && r.id).filter(Boolean) },
-    uploadContext: refs.map((r) => r && r.scope_note).filter(Boolean).join("; "),
+    request: { mode: row.mode, audience: row.audience, geography: row.geography, focus: row.focus || {}, dataSource: row.data_source || "web", uploadIds: refs.map((r) => r && r.id).filter(Boolean) },
+    // Only the scope note (places, dates, counts) ever goes to the web provider: never a price, median or address from a report.
+    uploadContext: (row.data_source || "web") === "both" ? refs.map((r) => r && r.scope_note).filter(Boolean).join("; ") : "",
   };
 }
 
 /**
- * runResearch({ row, apiKey, callFn, sleepFn, now, env }) → { fields, problems, attempts }
- * Up to 1 + AGENT_MARKETING_RESEARCH_RETRIES (default 1, max 2) answers are tried. A retry tells the provider why the previous
+ * runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callFn, sleepFn, now, env }) → { fields, problems, attempts }
+ * Where the topics come from is row.data_source:
+ *   web     Perplexity only (what every session did before).
+ *   upload  Claude writes the five topics from the agent's confirmed report(s); no web call at all.
+ *   both    Perplexity finds five web topics as before; Claude writes up to three from the report(s); the report's topics come first.
+ * Up to 1 + AGENT_MARKETING_RESEARCH_RETRIES (default 1, max 2) web answers are tried. A retry tells the provider why the previous
  * answer was rejected. All attempts' usage is added together, so the stored cost is the real cost of the session.
+ * A session is charged only when FIVE validated topics are delivered, whatever the source.
  */
-async function runResearch({ row, apiKey, callFn, sleepFn, now, env }) {
+async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callFn, sleepFn, now, env }) {
   const e = env || process.env;
   const cfg = rl.researchSettings(e);
   const extra = Number(e.AGENT_MARKETING_RESEARCH_RETRIES);
@@ -169,30 +177,54 @@ async function runResearch({ row, apiKey, callFn, sleepFn, now, env }) {
   const providerRetries = 2;
   const today = todayPT(now);
   const { request, uploadContext } = requestFromRow(row);
-  let payload = rl.buildResearchPayload({ request, today, uploadContext, env: e });
-  const baseInput = payload.input;
+  const dataSource = request.dataSource;
+  let payload = dataSource === "upload" ? null : rl.buildResearchPayload({ request, today, uploadContext, env: e });
+  const baseInput = payload && payload.input;
   let usage = { promptTokens: null, completionTokens: null, citationTokens: null, reasoningTokens: null, searchQueries: null, costUsd: null };
-  let modelUsed = payload.model, grounded = null, attempts = 0, problems = [], validation = null, error = null, providerError = null;
+  let modelUsed = payload ? payload.model : null, grounded = null, attempts = 0, problems = [], validation = null, error = null, providerError = null;
+  let reportNote = null, reportAttempts = 0;
 
   try {
-    while (attempts < maxAttempts) {
-      attempts++;
-      const { resp, modelUsed: m } = await askProvider({ payload, apiKey, callFn, sleepFn, retries: providerRetries });
-      modelUsed = m;
-      usage = addUsage(usage, rl.usageSummary(resp, cfg.costTargetUsd));
-      const text = answerText(resp);
-      try {
-        const g = groundTopics(rl.extractTopics(text), resp);
-        grounded = g.grounded;
-        validation = rl.validateTopics(g.topics, { mode: request.mode, today });
-        problems = validation.problems;
-      } catch (parseErr) {
-        validation = { ok: false, topics: [], problems: [parseErr.message] };
-        problems = validation.problems;
+    if (dataSource !== "upload") {
+      while (attempts < maxAttempts) {
+        attempts++;
+        const { resp, modelUsed: m } = await askProvider({ payload, apiKey, callFn, sleepFn, retries: providerRetries });
+        modelUsed = m;
+        usage = addUsage(usage, rl.usageSummary(resp, cfg.costTargetUsd));
+        const text = answerText(resp);
+        try {
+          const g = groundTopics(rl.extractTopics(text), resp);
+          grounded = g.grounded;
+          validation = rl.validateTopics(g.topics, { mode: request.mode, today });
+          problems = validation.problems;
+        } catch (parseErr) {
+          validation = { ok: false, topics: [], problems: [parseErr.message] };
+          problems = validation.problems;
+        }
+        if (validation.ok) break;
+        if (attempts < maxAttempts) {
+          payload = { ...payload, input: `${baseInput}\n\nYour previous answer was rejected: ${problems.slice(0, 6).join("; ").slice(0, 600)}. Return the JSON again with exactly 5 topics that fix this. Do not invent sources, dates or events.` };
+        }
       }
-      if (validation.ok) break;
-      if (attempts < maxAttempts) {
-        payload = { ...payload, input: `${baseInput}\n\nYour previous answer was rejected: ${problems.slice(0, 6).join("; ").slice(0, 600)}. Return the JSON again with exactly 5 topics that fix this. Do not invent sources, dates or events.` };
+    }
+    if (dataSource !== "web" && (dataSource === "upload" || (validation && validation.ok))) {
+      // Topics from the agent's own report. In "both", a failure here is not fatal: the five web topics are still delivered, and the agent is told.
+      const ctx = reportTopics.buildContext(uploads, request);
+      const want = dataSource === "both" ? reportTopics.REPORT_TOPICS_WHEN_BOTH : rl.TOPIC_COUNT;
+      try {
+        if (!ctx.reports.length) throw new Error("no report figures");
+        const out = await reportTopics.generateReportTopics({ ctx, want, minNeeded: dataSource === "both" ? 1 : rl.TOPIC_COUNT, today, anthropicKey, callFn: claudeFn });
+        reportAttempts = out.attempts;
+        modelUsed = dataSource === "upload" ? planLib.MODEL : modelUsed;
+        const combined = reportTopics.combineTopics({ dataSource, reportTopics: out.topics, webTopics: validation && validation.topics });
+        if (combined) validation = { ok: true, topics: combined, problems: [] };
+        else if (dataSource === "upload") { problems = out.problems.length ? out.problems : [`only ${out.topics.length} topics could be written from the report`]; validation = { ok: false, topics: [], problems }; }
+        else reportNote = "Your report could not be turned into topics this time, so these five come from web research only.";
+        if (dataSource === "both" && out.topics.length === 0 && !reportNote) reportNote = "Your report could not be turned into topics this time, so these five come from web research only.";
+      } catch (err) {
+        console.error(`[agent-marketing-research] report topics failed: ${String(err && err.message).slice(0, 200)}`);
+        if (dataSource === "upload") { error = "Topics could not be written from your report this time. This did not use a session."; }
+        else reportNote = "Your report could not be turned into topics this time, so these five come from web research only.";
       }
     }
   } catch (err) {
@@ -203,7 +235,7 @@ async function runResearch({ row, apiKey, callFn, sleepFn, now, env }) {
   // Cost: the provider's own figure when it sent one, otherwise an estimate from tokens (flagged as an estimate).
   const estimated = usage.costUsd == null ? estimateCostUsd(modelUsed, usage) : null;
   const costUsd = usage.costUsd != null ? usage.costUsd : estimated;
-  const finalUsage = { ...usage, costUsd, costEstimated: usage.costUsd == null && estimated != null, targetUsd: cfg.costTargetUsd, withinTarget: costUsd == null ? null : costUsd <= cfg.costTargetUsd, attempts, grounded, providerError };
+  const finalUsage = { ...usage, costUsd, costEstimated: usage.costUsd == null && estimated != null, targetUsd: cfg.costTargetUsd, withinTarget: costUsd == null ? null : costUsd <= cfg.costTargetUsd, attempts, grounded, providerError, dataSource, reportAttempts, reportNote };
   const fields = rl.outcomeFields({ validation: error ? null : validation, usage: finalUsage, model: modelUsed, today, now, error });
   return { fields, problems, attempts };
 }

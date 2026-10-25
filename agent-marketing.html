@@ -478,6 +478,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
       researchUI = AMResearchUI({
         api: function (base, method, qs, body) { return api(method, qs, body, base); },
         onSelected: function (topic) { state.project.selectedTopic = topic; showContinue(); renderSteps(2); },
+        onContinue: function () { go(3); },
       });
       $("resContinueBtn").addEventListener("click", function () { go(3); });
     }

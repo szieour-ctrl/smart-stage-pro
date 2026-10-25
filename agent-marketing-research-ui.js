@@ -99,11 +99,15 @@
     if (r.status === "failed") $("resError").textContent = (r.error || "The research could not be completed.") + (/did not use a session/.test(r.error || "") ? "" : " This did not use a session.");
     say("resNote", r.status === "ready" && r.note ? r.note : "");
     var pickedId = state.selected && state.selected.researchId === r.id ? state.selected.id : null;
-    $("resTopics").innerHTML = r.status === "ready" ? r.topics.map(function (t) { return renderTopic(t, pickedId); }).join("") : "";
+    var chosen = pickedId && r.status === "ready" ? r.topics.filter(function (t) { return t.id === pickedId; })[0] : null;
+    var bar = chosen ? '<div id="selBar" style="border:1px solid var(--gold);background:#fdf9f0;border-radius:6px;padding:12px 14px;margin-top:12px;display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap"><div style="font-size:0.88rem"><b style="color:var(--success)">\u2713 Topic selected</b><div>' + esc(chosen.question) + "</div></div>" +
+      (opts.onContinue ? '<button class="btn gold small" type="button" id="selContinue">Continue with this topic</button>' : "") + "</div>" : "";
+    $("resTopics").innerHTML = bar + (r.status === "ready" ? r.topics.map(function (t) { return renderTopic(t, pickedId); }).join("") : "");
+    if ($("selContinue")) $("selContinue").addEventListener("click", function () { opts.onContinue(state.selected); });
     renderCost(r);
     say("selMsg", "");
     Array.prototype.forEach.call($("resTopics").querySelectorAll("[data-pick]"), function (b) { b.addEventListener("click", function () { pick(r.id, b.getAttribute("data-pick")); }); });
-    $("resultPanel").scrollIntoView({ behavior: "smooth", block: "start" });
+    if (!opts.__pickedNow) $("resultPanel").scrollIntoView({ behavior: "smooth", block: "start" });
   }
   async function pick(researchId, topicId) {
     say("selMsg", "Saving your choice…");
@@ -112,8 +116,9 @@
       if (!r.ok) return say("selMsg", r.json.error || "Could not save your choice.", "err");
       state.selected = r.json.selectedTopic;
       if (opts.onSelected) opts.onSelected(state.selected);
-      showResult(state.current);
+      opts.__pickedNow = true; showResult(state.current); opts.__pickedNow = false;
       say("selMsg", "Saved. Resuming this project later restores this topic without a new research call.", "ok");
+      var b = $("selBar"); if (b) b.scrollIntoView({ behavior: "smooth", block: "center" });
     } catch (e) { say("selMsg", e.message, "err"); }
   }
   function renderSaved(list) {

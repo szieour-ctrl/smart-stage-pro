@@ -94,6 +94,27 @@ async function readPdfPages(buf) {
   return pages;
 }
 
+/**
+ * readPdf(buf) → { pages, items }. `items` (positioned text of page 1, y from the top) is only collected for Domus Analytics dashboards,
+ * whose text comes out of the PDF in no useful order and has to be read by position.
+ */
+async function readPdf(buf) {
+  const unpdf = await import("unpdf");
+  await useLegacyPdfjs(unpdf);
+  const pdf = await unpdf.getDocumentProxy(new Uint8Array(buf), { isEvalSupported: false, useSystemFonts: false, disableFontFace: true, verbosity: 0 });
+  if (pdf.numPages > MAX_PDF_PAGES) { const e = new Error("too_many_pages"); e.code = "too_large"; throw e; }
+  const out = await unpdf.extractText(pdf, { mergePages: false });
+  const pages = (Array.isArray(out.text) ? out.text : [String(out.text || "")]).map((t) => String(t || "").slice(0, MAX_TEXT_CHARS));
+  let items = null;
+  if (/Domus Analytics/i.test(pages.join("\n")) && /Weekly (?:Review|Infographic)/i.test(pages.join("\n"))) {
+    const page = await pdf.getPage(1);
+    const h = page.getViewport({ scale: 1 }).height;
+    const tc = await page.getTextContent();
+    items = tc.items.filter((i) => i && typeof i.str === "string" && i.str.trim() && Array.isArray(i.transform)).slice(0, 2000).map((i) => ({ s: i.str, x: i.transform[4] + (i.width || 0) / 2, y: h - i.transform[5] }));
+  }
+  return { pages, items };
+}
+
 function withTimeout(promise, ms) {
   let t;
   const timer = new Promise((_, reject) => { t = setTimeout(() => { const e = new Error("timeout"); e.code = "unreadable"; reject(e); }, ms); });
@@ -110,7 +131,7 @@ async function readReport(bytes, fileName) {
   if (k.error) return { ok: false, code: k.error, message: k.error === "too_big" ? "That file is larger than 4 MB. Try one property type or a shorter date range." : lib.errorMessage(k.error) };
   try {
     let result;
-    if (k.kind === "pdf") result = lib.analyzePages(await withTimeout(readPdfPages(buf), READ_TIMEOUT_MS));
+    if (k.kind === "pdf") { const pdf = await withTimeout(readPdf(buf), READ_TIMEOUT_MS); result = lib.analyzePages(pdf.pages, { items: pdf.items }); }
     else if (k.kind === "xlsx") result = lib.analyzeRows(await withTimeout(readXlsxRows(buf), READ_TIMEOUT_MS), "xlsx");
     else result = lib.analyzeRows(parseCsv(buf.toString("utf8")), "csv");
     if (result.error) return { ok: false, code: result.error, message: lib.errorMessage(result.error) };
@@ -123,4 +144,4 @@ async function readReport(bytes, fileName) {
   }
 }
 
-module.exports = { MAX_BYTES, MAX_PDF_PAGES, detectKind, parseCsv, readXlsxRows, readPdfPages, readReport };
+module.exports = { MAX_BYTES, MAX_PDF_PAGES, detectKind, parseCsv, readXlsxRows, readPdfPages, readPdf, readReport };

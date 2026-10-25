@@ -193,6 +193,7 @@ function formatFigure(f) {
     case "pct": return `${round(f.value, 1)}%`;
     case "days": return `${Math.round(f.value)} days`;
     case "months": return `${round(f.value, 1)} months`;
+    case "weeks": return `${round(f.value, 1)} weeks`;
     default: return Math.round(f.value).toLocaleString("en-US");
   }
 }
@@ -216,6 +217,10 @@ function scopeSentence(facts) {
     const where = placesOf(f);
     return `This ${f.mlsSource ? f.mlsSource + " " : ""}market-trends report covers ${where.length ? listText(where) : "an area it does not name"}${(f.propertyTypes || []).length ? ` (${f.propertyTypes.join(", ")})` : ""}, for ${f.period.label}. It shows ${f.period.months} months of history; the latest month has ${f.sample ? Number(f.sample.closed).toLocaleString("en-US") : "?"} closed ${f.sample && f.sample.closed === 1 ? "sale" : "sales"}.`;
   }
+  if (f.layout === "weekly_snapshot" && f.period) {
+    const where = placesOf(f);
+    return `This ${f.mlsSource ? f.mlsSource + " " : ""}weekly report covers ${where.length ? listText(where) : "an area it does not name"}${(f.propertyTypes || []).length ? ` (${f.propertyTypes.join(", ")})` : ""}, for ${f.period.label}${f.reportDate ? `, data updated ${longDate(f.reportDate)}` : ""}. The week has ${f.sample ? Number(f.sample.closed).toLocaleString("en-US") : "?"} closed ${f.sample && f.sample.closed === 1 ? "sale" : "sales"}.`;
+  }
   const parts = [];
   const places = placesOf(f);
   const src = f.mlsSource ? `${f.mlsSource} report` : "report";
@@ -236,8 +241,8 @@ function scopeSentence(facts) {
 function scopeNote(facts) {
   const f = facts || {};
   const places = placesOf(f);
-  if (f.layout === "market_trends" && f.period) {
-    const bits = [`${f.mlsSource ? f.mlsSource + " " : ""}market-trends report`, places.length ? `covering ${listText(places)}` : null, (f.propertyTypes || []).length ? f.propertyTypes.join(", ") : null, `for ${f.period.label}`];
+  if ((f.layout === "market_trends" || f.layout === "weekly_snapshot") && f.period) {
+    const bits = [`${f.mlsSource ? f.mlsSource + " " : ""}${f.layout === "weekly_snapshot" ? "weekly" : "market-trends"} report`, places.length ? `covering ${listText(places)}` : null, (f.propertyTypes || []).length ? f.propertyTypes.join(", ") : null, `for ${f.period.label}`];
     if (f.sample && f.sample.small) bits.push("a small sample of closed sales");
     return bits.filter(Boolean).join(", ").slice(0, 400);
   }
@@ -258,7 +263,10 @@ function compareText(facts, f) {
   const bits = [];
   if (f.prior != null) bits.push(`${at(f.prior)} in ${p.priorLabel}`);
   if (f.yearAgo != null) bits.push(`${at(f.yearAgo)} in ${p.yearAgoLabel}`);
-  return bits.length ? `vs ${bits.join(" and ")}` : "";
+  const vs = bits.length ? `vs ${bits.join(" and ")}` : "";
+  // Reports that print a percent change instead of the earlier value (the weekly dashboards): "down 1.8% from the week ending October 10, 2026".
+  const ch = (Array.isArray(f.changes) ? f.changes : []).map((c) => `${c.pct < 0 ? "down" : c.pct > 0 ? "up" : "unchanged"}${c.pct === 0 ? "" : ` ${Math.abs(c.pct)}%`} from ${c.vs}`);
+  return [vs, ...ch].filter(Boolean).join("; ");
 }
 function displayFigures(facts) {
   const figs = (facts && facts.figures) || [];
@@ -723,13 +731,121 @@ function analyzeTrendReport(pages) {
   return { facts };
 }
 
-/** analyzePages(pages) → { facts } | { error }  for PDF text. */
-function analyzePages(pages) {
+
+// ── Weekly dashboards (Domus Analytics "Weekly Infographic" and "Weekly Review", as MetroList members receive them) ──
+// One page of tiles: a label, a big number, and (Review only) the percent change against two earlier weeks. The text inside the PDF comes
+// out in no useful order, so these are read by POSITION: each number is paired with the label directly above it, and each percent with the
+// row it sits in. Anything that cannot be paired cleanly is left out rather than guessed. The Pricing Insights tool (individual listings)
+// and the Market Insights chart are not read.
+const WEEKLY_TILES = [
+  { label: "Median Sales Price", key: "median_close_price", name: "Median sold price", status: "closed", unit: "usd" },
+  { label: "Closed Sales", key: "count_closed", name: "Closed sales", status: "closed", unit: "count" },
+  { label: "Median Days on Market", key: "median_dom", name: "Median days on market", status: "market", unit: "days" },
+  { label: "List Price Received", key: "avg_close_to_list_pct", name: "Sold price as a percent of list price", status: "closed", unit: "pct" },
+  { label: "Median Sold $/SqFt", key: "median_ppsf", name: "Median sold price per square foot", status: "closed", unit: "usd_per_sqft" },
+  { label: "New Listings", key: "count_new", name: "New listings", status: "active", unit: "count" },
+  { label: "Active Inventory", key: "count_active", name: "Active listings", status: "active", unit: "count" },
+  { label: "Weeks Supply of Inventory", key: "weeks_supply", name: "Weeks of inventory", status: "market", unit: "weeks" },
+];
+const FULL_MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
+const monthIdx = (name) => { const k = String(name).toLowerCase().slice(0, 3); return ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"].indexOf(k) + 1; };
+const addDays = (iso, n) => { const t = Date.parse(`${iso}T00:00:00Z`) + n * 86400000; return new Date(t).toISOString().slice(0, 10); };
+
+function weeklyDate(text) {
+  let m = /\b(20\d\d)\s+([A-Za-z]{3,9})\s+(\d{1,2})\b/.exec(text);
+  if (m && monthIdx(m[2]) > 0) return isoDay(Number(m[1]), monthIdx(m[2]), Number(m[3]));
+  m = /\b(\d{1,2})\s+([A-Za-z]{3,9})\s+(20\d\d)\b/.exec(text);
+  if (m && monthIdx(m[2]) > 0) return isoDay(Number(m[3]), monthIdx(m[2]), Number(m[1]));
+  return null;
+}
+
+/** analyzeWeeklySnapshot(pages, items) → { facts } | { error } | null  (null = not this layout). `items` = [{ s, x, y }] for page 1, y measured from the top. */
+function analyzeWeeklySnapshot(pages, items) {
+  const text = (Array.isArray(pages) ? pages : []).join("\n");
+  if (!/Domus Analytics/i.test(text)) return null;
+  if (/Pricing Insights/i.test(text) && /Proposed List Price|Select(ed)? Listing/i.test(text)) return { error: "pricing_tool" };
+  const isReview = /Weekly Review/i.test(text), isInfo = /Weekly Infographic/i.test(text);
+  if (!isReview && !isInfo) return /Market Insights|Time Series/i.test(text) ? { error: "chart_only" } : null;
+  const its = (Array.isArray(items) ? items : []).filter((i) => i && typeof i.s === "string" && Number.isFinite(i.x) && Number.isFinite(i.y)).map((i) => ({ ...i, s: i.s.trim() })).filter((i) => i.s);
+  if (!its.length) return { error: "no_figures" };
+  const NUMLIKE = /^\$?\d[\d,]*(?:\.\d+)?%?$/;
+  const values = its.filter((i) => NUMLIKE.test(i.s));
+  // Pair each label with the number below it (greedy, closest first, each number used once).
+  const labels = WEEKLY_TILES.map((t) => ({ t, it: its.find((i) => i.s.toLowerCase() === t.label.toLowerCase()) })).filter((x) => x.it);
+  const pairs = [];
+  labels.forEach((l) => values.forEach((v) => { const dy = v.y - l.it.y; if (dy > 0 && dy < 220 && Math.abs(v.x - l.it.x) <= 110) pairs.push({ l, v, cost: dy + 1.5 * Math.abs(v.x - l.it.x) }); }));
+  pairs.sort((a, b) => a.cost - b.cost);
+  const usedL = new Set(), usedV = new Set(), got = new Map();
+  pairs.forEach((p) => { if (usedL.has(p.l) || usedV.has(p.v)) return; usedL.add(p.l); usedV.add(p.v); got.set(p.l.t.key, { l: p.l, v: p.v }); });
+  const fig = {};
+  got.forEach(({ l, v }) => {
+    const n = Number(v.s.replace(/[$,%]/g, "").replace(/,/g, ""));
+    const t = l.t;
+    const [lo, hi] = RANGE[t.unit === "weeks" ? "months" : t.unit] || [0, Infinity];
+    if (!Number.isFinite(n) || !(n >= lo && n <= hi)) return;
+    if (t.unit === "usd" && !v.s.startsWith("$")) return;
+    if (t.unit === "pct" && !v.s.endsWith("%")) return;
+    fig[t.key] = { t, value: n, y: v.y, ly: l.it.y, item: v };
+  });
+  // Percent changes (Review): the headers say which earlier week each column is; each percent belongs to the row it is level with.
+  const heads = its.filter((i) => /^vs\s+Wk\s+ending/i.test(i.s)).map((h) => ({ x: h.x, iso: weeklyDate(h.s) })).filter((h) => h.iso);
+  const rowFigs = Object.values(fig);
+  if (isReview && heads.length) {
+    const shown = new Set(rowFigs.map((r) => r.item));      // the big numbers themselves (one of them, "List Price Received", is a percent)
+    its.filter((i) => /^[-+−]?\d+(?:\.\d+)?%$/.test(i.s) && !shown.has(i)).forEach((c) => {
+      const row = rowFigs.map((r) => ({ r, d: Math.abs(c.y - (r.y + r.ly) / 2) })).sort((a, b) => a.d - b.d)[0];
+      const col = heads.map((h) => ({ h, d: Math.abs(c.x - h.x) })).sort((a, b) => a.d - b.d)[0];
+      if (!row || row.d > 30 || !col) return;
+      const pct = Number(c.s.replace(/[%+]/g, "").replace("−", "-"));
+      if (!Number.isFinite(pct) || Math.abs(pct) > 500) return;
+      const f = row.r; f.changes = f.changes || [];
+      if (!f.changes.some((x) => x.iso === col.h.iso)) f.changes.push({ pct, iso: col.h.iso });
+    });
+  }
+  const need = isReview ? 6 : 4;
+  if (Object.keys(fig).length < need) return { error: "no_figures" };
+  // The report's own date: the first full date left once the "vs Wk ending …" comparison dates are removed.
+  const end = weeklyDate(text.replace(/vs\s+Wk\s+ending\s+(?:\d{1,2}\s+[A-Za-z]{3,9}\s+20\d\d|[A-Za-z]{3,9}\s+\d{1,2},?\s+20\d\d|\d{1,2}\/\d{1,2}\/\d{2,4})/gi, " "));
+  if (!end) return { error: "no_figures" };
+  const updated = /updated\s+(\d{1,2})\/(\d{1,2})\/(\d{2})\b/.exec(text);
+  const scope = its.map((i) => /^Includes\s+(.{3,80}?)\s+in\s+(.{3,80})$/.exec(i.s)).find(Boolean);
+  const okText = (x) => /^[A-Za-z0-9 ,.&'\/-]+$/.test(x);
+  const types = scope && okText(scope[1]) ? scope[1].replace(/^all\s+/i, "All ") : null;
+  const placeRaw = scope && okText(scope[2]) ? scope[2].trim() : null;
+  const place = placeRaw ? (/^all counties$/i.test(placeRaw) ? "All MetroList counties" : placeRaw) : null;
+  const label = (iso) => longDate(iso);
+  const figures = WEEKLY_TILES.filter((t) => fig[t.key]).map((t, i) => {
+    const f = fig[t.key];
+    const out = { id: `f${i + 1}`, status: t.status, key: t.key, label: t.name, value: f.value, unit: t.unit, n: 0, small: false, reported: true, window: { start: addDays(end, -6), end } };
+    if (f.changes && f.changes.length) out.changes = f.changes.sort((a, b) => (a.iso < b.iso ? 1 : -1)).map((c) => ({ pct: c.pct, vs: `the week ending ${label(c.iso)}` }));
+    return out;
+  });
+  const closed = (figures.find((f) => f.key === "count_closed") || {}).value;
+  const warnings = ["This is one week of data. Weekly figures swing from week to week, so topics will describe the week and will not call it a trend."];
+  if (!place) warnings.push("I couldn't read the area this report covers. Check it before using it.");
+  const small = closed != null && closed < SMALL_SAMPLE_BELOW;
+  if (small) warnings.push(`Only ${closed} closed ${closed === 1 ? "sale" : "sales"} this week: a small sample.`);
+  const facts = {
+    version: FACTS_VERSION, kind: "pdf", layout: "weekly_snapshot", reportDate: updated ? isoDay(2000 + Number(updated[3]), Number(updated[1]), Number(updated[2])) : null,
+    mlsSource: /Data provided by MetroList/i.test(text) ? "MetroList" : null, propertyTypes: types ? [types] : [], criteria: { closedSince: null },
+    geography: { cities: place ? [place] : [], zips: [], drawnOnMap: false },
+    period: { label: `the week ending ${label(end)}`, start: addDays(end, -6), end, weekly: true },
+    statuses: {}, figures,
+    sample: { total: closed != null ? closed : 0, closed: closed != null ? closed : 0, small, broadWindow: false, windowDays: 6, weekly: true }, reportedTotal: null,
+    warnings, notes: ["Only the dashboard's figures were kept."],
+  };
+  return { facts };
+}
+
+/** analyzePages(pages, { items }) → { facts } | { error }  for PDF text. `items` = positioned text of page 1 (weekly dashboards only). */
+function analyzePages(pages, opts) {
   const list = Array.isArray(pages) ? pages : [String(pages || "")];
   const text = list.join("\n");
   if (text.replace(/\s+/g, "").length < 150) return { error: "no_text" };
   const trend = analyzeTrendReport(list);
   if (trend) return trend;
+  const weekly = analyzeWeeklySnapshot(list, opts && opts.items);
+  if (weekly) return weekly;
   const meta = cmaMeta(text);
   const cma = analyzeCmaPages(list);
   if (cma) return buildFacts({ kind: "pdf", records: cma.records, reported: cma.reported, reportedTotal: cma.reportedTotal, meta, layout: cma.layout });
@@ -745,6 +861,8 @@ const ERROR_MESSAGES = {
   too_large: "This report has more detail than I can use. Try one property type or a shorter date range.",
   xls: "Old .xls files can't be read here. Save it as .xlsx or CSV from Excel and upload that.",
   unsupported: "Upload a PDF, CSV or Excel (.xlsx) file.",
+  pricing_tool: "This is the Pricing Insights tool, which shows individual listings, so it can't be used. Upload your MetroList Weekly Review or Weekly Infographic, a TrendVision market report, or a CMA instead.",
+  chart_only: "This is a chart, not a table of figures, so I can't read numbers from it. Upload your MetroList Weekly Review or Weekly Infographic, a TrendVision market report, or a CMA instead.",
   empty: "That file is empty.",
   unreadable: "I couldn't open that file. Check that it isn't password protected, then try again.",
 };
@@ -779,6 +897,6 @@ function summarize(facts, opts) {
 module.exports = {
   FACTS_VERSION, PERMISSION_VERSION, PERMISSION_TEXT, SMALL_SAMPLE_BELOW, BROAD_WINDOW_DAYS, MAX_RECORDS, STATUS_ORDER, STATUS_PLURAL,
   normStatus, parseMoney, parseDom, parseDate, parseSqft, median, mean, statsFromRecords, formatFigure, scopeSentence, scopeNote, displayFigures,
-  verifiedFromReport, attributionNotice, analyzeTrendReport, compareText, windowText, geographyCheck, recordsFromRows, extractLabeledMetrics, analyzeCmaPages, cmaMeta, buildFacts, analyzeRows, analyzePages,
+  verifiedFromReport, attributionNotice, analyzeTrendReport, analyzeWeeklySnapshot, compareText, windowText, geographyCheck, recordsFromRows, extractLabeledMetrics, analyzeCmaPages, cmaMeta, buildFacts, analyzeRows, analyzePages,
   errorMessage, summarize,
 };

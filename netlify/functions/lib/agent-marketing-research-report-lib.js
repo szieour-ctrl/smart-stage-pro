@@ -82,6 +82,7 @@ function userMessage(ctx, want, today) {
     lines.push(`REPORT ${r.key}: ${r.scopeSentence}`);
     if (r.geoMessage) lines.push(`Note: ${r.geoMessage}`);
     if (r.facts.sample && r.facts.sample.small) lines.push("Note: a small sample. No trend claims.");
+    if (r.facts.period && r.facts.period.weekly) lines.push("Note: one week of data. Describe the week and the changes listed against the earlier weeks; never call it a trend.");
     if (r.facts.sample && r.facts.sample.broadWindow) lines.push(`Note: the closed sales span about ${Math.round(r.facts.sample.windowDays / 30)} months. Never call them this month, recent or current.`);
     ctx.figures.forEach((cf) => { if (cf.report === r) lines.push(`${cf.ref} | ${figureText(cf)}`); });
     lines.push("");
@@ -125,8 +126,9 @@ function validateReportTopics(raw, ctx, opts) {
     // 2. trend and time-frame claims
     const reports = [...new Set(cited.map((c) => c.report))];
     const small = reports.some((r) => r.facts.sample && r.facts.sample.small) || cited.some((c) => c.fig.small);
-    const hasComparison = cited.some((c) => c.fig.prior != null || c.fig.yearAgo != null);
+    const hasComparison = cited.some((c) => c.fig.prior != null || c.fig.yearAgo != null || (Array.isArray(c.fig.changes) && c.fig.changes.length > 0));
     if (TREND_CLAIM.test(text) && (small || !hasComparison)) return problems.push(`topic ${n}: describes a change or trend that the cited figures do not support`);
+    if (/\btrend/i.test(text) && reports.some((r) => r.facts.period && r.facts.period.weekly)) return problems.push(`topic ${n}: calls one week of data a trend`);
     if (NOW_WORDS.test(text) && reports.some((r) => r.facts.sample && r.facts.sample.broadWindow)) return problems.push(`topic ${n}: calls a long window "this month", "recent" or "now"`);
     // 3. the content gate (addresses, listings, sale advertising, Fair Housing)
     const verifiedTexts = cited.map(figureText).concat(reports.map((r) => r.scopeSentence));

@@ -268,3 +268,17 @@ test("topics: five topics resting on one or two websites fail a market update, w
   const ev = fiveEvents().map((t, i) => ({ ...t, sources: [{ title: "City", url: `https://www.roseville.ca.gov/events/${i}`, published: null }] }));
   assert.strictEqual(r.validateTopics(ev, { mode: "local_events", today: TODAY }).ok, true);
 });
+
+test("text that is too long is cut back to a whole word, never mid-word", () => {
+  const intake = require("../netlify/functions/lib/agent-marketing-intake");
+  const cta = "Ask me what September's pending data means for your timing and pricing — no pressure at all.";
+  const out = intake.cleanWords(cta, 80);
+  assert.ok(out.length <= 80);
+  assert.ok(cta.startsWith(out));
+  assert.ok(!/[—,;:-]$/.test(out));
+  assert.strictEqual(out, "Ask me what September's pending data means for your timing and pricing");
+  assert.strictEqual(intake.cleanWords("short text", 80), "short text");
+  assert.strictEqual(intake.cleanWords("abcdefghij", 5), "abcde"); // one long word: nothing to cut back to
+  assert.strictEqual(intake.cleanWords("one two three", 7), "one two");
+  assert.strictEqual(intake.cleanWords("one two three", 8), "one two"); // would cut "three" in half
+});

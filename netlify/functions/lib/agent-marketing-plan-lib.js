@@ -86,7 +86,7 @@ function buildSystemPrompt() {
     "  \"scenes\": [ { \"role\": string, \"narration_excerpt\": string, \"purpose\": string, \"visual_source\": \"GPT_IMAGE_2_CONCEPT\"|\"AGENT_SCENE\"|\"CONCEPT_REUSE\"|\"AGENT_PROFILE\"|\"BRAND_CARD\"|\"AUTHENTIC_AGENT_ASSET\", \"reuse_of_scene\": number | null, \"card_text\": string | null,",
     "    \"visual_brief\": string, \"authentic_photo_request\": { \"best_image\": string, \"should_contain\": string, \"avoid\": string, \"if_unavailable\": string } | null,",
     "    \"ai_generation_prompt\": string | null, \"camera_motion\": string, \"framing_9x16\": string, \"framing_16x9\": string, \"text_safe_placement\": string } ],",
-    "  \"cta_suggestion\": string, \"claims_to_verify\": [string], \"missing_agent_inputs\": [string] }",
+    "  \"cta_suggestion\": string (70 characters or fewer, a complete sentence), \"claims_to_verify\": [string], \"missing_agent_inputs\": [string] }",
   ].join("\n");
 }
 
@@ -170,7 +170,7 @@ function sanitizeTags(text) {
 }
 
 const MOTIONS = ["push_in", "pull_back", "pan_left", "pan_right", "tilt_up", "tilt_down", "static_hold"];
-const str = (v, n) => intakeLib.cleanText(v, n);
+const str = (v, n) => intakeLib.cleanWords(v, n);
 
 /**
  * normalizePlan(raw, project) → { narrative, warnings } or throws Error(message) for an unusable plan.

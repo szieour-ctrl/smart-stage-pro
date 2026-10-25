@@ -145,3 +145,49 @@ test("trends table: other month header styles work; gaps or missing measures are
   const few = TREND_CSV.split("\n").slice(0, 6).map((l) => l.split(","));
   assert.ok(!lib.analyzeRows(few, "csv").facts || lib.analyzeRows(few, "csv").facts.layout !== "market_trends");
 });
+
+// ── The emailed TrendVision report printed to PDF (header REGION / PROPERTY, comparison tables per chart) ──
+const EMAIL_PAGES = [
+  ["Sam Fixture <someone@example.com>", "trends", "TrendGraphix <mail@m1trendx.com> Sat, Oct 24, 2026", "TrendVisionTM", "R E G I O N", "Roseville", "P R O P E R T Y", "Single Family Homes", "Special Listing Conditions: All Properties", "R A N G E", "Price: $0 - No Limit",
+    "M A R K E T A D V A N T A G E", "Seller's market", "2.6 mo", "MONTHS OF", "INVENTORY", "38.7%", "ABSORPTION", "RATE", "97.00", "SP / ORIG LP",
+    "The selected market area remains a seller's market, which means inventory is constrained relative to recent demand with Months of Inventory (Closed Sales) at 2",
+    "and activity: there are 367 homes for sale and 146 pended listings in the latest month, versus 355 for sale and 181 pended same month last year, representing a"].join("\n"),
+  ["TODAY'S STATS 10/1/26 - 10/23/26", "FOR SALE", "381", "PENDED", "90", "SOLD", "91", "VS PREV MONTH VS SAME MONTH 1 YR AGO VS SAME QTR 1", "Sep. 26 Aug. 26 % Change Sep. 26 Sep. 25 % Change Jul. 26 To Sep.", "26", "Jul. 25 To S", "25",
+    "For Sale 367 360 1.9% ▲ 367 355 3.4% ▲ 367 355", "Pended 146 160 -8.7% ▼ 146 181 -19.3% ▼ 477 547", "Sold 142 151 -6% ▼ 142 193 -26.4% ▼ 496 537"].join("\n"),
+  ["Months of", "Inventory (Closed) 2.6 2.4 8.4% ▲ 2.6 1.8 43.5% ▲ 2.2 2", "Avg Sold Price 680 689 -1.3% ▼ 680 667 1.9% ▲ 695 695", "Avg Active Price 720 728 -1.1% ▼ 720 729 -1.2% ▼ 731 725", "Sold/List Price Diff", "% 99 99 0% 99 99 0% 99 99", "Avg Days on", "Market 38 33 15.2% ▲ 38 40 -5% ▼ 34 37"].join("\n"),
+];
+
+test("the emailed TrendVision report is read from its comparison tables, area and all; the clipped overview and part-month tiles are not", () => {
+  const r = lib.analyzePages(EMAIL_PAGES);
+  assert.ok(r.facts, JSON.stringify(r));
+  const f = r.facts;
+  assert.strictEqual(f.layout, "market_trends");
+  assert.deepStrictEqual(f.geography, { cities: ["Roseville"], zips: [], drawnOnMap: false });
+  assert.deepStrictEqual(f.propertyTypes, ["Single Family Homes"]);
+  assert.strictEqual(f.period.label, "September 2026");
+  assert.strictEqual(get(f, "months_supply").value, 2.6);                // not the "2" from the cut-off sentence
+  assert.strictEqual(get(f, "count_pending").value, 146);
+  assert.strictEqual(get(f, "count_pending").yearAgo, 181);
+  assert.strictEqual(get(f, "count_closed").value, 142);                 // not the part-month 91
+  assert.strictEqual(get(f, "avg_close_price").value, 680000);
+  assert.strictEqual(get(f, "avg_dom").prior, 33);
+  assert.strictEqual(get(f, "absorption_closed").value, 38.7);
+  assert.strictEqual(get(f, "avg_close_to_orig_list_pct").value, 97);
+  assert.deepStrictEqual(f.warnings, []);
+  const json = JSON.stringify(f);
+  for (const bad of ["someone@example.com", "Sam Fixture", "m1trendx"]) assert.ok(!json.includes(bad), bad);
+});
+
+test("emailed trends: a row that disagrees with its own percent change is dropped with a warning, not guessed", () => {
+  const pages = EMAIL_PAGES.map((p) => p.replace("Pended 146 160 -8.7% ▼ 146 181 -19.3%", "Pended 146 160 -8.7% ▼ 146 181 -39.3%"));
+  const f = lib.analyzePages(pages).facts;
+  assert.strictEqual(get(f, "count_pending"), undefined);
+  assert.match(f.warnings.join(" "), /could not confirm pended sales/);
+  assert.strictEqual(get(f, "count_closed").value, 142);
+});
+
+test("a number at the end of a long, possibly cut-off sentence is not read as a metric", () => {
+  const long = "The selected market area remains a seller's market, which means inventory is constrained relative to recent demand with Months of Inventory (Closed Sales) at 2";
+  assert.deepStrictEqual(lib.extractLabeledMetrics([long]), []);
+  assert.strictEqual(lib.extractLabeledMetrics(["Months of Inventory: 2.6"]).length, 1);
+});

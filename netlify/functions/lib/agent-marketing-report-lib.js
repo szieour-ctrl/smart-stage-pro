@@ -437,6 +437,7 @@ function extractLabeledMetrics(lines) {
       if (!hit) continue;
       const v = firstNumberAfter(line, hit.index + hit[0].length);
       if (!v) continue;
+      if (line.split(" ").length >= 15 && line.slice(v.end).trim() === "") continue; // the end of a long sentence is often cut off by the printout: "...Months of Inventory at 2" (of 2.6)
       if (/\d/.test(line.slice(v.end))) continue; // more numbers follow (a table row or a sentence): the first one may be the wrong column, so do not guess
       let value = v.value;
       if (m.unit === "pct" && value <= 1.5) value *= 100; // 0.991 → 99.1
@@ -803,6 +804,85 @@ function analyzeTrendTable(grid, kind) {
   return { facts };
 }
 
+// ── The emailed TrendVision report, printed to PDF from a mail client ────────────────────────────────────────────────
+// Same publisher, different layout: a header (REGION / PROPERTY), three "market advantage" tiles, a written overview whose lines are cut
+// off at the page edge by the printout (so it is NEVER read), "Today's Stats" tiles for the part-month so far (also never read), and one
+// small table per chart: "Sep. 26 | Aug. 26 | % Change | Sep. 26 | Sep. 25 | % Change | quarter". Only those tables are the source, and every
+// row is checked against its own percent changes before it is kept.
+const TE_ROWS = [
+  { re: "For Sale", key: "count_active", name: "Active listings", status: "active", unit: "count" },
+  { re: "Pended", key: "count_pending", name: "Pended sales", status: "pending", unit: "count" },
+  { re: "Sold", key: "count_closed", name: "Closed sales", status: "closed", unit: "count" },
+  { re: "Months of Inventory \\(Closed\\)", key: "months_supply", name: "Months of inventory (closed-sales basis)", status: "market", unit: "months" },
+  { re: "Avg Sold Price", key: "avg_close_price", name: "Average sold price", status: "closed", unit: "usd", scale: 1000 },
+  { re: "Avg Active Price", key: "avg_list_price", name: "Average active price", status: "active", unit: "usd", scale: 1000 },
+  { re: "Sold/List Price Diff %", key: "avg_close_to_list_pct", name: "Sold price as a percent of list price", status: "closed", unit: "pct" },
+  { re: "Avg Days on Market", key: "avg_dom", name: "Average days on market", status: "market", unit: "days" },
+];
+const TE_N = "(-?\\d[\\d,]*(?:\\.\\d+)?)";
+function teHeaderField(text, heading, next) {
+  const m = new RegExp(`${heading}\\s*\\n([\\s\\S]*?)\\n\\s*(?:${next})`, "i").exec(text);
+  return m ? m[1].split(/\n/).map((x) => x.trim()).filter(Boolean) : [];
+}
+
+/** analyzeTrendEmail(pages) → { facts } | { error } | null  (null = not this layout) */
+function analyzeTrendEmail(pages) {
+  const list = Array.isArray(pages) ? pages : [];
+  const all = list.join("\n");
+  if (!/TrendVision/i.test(all) || !/VS PREV MONTH/i.test(all) || !/R\s*E\s*G\s*I\s*O\s*N/.test(all) || /Data Table \(Part/i.test(all)) return null;
+  const flat = all.replace(/[\u25B2\u25BC]/g, " ").replace(/\s+/g, " ");
+  const hdr = new RegExp(`([A-Z][a-z]{2})\\. (\\d{2}) ([A-Z][a-z]{2})\\. (\\d{2}) % Change ([A-Z][a-z]{2})\\. (\\d{2}) ([A-Z][a-z]{2})\\. (\\d{2}) % Change`).exec(flat);
+  if (!hdr) return { error: "no_figures" };
+  const mo = (n, y) => ({ m: monthIdx(n), y: 2000 + Number(y) });
+  const cur = mo(hdr[1], hdr[2]), prior = mo(hdr[3], hdr[4]), cur2 = mo(hdr[5], hdr[6]), ago = mo(hdr[7], hdr[8]);
+  if (![cur, prior, cur2, ago].every((c) => c.m > 0) || cur.m !== cur2.m || cur.y !== cur2.y || ago.m !== cur.m || ago.y !== cur.y - 1 || prior.y * 12 + prior.m !== cur.y * 12 + cur.m - 1) return { error: "no_figures" };
+  const num = (v) => Number(String(v).replace(/,/g, ""));
+  const figures = [], bad = [];
+  TE_ROWS.forEach((r) => {
+    const m = new RegExp(`(?:^|\\s)${r.re.replace(/ /g, "\\s+")} ${TE_N} ${TE_N} ${TE_N}% ${TE_N} ${TE_N} ${TE_N}%`).exec(flat);
+    if (!m) return;
+    const [a, b, pc1, a2, y, pc2] = m.slice(1).map(num);
+    // The table must agree with itself: the same current value twice, and each percent change matching its own two numbers.
+    const near = (x, from, pct) => from !== 0 && Math.abs(((x - from) / Math.abs(from)) * 100 - pct) <= Math.max(0.15, Math.abs(pct) * 0.02) + (Math.abs(from) < 20 ? 3 : 0);
+    if (a !== a2 || !near(a, b, pc1) || !near(a, y, pc2)) { bad.push(r.name.toLowerCase()); return; }
+    const sc = r.scale || 1;
+    figures.push({ r, value: a * sc, prior: b * sc, yearAgo: y * sc });
+  });
+  if (figures.length < 5) return { error: "no_figures" };
+  const start = isoDay(cur.y, cur.m, 1), end = isoDay(cur.y, cur.m, new Date(Date.UTC(cur.y, cur.m, 0)).getUTCDate());
+  const window = { start, end };
+  const out = figures.map((f, i) => ({ id: `f${i + 1}`, status: f.r.status, key: f.r.key, label: f.r.name, value: f.value, unit: f.r.unit, n: 0, small: false, reported: true, window, prior: f.prior, yearAgo: f.yearAgo }));
+  // The tiles at the top carry two measures the tables do not; they are read only when they sit next to their own labels.
+  const tiles = /(\d+(?:\.\d+)?)% ABSORPTION RATE (\d+(?:\.\d+)?) SP \/ ORIG LP/.exec(flat);
+  if (tiles) {
+    const ab = Number(tiles[1]), sp = Number(tiles[2]);
+    if (ab > 0 && ab <= 100 && !out.some((f) => f.key === "absorption_closed")) out.push({ id: `f${out.length + 1}`, status: "market", key: "absorption_closed", label: "Absorption rate (closed sales)", value: ab, unit: "pct", n: 0, small: false, reported: true, window });
+    if (sp >= 50 && sp <= 150) out.push({ id: `f${out.length + 1}`, status: "closed", key: "avg_close_to_orig_list_pct", label: "Sold price as a percent of original list price", value: sp, unit: "pct", n: 0, small: false, reported: true, window });
+  }
+  const region = teHeaderField(all, "R\\s*E\\s*G\\s*I\\s*O\\s*N", "P\\s*R\\s*O\\s*P\\s*E\\s*R\\s*T\\s*Y").join(" ").replace(/\s+/g, " ").trim();
+  const okRegion = region && region.length <= 90 && /^[A-Za-z0-9 ,.&'\/-]+$/.test(region);
+  const zips = okRegion ? Array.from(new Set(region.match(/\b\d{5}\b/g) || [])) : [];
+  const ptLine = (teHeaderField(all, "P\\s*R\\s*O\\s*P\\s*E\\s*R\\s*T\\s*Y", "R\\s*A\\s*N\\s*G\\s*E")[0] || "").trim();
+  const closed = (out.find((f) => f.key === "count_closed") || {}).value;
+  const small = closed != null && closed < SMALL_SAMPLE_BELOW;
+  const warnings = [];
+  if (bad.length) warnings.push(`I could not confirm ${listText(bad)} against the report's own percent changes, so ${bad.length === 1 ? "it was" : "they were"} left out.`);
+  if (!okRegion) warnings.push("I couldn't read the area this report covers. Check it before using it.");
+  if (small) warnings.push(`Only ${closed} closed ${closed === 1 ? "sale" : "sales"} in ${MONTH_NAMES[cur.m - 1]} ${cur.y}: a small sample. Topics will say so and will not claim a trend.`);
+  const mls = MLS_SOURCES.find((n) => new RegExp(`\\b${n}\\b`, "i").test(all)) || null;
+  const facts = {
+    version: FACTS_VERSION, kind: "pdf", layout: "market_trends", reportDate: null, mlsSource: mls,
+    propertyTypes: /^[A-Za-z ,\/-]{3,40}$/.test(ptLine) ? [ptLine] : [], criteria: { closedSince: null },
+    geography: okRegion ? (zips.length ? { cities: [], zips: zips.slice(0, 8), drawnOnMap: false } : { cities: [region], zips: [], drawnOnMap: false }) : { cities: [], zips: [], drawnOnMap: false },
+    period: { label: `${MONTH_NAMES[cur.m - 1]} ${cur.y}`, start, end, priorLabel: `${MONTH_NAMES[prior.m - 1]} ${prior.y}`, yearAgoLabel: `${MONTH_NAMES[ago.m - 1]} ${ago.y}`, months: 2 },
+    statuses: {}, figures: out,
+    sample: { total: closed != null ? closed : 0, closed: closed != null ? closed : 0, small, broadWindow: false, windowDays: 29 },
+    reportedTotal: null, checks: { checked: figures.length, mismatched: bad.length }, warnings,
+    notes: ["Only the report's own comparison tables were used. The written overview and the part-month \"Today's Stats\" were not."],
+  };
+  return { facts };
+}
+
 // ── Weekly dashboards (Domus Analytics "Weekly Infographic" and "Weekly Review", as MetroList members receive them) ──
 // One page of tiles: a label, a big number, and (Review only) the percent change against two earlier weeks. The text inside the PDF comes
 // out in no useful order, so these are read by POSITION: each number is paired with the label directly above it, and each percent with the
@@ -915,6 +995,8 @@ function analyzePages(pages, opts) {
   if (text.replace(/\s+/g, "").length < 150) return { error: "no_text" };
   const trend = analyzeTrendReport(list);
   if (trend) return trend;
+  const trendEmail = analyzeTrendEmail(list);
+  if (trendEmail) return trendEmail;
   const weekly = analyzeWeeklySnapshot(list, opts && opts.items);
   if (weekly) return weekly;
   const meta = cmaMeta(text);
@@ -968,6 +1050,6 @@ function summarize(facts, opts) {
 module.exports = {
   FACTS_VERSION, PERMISSION_VERSION, PERMISSION_TEXT, SMALL_SAMPLE_BELOW, BROAD_WINDOW_DAYS, MAX_RECORDS, STATUS_ORDER, STATUS_PLURAL,
   normStatus, parseMoney, parseDom, parseDate, parseSqft, median, mean, statsFromRecords, formatFigure, scopeSentence, scopeNote, displayFigures,
-  verifiedFromReport, attributionNotice, analyzeTrendReport, analyzeTrendTable, analyzeWeeklySnapshot, compareText, windowText, geographyCheck, recordsFromRows, extractLabeledMetrics, analyzeCmaPages, cmaMeta, buildFacts, analyzeRows, analyzePages,
+  verifiedFromReport, attributionNotice, analyzeTrendReport, analyzeTrendEmail, analyzeTrendTable, analyzeWeeklySnapshot, compareText, windowText, geographyCheck, recordsFromRows, extractLabeledMetrics, analyzeCmaPages, cmaMeta, buildFacts, analyzeRows, analyzePages,
   errorMessage, summarize,
 };

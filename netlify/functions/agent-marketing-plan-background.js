@@ -39,7 +39,7 @@ exports.handler = async (event) => {
   } catch (err) {
     console.error(`[agent-marketing-plan-background] project ${id || "unknown"} failed:`, err.message);
     if (id && userId) {
-      try { await writeNarrative(id, userId, { status: "error", error: err.message, attempts: prev && prev.attempts, intakeHash: prev && prev.intakeHash }); }
+      try { await writeNarrative(id, userId, { status: "error", error: err.message, attempts: prev && prev.attempts, intakeHash: prev && prev.intakeHash, ...(err.gate && err.gate.blocks ? { blocked: err.gate.blocks.slice(0, 6).map((b) => ({ rule: b.rule, field: b.field, match: b.match })) } : {}) }); }
       catch (e) { console.error("[agent-marketing-plan-background] could not write error status:", e.message); }
     }
   }

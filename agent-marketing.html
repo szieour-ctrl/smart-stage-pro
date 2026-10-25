@@ -289,8 +289,8 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
       <div class="choices" id="angleChoices"></div>
       <label class="lbl" for="market">Market or neighborhood</label>
       <input type="text" id="market" maxlength="60" placeholder="Leave blank to use the market you researched">
-      <label class="lbl" for="audience">Who is this for?</label>
-      <select id="audience"></select>
+      <label class="lbl" for="intakeAudience">Who is this for?</label>
+      <select id="intakeAudience"></select>
       <div id="issueWrap"><label class="lbl" for="issue" id="issueLbl">Main issue</label>
       <select id="issue"></select></div>
       <label class="lbl" for="observation" id="obsLbl">What have you noticed? (optional)</label>
@@ -497,10 +497,10 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
       (tp.reportNotice ? '<div class="hint" style="margin-top:6px">Required notice, added to your piece automatically: ' + esc(tp.reportNotice) + "</div>" : "") : "";
     $("angleChoices").innerHTML = ['<label class="choice"><input type="radio" name="angle" value=""' + (!state.angle ? " checked" : "") + "><span>No specific angle. Use my topic.</span></label>"].concat(Object.keys(t.angles).map(function (k) { return '<label class="choice"><input type="radio" name="angle" value="' + esc(k) + '"' + (k === state.angle ? " checked" : "") + "><span>" + esc(t.angles[k].label) + "</span></label>"; })).join("");
     Array.prototype.forEach.call(document.querySelectorAll('input[name="angle"]'), function (el) { el.addEventListener("change", function () { state.angle = el.value; applyAngle(); }); });
-    $("audience").innerHTML = ['<option value="">Same as my research</option>'].concat(state.schema.audiences.map(function (a) { return '<option value="' + esc(a) + '">' + esc(a) + "</option>"; })).join("");
+    $("intakeAudience").innerHTML = ['<option value="">Same as my research</option>'].concat(state.schema.audiences.map(function (a) { return '<option value="' + esc(a) + '">' + esc(a) + "</option>"; })).join("");
     $("action").innerHTML = state.schema.actions.map(function (a) { return '<option value="' + esc(a) + '">' + esc(a) + "</option>"; }).join("");
     $("market").value = i.market || ""; $("observation").value = i.observation || "";
-    if (i.audience) $("audience").value = i.audience; if (i.action) $("action").value = i.action;
+    if (i.audience) $("intakeAudience").value = i.audience; if (i.action) $("action").value = i.action;
     applyAngle(i.issue); countObs(); say("intakeMsg", "");
   }
   function applyAngle(issue) {
@@ -517,7 +517,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
   async function saveIntake() {
     $("intakeBtn").disabled = true; say("intakeMsg", "");
     try {
-      var intake = { angle: state.angle || "", market: $("market").value, audience: $("audience").value, issue: $("issue").value, observation: $("observation").value, action: $("action").value };
+      var intake = { angle: state.angle || "", market: $("market").value, audience: $("intakeAudience").value, issue: $("issue").value, observation: $("observation").value, action: $("action").value };
       var r = await api("POST", "", { action: "save_intake", id: state.project.id, intake: intake });
       if (!r.ok) throw new Error(r.json.error || "Could not save");
       setProject(r.json.project);
@@ -679,14 +679,14 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     if (!$("stepImages").classList.contains("hidden")) { im.src[pickScene] = "own"; im.sig = ""; loadImages(); }
   }
   function renderUpload() {
-    $("pickerBody").innerHTML = '<input type="file" id="upFile" accept="image/png,image/jpeg,image/webp"><label class="lbl" for="upLabel">Name (optional)</label><input type="text" id="upLabel" maxlength="80" placeholder="e.g. Me at the community clubhouse">' +
+    $("pickerBody").innerHTML = '<input type="file" id="photoUpFile" accept="image/png,image/jpeg,image/webp"><label class="lbl" for="upLabel">Name (optional)</label><input type="text" id="upLabel" maxlength="80" placeholder="e.g. Me at the community clubhouse">' +
       '<label class="attest"><input type="checkbox" id="upOwn"><span id="upAttest"></span></label><div class="hint">Saved to My Marketing Photos so you can reuse it in other projects.</div>' +
       '<div class="actions"><button class="btn gold" type="button" id="upGo">Upload and use this photo</button></div>';
     $("upAttest").textContent = (state.schema.uploadAttestation && state.schema.uploadAttestation.text) || "I own this photo or have permission to use it in my own marketing.";
     $("upGo").addEventListener("click", upload);
   }
   async function upload() {
-    var f = $("upFile").files[0];
+    var f = $("photoUpFile").files[0];
     if (!f) return say("pickerMsg", "Choose a photo first.", "err");
     if (!$("upOwn").checked) return say("pickerMsg", "Please confirm you own this photo or have permission to use it.", "err");
     $("upGo").disabled = true; say("pickerMsg", "Uploading…");

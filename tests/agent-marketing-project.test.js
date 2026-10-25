@@ -12,13 +12,16 @@ let nextId = 1;
 // Stub the two modules that touch the network, before the handler loads.
 const libPath = require.resolve("../netlify/functions/lib/marketing-profile-lib");
 const authPath = require.resolve("../netlify/functions/lib/reel-auth-lib");
+// A chosen research topic (what the Research step freezes on the project).
+const TOPIC = { id: "t2", researchId: "bbbbbbbb-bbbb-4bbb-8bbb-000000000001", question: "Are homes in Roseville taking longer to sell?", whyItMatters: "Sellers are pricing off old sales.", scope: "selected", scopeNote: "", origin: "web", audience: "sellers",
+  geography: { type: "city", name: "Roseville", state: "CA", label: "Roseville, CA" }, sources: [{ type: "web", url: "https://example.com/a", title: "A", domain: "example.com" }] };
 const uuid = (n) => `aaaaaaaa-aaaa-4aaa-8aaa-${String(n).padStart(12, "0")}`;
 function fakeSupabase(method, table, body, qs = "") {
   assert.strictEqual(table, "agent_marketing_projects");
   const q = new URLSearchParams(qs.replace(/^\?/, ""));
   const idEq = (q.get("id") || "").replace("eq.", "");
   const userEq = (q.get("user_id") || "").replace("eq.", "");
-  if (method === "POST") { const row = { id: uuid(nextId++), status: "draft", intake: {}, created_at: "t", updated_at: "t", ...body }; rows.push(row); return Promise.resolve({ status: 201, data: [row] }); }
+  if (method === "POST") { const row = { id: uuid(nextId++), status: "draft", intake: {}, selected_topic: TOPIC, created_at: "t", updated_at: "t", ...body }; rows.push(row); return Promise.resolve({ status: 201, data: [row] }); }
   const match = rows.filter((r) => (!idEq || r.id === idEq) && (!userEq || r.user_id === userEq));
   if (method === "GET") return Promise.resolve({ status: 200, data: match });
   if (method === "PATCH") { match.forEach((r) => Object.assign(r, body)); return Promise.resolve({ status: 200, data: match }); }
@@ -221,4 +224,26 @@ test("edits keep the planner's scenes and counters and flag stale scenes", async
   assert.strictEqual(row.narrative.intakeHash, "abc");
   assert.strictEqual(row.narrative.scenesStale, true);
   assert.deepStrictEqual(row.narrative.claimsToVerify, ["x"]);
+});
+
+test("a topic makes the angle and issue optional, fills market and audience from the research, and is required to save", async () => {
+  process.env.AGENT_MARKETING_ENABLED = "true";
+  const c = await call("POST", { action: "create", template: "local_market_insider", durationSec: 45, formats: ["9x16"], voice: "ssp_male" });
+  const id = c.json.project.id;
+  const ok = await call("POST", { action: "save_intake", id, intake: { action: "Compare options", observation: "" } });
+  assert.strictEqual(ok.status, 200, JSON.stringify(ok.json));
+  assert.strictEqual(ok.json.project.intake.market, "Roseville, CA");
+  assert.strictEqual(ok.json.project.intake.audience, "Home sellers");
+  assert.strictEqual(ok.json.project.intake.angle, "");
+  assert.deepStrictEqual(ok.json.needsInput, ["observation"]);
+  assert.strictEqual(ok.json.project.selectedTopic.id, "t2");
+  const bad = await call("POST", { action: "save_intake", id, intake: { angle: "nonsense", action: "Compare options" } });
+  assert.strictEqual(bad.status, 400);
+  const bare = await call("POST", { action: "create", template: "local_market_insider", durationSec: 45, formats: ["9x16"], voice: "ssp_male" });
+  rows.find((r) => r.id === bare.json.project.id).selected_topic = null;
+  const none = await call("POST", { action: "save_intake", id: bare.json.project.id, intake: { action: "Compare options" } });
+  assert.strictEqual(none.status, 409);
+  assert.match(none.json.error, /five topics/);
+  const plan = await call("POST", { action: "plan", id: bare.json.project.id });
+  assert.strictEqual(plan.status, 409);
 });

@@ -141,3 +141,29 @@ test("a re-used scene that names no valid source falls back to the nearest EARLI
   assert.match(sys, /central third/); assert.match(sys, /ONCE as a wide 16:9/);
   assert.deepStrictEqual(planLib.GPT_RANGE, { 30: [2, 3], 45: [3, 4], 60: [4, 6] });
 });
+
+// ── the chosen research topic reaches the script writer, and only its checked text ──
+const topic = { id: "t1", researchId: "bbbbbbbb-bbbb-4bbb-8bbb-000000000001", question: "Are fewer homes closing?", whyItMatters: "There were 31 closed sales.", scope: "selected", scopeNote: "Covers Roseville.", origin: "report", smallSample: false,
+  reportFigures: [{ id: "r1.f3", text: "Closed sales: 31" }], reportNotice: "Based on information from MetroList Services, Inc. for the period Oct 11, 2026 through Oct 17, 2026.", trendSignals: [],
+  sources: [{ type: "report", url: null, title: "Your MLS report" }], secretField: "never sent" };
+
+test("planner input carries the topic's checked text and nothing else from it", () => {
+  const m = JSON.parse(planLib.buildUserMessage({ ...project, intake: { ...intake, angle: "", issue: "" }, selected_topic: topic }));
+  assert.strictEqual(m.selected_topic.topic_question, "Are fewer homes closing?");
+  assert.deepStrictEqual(m.selected_topic.figures_you_may_state, ["Closed sales: 31"]);
+  assert.strictEqual(m.selected_topic.origin, "the agent's own MLS report");
+  assert.ok(!JSON.stringify(m).includes("never sent"));
+  assert.strictEqual(m.insider_angle, null);
+  assert.match(planLib.buildSystemPrompt(), /selected_topic[^"]*only numbers and facts/);
+});
+
+test("a topic with no validated source is not given to the planner, and other templates never get one", () => {
+  assert.strictEqual(planLib.topicBrief({ ...topic, sources: [] }), null);
+  assert.ok(!("selected_topic" in JSON.parse(planLib.buildUserMessage({ ...project, selected_topic: { ...topic, sources: [] } }))));
+});
+
+test("choosing a different topic lets the script be planned again", () => {
+  assert.strictEqual(planLib.intakeHash(intake, topic), planLib.intakeHash(intake, { ...topic }));
+  assert.notStrictEqual(planLib.intakeHash(intake, topic), planLib.intakeHash(intake, { ...topic, id: "t2" }));
+  assert.notStrictEqual(planLib.intakeHash(intake, topic), planLib.intakeHash(intake));
+});

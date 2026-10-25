@@ -75,18 +75,28 @@ function schemaFor(template) { return SCHEMAS[template] || null; }
  * `clean` contains ONLY the known keys. A blank observation is allowed but listed in needsInput: Claude must then
  * write cautious general framing and flag the missing evidence instead of inventing a firsthand story.
  */
-function validateIntake(template, values) {
+// The research audience keys → the intake audience wording.
+const AUDIENCE_FROM_RESEARCH = { buyers: "Home buyers", sellers: "Home sellers", both: "Both buyers and sellers", investors: "Both buyers and sellers", general: "Both buyers and sellers" };
+
+/**
+ * opts.topic = the agent's chosen research topic (frozen on the project). With a topic, the angle and the issue are optional (the
+ * topic is the subject), and a blank market or audience is filled from the research request. Without one the original rules apply.
+ */
+function validateIntake(template, values, opts) {
   const schema = schemaFor(template);
   if (!schema) return { ok: false, errors: [{ field: "template", message: "Unknown template." }], clean: {}, needsInput: [] };
-  const v = values && typeof values === "object" ? values : {};
+  let v = values && typeof values === "object" ? values : {};
   const errors = [];
   const clean = {};
 
+  const topic = opts && opts.topic && typeof opts.topic === "object" ? opts.topic : null;
   const angleKey = String(v.angle || "");
   const angle = schema.angles[angleKey];
-  if (!angle) errors.push({ field: "angle", message: "Choose an insider angle." });
-  else clean.angle = angleKey;
+  if (!angle && (!topic || angleKey)) errors.push({ field: "angle", message: "Choose an insider angle." });
+  else clean.angle = angle ? angleKey : "";
 
+  if (topic && !String(v.market || "").trim() && topic.geography && typeof topic.geography.label === "string") v = { ...v, market: topic.geography.label };
+  if (topic && !String(v.audience || "").trim()) v = { ...v, audience: AUDIENCE_FROM_RESEARCH[topic.audience] || AUDIENCES[0] };
   clean.market = cleanText(v.market, LIMITS.market);
   if (!clean.market) errors.push({ field: "market", message: "Enter the city, neighborhood or ZIP this is about." });
   else if (String(v.market || "").trim().length > LIMITS.market) errors.push({ field: "market", message: `Keep the market to ${LIMITS.market} characters or fewer.` });
@@ -96,8 +106,8 @@ function validateIntake(template, values) {
 
   clean.issue = String(v.issue || "");
   if (angle) {
-    if (!angle.issues.includes(clean.issue)) errors.push({ field: "issue", message: "Choose an issue from the list." });
-  }
+    if (!angle.issues.includes(clean.issue) && !(topic && !clean.issue)) errors.push({ field: "issue", message: "Choose an issue from the list." });
+  } else if (clean.issue) { clean.issue = ""; }
 
   clean.action = String(v.action || ACTIONS[0]);
   if (!ACTIONS.includes(clean.action)) errors.push({ field: "action", message: "Choose what you want viewers to do." });
@@ -113,4 +123,4 @@ function validateIntake(template, values) {
   return { ok: errors.length === 0, errors, clean, needsInput };
 }
 
-module.exports = { AUDIENCES, ACTIONS, LIMITS, SCHEMAS, schemaFor, validateIntake, cleanText };
+module.exports = { AUDIENCE_FROM_RESEARCH, AUDIENCES, ACTIONS, LIMITS, SCHEMAS, schemaFor, validateIntake, cleanText };

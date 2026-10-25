@@ -24,14 +24,14 @@ const mediaLib = require("./lib/agent-marketing-media-lib");
 
 const headers = { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json", "Cache-Control": "no-store" };
 const reply = (statusCode, obj) => ({ statusCode, headers, body: JSON.stringify(obj) });
-const PUBLIC_COLS = "id,template,angle,formats,duration_sec,voice,music,intake,narrative,narrative_approved_at,storyboard,status,gate_version,gate_result,created_at,updated_at";
+const PUBLIC_COLS = "id,template,angle,formats,duration_sec,voice,music,intake,narrative,narrative_approved_at,storyboard,selected_topic,status,gate_version,gate_result,created_at,updated_at";
 
 function forClient(row) {
   if (!row) return null;
   return {
     id: row.id, template: row.template, angle: row.angle, formats: row.formats, durationSec: row.duration_sec, voice: row.voice, music: row.music || "default",
     intake: row.intake || {}, narrative: row.narrative || null, narrativeApprovedAt: row.narrative_approved_at || null,
-    storyboard: row.storyboard || null, status: row.status, gate: row.gate_result || null,
+    storyboard: row.storyboard || null, selectedTopic: row.selected_topic || null, status: row.status, gate: row.gate_result || null,
     createdAt: row.created_at, updatedAt: row.updated_at,
   };
 }
@@ -105,18 +105,20 @@ exports.handler = async (event) => {
     if (am.NOT_EDITABLE_AFTER.includes(project.status)) return reply(409, { error: "This piece is already rendering or finished. Start a new one to change it." });
 
     if (action === "save_intake") {
-      const v = intakeLib.validateIntake(project.template, b.intake);
+      // Local Market Insider starts from one of the five researched topics; its figures and sources are on the project, never from the browser.
+      if (project.template === "local_market_insider" && !project.selected_topic) return reply(409, { error: "Choose one of the five topics first." });
+      const v = intakeLib.validateIntake(project.template, b.intake, { topic: project.selected_topic });
       if (!v.ok) return reply(400, { error: v.errors[0].message, errors: v.errors });
       const g = gate.evaluate({ template: project.template, payload: b.intake, intake: v.clean });
       if (!g.ok) return reply(422, { error: gate.explain(g), gate: gateSummary(g) });
       // New facts mean any earlier script is stale: keep it as a draft, drop back to "draft", never touch narrative_approved.
-      const saved = await patch(project.id, userId, { intake: v.clean, angle: v.clean.angle, status: "draft", gate_version: g.version, gate_result: gateSummary(g) });
+      const saved = await patch(project.id, userId, { intake: v.clean, angle: v.clean.angle || null, status: "draft", gate_version: g.version, gate_result: gateSummary(g) });
       if (!saved) return reply(500, { error: "Could not save your answers" });
       return reply(200, { project: forClient(saved), needsInput: v.needsInput, gate: gateSummary(g) });
     }
 
     if (action === "save_narrative") {
-      if (!project.intake || !project.intake.angle) return reply(409, { error: "Answer the intake questions first." });
+      if (!project.intake || !project.intake.market) return reply(409, { error: "Answer the intake questions first." });
       const v = am.validateNarrative(b.narrative, project.duration_sec);
       if (v.error) return reply(400, { error: v.error });
       const g = gate.evaluate(am.gateInputFor(project, v.narrative, "edited"));
@@ -138,10 +140,11 @@ exports.handler = async (event) => {
     }
 
     if (action === "plan") {
-      if (!project.intake || !project.intake.angle) return reply(409, { error: "Answer the intake questions first." });
+      if (!project.intake || !project.intake.market) return reply(409, { error: "Answer the intake questions first." });
+      if (project.template === "local_market_insider" && !project.selected_topic) return reply(409, { error: "Choose one of the five topics first." });
       if (!process.env.ANTHROPIC_API_KEY || !process.env.INTERNAL_API_KEY) return reply(500, { error: "Planning is not configured." });
       const n = project.narrative;
-      const hash = planLib.intakeHash(project.intake);
+      const hash = planLib.intakeHash(project.intake, project.selected_topic);
       const attempts = (n && Number(n.attempts)) || 0;
       if (n && n.status === "planning" && Date.now() - Number(n.startedAt || 0) < planLib.STALE_PLANNING_MS) return reply(409, { error: "Your script is already being written." });
       // One planning call per distinct set of answers: a ready script for the same answers is reused, not re-bought.

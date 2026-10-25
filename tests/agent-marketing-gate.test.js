@@ -219,3 +219,21 @@ test("market vocabulary the verified facts use ('list price', 'price reduction')
   // a phrase the verified facts do NOT use is still blocked
   assert.ok(ev("This is a price drop you should not miss.", v).blocks.some((b) => b.rule === "listing_announcement"));
 });
+
+test("Local Market Insider may use sold / active / pending in market context; ownership of any activity still blocks", () => {
+  const am = require("../netlify/functions/lib/agent-marketing-lib.js");
+  const project = { template: "local_market_insider", intake: { market: "Roseville, CA" }, selected_topic: {
+    question: "Are sellers in Roseville accepting offers close to their asking price?", whyItMatters: "September 2026 sales.",
+    sources: [{ url: "https://example.org/r" }], reportFigures: [{ text: "Sold price as a percent of list price: 99%" }, { text: "Sold price as a percent of original list price: 97%" }], reportNotice: "N", trendSignals: [] } };
+  const run = (s) => gate.evaluate(am.gateInputFor(project, { captionText: s, narrationTagged: s, scenes: [{ narrationExcerpt: s }], notice: "N", cta: { text: "Ask me.", source: "claude" } }, "claude"));
+  for (const ok of [
+    "In September 2026, homes sold at 99% of their list price, and 97% of the original list price. I'm happy to walk you through what this means.",
+    "Active listings are up, pending sales slowed and price reductions were common.",
+    "I can show you how homes sold at 99% of list price and what pending homes mean for you.",
+    "Homes are under contract faster in Roseville.",
+  ]) assert.strictEqual(run(ok).ok, true, ok);
+  for (const bad of [
+    "I sold a home at 99% of list price.", "My listing is pending.", "I have a home under contract in Roseville.", "This home is pending.",
+    "This home is listed at $689,000.", "We just sold 3 homes in Roseville.", "Just listed in Roseville.", "Homes sold over asking.",
+  ]) assert.strictEqual(run(bad).ok, false, bad);
+});

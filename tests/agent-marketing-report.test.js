@@ -209,3 +209,24 @@ test("files with nothing readable fail with a plain message", () => {
   assert.match(lib.errorMessage("no_text"), /scan/);
   assert.match(lib.errorMessage("xls"), /xlsx/);
 });
+
+test("compareText adds a change calculated by code from the report's own two figures", () => {
+  const lib = require("../netlify/functions/lib/agent-marketing-report-lib");
+  const facts = { period: { priorLabel: "August 2026", yearAgoLabel: "September 2025" } };
+  const t = lib.compareText(facts, { key: "median_close_price", unit: "usd", value: 742000, prior: 735000, yearAgo: 662000 });
+  assert.match(t, /\$662,000 in September 2025 \(up 12\.1%\)/);
+  assert.match(t, /in August 2026 \(up 1%\)/);
+  assert.match(lib.compareText(facts, { unit: "count", value: 130, yearAgo: 146 }), /\(down 11%\)/);
+  assert.match(lib.compareText(facts, { unit: "pct", value: 99, yearAgo: 97.8 }), /\(up 1\.2 points\)/);
+  assert.match(lib.compareText(facts, { unit: "count", value: 50, yearAgo: 50 }), /\(unchanged\)/);
+  assert.doesNotMatch(lib.compareText(facts, { unit: "count", value: 5, yearAgo: 0 }), /\(up|\(down/); // no percent from zero
+});
+
+test("a percent change the system calculated is a verified figure; one the model invented still blocks", () => {
+  const gate = require("../netlify/functions/lib/agent-marketing-gate");
+  const topic = { question: "Are Roseville prices up?", whyItMatters: "September 2026.", sources: [{ url: "https://e.org" }], trendSignals: [],
+    reportFigures: [{ text: "Median sold price: $742,000 vs $662,000 in September 2025 (up 12.1%)" }] };
+  const run = (s) => gate.evaluate({ template: "local_market_insider", intake: {}, verified: gate.verifiedFromProject({ template: "local_market_insider", selected_topic: topic }), generated: { narration: s, captions: "" }, cta: { text: "Ask me.", source: "claude" } });
+  assert.strictEqual(run("The median sold price is $742,000, up 12.1% from $662,000 a year ago. That suggests buyers are still competing for good homes.").ok, true);
+  assert.ok(run("The median sold price is up 15% from a year ago.").blocks.some((b) => b.rule === "invented_number" && b.match === "15"));
+});

@@ -237,3 +237,14 @@ test("Local Market Insider may use sold / active / pending in market context; ow
     "This home is listed at $689,000.", "We just sold 3 homes in Roseville.", "Just listed in Roseville.", "Homes sold over asking.",
   ]) assert.strictEqual(run(bad).ok, false, bad);
 });
+
+test("approving a sourced Local Market Insider script (agent-text path) applies the same context rules", () => {
+  const am = require("../netlify/functions/lib/agent-marketing-lib.js");
+  const project = { template: "local_market_insider", intake: { market: "Roseville, CA" }, selected_topic: {
+    question: "Are sellers in Roseville accepting offers close to their asking price?", whyItMatters: "Negotiating room, September 2026",
+    sources: [{ url: "https://example.org/r" }], reportFigures: [{ text: "99% sold to list" }, { text: "97% sold to original" }], reportNotice: "N", trendSignals: [] } };
+  const run = (s) => gate.evaluate(am.gateInputFor(project, { captionText: s, narrationTagged: s, scenes: [{ narrationExcerpt: s }], notice: "N", cta: { text: "Ask me.", source: "user_edited" } }, "user"));
+  assert.strictEqual(run("In September 2026, homes sold at 99% of their list price, and the original asking price figure was 97%. I'm happy to walk you through what this means.").ok, true);
+  assert.strictEqual(run("I sold a home at 99% of list price.").ok, false);
+  assert.strictEqual(run("This home is listed at $689,000.").ok, false);
+});

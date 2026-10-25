@@ -266,20 +266,6 @@ function evaluate(input) {
   const intakeLower = intakeText.toLowerCase();
   const intakeNumbers = numberTokens(intakeText);
 
-  // Everything the AGENT typed: property-sale rules block; Fair Housing only warns; claims pass through.
-  const userFields = { ...(i.userText || {}) };
-  for (const [k, v] of Object.entries(intake)) if (typeof v === "string") userFields[`intake.${k}`] = v;
-  if (i.cta && (i.cta.source === "user_edited" || i.cta.source === "user_inserted")) userFields["cta"] = i.cta.text;
-  for (const [field, text] of Object.entries(userFields)) {
-    scan(text, field, BLOCK_RULES, blocks);
-    scan(text, field, WARN_RULES, warnings);
-    scan(text, field, FAIR_HOUSING, warnings);
-    for (const r of CLAIM_RULES) {
-      const m = norm(text).match(r.re);
-      if (m) agentSuppliedClaims.push(`${field}: ${snippet(m)}`);
-    }
-  }
-
   // Verified facts: honored only for Local Market Insider, and only in the shape verifiedFromTopic() produces.
   const vIn = i.template === VERIFIED_TEMPLATE && i.verified && typeof i.verified === "object" ? i.verified : null;
   const vTexts = vIn && Array.isArray(vIn.texts) ? vIn.texts.filter((x) => typeof x === "string" && x.trim()).map(norm) : [];
@@ -289,6 +275,23 @@ function evaluate(input) {
   const verifiedLower = verifiedText.toLowerCase();
   const verifiedNumbers = numberTokens(verifiedText);
   const sourcedFacts = [];
+
+  // Everything the AGENT typed: property-sale rules block; Fair Housing only warns; claims pass through.
+  const userFields = { ...(i.userText || {}) };
+  for (const [k, v] of Object.entries(intake)) if (typeof v === "string") userFields[`intake.${k}`] = v;
+  if (i.cta && (i.cta.source === "user_edited" || i.cta.source === "user_inserted")) userFields["cta"] = i.cta.text;
+  for (const [field, text] of Object.entries(userFields)) {
+    // Approving or saving a script sends Claude's words back as the agent's own text; on a sourced Local Market Insider piece the same
+    // context rules apply (market vocabulary passes, ownership claims block).
+    if (hasVerified && !field.startsWith("intake.")) scanBlocksVerified(text, field, { addresses: vAddresses, verifiedLower }, blocks, sourcedFacts);
+    else scan(text, field, BLOCK_RULES, blocks);
+    scan(text, field, WARN_RULES, warnings);
+    scan(text, field, FAIR_HOUSING, warnings);
+    for (const r of CLAIM_RULES) {
+      const m = norm(text).match(r.re);
+      if (m) agentSuppliedClaims.push(`${field}: ${snippet(m)}`);
+    }
+  }
 
   // Everything CLAUDE wrote (and the default CTA): property-sale rules block, Fair Housing blocks, and Claude may not
   // add claims or numbers the agent did not supply. Local Market Insider text may also use what traces to the verified topic.

@@ -30,6 +30,7 @@ const DATA_SOURCES = ["web", "upload", "both"];
 const TOPIC_COUNT = 5;
 const MAX_UPLOADS = 3;
 const FRESH_DAYS = 30;            // a source for a market update may be at most this old (the GPT prefers 7 and accepts 30)
+const MAX_TOPICS_PER_SITE = 2, MIN_SITES = 3;
 const LIMITS = { name: 60, question: 200, why: 400, signal: 160, scopeNote: 240, sourceTitle: 200, url: 500, eventText: 160 };
 
 // Dated, honest planning numbers: the proposed beta allowances from the Oct 24 brief. NOT billing entitlements.
@@ -157,6 +158,8 @@ function systemPrompt(mode) {
     : [
       "MODE: Local Market Update. Each topic is a question buyers, sellers or residents in this market are asking right now about housing inventory, pricing, days on market, pending or closed sales, competition, new construction or changing conditions.",
       "Prefer sources from the last 7 days; accept up to 30 days only if necessary. Prefer MLS-based or public data. Set event to null.",
+      "Use at least three different publishers across the five topics, and no more than two topics may rest on the same website. Prefer independent or primary sources (an MLS or association report, the city or county, California Association of Realtors, NAR, Redfin, Zillow, Realtor.com, Freddie Mac, local news) over an individual agent's or team's own marketing blog, and never make one agent's blog the main source for the whole set.",
+      "Take every figure in a topic from ONE source and name its period. Never mix numbers from different sources in the same topic. If a source calls a figure preliminary or the month is not complete, say so in trend_signals. Prefer the most recent complete month.",
     ];
   const shape = [
     "Return ONLY one JSON object, no commentary, in this shape:",
@@ -326,6 +329,15 @@ function validateTopics(rawTopics, { mode, today } = {}) {
   // Distinct: no two topics may be the same question in different words.
   for (let i = 0; i < topics.length; i++) for (let j = i + 1; j < topics.length; j++) {
     if (similar(topics[i].question, topics[j].question)) problems.push(`topics ${topics[i].id} and ${topics[j].id} overlap`);
+  }
+  // Variety: five topics that all rest on one website are one source's opinion, not a market picture. Market updates only: events
+  // legitimately come from the same city or venue calendar.
+  if (mode === "market_update" && topics.length === TOPIC_COUNT) {
+    const perSite = new Map();
+    topics.forEach((t) => new Set((t.sources || []).map((x) => String(x.domain || "").replace(/^www\./, ""))).forEach((d) => { if (d) perSite.set(d, (perSite.get(d) || 0) + 1); }));
+    const crowded = [...perSite.entries()].filter(([, n]) => n > MAX_TOPICS_PER_SITE).map(([d]) => d);
+    if (crowded.length) problems.push(`too many topics rely on the same site (${crowded.slice(0, 3).join(", ")}); use different publishers for at least three of them`);
+    else if (perSite.size < MIN_SITES) problems.push(`the topics use only ${perSite.size} different site${perSite.size === 1 ? "" : "s"}; use at least ${MIN_SITES} different publishers`);
   }
   const ok = problems.length === 0 && topics.length === TOPIC_COUNT;
   return { ok, topics: ok ? topics : [], problems };

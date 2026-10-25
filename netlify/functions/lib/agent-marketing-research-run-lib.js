@@ -182,7 +182,7 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
   const baseInput = payload && payload.input;
   let usage = { promptTokens: null, completionTokens: null, citationTokens: null, reasoningTokens: null, searchQueries: null, costUsd: null };
   let modelUsed = payload ? payload.model : null, grounded = null, attempts = 0, problems = [], validation = null, error = null, providerError = null;
-  let reportNote = null, reportAttempts = 0;
+  let reportNote = null, reportAttempts = 0, fallback = null;
 
   try {
     if (dataSource !== "upload") {
@@ -201,11 +201,19 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
           validation = { ok: false, topics: [], problems: [parseErr.message] };
           problems = validation.problems;
         }
-        if (validation.ok) break;
+        const soft = validation.ok && validation.soft ? validation.soft : [];
+        if (validation.ok && !soft.length) break;
+        if (validation.ok) fallback = fallback || validation;   // usable, but too few different sites: keep it in case the retry does worse
         if (attempts < maxAttempts) {
-          payload = { ...payload, input: `${baseInput}\n\nYour previous answer was rejected: ${problems.slice(0, 6).join("; ").slice(0, 600)}. Return the JSON again with exactly 5 topics that fix this. Do not invent sources, dates or events.` };
+          const why = validation.ok ? soft : problems;
+          const tool = payload.tools && payload.tools[0];
+          // A retry also looks wider (more results, more search context) so there is more to choose publishers from.
+          const tools = tool ? [{ ...tool, max_results: Math.max(tool.max_results || 0, 20), max_tokens: Math.max(tool.max_tokens || 0, 10000) }] : payload.tools;
+          payload = { ...payload, tools, input: `${baseInput}\n\nYour previous answer was ${validation.ok ? "usable but needs work" : "rejected"}: ${why.slice(0, 6).join("; ").slice(0, 600)}. Return the JSON again with exactly 5 topics that fix this. Do not invent sources, dates or events.` };
         }
       }
+      if (!(validation && validation.ok) && fallback) validation = fallback;
+      if (validation && validation.ok && validation.soft && validation.soft.length && !reportNote) reportNote = "Most of these topics rest on one or two websites, because few independent sources were found for this market this month. Your own MLS report is the best way to add a second source.";
     }
     if (dataSource !== "web" && (dataSource === "upload" || (validation && validation.ok))) {
       // Topics from the agent's own report. In "both", a failure here is not fatal: the five web topics are still delivered, and the agent is told.
@@ -235,7 +243,7 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
   // Cost: the provider's own figure when it sent one, otherwise an estimate from tokens (flagged as an estimate).
   const estimated = usage.costUsd == null ? estimateCostUsd(modelUsed, usage) : null;
   const costUsd = usage.costUsd != null ? usage.costUsd : estimated;
-  const finalUsage = { ...usage, costUsd, costEstimated: usage.costUsd == null && estimated != null, targetUsd: cfg.costTargetUsd, withinTarget: costUsd == null ? null : costUsd <= cfg.costTargetUsd, attempts, grounded, providerError, dataSource, reportAttempts, reportNote };
+  const finalUsage = { ...usage, costUsd, costEstimated: usage.costUsd == null && estimated != null, targetUsd: cfg.costTargetUsd, withinTarget: costUsd == null ? null : costUsd <= cfg.costTargetUsd, attempts, grounded, providerError, dataSource, reportAttempts, reportNote, problems: problems.slice(0, 6).map((x) => String(x).slice(0, 200)) };
   const fields = rl.outcomeFields({ validation: error ? null : validation, usage: finalUsage, model: modelUsed, today, now, error });
   return { fields, problems, attempts };
 }

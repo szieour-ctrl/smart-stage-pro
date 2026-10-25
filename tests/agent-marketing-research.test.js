@@ -253,20 +253,17 @@ test("outcome: charged only for a validated five-topic set; failures, timeouts a
   assert.match(timeout.error, /timed out/);
 });
 
-test("topics: five topics resting on one or two websites fail a market update, with a plain reason", () => {
+test("topics: five topics resting on one or two websites are usable but flagged as soft problems; events are exempt", () => {
   const oneSite = fiveMarket().map((t, i) => ({ ...t, sources: [{ title: "Agent blog", url: `https://agentblog.example.com/post-${i}`, published: "2026-10-20" }] }));
   const a = r.validateTopics(oneSite, { mode: "market_update", today: TODAY });
-  assert.strictEqual(a.ok, false);
-  assert.match(a.problems.join(" "), /same site \(agentblog\.example\.com\)/);
-  // Two topics on one site is fine as long as there are at least three sites in all.
+  assert.strictEqual(a.ok, true);                      // still a valid set: the run decides whether to ask again
+  assert.match(a.soft.join(" "), /same site \(agentblog\.example\.com\)/);
   const mixed = fiveMarket().map((t, i) => ({ ...t, sources: [{ title: "S", url: `https://${i < 2 ? "agentblog" : "site" + i}.example.com/p-${i}`, published: "2026-10-20" }] }));
-  assert.strictEqual(r.validateTopics(mixed, { mode: "market_update", today: TODAY }).ok, true);
-  // Only two sites in total, even with no site above the cap, is too narrow.
+  assert.deepStrictEqual(r.validateTopics(mixed, { mode: "market_update", today: TODAY }).soft, []);
   const two = fiveMarket().map((t, i) => ({ ...t, sources: [{ title: "S", url: `https://${i % 2 ? "a" : "b"}.example.com/p-${i}`, published: "2026-10-20" }] }));
-  assert.strictEqual(r.validateTopics(two, { mode: "market_update", today: TODAY }).ok, false);
-  // Events may share a city or venue calendar.
+  assert.match(r.validateTopics(two, { mode: "market_update", today: TODAY }).soft.join(" "), /same site \(b\.example\.com\)/);
   const ev = fiveEvents().map((t, i) => ({ ...t, sources: [{ title: "City", url: `https://www.roseville.ca.gov/events/${i}`, published: null }] }));
-  assert.strictEqual(r.validateTopics(ev, { mode: "local_events", today: TODAY }).ok, true);
+  assert.deepStrictEqual(r.validateTopics(ev, { mode: "local_events", today: TODAY }).soft, []);
 });
 
 test("text that is too long is cut back to a whole word, never mid-word", () => {

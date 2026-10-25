@@ -105,6 +105,12 @@ function validateNarrative(body, durationSec) {
   };
 }
 
+// MetroList's required notice comes from the frozen research topic and is attached by code, never by the client or the model.
+function topicNotice(project) {
+  const t = project && project.template === "local_market_insider" && project.selected_topic;
+  return t && typeof t.reportNotice === "string" ? t.reportNotice : "";
+}
+
 // Build the gate input for a stored project + narrative. Text the agent wrote or edited is checked as the agent's own;
 // text Claude wrote (source "claude") is held to the stricter rules (no invented claims or numbers).
 function gateInputFor(project, narrative, source) {
@@ -121,5 +127,5 @@ const NOT_EDITABLE_AFTER = ["rendering", "rendered", "published"];
 
 module.exports = {
   DURATIONS, FORMATS, VOICES, MUSIC, WORD_TARGETS, UUID_RE, NOT_EDITABLE_AFTER,
-  isEnabledFor, validateCreate, stripAudioTags, countWords, validateNarrative, gateInputFor,
+  isEnabledFor, validateCreate, stripAudioTags, countWords, validateNarrative, gateInputFor, topicNotice,
 };

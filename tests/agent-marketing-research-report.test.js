@@ -43,7 +43,7 @@ test("a topic that quotes its cited figures is accepted, with the figures, scope
   assert.strictEqual(t.scope, "selected");
   assert.strictEqual(t.reportNotice, "Based on information from MetroList Services, Inc. for the period Sep 1, 2026 through Sep 30, 2026.");
   assert.strictEqual(t.reportFigures.length, 1);
-  assert.match(t.reportFigures[0].text, /Average days on market: 45 days vs 42 days in August 2026 and 43 days in September 2025/);
+  assert.match(t.reportFigures[0].text, /Average days on market: 45 days vs 42 days in August 2026 \(up 7\.1%\) and 43 days in September 2025 \(up 4\.7%\)/);
   assert.strictEqual(t.sources[0].type, "report");
   assert.strictEqual(t.sources[0].url, null);
 });

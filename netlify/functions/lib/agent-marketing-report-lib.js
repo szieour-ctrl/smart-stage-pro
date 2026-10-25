@@ -255,14 +255,30 @@ function scopeNote(facts) {
 }
 
 /** Display rows for the confirmation screen: grouped by status, each figure with its sample size. */
+/**
+ * The change between this figure and an earlier value of the SAME measure in the SAME report, calculated here by code (never by a model):
+ * " (up 12.1%)" for counts, prices, days and months; " (up 1.2 points)" for a figure that is itself a percent. Rounded to one decimal.
+ * The text becomes part of the verified figure, so a script may quote it exactly; any other percentage still blocks.
+ */
+function changeText(f, earlier) {
+  const now = Number(f && f.value), then = Number(earlier);
+  if (!Number.isFinite(now) || !Number.isFinite(then)) return "";
+  const pct = f.unit === "pct";
+  if (!pct && then === 0) return "";
+  const diff = pct ? now - then : ((now - then) / Math.abs(then)) * 100;
+  const mag = Math.round(Math.abs(diff) * 10) / 10;
+  if (mag === 0) return " (unchanged)";
+  return ` (${diff > 0 ? "up" : "down"} ${mag}${pct ? " points" : "%"})`;
+}
+
 /** "vs $652,000 in August 2026 and $620,000 in September 2025" for figures that carry a prior month / year-ago value. */
 function compareText(facts, f) {
   const p = facts && facts.period;
   if (!p || !f) return "";
   const at = (v) => formatFigure({ ...f, value: v });
   const bits = [];
-  if (f.prior != null) bits.push(`${at(f.prior)} in ${p.priorLabel}`);
-  if (f.yearAgo != null) bits.push(`${at(f.yearAgo)} in ${p.yearAgoLabel}`);
+  if (f.prior != null) bits.push(`${at(f.prior)} in ${p.priorLabel}${changeText(f, f.prior)}`);
+  if (f.yearAgo != null) bits.push(`${at(f.yearAgo)} in ${p.yearAgoLabel}${changeText(f, f.yearAgo)}`);
   const vs = bits.length ? `vs ${bits.join(" and ")}` : "";
   // Reports that print a percent change instead of the earlier value (the weekly dashboards): "down 1.8% from the week ending October 10, 2026".
   const ch = (Array.isArray(f.changes) ? f.changes : []).map((c) => `${c.pct < 0 ? "down" : c.pct > 0 ? "up" : "unchanged"}${c.pct === 0 ? "" : ` ${Math.abs(c.pct)}%`} from ${c.vs}`);

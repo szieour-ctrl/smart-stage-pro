@@ -48,7 +48,7 @@ test("the confirmation text names the area and month, and months of inventory ke
   assert.strictEqual(s.geography, "match");
   const moi = s.groups.flatMap((g) => g.figures).find((x) => /closed-sales basis/.test(x.label));
   assert.strictEqual(moi.display, "5.9 months");
-  assert.match(moi.compare, /vs 5 months in August 2026 and 4 months in September 2025/);
+  assert.match(moi.compare, /vs 5 months in August 2026 \(up 18%\) and 4 months in September 2025 \(up 47\.5%\)/);
   assert.ok(!/\d{1,3},?\d{3}.*closed sale/.test(s.scopeNote) && !/\$/.test(s.scopeNote));    // nothing priced goes to the research provider
 });
 
@@ -78,7 +78,7 @@ test("months that skip a column are refused rather than compared wrongly", () =>
 test("verified facts for the gate carry the comparisons, so 'down from last month' can be traced", () => {
   const f = lib.analyzePages(tv.standard().pages).facts;
   const v = lib.verifiedFromReport({ ...f, figures: f.figures.filter((x) => x.key === "median_close_price") });
-  assert.match(v.texts[0], /Median sold price: \$715,000.*\$718,000 in August 2026 and \$710,000 in September 2025/);
+  assert.match(v.texts[0], /Median sold price: \$715,000.*\$718,000 in August 2026 \(down 0\.4%\) and \$710,000 in September 2025 \(up 0\.7%\)/);
 });
 
 test("the generic reader no longer guesses at table rows or sentences with several numbers", () => {

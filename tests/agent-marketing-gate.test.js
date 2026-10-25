@@ -248,3 +248,14 @@ test("approving a sourced Local Market Insider script (agent-text path) applies 
   assert.strictEqual(run("I sold a home at 99% of list price.").ok, false);
   assert.strictEqual(run("This home is listed at $689,000.").ok, false);
 });
+
+test("topicNotice reads MetroList's notice from the frozen topic only, and the gate needs it on the piece", () => {
+  const am = require("../netlify/functions/lib/agent-marketing-lib.js");
+  const notice = "Based on information from MetroList Services, Inc. for the period Sep 1, 2026 through Sep 30, 2026.";
+  const project = { template: "local_market_insider", intake: { market: "Roseville, CA" }, selected_topic: { question: "q 99%", whyItMatters: "w", sources: [{ url: "https://e.org" }], reportFigures: [{ text: "99% sold to list" }], reportNotice: notice, trendSignals: [] } };
+  assert.strictEqual(am.topicNotice(project), notice);
+  assert.strictEqual(am.topicNotice({ ...project, template: "other" }), "");
+  const n = { captionText: "Homes sold at 99% of list price.", narrationTagged: "Homes sold at 99% of list price.", scenes: [], cta: { text: "Ask me.", source: "user_edited" } };
+  assert.ok(gate.evaluate(am.gateInputFor(project, n, "edited")).blocks.some((b) => b.rule === "missing_notice"));
+  assert.strictEqual(gate.evaluate(am.gateInputFor(project, { ...n, notice: am.topicNotice(project) }, "edited")).ok, true);
+});

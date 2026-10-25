@@ -172,6 +172,41 @@ function sanitizeTags(text) {
 const MOTIONS = ["push_in", "pull_back", "pan_left", "pan_right", "tilt_up", "tilt_down", "static_hold"];
 const str = (v, n) => intakeLib.cleanWords(v, n);
 
+
+// The planner sometimes leaves the closing scene (often the brand call-to-action card) without any spoken text. When that happens at the END
+// of the story the plan is repaired instead of thrown away: narration the other scenes did not use goes to the first empty scene, and any
+// other empty scenes at the end are dropped (only if enough scenes remain). An empty scene in the MIDDLE is not guessed at.
+function repairExcerpts(scenes, captionText, minScenes, warnings) {
+  const list = scenes.slice();
+  const isEmpty = (sc) => !str(sc && sc.narration_excerpt, 500);
+  let lastFilled = -1;
+  list.forEach((sc, i) => { if (!isEmpty(sc)) lastFilled = i; });
+  if (lastFilled === list.length - 1) return list;                 // nothing empty at the end
+  const norm = (t) => String(t || "").replace(/\s+/g, " ").trim();
+  const full = norm(captionText);
+  // How far into the narration the filled scenes reach.
+  let pos = 0;
+  for (let i = 0; i <= lastFilled; i++) {
+    const ex = norm(list[i].narration_excerpt);
+    if (!ex) continue;
+    const at = full.indexOf(ex, pos);
+    if (at >= 0) pos = at + ex.length;
+  }
+  const leftover = full.slice(pos).trim();
+  const trailing = list.length - 1 - lastFilled;
+  let out = list;
+  if (leftover && leftover.split(" ").length >= 2) {
+    out = list.map((sc, i) => (i === lastFilled + 1 ? { ...sc, narration_excerpt: leftover.slice(0, 500) } : sc));
+    out = out.slice(0, lastFilled + 2);
+    warnings.push("The last scene had no spoken text, so the end of your script was assigned to it.");
+  } else {
+    out = list.slice(0, lastFilled + 1);
+    warnings.push(`The planner left ${trailing} closing scene${trailing === 1 ? "" : "s"} without spoken text, so ${trailing === 1 ? "it was" : "they were"} removed.`);
+  }
+  if (out.length < minScenes) return list;                          // too few scenes left: let the normal check fail so the planner is asked again
+  return out;
+}
+
 /**
  * normalizePlan(raw, project) → { narrative, warnings } or throws Error(message) for an unusable plan.
  */
@@ -186,7 +221,7 @@ function normalizePlan(raw, project) {
   const [wlo, whi] = am.WORD_TARGETS[dur];
   if (wordCount < wlo || wordCount > whi) warnings.push(`The script is about ${wordCount} spoken words; a ${dur}-second piece usually runs ${wlo}–${whi}.`);
 
-  const rawScenes = Array.isArray(raw.scenes) ? raw.scenes : [];
+  const rawScenes = repairExcerpts(Array.isArray(raw.scenes) ? raw.scenes : [], captionText, SCENE_RANGE[dur][0], warnings);
   const [smin, smax] = SCENE_RANGE[dur];
   if (rawScenes.length < smin || rawScenes.length > smax) throw new Error(`The planner returned ${rawScenes.length} scenes; ${smin === smax ? smin : `${smin}–${smax}`} are needed`);
 
@@ -275,8 +310,18 @@ function normalizePlan(raw, project) {
  */
 async function generatePlan({ project, anthropicKey, callFn }) {
   const call = callFn || module.exports.callClaudeText; // looked up at call time so tests can replace it
-  const text = await call(buildSystemPrompt(), buildUserMessage(project), anthropicKey);
-  const { narrative, warnings } = normalizePlan(extractJsonObject(text), project);
+  const user = buildUserMessage(project);
+  let normalized;
+  try {
+    normalized = normalizePlan(extractJsonObject(await call(buildSystemPrompt(), user, anthropicKey)), project);
+  } catch (err) {
+    // A structurally unusable plan (a missing narration excerpt, the wrong scene or image count, no JSON) gets ONE corrective retry inside the
+    // same attempt, so it does not use up one of the project's planning attempts. Anything else (a gate block, a cut-off reply) is not retried.
+    if (!/narration excerpt|scenes are needed|concept images?|unusable plan|no narration|JSON/i.test(String(err && err.message))) throw err;
+    const fix = `${user}\n\nYour previous reply could not be used: ${String(err.message).slice(0, 200)}. Return the complete JSON again. Every scene MUST have a non-empty narration_excerpt taken from your narration, in order, and the scenes together must cover the whole narration.`;
+    normalized = normalizePlan(extractJsonObject(await call(buildSystemPrompt(), fix, anthropicKey)), project);
+  }
+  const { narrative, warnings } = normalized;
   // A piece built on a MetroList report must carry MetroList's required notice (Rule 12.9). The notice comes from the frozen topic and is
   // attached here by code, never left to the model; the overlay step shows it on screen.
   const topicNotice = project.template === "local_market_insider" && project.selected_topic && typeof project.selected_topic.reportNotice === "string" ? project.selected_topic.reportNotice : "";

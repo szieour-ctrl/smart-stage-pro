@@ -225,15 +225,22 @@ const MEASURES = [
   { key: "avg_close_to_list_pct", re: /\bsold[-\s]to[-\s]list\b|\bpercent\s+of\s+(?:the\s+)?(?:list|asking)\b|\blist\s+price\s+received\b/ },
   { key: "median_ppsf", re: /\bprice\s+per\s+sq(?:uare)?\.?\s*f(?:ee|oo)?t\b/ },
 ];
+const MAX_REPORT_FIGURES_ON_WEB_TOPIC = 40;
+// "Both" (Sam, Oct 25): the agent's report is the ONLY source of numbers. A web topic supplies the narrative and the idea; every figure the
+// script may state comes from the report, so each web topic carries the report's figures (reportFirst) and its own web numbers are not
+// verified. A web figure for a measure the report also covers is additionally recorded as replaced (reportPrecedence), so the message can
+// name the report's figure.
 function applyReportPrecedence(topics, ctx) {
   const figs = ctx && ctx.figures ? [...ctx.figures.values()] : [];
   if (!figs.length) return topics;
   const allReportNums = new Set();
   figs.forEach((cf) => numbersIn(figureText(cf)).forEach((n) => allReportNums.add(n)));
+  const allNotices = [...new Set(figs.map((cf) => cf.report && cf.report.notice).filter(Boolean))];
+  const reportFigures = figs.slice(0, MAX_REPORT_FIGURES_ON_WEB_TOPIC).map((cf) => ({ ref: cf.ref, uploadId: cf.report.uploadId, key: cf.fig.key, label: cf.fig.label, display: reportLib.formatFigure(cf.fig), text: figureText(cf) }));
   return (topics || []).map((t) => {
     if (!t || t.origin !== "web") return t;
     const text = [t.question, t.whyItMatters, ...(Array.isArray(t.trendSignals) ? t.trendSignals : [])].filter(Boolean).join(" . ").toLowerCase();
-    const precedence = [], notices = [];
+    const precedence = [];
     for (const m of MEASURES) {
       const mine = figs.filter((cf) => cf.fig.key === m.key);
       if (!mine.length) continue;
@@ -249,13 +256,9 @@ function applyReportPrecedence(topics, ctx) {
       const mineNums = new Set();
       mine.forEach((cf) => numbersIn(figureText(cf)).forEach((n) => mineNums.add(n)));
       const superseded = [...near].filter((n) => !mineNums.has(n) && !allReportNums.has(n) && !(n >= 2020 && n <= 2035)).map(String);
-      if (!superseded.length) continue;
-      precedence.push({ key: m.key, label: mine[0].fig.label, reportText: mine.map(figureText).join("; "), supersededNumbers: superseded });
-      mine.forEach((cf) => { if (cf.report.notice) notices.push(cf.report.notice); });
+      if (superseded.length) precedence.push({ key: m.key, label: mine[0].fig.label, reportText: mine.map(figureText).join("; "), supersededNumbers: superseded });
     }
-    if (!precedence.length) return t;
-    const reportNotice = [...new Set([...(t.reportNotice ? [t.reportNotice] : []), ...notices])].join(" ");
-    return { ...t, reportPrecedence: precedence, reportNotice };
+    return { ...t, reportFirst: true, reportFigures, reportPrecedence: precedence, reportNotice: allNotices.join(" ") };
   });
 }
 

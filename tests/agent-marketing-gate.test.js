@@ -335,8 +335,41 @@ test("applyReportPrecedence records the agent's figure and the web number it rep
   assert.deepStrictEqual(out[1].reportPrecedence[0].supersededNumbers, ["130"]);
   assert.match(out[1].reportPrecedence[0].reportText, /146/);
   assert.strictEqual(out[1].reportNotice, NOTICE);
+  // a web topic with no conflicting number is still report-first: the report is the only source of numbers
   const same = { ...web, whyItMatters: "Pending sales were 146 in September 2026." };
-  assert.strictEqual(rep.applyReportPrecedence([same], ctx)[0], same); // no conflict, nothing changes
+  const r2 = rep.applyReportPrecedence([same], ctx)[0];
+  assert.strictEqual(r2.reportFirst, true);
+  assert.deepStrictEqual(r2.reportPrecedence, []);
+  assert.strictEqual(out[1].reportFirst, true);
+  assert.match(out[1].reportFigures[0].text, /146/);
+});
+
+test("report-first: when the agent chose Both, only the report's numbers can be stated; web numbers on the topic are not verified", () => {
+  const rep = require("../netlify/functions/lib/agent-marketing-research-report-lib");
+  const plan = require("../netlify/functions/lib/agent-marketing-plan-lib");
+  const ctx = { reports: [], figures: new Map([
+    ["r1.f1", { ref: "r1.f1", report: { notice: NOTICE, uploadId: "u1", facts: {} }, fig: { id: "f1", key: "count_active", label: "Active listings", value: 367, unit: "count" } }],
+    ["r1.f2", { ref: "r1.f2", report: { notice: NOTICE, uploadId: "u1", facts: {} }, fig: { id: "f2", key: "avg_close_to_list_pct", label: "Sold price as a percent of list price", value: 99, unit: "pct" } }],
+  ]) };
+  const web = { id: "t4", origin: "web", question: "What is the gap between asking and selling prices?", whyItMatters: "The median asking price is $660,000 and the median sold price is $634,000. Buyers have more choices.", trendSignals: ["Median sold price $634,000 (up 3.1%)"], sources: [{ url: "https://example.org/blog" }], scope: "selected", scopeNote: "" };
+  const topic = rep.applyReportPrecedence([web], ctx)[0];
+  const project = { template: "local_market_insider", intake: { market: "Roseville, CA" }, selected_topic: topic };
+  const run = (text) => gate.evaluate(amLib.gateInputFor(project, amLib.attachNotice(project, { captionText: text, narrationTagged: text, scenes: [{ narrationExcerpt: text }], cta: { text: "Ask me.", source: "claude" } }), "claude"));
+  // the report's figures pass
+  assert.strictEqual(run("There are 367 active listings, and homes sold for 99% of list price.").ok, true);
+  // the web numbers do not, and the message says why
+  const bad = run("The median asking price is $660,000 and homes sold for $634,000.");
+  assert.ok(bad.blocks.some((b) => b.rule === "invented_number" && b.match === "660000"));
+  assert.ok(bad.blocks.some((b) => b.match === "634000"));
+  assert.match(bad.blocks[0].message, /source of truth/);
+  // the report's notice rides along, and the planner never sees the web figures
+  assert.strictEqual(topic.reportNotice, NOTICE);
+  const brief = plan.topicBrief(topic);
+  assert.strictEqual(brief.numbers_come_only_from_agent_report, true);
+  assert.doesNotMatch(JSON.stringify(brief), /660,000|634,000|3\.1%/);
+  assert.ok(brief.figures_you_may_state.some((f) => /367/.test(f)));
+  assert.match(plan.buildSystemPrompt(), /numbers_come_only_from_agent_report/);
+  assert.match(plan.buildSystemPrompt(), /never set the median asking price of active listings against the median price of sold homes/);
 });
 
 test("the planner removes a spoken MetroList notice and tells the model the report wins", () => {

@@ -142,7 +142,10 @@ const VERIFIED_TEMPLATE = "local_market_insider";
 function verifiedFromTopic(topic) {
   const t = topic && typeof topic === "object" ? topic : null;
   if (!t || !Array.isArray(t.sources) || t.sources.length === 0) return null; // no validated source, nothing is verified
-  const texts = [t.question, t.whyItMatters, t.scopeNote, ...(Array.isArray(t.trendSignals) ? t.trendSignals : [])];
+  // reportFirst (a web topic when the agent chose "Both"): the agent's uploaded report is the only source of numbers. The web topic's own
+  // wording gives the narrative and idea, but its figures are NOT verified; only the report's figures (carried on the topic) are.
+  const reportFirst = t.reportFirst === true;
+  const texts = reportFirst ? [] : [t.question, t.whyItMatters, t.scopeNote, ...(Array.isArray(t.trendSignals) ? t.trendSignals : [])];
   // A topic written from the agent's own MLS report carries the exact figures it cited (frozen by agent-marketing-research-report-lib.js)
   // and, for MetroList data, the notice Rule 12.9 requires on anything published with them. Only those figures are verified, not the whole report.
   (Array.isArray(t.reportFigures) ? t.reportFigures : []).forEach((f) => { if (f && typeof f.text === "string") texts.push(f.text); });
@@ -161,7 +164,7 @@ function verifiedFromTopic(topic) {
     if (e.location) addresses.push(e.location);
   }
   const clean = texts.filter((x) => typeof x === "string" && x.trim()).map(norm);
-  return clean.length ? { texts: clean, addresses: addresses.map(norm), reportNotice, precedence } : null;
+  return clean.length ? { texts: clean, addresses: addresses.map(norm), reportNotice, precedence, reportFirst } : null;
 }
 
 /** verifiedFromProject(project) → verified facts for a stored project row, or null (any other template, no topic). */
@@ -375,7 +378,7 @@ function evaluate(input) {
     for (const n of numberTokens(text)) {
       if (intakeNumbers.has(n)) continue;
       if (market && verifiedNumbers.has(n)) sourcedFacts.push(`${field}: ${n}`); // the figure is in the validated source topic
-      else blocks.push({ rule: "invented_number", field, match: n, message: market ? `The number ${n} is not in your research topic, your uploaded report or your answers. Use only figures from those sources.` : "Contains a number the agent did not provide." });
+      else blocks.push({ rule: "invented_number", field, match: n, message: market ? (vIn && vIn.reportFirst ? `The number ${n} is not in your uploaded report. You chose to use your report with web research, so your report is the source of truth: use only its figures.` : `The number ${n} is not in your research topic, your uploaded report or your answers. Use only figures from those sources.`) : "Contains a number the agent did not provide." });
     }
   }
 

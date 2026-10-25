@@ -68,6 +68,19 @@ function cleanText(v, max) {
   return s.length > max ? s.slice(0, max) : s;
 }
 
+// Like cleanText, but when the text is too long it is cut back to a whole word (never mid-word, never ending on a dash or comma), so a
+// sentence is not shown as "...no pres". Used for text that is generated for display.
+function cleanWords(v, max) {
+  const s = cleanText(v, 100000);
+  if (s.length <= max) return s;
+  let cut = s.slice(0, max);
+  const clause = Math.max(cut.lastIndexOf(" \u2014"), cut.lastIndexOf(" \u2013"), cut.lastIndexOf(". "), cut.lastIndexOf("; "), cut.lastIndexOf(", "));
+  if (clause >= Math.floor(max * 0.6)) return cut.slice(0, clause).replace(/[\s,;:\u2014\u2013-]+$/, "").trim(); // end at the last whole clause when there is one
+  const sp = Math.max(cut.lastIndexOf(" "), cut.lastIndexOf("\n"));
+  if (sp >= Math.floor(max * 0.5) && !/\s/.test(s.charAt(max))) cut = cut.slice(0, sp);
+  return cut.replace(/[\s,;:\u2014\u2013-]+$/, "").trim();
+}
+
 function schemaFor(template) { return SCHEMAS[template] || null; }
 
 /**
@@ -123,4 +136,4 @@ function validateIntake(template, values, opts) {
   return { ok: errors.length === 0, errors, clean, needsInput };
 }
 
-module.exports = { AUDIENCE_FROM_RESEARCH, AUDIENCES, ACTIONS, LIMITS, SCHEMAS, schemaFor, validateIntake, cleanText };
+module.exports = { AUDIENCE_FROM_RESEARCH, AUDIENCES, ACTIONS, LIMITS, SCHEMAS, schemaFor, validateIntake, cleanText, cleanWords };

@@ -189,7 +189,7 @@ test("worker: five grounded topics are saved and charged once; the page then rea
   const Q = ["Why are some Roseville homes taking longer to sell?", "Does spring bring more competing listings to Roseville?", "How are builder incentives changing resale pricing near new communities?", "What are mortgage rate buydowns doing to buyer budgets?", "Which price bands are seeing the most pending sales this month?"];
   const today = runLib.todayPT();
   const dayAgo = new Date(Date.now() - 4 * 86400000).toISOString().slice(0, 10);
-  const url = (n) => `https://example.org/report-${n}`;
+  const url = (n) => `https://site${n}.example.org/report-${n}`;
   const topics = Q.map((q, i) => ({ question: q, why_it_matters: "It changes how sellers price.", trend_signals: ["MLS active listings up"], local_intent: true, scope: "selected", event: null, sources: [{ title: `R${i}`, url: url(i), published: dayAgo }] }));
   const original = runLib.callPerplexity;
   runLib.callPerplexity = async () => ({ status: 200, json: { output_text: JSON.stringify({ topics }), output: [{ type: "search_results", results: Q.map((_, i) => ({ url: url(i) })) }], usage: { input_tokens: 600, output_tokens: 1500, tool_calls_details: { search_web: { invocation: 2 } } } } });

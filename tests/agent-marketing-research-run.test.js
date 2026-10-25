@@ -15,7 +15,7 @@ const Q = [
   "What are mortgage rate buydowns doing to buyer budgets?",
   "Which price bands are seeing the most pending sales this month?",
 ];
-const url = (n) => `https://example.org/report-${n}`;
+const url = (n) => `https://site${n}.example.org/report-${n}`;
 const topic = (n) => ({ question: Q[n - 1], why_it_matters: "It changes how sellers price.", trend_signals: ["MLS active listings up month over month"], local_intent: true, scope: "selected", scope_note: null, event: null, sources: [{ title: `Report ${n}`, url: url(n), published: "2026-10-20" }] });
 const five = () => [1, 2, 3, 4, 5].map(topic);
 const reply = (topics, extra) => ({
@@ -36,15 +36,15 @@ test("today is the Pacific calendar day", () => {
 });
 
 test("grounding: a source the provider never found is dropped; the provider's own date wins; no provider list means no filtering", () => {
-  const t = [{ sources: [{ title: "a", url: "https://www.example.org/report-1/?utm_source=x", published: "2026-10-01" }, { title: "invented", url: "https://made-up.example/x", published: "2026-10-20" }] }];
-  const g = run.groundTopics(t, { search_results: [{ url: "https://example.org/report-1", date: "2026-10-22T08:00:00Z" }] });
+  const t = [{ sources: [{ title: "a", url: "https://www.site1.example.org/report-1/?utm_source=x", published: "2026-10-01" }, { title: "invented", url: "https://made-up.example/x", published: "2026-10-20" }] }];
+  const g = run.groundTopics(t, { search_results: [{ url: "https://site1.example.org/report-1", date: "2026-10-22T08:00:00Z" }] });
   assert.strictEqual(g.grounded, true);
   assert.strictEqual(g.topics[0].sources.length, 1);
   assert.strictEqual(g.topics[0].sources[0].published, "2026-10-22");
   const none = run.groundTopics(t, { choices: [] });
   assert.strictEqual(none.grounded, false);
   assert.strictEqual(none.topics[0].sources.length, 2);
-  assert.strictEqual(run.groundTopics(t, { citations: [{ url: "https://example.org/report-1" }] }).topics[0].sources.length, 1);
+  assert.strictEqual(run.groundTopics(t, { citations: [{ url: "https://site1.example.org/report-1" }] }).topics[0].sources.length, 1);
 });
 
 test("provider: busy answers are retried, a rejected model spelling is tried once, a bad key is a plain message", async () => {

@@ -4,7 +4,7 @@ const assert = require("node:assert");
 const r = require("../netlify/functions/lib/agent-marketing-research-lib");
 
 const TODAY = "2026-10-24";
-const src = (n, published) => ({ title: `Source ${n}`, url: `https://example.org/report-${n}`, published: published || "2026-10-20" });
+const src = (n, published) => ({ title: `Source ${n}`, url: `https://site${n}.example.org/report-${n}`, published: published || "2026-10-20" });
 const QUESTIONS = [
   "Why are some Crocker Ranch homes taking longer to sell?",
   "Does spring bring more competing listings to Roseville?",
@@ -106,7 +106,7 @@ test("topics: exactly five distinct sourced market topics are accepted", () => {
   assert.strictEqual(v.ok, true, v.problems.join("; "));
   assert.strictEqual(v.topics.length, 5);
   assert.deepStrictEqual(v.topics.map((t) => t.id), ["t1", "t2", "t3", "t4", "t5"]);
-  assert.ok(v.topics.every((t) => t.kind === "market_update" && t.sources.length >= 1 && t.sources[0].domain === "example.org"));
+  assert.ok(v.topics.every((t) => t.kind === "market_update" && t.sources.length >= 1 && /\.example\.org$/.test(t.sources[0].domain)));
 });
 
 test("topics: four, six or zero topics fail", () => {
@@ -251,4 +251,20 @@ test("outcome: charged only for a validated five-topic set; failures, timeouts a
   assert.strictEqual(timeout.status, "failed");
   assert.strictEqual(timeout.charged_at, null);
   assert.match(timeout.error, /timed out/);
+});
+
+test("topics: five topics resting on one or two websites fail a market update, with a plain reason", () => {
+  const oneSite = fiveMarket().map((t, i) => ({ ...t, sources: [{ title: "Agent blog", url: `https://agentblog.example.com/post-${i}`, published: "2026-10-20" }] }));
+  const a = r.validateTopics(oneSite, { mode: "market_update", today: TODAY });
+  assert.strictEqual(a.ok, false);
+  assert.match(a.problems.join(" "), /same site \(agentblog\.example\.com\)/);
+  // Two topics on one site is fine as long as there are at least three sites in all.
+  const mixed = fiveMarket().map((t, i) => ({ ...t, sources: [{ title: "S", url: `https://${i < 2 ? "agentblog" : "site" + i}.example.com/p-${i}`, published: "2026-10-20" }] }));
+  assert.strictEqual(r.validateTopics(mixed, { mode: "market_update", today: TODAY }).ok, true);
+  // Only two sites in total, even with no site above the cap, is too narrow.
+  const two = fiveMarket().map((t, i) => ({ ...t, sources: [{ title: "S", url: `https://${i % 2 ? "a" : "b"}.example.com/p-${i}`, published: "2026-10-20" }] }));
+  assert.strictEqual(r.validateTopics(two, { mode: "market_update", today: TODAY }).ok, false);
+  // Events may share a city or venue calendar.
+  const ev = fiveEvents().map((t, i) => ({ ...t, sources: [{ title: "City", url: `https://www.roseville.ca.gov/events/${i}`, published: null }] }));
+  assert.strictEqual(r.validateTopics(ev, { mode: "local_events", today: TODAY }).ok, true);
 });

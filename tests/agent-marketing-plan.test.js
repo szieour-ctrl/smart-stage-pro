@@ -167,3 +167,37 @@ test("choosing a different topic lets the script be planned again", () => {
   assert.notStrictEqual(planLib.intakeHash(intake, topic), planLib.intakeHash(intake, { ...topic, id: "t2" }));
   assert.notStrictEqual(planLib.intakeHash(intake, topic), planLib.intakeHash(intake));
 });
+
+test("a closing scene with no spoken text is repaired, not thrown away", async () => {
+  // The narration the first five scenes did not cover goes to the empty last scene.
+  const a = goodPlan();
+  a.scenes[4].narration_excerpt = excerpts[4] + " " + excerpts[5];
+  a.scenes[5].narration_excerpt = "";
+  const outA = await planLib.generatePlan({ project, anthropicKey: "k", callFn: async () => JSON.stringify(a) });
+  assert.strictEqual(outA.narrative.scenes.length, 5);                       // nothing left over: the empty closing scene is dropped (45s allows 5 to 6)
+  assert.ok(outA.warnings.some((w) => /without spoken text/.test(w)));
+  const b = goodPlan();
+  b.scenes[5].narration_excerpt = "";                                           // excerpt 5 is not used by any scene: it goes to scene 6
+  const outB = await planLib.generatePlan({ project, anthropicKey: "k", callFn: async () => JSON.stringify(b) });
+  assert.strictEqual(outB.narrative.scenes.length, 6);
+  assert.strictEqual(outB.narrative.scenes[5].narrationExcerpt, excerpts[5]);
+  assert.ok(outB.warnings.some((w) => /end of your script was assigned/.test(w)));
+});
+
+test("an empty scene in the middle gets one free corrective retry; a second bad answer fails with the same message", async () => {
+  const bad = goodPlan(); bad.scenes[2].narration_excerpt = "";
+  const answers = [JSON.stringify(bad), JSON.stringify(goodPlan())];
+  const seen = [];
+  const out = await planLib.generatePlan({ project, anthropicKey: "k", callFn: async (sys, user) => { seen.push(user); return answers.shift(); } });
+  assert.strictEqual(out.narrative.scenes.length, 6);
+  assert.strictEqual(seen.length, 2);
+  assert.match(seen[1], /previous reply could not be used: Scene 3 has no narration excerpt/);
+  await assert.rejects(planLib.generatePlan({ project, anthropicKey: "k", callFn: async () => JSON.stringify(bad) }), /Scene 3 has no narration excerpt/);
+});
+
+test("a gate block is not retried", async () => {
+  const plan = goodPlan(); plan.scenes[5].narration_excerpt = excerpts[5] + " Call 916-555-0100 to tour 123 Main Street.";
+  let calls = 0;
+  await assert.rejects(planLib.generatePlan({ project, anthropicKey: "k", callFn: async () => { calls++; return JSON.stringify(plan); } }), /can't use/);
+  assert.strictEqual(calls, 1);
+});

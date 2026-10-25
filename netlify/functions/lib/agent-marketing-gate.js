@@ -206,12 +206,8 @@ const MARKET_HOME_RULES = [
   { rule: "specific_home_announcement", message: "Reads like an announcement of one home. Use a Listing Reel for a specific home.",
     re: /(?:^|[.!?]\s+)(?:just\s+listed|just\s+sold|new\s+listing|coming\s+soon|now\s+selling|back\s+on\s+(?:the\s+)?market)\b|\b(?:my|our|this|that)\s+open\s+house\b/i },
 ];
-// Ambiguous, so flagged for the agent's review rather than blocked.
-const MARKET_WARN_RULES = [
-  ...WARN_RULES,
-  { rule: "announcement_wording", message: "Wording like this can read as a single-home announcement; make sure it describes the market.",
-    re: /\b(?:just\s+listed|new\s+listing|coming\s+soon|open\s+house|back\s+on\s+(?:the\s+)?market)\b/i },
-];
+// Wording alone is never flagged: "open house", "just listed" and the rest are only a problem as an announcement of one home (blocked above).
+const MARKET_WARN_RULES = WARN_RULES;
 // Outcome claims need support: a testimonial or staging result nobody supplied, or "over asking" with no figure behind it.
 const MARKET_CLAIM_RULES = CLAIM_RULES.filter((r) => r.rule !== "transaction_result");
 const OUTCOME_RE = /\b(?:over|above|under)\s+asking\b|\bmultiple\s+offers\b|\bbidding\s+wars?\b/gi;
@@ -266,7 +262,7 @@ function scanMarketClaims(text, field, ctx, blocks, sourcedFacts, claims) {
     const sentence = sentenceAround(t, m.index, m[0].length);
     if (ctx.intakeLower.includes(lower(m[0]))) claims.push(`${field}: ${snippet(m)}`);
     else if (!OWNERSHIP_RE.test(sentence) && (ctx.verifiedLower.includes(lower(m[0])) || [...numberTokens(sentence)].some((n) => ctx.verifiedNumbers.has(n)))) sourcedFacts.push(`${field}: ${snippet(m)}`);
-    else blocks.push({ rule: "unsupported_outcome", field, match: snippet(m), message: "States a market outcome that your research or report does not show." });
+    else blocks.push({ rule: "unsupported_outcome", field, match: snippet(m), message: `"${m[0]}" claims a market outcome, but no figure in your research or report supports it. Add the figure or reword it.` });
   }
 }
 
@@ -379,7 +375,7 @@ function evaluate(input) {
     for (const n of numberTokens(text)) {
       if (intakeNumbers.has(n)) continue;
       if (market && verifiedNumbers.has(n)) sourcedFacts.push(`${field}: ${n}`); // the figure is in the validated source topic
-      else blocks.push({ rule: "invented_number", field, match: n, message: "Contains a number the agent did not provide." });
+      else blocks.push({ rule: "invented_number", field, match: n, message: market ? `The number ${n} is not in your research topic, your uploaded report or your answers. Use only figures from those sources.` : "Contains a number the agent did not provide." });
     }
   }
 

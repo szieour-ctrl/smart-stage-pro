@@ -216,7 +216,8 @@ test("market vocabulary is plain vocabulary: list price, price reductions, open 
   assert.deepStrictEqual(ok.blocks, []);
   // the words themselves never block, even for phrases the topic did not use
   assert.deepStrictEqual(ev("Price drops, open house season and homes under contract are all part of the market.", v).blocks, []);
-  assert.ok(ev("Open house season is here.", v).warnings.some((w) => w.rule === "announcement_wording"));
+  const oh = ev("Open house season is here, and buyers are touring more homes.", v);
+  assert.deepStrictEqual([oh.blocks, oh.warnings], [[], []]); // no address, no announcement: nothing to review
   // without a validated topic the strict property-ad rules still apply
   const strict = ev("Of 12 active listings, 4 have a price reduction.", null);
   assert.strictEqual(strict.review, "strict");

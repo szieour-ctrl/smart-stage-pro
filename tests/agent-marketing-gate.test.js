@@ -116,6 +116,8 @@ test("attestation text and version are exported for the single checkbox", () => 
   assert.ok(gate.ATTESTATION_VERSION);
 });
 
+const NOTICE = "Based on information from MetroList Services, Inc. for the period Sep 1, 2026 through Sep 30, 2026.";
+
 // ── Verified facts: Local Market Insider only (Oct 24) ─────────────────────────────────────────────────────────
 const marketTopic = {
   id: "t1", kind: "market_update",
@@ -137,7 +139,7 @@ test("sourced figures and days-on-market vocabulary pass when they trace to the 
   const r = gate.evaluate(withVerified(marketTopic, text));
   assert.deepStrictEqual(r.blocks, []);
   assert.ok(r.sourcedFacts.some((f) => f.endsWith(": 31")));
-  assert.ok(r.sourcedFacts.some((f) => /days on market/i.test(f)));
+  assert.strictEqual(r.review, "market_insider");
 });
 
 test("without a verified topic the same figures are still blocked", () => {
@@ -153,10 +155,12 @@ test("a number that is not in the verified topic is still blocked", () => {
   assert.ok(!r.blocks.some((b) => b.match === "31"));
 });
 
-test("sale-result claims and client stories still need the agent or the topic to have said them", () => {
+test("outcome claims and client stories still need the agent or the topic to have said them", () => {
   const r = gate.evaluate(withVerified(marketTopic, "Homes here sold over asking and my clients loved it."));
-  assert.ok(r.blocks.some((b) => b.rule === "transaction_result"));
+  assert.ok(r.blocks.some((b) => b.rule === "unsupported_outcome"));
   assert.ok(r.blocks.some((b) => b.rule === "client_story"));
+  // "sold at" / "days on market" are plain vocabulary; only the unsupported outcome blocks
+  assert.ok(!r.blocks.some((b) => /sold|days on market/i.test(b.match)));
 });
 
 test("an event venue address that matches the verified event is allowed; any other address is blocked", () => {
@@ -175,7 +179,7 @@ test("event addresses are blocked when no event was verified", () => {
 
 test("property-sale rules and Fair Housing still block, even with verified facts", () => {
   const r = gate.evaluate(withVerified(marketTopic, "Just listed! A safe neighborhood, perfect for families. Schedule a private tour."));
-  for (const rule of ["listing_announcement", "fair_housing", "property_sale_cta"]) assert.ok(r.blocks.some((b) => b.rule === rule), rule);
+  for (const rule of ["specific_home_announcement", "fair_housing", "property_sale_cta"]) assert.ok(r.blocks.some((b) => b.rule === rule), rule);
 });
 
 test("verified facts are honored for Local Market Insider only", () => {
@@ -195,13 +199,13 @@ test("a topic with no validated source verifies nothing, and a client-sent verif
 });
 
 test("the agent's own typed text and structural property keys are unchanged by verified facts", () => {
-  const r = gate.evaluate(base({ verified: gate.verifiedFromProject(lmi(eventTopic)), intake: { ...intake, observation: "See 1550 Maidu Drive today" } }));
+  const r = gate.evaluate(base({ verified: gate.verifiedFromProject(lmi(eventTopic)), intake: { ...intake, observation: "See 1234 Oak Ridge Drive today" } }));
   assert.ok(r.blocks.some((b) => b.rule === "street_address" && b.field === "intake.observation"));
   const r2 = gate.evaluate(base({ verified: gate.verifiedFromProject(lmi(eventTopic)), payload: { address: "1550 Maidu Dr" } }));
   assert.ok(r2.blocks.some((b) => b.rule === "property_field"));
 });
 
-test("market vocabulary the verified facts use ('list price', 'price reduction') is allowed; listing-specific wording still blocks", () => {
+test("market vocabulary is plain vocabulary: list price, price reductions, open house, under contract; one home's price still blocks", () => {
   const topic = {
     id: "t1", kind: "market_update", question: "Are sellers cutting the list price? 4 of 12 active listings have a price reduction.", whyItMatters: "Median list price of active listings is 659,000.",
     trendSignals: [], scope: "selected", scopeNote: "", sources: [{ title: "r", url: "https://example.com/r", domain: "example.com", published: "2026-10-20" }], event: null,
@@ -210,22 +214,24 @@ test("market vocabulary the verified facts use ('list price', 'price reduction')
   const ev = (text, verified) => gate.evaluate(base({ verified, generated: { narration: text, captions: "" } }));
   const ok = ev("Of 12 active listings, 4 have a price reduction, and the median list price is $659,000.", v);
   assert.deepStrictEqual(ok.blocks, []);
-  assert.ok(ok.sourcedFacts.some((f) => /list price/i.test(f)) && ok.sourcedFacts.some((f) => /price reduction/i.test(f)));
-  // without verified facts the same sentence still blocks, exactly as before
-  assert.ok(ev("Of 12 active listings, 4 have a price reduction.", null).blocks.some((b) => b.rule === "listing_announcement"));
-  // an allowed phrase does not hide a bad one in the same text
+  // the words themselves never block, even for phrases the topic did not use
+  assert.deepStrictEqual(ev("Price drops, open house season and homes under contract are all part of the market.", v).blocks, []);
+  assert.ok(ev("Open house season is here.", v).warnings.some((w) => w.rule === "announcement_wording"));
+  // without a validated topic the strict property-ad rules still apply
+  const strict = ev("Of 12 active listings, 4 have a price reduction.", null);
+  assert.strictEqual(strict.review, "strict");
+  assert.ok(strict.blocks.some((b) => b.rule === "listing_announcement"));
+  // an allowed phrase does not hide a bad one in the same text: the home-specific price and announcement still block
   const mixed = ev("The median list price is $659,000. Just listed at $689,000, open house Saturday.", v);
-  for (const rule of ["listing_announcement", "listing_price"]) assert.ok(mixed.blocks.some((b) => b.rule === rule), rule);
-  // a phrase the verified facts do NOT use is still blocked
-  assert.ok(ev("This is a price drop you should not miss.", v).blocks.some((b) => b.rule === "listing_announcement"));
+  for (const rule of ["specific_home_announcement", "specific_home_price"]) assert.ok(mixed.blocks.some((b) => b.rule === rule), rule);
 });
 
 test("Local Market Insider may use sold / active / pending in market context; ownership of any activity still blocks", () => {
   const am = require("../netlify/functions/lib/agent-marketing-lib.js");
   const project = { template: "local_market_insider", intake: { market: "Roseville, CA" }, selected_topic: {
     question: "Are sellers in Roseville accepting offers close to their asking price?", whyItMatters: "September 2026 sales.",
-    sources: [{ url: "https://example.org/r" }], reportFigures: [{ text: "Sold price as a percent of list price: 99%" }, { text: "Sold price as a percent of original list price: 97%" }], reportNotice: "N", trendSignals: [] } };
-  const run = (s) => gate.evaluate(am.gateInputFor(project, { captionText: s, narrationTagged: s, scenes: [{ narrationExcerpt: s }], notice: "N", cta: { text: "Ask me.", source: "claude" } }, "claude"));
+    sources: [{ url: "https://example.org/r" }], reportFigures: [{ text: "Sold price as a percent of list price: 99%" }, { text: "Sold price as a percent of original list price: 97%" }], reportNotice: NOTICE, trendSignals: [] } };
+  const run = (s) => gate.evaluate(am.gateInputFor(project, { captionText: s, narrationTagged: s, scenes: [{ narrationExcerpt: s }], notice: NOTICE, cta: { text: "Ask me.", source: "claude" } }, "claude"));
   for (const ok of [
     "In September 2026, homes sold at 99% of their list price, and 97% of the original list price. I'm happy to walk you through what this means.",
     "Active listings are up, pending sales slowed and price reductions were common.",
@@ -242,8 +248,8 @@ test("approving a sourced Local Market Insider script (agent-text path) applies 
   const am = require("../netlify/functions/lib/agent-marketing-lib.js");
   const project = { template: "local_market_insider", intake: { market: "Roseville, CA" }, selected_topic: {
     question: "Are sellers in Roseville accepting offers close to their asking price?", whyItMatters: "Negotiating room, September 2026",
-    sources: [{ url: "https://example.org/r" }], reportFigures: [{ text: "99% sold to list" }, { text: "97% sold to original" }], reportNotice: "N", trendSignals: [] } };
-  const run = (s) => gate.evaluate(am.gateInputFor(project, { captionText: s, narrationTagged: s, scenes: [{ narrationExcerpt: s }], notice: "N", cta: { text: "Ask me.", source: "user_edited" } }, "user"));
+    sources: [{ url: "https://example.org/r" }], reportFigures: [{ text: "99% sold to list" }, { text: "97% sold to original" }], reportNotice: NOTICE, trendSignals: [] } };
+  const run = (s) => gate.evaluate(am.gateInputFor(project, { captionText: s, narrationTagged: s, scenes: [{ narrationExcerpt: s }], notice: NOTICE, cta: { text: "Ask me.", source: "user_edited" } }, "user"));
   assert.strictEqual(run("In September 2026, homes sold at 99% of their list price, and the original asking price figure was 97%. I'm happy to walk you through what this means.").ok, true);
   assert.strictEqual(run("I sold a home at 99% of list price.").ok, false);
   assert.strictEqual(run("This home is listed at $689,000.").ok, false);
@@ -258,4 +264,86 @@ test("topicNotice reads MetroList's notice from the frozen topic only, and the g
   const n = { captionText: "Homes sold at 99% of list price.", narrationTagged: "Homes sold at 99% of list price.", scenes: [], cta: { text: "Ask me.", source: "user_edited" } };
   assert.ok(gate.evaluate(am.gateInputFor(project, n, "edited")).blocks.some((b) => b.rule === "missing_notice"));
   assert.strictEqual(gate.evaluate(am.gateInputFor(project, { ...n, notice: am.topicNotice(project) }, "edited")).ok, true);
+});
+
+// ── SSP Agent Marketing — SaaS Production Model and Compliance Architecture (Oct 25, 2026) ─────────────────────────
+const amLib = require("../netlify/functions/lib/agent-marketing-lib.js");
+const roseville = (extra = {}) => ({
+  template: "local_market_insider", intake: { market: "Roseville, CA" },
+  selected_topic: {
+    question: "Are sellers in Roseville accepting offers close to their asking price?", whyItMatters: "September 2026 closed sales.",
+    sources: [{ url: "https://example.org/r" }], trendSignals: [], reportNotice: NOTICE,
+    reportFigures: [{ text: "Sold price as a percent of list price: 99%" }, { text: "Sold price as a percent of original list price: 97%" }], ...extra,
+  },
+});
+const review = (project, s, source = "claude") => gate.evaluate(amLib.gateInputFor(project, amLib.attachNotice(project, { captionText: s, narrationTagged: s, scenes: [{ narrationExcerpt: s }], cta: { text: "Ask me.", source: source === "claude" ? "claude" : "user_edited" } }), source));
+
+test("acceptance: a buyer-education script on 99% of list price and 97% of original list price is not rejected", () => {
+  const script = "In September 2026, Roseville homes sold for 99% of final list price and 97% of original list price. Here is what that means for buyers: there was some room to negotiate.";
+  for (const src of ["claude", "edited"]) {
+    const r = review(roseville(), script, src);
+    assert.deepStrictEqual(r.blocks, [], src);
+    assert.strictEqual(r.ok, true);
+    assert.strictEqual(r.review, "market_insider");
+  }
+});
+
+test("ordinary real estate terminology never blocks, whatever the word", () => {
+  for (const s of [
+    "Sold, pending and active counts all moved in September 2026.", "Price reductions and list price changes were common, and days on market stayed short.",
+    "Inventory is a key number. Open house season is a good time to learn the market.", "Homes under contract moved quickly in Roseville.",
+  ]) assert.strictEqual(review(roseville(), s).ok, true, s);
+});
+
+test("the four checks still block: specific home, untraceable number, spoken notice, Fair Housing", () => {
+  const p = roseville();
+  assert.ok(review(p, "Visit 4012 Maple Street today.").blocks.some((b) => b.rule === "street_address"));
+  assert.ok(review(p, "My listing is pending.").blocks.some((b) => b.rule === "ownership_claim"));
+  assert.ok(review(p, "Prices rose 12% in September 2026, and homes sold at 99% of list price.").blocks.some((b) => b.rule === "invented_number" && b.match === "12"));
+  assert.ok(review(p, "Homes sold at 99% of list price. " + NOTICE).blocks.some((b) => b.rule === "notice_spoken"));
+  assert.ok(review(p, "Roseville is a safe neighborhood, perfect for families.").blocks.some((b) => b.rule === "fair_housing"));
+});
+
+test("the MetroList notice is required as an on-screen overlay and is attached by code with the headshot placement", () => {
+  const p = roseville();
+  const n = amLib.attachNotice(p, { scenes: [{}, {}, {}, {}, {}, {}] });
+  assert.deepStrictEqual(n.noticeOverlay, { text: NOTICE, position: "bottom", scenes: [0, 5], showHeadshot: true, headshotSource: "marketing_profile" });
+  const bare = { captionText: "Homes sold at 99% of list price.", narrationTagged: "Homes sold at 99% of list price.", scenes: [], cta: { text: "Ask me.", source: "claude" } };
+  assert.ok(gate.evaluate(amLib.gateInputFor(p, bare, "claude")).blocks.some((b) => b.rule === "missing_notice"));
+  const noMetro = amLib.attachNotice({ ...p, selected_topic: { ...p.selected_topic, reportNotice: "" } }, { scenes: [{}], notice: "stale" });
+  assert.strictEqual(noMetro.notice, undefined);
+  assert.strictEqual(noMetro.noticeOverlay, undefined);
+});
+
+test("the agent's uploaded report wins over a conflicting web figure", () => {
+  const p = roseville({ origin: "web", reportPrecedence: [{ key: "count_pending", label: "Pended sales", reportText: "Pended sales: 146", supersededNumbers: ["130"] }] });
+  const bad = review(p, "Pending sales were 130 in September 2026.");
+  assert.ok(bad.blocks.some((b) => b.rule === "report_priority" && b.match === "130"));
+  assert.match(bad.blocks.find((b) => b.rule === "report_priority").message, /146/);
+  assert.strictEqual(review(p, "Pending sales were 146 in September 2026.").ok, true); // the report's figure is verified text
+  assert.ok(review(p, "Pending sales were 130 in September 2026.", "edited").blocks.some((b) => b.rule === "report_priority")); // approve/save path too
+});
+
+test("applyReportPrecedence records the agent's figure and the web number it replaces, and attaches the report's notice", () => {
+  const rep = require("../netlify/functions/lib/agent-marketing-research-report-lib");
+  const ctx = { reports: [], figures: new Map([["r1.f1", { ref: "r1.f1", report: { notice: NOTICE, facts: {} }, fig: { id: "f1", key: "count_pending", label: "Pended sales", value: 146, unit: "count" } }]]) };
+  const web = { id: "t4", origin: "web", question: "Are pending sales slowing in Roseville?", whyItMatters: "Pending sales were 130 in September 2026.", trendSignals: [] };
+  const rpt = { id: "t1", origin: "report", question: "q", whyItMatters: "w" };
+  const out = rep.applyReportPrecedence([rpt, web], ctx);
+  assert.strictEqual(out[0], rpt);
+  assert.deepStrictEqual(out[1].reportPrecedence[0].supersededNumbers, ["130"]);
+  assert.match(out[1].reportPrecedence[0].reportText, /146/);
+  assert.strictEqual(out[1].reportNotice, NOTICE);
+  const same = { ...web, whyItMatters: "Pending sales were 146 in September 2026." };
+  assert.strictEqual(rep.applyReportPrecedence([same], ctx)[0], same); // no conflict, nothing changes
+});
+
+test("the planner removes a spoken MetroList notice and tells the model the report wins", () => {
+  const plan = require("../netlify/functions/lib/agent-marketing-plan-lib");
+  assert.strictEqual(plan.stripNotice("Homes sold at 99% of list price. " + NOTICE + " Ask me."), "Homes sold at 99% of list price. Ask me.");
+  const sys = plan.buildSystemPrompt();
+  assert.match(sys, /agent_report_takes_priority/);
+  assert.match(sys, /never judge|Do not judge whether the data may be used/i);
+  const brief = plan.topicBrief(roseville({ reportPrecedence: [{ label: "Pended sales", reportText: "Pended sales: 146", supersededNumbers: ["130"] }] }).selected_topic);
+  assert.deepStrictEqual(brief.agent_report_takes_priority, [{ measure: "Pended sales", agent_report_figure: "Pended sales: 146", never_state: ["130"] }]);
 });

@@ -121,9 +121,7 @@ exports.handler = async (event) => {
       if (!project.intake || !project.intake.market) return reply(409, { error: "Answer the intake questions first." });
       const v = am.validateNarrative(b.narrative, project.duration_sec);
       if (v.error) return reply(400, { error: v.error });
-      const noticeLine = am.topicNotice(project);
-      if (noticeLine) v.narrative.notice = noticeLine; // a script edit must never drop the required notice
-      else delete v.narrative.notice;
+      am.attachNotice(project, v.narrative); // a script edit must never drop the required notice (on-screen overlay, never spoken)
       const g = gate.evaluate(am.gateInputFor(project, v.narrative, "edited"));
       if (!g.ok) return reply(422, { error: gate.explain(g), gate: gateSummary(g) });
       // Keep what the planner produced (scene plan, photo shopping list, claims to verify, planning counters) and replace only
@@ -173,8 +171,7 @@ exports.handler = async (event) => {
     // approve_narrative
     const n = project.narrative;
     if (!n || !n.narrationTagged) return reply(409, { error: "There is no script to approve yet." });
-    const approveNotice = am.topicNotice(project);
-    if (approveNotice) n.notice = approveNotice; // scripts saved before the notice was kept still carry it
+    am.attachNotice(project, n); // scripts saved before the notice was kept still carry it
     const g = gate.evaluate(am.gateInputFor(project, n, n.source === "claude" ? "claude" : "edited"));
     if (!g.ok) return reply(422, { error: gate.explain(g), gate: gateSummary(g) });
     const now = new Date().toISOString();

@@ -225,7 +225,7 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
         reportAttempts = out.attempts;
         modelUsed = dataSource === "upload" ? planLib.MODEL : modelUsed;
         const combined = reportTopics.combineTopics({ dataSource, reportTopics: out.topics, webTopics: validation && validation.topics });
-        if (combined) validation = { ok: true, topics: combined, problems: [] };
+        if (combined) validation = { ok: true, topics: dataSource === "both" ? reportTopics.applyReportPrecedence(combined, ctx) : combined, problems: [] }; // the agent's own report wins over a conflicting web figure
         else if (dataSource === "upload") { problems = out.problems.length ? out.problems : [`only ${out.topics.length} topics could be written from the report`]; validation = { ok: false, topics: [], problems }; }
         else reportNote = "Your report could not be turned into topics this time, so these five come from web research only.";
         if (dataSource === "both" && out.topics.length === 0 && !reportNote) reportNote = "Your report could not be turned into topics this time, so these five come from web research only.";

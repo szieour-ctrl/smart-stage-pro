@@ -46,7 +46,13 @@ function topicBrief(topic) {
     origin: t.origin === "report" ? "the agent's own MLS report" : "web research",
   };
   if (t.scope === "selected" && t.origin === "report" && t.scopeNote) out.note = String(t.scopeNote);
-  if (Array.isArray(t.trendSignals) && t.trendSignals.length) out.trend_signals = t.trendSignals.map(String);
+  if (t.reportFirst === true) {
+    // The topic's web wording is the idea and the narrative only. Sentences with digits are web figures, which are not verified, so the model never sees them.
+    const noDigits = (x) => String(x || "").split(/(?<=[.!?])\s+/).filter((sent) => sent && !/\d/.test(sent)).join(" ");
+    out.topic_question = noDigits(t.question) || "the topic's question";
+    out.why_it_matters = noDigits(t.whyItMatters);
+    out.numbers_come_only_from_agent_report = true;
+  } else if (Array.isArray(t.trendSignals) && t.trendSignals.length) out.trend_signals = t.trendSignals.map(String);
   if (Array.isArray(t.reportFigures) && t.reportFigures.length) out.figures_you_may_state = t.reportFigures.map((f) => String(f && f.text || "")).filter(Boolean);
   if (Array.isArray(t.reportPrecedence) && t.reportPrecedence.length) {
     out.agent_report_takes_priority = t.reportPrecedence.map((p) => ({ measure: String(p.label || ""), agent_report_figure: String(p.reportText || ""), never_state: (p.supersededNumbers || []).map(String) }));
@@ -76,6 +82,7 @@ function buildSystemPrompt() {
     "4. Use no Fair Housing steering language (no descriptions of who a neighborhood is \"perfect for\", no \"safe\" or \"exclusive\" areas, no school quality).",
     "2c. For a selected_topic, ordinary real estate vocabulary (sold, active, pending, under contract, list price, original list price, price reductions, open house, inventory, days on market) is allowed when it describes the market ('homes sold at 99% of list price', 'pending sales rose'). Judge meaning, not words. Write about the market as a whole, never about the agent: never say or imply that the agent sold a home, has or represents a listing, has a home pending or under contract, or owns any activity ('I sold', 'my listing', 'we just closed', 'this home is pending'), and never describe one particular home. Speak to the viewer about what the market data means for them, and offer help in general terms.",
     "2d. If selected_topic has agent_report_takes_priority, the agent's own uploaded report is the source of truth for that measure. State the agent_report_figure exactly and never state any number listed in never_state, even if the topic text mentions it.",
+    "2f. If selected_topic says numbers_come_only_from_agent_report, the agent chose to use their own uploaded report together with web research. The report is the source of truth and the web research only gives you the narrative and the idea: state numbers only from figures_you_may_state, written exactly as they appear there, and never any other number. For a comparison between what sellers ask and what buyers pay, use the report's sold-to-list figures (for example the percent of list price homes sold for); never set the median asking price of active listings against the median price of sold homes, because those are different homes.",
     "2e. Do not judge whether the data may be used, who owns it or how it is licensed; the source was already accepted before you were called. Do not put MetroList's required notice in the narration: it is shown on screen separately. Do not write anything like 'based on information from MetroList' in the spoken script.",
     "5. narration_with_audio_tags is for ElevenLabs v3. Use only these audio tags, sparingly (at most 5 in total): [conversational] [emphasis] [warm] [thoughtful] [confident]. Never put tags inside words. Write for the ear: short sentences, natural pacing, a clear hook first, one practical insight, a low-pressure close. Avoid clichés and self-congratulation.",
     "6. Spoken words must fit the requested word range. The narration must end on a complete sentence.",

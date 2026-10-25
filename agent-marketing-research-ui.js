@@ -60,6 +60,7 @@
   function renderCost(r) {
     var u = r.usage;
     if (!u) { $("resCost").innerHTML = '<div class="hint" style="margin-top:12px">Cost is hidden. To see it here while testing, set <b>AGENT_MARKETING_RESEARCH_DEBUG</b> to <b>true</b> in Netlify and redeploy.</div>'; return; }
+    if (!u.providerError && r.status === "failed" && u.problems && u.problems.length) { $("resCost").innerHTML = '<div class="cost over"><div class="eyebrow">Why it failed</div><div><b>The answer was rejected for:</b><ul style="margin:6px 0 0 18px">' + u.problems.map(function (x) { return "<li>" + esc(x) + "</li>"; }).join("") + '</ul></div><div class="hint">Model ' + esc(r.model || "?") + " · attempts " + esc(u.attempts) + ". No session was used and nothing was charged.</div></div>"; return; }
     if (u.providerError) { $("resCost").innerHTML = '<div class="cost over"><div class="eyebrow">Why it failed</div><div><b>Perplexity said:</b> ' + esc(u.providerError) + '</div><div class="hint">Model ' + esc(r.model || "?") + " · attempts " + esc(u.attempts) + ". No session was used and nothing was charged.</div></div>"; return; }
     var cls = u.withinTarget === true ? "under" : u.withinTarget === false ? "over" : "";
     $("resCost").innerHTML = '<div class="cost ' + cls + '"><div class="eyebrow">What this run cost</div><div class="big">' + money(u.costUsd) + "</div>" +

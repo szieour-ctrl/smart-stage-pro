@@ -330,17 +330,19 @@ function validateTopics(rawTopics, { mode, today } = {}) {
   for (let i = 0; i < topics.length; i++) for (let j = i + 1; j < topics.length; j++) {
     if (similar(topics[i].question, topics[j].question)) problems.push(`topics ${topics[i].id} and ${topics[j].id} overlap`);
   }
-  // Variety: five topics that all rest on one website are one source's opinion, not a market picture. Market updates only: events
+  // Variety (a SOFT rule): five topics that all rest on one website are one source's opinion, not a market picture. The caller asks for
+  // different publishers once; if the market simply has few sources the set is still delivered, with a note. Market updates only: events
   // legitimately come from the same city or venue calendar.
+  const soft = [];
   if (mode === "market_update" && topics.length === TOPIC_COUNT) {
     const perSite = new Map();
     topics.forEach((t) => new Set((t.sources || []).map((x) => String(x.domain || "").replace(/^www\./, ""))).forEach((d) => { if (d) perSite.set(d, (perSite.get(d) || 0) + 1); }));
     const crowded = [...perSite.entries()].filter(([, n]) => n > MAX_TOPICS_PER_SITE).map(([d]) => d);
-    if (crowded.length) problems.push(`too many topics rely on the same site (${crowded.slice(0, 3).join(", ")}); use different publishers for at least three of them`);
-    else if (perSite.size < MIN_SITES) problems.push(`the topics use only ${perSite.size} different site${perSite.size === 1 ? "" : "s"}; use at least ${MIN_SITES} different publishers`);
+    if (crowded.length) soft.push(`too many topics rely on the same site (${crowded.slice(0, 3).join(", ")}); use different publishers for at least three of them`);
+    else if (perSite.size < MIN_SITES) soft.push(`the topics use only ${perSite.size} different site${perSite.size === 1 ? "" : "s"}; use at least ${MIN_SITES} different publishers`);
   }
   const ok = problems.length === 0 && topics.length === TOPIC_COUNT;
-  return { ok, topics: ok ? topics : [], problems };
+  return { ok, topics: ok ? topics : [], problems, soft: ok ? soft : [] };
 }
 
 // Measured provider usage (tokens, search queries, cost) stored with each session so real cost can be benchmarked.

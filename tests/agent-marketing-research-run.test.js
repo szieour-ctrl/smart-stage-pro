@@ -150,3 +150,28 @@ test("plan key: brokerage and team members use their tier, everyone else Solo", 
   assert.strictEqual(run.planKeyFromContext({ poolKind: "user" }), "solo");
   assert.strictEqual(run.planKeyFromContext(null), "solo");
 });
+
+test("run: topics from one site get one wider retry; if the market has few sources the set is still delivered, with a note", async () => {
+  const oneSite = (n) => reply(five().map((t) => ({ ...t, sources: [{ title: "Blog", url: `https://agentblog.example.com/p${n}`, published: "2026-10-20" }] })));
+  const sent = [];
+  const answers = [oneSite(1), oneSite(2)];
+  const withGrounding = (resp) => ({ ...resp, json: { ...resp.json, output: [{ type: "search_results", results: [1, 2].map((i) => ({ url: `https://agentblog.example.com/p${i}` })) }, resp.json.output[1]] } });
+  const r = await run.runResearch({ row, apiKey: "k", now: NOW, env: ENV, sleepFn: noSleep, callFn: async (p) => { sent.push(p); return withGrounding(answers.shift()); } });
+  assert.strictEqual(r.fields.status, "ready");            // still delivered and charged: five valid topics
+  assert.ok(r.fields.charged_at);
+  assert.strictEqual(r.attempts, 2);
+  assert.match(sent[1].input, /different publishers/);
+  assert.ok(sent[1].tools[0].max_results >= 20);           // the retry looks wider
+  assert.match(r.fields.usage.reportNote, /one or two websites/);
+  // A varied first answer needs no retry and no note.
+  const ok = await run.runResearch({ row, apiKey: "k", now: NOW, env: ENV, sleepFn: noSleep, callFn: async () => reply(five()) });
+  assert.strictEqual(ok.attempts, 1);
+  assert.strictEqual(ok.fields.usage.reportNote, null);
+});
+
+test("run: a failed set records why it was rejected", async () => {
+  const r = await run.runResearch({ row, apiKey: "k", now: NOW, env: { AGENT_MARKETING_RESEARCH_RETRIES: "0" }, sleepFn: noSleep, callFn: async () => reply(five().slice(0, 3)) });
+  assert.strictEqual(r.fields.status, "failed");
+  assert.ok(r.fields.usage.problems.length > 0);
+  assert.match(r.fields.usage.problems.join(" "), /expected 5 topics/);
+});

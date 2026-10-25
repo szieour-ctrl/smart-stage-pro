@@ -56,7 +56,17 @@ function findForbiddenKeys(obj, path, out, depth) {
 
 // ── Text rules ─────────────────────────────────────────────────────────────────────────────────────────────────
 const STREET_SUFFIX = "St|Street|Ave|Avenue|Blvd|Boulevard|Dr|Drive|Rd|Road|Ln|Lane|Ct|Court|Way|Pl|Place|Cir|Circle|Ter|Terrace|Pkwy|Parkway|Hwy|Loop|Trl|Trail";
+// Ownership: the agent made the seller or listing agent, or the sentence is about one particular home. Context, not vocabulary: "homes sold
+// at 99% of list price" is a market statistic; "I sold a home" and "this home is pending" are not Local Market Insider content.
+const ST = "sold|listed|pending|under\\s+contract|in\\s+escrow|closed|active|for\\s+sale|on\\s+the\\s+market";
+const OWNERSHIP_RE = new RegExp([
+  `\\b(?:i|we)(?:'ve|'d)?\\s+(?:(?:just|recently|also|already)\\s+)?(?:sold|listed|closed|put\\s+(?:\\w+\\s+){0,3}under\\s+contract)\\b`,
+  `\\b(?:i|we)\\s+(?:currently\\s+)?(?:have|has|got|represent|hold)\\s+(?:a|an|\\d+|several|some|two|three|four|five)\\s+(?:\\w+\\s+){0,3}(?:home|homes|house|houses|listing|listings|propert(?:y|ies)|condo|condos)\\b`,
+  `\\b(?:my|our)\\s+(?:\\w+\\s+){0,2}(?:listings?|homes?|houses?|propert(?:y|ies))\\b[^.!?;]{0,30}\\b(?:${ST})\\b`,
+  `\\b(?:this|that|the)\\s+(?:home|house|property|condo|townhome|townhouse|listing)\\s+(?:is|was|has|just|recently|will\\s+be)\\s+(?:\\w+\\s+){0,2}(?:${ST})\\b`,
+].join("|"), "i");
 const BLOCK_RULES = [
+  { rule: "ownership_claim", message: "Reads as though you sold, listed or hold a specific home. Use a Listing Reel for a specific home.", re: OWNERSHIP_RE },
   { rule: "mls_reference", message: "Mentions an MLS number or listing ID.",
     re: /\b(?:MLS|listing)\s*(?:#|no\.?|number|id)\s*[:#]?\s*[A-Za-z0-9-]{4,}|\bMLS\s*[:#]\s*[A-Za-z0-9-]{4,}/i },
   { rule: "street_address", message: "Looks like a specific property address.",
@@ -173,6 +183,8 @@ function addressIsVerified(matchText, addresses) {
 //   listing_announcement "price reduction(s)" is a market figure when the source reports one; "just listed", "open house",
 //                        "under contract" and the rest still block.
 const VERIFIED_PHRASE_RULES = new Set(["listing_price", "listing_announcement"]);
+// Market vocabulary allowed in an aggregate sentence (never "just listed", "new listing", "coming soon", "open house", "just sold").
+const MARKET_PHRASE = /^(?:list(?:ing)?\s+price|under\s+contract|price\s+(?:drops|improvements|reductions|cuts))$/i;
 function scanBlocksVerified(text, field, ctx, blocks, sourcedFacts) {
   const t = norm(text);
   if (!t) return;
@@ -183,7 +195,7 @@ function scanBlocksVerified(text, field, ctx, blocks, sourcedFacts) {
     const re = new RegExp(r.re.source, r.re.flags.includes("g") ? r.re.flags : r.re.flags + "g");
     let m;
     while ((m = re.exec(t))) {
-      const ok = isAddress ? addressIsVerified(m[0], ctx.addresses) : ctx.verifiedLower.includes(lower(m[0]));
+      const ok = isAddress ? addressIsVerified(m[0], ctx.addresses) : (ctx.verifiedLower.includes(lower(m[0])) || (MARKET_PHRASE.test(m[0]) && !ownershipClaim(t, m)));
       if (ok) sourcedFacts.push(`${field}: ${snippet(m)}`);
       else blocks.push({ rule: r.rule, field, match: snippet(m), message: r.message });
       if (m[0].length === 0) re.lastIndex++;
@@ -191,15 +203,24 @@ function scanBlocksVerified(text, field, ctx, blocks, sourcedFacts) {
   }
 }
 
-// A market statistic reads "homes sold for 99% of list price". It is a sourced figure, not the agent's own sale result, when the same
-// sentence carries a number from the validated topic and says nothing in the first person or about the agent's clients.
-function marketStatement(t, m, verifiedNumbers) {
-  const start = Math.max(t.lastIndexOf(".", m.index) , t.lastIndexOf("!", m.index), t.lastIndexOf("?", m.index)) + 1;
-  const ends = [".", "!", "?"].map((c) => t.indexOf(c, m.index + m[0].length)).filter((x) => x >= 0);
-  const sentence = t.slice(start, ends.length ? Math.min(...ends) + 1 : t.length);
-  if (/\b(?:I|I'm|I've|my|me|we|we're|our|us)\b|\bclients?\b/i.test(sentence)) return false;
-  for (const n of numberTokens(sentence)) if (verifiedNumbers.has(n)) return true;
-  return false;
+// Local Market Insider may use market vocabulary (sold, active, pending, under contract, list price, price reductions, days on market):
+// it is the context that matters, not the word. A sentence is an OWNERSHIP claim when the agent is made the seller or listing agent
+// ("I sold…", "my listing is pending", "we have a home under contract") or when it is about one particular home ("this home is
+// pending", "the property just sold"). Ownership claims still block; aggregate market statements do not.
+function sentenceAround(t, index, len) {
+  const start = Math.max(t.lastIndexOf(".", index - 1), t.lastIndexOf("!", index - 1), t.lastIndexOf("?", index - 1)) + 1;
+  const ends = [".", "!", "?"].map((c) => t.indexOf(c, index + len)).filter((x) => x >= 0);
+  return t.slice(start, ends.length ? Math.min(...ends) + 1 : t.length);
+}
+// Market vocabulary passes in an aggregate sentence. "Over/above/under asking" and "multiple offers" are outcome claims, so they also need a
+// figure from the validated topic in the same sentence.
+function marketContext(t, m, verifiedNumbers) {
+  if (ownershipClaim(t, m)) return false;
+  if (!/\b(?:over|above|under)\b|multiple\s+offers/i.test(m[0])) return true;
+  return [...numberTokens(sentenceAround(t, m.index, m[0].length))].some((n) => verifiedNumbers.has(n));
+}
+function ownershipClaim(t, m) {
+  return OWNERSHIP_RE.test(sentenceAround(t, m.index, m[0].length));
 }
 
 // Numeric tokens such as 55, 55+, 3.5%, 4,000. Used to stop Claude inventing figures.
@@ -293,8 +314,8 @@ function evaluate(input) {
         if (intakeLower.includes(lower(m[0]))) agentSuppliedClaims.push(`${field}: ${snippet(m)}`); // the agent said it first
         else if (hasVerified && r.rule === "transaction_result" && (verifiedLower.includes(lower(m[0])) || /^days on market$/i.test(m[0]))) {
           sourcedFacts.push(`${field}: ${snippet(m)}`); // market vocabulary that the sourced topic itself uses
-        } else if (hasVerified && r.rule === "transaction_result" && marketStatement(t, m, verifiedNumbers)) {
-          sourcedFacts.push(`${field}: ${snippet(m)}`); // "homes sold for 99% of list price" with 99% in the sourced figures
+        } else if (hasVerified && r.rule === "transaction_result" && marketContext(t, m, verifiedNumbers)) {
+          sourcedFacts.push(`${field}: ${snippet(m)}`); // "homes sold for 99% of list price": market vocabulary, nobody's own result
         } else blocks.push({ rule: r.rule, field, match: snippet(m), message: r.message });
       }
     }

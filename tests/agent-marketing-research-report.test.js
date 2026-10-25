@@ -249,9 +249,10 @@ test("plan: a piece built on a MetroList report carries the notice from the froz
   const planLib = require("../netlify/functions/lib/agent-marketing-plan-lib");
   const t = frozenTopic();
   assert.ok(t.reportNotice);
-  const src = require("fs").readFileSync(require.resolve("../netlify/functions/lib/agent-marketing-plan-lib"), "utf8");
-  assert.match(src, /narrative\.notice = topicNotice/);
   const am = require("../netlify/functions/lib/agent-marketing-lib");
+  const stamped = am.attachNotice({ template: "local_market_insider", selected_topic: t }, { scenes: [{}, {}, {}, {}, {}] });
+  assert.strictEqual(stamped.notice, t.reportNotice);
+  assert.deepStrictEqual(stamped.noticeOverlay, { text: t.reportNotice, position: "bottom", scenes: [0, 4], showHeadshot: true, headshotSource: "marketing_profile" });
   const gi = am.gateInputFor({ template: "local_market_insider", intake: {}, selected_topic: t }, { captionText: "Average days on market was 45 days.", narrationTagged: "Average days on market was 45 days.", scenes: [], notice: t.reportNotice }, "claude");
   assert.strictEqual(gi.fullPiece, true);
   assert.deepStrictEqual(gi.generated.overlays, [t.reportNotice]);

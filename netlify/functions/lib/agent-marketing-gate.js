@@ -15,13 +15,17 @@
 // This module is the deterministic server-side check. It runs at storyboard approval and again before render, on
 // the intake answers, Claude's script, captions, CTA and any overlay text. It never calls an AI model.
 //
+// Local Market Insider with a validated research topic is reviewed by the market-insider rules below (SaaS Production Model and
+// Compliance Architecture, Oct 25, 2026): it checks meaning and factual support, never vocabulary. Every other template, and Local Market
+// Insider without a validated topic, keeps the strict property-ad rules.
+//
 // Result shape: { ok, version, blocks: [issue], warnings: [issue], agentSuppliedClaims: [string] }
 //   issue = { rule, field, match, message }
 // `ok` is false when there is at least one block. Warnings never block; they are stored on the advertising record.
 
 "use strict";
 
-const GATE_VERSION = "2026-10-24.2";
+const GATE_VERSION = "2026-10-25.1";
 
 // One checkbox, extending the existing Reel advertising-accuracy confirmation. Store the version with the timestamp.
 const ATTESTATION_VERSION = "agent-marketing-1";
@@ -144,6 +148,12 @@ function verifiedFromTopic(topic) {
   (Array.isArray(t.reportFigures) ? t.reportFigures : []).forEach((f) => { if (f && typeof f.text === "string") texts.push(f.text); });
   const reportNotice = typeof t.reportNotice === "string" ? norm(t.reportNotice) : "";
   if (reportNotice) texts.push(reportNotice);
+  // Figures from the agent's own report that take priority over a conflicting web figure on a web topic (see applyReportPrecedence).
+  const precedence = (Array.isArray(t.reportPrecedence) ? t.reportPrecedence : []).map((p) => ({
+    label: norm(p && p.label), reportText: norm(p && p.reportText),
+    supersededNumbers: (Array.isArray(p && p.supersededNumbers) ? p.supersededNumbers : []).map(String).filter(Boolean),
+  })).filter((p) => p.reportText);
+  precedence.forEach((p) => texts.push(p.reportText));
   const addresses = [];
   const e = t.event && typeof t.event === "object" ? t.event : null;
   if (e) {
@@ -151,7 +161,7 @@ function verifiedFromTopic(topic) {
     if (e.location) addresses.push(e.location);
   }
   const clean = texts.filter((x) => typeof x === "string" && x.trim()).map(norm);
-  return clean.length ? { texts: clean, addresses: addresses.map(norm), reportNotice } : null;
+  return clean.length ? { texts: clean, addresses: addresses.map(norm), reportNotice, precedence } : null;
 }
 
 /** verifiedFromProject(project) → verified facts for a stored project row, or null (any other template, no topic). */
@@ -174,53 +184,86 @@ function addressIsVerified(matchText, addresses) {
   });
 }
 
-// Same as scan(text, field, BLOCK_RULES, ...) for Claude's text on a Local Market Insider piece that has verified facts. Three rules
-// are relaxed, and only for what the verified facts themselves contain; EVERY match is checked, so an allowed phrase next to a bad
-// one does not hide it:
-//   street_address       allowed when it is the verified event venue ("1550 Maidu Drive" vs "1550 Maidu Dr, Roseville")
-//   listing_price        "list price" is market vocabulary ("median list price"); allowed when a verified fact uses that phrase.
-//                        "listed at $689,000" and "new price: $…" are never in a verified fact, so they still block.
-//   listing_announcement "price reduction(s)" is a market figure when the source reports one; "just listed", "open house",
-//                        "under contract" and the rest still block.
-const VERIFIED_PHRASE_RULES = new Set(["listing_price", "listing_announcement"]);
-// Market vocabulary allowed in an aggregate sentence (never "just listed", "new listing", "coming soon", "open house", "just sold").
-const MARKET_PHRASE = /^(?:list(?:ing)?\s+price|under\s+contract|price\s+(?:drops|improvements|reductions|cuts))$/i;
-function scanBlocksVerified(text, field, ctx, blocks, sourcedFacts) {
+// ── Local Market Insider review (Oct 25, 2026) ────────────────────────────────────────────────────────────────────
+// Governing rule (SSP Agent Marketing — SaaS Production Model and Compliance Architecture): review the meaning, factual support and
+// advertising context of a statement, not its words. sold, pending, active, price reduction, list price, open house, inventory and days on
+// market are ordinary market vocabulary. A block must cite one of the approved rules below and say what is actually wrong. Source
+// acceptance (may this report be used?) is decided at upload, never here: this module never second-guesses an accepted source.
+//
+// The approved rules for a piece with a validated topic:
+//   1. No specific home      ownership_claim, mls_reference, street_address, specific_home_price, specific_home_announcement,
+//                            property_availability, property_sale_cta, property_field (structural)
+//   2. Every number traces   invented_number (to the intake, the validated topic or the agent's report), unsupported_outcome, client_story,
+//                            staging_outcome; report_priority (the agent's own report wins over a conflicting web figure)
+//   3. Required notice       missing_notice (MetroList Rule 12.9, an on-screen overlay) and notice_spoken (never read aloud)
+//   4. Fair Housing          fair_housing
+const HOME_RULES = new Set(["mls_reference", "street_address", "property_availability", "property_sale_cta"]);
+const MARKET_HOME_RULES = [
+  { rule: "ownership_claim", message: "Reads as though you sold, listed or hold a specific home. Use a Listing Reel for a specific home.", re: OWNERSHIP_RE },
+  ...BLOCK_RULES.filter((r) => HOME_RULES.has(r.rule)),
+  { rule: "specific_home_price", message: "States a price tied to one home. Market figures (a median, an average, a percent of list price) are fine; one listing's price belongs in a Listing Reel.",
+    re: /\b(?:listed|asking|reduced|marked\s+down)\s+(?:at|for|to)\s*\$\s?\d|\bnew\s+price\s*[:\-]\s*\$|\b(?:this|that|our|my)\s+(?:home|house|property|listing|condo|townhome|townhouse)\b[^.!?]{0,40}\$\s?\d/i },
+  { rule: "specific_home_announcement", message: "Reads like an announcement of one home. Use a Listing Reel for a specific home.",
+    re: /(?:^|[.!?]\s+)(?:just\s+listed|just\s+sold|new\s+listing|coming\s+soon|now\s+selling|back\s+on\s+(?:the\s+)?market)\b|\b(?:my|our|this|that)\s+open\s+house\b/i },
+];
+// Wording alone is never flagged: "open house", "just listed" and the rest are only a problem as an announcement of one home (blocked above).
+const MARKET_WARN_RULES = WARN_RULES;
+// Outcome claims need support: a testimonial or staging result nobody supplied, or "over asking" with no figure behind it.
+const MARKET_CLAIM_RULES = CLAIM_RULES.filter((r) => r.rule !== "transaction_result");
+const OUTCOME_RE = /\b(?:over|above|under)\s+asking\b|\bmultiple\s+offers\b|\bbidding\s+wars?\b/gi;
+const isSpokenField = (f) => f === "narration" || f === "captions" || f.startsWith("sceneText[");
+
+function sentenceAround(t, index, len) {
+  const start = Math.max(t.lastIndexOf(".", index - 1), t.lastIndexOf("!", index - 1), t.lastIndexOf("?", index - 1)) + 1;
+  const ends = [".", "!", "?"].map((c) => t.indexOf(c, index + len)).filter((x) => x >= 0);
+  return t.slice(start, ends.length ? Math.min(...ends) + 1 : t.length);
+}
+
+// Rule 1. An address is fine only when it is the verified event venue ("1550 Maidu Drive" vs "1550 Maidu Dr, Roseville").
+function scanSpecificHome(text, field, addresses, blocks, sourcedFacts) {
   const t = norm(text);
   if (!t) return;
-  for (const r of BLOCK_RULES) {
-    const isAddress = r.rule === "street_address" && ctx.addresses.length > 0;
-    const isPhrase = VERIFIED_PHRASE_RULES.has(r.rule) && ctx.verifiedLower;
-    if (!isAddress && !isPhrase) { scan(t, field, [r], blocks); continue; }
+  for (const r of MARKET_HOME_RULES) {
+    if (r.rule !== "street_address" || !addresses.length) { scan(t, field, [r], blocks); continue; }
     const re = new RegExp(r.re.source, r.re.flags.includes("g") ? r.re.flags : r.re.flags + "g");
     let m;
     while ((m = re.exec(t))) {
-      const ok = isAddress ? addressIsVerified(m[0], ctx.addresses) : (ctx.verifiedLower.includes(lower(m[0])) || (MARKET_PHRASE.test(m[0]) && !ownershipClaim(t, m)));
-      if (ok) sourcedFacts.push(`${field}: ${snippet(m)}`);
+      if (addressIsVerified(m[0], addresses)) sourcedFacts.push(`${field}: ${snippet(m)}`);
       else blocks.push({ rule: r.rule, field, match: snippet(m), message: r.message });
       if (m[0].length === 0) re.lastIndex++;
     }
   }
 }
 
-// Local Market Insider may use market vocabulary (sold, active, pending, under contract, list price, price reductions, days on market):
-// it is the context that matters, not the word. A sentence is an OWNERSHIP claim when the agent is made the seller or listing agent
-// ("I sold…", "my listing is pending", "we have a home under contract") or when it is about one particular home ("this home is
-// pending", "the property just sold"). Ownership claims still block; aggregate market statements do not.
-function sentenceAround(t, index, len) {
-  const start = Math.max(t.lastIndexOf(".", index - 1), t.lastIndexOf("!", index - 1), t.lastIndexOf("?", index - 1)) + 1;
-  const ends = [".", "!", "?"].map((c) => t.indexOf(c, index + len)).filter((x) => x >= 0);
-  return t.slice(start, ends.length ? Math.min(...ends) + 1 : t.length);
+// Rule 2. The agent's own report is the source of truth. A web figure for a measure the report also covers, and that disagrees with it,
+// was recorded on the topic (reportPrecedence) when the topics were built; using it in the script blocks.
+function scanReportPriority(text, field, precedence, blocks) {
+  if (!precedence.length) return;
+  const nums = numberTokens(text);
+  for (const p of precedence) {
+    for (const n of p.supersededNumbers) {
+      if (nums.has(n)) blocks.push({ rule: "report_priority", field, match: n, message: `Your uploaded report is the source of truth for ${p.label} (${p.reportText}). Use that figure, not ${n}.` });
+    }
+  }
 }
-// Market vocabulary passes in an aggregate sentence. "Over/above/under asking" and "multiple offers" are outcome claims, so they also need a
-// figure from the validated topic in the same sentence.
-function marketContext(t, m, verifiedNumbers) {
-  if (ownershipClaim(t, m)) return false;
-  if (!/\b(?:over|above|under)\b|multiple\s+offers/i.test(m[0])) return true;
-  return [...numberTokens(sentenceAround(t, m.index, m[0].length))].some((n) => verifiedNumbers.has(n));
-}
-function ownershipClaim(t, m) {
-  return OWNERSHIP_RE.test(sentenceAround(t, m.index, m[0].length));
+
+// Claude's own text for a sourced piece. Returns nothing; pushes into blocks / sourcedFacts / agentSuppliedClaims.
+function scanMarketClaims(text, field, ctx, blocks, sourcedFacts, claims) {
+  const t = norm(text);
+  for (const r of MARKET_CLAIM_RULES) {
+    const m = t.match(r.re);
+    if (!m) continue;
+    if (ctx.intakeLower.includes(lower(m[0]))) claims.push(`${field}: ${snippet(m)}`); // the agent said it first
+    else blocks.push({ rule: r.rule, field, match: snippet(m), message: r.message });
+  }
+  const re = new RegExp(OUTCOME_RE.source, "gi");
+  let m;
+  while ((m = re.exec(t))) {
+    const sentence = sentenceAround(t, m.index, m[0].length);
+    if (ctx.intakeLower.includes(lower(m[0]))) claims.push(`${field}: ${snippet(m)}`);
+    else if (!OWNERSHIP_RE.test(sentence) && (ctx.verifiedLower.includes(lower(m[0])) || [...numberTokens(sentence)].some((n) => ctx.verifiedNumbers.has(n)))) sourcedFacts.push(`${field}: ${snippet(m)}`);
+    else blocks.push({ rule: "unsupported_outcome", field, match: snippet(m), message: `"${m[0]}" claims a market outcome, but no figure in your research or report supports it. Add the figure or reword it.` });
+  }
 }
 
 // Numeric tokens such as 55, 55+, 3.5%, 4,000. Used to stop Claude inventing figures.
@@ -270,26 +313,32 @@ function evaluate(input) {
   const vIn = i.template === VERIFIED_TEMPLATE && i.verified && typeof i.verified === "object" ? i.verified : null;
   const vTexts = vIn && Array.isArray(vIn.texts) ? vIn.texts.filter((x) => typeof x === "string" && x.trim()).map(norm) : [];
   const vAddresses = vIn && Array.isArray(vIn.addresses) ? vIn.addresses.filter((x) => typeof x === "string" && x.trim()).map(norm) : [];
-  const hasVerified = vTexts.length > 0;
+  const precedence = vIn && Array.isArray(vIn.precedence) ? vIn.precedence.filter((p) => p && Array.isArray(p.supersededNumbers)) : [];
   const verifiedText = vTexts.join(" \n ");
   const verifiedLower = verifiedText.toLowerCase();
   const verifiedNumbers = numberTokens(verifiedText);
   const sourcedFacts = [];
+  const market = vTexts.length > 0; // a validated topic exists: review the meaning (market rules); otherwise the strict property-ad rules apply
+  const ctx = { intakeLower, verifiedLower, verifiedNumbers };
 
   // Everything the AGENT typed: property-sale rules block; Fair Housing only warns; claims pass through.
   const userFields = { ...(i.userText || {}) };
   for (const [k, v] of Object.entries(intake)) if (typeof v === "string") userFields[`intake.${k}`] = v;
   if (i.cta && (i.cta.source === "user_edited" || i.cta.source === "user_inserted")) userFields["cta"] = i.cta.text;
   for (const [field, text] of Object.entries(userFields)) {
-    // Approving or saving a script sends Claude's words back as the agent's own text; on a sourced Local Market Insider piece the same
-    // context rules apply (market vocabulary passes, ownership claims block).
-    if (hasVerified && !field.startsWith("intake.")) scanBlocksVerified(text, field, { addresses: vAddresses, verifiedLower }, blocks, sourcedFacts);
+    if (market) scanSpecificHome(text, field, vAddresses, blocks, sourcedFacts);
     else scan(text, field, BLOCK_RULES, blocks);
-    scan(text, field, WARN_RULES, warnings);
+    scan(text, field, market ? MARKET_WARN_RULES : WARN_RULES, warnings);
     scan(text, field, FAIR_HOUSING, warnings);
     for (const r of CLAIM_RULES) {
       const m = norm(text).match(r.re);
       if (m) agentSuppliedClaims.push(`${field}: ${snippet(m)}`);
+    }
+    // Approving or saving a script sends Claude's words back as the agent's own text. On a sourced piece the same context rules apply to it
+    // (the agent's own intake answers are theirs and are not held to them).
+    if (market && !field.startsWith("intake.") && field !== "cta") {
+      scanMarketClaims(text, field, ctx, blocks, sourcedFacts, agentSuppliedClaims);
+      scanReportPriority(text, field, precedence, blocks);
     }
   }
 
@@ -304,43 +353,51 @@ function evaluate(input) {
   if (i.cta && i.cta.source !== "user_edited" && i.cta.source !== "user_inserted") genFields["cta"] = i.cta.text;
   for (const [field, text] of Object.entries(genFields)) {
     if (!text) continue;
-    if (hasVerified) scanBlocksVerified(text, field, { addresses: vAddresses, verifiedLower }, blocks, sourcedFacts);
+    if (market) scanSpecificHome(text, field, vAddresses, blocks, sourcedFacts);
     else scan(text, field, BLOCK_RULES, blocks);
-    scan(text, field, WARN_RULES, warnings);
+    scan(text, field, market ? MARKET_WARN_RULES : WARN_RULES, warnings);
     scan(text, field, FAIR_HOUSING, blocks);
-    for (const r of CLAIM_RULES) {
-      const t = norm(text);
-      const re = new RegExp(r.re.source, r.re.flags.includes("g") ? r.re.flags : r.re.flags + "g");
-      let m;
-      while ((m = re.exec(t))) {
-        if (m[0].length === 0) { re.lastIndex++; continue; }
-        if (intakeLower.includes(lower(m[0]))) agentSuppliedClaims.push(`${field}: ${snippet(m)}`); // the agent said it first
-        else if (hasVerified && r.rule === "transaction_result" && (verifiedLower.includes(lower(m[0])) || /^days on market$/i.test(m[0]))) {
-          sourcedFacts.push(`${field}: ${snippet(m)}`); // market vocabulary that the sourced topic itself uses
-        } else if (hasVerified && r.rule === "transaction_result" && marketContext(t, m, verifiedNumbers)) {
-          sourcedFacts.push(`${field}: ${snippet(m)}`); // "homes sold for 99% of list price": market vocabulary, nobody's own result
-        } else blocks.push({ rule: r.rule, field, match: snippet(m), message: r.message });
+    if (market) {
+      scanMarketClaims(text, field, ctx, blocks, sourcedFacts, agentSuppliedClaims);
+      scanReportPriority(text, field, precedence, blocks);
+    } else {
+      for (const r of CLAIM_RULES) {
+        const t = norm(text);
+        const re = new RegExp(r.re.source, r.re.flags.includes("g") ? r.re.flags : r.re.flags + "g");
+        let m;
+        while ((m = re.exec(t))) {
+          if (m[0].length === 0) { re.lastIndex++; continue; }
+          if (intakeLower.includes(lower(m[0]))) agentSuppliedClaims.push(`${field}: ${snippet(m)}`); // the agent said it first
+          else blocks.push({ rule: r.rule, field, match: snippet(m), message: r.message });
+        }
       }
     }
     for (const n of numberTokens(text)) {
       if (intakeNumbers.has(n)) continue;
-      if (hasVerified && verifiedNumbers.has(n)) sourcedFacts.push(`${field}: ${n}`); // the figure is in the validated source topic
-      else blocks.push({ rule: "invented_number", field, match: n, message: "Contains a number the agent did not provide." });
+      if (market && verifiedNumbers.has(n)) sourcedFacts.push(`${field}: ${n}`); // the figure is in the validated source topic
+      else blocks.push({ rule: "invented_number", field, match: n, message: market ? `The number ${n} is not in your research topic, your uploaded report or your answers. Use only figures from those sources.` : "Contains a number the agent did not provide." });
     }
   }
 
   // MetroList Rule 12.9: advertising that uses its statistics must carry "Based on information from MetroList Services, Inc. for the period
-  // (date) through (date)." When the verified topic came from a MetroList report, a complete piece must contain that notice. Callers that
-  // check a whole piece pass fullPiece: true (a partial check, such as one image caption, is not held to it).
-  if (vIn && typeof vIn.reportNotice === "string" && vIn.reportNotice && i.fullPiece === true) {
-    const everything = lower([...Object.values(genFields), ...Object.values(userFields), i.cta && i.cta.text].filter((x) => typeof x === "string").map(norm).join(" \n "));
-    if (!everything.includes(lower(norm(vIn.reportNotice)))) blocks.push({ rule: "missing_notice", field: "notice", match: "", message: "A piece that uses MetroList report figures must carry MetroList's required notice." });
+  // (date) through (date)." When the verified topic came from a MetroList report, a complete piece must carry that notice as an on-screen
+  // overlay (overlay / notice fields), never as spoken words. Callers that check a whole piece pass fullPiece: true (a partial check, such as
+  // one image caption, is not held to it).
+  const noticeText = vIn && typeof vIn.reportNotice === "string" ? lower(norm(vIn.reportNotice)) : "";
+  if (noticeText) {
+    const all = { ...userFields, ...genFields };
+    const spoken = Object.entries(all).filter(([f, t]) => isSpokenField(f) && typeof t === "string" && lower(t).includes(noticeText)).map(([f]) => f);
+    spoken.forEach((f) => blocks.push({ rule: "notice_spoken", field: f, match: "", message: "MetroList's notice is shown on screen, not spoken. Remove it from the script; it is added to the video automatically." }));
+    if (i.fullPiece === true) {
+      const onScreen = Object.entries(all).some(([f, t]) => (f === "notice" || f.startsWith("overlay[")) && typeof t === "string" && lower(norm(t)).includes(noticeText));
+      if (!onScreen) blocks.push({ rule: "missing_notice", field: "notice", match: "", message: "A piece that uses MetroList report figures must carry MetroList's required notice." });
+    }
   }
 
   // De-duplicate identical issues
   const uniq = (arr) => { const seen = new Set(); return arr.filter((x) => { const k = `${x.rule}|${x.field}|${x.match}`; if (seen.has(k)) return false; seen.add(k); return true; }); };
   const b = uniq(blocks);
-  return { ok: b.length === 0, version: GATE_VERSION, blocks: b, warnings: uniq(warnings), agentSuppliedClaims: [...new Set(agentSuppliedClaims)], sourcedFacts: [...new Set(sourcedFacts)] };
+  return { ok: b.length === 0, version: GATE_VERSION, review: market ? "market_insider" : "strict", blocks: b, warnings: uniq(warnings), agentSuppliedClaims: [...new Set(agentSuppliedClaims)], sourcedFacts: [...new Set(sourcedFacts)] };
 }
 
 // Friendly message for the UI when the gate blocks.

@@ -206,4 +206,57 @@ function combineTopics({ dataSource, reportTopics, webTopics }) {
   return out.map((t, i) => ({ ...t, id: `t${i + 1}` }));
 }
 
-module.exports = { REPORT_TOPICS_WHEN_BOTH, MAX_FIGS_PER_TOPIC, buildContext, figureText, systemPrompt, userMessage, validateReportTopics, generateReportTopics, combineTopics, TREND_CLAIM, NOW_WORDS };
+// ── The agent's own report wins (Sam, Oct 25) ──────────────────────────────────────────────────────────────────────
+// A web topic can quote a figure for a measure the agent's uploaded report also covers (a blog says 130 pending sales; the agent's own
+// MetroList data says 146). The upload is the source of truth. For each such web topic this records, on the topic itself, the agent's
+// figure and the web numbers it replaces (reportPrecedence). The gate then blocks the replaced numbers, the planner is told to state the
+// report's figure, and the report's notice (MetroList Rule 12.9) rides along because its figure may be used.
+const MEASURES = [
+  { key: "count_pending", re: /\bpend(?:ed|ing)\b/ },
+  { key: "count_active", re: /\bactive\s+(?:listings|inventory)\b|\bhomes\s+for\s+sale\b/ },
+  { key: "count_closed", re: /\bclosed\s+sales\b|\bhomes\s+sold\b|\bsales\s+closed\b/ },
+  { key: "count_new", re: /\bnew\s+listings\b/ },
+  { key: "months_supply", re: /\bmonths?\s+(?:of\s+)?(?:inventory|supply)\b/ },
+  { key: "median_close_price", re: /\bmedian\s+(?:sale|sales|sold|closed|home)\s+price\b/ },
+  { key: "avg_close_price", re: /\baverage\s+(?:sale|sales|sold|closed|home)\s+price\b/ },
+  { key: "median_list_price", re: /\bmedian\s+(?:list|listing|asking)\s+price\b/ },
+  { key: "avg_dom", re: /\bdays\s+on\s+market\b/ },
+  { key: "median_dom", re: /\bdays\s+on\s+market\b/ },
+  { key: "avg_close_to_list_pct", re: /\bsold[-\s]to[-\s]list\b|\bpercent\s+of\s+(?:the\s+)?(?:list|asking)\b|\blist\s+price\s+received\b/ },
+  { key: "median_ppsf", re: /\bprice\s+per\s+sq(?:uare)?\.?\s*f(?:ee|oo)?t\b/ },
+];
+function applyReportPrecedence(topics, ctx) {
+  const figs = ctx && ctx.figures ? [...ctx.figures.values()] : [];
+  if (!figs.length) return topics;
+  const allReportNums = new Set();
+  figs.forEach((cf) => numbersIn(figureText(cf)).forEach((n) => allReportNums.add(n)));
+  return (topics || []).map((t) => {
+    if (!t || t.origin !== "web") return t;
+    const text = [t.question, t.whyItMatters, ...(Array.isArray(t.trendSignals) ? t.trendSignals : [])].filter(Boolean).join(" . ").toLowerCase();
+    const precedence = [], notices = [];
+    for (const m of MEASURES) {
+      const mine = figs.filter((cf) => cf.fig.key === m.key);
+      if (!mine.length) continue;
+      const near = new Set();
+      const re = new RegExp(m.re.source, "g");
+      let x;
+      while ((x = re.exec(text))) {
+        // whole numbers that START close to the measure (12 characters before it, 30 after), never a slice that cuts a number in half
+        const lo = x.index - 12, hi = x.index + x[0].length + 30, nr = /\d[\d,]*(?:\.\d+)?/g;
+        let y;
+        while ((y = nr.exec(text))) if (y.index >= lo && y.index <= hi) numbersIn(y[0]).forEach((n) => near.add(n));
+      }
+      const mineNums = new Set();
+      mine.forEach((cf) => numbersIn(figureText(cf)).forEach((n) => mineNums.add(n)));
+      const superseded = [...near].filter((n) => !mineNums.has(n) && !allReportNums.has(n) && !(n >= 2020 && n <= 2035)).map(String);
+      if (!superseded.length) continue;
+      precedence.push({ key: m.key, label: mine[0].fig.label, reportText: mine.map(figureText).join("; "), supersededNumbers: superseded });
+      mine.forEach((cf) => { if (cf.report.notice) notices.push(cf.report.notice); });
+    }
+    if (!precedence.length) return t;
+    const reportNotice = [...new Set([...(t.reportNotice ? [t.reportNotice] : []), ...notices])].join(" ");
+    return { ...t, reportPrecedence: precedence, reportNotice };
+  });
+}
+
+module.exports = { applyReportPrecedence, MEASURES, REPORT_TOPICS_WHEN_BOTH, MAX_FIGS_PER_TOPIC, buildContext, figureText, systemPrompt, userMessage, validateReportTopics, generateReportTopics, combineTopics, TREND_CLAIM, NOW_WORDS };

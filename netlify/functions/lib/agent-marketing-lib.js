@@ -111,6 +111,23 @@ function topicNotice(project) {
   return t && typeof t.reportNotice === "string" ? t.reportNotice : "";
 }
 
+// On screen, never spoken (Sam, Oct 24-25): the notice sits at the bottom of the opening and the closing scene, together with the agent's
+// headshot from their Marketing Profile. This is the contract for the Railway renderer; the text always comes from the frozen topic.
+function noticeOverlayFor(project, narrative) {
+  const text = topicNotice(project);
+  if (!text) return null;
+  const count = Array.isArray(narrative && narrative.scenes) ? narrative.scenes.length : 0;
+  return { text, position: "bottom", scenes: count > 1 ? [0, count - 1] : [0], showHeadshot: true, headshotSource: "marketing_profile" };
+}
+// Sets (or removes) narrative.notice and narrative.noticeOverlay from the stored topic. A script edit can never drop or change the notice.
+function attachNotice(project, narrative) {
+  const n = narrative || {};
+  const overlay = noticeOverlayFor(project, n);
+  if (overlay) { n.notice = overlay.text; n.noticeOverlay = overlay; }
+  else { delete n.notice; delete n.noticeOverlay; }
+  return n;
+}
+
 // Build the gate input for a stored project + narrative. Text the agent wrote or edited is checked as the agent's own;
 // text Claude wrote (source "claude") is held to the stricter rules (no invented claims or numbers).
 function gateInputFor(project, narrative, source) {
@@ -127,5 +144,5 @@ const NOT_EDITABLE_AFTER = ["rendering", "rendered", "published"];
 
 module.exports = {
   DURATIONS, FORMATS, VOICES, MUSIC, WORD_TARGETS, UUID_RE, NOT_EDITABLE_AFTER,
-  isEnabledFor, validateCreate, stripAudioTags, countWords, validateNarrative, gateInputFor, topicNotice,
+  isEnabledFor, validateCreate, stripAudioTags, countWords, validateNarrative, gateInputFor, topicNotice, noticeOverlayFor, attachNotice,
 };

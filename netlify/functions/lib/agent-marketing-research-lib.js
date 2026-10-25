@@ -26,6 +26,7 @@ const AUDIENCES = [
   { key: "general", label: "General market update" },
 ];
 const AUDIENCE_KEYS = AUDIENCES.map((a) => a.key);
+const DATA_SOURCES = ["web", "upload", "both"];
 const TOPIC_COUNT = 5;
 const MAX_UPLOADS = 3;
 const FRESH_DAYS = 30;            // a source for a market update may be at most this old (the GPT prefers 7 and accepts 30)
@@ -80,7 +81,7 @@ function geoLabel(g) {
 // ── The agent's research request ────────────────────────────────────────────────────────────────────────────────
 /**
  * validateResearchRequest(body) → { ok, errors, request }
- * `request` holds only known keys: mode, audience, geography, focus, uploadIds.
+ * `request` holds only known keys: mode, audience, geography, focus, dataSource, uploadIds.
  */
 function validateResearchRequest(body) {
   const b = body && typeof body === "object" ? body : {};
@@ -97,15 +98,20 @@ function validateResearchRequest(body) {
   if (ids.length > MAX_UPLOADS) errors.push({ field: "uploadIds", message: `Attach at most ${MAX_UPLOADS} reports.` });
   const uploadIds = [...new Set(ids)].filter((id) => am.UUID_RE.test(id));
   if (uploadIds.length !== new Set(ids).size) errors.push({ field: "uploadIds", message: "One of the attached reports is not valid." });
+  // Where the topics come from. No choice made: a report that is attached is used together with web research, otherwise web only.
+  let dataSource = b.dataSource == null || b.dataSource === "" ? (uploadIds.length ? "both" : "web") : String(b.dataSource);
+  if (!DATA_SOURCES.includes(dataSource)) errors.push({ field: "dataSource", message: "Choose web research, your report, or both." });
+  else if (dataSource !== "web" && uploadIds.length === 0) errors.push({ field: "dataSource", message: "Attach and confirm a report to use it, or choose web research only." });
+  if (mode === "local_events" && dataSource !== "web") errors.push({ field: "dataSource", message: "Local Events uses web research only." });
   if (errors.length) return { ok: false, errors, request: null };
-  return { ok: true, errors: [], request: { mode, audience, geography: geo.geography, focus, uploadIds } };
+  return { ok: true, errors: [], request: { mode, audience, geography: geo.geography, focus, dataSource, uploadIds: dataSource === "web" ? [] : uploadIds } };
 }
 
 // A short, stable fingerprint of a request, so the same request is recognised (reuse saved results, never re-buy).
 function requestKey(request) {
   const r = request || {};
   const g = r.geography || {};
-  return JSON.stringify([r.mode, r.audience, g.type, String(g.name || "").toLowerCase(), String(g.city || "").toLowerCase(), !!(r.focus && r.focus.active_adult_55), !!(r.focus && r.focus.new_construction), (r.uploadIds || []).slice().sort()]);
+  return JSON.stringify([r.mode, r.audience, g.type, String(g.name || "").toLowerCase(), String(g.city || "").toLowerCase(), !!(r.focus && r.focus.active_adult_55), !!(r.focus && r.focus.new_construction), (r.uploadIds || []).slice().sort(), r.dataSource || "web"]);
 }
 
 // ── Provider request (Perplexity Agent API, POST /v1/agent) ────────────────────────────────────────────────────────
@@ -309,7 +315,7 @@ function validateTopics(rawTopics, { mode, today } = {}) {
       if (c && !seen.has(c.url)) { seen.add(c.url); sources.push(c); }
     });
     if (sources.length === 0) return problems.push(`topic ${n}: no usable source`);
-    const topic = { id: `t${n}`, kind: mode, question, whyItMatters: why, trendSignals: signals, localIntent: x.local_intent === true, scope, scopeNote: scope === "broader_context" ? scopeNote : "", sources: sources.slice(0, 4), event: null };
+    const topic = { id: `t${n}`, origin: "web", kind: mode, question, whyItMatters: why, trendSignals: signals, localIntent: x.local_intent === true, scope, scopeNote: scope === "broader_context" ? scopeNote : "", sources: sources.slice(0, 4), event: null };
     if (mode === "local_events") {
       const e = cleanEvent(x.event, todayN);
       if (e.problem) return problems.push(`topic ${n}: ${e.problem}`);
@@ -381,7 +387,7 @@ function outcomeFields({ validation, usage, model, today, now, error }) {
 }
 
 module.exports = {
-  MODES, MODE_LABELS, GEO_TYPES, AUDIENCES, AUDIENCE_KEYS, TOPIC_COUNT, MAX_UPLOADS, FRESH_DAYS, ALLOWANCE_BY_PLAN, PAYWALLED_DOMAINS, DEFAULT_MODEL, DEFAULT_COST_TARGET_USD,
+  MODES, MODE_LABELS, DATA_SOURCES, GEO_TYPES, AUDIENCES, AUDIENCE_KEYS, TOPIC_COUNT, MAX_UPLOADS, FRESH_DAYS, ALLOWANCE_BY_PLAN, PAYWALLED_DOMAINS, DEFAULT_MODEL, DEFAULT_COST_TARGET_USD,
   validateGeography, geoLabel, validateResearchRequest, requestKey, researchModel, researchSettings, systemPrompt, buildResearchPayload,
-  extractTopics, validateTopics, usageSummary, monthKeyPT, allowanceFor, sessionStatus, outcomeFields,
+  extractTopics, validateTopics, similar, usageSummary, monthKeyPT, allowanceFor, sessionStatus, outcomeFields,
 };

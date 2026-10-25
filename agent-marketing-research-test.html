@@ -144,7 +144,7 @@ input:focus,select:focus{outline:2px solid var(--gold-light);outline-offset:1px;
           <button type="button" class="btn small" id="upYes">Correct, use it</button>
           <button type="button" class="btn ghost small" id="upNo">Not right, remove</button>
         </div>
-        <div class="hint">Using the report in your topics arrives in the next update. For now this only checks that the report is read correctly.</div>
+        <div class="hint">Once you confirm, choose below whether your topics use this report, web research, or both. With both, up to three topics come from your report first.</div>
       </div>
       <div id="dataChoice" class="hidden">
         <label class="lbl" style="margin-top:14px">Select what data you want to use</label>
@@ -168,6 +168,7 @@ input:focus,select:focus{outline:2px solid var(--gold-light);outline-offset:1px;
       <div class="panel-title" id="resTitle"></div>
       <div id="resWait" class="hidden"><span class="spinner"></span><span id="resWaitText">Researching… this usually takes under a minute.</span></div>
       <div id="resError" class="msg err hidden"></div>
+      <div id="resNote" class="msg"></div>
       <div id="resTopics"></div>
       <div id="resCost"></div>
       <div class="msg" id="selMsg" role="status"></div>
@@ -256,7 +257,15 @@ input:focus,select:focus{outline:2px solid var(--gold-light);outline-offset:1px;
       mode: picked("mode"), audience: $("audience").value,
       geography: { type: type, name: $("geoName").value, city: type === "neighborhood" ? $("geoCity").value : "" },
       focus: { active_adult_55: $("f55").checked, new_construction: $("fNew").checked },
+      dataSource: reportSource().dataSource, uploadIds: reportSource().uploadIds,
     };
+  }
+  // A report is used only once the agent has confirmed "This report covers\u2026 Correct?". Radio values: upload / research / both.
+  function reportSource() {
+    var u = state.upload;
+    if (!u || u.status !== "confirmed" || !u.id) return { dataSource: "web", uploadIds: [] };
+    var v = (document.querySelector('input[name="dataSrc"]:checked') || {}).value || "both";
+    return v === "research" ? { dataSource: "web", uploadIds: [] } : { dataSource: v, uploadIds: [u.id] };
   }
 
   // ── Session line ──
@@ -282,14 +291,19 @@ input:focus,select:focus{outline:2px solid var(--gold-light);outline-offset:1px;
       (u.searchQueries != null ? " · searches " + esc(u.searchQueries) : "") + " · sources checked against the provider: " + (u.grounded === true ? "yes" : u.grounded === false ? "no (provider sent none)" : "n/a") + "</div></div>";
   }
   function srcLine(s) {
+    if (s.type === "report") return '<div class="src"><b>Your MLS report</b>' + (s.published ? " <span>\u00b7 through " + esc(s.published) + "</span>" : "") + "</div>";
     return '<div class="src"><a href="' + esc(s.url) + '" target="_blank" rel="noopener noreferrer">' + esc(s.title) + '</a> <span>· ' + esc(s.domain) + (s.published ? " · " + esc(s.published) : "") + "</span></div>";
   }
   function renderTopic(t, pickedId) {
     var ev = t.event;
     return '<div class="topic' + (t.id === pickedId ? " picked" : "") + '"><div class="tags"><span class="tag">' + esc(t.id.toUpperCase()) + "</span>" +
       '<span class="tag ' + (t.scope === "selected" ? "ok" : "warn") + '">' + (t.scope === "selected" ? "Your exact market" : "Broader context") + "</span>" +
+      '<span class="tag ' + (t.origin === "report" ? "ok" : "") + '">' + (t.origin === "report" ? "From your report" : "From web research") + "</span>" +
+      (t.smallSample ? '<span class="tag warn">Small sample</span>' : "") +
       (t.localIntent ? '<span class="tag ok">Local intent</span>' : "") + "</div><h3>" + esc(t.question) + '</h3><div class="why">' + esc(t.whyItMatters) + "</div>" +
-      (t.scope !== "selected" ? '<div class="kv"><b>Data covers:</b> ' + esc(t.scopeNote) + "</div>" : "") +
+      (t.scope !== "selected" || (t.origin === "report" && t.scopeNote) ? '<div class="kv"><b>' + (t.scope !== "selected" ? "Data covers" : "Note") + ":</b> " + esc(t.scopeNote) + "</div>" : "") +
+      (t.reportFigures && t.reportFigures.length ? '<div class="kv"><b>Report figures:</b> ' + t.reportFigures.map(function (f) { return esc(f.text); }).join(" \u00b7 ") + "</div>" : "") +
+      (t.reportNotice ? '<div class="kv"><b>Required notice:</b> ' + esc(t.reportNotice) + "</div>" : "") +
       (t.trendSignals && t.trendSignals.length ? '<div class="kv"><b>Trend signals:</b> ' + t.trendSignals.map(esc).join(" · ") + "</div>" : "") +
       (ev ? '<div class="kv"><b>' + esc(ev.name) + "</b> · " + esc(ev.date) + (ev.endDate ? " to " + esc(ev.endDate) : "") + " · " + esc(ev.time) + "</div>" +
         '<div class="kv"><b>Where:</b> ' + esc(ev.location) + " · <b>Organizer:</b> " + esc(ev.organizer) + " · <b>Status:</b> " + esc(ev.status) + "</div>" : "") +
@@ -304,7 +318,8 @@ input:focus,select:focus{outline:2px solid var(--gold-light);outline-offset:1px;
     $("resTitle").textContent = r.status === "ready" ? "Five topics" + (r.researchDate ? " from " + r.researchDate : "") : r.status === "failed" ? "No topics this time" : "Researching…";
     $("resWait").classList.toggle("hidden", r.status !== "running");
     $("resError").classList.toggle("hidden", r.status !== "failed");
-    if (r.status === "failed") $("resError").textContent = (r.error || "The research could not be completed.") + " This did not use a session.";
+    if (r.status === "failed") $("resError").textContent = (r.error || "The research could not be completed.") + (/did not use a session/.test(r.error || "") ? "" : " This did not use a session.");
+    say("resNote", r.status === "ready" && r.note ? r.note : "");
     var pickedId = state.selected && state.selected.researchId === r.id ? state.selected.id : null;
     $("resTopics").innerHTML = r.status === "ready" ? r.topics.map(function (t) { return renderTopic(t, pickedId); }).join("") : "";
     renderCost(r);

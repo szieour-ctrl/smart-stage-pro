@@ -27,11 +27,23 @@ exports.handler = async (event) => {
     const row = Array.isArray(r.data) ? r.data[0] : null;
     if (!row) return { statusCode: 404, body: "" };
     if (row.status !== "running") return { statusCode: 200, body: "" }; // a duplicate dispatch does nothing
-    if (!process.env.PERPLEXITY_API_KEY) {
+    const source = row.data_source || "web";
+    if ((source !== "upload" && !process.env.PERPLEXITY_API_KEY) || (source !== "web" && !process.env.ANTHROPIC_API_KEY)) {
       await writeRow(id, userId, { status: "failed", error: "Research is not set up yet.", charged_at: null, updated_at: new Date().toISOString() });
       return { statusCode: 200, body: "" };
     }
-    const { fields, problems, attempts } = await runLib.runResearch({ row, apiKey: process.env.PERPLEXITY_API_KEY });
+    // The agent's confirmed report(s), read fresh by id and owner. If one was removed since the request started, nothing is charged.
+    let uploads = [];
+    const refs = Array.isArray(row.upload_refs) ? row.upload_refs.map((x) => x && x.id).filter((x) => am.UUID_RE.test(String(x || ""))) : [];
+    if (source !== "web") {
+      const ur = await supabase("GET", "agent_marketing_uploads", null, `?id=in.(${refs.join(",")})&user_id=eq.${userId}&status=eq.confirmed&select=id,facts`);
+      uploads = Array.isArray(ur.data) ? ur.data : [];
+      if (!refs.length || uploads.length !== refs.length) {
+        await writeRow(id, userId, { status: "failed", error: "A report you attached was removed before the research finished. This did not use a session.", charged_at: null, updated_at: new Date().toISOString() });
+        return { statusCode: 200, body: "" };
+      }
+    }
+    const { fields, problems, attempts } = await runLib.runResearch({ row, apiKey: process.env.PERPLEXITY_API_KEY, uploads, anthropicKey: process.env.ANTHROPIC_API_KEY });
     if (fields.status === "failed") console.error(`[agent-marketing-research] ${id} failed after ${attempts} attempt(s): ${(problems || []).join("; ").slice(0, 400)} ${fields.error || ""}`);
     await writeRow(id, userId, fields);
   } catch (err) {

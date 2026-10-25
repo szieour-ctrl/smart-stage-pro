@@ -267,3 +267,17 @@ test("select: freezes the chosen topic and its sources on the project; only from
   currentUser = U2;
   assert.strictEqual((await call("POST", { action: "select", projectId: p.id, researchId: ready.id, topicId: "t1" })).status, 404);
 });
+
+test("select: choosing a different topic after the script was approved sends the project back to draft; the same topic does not", async () => {
+  reset();
+  const p = mkProject({ status: "narrative_approved" });
+  const topics = [1, 2].map((n) => ({ id: `t${n}`, kind: "market_update", question: `Q${n}`, sources: [{ title: "S", url: "https://example.org/a", published: "2026-10-20" }] }));
+  db.agent_marketing_research.push({ id: uuid(nextId++), project_id: p.id, user_id: U1, mode: "market_update", audience: "sellers", geography: { label: "Roseville, CA" }, focus: {}, status: "ready", topics, research_date: "2026-10-24", charged_at: "2026-10-24T17:00:00Z", created_at: "2026-10-24T17:00:00Z" });
+  const rid = db.agent_marketing_research[0].id;
+  assert.strictEqual((await call("POST", { action: "select", projectId: p.id, researchId: rid, topicId: "t1" })).status, 200);
+  assert.strictEqual(p.status, "narrative_approved");    // first pick: no earlier topic to differ from
+  await call("POST", { action: "select", projectId: p.id, researchId: rid, topicId: "t1" });
+  assert.strictEqual(p.status, "narrative_approved");    // same topic again: nothing changes
+  await call("POST", { action: "select", projectId: p.id, researchId: rid, topicId: "t2" });
+  assert.strictEqual(p.status, "draft");
+});

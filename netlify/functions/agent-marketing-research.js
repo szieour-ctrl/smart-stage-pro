@@ -138,7 +138,12 @@ exports.handler = async (event) => {
       const topic = (row.topics || []).find((t) => t && t.id === String(b.topicId || ""));
       if (!topic) return reply(400, { error: "Choose one of the five topics." });
       const frozen = { ...topic, researchId: row.id, researchDate: row.research_date, mode: row.mode, audience: row.audience, focus: row.focus || {}, geography: row.geography };
-      const saved = await supabase("PATCH", "agent_marketing_projects", { selected_research_id: row.id, selected_topic: frozen, updated_at: new Date().toISOString() }, `?id=eq.${project.id}&user_id=eq.${userId}`);
+      // A different topic makes any earlier script stale: drop back to "draft" (the script is kept for the agent to see, never auto-approved).
+      const prev = project.selected_topic;
+      const changed = !!prev && (prev.id !== frozen.id || prev.researchId !== frozen.researchId);
+      const fields = { selected_research_id: row.id, selected_topic: frozen, updated_at: new Date().toISOString() };
+      if (changed && ["narrative_approved", "images"].includes(project.status)) fields.status = "draft";
+      const saved = await supabase("PATCH", "agent_marketing_projects", fields, `?id=eq.${project.id}&user_id=eq.${userId}`);
       if (saved.status >= 300 || !Array.isArray(saved.data) || !saved.data[0]) return reply(500, { error: "Could not save your choice" });
       return reply(200, { selectedResearchId: row.id, selectedTopic: frozen });
     }

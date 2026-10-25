@@ -102,6 +102,50 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
 .pill.ok{background:#eaf3ee;color:var(--success);}
 .img-scene{margin-top:16px;padding-top:14px;border-top:1px solid var(--border);}
 .img-scene:first-of-type{border-top:0;padding-top:0;}
+/* research step (shared with agent-marketing-research-test.html) */
+.topic{border:1px solid var(--border);border-radius:6px;padding:14px 16px;margin-top:12px;background:#fff;}
+.topic.picked{border-color:var(--gold);background:#fdf9f0;box-shadow:inset 0 0 0 1px var(--gold);}
+.topic h3{font-family:'Cormorant Garamond',serif;font-size:1.15rem;font-weight:600;line-height:1.3;}
+.topic .why{font-size:0.85rem;margin:6px 0;}
+.tags{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0;}
+.tag{font-size:0.68rem;text-transform:uppercase;letter-spacing:0.06em;font-weight:600;padding:3px 8px;border-radius:10px;background:var(--warm);color:var(--muted);}
+.tag.warn{background:#fdf3d8;color:#7a5a12;} .tag.ok{background:#eaf3ee;color:var(--success);}
+.kv{font-size:0.8rem;color:var(--muted);margin:2px 0;} .kv b{color:var(--ink);font-weight:600;}
+.src{font-size:0.8rem;margin:3px 0;} .src a{color:#7a5a12;word-break:break-all;} .src span{color:var(--muted);}
+.cost{border:1px dashed var(--gold);border-radius:6px;background:#fffdf8;padding:12px 14px;margin-top:14px;font-size:0.82rem;}
+.cost b{font-weight:600;} .cost .big{font-family:'Cormorant Garamond',serif;font-size:1.5rem;font-weight:600;}
+.cost.over .big{color:var(--danger);} .cost.under .big{color:var(--success);}
+.saved{display:flex;justify-content:space-between;align-items:center;gap:10px;border-top:1px solid var(--border);padding:10px 0;font-size:0.84rem;}
+.saved:first-of-type{border-top:0;}
+.upload{border:1.5px dashed var(--border);border-radius:6px;background:#fbfaf7;padding:16px;text-align:center;margin-top:6px;}
+.upload.locked{opacity:0.55;}
+.upload .ut{font-weight:600;font-size:0.9rem;margin-top:2px;} .upload .us{font-size:0.78rem;color:var(--muted);margin-top:2px;}
+.upload input[type=file]{margin-top:10px;font-size:0.8rem;max-width:100%;}
+.upload .fname{font-size:0.8rem;margin-top:8px;color:var(--ink);word-break:break-all;}
+.modal-back{position:fixed;inset:0;background:rgba(30,26,20,0.45);display:flex;align-items:flex-start;justify-content:center;padding:6vh 16px;z-index:50;overflow:auto;}
+.modal{background:#fff;border-radius:8px;box-shadow:0 18px 50px rgba(0,0,0,0.25);width:100%;max-width:560px;padding:22px;}
+.modal-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;}
+.modal-x{background:none;border:0;font-size:1.5rem;line-height:1;cursor:pointer;color:var(--muted);padding:2px 6px;}
+.modal-list{max-height:55vh;overflow:auto;margin-top:6px;}
+.pills{display:flex;gap:6px;flex-wrap:wrap;}
+.pills .choice{padding:5px 10px;font-size:0.78rem;gap:6px;border-radius:14px;}
+.filerow{display:inline-flex;align-items:center;gap:8px;margin-top:10px;border:1px solid var(--border);border-radius:14px;background:#fff;padding:3px 6px 3px 12px;font-size:0.8rem;max-width:100%;}
+.filerow span{word-break:break-all;}
+.xbtn{border:0;background:var(--warm);color:var(--ink);width:22px;height:22px;border-radius:50%;font-size:1rem;line-height:1;cursor:pointer;flex:none;}
+.xbtn:hover{background:var(--border);}
+.attest-box{border:1px solid var(--gold);background:#fdf9f0;border-radius:6px;padding:12px 14px;margin-top:10px;}
+.attest-box .attest{margin-top:0;}
+.modal-x{border:1px solid var(--border) !important;border-radius:50%;width:34px;height:34px;display:flex;align-items:center;justify-content:center;flex:none;color:var(--ink) !important;background:#fff !important;font-size:1.3rem !important;}
+.modal-foot{display:flex;justify-content:flex-end;margin-top:14px;border-top:1px solid var(--border);padding-top:14px;}
+.closepill{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--ink);background:#fff;color:var(--ink);border-radius:18px;padding:5px 8px 5px 14px;font:600 0.8rem 'DM Sans',sans-serif;cursor:pointer;flex:none;}
+.closepill i{font-style:normal;font-size:1.05rem;line-height:1;width:20px;height:20px;border-radius:50%;background:var(--ink);color:#fff;display:inline-flex;align-items:center;justify-content:center;}
+.closepill:hover{background:var(--warm);}
+.res-x{position:absolute;top:14px;right:14px;}
+.panel{position:relative;}
+.btn.small{padding:7px 12px;font-size:0.78rem;}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+@media(max-width:560px){.row2{grid-template-columns:1fr;}}
+.upload.locked{opacity:0.55;}
 @media(max-width:560px){.scene dl{grid-template-columns:1fr;} .stage{padding:0 14px 80px;}}
 </style>
 </head>
@@ -144,20 +188,112 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
       <div class="msg" id="setupMsg" role="status"></div>
     </section>
 
-    <!-- 2. Intake -->
-    <section class="panel hidden" id="stepIntake">
-      <div class="eyebrow">02 / Your insight</div>
-      <div class="panel-title">What do you want people to know?</div>
-      <div class="panel-sub">Your own observation is what makes this credible. We never invent a story, a statistic or a result for you.</div>
-      <label class="lbl">Choose your insider angle</label>
-      <div class="choices" id="angleChoices"></div>
-      <label class="lbl" for="market">Market or neighborhood</label>
-      <input type="text" id="market" maxlength="60" placeholder="e.g. Roseville, CA">
+    <!-- 2. Research: request, five topics, select -->
+    <div class="hidden" id="stepResearch">
+    <div class="panel">
+      <div class="eyebrow">02 / Research</div>
+      <div class="panel-title">What are people in this market interested in right now?</div>
+      <div class="panel-sub" id="sessionLine"></div>
+
+      <label class="lbl">Content type</label>
+      <div class="choices row" id="modeChoices"></div>
+
+      <div class="row2">
+        <div><label class="lbl" for="geoType">Market type</label><select id="geoType"></select></div>
+        <div><label class="lbl" for="geoName" id="geoNameLbl">Place</label><input type="text" id="geoName" maxlength="60" placeholder="e.g. Roseville"></div>
+      </div>
+      <div id="cityWrap" class="hidden"><label class="lbl" for="geoCity">City this neighborhood is in</label><input type="text" id="geoCity" maxlength="60" placeholder="e.g. Roseville"></div>
+      <div class="hint">The research stays inside exactly this place. It is never widened to the city or county for you.</div>
+
       <label class="lbl" for="audience">Who is this for?</label>
       <select id="audience"></select>
-      <label class="lbl" for="issue" id="issueLbl">Main issue</label>
-      <select id="issue"></select>
-      <label class="lbl" for="observation" id="obsLbl">What have you noticed?</label>
+
+      <label class="lbl">Optional focus</label>
+      <div class="choices row">
+        <label class="choice"><input type="checkbox" id="f55"><span>55+ Active Adult</span></label>
+        <label class="choice"><input type="checkbox" id="fNew"><span>New Construction</span></label>
+      </div>
+
+      <label class="lbl">Your MLS market report or CMA <span style="font-weight:400;color:var(--muted)">(optional)</span></label>
+      <div class="upload" id="uploadBox">
+        <div class="ut">Upload MLS Report or CMA</div>
+        <div class="us">PDF, Excel or CSV</div>
+        <div class="us">Up to 4 MB. Your file is read once and never stored; only the market-level figures are kept.</div>
+        <input type="file" id="upFile" accept=".pdf,.csv,.xls,.xlsx">
+        <div class="filerow hidden" id="upRow"><span id="upName"></span><button type="button" class="xbtn" id="upX" aria-label="Remove this file" title="Remove this file">&times;</button></div>
+      </div>
+      <div class="attest-box hidden" id="attestBox">
+        <label class="attest"><input type="checkbox" id="upOk"><span><b>Please confirm before this file can be used:</b> I am permitted to use this data in my marketing, and it excludes confidential client information.</span></label>
+        <div class="hint">Client names, phone numbers, emails and street addresses in a report are never used in your topics. Only market-level figures (counts, medians, days on market, price ranges) are.</div>
+        <div class="msg err" id="attestMsg"></div>
+      </div>
+      <div class="attest-box hidden" id="upReview" aria-live="polite">
+        <div id="upScope" style="font-weight:600;font-size:0.9rem"></div>
+        <div id="upGroups"></div>
+        <div id="upWarn"></div>
+        <div class="msg err" id="upMsg"></div>
+        <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+          <button type="button" class="btn small" id="upYes">Correct, use it</button>
+          <button type="button" class="btn ghost small" id="upNo">Not right, remove</button>
+        </div>
+        <div class="hint">Once you confirm, choose below whether your topics use this report, web research, or both. With both, up to three topics come from your report first.</div>
+      </div>
+      <div id="dataChoice" class="hidden">
+        <label class="lbl" style="margin-top:14px">Select what data you want to use</label>
+        <div class="pills">
+          <label class="choice"><input type="radio" name="dataSrc" value="upload"><span>Use my upload only</span></label>
+          <label class="choice"><input type="radio" name="dataSrc" value="research"><span>Use web research only</span></label>
+          <label class="choice"><input type="radio" name="dataSrc" value="both" checked><span>Both</span></label>
+        </div>
+        <div class="hint">With both, your report's figures take priority over web figures.</div>
+      </div>
+
+      <label class="lbl" style="margin-top:18px"><span class="choice" style="display:inline-flex"><input type="checkbox" id="newTopics"><span>Get a fresh set even if I already have one for this request (uses a session)</span></span></label>
+
+      <div class="actions"><button class="btn gold" type="button" id="startBtn">Research this market</button><button class="btn ghost" type="button" id="libBtn">Browse Research Library</button></div>
+      <div class="msg" id="startMsg" role="status"></div>
+    </div>
+
+    <div class="panel hidden" id="resultPanel">
+      <button class="closepill res-x" type="button" id="resX" aria-label="Close these results" title="Close these results"><span>Close</span><i>&times;</i></button>
+      <div class="eyebrow" id="resEyebrow">Result</div>
+      <div class="panel-title" id="resTitle"></div>
+      <div id="resWait" class="hidden"><span class="spinner"></span><span id="resWaitText">Researching… this usually takes under a minute.</span></div>
+      <div id="resError" class="msg err hidden"></div>
+      <div id="resNote" class="msg"></div>
+      <div id="resTopics"></div>
+      <div id="resCost"></div>
+      <div class="msg" id="selMsg" role="status"></div>
+    <div class="actions"><button class="btn gold hidden" type="button" id="resContinueBtn">Continue with this topic</button></div>
+      </div>
+
+<div class="modal-back hidden" id="libModal" role="dialog" aria-modal="true" aria-labelledby="libTitle">
+  <div class="modal">
+    <div class="modal-head">
+      <div><div class="eyebrow">Saved research</div><div class="panel-title" id="libTitle">Research Library</div><div class="panel-sub">Opening a saved set never uses a session.</div></div>
+      <button class="closepill" type="button" id="libX" aria-label="Close"><span>Close</span><i>&times;</i></button>
+    </div>
+    <div class="modal-list" id="savedList"></div>
+    <div class="modal-foot"><button class="btn ghost small" type="button" id="libClose">Close</button></div>
+  </div>
+</div>
+    </div>
+
+    <!-- 3. Intake -->
+    <section class="panel hidden" id="stepIntake">
+      <div class="eyebrow">03 / Your insight (optional)</div>
+      <div class="panel-title">Add your own perspective</div>
+      <div class="panel-sub">Your topic is chosen. Add what you have personally noticed so the script sounds like you, or skip it. We never invent a story, a statistic or a result for you.</div>
+      <div class="note" id="topicCard" style="margin-top:0"></div>
+      <label class="lbl">Insider angle (optional)</label>
+      <div class="choices" id="angleChoices"></div>
+      <label class="lbl" for="market">Market or neighborhood</label>
+      <input type="text" id="market" maxlength="60" placeholder="Leave blank to use the market you researched">
+      <label class="lbl" for="audience">Who is this for?</label>
+      <select id="audience"></select>
+      <div id="issueWrap"><label class="lbl" for="issue" id="issueLbl">Main issue</label>
+      <select id="issue"></select></div>
+      <label class="lbl" for="observation" id="obsLbl">What have you noticed? (optional)</label>
       <textarea id="observation" maxlength="600"></textarea>
       <div class="hint"><span id="obsHint"></span> <span id="obsCount"></span></div>
       <label class="lbl" for="action">What should viewers do?</label>
@@ -169,7 +305,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
 
     <!-- 3. Script -->
     <section class="panel hidden" id="stepScript">
-      <div class="eyebrow">03 / Your script</div>
+      <div class="eyebrow">04 / Your script</div>
       <div class="panel-title">Review and approve what will be said</div>
       <div id="scriptEmpty">
         <div class="panel-sub">We'll write a short, first-person script from your answers. You can edit every word before approving.</div>
@@ -188,6 +324,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
         <div class="hint">Keep it about your expertise, such as comparing options or asking for a local perspective.</div>
         <div id="warnBox" class="note hidden"></div>
         <div id="verifyBox" class="note hidden"></div>
+        <div id="noticeBox" class="note hidden"></div>
         <div class="actions">
           <button class="btn ghost" type="button" id="saveScriptBtn">Save edits</button>
           <button class="btn gold" type="button" id="approveBtn">Approve script</button>
@@ -198,18 +335,18 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
 
     <!-- 4. Storyboard -->
     <section class="panel hidden" id="stepBoard">
-      <div class="eyebrow">04 / Storyboard</div>
+      <div class="eyebrow">05 / Storyboard</div>
       <div class="panel-title">Your script is approved</div>
       <div class="panel-sub">Your Reel works without any photos: concept images, your profile photos and brand cards fill every scene. Where a scene offers an optional real photo, you can add one.</div>
       <div id="boardWarn" class="note hidden"></div>
       <div id="scenes"></div>
       <div id="missingBox" class="note hidden"></div>
-      <div class="actions"><button class="btn gold" type="button" id="toImagesBtn">Continue to images</button></div>
+      <div class="actions"><button class="btn gold" type="button" id="toImagesBtn">Continue to visuals</button></div>
     </section>
 
     <!-- 5. Images -->
     <section class="panel hidden" id="stepImages">
-      <div class="eyebrow">05 / Images</div>
+      <div class="eyebrow">06 / Visuals</div>
       <div class="panel-title">Create and approve your concept images</div>
       <div class="panel-sub" id="imagesSub">Review each image and approve the ones you want. Nothing is used in your Reel until you accept it.</div>
       <div class="note" id="imagesCount"></div>
@@ -253,6 +390,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
   </div>
 </main>
 
+<script src="agent-marketing-research-ui.js"></script>
 <script>
 (function () {
   "use strict";
@@ -286,18 +424,19 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     return { status: res.status, ok: res.ok, json: json };
   }
   function say(id, text, kind) { var el = $(id); el.textContent = text || ""; el.className = "msg" + (kind ? " " + kind : ""); }
-  function show(ids) { ["stepProjects", "stepSetup", "stepIntake", "stepScript", "stepBoard", "stepImages"].forEach(function (s) { $(s).classList.toggle("hidden", ids.indexOf(s) < 0); }); }
+  function show(ids) { ["stepProjects", "stepSetup", "stepResearch", "stepIntake", "stepScript", "stepBoard", "stepImages"].forEach(function (s) { $(s).classList.toggle("hidden", ids.indexOf(s) < 0); }); }
 
   // ── Progress pills ──
   function stage() {
     var p = state.project;
     if (!p) return 1;
-    if (!p.intake || !p.intake.angle) return 2;
-    if (p.status === "images" || p.status === "ready_to_render") return 5;
-    if (p.status !== "narrative_approved") return 3;
-    return 4;
+    if (!p.selectedTopic) return 2;
+    if (!p.intake || !p.intake.market) return 3;
+    if (p.status === "images" || p.status === "ready_to_render") return 6;
+    if (p.status !== "narrative_approved") return 4;
+    return 5;
   }
-  var STEP_NAMES = ["Setup", "Your insight", "Script", "Storyboard", "Images"], STEP_IDS = ["stepSetup", "stepIntake", "stepScript", "stepBoard", "stepImages"];
+  var STEP_NAMES = ["Setup", "Research", "Your insight", "Script", "Storyboard", "Visuals"], STEP_IDS = ["stepSetup", "stepResearch", "stepIntake", "stepScript", "stepBoard", "stepImages"];
   function renderSteps(active) {
     var max = stage();
     $("steps").innerHTML = STEP_NAMES.map(function (n, i) {
@@ -306,7 +445,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     }).join("");
     Array.prototype.forEach.call($("steps").querySelectorAll(".step-pill.done"), function (b) { b.addEventListener("click", function () { go(Number(b.getAttribute("data-step"))); }); });
   }
-  function go(step) { stopImgPoll(); $("picker").classList.add("hidden"); if (typeof closeModal === "function") { closeModal(); $("photoView").classList.add("hidden"); } show([STEP_IDS[step - 1]]); renderSteps(step); if (step === 2) fillIntake(); if (step === 3) renderScript(); if (step === 4) renderBoard(); if (step === 5) renderImages(); window.scrollTo({ top: 0, behavior: "smooth" }); }
+  function go(step) { stopImgPoll(); $("picker").classList.add("hidden"); if (typeof closeModal === "function") { closeModal(); $("photoView").classList.add("hidden"); } show([STEP_IDS[step - 1]]); renderSteps(step); if (step !== 2 && researchUI) researchUI.stop(); if (step === 2) renderResearch(); if (step === 3) fillIntake(); if (step === 4) renderScript(); if (step === 5) renderBoard(); if (step === 6) renderImages(); window.scrollTo({ top: 0, behavior: "smooth" }); }
   function setProject(p) { state.project = p; if (p) { try { history.replaceState(null, "", "#p=" + p.id); } catch (e) { /* ignore */ } } }
 
   // ── Setup ──
@@ -331,14 +470,33 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     $("createBtn").disabled = false;
   }
 
+  // ── Research: request, five topics, select (the shared module) ──
+  var researchUI = null;
+  function showContinue() { $("resContinueBtn").classList.toggle("hidden", !(state.project && state.project.selectedTopic)); }
+  async function renderResearch() {
+    if (!researchUI) {
+      researchUI = AMResearchUI({
+        api: function (base, method, qs, body) { return api(method, qs, body, base); },
+        onSelected: function (topic) { state.project.selectedTopic = topic; showContinue(); renderSteps(2); },
+      });
+      $("resContinueBtn").addEventListener("click", function () { go(3); });
+    }
+    showContinue();
+    try { await researchUI.start(state.project.id, state.project.selectedTopic || null); }
+    catch (e) { say("startMsg", e.message, "err"); }
+  }
+
   // ── Intake ──
   function tmpl() { return state.schema.templates[0]; }
   function fillIntake() {
     var t = tmpl(), i = (state.project && state.project.intake) || {};
-    state.angle = i.angle || state.angle || null;
-    $("angleChoices").innerHTML = Object.keys(t.angles).map(function (k) { return '<label class="choice"><input type="radio" name="angle" value="' + esc(k) + '"' + (k === state.angle ? " checked" : "") + "><span>" + esc(t.angles[k].label) + "</span></label>"; }).join("");
+    state.angle = (i.angle !== undefined ? i.angle : state.angle) || "";
+    var tp = (state.project && state.project.selectedTopic) || null;
+    $("topicCard").innerHTML = tp ? "<b>Your topic:</b> " + esc(tp.question) + ' <span class="hint">(' + (tp.origin === "report" ? "from your report" : "from web research") + ")</span>" +
+      (tp.reportNotice ? '<div class="hint" style="margin-top:6px">Required notice, added to your piece automatically: ' + esc(tp.reportNotice) + "</div>" : "") : "";
+    $("angleChoices").innerHTML = ['<label class="choice"><input type="radio" name="angle" value=""' + (!state.angle ? " checked" : "") + "><span>No specific angle. Use my topic.</span></label>"].concat(Object.keys(t.angles).map(function (k) { return '<label class="choice"><input type="radio" name="angle" value="' + esc(k) + '"' + (k === state.angle ? " checked" : "") + "><span>" + esc(t.angles[k].label) + "</span></label>"; })).join("");
     Array.prototype.forEach.call(document.querySelectorAll('input[name="angle"]'), function (el) { el.addEventListener("change", function () { state.angle = el.value; applyAngle(); }); });
-    $("audience").innerHTML = state.schema.audiences.map(function (a) { return '<option value="' + esc(a) + '">' + esc(a) + "</option>"; }).join("");
+    $("audience").innerHTML = ['<option value="">Same as my research</option>'].concat(state.schema.audiences.map(function (a) { return '<option value="' + esc(a) + '">' + esc(a) + "</option>"; })).join("");
     $("action").innerHTML = state.schema.actions.map(function (a) { return '<option value="' + esc(a) + '">' + esc(a) + "</option>"; }).join("");
     $("market").value = i.market || ""; $("observation").value = i.observation || "";
     if (i.audience) $("audience").value = i.audience; if (i.action) $("action").value = i.action;
@@ -348,8 +506,9 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     var a = state.angle && tmpl().angles[state.angle];
     $("issue").innerHTML = a ? a.issues.map(function (x) { return '<option value="' + esc(x) + '">' + esc(x) + "</option>"; }).join("") : '<option value="">Choose an angle first</option>';
     if (issue && a && a.issues.indexOf(issue) >= 0) $("issue").value = issue;
+    $("issueWrap").classList.toggle("hidden", !a);
     $("issueLbl").textContent = a ? a.issueQuestion : "Main issue";
-    $("obsLbl").textContent = a ? a.observationPrompt : "What have you noticed?";
+    $("obsLbl").textContent = (a ? a.observationPrompt : "What have you noticed?") + " (optional)";
     $("obsHint").textContent = a ? a.observationHint + "." : "";
     $("observation").placeholder = a ? a.observationHint : "";
   }
@@ -361,8 +520,8 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
       var r = await api("POST", "", { action: "save_intake", id: state.project.id, intake: intake });
       if (!r.ok) throw new Error(r.json.error || "Could not save");
       setProject(r.json.project);
-      if (r.json.needsInput && r.json.needsInput.length) say("intakeMsg", "Saved. Without your own observation, the script will stay general.", "ok");
-      go(3);
+      if (r.json.needsInput && r.json.needsInput.length) say("intakeMsg", "Saved. Without your own perspective the script will stick to your topic's facts.", "ok");
+      go(4);
     } catch (e) { say("intakeMsg", e.message, "err"); }
     $("intakeBtn").disabled = false;
   }
@@ -385,6 +544,8 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
       var w = n.warnings || [];
       $("warnBox").classList.toggle("hidden", !w.length); $("warnBox").innerHTML = w.map(esc).join("<br>");
       var c = n.claimsToVerify || [];
+      $("noticeBox").classList.toggle("hidden", !n.notice);
+      if (n.notice) $("noticeBox").innerHTML = "<strong>Required notice (MetroList Rule 12.9).</strong> This line must appear with the figures in your piece, and it is added for you: " + esc(n.notice);
       $("verifyBox").classList.toggle("hidden", !c.length);
       $("verifyBox").innerHTML = "<strong>Please verify before you publish:</strong><ul class='plain'>" + c.map(function (x) { return "<li>" + esc(x) + "</li>"; }).join("") + "</ul>";
       refreshPreview();
@@ -425,7 +586,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
       if (thenApprove) {
         var a = await api("POST", "", { action: "approve_narrative", id: state.project.id });
         if (!a.ok) throw new Error(a.json.error || "Could not approve");
-        setProject(a.json.project); go(4);
+        setProject(a.json.project); go(5);
       } else {
         say("scriptMsg", "Saved." + (r.json.warnings && r.json.warnings.length ? " " + r.json.warnings.join(" ") : ""), "ok");
       }
@@ -805,7 +966,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
         var si = Number(String(k).split("_")[0]);
         delete picked[si]; // accepting a generated image retires an own photo for that scene
         closeModal();
-        if (state.project.status === "narrative_approved") { state.project.status = "images"; renderSteps(5); }
+        if (state.project.status === "narrative_approved") { state.project.status = "images"; renderSteps(6); }
       }
     } catch (e) { setSlotMsg(k, e.message, "err"); }
     await loadImages();
@@ -907,14 +1068,14 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     state.schema = r.json; buildSetup();
     $("app").classList.remove("hidden"); $("myProjectsBtn").classList.remove("hidden");
     $("myProjectsBtn").addEventListener("click", showProjects);
-    $("newBtn").addEventListener("click", function () { setProject(null); state.angle = null; try { history.replaceState(null, "", location.pathname); } catch (e) { /* ignore */ } go(1); });
+    $("newBtn").addEventListener("click", function () { setProject(null); state.angle = ""; try { history.replaceState(null, "", location.pathname); } catch (e) { /* ignore */ } go(1); });
     $("createBtn").addEventListener("click", createProject);
     $("intakeBtn").addEventListener("click", saveIntake);
     $("observation").addEventListener("input", countObs);
     $("planBtn").addEventListener("click", plan);
     $("pickerClose").addEventListener("click", function () { $("picker").classList.add("hidden"); });
-    $("toImagesBtn").addEventListener("click", function () { go(5); });
-    $("backToBoardBtn").addEventListener("click", function () { go(4); });
+    $("toImagesBtn").addEventListener("click", function () { go(6); });
+    $("backToBoardBtn").addEventListener("click", function () { go(5); });
     $("imageSlots").addEventListener("click", onImageClick);
     $("imgModal").addEventListener("click", onModalClick);
     $("photoView").addEventListener("click", onPhotoViewClick);

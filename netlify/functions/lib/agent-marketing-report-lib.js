@@ -598,6 +598,8 @@ function buildFacts({ kind, records, metrics, reported, reportedTotal, meta, lay
 /** analyzeRows(rows, kind) → { facts } | { error }  for CSV and Excel. */
 function analyzeRows(rows, kind) {
   const grid = Array.isArray(rows) ? rows : [];
+  const trendTable = analyzeTrendTable(grid, kind);
+  if (trendTable) return trendTable;
   const lines = grid.map((r) => (Array.isArray(r) ? r.map((c) => (c == null ? "" : String(c))).join(" ") : ""));
   const t = recordsFromRows(grid);
   const metrics = extractLabeledMetrics(lines);
@@ -731,6 +733,75 @@ function analyzeTrendReport(pages) {
   return { facts };
 }
 
+
+// ── Trends data as a spreadsheet (the same measures as the TrendVision Data Table, exported as CSV or Excel) ────────────
+// One row per measure ("Sold", "Pended", "Median Sold Price", ...) and one column per month ("25-Jul", "Jul-25", "7/25", "2025-07").
+// There is no area or property type in such a file, so the agent's confirmation covers it. Prices are in $ thousands, as in the PDF.
+function parseMonthCell(v) {
+  const t = String(v == null ? "" : v).trim();
+  let m = /^(\d{2})-([A-Za-z]{3})[a-z]*$/.exec(t);                 // 25-Jul
+  if (m && monthIdx(m[2]) > 0) return { m: monthIdx(m[2]), y: 2000 + Number(m[1]) };
+  m = /^([A-Za-z]{3})[a-z]*[-\s'](\d{2}|\d{4})$/.exec(t);          // Jul-25, Jul 2025
+  if (m && monthIdx(m[1]) > 0) return { m: monthIdx(m[1]), y: m[2].length === 2 ? 2000 + Number(m[2]) : Number(m[2]) };
+  m = /^(\d{1,2})\/(\d{2}|\d{4})$/.exec(t);                        // 7/25
+  if (m && Number(m[1]) >= 1 && Number(m[1]) <= 12) return { m: Number(m[1]), y: m[2].length === 2 ? 2000 + Number(m[2]) : Number(m[2]) };
+  m = /^(20\d\d)-(\d{2})$/.exec(t);                                // 2025-07
+  if (m && Number(m[2]) >= 1 && Number(m[2]) <= 12) return { m: Number(m[2]), y: Number(m[1]) };
+  return null;
+}
+
+/** analyzeTrendTable(grid, kind) → { facts } | { error } | null  (null = not this layout) */
+function analyzeTrendTable(grid, kind) {
+  const rows = Array.isArray(grid) ? grid : [];
+  const norm = (c) => String(c == null ? "" : c).trim().toLowerCase();
+  const byLabel = new Map(TV_ROWS.map((r) => [r.label.toLowerCase(), r]));
+  const hit = rows.filter((r) => Array.isArray(r) && byLabel.has(norm(r[0]))).length;
+  if (hit < 6) return null;
+  const hdrIdx = rows.findIndex((r) => Array.isArray(r) && r.slice(1).filter((c) => parseMonthCell(c)).length >= 3);
+  if (hdrIdx < 0) return null;
+  const hdr = rows[hdrIdx];
+  const cols = [];
+  for (let i = 1; i < hdr.length; i++) { const mc = parseMonthCell(hdr[i]); if (mc) cols.push({ i, ...mc }); else if (String(hdr[i] == null ? "" : hdr[i]).trim()) return { error: "no_figures" }; }
+  const N = cols.length;
+  if (N < 2) return { error: "no_figures" };
+  // The months must run one after another with no gaps, or "prior month" and "year ago" would point at the wrong column.
+  for (let i = 1; i < N; i++) { const a = cols[i - 1], b = cols[i]; if (b.y * 12 + b.m !== a.y * 12 + a.m + 1) return { error: "no_figures" }; }
+  const series = {};
+  rows.slice(hdrIdx + 1).forEach((r) => {
+    const def = Array.isArray(r) ? byLabel.get(norm(r[0])) : null;
+    if (!def || series[def.key]) return;
+    const nums = cols.map((c) => { const raw = String(r[c.i] == null ? "" : r[c.i]).replace(/[,%$\s]/g, ""); return /^-?\d+(?:\.\d+)?$/.test(raw) ? Number(raw) : null; });
+    if (nums.every((n) => n != null)) series[def.key] = nums;
+  });
+  const used = TV_ROWS.filter((r) => series[r.key]);
+  if (used.length < 8) return { error: "no_figures" };
+  const last = cols[N - 1];
+  const mkLabel = (c) => `${MONTH_NAMES[c.m - 1]} ${c.y}`;
+  const ago = cols.findIndex((c) => c.y === last.y - 1 && c.m === last.m);
+  const start = isoDay(last.y, last.m, 1);
+  const end = isoDay(last.y, last.m, new Date(Date.UTC(last.y, last.m, 0)).getUTCDate());
+  const window = { start, end };
+  const figures = used.map((r, i) => {
+    const sc = r.scale || 1, ser = series[r.key];
+    const f = { id: `f${i + 1}`, status: r.status, key: r.key, label: r.name, value: ser[N - 1] * sc, unit: r.unit, n: 0, small: false, reported: true, window, prior: ser[N - 2] * sc };
+    if (ago >= 0) f.yearAgo = ser[ago] * sc;
+    return f;
+  });
+  const closed = (figures.find((f) => f.key === "count_closed") || {}).value;
+  const small = closed != null && closed < SMALL_SAMPLE_BELOW;
+  const warnings = ["This file does not say which area or property type it covers. Confirm it matches the place you chose."];
+  if (small) warnings.push(`Only ${closed} closed ${closed === 1 ? "sale" : "sales"} in ${mkLabel(last)}: a small sample. Topics will say so and will not claim a trend.`);
+  const facts = {
+    version: FACTS_VERSION, kind, layout: "market_trends", reportDate: null, mlsSource: null, propertyTypes: [], criteria: { closedSince: null },
+    geography: { cities: [], zips: [], drawnOnMap: false },
+    period: { label: mkLabel(last), start, end, priorLabel: mkLabel(cols[N - 2]), yearAgoLabel: ago >= 0 ? mkLabel(cols[ago]) : null, months: N },
+    statuses: {}, figures,
+    sample: { total: closed != null ? closed : 0, closed: closed != null ? closed : 0, small, broadWindow: false, windowDays: 29 },
+    reportedTotal: null, checks: { checked: 0, mismatched: 0 }, warnings,
+    notes: ["Only market-level figures were kept."],
+  };
+  return { facts };
+}
 
 // ── Weekly dashboards (Domus Analytics "Weekly Infographic" and "Weekly Review", as MetroList members receive them) ──
 // One page of tiles: a label, a big number, and (Review only) the percent change against two earlier weeks. The text inside the PDF comes
@@ -897,6 +968,6 @@ function summarize(facts, opts) {
 module.exports = {
   FACTS_VERSION, PERMISSION_VERSION, PERMISSION_TEXT, SMALL_SAMPLE_BELOW, BROAD_WINDOW_DAYS, MAX_RECORDS, STATUS_ORDER, STATUS_PLURAL,
   normStatus, parseMoney, parseDom, parseDate, parseSqft, median, mean, statsFromRecords, formatFigure, scopeSentence, scopeNote, displayFigures,
-  verifiedFromReport, attributionNotice, analyzeTrendReport, analyzeWeeklySnapshot, compareText, windowText, geographyCheck, recordsFromRows, extractLabeledMetrics, analyzeCmaPages, cmaMeta, buildFacts, analyzeRows, analyzePages,
+  verifiedFromReport, attributionNotice, analyzeTrendReport, analyzeTrendTable, analyzeWeeklySnapshot, compareText, windowText, geographyCheck, recordsFromRows, extractLabeledMetrics, analyzeCmaPages, cmaMeta, buildFacts, analyzeRows, analyzePages,
   errorMessage, summarize,
 };

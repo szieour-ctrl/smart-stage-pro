@@ -47,7 +47,7 @@ test("geography: the agent defines it, a neighborhood must name its city, ZIPs a
 test("request: known keys only, both modes, audiences, focus flags, upload limits", () => {
   const ok = r.validateResearchRequest({ mode: "market_update", audience: "sellers", geography: { type: "city", name: "Roseville" }, focus: { active_adult_55: true, new_construction: "true", junk: 1 }, address: "1 Main St" });
   assert.strictEqual(ok.ok, true);
-  assert.deepStrictEqual(Object.keys(ok.request).sort(), ["audience", "focus", "geography", "mode", "uploadIds"]);
+  assert.deepStrictEqual(Object.keys(ok.request).sort(), ["audience", "dataSource", "focus", "geography", "mode", "uploadIds"]);
   assert.deepStrictEqual(ok.request.focus, { active_adult_55: true, new_construction: true });
   assert.strictEqual(r.validateResearchRequest({ mode: "local_events", audience: "general", geography: { type: "zip", name: "95661" } }).ok, true);
   assert.strictEqual(r.validateResearchRequest({ mode: "blog", audience: "sellers", geography: { type: "city", name: "A" } }).ok, false);

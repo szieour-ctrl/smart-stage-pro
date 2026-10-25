@@ -21,7 +21,7 @@
 
 "use strict";
 
-const GATE_VERSION = "2026-10-24.1";
+const GATE_VERSION = "2026-10-24.2";
 
 // One checkbox, extending the existing Reel advertising-accuracy confirmation. Store the version with the timestamp.
 const ATTESTATION_VERSION = "agent-marketing-1";
@@ -129,6 +129,11 @@ function verifiedFromTopic(topic) {
   const t = topic && typeof topic === "object" ? topic : null;
   if (!t || !Array.isArray(t.sources) || t.sources.length === 0) return null; // no validated source, nothing is verified
   const texts = [t.question, t.whyItMatters, t.scopeNote, ...(Array.isArray(t.trendSignals) ? t.trendSignals : [])];
+  // A topic written from the agent's own MLS report carries the exact figures it cited (frozen by agent-marketing-research-report-lib.js)
+  // and, for MetroList data, the notice Rule 12.9 requires on anything published with them. Only those figures are verified, not the whole report.
+  (Array.isArray(t.reportFigures) ? t.reportFigures : []).forEach((f) => { if (f && typeof f.text === "string") texts.push(f.text); });
+  const reportNotice = typeof t.reportNotice === "string" ? norm(t.reportNotice) : "";
+  if (reportNotice) texts.push(reportNotice);
   const addresses = [];
   const e = t.event && typeof t.event === "object" ? t.event : null;
   if (e) {
@@ -136,7 +141,7 @@ function verifiedFromTopic(topic) {
     if (e.location) addresses.push(e.location);
   }
   const clean = texts.filter((x) => typeof x === "string" && x.trim()).map(norm);
-  return clean.length ? { texts: clean, addresses: addresses.map(norm) } : null;
+  return clean.length ? { texts: clean, addresses: addresses.map(norm), reportNotice } : null;
 }
 
 /** verifiedFromProject(project) → verified facts for a stored project row, or null (any other template, no topic). */
@@ -159,17 +164,27 @@ function addressIsVerified(matchText, addresses) {
   });
 }
 
-// Same as scan(text, field, BLOCK_RULES, ...) but a street address that matches the verified event venue is allowed
-// (and recorded). Every match is checked, so an unverified address next to the venue is still blocked.
-function scanBlocksWithVenue(text, field, addresses, blocks, sourcedFacts) {
+// Same as scan(text, field, BLOCK_RULES, ...) for Claude's text on a Local Market Insider piece that has verified facts. Three rules
+// are relaxed, and only for what the verified facts themselves contain; EVERY match is checked, so an allowed phrase next to a bad
+// one does not hide it:
+//   street_address       allowed when it is the verified event venue ("1550 Maidu Drive" vs "1550 Maidu Dr, Roseville")
+//   listing_price        "list price" is market vocabulary ("median list price"); allowed when a verified fact uses that phrase.
+//                        "listed at $689,000" and "new price: $…" are never in a verified fact, so they still block.
+//   listing_announcement "price reduction(s)" is a market figure when the source reports one; "just listed", "open house",
+//                        "under contract" and the rest still block.
+const VERIFIED_PHRASE_RULES = new Set(["listing_price", "listing_announcement"]);
+function scanBlocksVerified(text, field, ctx, blocks, sourcedFacts) {
   const t = norm(text);
   if (!t) return;
   for (const r of BLOCK_RULES) {
-    if (r.rule !== "street_address") { scan(t, field, [r], blocks); continue; }
+    const isAddress = r.rule === "street_address" && ctx.addresses.length > 0;
+    const isPhrase = VERIFIED_PHRASE_RULES.has(r.rule) && ctx.verifiedLower;
+    if (!isAddress && !isPhrase) { scan(t, field, [r], blocks); continue; }
     const re = new RegExp(r.re.source, r.re.flags.includes("g") ? r.re.flags : r.re.flags + "g");
     let m;
     while ((m = re.exec(t))) {
-      if (addressIsVerified(m[0], addresses)) sourcedFacts.push(`${field}: ${snippet(m)}`);
+      const ok = isAddress ? addressIsVerified(m[0], ctx.addresses) : ctx.verifiedLower.includes(lower(m[0]));
+      if (ok) sourcedFacts.push(`${field}: ${snippet(m)}`);
       else blocks.push({ rule: r.rule, field, match: snippet(m), message: r.message });
       if (m[0].length === 0) re.lastIndex++;
     }
@@ -254,7 +269,7 @@ function evaluate(input) {
   if (i.cta && i.cta.source !== "user_edited" && i.cta.source !== "user_inserted") genFields["cta"] = i.cta.text;
   for (const [field, text] of Object.entries(genFields)) {
     if (!text) continue;
-    if (vAddresses.length) scanBlocksWithVenue(text, field, vAddresses, blocks, sourcedFacts);
+    if (hasVerified) scanBlocksVerified(text, field, { addresses: vAddresses, verifiedLower }, blocks, sourcedFacts);
     else scan(text, field, BLOCK_RULES, blocks);
     scan(text, field, WARN_RULES, warnings);
     scan(text, field, FAIR_HOUSING, blocks);
@@ -271,6 +286,14 @@ function evaluate(input) {
       if (hasVerified && verifiedNumbers.has(n)) sourcedFacts.push(`${field}: ${n}`); // the figure is in the validated source topic
       else blocks.push({ rule: "invented_number", field, match: n, message: "Contains a number the agent did not provide." });
     }
+  }
+
+  // MetroList Rule 12.9: advertising that uses its statistics must carry "Based on information from MetroList Services, Inc. for the period
+  // (date) through (date)." When the verified topic came from a MetroList report, a complete piece must contain that notice. Callers that
+  // check a whole piece pass fullPiece: true (a partial check, such as one image caption, is not held to it).
+  if (vIn && typeof vIn.reportNotice === "string" && vIn.reportNotice && i.fullPiece === true) {
+    const everything = lower([...Object.values(genFields), ...Object.values(userFields), i.cta && i.cta.text].filter((x) => typeof x === "string").map(norm).join(" \n "));
+    if (!everything.includes(lower(norm(vIn.reportNotice)))) blocks.push({ rule: "missing_notice", field: "notice", match: "", message: "A piece that uses MetroList report figures must carry MetroList's required notice." });
   }
 
   // De-duplicate identical issues

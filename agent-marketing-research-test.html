@@ -126,7 +126,7 @@ input:focus,select:focus{outline:2px solid var(--gold-light);outline-offset:1px;
       <div class="upload" id="uploadBox">
         <div class="ut">Upload MLS Report or CMA</div>
         <div class="us">PDF, Excel or CSV</div>
-        <div class="us">Test layout only. The file is not sent or stored anywhere yet.</div>
+        <div class="us">Up to 4 MB. Your file is read once and never stored; only the market-level figures are kept.</div>
         <input type="file" id="upFile" accept=".pdf,.csv,.xls,.xlsx">
         <div class="filerow hidden" id="upRow"><span id="upName"></span><button type="button" class="xbtn" id="upX" aria-label="Remove this file" title="Remove this file">&times;</button></div>
       </div>
@@ -134,6 +134,17 @@ input:focus,select:focus{outline:2px solid var(--gold-light);outline-offset:1px;
         <label class="attest"><input type="checkbox" id="upOk"><span><b>Please confirm before this file can be used:</b> I am permitted to use this data in my marketing, and it excludes confidential client information.</span></label>
         <div class="hint">Client names, phone numbers, emails and street addresses in a report are never used in your topics. Only market-level figures (counts, medians, days on market, price ranges) are.</div>
         <div class="msg err" id="attestMsg"></div>
+      </div>
+      <div class="attest-box hidden" id="upReview" aria-live="polite">
+        <div id="upScope" style="font-weight:600;font-size:0.9rem"></div>
+        <div id="upGroups"></div>
+        <div id="upWarn"></div>
+        <div class="msg err" id="upMsg"></div>
+        <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+          <button type="button" class="btn small" id="upYes">Correct, use it</button>
+          <button type="button" class="btn ghost small" id="upNo">Not right, remove</button>
+        </div>
+        <div class="hint">Once you confirm, choose below whether your topics use this report, web research, or both. With both, up to three topics come from your report first.</div>
       </div>
       <div id="dataChoice" class="hidden">
         <label class="lbl" style="margin-top:14px">Select what data you want to use</label>
@@ -157,6 +168,7 @@ input:focus,select:focus{outline:2px solid var(--gold-light);outline-offset:1px;
       <div class="panel-title" id="resTitle"></div>
       <div id="resWait" class="hidden"><span class="spinner"></span><span id="resWaitText">Researching… this usually takes under a minute.</span></div>
       <div id="resError" class="msg err hidden"></div>
+      <div id="resNote" class="msg"></div>
       <div id="resTopics"></div>
       <div id="resCost"></div>
       <div class="msg" id="selMsg" role="status"></div>
@@ -245,7 +257,15 @@ input:focus,select:focus{outline:2px solid var(--gold-light);outline-offset:1px;
       mode: picked("mode"), audience: $("audience").value,
       geography: { type: type, name: $("geoName").value, city: type === "neighborhood" ? $("geoCity").value : "" },
       focus: { active_adult_55: $("f55").checked, new_construction: $("fNew").checked },
+      dataSource: reportSource().dataSource, uploadIds: reportSource().uploadIds,
     };
+  }
+  // A report is used only once the agent has confirmed "This report covers\u2026 Correct?". Radio values: upload / research / both.
+  function reportSource() {
+    var u = state.upload;
+    if (!u || u.status !== "confirmed" || !u.id) return { dataSource: "web", uploadIds: [] };
+    var v = (document.querySelector('input[name="dataSrc"]:checked') || {}).value || "both";
+    return v === "research" ? { dataSource: "web", uploadIds: [] } : { dataSource: v, uploadIds: [u.id] };
   }
 
   // ── Session line ──
@@ -271,14 +291,19 @@ input:focus,select:focus{outline:2px solid var(--gold-light);outline-offset:1px;
       (u.searchQueries != null ? " · searches " + esc(u.searchQueries) : "") + " · sources checked against the provider: " + (u.grounded === true ? "yes" : u.grounded === false ? "no (provider sent none)" : "n/a") + "</div></div>";
   }
   function srcLine(s) {
+    if (s.type === "report") return '<div class="src"><b>Your MLS report</b>' + (s.published ? " <span>\u00b7 through " + esc(s.published) + "</span>" : "") + "</div>";
     return '<div class="src"><a href="' + esc(s.url) + '" target="_blank" rel="noopener noreferrer">' + esc(s.title) + '</a> <span>· ' + esc(s.domain) + (s.published ? " · " + esc(s.published) : "") + "</span></div>";
   }
   function renderTopic(t, pickedId) {
     var ev = t.event;
     return '<div class="topic' + (t.id === pickedId ? " picked" : "") + '"><div class="tags"><span class="tag">' + esc(t.id.toUpperCase()) + "</span>" +
       '<span class="tag ' + (t.scope === "selected" ? "ok" : "warn") + '">' + (t.scope === "selected" ? "Your exact market" : "Broader context") + "</span>" +
+      '<span class="tag ' + (t.origin === "report" ? "ok" : "") + '">' + (t.origin === "report" ? "From your report" : "From web research") + "</span>" +
+      (t.smallSample ? '<span class="tag warn">Small sample</span>' : "") +
       (t.localIntent ? '<span class="tag ok">Local intent</span>' : "") + "</div><h3>" + esc(t.question) + '</h3><div class="why">' + esc(t.whyItMatters) + "</div>" +
-      (t.scope !== "selected" ? '<div class="kv"><b>Data covers:</b> ' + esc(t.scopeNote) + "</div>" : "") +
+      (t.scope !== "selected" || (t.origin === "report" && t.scopeNote) ? '<div class="kv"><b>' + (t.scope !== "selected" ? "Data covers" : "Note") + ":</b> " + esc(t.scopeNote) + "</div>" : "") +
+      (t.reportFigures && t.reportFigures.length ? '<div class="kv"><b>Report figures:</b> ' + t.reportFigures.map(function (f) { return esc(f.text); }).join(" \u00b7 ") + "</div>" : "") +
+      (t.reportNotice ? '<div class="kv"><b>Required notice:</b> ' + esc(t.reportNotice) + "</div>" : "") +
       (t.trendSignals && t.trendSignals.length ? '<div class="kv"><b>Trend signals:</b> ' + t.trendSignals.map(esc).join(" · ") + "</div>" : "") +
       (ev ? '<div class="kv"><b>' + esc(ev.name) + "</b> · " + esc(ev.date) + (ev.endDate ? " to " + esc(ev.endDate) : "") + " · " + esc(ev.time) + "</div>" +
         '<div class="kv"><b>Where:</b> ' + esc(ev.location) + " · <b>Organizer:</b> " + esc(ev.organizer) + " · <b>Status:</b> " + esc(ev.status) + "</div>" : "") +
@@ -293,7 +318,8 @@ input:focus,select:focus{outline:2px solid var(--gold-light);outline-offset:1px;
     $("resTitle").textContent = r.status === "ready" ? "Five topics" + (r.researchDate ? " from " + r.researchDate : "") : r.status === "failed" ? "No topics this time" : "Researching…";
     $("resWait").classList.toggle("hidden", r.status !== "running");
     $("resError").classList.toggle("hidden", r.status !== "failed");
-    if (r.status === "failed") $("resError").textContent = (r.error || "The research could not be completed.") + " This did not use a session.";
+    if (r.status === "failed") $("resError").textContent = (r.error || "The research could not be completed.") + (/did not use a session/.test(r.error || "") ? "" : " This did not use a session.");
+    say("resNote", r.status === "ready" && r.note ? r.note : "");
     var pickedId = state.selected && state.selected.researchId === r.id ? state.selected.id : null;
     $("resTopics").innerHTML = r.status === "ready" ? r.topics.map(function (t) { return renderTopic(t, pickedId); }).join("") : "";
     renderCost(r);
@@ -328,24 +354,90 @@ input:focus,select:focus{outline:2px solid var(--gold-light);outline-offset:1px;
     $("libX").addEventListener("click", closeLib);
     $("libModal").addEventListener("click", function (e) { if (e.target === $("libModal")) closeLib(); });
     document.addEventListener("keydown", function (e) { if (e.key === "Escape" && !$("libModal").classList.contains("hidden")) closeLib(); });
+    var REPORT = "/.netlify/functions/agent-marketing-report";
+    var MAX_BYTES = 4 * 1024 * 1024;
+    // state.upload: null | { busy, id, status: "pending" | "confirmed", summary }
+    function resetReview() { state.upload = null; $("upReview").classList.add("hidden"); $("upMsg").textContent = ""; $("upGroups").innerHTML = ""; $("upWarn").innerHTML = ""; }
     function syncUpload() {
       var has = !!($("upFile").files && $("upFile").files.length > 0);
       var ok = has && $("upOk").checked;
+      var confirmed = !!(state.upload && state.upload.status === "confirmed");
       $("upRow").classList.toggle("hidden", !has);
       if (has) $("upName").textContent = $("upFile").files[0].name;
-      $("attestBox").classList.toggle("hidden", !has);
+      $("attestBox").classList.toggle("hidden", !has || !!state.upload);
       if (!has) { $("upOk").checked = false; $("attestMsg").textContent = ""; }
       if (ok) $("attestMsg").textContent = "";
-      $("dataChoice").classList.toggle("hidden", !ok);
+      $("dataChoice").classList.toggle("hidden", !confirmed);
     }
-    $("upOk").addEventListener("change", syncUpload);
-    $("upFile").addEventListener("change", function () { $("upOk").checked = false; syncUpload(); if ($("upFile").files.length) $("attestBox").scrollIntoView({ behavior: "smooth", block: "nearest" }); });
-    $("upX").addEventListener("click", function () { $("upFile").value = ""; syncUpload(); });
+    function toBase64(file) {
+      return new Promise(function (resolve, reject) {
+        var fr = new FileReader();
+        fr.onload = function () { resolve(String(fr.result).replace(/^data:[^,]*,/, "")); };
+        fr.onerror = function () { reject(new Error("Could not read that file.")); };
+        fr.readAsDataURL(file);
+      });
+    }
+    function renderReview(u) {
+      var s = u.summary || {};
+      $("upScope").textContent = (s.scopeSentence || "") + " Correct?";
+      $("upGroups").innerHTML = (s.groups || []).map(function (g) {
+        return '<div style="margin-top:10px"><b>' + esc(g.heading) + "</b>" + (g.window ? '<div class="hint">' + esc(g.window) + "</div>" : "") +
+          '<ul style="margin:4px 0 0 18px;padding:0;font-size:0.85rem">' + g.figures.map(function (f) { return "<li>" + esc(f.label) + ": " + esc(f.display) + (f.compare ? ' <span class="hint">(' + esc(f.compare) + ")</span>" : "") + (f.small ? ' <span class="hint">(small sample)</span>' : "") + "</li>"; }).join("") + "</ul></div>";
+      }).join("");
+      $("upWarn").innerHTML = (s.warnings || []).map(function (w) { return '<div class="hint" style="margin-top:8px">⚠ ' + esc(w) + "</div>"; }).join("");
+      if (s.notice) $("upWarn").innerHTML += '<div class="hint" style="margin-top:8px">Required notice for anything you publish with these figures: <b>' + esc(s.notice) + "</b></div>";
+      $("upYes").classList.toggle("hidden", u.status === "confirmed");
+      $("upNo").textContent = u.status === "confirmed" ? "Remove this report" : "Not right, remove";
+      $("upReview").classList.remove("hidden");
+    }
+    async function sendUpload() {
+      var file = $("upFile").files[0];
+      if (!file) return;
+      if (file.size > MAX_BYTES) { $("attestMsg").textContent = "That file is larger than 4 MB. Try one property type or a shorter date range."; $("upOk").checked = false; return; }
+      state.upload = { busy: true };
+      $("attestMsg").textContent = "Reading your report…";
+      try {
+        var b64 = await toBase64(file);
+        var r = await api(REPORT, "POST", "", { action: "upload", projectId: state.projectId, fileName: file.name, fileBase64: b64, permission: true });
+        if (!r.ok) { state.upload = null; $("upOk").checked = false; $("attestMsg").textContent = (r.json && r.json.error) || "Could not read that file."; return; }
+        state.upload = { id: r.json.upload.id, status: r.json.upload.status, summary: r.json.upload.summary };
+        $("attestMsg").textContent = "";
+        renderReview(state.upload); syncUpload();
+        $("upReview").scrollIntoView({ behavior: "smooth", block: "nearest" });
+      } catch (e) { state.upload = null; $("upOk").checked = false; $("attestMsg").textContent = e.message; }
+    }
+    async function removeUpload() {
+      var u = state.upload;
+      if (u && u.id) {
+        try { await api(REPORT, "POST", "", { action: u.status === "confirmed" ? "remove" : "confirm", uploadId: u.id, correct: false }); } catch (e) { /* the file is gone from the page either way */ }
+      }
+      $("upFile").value = ""; $("upOk").checked = false; resetReview(); syncUpload();
+    }
+    $("upOk").addEventListener("change", function () { syncUpload(); if ($("upOk").checked && !state.upload) sendUpload(); });
+    $("upFile").addEventListener("change", function () {
+      if (state.upload && state.upload.id) removeUpload(); // choosing a different file replaces the old report
+      $("upOk").checked = false; resetReview(); syncUpload();
+      if ($("upFile").files.length) $("attestBox").scrollIntoView({ behavior: "smooth", block: "nearest" });
+    });
+    $("upX").addEventListener("click", removeUpload);
+    $("upNo").addEventListener("click", removeUpload);
+    $("upYes").addEventListener("click", async function () {
+      var u = state.upload; if (!u || !u.id) return;
+      $("upMsg").textContent = "";
+      try {
+        var r = await api(REPORT, "POST", "", { action: "confirm", uploadId: u.id, correct: true });
+        if (!r.ok) { $("upMsg").textContent = (r.json && r.json.error) || "Could not confirm."; return; }
+        u.status = "confirmed"; renderReview(u); syncUpload();
+        say("upMsg", "Report confirmed.", "ok");
+      } catch (e) { $("upMsg").textContent = e.message; }
+    });
     $("libClose").addEventListener("click", closeLib);
     $("resX").addEventListener("click", function () { $("resultPanel").classList.add("hidden"); });
     state.uploadReady = function () {
       var has = $("upFile").files && $("upFile").files.length > 0;
+      if (state.upload && state.upload.busy) { $("attestMsg").textContent = "Still reading your report. One moment."; return false; }
       if (has && !$("upOk").checked) { $("attestMsg").textContent = "Tick the box to use this file, or remove it with the \u00d7."; $("attestBox").scrollIntoView({ behavior: "smooth", block: "center" }); return false; }
+      if (has && state.upload && state.upload.status !== "confirmed") { $("upMsg").textContent = "Confirm that the report is read correctly, or remove it."; $("upReview").scrollIntoView({ behavior: "smooth", block: "center" }); return false; }
       return true;
     };
   }

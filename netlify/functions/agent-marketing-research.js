@@ -6,7 +6,7 @@
 //                               Reopening saved research never costs a session.
 //   GET  ?schema=1           → the choices the page shows (modes, audiences, geography types)
 //   GET  ?id=<uuid>          → one saved set
-//   POST { action: "start", projectId, request: { mode, audience, geography, focus?, uploadIds? } }
+//   POST { action: "start", projectId, request: { mode, audience, geography, focus?, dataSource?: "web"|"upload"|"both", uploadIds? } }
 //        → 202 { research, session } and the work continues in the background; poll GET until status is not "running".
 //        The same request on the same project reuses its saved set and uses no session.
 //   POST { action: "select", projectId, researchId, topicId }
@@ -30,6 +30,7 @@ function forClient(row) {
   if (!row) return null;
   const out = {
     id: row.id, projectId: row.project_id, mode: row.mode, geography: row.geography, audience: row.audience, focus: row.focus || {},
+    dataSource: row.data_source || "web", note: (row.usage && row.usage.reportNote) || null,
     status: row.status, model: row.model || null, topics: row.status === "ready" ? (row.topics || []) : [], researchDate: row.research_date || null,
     error: row.status === "failed" ? (row.error || "The research could not be completed.") : null,
     charged: !!row.charged_at, createdAt: row.created_at,
@@ -83,7 +84,7 @@ const who = (session) => (session.pool === "brokerage" ? "Your brokerage has" : 
 // The same request, rebuilt from a saved row, so "same request on the same project" is recognised without a second purchase.
 function keyOfRow(row) {
   const refs = Array.isArray(row.upload_refs) ? row.upload_refs : [];
-  return rl.requestKey({ mode: row.mode, audience: row.audience, geography: row.geography, focus: row.focus || {}, uploadIds: refs.map((x) => x && x.id).filter(Boolean) });
+  return rl.requestKey({ mode: row.mode, audience: row.audience, geography: row.geography, focus: row.focus || {}, dataSource: row.data_source || "web", uploadIds: refs.map((x) => x && x.id).filter(Boolean) });
 }
 
 exports.handler = async (event) => {
@@ -155,11 +156,21 @@ exports.handler = async (event) => {
     if (Array.isArray(mine.data) && mine.data[0]) return reply(409, { error: "A research request is already running. Please wait for it to finish." });
     const session = await sessionFor(pool);
     if (!session.canStart) return reply(429, { error: `${who(session)} used all ${session.allowance} research sessions included this month.`, session });
-    if (!process.env.PERPLEXITY_API_KEY || !process.env.INTERNAL_API_KEY) return reply(500, { error: "Research is not set up yet." });
+    const needsWeb = v.request.dataSource !== "upload", needsClaude = v.request.dataSource !== "web";
+    if ((needsWeb && !process.env.PERPLEXITY_API_KEY) || (needsClaude && !process.env.ANTHROPIC_API_KEY) || !process.env.INTERNAL_API_KEY) return reply(500, { error: "Research is not set up yet." });
+    // A report is used only when it is the agent's own, belongs to this project, and the agent confirmed "This report covers… Correct?".
+    let refs = [];
+    if (v.request.uploadIds.length) {
+      const ids = v.request.uploadIds;
+      const ur = await supabase("GET", "agent_marketing_uploads", null, `?id=in.(${ids.join(",")})&user_id=eq.${userId}&project_id=eq.${project.id}&status=eq.confirmed&select=id,scope_note`);
+      const found = Array.isArray(ur.data) ? ur.data : [];
+      if (found.length !== ids.length) return reply(400, { error: "A report you attached isn't confirmed yet, or was removed. Confirm it, or choose web research only." });
+      refs = ids.map((id) => { const f = found.find((x) => x.id === id); return { id, scope_note: f.scope_note || "" }; });
+    }
 
     const ins = await supabase("POST", "agent_marketing_research", {
       project_id: project.id, user_id: userId, pool_user_id: pool.poolUserId, mode: v.request.mode, geography: v.request.geography, audience: v.request.audience, focus: v.request.focus,
-      upload_refs: v.request.uploadIds.map((id) => ({ id })), status: "running", model: rl.researchModel(),
+      data_source: v.request.dataSource, upload_refs: refs, status: "running", model: rl.researchModel(),
     });
     const row = Array.isArray(ins.data) ? ins.data[0] : null;
     if (ins.status >= 300 || !row) { console.error("agent-marketing-research insert failed:", ins.status, JSON.stringify(ins.data).slice(0, 200)); return reply(500, { error: "Could not start the research" }); }

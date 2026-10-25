@@ -191,6 +191,17 @@ function scanBlocksVerified(text, field, ctx, blocks, sourcedFacts) {
   }
 }
 
+// A market statistic reads "homes sold for 99% of list price". It is a sourced figure, not the agent's own sale result, when the same
+// sentence carries a number from the validated topic and says nothing in the first person or about the agent's clients.
+function marketStatement(t, m, verifiedNumbers) {
+  const start = Math.max(t.lastIndexOf(".", m.index) , t.lastIndexOf("!", m.index), t.lastIndexOf("?", m.index)) + 1;
+  const ends = [".", "!", "?"].map((c) => t.indexOf(c, m.index + m[0].length)).filter((x) => x >= 0);
+  const sentence = t.slice(start, ends.length ? Math.min(...ends) + 1 : t.length);
+  if (/\b(?:I|I'm|I've|my|me|we|we're|our|us)\b|\bclients?\b/i.test(sentence)) return false;
+  for (const n of numberTokens(sentence)) if (verifiedNumbers.has(n)) return true;
+  return false;
+}
+
 // Numeric tokens such as 55, 55+, 3.5%, 4,000. Used to stop Claude inventing figures.
 function numberTokens(text) {
   const out = new Set();
@@ -274,12 +285,18 @@ function evaluate(input) {
     scan(text, field, WARN_RULES, warnings);
     scan(text, field, FAIR_HOUSING, blocks);
     for (const r of CLAIM_RULES) {
-      const m = norm(text).match(r.re);
-      if (!m) continue;
-      if (intakeLower.includes(lower(m[0]))) agentSuppliedClaims.push(`${field}: ${snippet(m)}`); // the agent said it first
-      else if (hasVerified && r.rule === "transaction_result" && (verifiedLower.includes(lower(m[0])) || /^days on market$/i.test(m[0]))) {
-        sourcedFacts.push(`${field}: ${snippet(m)}`); // market vocabulary that the sourced topic itself uses
-      } else blocks.push({ rule: r.rule, field, match: snippet(m), message: r.message });
+      const t = norm(text);
+      const re = new RegExp(r.re.source, r.re.flags.includes("g") ? r.re.flags : r.re.flags + "g");
+      let m;
+      while ((m = re.exec(t))) {
+        if (m[0].length === 0) { re.lastIndex++; continue; }
+        if (intakeLower.includes(lower(m[0]))) agentSuppliedClaims.push(`${field}: ${snippet(m)}`); // the agent said it first
+        else if (hasVerified && r.rule === "transaction_result" && (verifiedLower.includes(lower(m[0])) || /^days on market$/i.test(m[0]))) {
+          sourcedFacts.push(`${field}: ${snippet(m)}`); // market vocabulary that the sourced topic itself uses
+        } else if (hasVerified && r.rule === "transaction_result" && marketStatement(t, m, verifiedNumbers)) {
+          sourcedFacts.push(`${field}: ${snippet(m)}`); // "homes sold for 99% of list price" with 99% in the sourced figures
+        } else blocks.push({ rule: r.rule, field, match: snippet(m), message: r.message });
+      }
     }
     for (const n of numberTokens(text)) {
       if (intakeNumbers.has(n)) continue;

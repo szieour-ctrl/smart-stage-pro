@@ -201,3 +201,17 @@ test("a gate block is not retried", async () => {
   await assert.rejects(planLib.generatePlan({ project, anthropicKey: "k", callFn: async () => { calls++; return JSON.stringify(plan); } }), /can't use/);
   assert.strictEqual(calls, 1);
 });
+
+test("a sourced market statistic ('homes sold for 99% of list price') passes for a report topic, but a first-person result still blocks", () => {
+  const gate = require("../netlify/functions/lib/agent-marketing-gate.js");
+  const am = require("../netlify/functions/lib/agent-marketing-lib.js");
+  const notice = "Based on information from MetroList Services, Inc. for the period 09/01/2026 through 09/30/2026.";
+  const project = { template: "local_market_insider", intake: { market: "Roseville, CA" }, selected_topic: {
+    question: "Are sellers in Roseville accepting offers close to their asking price?", whyItMatters: "Sold price as a percent of list price shows negotiating room.",
+    sources: [{ url: "https://example.org/r" }], reportFigures: [{ text: "Sold price as a percent of list price: 99%" }], reportNotice: notice, trendSignals: [] } };
+  const run = (s) => gate.evaluate(am.gateInputFor(project, { captionText: s, narrationTagged: s, scenes: [{ narrationExcerpt: s }], notice, cta: { text: "Ask me what this means for your pricing.", source: "claude" } }, "claude"));
+  assert.strictEqual(run("Homes in Roseville sold for 99% of list price in September.").ok, true);
+  assert.strictEqual(run("I sold for 99% of list price last month.").ok, false);
+  assert.strictEqual(run("Homes sold for 88% of list price.").ok, false);
+  assert.strictEqual(run("My clients sold for 99% of list price.").ok, false);
+});

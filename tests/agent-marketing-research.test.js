@@ -350,3 +350,8 @@ test("the research prompt asks for a short hook, not an article title", () => {
   assert.match(sys, /HOOK, not an article title: 12 words or fewer/);
   assert.match(sys, /never use a colon, a source name or a date range/);
 });
+
+test("the research prompt gives the model the expert-marketer title role", () => {
+  assert.match(r.systemPrompt("market_update"), /expert marketer who crafts titles that inspire engagement/);
+  assert.match(r.systemPrompt("local_events"), /expert marketer who crafts titles that inspire engagement/);
+});

@@ -239,10 +239,7 @@
     function renderReview(u) {
       var s = u.summary || {};
       $("upScope").textContent = (s.scopeSentence || "") + " Correct?";
-      $("upGroups").innerHTML = !(s.groups || []).length ? "" : '<details style="margin-top:10px"><summary class="hint" style="cursor:pointer">See the figures I read</summary>' + (s.groups || []).map(function (g) {
-        return '<div style="margin-top:10px"><b>' + esc(g.heading) + "</b>" + (g.window ? '<div class="hint">' + esc(g.window) + "</div>" : "") +
-          '<ul style="margin:4px 0 0 18px;padding:0;font-size:0.85rem">' + g.figures.map(function (f) { return "<li>" + esc(f.label) + ": " + esc(f.display) + (f.compare ? ' <span class="hint">(' + esc(f.compare) + ")</span>" : "") + (f.small ? ' <span class="hint">(small sample)</span>' : "") + "</li>"; }).join("") + "</ul></div>";
-      }).join("") + "</details>";
+      $("upGroups").innerHTML = ""; // the summary paragraph is the check; the figures are not listed line by line (Sam, Oct 25)
       $("upWarn").innerHTML = (s.warnings || []).map(function (w) { return '<div class="hint" style="margin-top:8px">⚠ ' + esc(w) + "</div>"; }).join("");
       if (s.notice) $("upWarn").innerHTML += '<div class="hint" style="margin-top:8px">Required notice for anything you publish with these figures: <b>' + esc(s.notice) + "</b></div>";
       $("upYes").classList.toggle("hidden", u.status === "confirmed");

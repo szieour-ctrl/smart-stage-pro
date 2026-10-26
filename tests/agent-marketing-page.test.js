@@ -114,7 +114,8 @@ test("Research: 'Not right' asks what is wrong and sends it before removing; cho
 test("Research is compact: the report check shows its summary first, topic cards never repeat the report's figures, and the form folds into a bar when topics are showing", () => {
   const research = read("agent-marketing-research-ui.js");
   for (const f of ["agent-marketing.html", "agent-marketing-research-test.html"]) for (const id of ["setupBody", "setupBar", "setupEdit", "libBtn2"]) assert.match(read(f), new RegExp(`id="${id}"`), `${f} ${id}`);
-  assert.match(research, /See the figures I read/);
+  assert.doesNotMatch(research, /See the figures I read/); // the summary paragraph is the whole check
+  assert.match(research, /\$\("upGroups"\)\.innerHTML = ""/);
   const d = research.slice(research.indexOf("function topicDetails"), research.indexOf("function renderTopic"));
   assert.match(d, /t\.origin === "report" && t\.reportFigures/);   // a web topic never lists the report's figures
   assert.match(d, /<details class="kv"><summary[^>]*>Details/);

@@ -381,3 +381,22 @@ test("the planner removes a spoken MetroList notice and tells the model the repo
   const brief = plan.topicBrief(roseville({ reportPrecedence: [{ label: "Pended sales", reportText: "Pended sales: 146", supersededNumbers: ["130"] }] }).selected_topic);
   assert.deepStrictEqual(brief.agent_report_takes_priority, [{ measure: "Pended sales", agent_report_figure: "Pended sales: 146", never_state: ["130"] }]);
 });
+
+test("a validated calculation is as good as a written figure, and only when the caller passes it", () => {
+  const topic = {
+    id: "t2", kind: "market_update", question: "Are sellers cutting the list price? 6 of 14 active listings have a price reduction.", whyItMatters: "Sellers are watching the market.",
+    trendSignals: [], scope: "selected", scopeNote: "", sources: [{ title: "r", url: "https://example.com/r", domain: "example.com", published: "2026-10-20" }], event: null,
+  };
+  const v = gate.verifiedFromProject({ template: "local_market_insider", selected_topic: topic });
+  const text = "About 42.9% of the 14 active listings have a price reduction.";
+  const without = gate.evaluate(base({ verified: v, generated: { narration: text, captions: "" } }));
+  assert.ok(without.blocks.some((b) => b.rule === "invented_number" && b.match === "42.9"));
+  const withDerived = gate.evaluate(base({ verified: v, derivedNumbers: [42.9], generated: { narration: text, captions: "" } }));
+  assert.deepStrictEqual(withDerived.blocks, []);
+  // a number that is neither written nor calculated still blocks
+  const other = gate.evaluate(base({ verified: v, derivedNumbers: [42.9], generated: { narration: "About 55% have a price reduction.", captions: "" } }));
+  assert.ok(other.blocks.some((b) => b.rule === "invented_number" && b.match === "55"));
+  // derived numbers do nothing outside a verified Local Market Insider piece
+  const strict = gate.evaluate(base({ verified: null, derivedNumbers: [42.9], generated: { narration: text, captions: "" } }));
+  assert.ok(strict.blocks.some((b) => b.rule === "invented_number"));
+});

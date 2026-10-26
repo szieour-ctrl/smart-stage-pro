@@ -66,7 +66,24 @@ exports.handler = async (event) => {
     let b;
     try { b = JSON.parse(event.body || "{}"); } catch { return reply(400, { error: "Invalid JSON" }); }
     const action = String(b.action || "");
-    if (!["upload", "confirm", "remove"].includes(action)) return reply(400, { error: "Unknown action" });
+    if (!["upload", "confirm", "remove", "feedback"].includes(action)) return reply(400, { error: "Unknown action" });
+
+    // "Not right": the agent says what is wrong (reasons and a short note). The note is kept for us with a small, file-free context, and the
+    // report is removed exactly as "Not right, remove" always did.
+    if (action === "feedback") {
+      const up = await loadUpload(b.uploadId, userId);
+      if (!up) return reply(404, { error: "That report was not found." });
+      const p = await loadProject(up.project_id, userId);
+      if (p.error) return p.error;
+      if (am.NOT_EDITABLE_AFTER.includes(p.row.status)) return reply(409, { error: "This piece is already rendering or finished. Start a new one to change it." });
+      const fb = lib.cleanFeedback(b);
+      if (fb.error) return reply(400, { error: fb.error });
+      const ctx = lib.feedbackContext(up.facts);
+      const ins = await supabase("POST", "agent_marketing_feedback", { project_id: p.row.id, user_id: userId, stage: "report", reasons: fb.reasons, message: fb.message, context: ctx });
+      if (ins.status >= 300) console.error("agent-marketing-report feedback insert failed:", ins.status, JSON.stringify(ins.data).slice(0, 200));
+      await supabase("DELETE", "agent_marketing_uploads", null, `?id=eq.${up.id}&user_id=eq.${userId}`);
+      return reply(200, { removed: true, saved: ins.status < 300 });
+    }
 
     if (action === "confirm" || action === "remove") {
       const up = await loadUpload(b.uploadId, userId);

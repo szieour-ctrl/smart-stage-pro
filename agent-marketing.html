@@ -275,6 +275,23 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
           <button type="button" class="btn small" id="upYes">Correct, use it</button>
           <button type="button" class="btn ghost small" id="upNo">Not right, remove</button>
         </div>
+        <div id="upFix" class="hidden" style="margin-top:12px">
+          <div style="font-weight:600;font-size:0.88rem">What is not right?</div>
+          <div class="choices" style="flex-direction:column;align-items:flex-start;margin-top:6px">
+            <label class="choice"><input type="checkbox" name="upWhy" value="wrong_area"><span>It is the wrong area</span></label>
+            <label class="choice"><input type="checkbox" name="upWhy" value="wrong_dates"><span>The dates are wrong</span></label>
+            <label class="choice"><input type="checkbox" name="upWhy" value="wrong_type"><span>The property type is wrong</span></label>
+            <label class="choice"><input type="checkbox" name="upWhy" value="counts_off"><span>The counts do not match my report</span></label>
+            <label class="choice"><input type="checkbox" name="upWhy" value="other"><span>Something else</span></label>
+          </div>
+          <label class="lbl" for="upFixText">What should it say? (optional)</label>
+          <textarea id="upFixText" maxlength="600" rows="3" placeholder="For example: this report is for North Natomas, 95835, closed in the last 90 days."></textarea>
+          <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+            <button type="button" class="btn small" id="upFixSend">Send and remove the report</button>
+            <button type="button" class="btn ghost small" id="upFixCancel">Cancel</button>
+          </div>
+          <div class="hint">Your note comes to us so we can fix how reports are read. The report itself is never kept. Try another file, or an export filtered to your area, after removing it.</div>
+        </div>
         <div class="hint">Once you confirm, your report is the source of truth for the figures. Web research only adds the story around them, and up to three topics come from your report first.</div>
       </div>
       <div class="hint" id="dataNote">No report attached: the topics come from web research, and each figure names its source. Attach and confirm a report and your report's figures take priority over web figures.</div>
@@ -306,13 +323,21 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
       <div id="resTopics"></div>
       <div id="resCost"></div>
       <div class="msg" id="selMsg" role="status"></div>
-    <div id="resNext" class="hidden">
-      <label class="lbl" for="resAction">What should viewers do?</label>
-      <select id="resAction"></select>
-      <div class="actions"><button class="btn gold" type="button" id="resContinueBtn">Continue with this topic</button></div>
-      <div class="msg" id="resNextMsg" role="status"></div>
-    </div>
       </div>
+
+<div class="modal-back hidden" id="resNext" role="dialog" aria-modal="true" aria-labelledby="ctaTitle">
+  <div class="modal">
+    <div class="modal-head">
+      <div><div class="eyebrow">Your topic</div><div class="panel-title" id="ctaTitle">What should viewers do next?</div><div class="panel-sub" id="ctaTopic"></div></div>
+      <button class="closepill" type="button" id="ctaX" aria-label="Close"><span>Close</span><i>&times;</i></button>
+    </div>
+    <label class="lbl" for="resAction">Call to action</label>
+    <select id="resAction"></select>
+    <div class="hint">Keep it about your expertise, such as comparing options or asking for a local perspective.</div>
+    <div class="actions"><button class="btn gold" type="button" id="resContinueBtn">Write my script</button></div>
+    <div class="msg" id="resNextMsg" role="status"></div>
+  </div>
+</div>
 
 <div class="modal-back hidden" id="libModal" role="dialog" aria-modal="true" aria-labelledby="libTitle">
   <div class="modal">
@@ -353,7 +378,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
           <button class="btn gold" type="button" id="approveBtn">Approve script</button>
         </div>
       </div>
-      <div class="msg" id="scriptMsg" role="status"></div>
+      <div class="msg" id="scriptMsg" role="status" style="white-space:pre-line"></div>
     </section>
 
     <!-- 4. Storyboard -->
@@ -494,10 +519,13 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
 
   // ── Research: request, five topics, select (the shared module) ──
   var researchUI = null;
+  // Choosing a topic opens this dialog: pick what viewers should do, then "Write my script" lands on the Script step.
+  function openCta() { if (!(state.project && state.project.selectedTopic)) return; showContinue(); $("resNext").classList.remove("hidden"); $("resAction").focus(); }
+  function closeCta() { $("resNext").classList.add("hidden"); }
   function showContinue() {
     var has = !!(state.project && state.project.selectedTopic);
-    $("resNext").classList.toggle("hidden", !has);
     if (has) {
+      $("ctaTopic").textContent = state.project.selectedTopic.question || "";
       var acts = state.schema.actions, i = (state.project.intake && state.project.intake.action) || "Ask for a local perspective";
       if (!$("resAction").options.length) $("resAction").innerHTML = acts.map(function (a) { return '<option value="' + esc(a) + '">' + esc(a) + "</option>"; }).join("");
       $("resAction").value = acts.indexOf(i) >= 0 ? i : acts[0];
@@ -514,7 +542,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
         if (!r.ok) throw new Error(r.json.error || "Could not save");
         setProject(r.json.project);
       }
-      go(3);
+      closeCta(); go(3);
     } catch (e) { say("resNextMsg", e.message, "err"); }
     $("resContinueBtn").disabled = false;
   }
@@ -522,12 +550,15 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     if (!researchUI) {
       researchUI = AMResearchUI({
         api: function (base, method, qs, body) { return api(method, qs, body, base); },
-        onSelected: function (topic) { state.project.selectedTopic = topic; showContinue(); renderSteps(2); },
-        onContinue: function () { continueWithTopic(); },
+        onSelected: function (topic) { state.project.selectedTopic = topic; renderSteps(2); openCta(); },
+        onContinue: function () { openCta(); },
       });
       $("resContinueBtn").addEventListener("click", continueWithTopic);
+      $("ctaX").addEventListener("click", closeCta);
+      $("resNext").addEventListener("click", function (e) { if (e.target === $("resNext")) closeCta(); });
+      document.addEventListener("keydown", function (e) { if (e.key === "Escape" && !$("resNext").classList.contains("hidden")) closeCta(); });
     }
-    showContinue();
+    closeCta();
     try { await researchUI.start(state.project.id, state.project.selectedTopic || null); }
     catch (e) { say("startMsg", e.message, "err"); }
   }

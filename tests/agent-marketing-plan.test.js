@@ -80,13 +80,13 @@ test("the gate rejects an invented result, an invented number and a property-sal
     const plan = goodPlan();
     plan.narration_with_audio_tags = tagged + " " + bad;
     plan.scenes[5].narration_excerpt = excerpts[5] + " " + bad;
-    await assert.rejects(planLib.generatePlan({ project, anthropicKey: "k", callFn: async () => JSON.stringify(plan) }), /can't use/);
+    await assert.rejects(planLib.generatePlan({ project, anthropicKey: "k", callFn: async () => JSON.stringify(plan) }), /blocked by Agent Marketing's check:\n- /);
   }
 });
 
 test("a property-sale concept in an image prompt is rejected too", async () => {
   const plan = goodPlan(); plan.scenes[1].ai_generation_prompt = "A yard sign saying Just Listed with an open house banner";
-  await assert.rejects(planLib.generatePlan({ project, anthropicKey: "k", callFn: async () => JSON.stringify(plan) }), /can't use/);
+  await assert.rejects(planLib.generatePlan({ project, anthropicKey: "k", callFn: async () => JSON.stringify(plan) }), /blocked by Agent Marketing's check/);
 });
 
 test("non-JSON replies fail cleanly", async () => {
@@ -195,11 +195,24 @@ test("an empty scene in the middle gets one free corrective retry; a second bad 
   await assert.rejects(planLib.generatePlan({ project, anthropicKey: "k", callFn: async () => JSON.stringify(bad) }), /Scene 3 has no narration excerpt/);
 });
 
-test("a gate block is not retried", async () => {
+test("a gate block gets one rewrite that names the problems; two blocks show the agent the rule and what is wrong", async () => {
   const plan = goodPlan(); plan.scenes[5].narration_excerpt = excerpts[5] + " Call 916-555-0100 to tour 123 Main Street.";
+  let calls = 0, second = "";
+  const err = await planLib.generatePlan({ project, anthropicKey: "k", callFn: async (sys, user) => { calls++; if (calls === 2) second = user; return JSON.stringify(plan); } }).then(() => null, (e) => e);
+  assert.strictEqual(calls, 2, "exactly one rewrite");
+  assert.match(second, /rejected by the compliance check for these specific reasons/);
+  assert.match(second, /\([a-z_]+, in /);
+  assert.match(err.message, /^The script was blocked by Agent Marketing's check:\n- .+\([a-z_]+, in /);
+  assert.ok(err.gate && err.gate.blocks.length > 0);
+});
+
+test("a first draft the gate blocks is repaired by the rewrite without the agent seeing an error", async () => {
+  const bad = goodPlan(); bad.scenes[5].narration_excerpt = excerpts[5] + " Call 916-555-0100 to tour 123 Main Street.";
+  const good = goodPlan();
   let calls = 0;
-  await assert.rejects(planLib.generatePlan({ project, anthropicKey: "k", callFn: async () => { calls++; return JSON.stringify(plan); } }), /can't use/);
-  assert.strictEqual(calls, 1);
+  const r = await planLib.generatePlan({ project, anthropicKey: "k", callFn: async () => JSON.stringify(++calls === 1 ? bad : good) });
+  assert.strictEqual(calls, 2);
+  assert.strictEqual(r.gate.ok, true);
 });
 
 test("a sourced market statistic ('homes sold for 99% of list price') passes for a report topic, but a first-person result still blocks", () => {
@@ -214,4 +227,12 @@ test("a sourced market statistic ('homes sold for 99% of list price') passes for
   assert.strictEqual(run("I sold for 99% of list price last month.").ok, false);
   assert.strictEqual(run("Homes sold for 88% of list price.").ok, false);
   assert.strictEqual(run("My clients sold for 99% of list price.").ok, false);
+});
+
+test("the planner is told to open with a short, specific hook and to vary its visuals instead of reusing a street and a tabletop", () => {
+  const sys = planLib.buildSystemPrompt();
+  assert.match(sys, /THE HOOK\. The first spoken sentence must stop a scroll: 14 words or fewer/);
+  assert.match(sys, /Never open with a greeting, with "If you're thinking about selling\/buying in"/);
+  assert.match(sys, /VISUAL VARIETY AND EDITORIAL QUALITY/);
+  assert.match(sys, /do NOT default to a quiet suburban street at golden hour/);
 });

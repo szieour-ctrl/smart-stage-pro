@@ -238,6 +238,23 @@ function scopeSentence(facts) {
   return parts.join(" ");
 }
 
+// ── "Not right" feedback ──────────────────────────────────────────────────────────────────────────────────────────
+const FEEDBACK_REASONS = ["wrong_area", "wrong_dates", "wrong_type", "counts_off", "other"];
+const MAX_FEEDBACK_CHARS = 600;
+/** cleanFeedback(body) → { reasons, message } | { error }. At least a reason or a note is needed. */
+function cleanFeedback(b) {
+  const x = b && typeof b === "object" ? b : {};
+  const reasons = [...new Set((Array.isArray(x.reasons) ? x.reasons : []).map(String).filter((r) => FEEDBACK_REASONS.includes(r)))];
+  const message = String(x.message == null ? "" : x.message).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, "").replace(/\s+/g, " ").trim().slice(0, MAX_FEEDBACK_CHARS);
+  if (!reasons.length && !message) return { error: "Tick what is wrong or write a short note." };
+  return { reasons, message };
+}
+/** What is kept with a note: the scope sentence, layout, window and sample size. Never the file, its text or any listing. */
+function feedbackContext(facts) {
+  const f = facts || {};
+  return { layout: f.layout || null, scope: scopeSentence(f), window: f.window ? { label: f.window.label, closedInWindow: f.window.closedInWindow } : null, sample: f.sample || null, reportDate: f.reportDate || null, warnings: (f.warnings || []).slice(0, 6) };
+}
+
 /** The only text about a report that is ever sent to Perplexity. No prices, no medians, no addresses: places, dates and counts. */
 function scopeNote(facts) {
   const f = facts || {};
@@ -1135,7 +1152,7 @@ function summarize(facts, opts) {
 }
 
 module.exports = {
-  validateWindow, WINDOW_PRESETS,
+  validateWindow, WINDOW_PRESETS, FEEDBACK_REASONS, cleanFeedback, feedbackContext,
   FACTS_VERSION, PERMISSION_VERSION, PERMISSION_TEXT, SMALL_SAMPLE_BELOW, BROAD_WINDOW_DAYS, MAX_RECORDS, STATUS_ORDER, STATUS_PLURAL,
   normStatus, parseMoney, parseDom, parseDate, parseSqft, median, mean, statsFromRecords, formatFigure, scopeSentence, scopeNote, displayFigures,
   verifiedFromReport, attributionNotice, analyzeTrendReport, analyzeTrendEmail, analyzeTrendTable, analyzeWeeklySnapshot, compareText, windowText, geographyCheck, recordsFromRows, extractLabeledMetrics, analyzeCmaPages, cmaMeta, buildFacts, analyzeRows, analyzePages,

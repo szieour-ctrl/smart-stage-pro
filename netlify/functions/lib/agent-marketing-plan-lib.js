@@ -85,10 +85,12 @@ function buildSystemPrompt() {
     "2f. If selected_topic says numbers_come_only_from_agent_report, the agent chose to use their own uploaded report together with web research. The report is the source of truth and the web research only gives you the narrative and the idea: state numbers only from figures_you_may_state, written exactly as they appear there, and never any other number. For a comparison between what sellers ask and what buyers pay, use the report's sold-to-list figures (for example the percent of list price homes sold for); never set the median asking price of active listings against the median price of sold homes, because those are different homes.",
     "2e. Do not judge whether the data may be used, who owns it or how it is licensed; the source was already accepted before you were called. Do not put MetroList's required notice in the narration: it is shown on screen separately. Do not write anything like 'based on information from MetroList' in the spoken script.",
     "5. narration_with_audio_tags is for ElevenLabs v3. Use only these audio tags, sparingly (at most 5 in total): [conversational] [emphasis] [warm] [thoughtful] [confident]. Never put tags inside words. Write for the ear: short sentences, natural pacing, a clear hook first, one practical insight, a low-pressure close. Avoid clichés and self-congratulation.",
+    "5b. THE HOOK. The first spoken sentence must stop a scroll: 14 words or fewer, and it leads with the single most surprising or specific thing in selected_topic (a figure you are allowed to state, a contrast between two of them, or a direct question a local is asking). Never open with a greeting, with \"If you're thinking about selling/buying in\", with the agent's name, or with a restatement of the topic's title. The hook field repeats that sentence.",
     "6. Spoken words must fit the requested word range. The narration must end on a complete sentence.",
     "7. Storyboard: the number of scenes you are given, in story order: local hook, tension or misconception, grounded insight and consequence, then solution plus the branded call to action (add comparison/context scenes between them for longer pieces). Every scene has a narration_excerpt that is an exact consecutive slice of your narration (tags removed); together the excerpts cover the whole narration in order.",
     "8. Most agents have NO suitable photos, so the video must work with none. visual_source is one of: GPT_IMAGE_2_CONCEPT (a new conceptual illustration, never presented as documentary evidence; use the number you are given as the TOTAL of generated images, so GPT_IMAGE_2_CONCEPT plus AGENT_SCENE together never exceed generated_images_allowed_total), AGENT_SCENE (a generated image of the agent themself in a generic setting such as a tree-lined street, a bright empty room or a desk, created from their own profile photo; at most 1; ai_generation_prompt describes ONLY the setting, pose and mood; never other people), CONCEPT_REUSE (a different crop of an earlier generated image; set reuse_of_scene to the number of the scene whose image actually shows this content, which must be a GPT_IMAGE_2_CONCEPT or AGENT_SCENE scene; visual_brief must describe ONLY what is visibly present in that source image, never objects, props or places that are not in it; do NOT point every reuse at scene 1, and use at most 2 reuse scenes; if a beat needs content the earlier images do not show, make it its own generated image instead), AGENT_PROFILE (the agent's own headshot or full-body photo from their profile; use only for a personal beat such as the opening or the close; at most 2), BRAND_CARD (a brand-colored text card with the agent's name and a short line; set card_text to at most 8 words; at most 2, typically the closing call to action), or AUTHENTIC_AGENT_ASSET (an optional real photo, at most 1, only if one specific real photo would clearly strengthen that beat; never ask for a person, client, event, closing or place the agent may not have; always give an if_unavailable fallback). Every remaining scene must be CONCEPT_REUSE.",
     "9. ai_generation_prompt (GPT_IMAGE_2_CONCEPT and AGENT_SCENE only): photorealistic editorial still life or tabletop concept, California residential aesthetic, no people (for AGENT_SCENE the only person is the agent, described only by setting, pose and mood, never by appearance), no text, no logos, no readable rates or prices, no charts, no identifiable addresses, no real development or builder names, no real landmarks. Each image is generated ONCE as a wide 16:9 frame and the tall 9:16 version is cropped from its middle, so describe a wide composition with the main subject and key details in the central third and calm scenery on the left and right.",
+    "9b. VISUAL VARIETY AND EDITORIAL QUALITY. Each image is something a magazine would run beside THIS story, built from the subject of its own scene and this topic, not a stock backdrop. Never reuse the same two settings across projects: do NOT default to a quiet suburban street at golden hour or to a desk or tabletop with a calendar, a house key and a notepad. Within one piece, no two images may share a subject, composition or scale: mix a wide landscape or streetscape, a close detail, an object at human scale and an abstract or graphic treatment. Take the subject from the scene's own narration (for example new homes under construction against established ones for a new-construction story; a single reduced-price tag motif is NOT allowed, so show hesitation or a decision through composition instead). Vary light, season and time of day to match the mood of the beat.",
     "10. framing_9x16 says where the tall 9:16 window sits inside the wide image (left, center or right; tight or loose) and what it shows; framing_16x9 says how the full wide frame is used. Both are crops of the same generated image; never plan a crop of a finished video.",
     "11. Camera motion is Ken Burns only (slow, deliberate, minimal): choose from push_in, pull_back, pan_left, pan_right, tilt_up, tilt_down, static_hold.",
     "12. The CTA is low-pressure and about the agent's expertise (for example comparing options or asking for a local perspective). No property-sale CTA.",
@@ -338,12 +340,35 @@ async function generatePlan({ project, anthropicKey, callFn }) {
     const fix = `${user}\n\nYour previous reply could not be used: ${String(err.message).slice(0, 200)}. Return the complete JSON again. Every scene MUST have a non-empty narration_excerpt taken from your narration, in order, and the scenes together must cover the whole narration.`;
     normalized = normalizePlan(extractJsonObject(await call(buildSystemPrompt(), fix, anthropicKey)), project);
   }
-  const { narrative, warnings } = normalized;
-  // A piece built on a MetroList report must carry MetroList's required notice (Rule 12.9). The notice comes from the frozen topic and is
-  // attached here by code, never left to the model; the overlay step shows it on screen.
+  let { narrative, warnings } = normalized;
+  let g = gateNarrative(project, narrative);
+  if (!g.ok) {
+    // The first draft was blocked. Instead of failing (and using up one of the project's planning attempts), tell the writer exactly what was
+    // wrong and ask for one rewrite. Only a second block reaches the agent, and then with the rule and the reason.
+    console.error("[agent-marketing-plan] gate blocked the first draft:", JSON.stringify(g.blocks).slice(0, 500));
+    const fix = `${user}\n\nYour draft was rejected by the compliance check for these specific reasons:\n${blockLines(g.blocks)}\nRewrite the complete JSON so none of these happen. Keep the same topic, hook and facts; change only what is listed, and take every number from the topic or the agent's report.`;
+    normalized = normalizePlan(extractJsonObject(await call(buildSystemPrompt(), fix, anthropicKey)), project);
+    narrative = normalized.narrative; warnings = normalized.warnings;
+    g = gateNarrative(project, narrative);
+  }
+  if (!g.ok) {
+    console.error("[agent-marketing-plan] gate blocked the rewrite:", JSON.stringify(g.blocks).slice(0, 500));
+    const err = new Error(`The script was blocked by Agent Marketing's check:\n${blockLines(g.blocks, 3)}`);
+    err.gate = g;
+    throw err;
+  }
+  return { narrative, warnings: warnings.concat(g.warnings.map((w) => w.message)), gate: g };
+}
+
+// What the compliance check says about a draft: "- <what is wrong> (rule, where)". One line per block, at most `max`.
+function blockLines(blocks, max) {
+  return (blocks || []).slice(0, max || 6).map((b) => `- ${b.message} (${b.rule}${b.field ? `, in ${String(b.field).replace(/\[(\d+)\]/g, (m, n) => ` ${Number(n) + 1}`)}` : ""})`).join("\n");
+}
+
+// Attach the required notice by code, then hold the draft to the strict "Claude wrote it" rules. Visual briefs and image prompts are checked
+// only for property-sale content (they legitimately contain things like "9:16").
+function gateNarrative(project, narrative) {
   am.attachNotice(project, narrative);
-  // Spoken text is held to the strict "Claude wrote it" rules. Visual briefs and image prompts are checked only for
-  // property-sale content (they legitimately contain things like "9:16").
   const visualText = {};
   narrative.scenes.forEach((sc, i) => {
     visualText[`visualBrief[${i}]`] = sc.visualBrief;
@@ -351,17 +376,10 @@ async function generatePlan({ project, anthropicKey, callFn }) {
     if (sc.cardText) visualText[`cardText[${i}]`] = sc.cardText;
     if (sc.photoRequest) visualText[`photoRequest[${i}]`] = [sc.photoRequest.bestImage, sc.photoRequest.shouldContain].join(" ");
   });
-  const g = gate.evaluate({ ...am.gateInputFor(project, narrative, "claude"), userText: visualText });
-  if (!g.ok) {
-    console.error("[agent-marketing-plan] gate blocked the draft:", JSON.stringify(g.blocks).slice(0, 500));
-    const err = new Error("The draft included wording that Agent Marketing can't use. Please try again.");
-    err.gate = g;
-    throw err;
-  }
-  return { narrative, warnings: warnings.concat(g.warnings.map((w) => w.message)), gate: g };
+  return gate.evaluate({ ...am.gateInputFor(project, narrative, "claude"), userText: visualText });
 }
 
-module.exports = { topicBrief,
+module.exports = { topicBrief, blockLines,
   MODEL, stripNotice, SCENE_RANGE, GPT_RANGE, NEW_IMAGE_SOURCES, VISUAL_SOURCES, SOURCE_MAX, MAX_ATTEMPTS, STALE_PLANNING_MS, ALLOWED_TAGS,
   intakeHash, buildSystemPrompt, buildUserMessage, callClaudeText, extractJsonObject, sanitizeTags, normalizePlan, generatePlan,
 };

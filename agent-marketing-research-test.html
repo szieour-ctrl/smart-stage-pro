@@ -183,6 +183,23 @@ input:focus,select:focus{outline:2px solid var(--gold-light);outline-offset:1px;
           <button type="button" class="btn small" id="upYes">Correct, use it</button>
           <button type="button" class="btn ghost small" id="upNo">Not right, remove</button>
         </div>
+        <div id="upFix" class="hidden" style="margin-top:12px">
+          <div style="font-weight:600;font-size:0.88rem">What is not right?</div>
+          <div class="choices" style="flex-direction:column;align-items:flex-start;margin-top:6px">
+            <label class="choice"><input type="checkbox" name="upWhy" value="wrong_area"><span>It is the wrong area</span></label>
+            <label class="choice"><input type="checkbox" name="upWhy" value="wrong_dates"><span>The dates are wrong</span></label>
+            <label class="choice"><input type="checkbox" name="upWhy" value="wrong_type"><span>The property type is wrong</span></label>
+            <label class="choice"><input type="checkbox" name="upWhy" value="counts_off"><span>The counts do not match my report</span></label>
+            <label class="choice"><input type="checkbox" name="upWhy" value="other"><span>Something else</span></label>
+          </div>
+          <label class="lbl" for="upFixText">What should it say? (optional)</label>
+          <textarea id="upFixText" maxlength="600" rows="3" placeholder="For example: this report is for North Natomas, 95835, closed in the last 90 days."></textarea>
+          <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+            <button type="button" class="btn small" id="upFixSend">Send and remove the report</button>
+            <button type="button" class="btn ghost small" id="upFixCancel">Cancel</button>
+          </div>
+          <div class="hint">Your note comes to us so we can fix how reports are read. The report itself is never kept. Try another file, or an export filtered to your area, after removing it.</div>
+        </div>
         <div class="hint">Once you confirm, your report is the source of truth for the figures. Web research only adds the story around them, and up to three topics come from your report first.</div>
       </div>
       <div class="hint" id="dataNote">No report attached: the topics come from web research, and each figure names its source. Attach and confirm a report and your report's figures take priority over web figures.</div>

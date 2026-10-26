@@ -344,3 +344,9 @@ test("optional data: the research is told what data and which dates; periods cou
   assert.doesNotMatch(input({ mode: "local_events" }), /Optional data/);
   assert.deepStrictEqual(r.periodDates({ days: 7 === 7 ? 30 : 0 }, "2026-10-25"), { start: "2026-09-26", end: "2026-10-25" });
 });
+
+test("the research prompt asks for a short hook, not an article title", () => {
+  const sys = r.systemPrompt("market_update");
+  assert.match(sys, /HOOK, not an article title: 12 words or fewer/);
+  assert.match(sys, /never use a colon, a source name or a date range/);
+});

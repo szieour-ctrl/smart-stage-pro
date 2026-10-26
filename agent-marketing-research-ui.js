@@ -120,7 +120,7 @@
     var pickedId = state.selected && state.selected.researchId === r.id ? state.selected.id : null;
     var chosen = pickedId && r.status === "ready" ? r.topics.filter(function (t) { return t.id === pickedId; })[0] : null;
     var bar = chosen ? '<div id="selBar" style="border:1px solid var(--gold);background:#fdf9f0;border-radius:6px;padding:12px 14px;margin-top:12px;display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap"><div style="font-size:0.88rem"><b style="color:var(--success)">\u2713 Topic selected</b><div>' + esc(chosen.question) + "</div></div>" +
-      (opts.onContinue ? '<button class="btn gold small" type="button" id="selContinue">Continue with this topic</button>' : "") + "</div>" : "";
+      (opts.onContinue ? '<button class="btn gold small" type="button" id="selContinue">Choose the call to action</button>' : "") + "</div>" : "";
     $("resTopics").innerHTML = bar + (r.status === "ready" ? r.topics.map(function (t) { return renderTopic(t, pickedId); }).join("") : "");
     if ($("selContinue")) $("selContinue").addEventListener("click", function () { opts.onContinue(state.selected); });
     renderCost(r);
@@ -195,7 +195,7 @@
     var REPORT = "/.netlify/functions/agent-marketing-report";
     var MAX_BYTES = 4 * 1024 * 1024;
     // state.upload: null | { busy, id, status: "pending" | "confirmed", summary }
-    function resetReview() { state.upload = null; $("upReview").classList.add("hidden"); $("upMsg").textContent = ""; $("upGroups").innerHTML = ""; $("upWarn").innerHTML = ""; }
+    function resetReview() { state.upload = null; $("upFix").classList.add("hidden"); $("upFixText").value = ""; Array.prototype.forEach.call(document.querySelectorAll('input[name="upWhy"]'), function (c) { c.checked = false; }); $("upReview").classList.add("hidden"); $("upMsg").textContent = ""; $("upGroups").innerHTML = ""; $("upWarn").innerHTML = ""; }
     function syncUpload() {
       var has = !!($("upFile").files && $("upFile").files.length > 0);
       var ok = has && $("upOk").checked;
@@ -277,7 +277,26 @@
     $("upWindow").addEventListener("change", function () { $("upDates").classList.toggle("hidden", $("upWindow").value !== "custom"); });
     $("upWindowGo").addEventListener("click", reread);
     $("upX").addEventListener("click", removeUpload);
-    $("upNo").addEventListener("click", removeUpload);
+    // "Not right": say what is wrong first (kept for us), then the report is removed. A confirmed report is removed straight away.
+    $("upNo").addEventListener("click", function () {
+      if (state.upload && state.upload.status === "confirmed") return removeUpload();
+      $("upFix").classList.remove("hidden"); $("upFix").scrollIntoView({ behavior: "smooth", block: "nearest" });
+    });
+    $("upFixCancel").addEventListener("click", function () { $("upFix").classList.add("hidden"); });
+    $("upFixSend").addEventListener("click", async function () {
+      var u = state.upload; if (!u || !u.id) return;
+      var reasons = Array.prototype.map.call(document.querySelectorAll('input[name="upWhy"]:checked'), function (c) { return c.value; });
+      var note = $("upFixText").value.trim();
+      if (!reasons.length && !note) { $("upMsg").textContent = "Tick what is wrong or write a short note."; return; }
+      $("upFixSend").disabled = true;
+      try {
+        var r = await api(REPORT, "POST", "", { action: "feedback", uploadId: u.id, reasons: reasons, message: note });
+        if (!r.ok) { $("upMsg").textContent = (r.json && r.json.error) || "Could not send that."; return; }
+        $("upFile").value = ""; $("upOk").checked = false; resetReview(); resetWindow(); syncUpload();
+        say("startMsg", "Thanks, I have your note and removed that report. Try another file, or an export filtered to your area.", "ok");
+      } catch (e) { $("upMsg").textContent = e.message; }
+      finally { $("upFixSend").disabled = false; }
+    });
     $("upYes").addEventListener("click", async function () {
       var u = state.upload; if (!u || !u.id) return;
       $("upMsg").textContent = "";

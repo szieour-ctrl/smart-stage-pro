@@ -7,7 +7,7 @@ const { pdfFromPages } = require("./helpers/make-pdf");
 const U1 = "11111111-1111-4111-8111-111111111111";
 const U2 = "22222222-2222-4222-8222-222222222222";
 let currentUser = U1;
-const db = { agent_marketing_projects: [], agent_marketing_uploads: [] };
+const db = { agent_marketing_projects: [], agent_marketing_uploads: [], agent_marketing_feedback: [] };
 let nextId = 1;
 const uuid = (n) => `cccccccc-cccc-4ccc-8ccc-${String(n).padStart(12, "0")}`;
 
@@ -33,7 +33,7 @@ const call = async (method, body, qs) => {
   return { status: res.statusCode, json: JSON.parse(res.body) };
 };
 const mkProject = (over) => { const row = { id: uuid(nextId++), user_id: currentUser, template: "local_market_insider", status: "draft", intake: {}, ...over }; db.agent_marketing_projects.push(row); return row; };
-const reset = () => { db.agent_marketing_projects.length = 0; db.agent_marketing_uploads.length = 0; currentUser = U1; process.env.AGENT_MARKETING_ENABLED = "true"; };
+const reset = () => { db.agent_marketing_projects.length = 0; db.agent_marketing_uploads.length = 0; db.agent_marketing_feedback.length = 0; currentUser = U1; process.env.AGENT_MARKETING_ENABLED = "true"; };
 let pdfB64 = null;
 const cmaB64 = async () => (pdfB64 = pdfB64 || (await pdfFromPages(fx.standard().pages)).toString("base64"));
 const upload = async (p, over) => call("POST", { action: "upload", projectId: p.id, fileName: "Smith CMA.pdf", fileBase64: await cmaB64(), permission: true, ...over });
@@ -143,4 +143,35 @@ test("GET lists this project's reports newest first, with the confirmation summa
   const r = await call("GET", null, { projectId: p.id });
   assert.strictEqual(r.json.uploads.length, 2);
   assert.ok(r.json.uploads.every((u) => u.projectId === p.id && /MetroList report/.test(u.summary.scopeSentence)));
+});
+
+test("'not right' with a note: the reasons and note are kept with a file-free context, then the report is removed", async () => {
+  reset();
+  const p = mkProject();
+  const up = (await upload(p)).json.upload;
+  const bad = await call("POST", { action: "feedback", uploadId: up.id, reasons: [], message: "  " });
+  assert.strictEqual(bad.status, 400);
+  assert.strictEqual(db.agent_marketing_uploads.length, 1, "nothing removed without a reason or a note");
+  const r = await call("POST", { action: "feedback", uploadId: up.id, reasons: ["wrong_area", "wrong_dates", "made_up", "wrong_area"], message: "This is North Natomas,\n95835, last 90 days. " + "x".repeat(900) });
+  assert.strictEqual(r.status, 200);
+  assert.deepStrictEqual([r.json.removed, r.json.saved], [true, true]);
+  assert.strictEqual(db.agent_marketing_uploads.length, 0);
+  assert.strictEqual(db.agent_marketing_feedback.length, 1);
+  const fb = db.agent_marketing_feedback[0];
+  assert.deepStrictEqual(fb.reasons, ["wrong_area", "wrong_dates"]);
+  assert.ok(fb.message.length <= 600 && fb.message.startsWith("This is North Natomas, 95835, last 90 days."));
+  assert.strictEqual(fb.stage, "report");
+  assert.match(fb.context.scope, /^This MetroList report covers Roseville/);
+  const json = JSON.stringify(fb);
+  for (const x of [...fx.FAKE.streets.map((st) => st.split(" ")[0]), "Smith", "916-555", "@"]) assert.ok(!json.includes(x), `feedback must not contain "${x}"`);
+});
+
+test("only the owner can send a note about a report", async () => {
+  reset();
+  const p = mkProject();
+  const up = (await upload(p)).json.upload;
+  currentUser = U2;
+  assert.strictEqual((await call("POST", { action: "feedback", uploadId: up.id, reasons: ["other"] })).status, 404);
+  assert.strictEqual(db.agent_marketing_feedback.length, 0);
+  assert.strictEqual(db.agent_marketing_uploads.length, 1);
 });

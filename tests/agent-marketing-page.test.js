@@ -99,3 +99,14 @@ test("Research: optional data (None / MLS statistics / Recent listings and sales
   assert.match(research, /"Optional data", focusLabel\(q\)/);
   assert.match(research, /\$\("dataFocusBox"\)\.classList\.toggle\("hidden", events\)/);
 });
+
+test("Research: 'Not right' asks what is wrong and sends it before removing; choosing a topic opens the call-to-action dialog that ends in Write my script", () => {
+  const research = read("agent-marketing-research-ui.js");
+  const html = read("agent-marketing.html");
+  for (const f of ["agent-marketing.html", "agent-marketing-research-test.html"]) for (const id of ["upFix", "upFixText", "upFixSend", "upFixCancel"]) assert.match(read(f), new RegExp(`id="${id}"`), `${f} ${id}`);
+  assert.match(research, /action: "feedback", uploadId: u\.id, reasons: reasons, message: note/);
+  assert.match(html, /<div class="modal-back hidden" id="resNext" role="dialog"/);
+  assert.match(html, /id="resContinueBtn">Write my script</);
+  assert.match(html, /onSelected: function \(topic\) \{ state\.project\.selectedTopic = topic; renderSteps\(2\); openCta\(\); \}/);
+  assert.match(html, /closeCta\(\); go\(3\);/);
+});

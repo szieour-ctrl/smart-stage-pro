@@ -117,4 +117,31 @@ function pickReferenceKey(profileRow) {
   return r.fullbody_key || r.headshot_key || null;
 }
 
-module.exports = { CROP_WIDTH, clampCrop, defaultCropX, WIDE, DEFAULT_SIZE, validWideSize, SIZES, IMAGE_SOURCES, STALE_GENERATING_MS, settings, imageScenes, allScenes, plannedKind, slotAssets, quote, buildPrompt, pickReferenceKey, counts, fmtOf, stateOf };
+
+// Agent Marketing asset preparation (Oct 26, 2026): each SELECTED format gets its own image. The wide prompt is the one above;
+// the tall prompt keeps the subject centred with calm bands at the top (headline) and bottom (captions). `framing` is the planner's
+// per-format framing note for the scene.
+const TALL_SIZE = "1440x2560";
+const TALL_RULES = "Tall vertical 9:16 portrait-orientation composition. Place the main subject and every key detail in the middle of the frame, with calm, simple scenery above and below. Keep the top fifth and the lower third calm and uncluttered (a headline sits at the top and captions at the bottom).";
+function buildFormatPrompt({ kind, scenePrompt, format, framing }) {
+  if (format !== "9x16") return buildPrompt({ kind, scenePrompt });
+  const base = String(scenePrompt || "").replace(/\s+/g, " ").trim().slice(0, 900);
+  const note = framing ? String(framing).replace(/\s+/g, " ").trim().slice(0, 300) : "";
+  return [
+    "Create a photorealistic editorial concept image: " + base,
+    TALL_RULES,
+    note ? "Framing: " + note : "",
+    "Soft natural light, California residential aesthetic, calm and uncluttered. It is a conceptual illustration, not a documentary photo of a real place.",
+    NO_REAL_THINGS + " No people at all.",
+  ].filter(Boolean).join("\n");
+}
+const tallSize = () => validTallSize(process.env.AGENT_MARKETING_IMAGE_SIZE_TALL) || TALL_SIZE;
+function validTallSize(v) {
+  const m = /^(\d{3,4})x(\d{3,4})$/.exec(String(v || "").trim());
+  if (!m) return null;
+  const w = Number(m[1]), h = Number(m[2]);
+  if (w % 16 || h % 16 || Math.max(w, h) > 3840 || Math.abs(h / w - 16 / 9) > 0.02 || w * h < 655360 || w * h > 8294400) return null;
+  return w + "x" + h;
+}
+
+module.exports = { buildFormatPrompt, tallSize, TALL_SIZE, CROP_WIDTH, clampCrop, defaultCropX, WIDE, DEFAULT_SIZE, validWideSize, SIZES, IMAGE_SOURCES, STALE_GENERATING_MS, settings, imageScenes, allScenes, plannedKind, slotAssets, quote, buildPrompt, pickReferenceKey, counts, fmtOf, stateOf };

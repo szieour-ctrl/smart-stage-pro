@@ -65,6 +65,7 @@ test("Research: a failed run offers retry / widen / change, never widens on its 
   assert.doesNotMatch(fail, /api\(/);        // choosing an option never calls the server by itself
   assert.match(research, /Recommended/);
   assert.match(research, /Why this one:/);
+});
 
 test("Research: a report with dated rows can be narrowed to a date window, which re-reads the file and is shown in the confirm summary", () => {
   const research = read("agent-marketing-research-ui.js");

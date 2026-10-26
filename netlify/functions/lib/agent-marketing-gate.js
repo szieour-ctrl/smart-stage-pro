@@ -322,6 +322,9 @@ function evaluate(input) {
   const verifiedNumbers = numberTokens(verifiedText);
   const sourcedFacts = [];
   const market = vTexts.length > 0; // a validated topic exists: review the meaning (market rules); otherwise the strict property-ad rules apply
+  // Validated calculations (a ratio, difference or percent change whose inputs are verified figures, recomputed by agent-marketing-manifest-lib.js)
+  // are as good as a figure written in the research. Callers pass the results as input.derivedNumbers; nothing is accepted without them.
+  if (market && Array.isArray(i.derivedNumbers)) i.derivedNumbers.forEach((n) => { if (n !== null && n !== undefined && n !== "") verifiedNumbers.add(String(n).replace(/,/g, "").replace(/\.0+$/, "")); });
   const ctx = { intakeLower, verifiedLower, verifiedNumbers };
 
   // Everything the AGENT typed: property-sale rules block; Fair Housing only warns; claims pass through.

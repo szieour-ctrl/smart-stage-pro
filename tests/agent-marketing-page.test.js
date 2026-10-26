@@ -77,3 +77,25 @@ test("Research: a failed run offers retry / widen / change, never widens on its 
   assert.match(research, /Recommended/);
   assert.match(research, /Why this one:/);
 });
+
+test("Research: a report with dated rows can be narrowed to a date window, which re-reads the file and is shown in the confirm summary", () => {
+  const research = read("agent-marketing-research-ui.js");
+  for (const f of ["agent-marketing.html", "agent-marketing-research-test.html"]) {
+    const html = read(f);
+    for (const id of ["upWindowBox", "upWindow", "upFrom", "upTo", "upWindowGo"]) assert.match(html, new RegExp(`id="${id}"`), `${f} ${id}`);
+  }
+  assert.match(research, /window: state\.pendingWindow/);
+  assert.match(research, /cma_table/);
+  assert.match(research, /closed sales limited to/);
+});
+
+test("Research: optional data (None / MLS statistics / Recent listings and sales / All) with a period, for market updates only, shown in the confirm summary", () => {
+  const research = read("agent-marketing-research-ui.js");
+  for (const f of ["agent-marketing.html", "agent-marketing-research-test.html"]) {
+    const html = read(f);
+    for (const id of ["dataFocusBox", "dataFocus", "periodBox", "period", "periodFrom", "periodTo", "periodDates"]) assert.match(html, new RegExp(`id="${id}"`), `${f} ${id}`);
+  }
+  assert.match(research, /dataFocus: \$\("dataFocus"\)\.value, period: collectPeriod\(\)/);
+  assert.match(research, /"Optional data", focusLabel\(q\)/);
+  assert.match(research, /\$\("dataFocusBox"\)\.classList\.toggle\("hidden", events\)/);
+});

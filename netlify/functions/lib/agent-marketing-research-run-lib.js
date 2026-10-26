@@ -153,7 +153,7 @@ function addUsage(total, u) {
 function requestFromRow(row) {
   const refs = Array.isArray(row.upload_refs) ? row.upload_refs : [];
   return {
-    request: { mode: row.mode, audience: row.audience, geography: row.geography, focus: row.focus || {}, keywords: (row.focus && row.focus.keywords) || "", dataSource: row.data_source || "web", uploadIds: refs.map((r) => r && r.id).filter(Boolean) },
+    request: { mode: row.mode, audience: row.audience, geography: row.geography, focus: row.focus || {}, keywords: (row.focus && row.focus.keywords) || "", dataFocus: (row.focus && row.focus.dataFocus) || "all", period: (row.focus && row.focus.period) || null, dataSource: row.data_source || "web", uploadIds: refs.map((r) => r && r.id).filter(Boolean) },
     // Only the scope note (places, dates, counts) ever goes to the web provider: never a price, median or address from a report.
     uploadContext: (row.data_source || "web") === "both" ? refs.map((r) => r && r.scope_note).filter(Boolean).join("; ") : "",
   };

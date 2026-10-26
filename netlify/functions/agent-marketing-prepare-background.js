@@ -1,0 +1,206 @@
+// agent-marketing-prepare-background.js — Netlify Background Function. Prepares everything an Agent Marketing Reel needs, then hands the
+// frozen manifest to Railway. Dispatched only by agent-marketing-render.js (shared internal key).
+//
+// Steps (each one saved in the job record as it finishes, so a retry never repeats paid work):
+//   1. narration  ElevenLabs with-timestamps -> audio + word timings        (assets.audio)
+//   2. images     one per scene per SELECTED format: GPT Image 2, an approved wide image already in the project, or a brand plate drawn in code
+//                                                                           (assets.images["<scene>_<format>"])
+//   3. manifest   am-manifest-2 built from the approved narrative and the verified figures, then validated; blocking errors stop the job
+//   4. dispatch   presigned asset links + manifest -> Railway POST /render-agent-marketing
+// Beta: nothing is charged. Usage (images made, narration characters) is logged on the job.
+const https = require("https");
+const crypto = require("crypto");
+const sharp = require("sharp");
+const { S3Client, PutObjectCommand, GetObjectCommand } = require("@aws-sdk/client-s3");
+const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
+const { supabase, getProfileRow } = require("./lib/marketing-profile-lib");
+const am = require("./lib/agent-marketing-lib");
+const img = require("./lib/agent-marketing-images-lib");
+const timing = require("./lib/agent-marketing-timing-lib");
+const assetsLib = require("./lib/agent-marketing-assets-lib");
+
+const IMAGE_MODEL = process.env.OPENAI_IMAGE_MODEL || "gpt-image-2";
+const s3 = new S3Client({ region: process.env.S3_REGION, credentials: { accessKeyId: process.env.S3_ACCESS_KEY_ID, secretAccessKey: process.env.S3_SECRET_ACCESS_KEY } });
+const BUCKET = () => process.env.S3_BUCKET_NAME;
+const put = (Key, Body, ContentType) => s3.send(new PutObjectCommand({ Bucket: BUCKET(), Key, Body, ContentType }));
+const presign = (Key, secs) => getSignedUrl(s3, new GetObjectCommand({ Bucket: BUCKET(), Key }), { expiresIn: secs });
+
+function postJson(hostname, path, headers, bodyObj, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify(bodyObj);
+    const req = https.request({ hostname, path, method: "POST", headers: { ...headers, "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) } }, (res) => {
+      const chunks = []; res.on("data", (c) => chunks.push(c));
+      res.on("end", () => { const raw = Buffer.concat(chunks).toString("utf8"); let json = null; try { json = JSON.parse(raw); } catch { /* not JSON */ } resolve({ status: res.statusCode, json, raw: raw.slice(0, 400) }); });
+    });
+    req.setTimeout(timeoutMs, () => req.destroy(new Error("Request timed out")));
+    req.on("error", reject); req.write(body); req.end();
+  });
+}
+
+async function patchJob(id, fields) {
+  const r = await supabase("PATCH", "agent_marketing_jobs", { ...fields, updated_at: new Date().toISOString() }, `?id=eq.${encodeURIComponent(id)}`);
+  if (r.status >= 300) console.error("agent-marketing job update failed:", r.status, JSON.stringify(r.data || "").slice(0, 200));
+}
+async function fail(job, message) {
+  console.error(`[agent-marketing-prepare] ${job.id}: ${message}`);
+  await patchJob(job.id, { status: "error", error: String(message).slice(0, 900), step: "Stopped" });
+}
+
+// ── 1. narration ──────────────────────────────────────────────────────────────────────────────────────────────
+async function prepareNarration(job, project, tagged) {
+  if (job.assets && job.assets.audio && job.assets.audio.key) return job.assets.audio;
+  const voiceId = assetsLib.voiceIdFor(project.voice);
+  if (!voiceId) throw new Error("This voice is not configured yet.");
+  if (!process.env.ELEVENLABS_API_KEY) throw new Error("Narration is not configured.");
+  const res = await postJson("api.elevenlabs.io", timing.endpointPath(voiceId), { "xi-api-key": process.env.ELEVENLABS_API_KEY }, timing.buildRequest(tagged), 180000);
+  const j = res.json;
+  if (res.status !== 200 || !j || !j.audio_base64) throw new Error(`The narration service returned ${res.status}${res.json && res.json.detail && res.json.detail.message ? ": " + res.json.detail.message : ""}`);
+  const audio = Buffer.from(j.audio_base64, "base64");
+  const al = j.alignment;
+  const lastEnd = al && al.character_end_times_seconds && al.character_end_times_seconds[al.character_end_times_seconds.length - 1];
+  const check = timing.checkAlignment(al, tagged, lastEnd);
+  if (!check.ok) throw new Error("The narration timings were not usable: " + check.problems.join(" "));
+  const words = timing.wordsFromAlignment(al);
+  if (!timing.wordsMatchCaption(words, tagged)) throw new Error("The narration timings do not match the approved words.");
+  const key = `agent-marketing-assets/${job.user_id}/${job.project_id}/${job.id}/narration.mp3`;
+  await put(key, audio, "audio/mpeg");
+  const durationSec = Math.round(Math.max(lastEnd + 0.4, (audio.length * 8) / 128000) * 100) / 100; // default output is 128 kbps mp3
+  const rec = { key, duration_sec: durationSec, words: words.map((w) => ({ text: w.text, start: w.start, end: w.end })), voice_id: voiceId, characters: tagged.length };
+  const usage = { ...(job.usage || {}), narration_characters: tagged.length };
+  job.assets = { ...(job.assets || {}), audio: rec }; job.usage = usage;
+  await patchJob(job.id, { assets: job.assets, usage });
+  return rec;
+}
+
+// ── 2. images ─────────────────────────────────────────────────────────────────────────────────────────────────
+async function generateImage(prompt, size) {
+  const res = await postJson("api.openai.com", "/v1/images/generations", { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` }, { model: IMAGE_MODEL, prompt, n: 1, size, quality: img.settings().quality, output_format: "png" }, 240000);
+  const b64 = res.json && res.json.data && res.json.data[0] && res.json.data[0].b64_json;
+  if (res.status >= 300 || !b64) {
+    const msg = res.json && res.json.error && res.json.error.message ? res.json.error.message : `Image service returned ${res.status}`;
+    throw new Error(/safety|policy|moderation/i.test(msg) ? "An image was declined by the image service. Adjust that scene's description and try again." : `An image could not be created (${String(msg).slice(0, 120)})`);
+  }
+  return Buffer.from(b64, "base64");
+}
+async function brandPlate(format, brand) {
+  const [w, h] = format === "9x16" ? [1080, 1920] : [1920, 1080];
+  const c1 = brand.secondary || "#1a1714", c2 = brand.primary || "#b8975a";
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><defs><linearGradient id="g" x1="0" y1="0" x2="0.4" y2="1"><stop offset="0" stop-color="${c1}"/><stop offset="1" stop-color="${c1}"/></linearGradient><radialGradient id="r" cx="0.8" cy="0.1" r="0.9"><stop offset="0" stop-color="${c2}" stop-opacity="0.28"/><stop offset="1" stop-color="${c2}" stop-opacity="0"/></radialGradient></defs><rect width="100%" height="100%" fill="url(#g)"/><rect width="100%" height="100%" fill="url(#r)"/></svg>`;
+  return sharp(Buffer.from(svg)).png().toBuffer();
+}
+
+async function prepareImages(job, project, narrative, brand, formats) {
+  const images = { ...((job.assets && job.assets.images) || {}) };
+  const needs = assetsLib.imageNeeds(narrative);
+  const unsupported = needs.filter((n) => n.kind === "unsupported");
+  if (unsupported.length) throw new Error(`Scene ${unsupported[0].scene + 1} uses a visual source (${unsupported[0].source || "none"}) that Agent Marketing rendering does not support yet.`);
+  // approved or proposed wide images already made for this project can be reused as the 16:9 image
+  const rows = await supabase("GET", "agent_marketing_assets", null, `?project_id=eq.${job.project_id}&user_id=eq.${job.user_id}&source=eq.gpt_image_2&select=scene_index,version,status,asset_key,generation&order=version.desc`);
+  const existing = (Array.isArray(rows.data) ? rows.data : []).filter((r) => r.asset_key && r.status !== "rejected" && r.generation && r.generation.state === "done" && r.generation.format === "16x9");
+  const todo = [];
+  for (const n of needs) for (const f of formats) {
+    const slot = `${n.scene}_${f}`;
+    if (n.kind === "reuse" || (images[slot] && images[slot].key)) continue;
+    if (n.kind === "plate") { todo.push({ slot, n, f, plate: true }); continue; }
+    const adopt = f === "16x9" ? existing.find((r) => r.scene_index === n.scene) : null;
+    if (adopt) { images[slot] = { key: adopt.asset_key, source: "existing_project_image" }; continue; }
+    todo.push({ slot, n, f });
+  }
+  if (todo.some((t) => !t.plate) && !process.env.OPENAI_API_KEY) throw new Error("Image generation is not configured.");
+  const usage = { ...(job.usage || {}) };
+  let done = 0;
+  const worker = async (t) => {
+    const base = `agent-marketing-assets/${job.user_id}/${job.project_id}/${job.id}/${t.slot}`;
+    let buf, source;
+    if (t.plate) { buf = await brandPlate(t.f, brand); source = "brand_plate"; }
+    else {
+      const prompt = img.buildFormatPrompt({ kind: t.n.imageKind, scenePrompt: t.n.prompt, format: t.f, framing: t.n.framing && t.n.framing[t.f] });
+      buf = await generateImage(prompt, t.f === "9x16" ? img.tallSize() : img.SIZES[img.WIDE]);
+      source = "gpt_image_2"; usage.images_generated = (usage.images_generated || 0) + 1;
+    }
+    const key = `${base}_${crypto.randomBytes(3).toString("hex")}.png`;
+    await put(key, buf, "image/png");
+    images[t.slot] = { key, source };
+    done++;
+    job.assets = { ...(job.assets || {}), images }; job.usage = usage;
+    await patchJob(job.id, { assets: job.assets, usage, step: `Images ${done} of ${todo.length}` });
+  };
+  const queue = todo.slice();
+  const runners = Array.from({ length: Math.min(3, queue.length) }, async () => { for (let t = queue.shift(); t; t = queue.shift()) await worker(t); });
+  await Promise.all(runners);
+  job.assets = { ...(job.assets || {}), images };
+  return images;
+}
+
+// ── 4. hand to Railway ────────────────────────────────────────────────────────────────────────────────────────
+function railwayPost(pathname, payload) {
+  return new Promise((resolve, reject) => {
+    const url = new URL(`${process.env.RAILWAY_RENDER_URL}${pathname}`);
+    const body = JSON.stringify(payload);
+    const req = https.request({ hostname: url.hostname, path: url.pathname, method: "POST", headers: { "x-railway-secret": process.env.RAILWAY_SECRET, "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) } }, (res) => {
+      let d = ""; res.on("data", (c) => (d += c)); res.on("end", () => { let j = null; try { j = JSON.parse(d); } catch { /* */ } resolve({ status: res.statusCode, json: j }); });
+    });
+    req.setTimeout(30000, () => req.destroy(new Error("Railway request timed out")));
+    req.on("error", reject); req.write(body); req.end();
+  });
+}
+async function dispatchRender(job, manifest, headshotKey) {
+  const keys = new Set([manifest.audio.narration_key]);
+  if (headshotKey) keys.add(headshotKey);
+  manifest.scenes.forEach((s) => Object.values(s.visual.image_keys || {}).forEach((k) => keys.add(k)));
+  const assets = {};
+  for (const k of keys) assets[k] = await presign(k, 12 * 3600);
+  const r = await railwayPost("/render-agent-marketing", { jobId: job.id, manifest, assets, musicStyle: job.music || "default" });
+  return r;
+}
+
+exports.handler = async (event) => {
+  const h = event.headers || {};
+  const key = process.env.INTERNAL_API_KEY || "";
+  if (!key || h["x-internal-key"] !== key) return { statusCode: 401, body: "" };
+  let job = null;
+  try {
+    const body = JSON.parse(event.body || "{}");
+    if (!/^[\w-]{6,80}$/.test(String(body.jobId || ""))) return { statusCode: 400, body: "" };
+    const jr = await supabase("GET", "agent_marketing_jobs", null, `?id=eq.${encodeURIComponent(body.jobId)}&select=*&limit=1`);
+    job = Array.isArray(jr.data) ? jr.data[0] : null;
+    if (!job || !am.isEnabledFor(job.user_id)) return { statusCode: 404, body: "" };
+    if (!["queued", "error"].includes(job.status) || (job.status === "error" && !body.retry)) return { statusCode: 200, body: "" }; // late or duplicate call
+    await patchJob(job.id, { status: "preparing", error: null, step: "Starting", attempt: body.retry ? job.attempt + 1 : job.attempt });
+
+    const pr = await supabase("GET", "agent_marketing_projects", null, `?id=eq.${job.project_id}&user_id=eq.${job.user_id}&select=*&limit=1`);
+    const project = Array.isArray(pr.data) ? pr.data[0] : null;
+    if (!project) return await fail(job, "The project was not found."), { statusCode: 200, body: "" };
+    const narrative = project.narrative_approved;
+    if (!narrative || !project.narrative_approved_at || !Array.isArray(narrative.scenes) || !narrative.narrationTagged) return await fail(job, "The narration has not been approved yet."), { statusCode: 200, body: "" };
+    const reportFigures = project.selected_topic && project.selected_topic.reportFigures;
+    const period = assetsLib.parseNoticePeriod(narrative.notice || (project.selected_topic && project.selected_topic.reportNotice));
+    if (!Array.isArray(reportFigures) || !reportFigures.length || !period) return await fail(job, "The verified report figures or the report period are missing."), { statusCode: 200, body: "" };
+    const profile = await getProfileRow(job.user_id);
+    if (!profile || !profile.licensed_name || !profile.headshot_key) return await fail(job, "Your Agent Profile needs your name and headshot before a Reel can be made."), { statusCode: 200, body: "" };
+    const brand = { primary: profile.brand_primary, secondary: profile.brand_secondary, border: profile.brand_border, font: profile.brand_font || undefined, headshot_key: profile.headshot_key, agent: { name: profile.licensed_name, brokerage: profile.brokerage_name || "" } };
+    const formats = job.formats;
+    job.music = project.music || "default";
+
+    await patchJob(job.id, { step: "Recording the narration" });
+    const audio = await prepareNarration(job, project, narrative.narrationTagged);
+    await patchJob(job.id, { step: "Creating the images" });
+    const images = await prepareImages(job, project, narrative, brand, formats);
+    const imageKeys = {};
+    for (const [slot, v] of Object.entries(images)) { const [sc, f] = slot.split("_"); (imageKeys[sc] = imageKeys[sc] || {})[f] = v.key; }
+
+    await patchJob(job.id, { step: "Checking the facts and layout" });
+    const built = assetsLib.buildManifest({ projectId: project.id, formats, narrative, intake: project.intake, reportFigures, notice: { period }, brand, narrationTagged: narrative.narrationTagged, audio: { narration_key: audio.key, duration_sec: audio.duration_sec, words: audio.words }, imageKeys });
+    await patchJob(job.id, { validation: built.validation, manifest: built.manifest });
+    if (!built.validation.ok) return await fail(job, "The Reel did not pass its checks: " + built.validation.errors.map((e) => e.message).join(" | ")), { statusCode: 200, body: "" };
+
+    await patchJob(job.id, { status: "ready", step: "Sending to the renderer" });
+    const r = await dispatchRender(job, built.manifest, profile.headshot_key);
+    if (r.status !== 202) return await fail(job, r.status === 429 ? "The renderer is busy. Please try again in a few minutes." : `The renderer did not accept the job (${r.status}).`), { statusCode: 200, body: "" };
+    await patchJob(job.id, { status: "rendering", step: "Rendering" });
+  } catch (err) {
+    console.error("[agent-marketing-prepare-background] failed:", err.message);
+    if (job) { try { await fail(job, err.message); } catch (e) { console.error("could not write error state:", e.message); } }
+  }
+  return { statusCode: 200, body: "" };
+};

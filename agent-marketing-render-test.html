@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex">
+<title>Agent Marketing — Render test (beta)</title>
+<style>
+:root{--ink:#1a1714;--cream:#f7f4ef;--gold:#ad864b;--muted:#7a6f63;--danger:#c0392b;--success:#2d6a4f;--border:#ddd5c8;}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;background:var(--cream);color:var(--ink);font-size:15px;line-height:1.6;}
+.stage{max-width:820px;margin:0 auto;padding:24px 20px 80px;}
+h1{font-size:1.4rem;font-weight:600;margin-bottom:4px;}
+.sub{color:var(--muted);font-size:.85rem;margin-bottom:18px;}
+.panel{background:#fff;border:1px solid var(--border);border-radius:6px;padding:20px;margin-bottom:16px;}
+label.lbl{display:block;font-size:.8rem;font-weight:600;margin:14px 0 6px;}
+input[type=text]{width:100%;border:1px solid var(--border);border-radius:4px;padding:10px 12px;font:inherit;}
+.row{display:flex;gap:18px;flex-wrap:wrap;margin-top:6px;}
+.row label{font-size:.9rem;display:flex;gap:8px;align-items:center;}
+.confirm{display:flex;gap:10px;align-items:flex-start;font-size:.85rem;margin-top:16px;}
+.btn{background:var(--ink);color:#fff;border:0;padding:11px 18px;border-radius:5px;font:600 .85rem inherit;cursor:pointer;margin-top:16px;margin-right:8px;}
+.btn.gold{background:var(--gold);} .btn:disabled{opacity:.5;cursor:default;}
+.msg{margin-top:12px;font-size:.88rem;min-height:1.2em;white-space:pre-wrap;} .msg.err{color:var(--danger);} .msg.ok{color:var(--success);}
+.videos{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:18px;margin-top:14px;}
+video{width:100%;background:#000;border-radius:4px;max-height:640px;}
+pre{background:#f3eee6;padding:10px;border-radius:4px;font-size:.75rem;overflow:auto;margin-top:10px;}
+a{color:var(--gold);}
+</style>
+</head>
+<body>
+<div class="stage">
+  <h1>Agent Marketing — render test</h1>
+  <div class="sub">Beta. Makes the images and narration for an approved project, then renders the finished Reel. Nothing is charged during beta.</div>
+  <div class="panel">
+    <label class="lbl" for="pid">Project id</label>
+    <input type="text" id="pid" value="ea1444e8-a0e4-4642-a21a-37ed89c77ca9">
+    <label class="lbl">Formats</label>
+    <div class="row"><label><input type="checkbox" id="f9" checked> 9:16 (Reels, Shorts, TikTok)</label><label><input type="checkbox" id="f16" checked> 16:9 (YouTube)</label></div>
+    <label class="confirm"><input type="checkbox" id="ok"> <span>I confirm the market statistics and claims in this Reel are accurate and comply with applicable advertising requirements.</span></label>
+    <button class="btn gold" id="go">Make my Reel</button><button class="btn" id="retry" style="display:none">Retry</button>
+    <div class="msg" id="msg"></div>
+  </div>
+  <div class="panel" id="out" style="display:none"><div id="videos" class="videos"></div><div id="details"></div></div>
+</div>
+<script>
+(function () {
+  var API = "/.netlify/functions/agent-marketing-render", job = null, timer = null;
+  function $(id) { return document.getElementById(id); }
+  function say(t, k) { var m = $("msg"); m.textContent = t || ""; m.className = "msg" + (k ? " " + k : ""); }
+  function token() {
+    try { for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (!/^sb-.+-auth-token/.test(k)) continue; var p = JSON.parse(localStorage.getItem(k) || "null"); if (p && p.access_token && p.expires_at && p.expires_at * 1000 > Date.now() + 15000) return p.access_token; } } catch (e) {}
+    return null;
+  }
+  async function call(method, qs, body) {
+    var t = token(); if (!t) throw new Error("Your session has expired. Log in at smartstagepro.com, then reopen this page.");
+    var res = await fetch(API + (qs || ""), { method: method, headers: { Authorization: "Bearer " + t, "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+    var json = {}; try { json = await res.json(); } catch (e) {}
+    return { ok: res.ok, status: res.status, json: json };
+  }
+  function poll() {
+    clearTimeout(timer);
+    call("GET", "?jobId=" + encodeURIComponent(job)).then(function (r) {
+      var j = r.json || {};
+      if (!r.ok) { say(j.error || "Could not check the render.", "err"); return; }
+      if (j.status === "done") { show(j); return; }
+      if (j.status === "error") { say("Stopped: " + (j.error || "unknown problem"), "err"); $("retry").style.display = ""; $("go").disabled = false; return; }
+      say((j.step || "Working") + " … (this takes a few minutes)"); timer = setTimeout(poll, 5000);
+    }).catch(function (e) { say(e.message, "err"); timer = setTimeout(poll, 8000); });
+  }
+  function show(j) {
+    say("Done. Video length " + (j.durationSec ? j.durationSec.toFixed(1) + " s" : "") + ".", "ok"); $("go").disabled = false;
+    var v = $("videos"); v.innerHTML = "";
+    Object.keys(j.videos || {}).forEach(function (f) {
+      var d = document.createElement("div"); d.innerHTML = "<b>" + (f === "9x16" ? "9:16" : "16:9") + "</b>";
+      var el = document.createElement("video"); el.controls = true; el.src = j.videos[f]; d.appendChild(el);
+      var a = document.createElement("a"); a.href = j.videos[f]; a.textContent = "Download"; a.target = "_blank"; d.appendChild(document.createElement("br")); d.appendChild(a); v.appendChild(d);
+    });
+    var det = { notice_check: j.checks, warnings: j.warnings, usage: j.usage, manifest_warnings: j.validation && j.validation.warnings };
+    $("details").innerHTML = "<pre></pre>"; $("details").firstChild.textContent = JSON.stringify(det, null, 2);
+    $("out").style.display = "";
+  }
+  $("go").onclick = async function () {
+    var formats = []; if ($("f9").checked) formats.push("9x16"); if ($("f16").checked) formats.push("16x9");
+    if (!formats.length) return say("Choose at least one format.", "err");
+    if (!$("ok").checked) return say("Please tick the confirmation first.", "err");
+    $("go").disabled = true; $("retry").style.display = "none"; say("Starting …");
+    try {
+      var r = await call("POST", "", { projectId: $("pid").value.trim(), formats: formats, advertisingConfirmed: true });
+      if (r.status === 409 && r.json.jobId) { job = r.json.jobId; say("A render is already running for this project; following it …"); return poll(); }
+      if (!r.ok) { $("go").disabled = false; return say(r.json.error || "Could not start.", "err"); }
+      job = r.json.jobId; poll();
+    } catch (e) { $("go").disabled = false; say(e.message, "err"); }
+  };
+  $("retry").onclick = async function () {
+    $("retry").style.display = "none"; say("Retrying — images and narration already made are reused …");
+    try { var r = await call("POST", "", { jobId: job, retry: true }); if (!r.ok) return say(r.json.error || "Could not retry.", "err"); poll(); } catch (e) { say(e.message, "err"); }
+  };
+})();
+</script>
+</body>
+</html>

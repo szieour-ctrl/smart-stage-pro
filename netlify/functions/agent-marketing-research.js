@@ -84,7 +84,7 @@ const who = (session) => (session.pool === "brokerage" ? "Your brokerage has" : 
 // The same request, rebuilt from a saved row, so "same request on the same project" is recognised without a second purchase.
 function keyOfRow(row) {
   const refs = Array.isArray(row.upload_refs) ? row.upload_refs : [];
-  return rl.requestKey({ mode: row.mode, audience: row.audience, geography: row.geography, focus: row.focus || {}, keywords: (row.focus && row.focus.keywords) || "", dataSource: row.data_source || "web", uploadIds: refs.map((x) => x && x.id).filter(Boolean) });
+  return rl.requestKey({ mode: row.mode, audience: row.audience, geography: row.geography, focus: row.focus || {}, keywords: (row.focus && row.focus.keywords) || "", dataFocus: (row.focus && row.focus.dataFocus) || "all", period: (row.focus && row.focus.period) || null, dataSource: row.data_source || "web", uploadIds: refs.map((x) => x && x.id).filter(Boolean) });
 }
 
 exports.handler = async (event) => {
@@ -101,7 +101,7 @@ exports.handler = async (event) => {
         // One copy of the choices lives in the research lib; the page reads it here instead of keeping its own.
         const GEO = { neighborhood: "Neighborhood", city: "City", zip: "ZIP code", county: "County", metro: "Metro area" };
         return reply(200, {
-          modes: rl.MODES.map((k) => ({ key: k, label: rl.MODE_LABELS[k] })), audiences: rl.AUDIENCES,
+          dataFocus: rl.DATA_FOCUS, modes: rl.MODES.map((k) => ({ key: k, label: rl.MODE_LABELS[k] })), audiences: rl.AUDIENCES,
           geoTypes: rl.GEO_TYPES.map((k) => ({ key: k, label: GEO[k] })), topicCount: rl.TOPIC_COUNT, maxUploads: rl.MAX_UPLOADS,
         });
       }
@@ -176,7 +176,7 @@ exports.handler = async (event) => {
     }
 
     const ins = await supabase("POST", "agent_marketing_research", {
-      project_id: project.id, user_id: userId, pool_user_id: pool.poolUserId, mode: v.request.mode, geography: v.request.geography, audience: v.request.audience, focus: { ...v.request.focus, keywords: v.request.keywords },
+      project_id: project.id, user_id: userId, pool_user_id: pool.poolUserId, mode: v.request.mode, geography: v.request.geography, audience: v.request.audience, focus: { ...v.request.focus, keywords: v.request.keywords, dataFocus: v.request.dataFocus, period: v.request.period },
       data_source: v.request.dataSource, upload_refs: refs, status: "running", model: rl.researchModel(),
     });
     const row = Array.isArray(ins.data) ? ins.data[0] : null;

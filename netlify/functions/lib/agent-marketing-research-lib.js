@@ -41,6 +41,35 @@ const PAYWALLED_DOMAINS = ["wsj.com", "ft.com", "bloomberg.com", "nytimes.com", 
 
 const clean = (v, n) => intakeLib.cleanWords(v, n);
 const MAX_KEYWORDS_CHARS = 120;
+
+// ── Optional data (Sam's original flow, Oct 25): what kind of market data the web research should include, and for which period ─────
+const DATA_FOCUS = [
+  { key: "none", label: "None" },
+  { key: "stats", label: "MLS statistics" },
+  { key: "recent_sales", label: "Recent listings and sales" },
+  { key: "all", label: "All available market data" },
+];
+const DATA_FOCUS_KEYS = DATA_FOCUS.map((d) => d.key);
+const PERIOD_PRESETS = [30, 60, 90];
+const MAX_PERIOD_DAYS = 800;
+const isoOk = (v) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || "")) && new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) === v;
+const isoPlus = (iso, d) => new Date(Date.parse(`${iso}T00:00:00Z`) + d * 86400000).toISOString().slice(0, 10);
+/** validatePeriod(p) → { period } | { error }. Default is the last 30 days. { days: 30|60|90 } or { start, end } as YYYY-MM-DD. */
+function validatePeriod(p) {
+  if (p == null || p === "" || (typeof p === "object" && !p.days && !p.start && !p.end)) return { period: { days: 30 } };
+  if (typeof p !== "object") return { error: "Choose 30, 60 or 90 days, or two dates." };
+  if (p.days != null && p.days !== "") return PERIOD_PRESETS.includes(Number(p.days)) ? { period: { days: Number(p.days) } } : { error: "Choose 30, 60 or 90 days." };
+  if (!isoOk(p.start) || !isoOk(p.end)) return { error: "Enter both dates for the period." };
+  if (p.start > p.end) return { error: "The period's start date must be on or before its end date." };
+  if ((Date.parse(p.end) - Date.parse(p.start)) / 86400000 > MAX_PERIOD_DAYS) return { error: "Choose a period of about two years or less." };
+  return { period: { start: p.start, end: p.end } };
+}
+/** The period as the plain dates the research is told to cover, counted back from today's date for the presets. */
+function periodDates(period, today) {
+  if (!period) return null;
+  if (period.start) return { start: period.start, end: period.end };
+  return isoOk(today) ? { start: isoPlus(today, -(period.days - 1)), end: today } : null;
+}
 const isTrue = (v) => v === true || String(v).toLowerCase() === "true";
 
 // ── Geography ───────────────────────────────────────────────────────────────────────────────────────────────────
@@ -98,6 +127,15 @@ function validateResearchRequest(body) {
   const focus = { active_adult_55: isTrue(f.active_adult_55), new_construction: isTrue(f.new_construction) };
   // Keywords and brand terms the agent wants the research to look for (optional): "55+, Four Seasons, Heritage". Plain words only, kept short.
   const keywords = clean(String(b.keywords == null ? "" : b.keywords).replace(/[\r\n]+/g, ", "), MAX_KEYWORDS_CHARS);
+  // Optional data and its period. Local Events never uses market data. "None" has no period.
+  let dataFocus = b.dataFocus == null || b.dataFocus === "" ? "all" : String(b.dataFocus);
+  if (!DATA_FOCUS_KEYS.includes(dataFocus)) { errors.push({ field: "dataFocus", message: "Choose which optional data to include." }); dataFocus = "all"; }
+  if (mode === "local_events") dataFocus = "none";
+  let period = null;
+  if (dataFocus !== "none") {
+    const pv = validatePeriod(b.period);
+    if (pv.error) errors.push({ field: "period", message: pv.error }); else period = pv.period;
+  }
   const ids = Array.isArray(b.uploadIds) ? b.uploadIds.map(String) : [];
   if (ids.length > MAX_UPLOADS) errors.push({ field: "uploadIds", message: `Attach at most ${MAX_UPLOADS} reports.` });
   const uploadIds = [...new Set(ids)].filter((id) => am.UUID_RE.test(id));
@@ -108,14 +146,14 @@ function validateResearchRequest(body) {
   else if (dataSource !== "web" && uploadIds.length === 0) errors.push({ field: "dataSource", message: "Attach and confirm a report to use it, or choose web research only." });
   if (mode === "local_events" && dataSource !== "web") errors.push({ field: "dataSource", message: "Local Events uses web research only." });
   if (errors.length) return { ok: false, errors, request: null };
-  return { ok: true, errors: [], request: { mode, audience, geography: geo.geography, focus, keywords, dataSource, uploadIds: dataSource === "web" ? [] : uploadIds } };
+  return { ok: true, errors: [], request: { mode, audience, geography: geo.geography, focus, keywords, dataFocus, period, dataSource, uploadIds: dataSource === "web" ? [] : uploadIds } };
 }
 
 // A short, stable fingerprint of a request, so the same request is recognised (reuse saved results, never re-buy).
 function requestKey(request) {
   const r = request || {};
   const g = r.geography || {};
-  return JSON.stringify([r.mode, r.audience, g.type, String(g.name || "").toLowerCase(), String(g.city || "").toLowerCase(), !!(r.focus && r.focus.active_adult_55), !!(r.focus && r.focus.new_construction), String(r.keywords || "").toLowerCase(), (r.uploadIds || []).slice().sort(), r.dataSource || "web"]);
+  return JSON.stringify([r.mode, r.audience, g.type, String(g.name || "").toLowerCase(), String(g.city || "").toLowerCase(), !!(r.focus && r.focus.active_adult_55), !!(r.focus && r.focus.new_construction), String(r.keywords || "").toLowerCase(), r.dataFocus || "all", JSON.stringify(r.period || null), (r.uploadIds || []).slice().sort(), r.dataSource || "web"]);
 }
 
 // ── Provider request (Perplexity Agent API, POST /v1/agent) ────────────────────────────────────────────────────────
@@ -180,6 +218,18 @@ function systemPrompt(mode) {
  * `uploadContext` is a plain-text scope note about an agent-uploaded report (geography, date range, sample and metric
  * definitions), never the report's numbers, and never confidential client information.
  */
+function dataFocusLine(r, today) {
+  const d = r.dataFocus || "all";
+  if (r.mode === "local_events") return null;
+  if (d === "none") return "Optional data: none. Use news, announcements and local developments; do not build topics around market statistics or sales figures.";
+  const what = d === "stats" ? "MLS-based market statistics (inventory, median price, days on market, months of supply)"
+    : d === "recent_sales" ? "recent listings and sales activity (counts of new, pending and closed sales, sale-to-list price) at the market level, never individual properties or addresses"
+      : "all available market data: MLS-based statistics and recent listings and sales activity at the market level, never individual properties or addresses";
+  const pd = periodDates(r.period, today);
+  const per = pd ? `Period: ${pd.start} to ${pd.end}.` : "";
+  return `Optional data to include: ${what}. ${per} State on every figure the period it covers. If a source does not cover this period, say so in scope_note and treat the figure as preliminary; never present a figure for a different period as if it were for this one.`;
+}
+
 function buildResearchPayload({ request, today, uploadContext, env }) {
   const r = request;
   const focus = [r.focus && r.focus.active_adult_55 ? "55+ active adult communities" : null, r.focus && r.focus.new_construction ? "new construction" : null].filter(Boolean);
@@ -189,6 +239,7 @@ function buildResearchPayload({ request, today, uploadContext, env }) {
     `Market (exact, do not broaden): ${r.geography.label}.`,
     `Audience: ${aud}.`,
     focus.length ? `Narrow the research to: ${focus.join(" and ")}.` : null,
+    dataFocusLine(r, today),
     r.keywords ? `The agent asked the research to look for these keywords and terms (use them to find relevant local items; they do not change the exact market): ${clean(r.keywords, MAX_KEYWORDS_CHARS)}.` : null,
     uploadContext ? `The agent also has a report with this scope (use only as context for what to look for, never quote numbers from this note): ${clean(uploadContext, 600)}` : null,
     `Today: ${today}.`,
@@ -430,6 +481,6 @@ function outcomeFields({ validation, usage, model, today, now, error }) {
 
 module.exports = {
   MODES, MODE_LABELS, DATA_SOURCES, GEO_TYPES, AUDIENCES, AUDIENCE_KEYS, TOPIC_COUNT, MAX_UPLOADS, FRESH_DAYS, ALLOWANCE_BY_PLAN, PAYWALLED_DOMAINS, DEFAULT_MODEL, DEFAULT_COST_TARGET_USD,
-  validateGeography, geoLabel, validateResearchRequest, requestKey, researchModel, researchSettings, systemPrompt, buildResearchPayload,
+  DATA_FOCUS, DATA_FOCUS_KEYS, validatePeriod, periodDates, validateGeography, geoLabel, validateResearchRequest, requestKey, researchModel, researchSettings, systemPrompt, buildResearchPayload,
   extractTopics, extractRecommendation, validateTopics, similar, usageSummary, monthKeyPT, allowanceFor, sessionStatus, outcomeFields,
 };

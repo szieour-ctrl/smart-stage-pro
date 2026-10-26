@@ -47,7 +47,7 @@ test("geography: the agent defines it, a neighborhood must name its city, ZIPs a
 test("request: known keys only, both modes, audiences, focus flags, upload limits", () => {
   const ok = r.validateResearchRequest({ mode: "market_update", audience: "sellers", geography: { type: "city", name: "Roseville" }, focus: { active_adult_55: true, new_construction: "true", junk: 1 }, address: "1 Main St" });
   assert.strictEqual(ok.ok, true);
-  assert.deepStrictEqual(Object.keys(ok.request).sort(), ["audience", "dataSource", "focus", "geography", "keywords", "mode", "uploadIds"]);
+  assert.deepStrictEqual(Object.keys(ok.request).sort(), ["audience", "dataFocus", "dataSource", "focus", "geography", "keywords", "mode", "period", "uploadIds"]);
   assert.deepStrictEqual(ok.request.focus, { active_adult_55: true, new_construction: true });
   assert.strictEqual(r.validateResearchRequest({ mode: "local_events", audience: "general", geography: { type: "zip", name: "95661" } }).ok, true);
   assert.strictEqual(r.validateResearchRequest({ mode: "blog", audience: "sellers", geography: { type: "city", name: "A" } }).ok, false);
@@ -310,4 +310,37 @@ test("recommendation: the model's pick is attached to that topic; a missing or o
   assert.deepStrictEqual(r.extractRecommendation(JSON.stringify({ topics: [], recommendation: rec })), rec);
   assert.strictEqual(r.extractRecommendation("not json"), null);
   assert.match(r.systemPrompt("market_update"), /"recommendation"/);
+});
+
+test("optional data: four choices, default all with the last 30 days; none and Local Events carry no period; the period is checked", () => {
+  const base = { mode: "market_update", audience: "sellers", geography: { type: "city", name: "Roseville" } };
+  assert.deepStrictEqual(r.DATA_FOCUS.map((d) => d.key), ["none", "stats", "recent_sales", "all"]);
+  const d = r.validateResearchRequest(base).request;
+  assert.strictEqual(d.dataFocus, "all");
+  assert.deepStrictEqual(d.period, { days: 30 });
+  const none = r.validateResearchRequest({ ...base, dataFocus: "none", period: { days: 90 } }).request;
+  assert.strictEqual(none.period, null);
+  const ev = r.validateResearchRequest({ ...base, mode: "local_events", dataFocus: "all" }).request;
+  assert.deepStrictEqual([ev.dataFocus, ev.period], ["none", null]);
+  assert.deepStrictEqual(r.validateResearchRequest({ ...base, dataFocus: "recent_sales", period: { start: "2026-07-01", end: "2026-09-30" } }).request.period, { start: "2026-07-01", end: "2026-09-30" });
+  for (const bad of [{ dataFocus: "everything" }, { period: { days: 45 } }, { period: { start: "2026-10-01", end: "2026-09-01" } }, { period: { start: "x", end: "y" } }, { period: { start: "2020-01-01", end: "2026-01-01" } }]) {
+    assert.strictEqual(r.validateResearchRequest({ ...base, ...bad }).ok, false, JSON.stringify(bad));
+  }
+  // a different data choice or period is a different request, so it is not served from an old saved set
+  const k = (x) => r.requestKey(r.validateResearchRequest({ ...base, ...x }).request);
+  assert.notStrictEqual(k({}), k({ dataFocus: "stats" }));
+  assert.notStrictEqual(k({}), k({ period: { days: 90 } }));
+  assert.strictEqual(k({}), k({ dataFocus: "all", period: { days: 30 } }));
+});
+
+test("optional data: the research is told what data and which dates; periods count back from today; none and events say nothing about data", () => {
+  const base = { mode: "market_update", audience: "sellers", geography: { type: "city", name: "Roseville" } };
+  const input = (x) => r.buildResearchPayload({ request: r.validateResearchRequest({ ...base, ...x }).request, today: "2026-10-25", env: {} }).input;
+  assert.match(input({ dataFocus: "recent_sales", period: { days: 30 } }), /Optional data to include: recent listings and sales[^\n]*never individual properties[^\n]*Period: 2026-09-26 to 2026-10-25\./);
+  assert.match(input({ dataFocus: "stats", period: { start: "2026-07-01", end: "2026-09-30" } }), /MLS-based market statistics[^\n]*Period: 2026-07-01 to 2026-09-30\./);
+  assert.match(input({}), /all available market data/);
+  assert.match(input({}), /State on every figure the period it covers/);
+  assert.match(input({ dataFocus: "none" }), /Optional data: none/);
+  assert.doesNotMatch(input({ mode: "local_events" }), /Optional data/);
+  assert.deepStrictEqual(r.periodDates({ days: 7 === 7 ? 30 : 0 }, "2026-10-25"), { start: "2026-09-26", end: "2026-10-25" });
 });

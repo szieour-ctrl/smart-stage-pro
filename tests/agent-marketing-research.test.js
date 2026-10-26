@@ -293,3 +293,21 @@ test("keywords: optional, cleaned, kept short, part of the request key and the r
   assert.ok(/keywords and terms[^\n]*55\+, Four Seasons, Heritage/.test(p.input));
   assert.ok(!/keywords and terms/.test(r.buildResearchPayload({ request: none, today: "2026-10-25", env: {} }).input));
 });
+
+test("recommendation: the model's pick is attached to that topic; a missing or odd pick never fails the run", () => {
+  const opts = { mode: "market_update", today: TODAY };
+  const rec = { topic: 3, reason: "  Sellers are asking this now.  ", evidence: ["Pending sales rose.", "Days on market fell.", "c", "d"] };
+  const v = r.validateTopics(fiveMarket(), { ...opts, recommendation: rec });
+  assert.strictEqual(v.ok, true);
+  assert.deepStrictEqual(v.topics.filter((t) => t.recommended).map((t) => t.id), ["t3"]);
+  assert.strictEqual(v.topics[2].recommended.reason, "Sellers are asking this now.");
+  assert.strictEqual(v.topics[2].recommended.evidence.length, 3);
+  for (const bad of [null, {}, { topic: 9, reason: "x" }, { topic: 2, reason: "" }, { topic: "two", reason: "x" }, "t2"]) {
+    const w = r.validateTopics(fiveMarket(), { ...opts, recommendation: bad });
+    assert.strictEqual(w.ok, true);
+    assert.strictEqual(w.topics.filter((t) => t.recommended).length, 0);
+  }
+  assert.deepStrictEqual(r.extractRecommendation(JSON.stringify({ topics: [], recommendation: rec })), rec);
+  assert.strictEqual(r.extractRecommendation("not json"), null);
+  assert.match(r.systemPrompt("market_update"), /"recommendation"/);
+});

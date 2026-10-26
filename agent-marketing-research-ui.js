@@ -77,8 +77,10 @@
     return '<div class="topic' + (t.id === pickedId ? " picked" : "") + '"><div class="tags"><span class="tag">' + esc(t.id.toUpperCase()) + "</span>" +
       '<span class="tag ' + (t.scope === "selected" ? "ok" : "warn") + '">' + (t.scope === "selected" ? "Your exact market" : "Broader context") + "</span>" +
       '<span class="tag ' + (t.origin === "report" ? "ok" : "") + '">' + (t.origin === "report" ? "From your report" : "From web research") + "</span>" +
+      (t.recommended ? '<span class="tag ok">Recommended</span>' : "") +
       (t.smallSample ? '<span class="tag warn">Small sample</span>' : "") +
       (t.localIntent ? '<span class="tag ok">Local intent</span>' : "") + "</div><h3>" + esc(t.question) + '</h3><div class="why">' + esc(t.whyItMatters) + "</div>" +
+      (t.recommended ? '<div class="kv"><b>Why this one:</b> ' + esc(t.recommended.reason) + ((t.recommended.evidence || []).length ? " <span>(" + t.recommended.evidence.map(esc).join(" \u00b7 ") + ")</span>" : "") + "</div>" : "") +
       (t.scope !== "selected" || (t.origin === "report" && t.scopeNote) ? '<div class="kv"><b>' + (t.scope !== "selected" ? "Data covers" : "Note") + ":</b> " + esc(t.scopeNote) + "</div>" : "") +
       (t.reportFigures && t.reportFigures.length ? '<div class="kv"><b>Report figures:</b> ' + t.reportFigures.map(function (f) { return esc(f.text); }).join(" \u00b7 ") + "</div>" : "") +
       (t.reportNotice ? '<div class="kv"><b>Required notice:</b> ' + esc(t.reportNotice) + "</div>" : "") +
@@ -97,6 +99,7 @@
     $("resWait").classList.toggle("hidden", r.status !== "running");
     $("resError").classList.toggle("hidden", r.status !== "failed");
     if (r.status === "failed") $("resError").textContent = (r.error || "The research could not be completed.") + (/did not use a session/.test(r.error || "") ? "" : " This did not use a session.");
+    renderFailOptions(r);
     say("resNote", r.status === "ready" ? (r.note || (r.dataSource !== "report" && r.mode !== "local_events" ? "Figures from web research come from public pages. They can differ from your MLS numbers or be preliminary. Upload your MLS report to base your topics on your own data." : "")) : "");
     var pickedId = state.selected && state.selected.researchId === r.id ? state.selected.id : null;
     var chosen = pickedId && r.status === "ready" ? r.topics.filter(function (t) { return t.id === pickedId; })[0] : null;
@@ -108,6 +111,37 @@
     say("selMsg", "");
     Array.prototype.forEach.call($("resTopics").querySelectorAll("[data-pick]"), function (b) { b.addEventListener("click", function () { pick(r.id, b.getAttribute("data-pick")); }); });
     if (!opts.__pickedNow) $("resultPanel").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  // When research fails or comes back thin, the agent chooses what happens next. The area is never widened on its own.
+  function setForm(r) {
+    var g = r.geography || {}, f = r.focus || {};
+    var m = document.querySelector('input[name="mode"][value="' + r.mode + '"]'); if (m) m.checked = true;
+    $("geoType").value = g.type || "city"; applyGeo();
+    $("geoName").value = g.name || ""; $("geoCity").value = g.city || "";
+    $("audience").value = r.audience || $("audience").value;
+    $("f55").checked = !!f.active_adult_55; $("fNew").checked = !!f.new_construction; $("keywords").value = f.keywords || "";
+  }
+  function renderFailOptions(r) {
+    var box = $("resFailOptions"); if (!box) return;
+    if (r.status !== "failed") { box.classList.add("hidden"); box.innerHTML = ""; return; }
+    var g = r.geography || {}, btns = [{ k: "retry", t: "Try again" }];
+    if (g.type === "neighborhood" && g.city) btns.push({ k: "city", t: "Widen to " + g.city });
+    else if (g.type === "city" || g.type === "zip") btns.push({ k: "county", t: "Widen to the county" });
+    btns.push({ k: "edit", t: "Change my request" });
+    box.innerHTML = '<div class="hint" style="margin-bottom:8px">Your area was not widened. Choose what to do next; you will see a summary and confirm before anything runs.</div><div class="actions">' +
+      btns.map(function (b) { return '<button type="button" class="btn ' + (b.k === "retry" ? "gold" : "ghost") + ' small" data-fail="' + b.k + '">' + esc(b.t) + "</button>"; }).join("") + "</div>";
+    box.classList.remove("hidden");
+    Array.prototype.forEach.call(box.querySelectorAll("[data-fail]"), function (b) {
+      b.addEventListener("click", function () {
+        var k = b.getAttribute("data-fail");
+        setForm(r); hideConfirm();
+        if (k === "city") { $("geoType").value = "city"; applyGeo(); $("geoName").value = g.city; $("geoCity").value = ""; }
+        if (k === "county") { $("geoType").value = "county"; applyGeo(); $("geoName").value = ""; }
+        $("resultPanel").classList.add("hidden");
+        if (k === "retry" || k === "city") { $("startBtn").scrollIntoView({ block: "center" }); review(); }
+        else { $("geoName").focus(); $("geoName").scrollIntoView({ block: "center" }); }
+      });
+    });
   }
   async function pick(researchId, topicId) {
     say("selMsg", "Saving your choice…");

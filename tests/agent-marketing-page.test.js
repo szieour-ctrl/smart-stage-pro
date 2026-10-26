@@ -65,3 +65,15 @@ test("Research: a report with dated rows can be narrowed to a date window, which
   assert.match(research, /cma_table/);
   assert.match(research, /closed sales limited to/);
 });
+
+test("Research: a failed run offers retry / widen / change, never widens on its own; the recommended topic shows its reason", () => {
+  const research = read("agent-marketing-research-ui.js");
+  for (const f of ["agent-marketing.html", "agent-marketing-research-test.html"]) assert.match(read(f), /id="resFailOptions"/, f);
+  assert.match(research, /Widen to /);
+  assert.match(research, /Your area was not widened/);
+  const fail = research.slice(research.indexOf("function renderFailOptions"), research.indexOf("async function pick("));
+  assert.match(fail, /review\(\)/);          // every option ends at the summary the agent must confirm
+  assert.doesNotMatch(fail, /api\(/);        // choosing an option never calls the server by itself
+  assert.match(research, /Recommended/);
+  assert.match(research, /Why this one:/);
+});

@@ -34,16 +34,15 @@
     return {
       mode: picked("mode"), audience: $("audience").value,
       geography: { type: type, name: $("geoName").value, city: type === "neighborhood" ? $("geoCity").value : "" },
-      focus: { active_adult_55: $("f55").checked, new_construction: $("fNew").checked },
+      focus: { active_adult_55: $("f55").checked, new_construction: $("fNew").checked }, keywords: $("keywords").value,
       dataSource: reportSource().dataSource, uploadIds: reportSource().uploadIds,
     };
   }
-  // A report is used only once the agent has confirmed "This report covers\u2026 Correct?". Radio values: upload / research / both.
+  // A report is used only once the agent has confirmed "This report covers\u2026 Correct?". Attached and confirmed = both (report figures win); otherwise web only.
   function reportSource() {
     var u = state.upload;
     if (!u || u.status !== "confirmed" || !u.id) return { dataSource: "web", uploadIds: [] };
-    var v = (document.querySelector('input[name="dataSrc"]:checked') || {}).value || "both";
-    return v === "research" ? { dataSource: "web", uploadIds: [] } : { dataSource: v, uploadIds: [u.id] };
+    return { dataSource: "both", uploadIds: [u.id] }; // a confirmed report is the choice: its figures win, the web adds the narrative
   }
 
   // ── Session line ──
@@ -152,7 +151,6 @@
       $("attestBox").classList.toggle("hidden", !has || !!state.upload);
       if (!has) { $("upOk").checked = false; $("attestMsg").textContent = ""; }
       if (ok) $("attestMsg").textContent = "";
-      $("dataChoice").classList.toggle("hidden", !confirmed);
     }
     function toBase64(file) {
       return new Promise(function (resolve, reject) {
@@ -250,8 +248,31 @@
       } catch (e) { /* keep polling */ }
     }, 4000);
   }
+  // The agent confirms audience, area, keywords and data before anything is bought. "Research this market" opens this summary; only "Confirm and research" spends a session.
+  function confirmLines(q) {
+    var s = state.schema, g = q.geography || {};
+    var area = g.name ? (g.type === "neighborhood" && g.city ? g.name + ", " + g.city : g.name) + " (" + (s.geoTypes.filter(function (x) { return x.key === g.type; })[0] || {}).label + ")" : "";
+    var aud = (s.audiences.filter(function (a) { return a.key === q.audience; })[0] || {}).label || "";
+    var mode = (s.modes.filter(function (m) { return m.key === q.mode; })[0] || {}).label || "";
+    var focus = [q.focus.active_adult_55 ? "55+ Active Adult" : "", q.focus.new_construction ? "New Construction" : ""].filter(Boolean).join(", ");
+    var data = q.dataSource === "both" ? "Your confirmed report (its figures are the source of truth) plus web research for the story" : "Web research. Each figure names its source, and preliminary figures are flagged";
+    var rows = [["Content", mode], ["Area", area], ["Audience", aud], ["Focus", focus || "None"], ["Keywords", (q.keywords || "").trim() || "None"], ["Data", data]];
+    return rows.map(function (r) { return "<div><b>" + esc(r[0]) + ":</b> " + esc(r[1]) + "</div>"; }).join("");
+  }
+  function hideConfirm() { $("confirmBox").classList.add("hidden"); $("startBtn").classList.remove("hidden"); }
+  function review() {
+    if (state.uploadReady && !state.uploadReady()) return;
+    var q = collect(); say("startMsg", "");
+    if (!q.mode || !q.geography.name.trim() || !q.audience) { say("startMsg", !q.audience ? "Choose who this is for." : "Enter the place to research.", "err"); return; }
+    $("confirmList").innerHTML = confirmLines(q);
+    var x = state.session;
+    $("confirmCost").textContent = "Running this uses one research session" + (x ? " (" + x.remaining + " of " + x.allowance + " left this month)" : "") + ", unless you already have this exact set saved, which is simply reopened.";
+    $("confirmBox").classList.remove("hidden"); $("startBtn").classList.add("hidden");
+    $("confirmBox").scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
   async function start() {
     if (state.uploadReady && !state.uploadReady()) return;
+    hideConfirm();
     $("startBtn").disabled = true; say("startMsg", "");
     try {
       var body = { action: "start", projectId: state.projectId, request: collect(), newTopics: $("newTopics").checked };
@@ -268,14 +289,16 @@
     async function start_(projectId, selected) {
       var changed = state.projectId && state.projectId !== projectId;
       state.projectId = projectId; state.selected = selected || null;
-      if (changed) { stopPoll(); state.current = null; if (state.resetUpload) state.resetUpload(); $("resultPanel").classList.add("hidden"); $("startBtn").disabled = false; say("startMsg", ""); }
+      if (changed) { hideConfirm(); stopPoll(); state.current = null; if (state.resetUpload) state.resetUpload(); $("resultPanel").classList.add("hidden"); $("startBtn").disabled = false; say("startMsg", ""); }
       if (!state.schema) {
         var s = await api(API, "GET", "?schema=1");
         if (s.status === 404) throw new Error("Agent Marketing isn't available on your account yet.");
         if (!s.ok) throw new Error((s.json && s.json.error) || "Could not load the research step.");
         state.schema = s.json;
       }
-      if (!wired) { wired = true; buildForm(); $("startBtn").addEventListener("click", start); wireIntakeExtras(); }
+      if (!wired) { wired = true; buildForm(); $("startBtn").addEventListener("click", review); $("confirmBtn").addEventListener("click", start); $("confirmEdit").addEventListener("click", hideConfirm);
+        // an edit makes the shown summary stale, so it closes
+        ["geoType", "geoName", "geoCity", "audience", "f55", "fNew", "keywords", "upFile"].forEach(function (id) { $(id).addEventListener("input", hideConfirm); $(id).addEventListener("change", hideConfirm); }); wireIntakeExtras(); }
       $("resultPanel").classList.add("hidden");
       var list = await refreshSaved();
       var running = (list || []).filter(function (r) { return r.status === "running"; })[0];

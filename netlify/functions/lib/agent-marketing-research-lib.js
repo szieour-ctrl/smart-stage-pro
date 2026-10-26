@@ -40,6 +40,7 @@ const ALLOWANCE_BY_PLAN = { solo: 10, team: 30, brokerage: 100 };
 const PAYWALLED_DOMAINS = ["wsj.com", "ft.com", "bloomberg.com", "nytimes.com", "washingtonpost.com", "economist.com", "barrons.com"];
 
 const clean = (v, n) => intakeLib.cleanWords(v, n);
+const MAX_KEYWORDS_CHARS = 120;
 const isTrue = (v) => v === true || String(v).toLowerCase() === "true";
 
 // ── Geography ───────────────────────────────────────────────────────────────────────────────────────────────────
@@ -95,6 +96,8 @@ function validateResearchRequest(body) {
   if (!geo.ok) errors.push(...geo.errors);
   const f = b.focus && typeof b.focus === "object" ? b.focus : {};
   const focus = { active_adult_55: isTrue(f.active_adult_55), new_construction: isTrue(f.new_construction) };
+  // Keywords and brand terms the agent wants the research to look for (optional): "55+, Four Seasons, Heritage". Plain words only, kept short.
+  const keywords = clean(String(b.keywords == null ? "" : b.keywords).replace(/[\r\n]+/g, ", "), MAX_KEYWORDS_CHARS);
   const ids = Array.isArray(b.uploadIds) ? b.uploadIds.map(String) : [];
   if (ids.length > MAX_UPLOADS) errors.push({ field: "uploadIds", message: `Attach at most ${MAX_UPLOADS} reports.` });
   const uploadIds = [...new Set(ids)].filter((id) => am.UUID_RE.test(id));
@@ -105,14 +108,14 @@ function validateResearchRequest(body) {
   else if (dataSource !== "web" && uploadIds.length === 0) errors.push({ field: "dataSource", message: "Attach and confirm a report to use it, or choose web research only." });
   if (mode === "local_events" && dataSource !== "web") errors.push({ field: "dataSource", message: "Local Events uses web research only." });
   if (errors.length) return { ok: false, errors, request: null };
-  return { ok: true, errors: [], request: { mode, audience, geography: geo.geography, focus, dataSource, uploadIds: dataSource === "web" ? [] : uploadIds } };
+  return { ok: true, errors: [], request: { mode, audience, geography: geo.geography, focus, keywords, dataSource, uploadIds: dataSource === "web" ? [] : uploadIds } };
 }
 
 // A short, stable fingerprint of a request, so the same request is recognised (reuse saved results, never re-buy).
 function requestKey(request) {
   const r = request || {};
   const g = r.geography || {};
-  return JSON.stringify([r.mode, r.audience, g.type, String(g.name || "").toLowerCase(), String(g.city || "").toLowerCase(), !!(r.focus && r.focus.active_adult_55), !!(r.focus && r.focus.new_construction), (r.uploadIds || []).slice().sort(), r.dataSource || "web"]);
+  return JSON.stringify([r.mode, r.audience, g.type, String(g.name || "").toLowerCase(), String(g.city || "").toLowerCase(), !!(r.focus && r.focus.active_adult_55), !!(r.focus && r.focus.new_construction), String(r.keywords || "").toLowerCase(), (r.uploadIds || []).slice().sort(), r.dataSource || "web"]);
 }
 
 // ── Provider request (Perplexity Agent API, POST /v1/agent) ────────────────────────────────────────────────────────
@@ -185,6 +188,7 @@ function buildResearchPayload({ request, today, uploadContext, env }) {
     `Market (exact, do not broaden): ${r.geography.label}.`,
     `Audience: ${aud}.`,
     focus.length ? `Narrow the research to: ${focus.join(" and ")}.` : null,
+    r.keywords ? `The agent asked the research to look for these keywords and terms (use them to find relevant local items; they do not change the exact market): ${clean(r.keywords, MAX_KEYWORDS_CHARS)}.` : null,
     uploadContext ? `The agent also has a report with this scope (use only as context for what to look for, never quote numbers from this note): ${clean(uploadContext, 600)}` : null,
     `Today: ${today}.`,
     `Goal: ${TOPIC_COUNT} timely topics for a short educational video that shows what this agent knows about the local market right now.`,

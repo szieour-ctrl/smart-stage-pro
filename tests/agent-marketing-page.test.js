@@ -16,11 +16,18 @@ test("agent-marketing.html: every id is unique, including inputs the page's own 
   assert.deepStrictEqual([...dupes], []);
 });
 
-test("the Research step and the Your Insight step each have their own audience list", () => {
+test("the Research step owns the audience list; the page's own script never touches it", () => {
   const html = read("agent-marketing.html");
   const research = read("agent-marketing-research-ui.js");
   assert.match(html, /id="audience"/);
-  assert.match(html, /id="intakeAudience"/);
   assert.match(research, /\$\("audience"\)\.value/);
-  assert.doesNotMatch(html, /\$\("audience"\)/); // the page's own script never touches the Research list
+  assert.doesNotMatch(html, /\$\("audience"\)/);
+});
+
+test("Local Market Insider has no separate insight step: Research leads straight to Script, and the call to action is chosen with the topic", () => {
+  const html = read("agent-marketing.html");
+  assert.doesNotMatch(html, /stepIntake|Your insight|saveIntake|fillIntake/);
+  assert.match(html, /STEP_NAMES = \["Setup", "Research", "Script", "Storyboard", "Visuals"\]/);
+  assert.match(html, /id="resAction"/);
+  assert.match(html, /action: "save_intake"[^}]*action: action/);
 });

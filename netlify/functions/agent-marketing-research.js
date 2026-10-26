@@ -143,6 +143,8 @@ exports.handler = async (event) => {
       const changed = !!prev && (prev.id !== frozen.id || prev.researchId !== frozen.researchId);
       const fields = { selected_research_id: row.id, selected_topic: frozen, updated_at: new Date().toISOString() };
       if (changed && ["narrative_approved", "images"].includes(project.status)) fields.status = "draft";
+      // The market and audience on the intake came from the earlier topic; the page saves them again from the new one when the agent continues.
+      if (changed) fields.intake = {};
       const saved = await supabase("PATCH", "agent_marketing_projects", fields, `?id=eq.${project.id}&user_id=eq.${userId}`);
       if (saved.status >= 300 || !Array.isArray(saved.data) || !saved.data[0]) return reply(500, { error: "Could not save your choice" });
       return reply(200, { selectedResearchId: row.id, selectedTopic: frozen });

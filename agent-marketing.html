@@ -264,7 +264,12 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
       <div id="resTopics"></div>
       <div id="resCost"></div>
       <div class="msg" id="selMsg" role="status"></div>
-    <div class="actions"><button class="btn gold hidden" type="button" id="resContinueBtn">Continue with this topic</button></div>
+    <div id="resNext" class="hidden">
+      <label class="lbl" for="resAction">What should viewers do?</label>
+      <select id="resAction"></select>
+      <div class="actions"><button class="btn gold" type="button" id="resContinueBtn">Continue with this topic</button></div>
+      <div class="msg" id="resNextMsg" role="status"></div>
+    </div>
       </div>
 
 <div class="modal-back hidden" id="libModal" role="dialog" aria-modal="true" aria-labelledby="libTitle">
@@ -278,30 +283,6 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
   </div>
 </div>
     </div>
-
-    <!-- 3. Intake -->
-    <section class="panel hidden" id="stepIntake">
-      <div class="eyebrow">03 / Your insight (optional)</div>
-      <div class="panel-title">Add your own perspective</div>
-      <div class="panel-sub">Your topic is chosen. Add what you have personally noticed so the script sounds like you, or skip it. We never invent a story, a statistic or a result for you.</div>
-      <div class="note" id="topicCard" style="margin-top:0"></div>
-      <label class="lbl">Insider angle (optional)</label>
-      <div class="choices" id="angleChoices"></div>
-      <label class="lbl" for="market">Market or neighborhood</label>
-      <input type="text" id="market" maxlength="60" placeholder="Leave blank to use the market you researched">
-      <label class="lbl" for="intakeAudience">Who is this for?</label>
-      <select id="intakeAudience"></select>
-      <div id="issueWrap"><label class="lbl" for="issue" id="issueLbl">Main issue</label>
-      <select id="issue"></select></div>
-      <label class="lbl" for="observation" id="obsLbl">What have you noticed? (optional)</label>
-      <textarea id="observation" maxlength="600"></textarea>
-      <div class="hint"><span id="obsHint"></span> <span id="obsCount"></span></div>
-      <label class="lbl" for="action">What should viewers do?</label>
-      <select id="action"></select>
-      <div class="note">Agent Marketing is for your expertise and services. To promote a specific home, price, address or open house, use a Listing Reel.</div>
-      <div class="actions"><button class="btn gold" type="button" id="intakeBtn">Save and continue</button></div>
-      <div class="msg" id="intakeMsg" role="status"></div>
-    </section>
 
     <!-- 3. Script -->
     <section class="panel hidden" id="stepScript">
@@ -424,19 +405,18 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     return { status: res.status, ok: res.ok, json: json };
   }
   function say(id, text, kind) { var el = $(id); el.textContent = text || ""; el.className = "msg" + (kind ? " " + kind : ""); }
-  function show(ids) { ["stepProjects", "stepSetup", "stepResearch", "stepIntake", "stepScript", "stepBoard", "stepImages"].forEach(function (s) { $(s).classList.toggle("hidden", ids.indexOf(s) < 0); }); }
+  function show(ids) { ["stepProjects", "stepSetup", "stepResearch", "stepScript", "stepBoard", "stepImages"].forEach(function (s) { $(s).classList.toggle("hidden", ids.indexOf(s) < 0); }); }
 
   // ── Progress pills ──
   function stage() {
     var p = state.project;
     if (!p) return 1;
-    if (!p.selectedTopic) return 2;
-    if (!p.intake || !p.intake.market) return 3;
-    if (p.status === "images" || p.status === "ready_to_render") return 6;
-    if (p.status !== "narrative_approved") return 4;
-    return 5;
+    if (!p.selectedTopic || !p.intake || !p.intake.market) return 2;
+    if (p.status === "images" || p.status === "ready_to_render") return 5;
+    if (p.status !== "narrative_approved") return 3;
+    return 4;
   }
-  var STEP_NAMES = ["Setup", "Research", "Your insight", "Script", "Storyboard", "Visuals"], STEP_IDS = ["stepSetup", "stepResearch", "stepIntake", "stepScript", "stepBoard", "stepImages"];
+  var STEP_NAMES = ["Setup", "Research", "Script", "Storyboard", "Visuals"], STEP_IDS = ["stepSetup", "stepResearch", "stepScript", "stepBoard", "stepImages"];
   function renderSteps(active) {
     var max = stage();
     $("steps").innerHTML = STEP_NAMES.map(function (n, i) {
@@ -445,7 +425,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     }).join("");
     Array.prototype.forEach.call($("steps").querySelectorAll(".step-pill.done"), function (b) { b.addEventListener("click", function () { go(Number(b.getAttribute("data-step"))); }); });
   }
-  function go(step) { stopImgPoll(); $("picker").classList.add("hidden"); if (typeof closeModal === "function") { closeModal(); $("photoView").classList.add("hidden"); } show([STEP_IDS[step - 1]]); renderSteps(step); if (step !== 2 && researchUI) researchUI.stop(); if (step === 2) renderResearch(); if (step === 3) fillIntake(); if (step === 4) renderScript(); if (step === 5) renderBoard(); if (step === 6) renderImages(); window.scrollTo({ top: 0, behavior: "smooth" }); }
+  function go(step) { stopImgPoll(); $("picker").classList.add("hidden"); if (typeof closeModal === "function") { closeModal(); $("photoView").classList.add("hidden"); } show([STEP_IDS[step - 1]]); renderSteps(step); if (step !== 2 && researchUI) researchUI.stop(); if (step === 2) renderResearch(); if (step === 3) renderScript(); if (step === 4) renderBoard(); if (step === 5) renderImages(); window.scrollTo({ top: 0, behavior: "smooth" }); }
   function setProject(p) { state.project = p; if (p) { try { history.replaceState(null, "", "#p=" + p.id); } catch (e) { /* ignore */ } } }
 
   // ── Setup ──
@@ -472,59 +452,42 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
 
   // ── Research: request, five topics, select (the shared module) ──
   var researchUI = null;
-  function showContinue() { $("resContinueBtn").classList.toggle("hidden", !(state.project && state.project.selectedTopic)); }
+  function showContinue() {
+    var has = !!(state.project && state.project.selectedTopic);
+    $("resNext").classList.toggle("hidden", !has);
+    if (has) {
+      var acts = state.schema.actions, i = (state.project.intake && state.project.intake.action) || "Ask for a local perspective";
+      if (!$("resAction").options.length) $("resAction").innerHTML = acts.map(function (a) { return '<option value="' + esc(a) + '">' + esc(a) + "</option>"; }).join("");
+      $("resAction").value = acts.indexOf(i) >= 0 ? i : acts[0];
+    }
+  }
+  // The topic is the subject, so there is no separate insight step: the market and audience come from the research, and the only
+  // choice left is what viewers should do. The server fills the rest and runs the content gate.
+  async function continueWithTopic() {
+    $("resContinueBtn").disabled = true; say("resNextMsg", "");
+    try {
+      var p = state.project, action = $("resAction").value;
+      if (!(p.intake && p.intake.market) || p.intake.action !== action) {
+        var r = await api("POST", "", { action: "save_intake", id: p.id, intake: { angle: "", market: "", audience: "", issue: "", observation: "", action: action } });
+        if (!r.ok) throw new Error(r.json.error || "Could not save");
+        setProject(r.json.project);
+      }
+      go(3);
+    } catch (e) { say("resNextMsg", e.message, "err"); }
+    $("resContinueBtn").disabled = false;
+  }
   async function renderResearch() {
     if (!researchUI) {
       researchUI = AMResearchUI({
         api: function (base, method, qs, body) { return api(method, qs, body, base); },
         onSelected: function (topic) { state.project.selectedTopic = topic; showContinue(); renderSteps(2); },
-        onContinue: function () { go(3); },
+        onContinue: function () { continueWithTopic(); },
       });
-      $("resContinueBtn").addEventListener("click", function () { go(3); });
+      $("resContinueBtn").addEventListener("click", continueWithTopic);
     }
     showContinue();
     try { await researchUI.start(state.project.id, state.project.selectedTopic || null); }
     catch (e) { say("startMsg", e.message, "err"); }
-  }
-
-  // ── Intake ──
-  function tmpl() { return state.schema.templates[0]; }
-  function fillIntake() {
-    var t = tmpl(), i = (state.project && state.project.intake) || {};
-    state.angle = (i.angle !== undefined ? i.angle : state.angle) || "";
-    var tp = (state.project && state.project.selectedTopic) || null;
-    $("topicCard").innerHTML = tp ? "<b>Your topic:</b> " + esc(tp.question) + ' <span class="hint">(' + (tp.origin === "report" ? "from your report" : "from web research") + ")</span>" +
-      (tp.reportNotice ? '<div class="hint" style="margin-top:6px">Required notice, added to your piece automatically: ' + esc(tp.reportNotice) + "</div>" : "") : "";
-    $("angleChoices").innerHTML = ['<label class="choice"><input type="radio" name="angle" value=""' + (!state.angle ? " checked" : "") + "><span>No specific angle. Use my topic.</span></label>"].concat(Object.keys(t.angles).map(function (k) { return '<label class="choice"><input type="radio" name="angle" value="' + esc(k) + '"' + (k === state.angle ? " checked" : "") + "><span>" + esc(t.angles[k].label) + "</span></label>"; })).join("");
-    Array.prototype.forEach.call(document.querySelectorAll('input[name="angle"]'), function (el) { el.addEventListener("change", function () { state.angle = el.value; applyAngle(); }); });
-    $("intakeAudience").innerHTML = ['<option value="">Same as my research</option>'].concat(state.schema.audiences.map(function (a) { return '<option value="' + esc(a) + '">' + esc(a) + "</option>"; })).join("");
-    $("action").innerHTML = state.schema.actions.map(function (a) { return '<option value="' + esc(a) + '">' + esc(a) + "</option>"; }).join("");
-    $("market").value = i.market || ""; $("observation").value = i.observation || "";
-    if (i.audience) $("intakeAudience").value = i.audience; if (i.action) $("action").value = i.action;
-    applyAngle(i.issue); countObs(); say("intakeMsg", "");
-  }
-  function applyAngle(issue) {
-    var a = state.angle && tmpl().angles[state.angle];
-    $("issue").innerHTML = a ? a.issues.map(function (x) { return '<option value="' + esc(x) + '">' + esc(x) + "</option>"; }).join("") : '<option value="">Choose an angle first</option>';
-    if (issue && a && a.issues.indexOf(issue) >= 0) $("issue").value = issue;
-    $("issueWrap").classList.toggle("hidden", !a);
-    $("issueLbl").textContent = a ? a.issueQuestion : "Main issue";
-    $("obsLbl").textContent = (a ? a.observationPrompt : "What have you noticed?") + " (optional)";
-    $("obsHint").textContent = a ? a.observationHint + "." : "";
-    $("observation").placeholder = a ? a.observationHint : "";
-  }
-  function countObs() { $("obsCount").textContent = $("observation").value.length + " / " + state.schema.limits.observation; }
-  async function saveIntake() {
-    $("intakeBtn").disabled = true; say("intakeMsg", "");
-    try {
-      var intake = { angle: state.angle || "", market: $("market").value, audience: $("intakeAudience").value, issue: $("issue").value, observation: $("observation").value, action: $("action").value };
-      var r = await api("POST", "", { action: "save_intake", id: state.project.id, intake: intake });
-      if (!r.ok) throw new Error(r.json.error || "Could not save");
-      setProject(r.json.project);
-      if (r.json.needsInput && r.json.needsInput.length) say("intakeMsg", "Saved. Without your own perspective the script will stick to your topic's facts.", "ok");
-      go(4);
-    } catch (e) { say("intakeMsg", e.message, "err"); }
-    $("intakeBtn").disabled = false;
   }
 
   // ── Script ──
@@ -587,7 +550,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
       if (thenApprove) {
         var a = await api("POST", "", { action: "approve_narrative", id: state.project.id });
         if (!a.ok) throw new Error(a.json.error || "Could not approve");
-        setProject(a.json.project); go(5);
+        setProject(a.json.project); go(4);
       } else {
         say("scriptMsg", "Saved." + (r.json.warnings && r.json.warnings.length ? " " + r.json.warnings.join(" ") : ""), "ok");
       }
@@ -967,7 +930,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
         var si = Number(String(k).split("_")[0]);
         delete picked[si]; // accepting a generated image retires an own photo for that scene
         closeModal();
-        if (state.project.status === "narrative_approved") { state.project.status = "images"; renderSteps(6); }
+        if (state.project.status === "narrative_approved") { state.project.status = "images"; renderSteps(5); }
       }
     } catch (e) { setSlotMsg(k, e.message, "err"); }
     await loadImages();
@@ -1069,14 +1032,12 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     state.schema = r.json; buildSetup();
     $("app").classList.remove("hidden"); $("myProjectsBtn").classList.remove("hidden");
     $("myProjectsBtn").addEventListener("click", showProjects);
-    $("newBtn").addEventListener("click", function () { setProject(null); state.angle = ""; try { history.replaceState(null, "", location.pathname); } catch (e) { /* ignore */ } go(1); });
+    $("newBtn").addEventListener("click", function () { setProject(null); try { history.replaceState(null, "", location.pathname); } catch (e) { /* ignore */ } go(1); });
     $("createBtn").addEventListener("click", createProject);
-    $("intakeBtn").addEventListener("click", saveIntake);
-    $("observation").addEventListener("input", countObs);
     $("planBtn").addEventListener("click", plan);
     $("pickerClose").addEventListener("click", function () { $("picker").classList.add("hidden"); });
-    $("toImagesBtn").addEventListener("click", function () { go(6); });
-    $("backToBoardBtn").addEventListener("click", function () { go(5); });
+    $("toImagesBtn").addEventListener("click", function () { go(5); });
+    $("backToBoardBtn").addEventListener("click", function () { go(4); });
     $("imageSlots").addEventListener("click", onImageClick);
     $("imgModal").addEventListener("click", onModalClick);
     $("photoView").addEventListener("click", onPhotoViewClick);

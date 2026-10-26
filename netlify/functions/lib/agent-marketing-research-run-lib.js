@@ -195,7 +195,7 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
         try {
           const g = groundTopics(rl.extractTopics(text), resp);
           grounded = g.grounded;
-          validation = rl.validateTopics(g.topics, { mode: request.mode, today });
+          validation = rl.validateTopics(g.topics, { mode: request.mode, today, recommendation: rl.extractRecommendation(text) });
           problems = validation.problems;
         } catch (parseErr) {
           validation = { ok: false, topics: [], problems: [parseErr.message] };

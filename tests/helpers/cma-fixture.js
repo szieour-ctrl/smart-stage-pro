@@ -44,7 +44,7 @@ const FOOTER = [
 /** Standard fixture: 6 active, 1 pending, 12 closed, 1 expired (Roseville). Returns { pages, lines, listings }. */
 function standard(over) {
   const o = over || {};
-  const active = o.active || [0, 1, 2, 3, 4, 5].map((i) => ({ list: 500000 + i * 40000, orig: i === 1 || i === 4 ? 500000 + i * 40000 + 20000 : undefined, dom: 5 + i * 10, date: `2026-10-${String(20 - i).padStart(2, "0")}`, sqft: 1800 + i * 100, ppsf: 280 + i }));
+  const active = o.active || Array.from({ length: 12 }, (_, i) => ({ list: 500000 + i * 20000, orig: i === 1 || i === 4 ? 500000 + i * 20000 + 20000 : undefined, dom: 5 + i * 5, date: `2026-10-${String(20 - i).padStart(2, "0")}`, sqft: 1800 + i * 100, ppsf: 280 + i }));
   const pending = o.pending || [{ list: 525000, orig: 544900, dom: 8, date: "2026-10-17", ppsf: 294 }];
   const closed = o.closed || Array.from({ length: 12 }, (_, i) => { const list = 600000 + i * 10000; return { list, close: list + (i % 2 ? 5000 : -5000), dom: 10 + i * 5, date: `2026-0${3 + (i % 6)}-1${i % 9}`, sqft: 2000 + i * 50, ppsf: 280 }; });
   const expired = o.expired || [{ list: 649900, dom: 41, date: "2026-06-30", ppsf: 323 }];

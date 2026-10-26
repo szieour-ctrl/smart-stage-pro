@@ -55,7 +55,7 @@ test("a real .xlsx export is read, its personal columns ignored and its dates un
   assert.ok(r.ok, JSON.stringify(r));
   assert.strictEqual(r.kind, "xlsx");
   assert.strictEqual(r.facts.statuses.closed.count, 3);
-  assert.strictEqual(r.facts.figures.find((x) => x.status === "closed" && x.key === "median_close_price").value, 630000);
+  assert.strictEqual(r.facts.figures.find((x) => x.status === "closed" && x.key === "median_close_price"), undefined); // three sales: a count only
   assert.deepStrictEqual(r.facts.statuses.closed.dateRange, { start: "2026-09-03", end: "2026-09-21", meaning: "closed" });
   const json = JSON.stringify(r.facts);
   for (const s of ["Hidden", "Seller", "Zed", "Yan"]) assert.ok(!json.includes(s));
@@ -65,7 +65,11 @@ test("a CSV file is read", async () => {
   const csv = "Status,Address,City,List Price,Sold Price,DOM\nSold,1 Test St,Roseville,600000,610000,10\nSold,2 Test St,Roseville,650000,640000,20\nSold,3 Test St,Roseville,700000,700000,30\n";
   const r = await readLib.readReport(Buffer.from(csv), "x.csv");
   assert.ok(r.ok, JSON.stringify(r));
-  assert.strictEqual(r.facts.figures.find((x) => x.key === "median_close_price").value, 640000);
+  assert.strictEqual(r.facts.statuses.closed.count, 3);
+  assert.strictEqual(r.facts.figures.find((x) => x.key === "median_close_price"), undefined); // three sales: a count only
+  const big = "Status,Address,City,List Price,Sold Price,DOM\n" + Array.from({ length: 10 }, (_, i) => `Sold,${i} Test St,Roseville,${600000 + i * 10000},${600000 + i * 10000},10`).join("\n") + "\n";
+  const r10 = await readLib.readReport(Buffer.from(big), "x.csv");
+  assert.strictEqual(r10.facts.figures.find((x) => x.key === "median_close_price").value, 645000);
 });
 
 test("failures are plain messages, never the file's content or a stack trace", async () => {

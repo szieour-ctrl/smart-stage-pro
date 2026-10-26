@@ -78,15 +78,26 @@
     if (!u.providerError && r.status === "failed" && u.problems && u.problems.length) { $("resCost").innerHTML = '<div class="cost over"><div class="eyebrow">Why it failed</div><div><b>The answer was rejected for:</b><ul style="margin:6px 0 0 18px">' + u.problems.map(function (x) { return "<li>" + esc(x) + "</li>"; }).join("") + '</ul></div><div class="hint">Model ' + esc(r.model || "?") + " · attempts " + esc(u.attempts) + ". No session was used and nothing was charged.</div></div>"; return; }
     if (u.providerError) { $("resCost").innerHTML = '<div class="cost over"><div class="eyebrow">Why it failed</div><div><b>Perplexity said:</b> ' + esc(u.providerError) + '</div><div class="hint">Model ' + esc(r.model || "?") + " · attempts " + esc(u.attempts) + ". No session was used and nothing was charged.</div></div>"; return; }
     var cls = u.withinTarget === true ? "under" : u.withinTarget === false ? "over" : "";
-    $("resCost").innerHTML = '<div class="cost ' + cls + '"><div class="eyebrow">What this run cost</div><div class="big">' + money(u.costUsd) + "</div>" +
+    $("resCost").innerHTML = '<details class="cost ' + cls + '"><summary style="cursor:pointer"><span class="eyebrow">What this run cost</span> <b>' + money(u.costUsd) + "</b></summary>" +
       "<div>" + (u.costEstimated ? "Estimated from tokens (Perplexity did not report a cost). " : "Reported by Perplexity. ") +
       "Target " + money(u.targetUsd) + (u.withinTarget === true ? " · <b>within target</b>" : u.withinTarget === false ? " · <b>over target</b>" : "") + "</div>" +
       '<div class="hint">Model ' + esc(r.model || "?") + " · attempts " + esc(u.attempts) + " · tokens in " + esc(u.promptTokens) + " / out " + esc(u.completionTokens) +
-      (u.searchQueries != null ? " · searches " + esc(u.searchQueries) : "") + " · sources checked against the provider: " + (u.grounded === true ? "yes" : u.grounded === false ? "no (provider sent none)" : "n/a") + "</div></div>";
+      (u.searchQueries != null ? " · searches " + esc(u.searchQueries) : "") + " · sources checked against the provider: " + (u.grounded === true ? "yes" : u.grounded === false ? "no (provider sent none)" : "n/a") + "</div></details>";
   }
   function srcLine(s) {
     if (s.type === "report") return '<div class="src"><b>Your MLS report</b>' + (s.published ? " <span>\u00b7 through " + esc(s.published) + "</span>" : "") + "</div>";
     return '<div class="src"><a href="' + esc(s.url) + '" target="_blank" rel="noopener noreferrer">' + esc(s.title) + '</a> <span>· ' + esc(s.domain) + (s.published ? " · " + esc(s.published) : "") + "</span></div>";
+  }
+  // Everything beyond the hook, the reason and the sources sits behind one closed "Details". Figures from the agent's report are listed only
+  // for a topic written from the report; a web topic never repeats the whole report.
+  function topicDetails(t) {
+    var parts = [];
+    if (t.scope !== "selected" || (t.origin === "report" && t.scopeNote)) parts.push("<b>" + (t.scope !== "selected" ? "Data covers" : "Note") + ":</b> " + esc(t.scopeNote));
+    if (t.origin === "report" && t.reportFigures && t.reportFigures.length) parts.push("<b>Report figures:</b> " + t.reportFigures.map(function (f) { return esc(f.text); }).join(" \u00b7 "));
+    if (t.trendSignals && t.trendSignals.length) parts.push("<b>Trend signals:</b> " + t.trendSignals.map(esc).join(" \u00b7 "));
+    if (t.recommended && (t.recommended.evidence || []).length) parts.push("<b>Evidence:</b> " + t.recommended.evidence.map(esc).join(" \u00b7 "));
+    if (!parts.length) return "";
+    return '<details class="kv"><summary style="cursor:pointer">Details</summary>' + parts.map(function (x) { return '<div class="kv">' + x + "</div>"; }).join("") + "</details>";
   }
   function renderTopic(t, pickedId) {
     var ev = t.event;
@@ -96,15 +107,22 @@
       (t.recommended ? '<span class="tag ok">Recommended</span>' : "") +
       (t.smallSample ? '<span class="tag warn">Small sample</span>' : "") +
       (t.localIntent ? '<span class="tag ok">Local intent</span>' : "") + "</div><h3>" + esc(t.question) + '</h3><div class="why">' + esc(t.whyItMatters) + "</div>" +
-      (t.recommended ? '<div class="kv"><b>Why this one:</b> ' + esc(t.recommended.reason) + ((t.recommended.evidence || []).length ? " <span>(" + t.recommended.evidence.map(esc).join(" \u00b7 ") + ")</span>" : "") + "</div>" : "") +
-      (t.scope !== "selected" || (t.origin === "report" && t.scopeNote) ? '<div class="kv"><b>' + (t.scope !== "selected" ? "Data covers" : "Note") + ":</b> " + esc(t.scopeNote) + "</div>" : "") +
-      (t.reportFigures && t.reportFigures.length ? '<div class="kv"><b>Report figures:</b> ' + t.reportFigures.map(function (f) { return esc(f.text); }).join(" \u00b7 ") + "</div>" : "") +
-      (t.reportNotice ? '<div class="kv"><b>Required notice:</b> ' + esc(t.reportNotice) + "</div>" : "") +
-      (t.trendSignals && t.trendSignals.length ? '<div class="kv"><b>Trend signals:</b> ' + t.trendSignals.map(esc).join(" · ") + "</div>" : "") +
+      (t.recommended ? '<div class="kv"><b>Why this one:</b> ' + esc(t.recommended.reason) + "</div>" : "") +
+      topicDetails(t) +
       (ev ? '<div class="kv"><b>' + esc(ev.name) + "</b> · " + esc(ev.date) + (ev.endDate ? " to " + esc(ev.endDate) : "") + " · " + esc(ev.time) + "</div>" +
         '<div class="kv"><b>Where:</b> ' + esc(ev.location) + " · <b>Organizer:</b> " + esc(ev.organizer) + " · <b>Status:</b> " + esc(ev.status) + "</div>" : "") +
       "<div style=\"margin-top:6px\">" + (t.sources || []).map(srcLine).join("") + "</div>" +
       '<div class="actions" style="margin-top:10px"><button class="btn small ' + (t.id === pickedId ? "" : "gold") + '" type="button" data-pick="' + esc(t.id) + '">' + (t.id === pickedId ? "Selected" : "Select this topic") + "</button></div></div>";
+  }
+  // Results get the screen: the request folds into one line (Change request brings the form back).
+  function foldSetup(on) {
+    $("setupBody").classList.toggle("hidden", on);
+    $("setupBar").classList.toggle("hidden", !on);
+    if (on && state.current) {
+      var g = state.current.geography || {}, a = (state.schema.audiences.filter(function (x) { return x.key === state.current.audience; })[0] || {}).label || "";
+      var f = state.current.focus || {}, kw = f.keywords ? " · " + f.keywords : "";
+      $("setupBarText").innerHTML = "<b>" + esc((g.label || g.name || "")) + "</b> · " + esc(a) + esc(kw);
+    }
   }
   function showResult(r) {
     stopPoll();
@@ -121,9 +139,12 @@
     var chosen = pickedId && r.status === "ready" ? r.topics.filter(function (t) { return t.id === pickedId; })[0] : null;
     var bar = chosen ? '<div id="selBar" style="border:1px solid var(--gold);background:#fdf9f0;border-radius:6px;padding:12px 14px;margin-top:12px;display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap"><div style="font-size:0.88rem"><b style="color:var(--success)">\u2713 Topic selected</b><div>' + esc(chosen.question) + "</div></div>" +
       (opts.onContinue ? '<button class="btn gold small" type="button" id="selContinue">Choose the call to action</button>' : "") + "</div>" : "";
-    $("resTopics").innerHTML = bar + (r.status === "ready" ? r.topics.map(function (t) { return renderTopic(t, pickedId); }).join("") : "");
+    var hasNotice = r.status === "ready" && r.topics.some(function (t) { return t.reportNotice; });
+    var noticeLine = hasNotice ? '<div class="hint" style="margin-top:10px">Topics that use your report carry MetroList\u2019s required notice automatically; you do not need to write it.</div>' : "";
+    $("resTopics").innerHTML = bar + noticeLine + (r.status === "ready" ? r.topics.map(function (t) { return renderTopic(t, pickedId); }).join("") : "");
     if ($("selContinue")) $("selContinue").addEventListener("click", function () { opts.onContinue(state.selected); });
     renderCost(r);
+    foldSetup(r.status === "ready");
     say("selMsg", "");
     Array.prototype.forEach.call($("resTopics").querySelectorAll("[data-pick]"), function (b) { b.addEventListener("click", function () { pick(r.id, b.getAttribute("data-pick")); }); });
     if (!opts.__pickedNow) $("resultPanel").scrollIntoView({ behavior: "smooth", block: "start" });
@@ -201,6 +222,7 @@
       var ok = has && $("upOk").checked;
       var confirmed = !!(state.upload && state.upload.status === "confirmed");
       $("upRow").classList.toggle("hidden", !has);
+      $("upFile").style.display = has ? "none" : "";
       if (has) $("upName").textContent = $("upFile").files[0].name;
       $("attestBox").classList.toggle("hidden", !has || !!state.upload);
       if (!has) { $("upOk").checked = false; $("attestMsg").textContent = ""; }
@@ -217,10 +239,10 @@
     function renderReview(u) {
       var s = u.summary || {};
       $("upScope").textContent = (s.scopeSentence || "") + " Correct?";
-      $("upGroups").innerHTML = (s.groups || []).map(function (g) {
+      $("upGroups").innerHTML = !(s.groups || []).length ? "" : '<details style="margin-top:10px"><summary class="hint" style="cursor:pointer">See the figures I read</summary>' + (s.groups || []).map(function (g) {
         return '<div style="margin-top:10px"><b>' + esc(g.heading) + "</b>" + (g.window ? '<div class="hint">' + esc(g.window) + "</div>" : "") +
           '<ul style="margin:4px 0 0 18px;padding:0;font-size:0.85rem">' + g.figures.map(function (f) { return "<li>" + esc(f.label) + ": " + esc(f.display) + (f.compare ? ' <span class="hint">(' + esc(f.compare) + ")</span>" : "") + (f.small ? ' <span class="hint">(small sample)</span>' : "") + "</li>"; }).join("") + "</ul></div>";
-      }).join("");
+      }).join("") + "</details>";
       $("upWarn").innerHTML = (s.warnings || []).map(function (w) { return '<div class="hint" style="margin-top:8px">⚠ ' + esc(w) + "</div>"; }).join("");
       if (s.notice) $("upWarn").innerHTML += '<div class="hint" style="margin-top:8px">Required notice for anything you publish with these figures: <b>' + esc(s.notice) + "</b></div>";
       $("upYes").classList.toggle("hidden", u.status === "confirmed");
@@ -308,7 +330,9 @@
       } catch (e) { $("upMsg").textContent = e.message; }
     });
     $("libClose").addEventListener("click", closeLib);
-    $("resX").addEventListener("click", function () { $("resultPanel").classList.add("hidden"); });
+    $("resX").addEventListener("click", function () { $("resultPanel").classList.add("hidden"); foldSetup(false); });
+    $("setupEdit").addEventListener("click", function () { foldSetup(false); $("setupBody").scrollIntoView({ behavior: "smooth", block: "start" }); });
+    $("libBtn2").addEventListener("click", openLib);
     state.resetUpload = function () { $("upFile").value = ""; $("upOk").checked = false; resetReview(); resetWindow(); syncUpload(); };
     state.uploadReady = function () {
       var has = $("upFile").files && $("upFile").files.length > 0;

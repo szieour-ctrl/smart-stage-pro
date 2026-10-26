@@ -103,6 +103,11 @@ input:focus,select:focus{outline:2px solid var(--gold-light);outline-offset:1px;
       <div class="panel-title">What are people in this market interested in right now?</div>
       <div class="panel-sub" id="sessionLine"></div>
 
+      <div id="setupBar" class="hidden" style="display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-top:10px">
+        <div id="setupBarText" style="font-size:0.86rem;line-height:1.4"></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn ghost small" type="button" id="setupEdit">Change request</button><button class="btn ghost small" type="button" id="libBtn2">Saved research</button></div>
+      </div>
+      <div id="setupBody">
       <label class="lbl">Content type</label>
       <div class="choices row" id="modeChoices"></div>
 
@@ -218,6 +223,7 @@ input:focus,select:focus{outline:2px solid var(--gold-light);outline-offset:1px;
 
       <div class="actions"><button class="btn gold" type="button" id="startBtn">Research this market</button><button class="btn ghost" type="button" id="libBtn">Browse Research Library</button></div>
       <div class="msg" id="startMsg" role="status"></div>
+      </div>
     </section>
 
     <section class="panel hidden" id="resultPanel">

@@ -236,6 +236,22 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
         <div id="upGroups"></div>
         <div id="upWarn"></div>
         <div class="msg err" id="upMsg"></div>
+        <div id="upWindowBox" class="hidden" style="margin-top:12px">
+          <label class="lbl" for="upWindow" style="margin-top:0">Closed sales to include</label>
+          <select id="upWindow">
+            <option value="all">Everything in the file</option>
+            <option value="30">Last 30 days</option>
+            <option value="60">Last 60 days</option>
+            <option value="90">Last 90 days</option>
+            <option value="custom">Choose dates</option>
+          </select>
+          <div id="upDates" class="row2 hidden" style="margin-top:8px">
+            <div><label class="lbl" for="upFrom">From</label><input type="date" id="upFrom"></div>
+            <div><label class="lbl" for="upTo">To</label><input type="date" id="upTo"></div>
+          </div>
+          <div style="margin-top:8px"><button type="button" class="btn ghost small" id="upWindowGo">Update the figures</button></div>
+          <div class="hint">Counted from your report's own dates while it is read; the listings are not kept. Active and pending listings stay as of the report date.</div>
+        </div>
         <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
           <button type="button" class="btn small" id="upYes">Correct, use it</button>
           <button type="button" class="btn ghost small" id="upNo">Not right, remove</button>

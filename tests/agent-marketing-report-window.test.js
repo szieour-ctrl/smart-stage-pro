@@ -32,10 +32,10 @@ test("rows: the window counts closed sales inside it, keeps active listings, end
   assert.strictEqual(all.window, undefined);
   const w = lib.analyzeRows(rows(), "csv", { window: { days: 30 } }).facts; // ends Oct 20 (newest row): Sep 21 to Oct 20
   assert.strictEqual(w.statuses.closed.count, 2);
-  assert.strictEqual(fig(w, "closed", "median_close_price"), undefined); // two sales: a count only, never a "median" of two homes
+  assert.strictEqual(fig(w, "closed", "median_close_price"), undefined); // under ten sales: a count only
   const w60 = lib.analyzeRows(rows(), "csv", { window: { days: 60 } }).facts; // Aug 22 to Oct 20: three closed sales
   assert.strictEqual(w60.statuses.closed.count, 3);
-  assert.strictEqual(fig(w60, "closed", "median_close_price"), 700000);
+  assert.strictEqual(fig(w60, "closed", "median_close_price"), undefined);
   assert.strictEqual(w.statuses.active.count, 1);
   assert.deepStrictEqual([w.window.start, w.window.end, w.window.closedInFile, w.window.closedInWindow], ["2026-09-21", "2026-10-20", 4, 2]);
   assert.match(lib.scopeSentence(w), /limited to the last 30 days, Sep 21, 2026 to Oct 20, 2026/);
@@ -68,4 +68,19 @@ test("CMA pages: the window starts from the report's own as-of date; the whole f
   assert.ok(w.statuses.closed ? w.statuses.closed.count <= closedAll : true);
   assert.strictEqual(w.window.closedInFile, closedAll);
   assert.strictEqual(lib.summarize(w).window.label, w.window.label);
+});
+
+test("a thin window suggests the next longer one, counted from the same file and only when it has more", () => {
+  const w30 = lib.analyzeRows(rows(), "csv", { window: { days: 30 } }).facts; // 2 closed; 60 days has 3, 90 has 4
+  assert.deepStrictEqual(w30.window.suggest, { days: 90, closed: 4 });
+  assert.ok(w30.warnings.some((x) => /Only 2 closed sales in that window\. The last 90 days has 4\./.test(x)));
+  assert.ok(!w30.warnings.some((x) => /enough for statistics/.test(x)));
+  const many = [HEAD, ...Array.from({ length: 12 }, (_, i) => ["Closed", `${i} Secret Ln`, "Roseville", "$600,000", "$610,000", "10", `${i < 3 ? "10" : "08"}/${String(10 + i).padStart(2, "0")}/2026`, "2,000"])];
+  const t = lib.analyzeRows(many, "csv", { window: { days: 30 } }).facts;
+  assert.strictEqual(t.window.suggest.closed >= 10, true);
+  assert.ok(t.warnings.some((x) => /enough for statistics/.test(x)));
+  assert.strictEqual(lib.analyzeRows(rows(), "csv").facts.window, undefined, "no window, no suggestion");
+  const ninety = lib.analyzeRows(rows(), "csv", { window: { days: 90 } }).facts;
+  assert.strictEqual(ninety.window.suggest, null, "nothing longer to offer");
+  assert.ok(!ninety.warnings.some((x) => /The last \d+ days has/.test(x)));
 });

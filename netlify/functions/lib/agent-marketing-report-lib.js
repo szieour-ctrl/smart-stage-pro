@@ -19,7 +19,7 @@ const FACTS_VERSION = 1;
 const PERMISSION_VERSION = "agent-marketing-report-1";
 const PERMISSION_TEXT = "I am permitted to use this data in my marketing, and it excludes confidential client information.";
 const SMALL_SAMPLE_BELOW = 10;     // fewer than this many records in a group = "small sample": say so, no trend claims
-const MIN_GROUP_FOR_STATS = 3;     // a group of 1 or 2 listings only gets a count: its "median" would be one specific home's price
+const MIN_GROUP_FOR_STATS = SMALL_SAMPLE_BELOW; // Sam, Oct 25: "under 10 is not a trend, only count". A group below 10 gets its count and nothing else: no median, average or ratio
 const BROAD_WINDOW_DAYS = 120;     // a date window wider than this must not be described as "this month" or "recent"
 const MAX_RECORDS = 5000;
 const PRICE_MIN = 20000, PRICE_MAX = 60000000;
@@ -601,6 +601,23 @@ function resolveWindow(window, reportDate, recs) {
   return { start, end, days: window.days, label: `the last ${window.days} days, ${windowText({ start, end })}` };
 }
 
+// When a window leaves fewer than 10 closed sales, say which longer preset (30/60/90 days, ending the same day) has more, counted from the
+// rows already in memory: no extra research call. It only suggests; the agent chooses.
+function suggestWiderWindow(recs, applied) {
+  const now = applied.closedInWindow;
+  if (now >= SMALL_SAMPLE_BELOW) return null;
+  const len = applied.days || dayNumber(applied.end) - dayNumber(applied.start) + 1;
+  const closed = recs.filter((r) => r.status === "closed" && r.date && r.date <= applied.end);
+  let best = null;
+  for (const days of WINDOW_PRESETS.filter((d) => d > len)) {
+    const start = isoAdd(applied.end, -(days - 1));
+    const n = closed.filter((r) => r.date >= start).length;
+    if (n >= SMALL_SAMPLE_BELOW) return { days, closed: n };
+    if (n > now && (!best || n > best.closed)) best = { days, closed: n };
+  }
+  return best;
+}
+
 /**
  * buildFacts({ kind, records, metrics, reported, reportedTotal, meta, layout, skipped }) → facts (or { error })
  * `facts` is the ONLY thing stored about a report.
@@ -622,6 +639,7 @@ function buildFacts({ kind, records, metrics, reported, reportedTotal, meta, lay
       used = recs.filter((r) => !WINDOW_STATUSES.includes(r.status) || (r.date && r.date >= rw.start && r.date <= rw.end));
       applied = { start: rw.start, end: rw.end, days: rw.days || null, label: rw.label, closedInFile: recs.filter((r) => r.status === "closed").length, closedInWindow: used.filter((r) => r.status === "closed").length };
       if (!used.length) return { error: "no_window_rows" };
+      applied.suggest = suggestWiderWindow(recs, applied);
       stats = statsFromRecords(used);
     }
   }
@@ -650,6 +668,10 @@ function buildFacts({ kind, records, metrics, reported, reportedTotal, meta, lay
   };
   if (applied && applied.closedInWindow === 0) facts.warnings.push(`No closed sales fall in ${applied.label}. Choose a longer window or a report that covers those dates.`);
   else if (applied) facts.warnings.push(`Closed, expired and canceled listings are limited to ${applied.label}: ${applied.closedInWindow} of the ${applied.closedInFile} closed sales in the file. Active and pending listings are as of the report date.`);
+  if (applied && applied.suggest) {
+    const g = applied.suggest;
+    facts.warnings.push(`${applied.closedInWindow === 0 ? "" : `Only ${applied.closedInWindow} closed ${applied.closedInWindow === 1 ? "sale" : "sales"} in that window. `}The last ${g.days} days has ${g.closed}${g.closed >= SMALL_SAMPLE_BELOW ? ", enough for statistics" : ""}. Use "Update the figures" to try it.`);
+  }
   if (reportedTotal != null && !applied && reportedTotal !== stats.total) facts.warnings.push(`The report lists ${reportedTotal} listings in total and I read ${stats.total}.`);
   if (skipped) facts.warnings.push(`${skipped} ${skipped === 1 ? "row" : "rows"} without a usable price ${skipped === 1 ? "was" : "were"} skipped.`);
   if (facts.sample.small && stats.statuses.closed) facts.warnings.push(`Only ${stats.statuses.closed.count} closed ${stats.statuses.closed.count === 1 ? "sale" : "sales"}: a small sample. Topics will say so and will not claim a trend.`);

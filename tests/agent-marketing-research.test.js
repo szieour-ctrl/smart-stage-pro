@@ -47,7 +47,7 @@ test("geography: the agent defines it, a neighborhood must name its city, ZIPs a
 test("request: known keys only, both modes, audiences, focus flags, upload limits", () => {
   const ok = r.validateResearchRequest({ mode: "market_update", audience: "sellers", geography: { type: "city", name: "Roseville" }, focus: { active_adult_55: true, new_construction: "true", junk: 1 }, address: "1 Main St" });
   assert.strictEqual(ok.ok, true);
-  assert.deepStrictEqual(Object.keys(ok.request).sort(), ["audience", "dataSource", "focus", "geography", "mode", "uploadIds"]);
+  assert.deepStrictEqual(Object.keys(ok.request).sort(), ["audience", "dataSource", "focus", "geography", "keywords", "mode", "uploadIds"]);
   assert.deepStrictEqual(ok.request.focus, { active_adult_55: true, new_construction: true });
   assert.strictEqual(r.validateResearchRequest({ mode: "local_events", audience: "general", geography: { type: "zip", name: "95661" } }).ok, true);
   assert.strictEqual(r.validateResearchRequest({ mode: "blog", audience: "sellers", geography: { type: "city", name: "A" } }).ok, false);
@@ -278,4 +278,18 @@ test("text that is too long is cut back to a whole word, never mid-word", () => 
   assert.strictEqual(intake.cleanWords("abcdefghij", 5), "abcde"); // one long word: nothing to cut back to
   assert.strictEqual(intake.cleanWords("one two three", 7), "one two");
   assert.strictEqual(intake.cleanWords("one two three", 8), "one two"); // would cut "three" in half
+});
+
+test("keywords: optional, cleaned, kept short, part of the request key and the research request", () => {
+  const base = { mode: "market_update", audience: "sellers", geography: { type: "city", name: "Roseville" } };
+  const none = r.validateResearchRequest(base).request;
+  assert.strictEqual(none.keywords, "");
+  const kw = r.validateResearchRequest({ ...base, keywords: "55+, Four Seasons\nHeritage" }).request;
+  assert.strictEqual(kw.keywords, "55+, Four Seasons, Heritage");
+  assert.notStrictEqual(r.requestKey(none), r.requestKey(kw));
+  assert.strictEqual(r.requestKey(kw), r.requestKey(r.validateResearchRequest({ ...base, keywords: "55+, FOUR SEASONS, heritage" }).request));
+  assert.ok(r.validateResearchRequest({ ...base, keywords: "x ".repeat(200) }).request.keywords.length <= 120);
+  const p = r.buildResearchPayload({ request: kw, today: "2026-10-25", env: {} });
+  assert.ok(/keywords and terms[^\n]*55\+, Four Seasons, Heritage/.test(p.input));
+  assert.ok(!/keywords and terms/.test(r.buildResearchPayload({ request: none, today: "2026-10-25", env: {} }).input));
 });

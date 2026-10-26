@@ -31,3 +31,26 @@ test("Local Market Insider has no separate insight step: Research leads straight
   assert.match(html, /id="resAction"/);
   assert.match(html, /action: "save_intake"[^}]*action: action/);
 });
+
+test("Research: no data-source picker (a confirmed report is the choice); keywords field; a summary must be confirmed before anything is run", () => {
+  const research = read("agent-marketing-research-ui.js");
+  for (const f of ["agent-marketing.html", "agent-marketing-research-test.html"]) {
+    const html = read(f);
+    assert.doesNotMatch(html, /dataSrc|dataChoice|Select what data you want to use/, f);
+    for (const id of ["keywords", "confirmBox", "confirmList", "confirmBtn", "confirmEdit", "startBtn"]) assert.match(html, new RegExp(`id="${id}"`), `${f} ${id}`);
+  }
+  assert.doesNotMatch(research, /dataSrc/);
+  assert.match(research, /\$\("startBtn"\)\.addEventListener\("click", review\)/);   // the main button only opens the summary
+  assert.match(research, /\$\("confirmBtn"\)\.addEventListener\("click", start\)/);  // only Confirm spends a session
+  assert.match(research, /keywords: \$\("keywords"\)\.value/);
+  const review = research.slice(research.indexOf("function review()"), research.indexOf("async function start()"));
+  assert.doesNotMatch(review, /api\(/); // reviewing never calls the server
+});
+
+test("the Research script and every inline script on the page parse (a syntax slip would blank the whole step)", () => {
+  const scripts = [read("agent-marketing-research-ui.js")];
+  for (const f of ["agent-marketing.html", "agent-marketing-research-test.html"]) {
+    for (const m of read(f).matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)) scripts.push(m[1]);
+  }
+  scripts.forEach((code, i) => assert.doesNotThrow(() => new Function(code), `script ${i}`));
+});

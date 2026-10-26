@@ -214,6 +214,10 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
         <label class="choice"><input type="checkbox" id="fNew"><span>New Construction</span></label>
       </div>
 
+      <label class="lbl" for="keywords">Keywords or brand names to look for <span style="font-weight:400;color:var(--muted)">(optional)</span></label>
+      <input type="text" id="keywords" maxlength="120" placeholder="e.g. 55+, Four Seasons, Heritage, mortgage rates">
+      <div class="hint">Separate with commas. The research looks for local news and data that mention them. The market itself is never widened.</div>
+
       <label class="lbl">Your MLS market report or CMA <span style="font-weight:400;color:var(--muted)">(optional)</span></label>
       <div class="upload" id="uploadBox">
         <div class="ut">Upload MLS Report or CMA</div>
@@ -236,19 +240,21 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
           <button type="button" class="btn small" id="upYes">Correct, use it</button>
           <button type="button" class="btn ghost small" id="upNo">Not right, remove</button>
         </div>
-        <div class="hint">Once you confirm, choose below whether your topics use this report, web research, or both. With both, up to three topics come from your report first.</div>
+        <div class="hint">Once you confirm, your report is the source of truth for the figures. Web research only adds the story around them, and up to three topics come from your report first.</div>
       </div>
-      <div id="dataChoice" class="hidden">
-        <label class="lbl" style="margin-top:14px">Select what data you want to use</label>
-        <div class="pills">
-          <label class="choice"><input type="radio" name="dataSrc" value="upload"><span>Use my upload only</span></label>
-          <label class="choice"><input type="radio" name="dataSrc" value="research"><span>Use web research only</span></label>
-          <label class="choice"><input type="radio" name="dataSrc" value="both" checked><span>Both</span></label>
-        </div>
-        <div class="hint">With both, your report's figures take priority over web figures.</div>
-      </div>
+      <div class="hint" id="dataNote">No report attached: the topics come from web research, and each figure names its source. Attach and confirm a report and your report's figures take priority over web figures.</div>
 
       <label class="lbl" style="margin-top:18px"><span class="choice" style="display:inline-flex"><input type="checkbox" id="newTopics"><span>Get a fresh set even if I already have one for this request (uses a session)</span></span></label>
+
+      <div class="attest-box hidden" id="confirmBox" aria-live="polite">
+        <div style="font-weight:600;font-size:0.9rem">Please confirm before I research</div>
+        <div id="confirmList" style="margin-top:8px;font-size:0.88rem;line-height:1.6"></div>
+        <div class="hint" id="confirmCost"></div>
+        <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+          <button type="button" class="btn gold small" id="confirmBtn">Confirm and research</button>
+          <button type="button" class="btn ghost small" id="confirmEdit">Edit</button>
+        </div>
+      </div>
 
       <div class="actions"><button class="btn gold" type="button" id="startBtn">Research this market</button><button class="btn ghost" type="button" id="libBtn">Browse Research Library</button></div>
       <div class="msg" id="startMsg" role="status"></div>

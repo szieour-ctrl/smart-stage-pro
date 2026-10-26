@@ -231,6 +231,7 @@ function scopeSentence(facts) {
     const total = f.sample ? f.sample.total : order.reduce((n, k) => n + st[k].count, 0);
     parts.push(`It includes ${total} ${total === 1 ? "listing" : "listings"}: ${listText(order.map((k) => `${st[k].count} ${STATUS_PLURAL[k] === "closed sales" ? "closed" : STATUS_HEADING[k].toLowerCase()}`))}.`);
     const c = st.closed;
+    if (f.window) parts.push(`Closed, expired and canceled listings are limited to ${f.window.label}.`);
     if (c && c.dateRange) parts.push(`Closed sales run from ${shortDate(c.dateRange.start, true)} to ${shortDate(c.dateRange.end, true)}.`);
   }
   if ((f.propertyTypes || []).length) parts.push(`Property type: ${f.propertyTypes.join(", ")}.`);
@@ -567,26 +568,70 @@ function verifyMedians(records, reported, statuses) {
   });
 }
 
+// ── Date window (Sam, Oct 25): a granular report can be narrowed to the last 30 / 60 / 90 days or custom dates while it is read ─────────
+// Applies to listings that have an event date (closed, expired, canceled, withdrawn). Active and pending listings are today's snapshot and
+// stay. The report's own counts and medians are checked on the whole file first; the rows are then discarded like always.
+const WINDOW_PRESETS = [30, 60, 90];
+const WINDOW_STATUSES = ["closed", "expired", "canceled", "withdrawn"];
+const MAX_WINDOW_DAYS = 800;
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+const isoValid = (s) => ISO_DAY.test(String(s || "")) && new Date(`${s}T00:00:00Z`).toISOString().slice(0, 10) === s;
+const isoAdd = (iso, days) => new Date(Date.parse(`${iso}T00:00:00Z`) + days * 86400000).toISOString().slice(0, 10);
+/** validateWindow(w) → { window } | { error }. Nothing / "all" = no window. { days: 30|60|90 } or { start, end } (YYYY-MM-DD). */
+function validateWindow(w) {
+  if (w == null || w === "" || w === "all" || (typeof w === "object" && !w.days && !w.start && !w.end)) return { window: null };
+  if (typeof w !== "object") return { error: "Choose All, 30, 60 or 90 days, or two dates." };
+  if (w.days != null && w.days !== "") {
+    const d = Number(w.days);
+    return WINDOW_PRESETS.includes(d) ? { window: { days: d } } : { error: "Choose 30, 60 or 90 days." };
+  }
+  if (!isoValid(w.start) || !isoValid(w.end)) return { error: "Enter both dates." };
+  if (w.start > w.end) return { error: "The start date must be on or before the end date." };
+  if (dayNumber(w.end) - dayNumber(w.start) > MAX_WINDOW_DAYS) return { error: "Choose a window of about two years or less." };
+  return { window: { start: w.start, end: w.end } };
+}
+// The window's end is the report's own "as of" date (or its newest dated row), never today's date.
+function resolveWindow(window, reportDate, recs) {
+  if (!window) return null;
+  if (window.start) return { start: window.start, end: window.end, label: windowText({ start: window.start, end: window.end }) };
+  const dates = recs.map((r) => r.date).filter((d) => d && isoValid(d));
+  const end = reportDate && isoValid(reportDate) ? reportDate : dates.sort().pop();
+  if (!end) return null;
+  const start = isoAdd(end, -(window.days - 1));
+  return { start, end, days: window.days, label: `the last ${window.days} days, ${windowText({ start, end })}` };
+}
+
 /**
  * buildFacts({ kind, records, metrics, reported, reportedTotal, meta, layout, skipped }) → facts (or { error })
  * `facts` is the ONLY thing stored about a report.
  */
-function buildFacts({ kind, records, metrics, reported, reportedTotal, meta, layout, skipped }) {
+function buildFacts({ kind, records, metrics, reported, reportedTotal, meta, layout, skipped, window }) {
   const recs = Array.isArray(records) ? records : [];
   const mets = Array.isArray(metrics) ? metrics : [];
   if (!recs.length && !mets.length) return { error: "no_figures" };
   const warnings = [];
-  const stats = statsFromRecords(recs);
+  let stats = statsFromRecords(recs);
   const dropped = checkAgainstReport(stats.statuses, reported, warnings);
   verifyMedians(recs, reported, stats.statuses);
   Object.keys(stats.statuses).forEach((k) => { if (stats.statuses[k].medianChecked === false) warnings.push(`The median price I calculated for ${STATUS_PLURAL[k]} does not match the one printed in the report, so please check those figures.`); });
+  // The window, if the agent chose one: counted from the dated rows, after the whole file was checked against the report's own totals above.
+  let used = recs, applied = null;
+  if (window && recs.length) {
+    const rw = resolveWindow(window, (meta || {}).reportDate, recs);
+    if (rw) {
+      used = recs.filter((r) => !WINDOW_STATUSES.includes(r.status) || (r.date && r.date >= rw.start && r.date <= rw.end));
+      applied = { start: rw.start, end: rw.end, days: rw.days || null, label: rw.label, closedInFile: recs.filter((r) => r.status === "closed").length, closedInWindow: used.filter((r) => r.status === "closed").length };
+      if (!used.length) return { error: "no_window_rows" };
+      stats = statsFromRecords(used);
+    }
+  }
   let figures = stats.figures.filter((f) => !dropped.has(f.status) || f.key === "count");
   figures.forEach((f) => { if (dropped.has(f.status) && f.key === "count") { f.value = stats.statuses[f.status].reportedCount != null ? stats.statuses[f.status].reportedCount : f.value; } });
   if (mets.length) figures = figures.concat(metricFigures(mets, figures.length + 1));
   // Re-number so ids are stable and unique in the stored list.
   figures = figures.map((f, i) => ({ ...f, id: `f${i + 1}` }));
-  const cities = topPlaces(recs.map((r) => r.city), 5);
-  const zips = topPlaces(recs.map((r) => r.zip), 8);
+  const cities = topPlaces(used.map((r) => r.city), 5);
+  const zips = topPlaces(used.map((r) => r.zip), 8);
   const m = meta || {};
   const closed = stats.statuses.closed;
   const windowDays = closed && closed.dateRange ? dayNumber(closed.dateRange.end) - dayNumber(closed.dateRange.start) : null;
@@ -599,10 +644,13 @@ function buildFacts({ kind, records, metrics, reported, reportedTotal, meta, lay
     figures,
     sample: { total: stats.total, closed: stats.sample.closed, small: stats.sample.small, broadWindow: windowDays != null && windowDays > BROAD_WINDOW_DAYS, windowDays },
     reportedTotal: reportedTotal != null ? reportedTotal : null,
+    ...(applied ? { window: applied } : {}),
     warnings,
     notes: ["Property addresses, names, phone numbers and emails were not kept. Only the figures below were."],
   };
-  if (reportedTotal != null && reportedTotal !== stats.total) facts.warnings.push(`The report lists ${reportedTotal} listings in total and I read ${stats.total}.`);
+  if (applied && applied.closedInWindow === 0) facts.warnings.push(`No closed sales fall in ${applied.label}. Choose a longer window or a report that covers those dates.`);
+  else if (applied) facts.warnings.push(`Closed, expired and canceled listings are limited to ${applied.label}: ${applied.closedInWindow} of the ${applied.closedInFile} closed sales in the file. Active and pending listings are as of the report date.`);
+  if (reportedTotal != null && !applied && reportedTotal !== stats.total) facts.warnings.push(`The report lists ${reportedTotal} listings in total and I read ${stats.total}.`);
   if (skipped) facts.warnings.push(`${skipped} ${skipped === 1 ? "row" : "rows"} without a usable price ${skipped === 1 ? "was" : "were"} skipped.`);
   if (facts.sample.small && stats.statuses.closed) facts.warnings.push(`Only ${stats.statuses.closed.count} closed ${stats.statuses.closed.count === 1 ? "sale" : "sales"}: a small sample. Topics will say so and will not claim a trend.`);
   else if (facts.sample.small && recs.length) facts.warnings.push("This report has fewer than 10 closed sales: a small sample. Topics will say so and will not claim a trend.");
@@ -613,7 +661,7 @@ function buildFacts({ kind, records, metrics, reported, reportedTotal, meta, lay
 }
 
 /** analyzeRows(rows, kind) → { facts } | { error }  for CSV and Excel. */
-function analyzeRows(rows, kind) {
+function analyzeRows(rows, kind, opts) {
   const grid = Array.isArray(rows) ? rows : [];
   const trendTable = analyzeTrendTable(grid, kind);
   if (trendTable) return trendTable;
@@ -622,7 +670,7 @@ function analyzeRows(rows, kind) {
   const metrics = extractLabeledMetrics(lines);
   if (!t.records.length && !metrics.length) return { error: t.problem === "no_header" ? "no_header" : "no_figures" };
   const meta = cmaMeta(lines.slice(0, 20).join("\n"));
-  return buildFacts({ kind, records: t.records, metrics: t.records.length ? [] : metrics, meta, skipped: t.skipped || 0, layout: t.records.length ? "listing_table" : "labeled_metrics" });
+  return buildFacts({ kind, records: t.records, metrics: t.records.length ? [] : metrics, meta, skipped: t.skipped || 0, layout: t.records.length ? "listing_table" : "labeled_metrics", window: opts && opts.window });
 }
 
 
@@ -1017,13 +1065,14 @@ function analyzePages(pages, opts) {
   if (weekly) return weekly;
   const meta = cmaMeta(text);
   const cma = analyzeCmaPages(list);
-  if (cma) return buildFacts({ kind: "pdf", records: cma.records, reported: cma.reported, reportedTotal: cma.reportedTotal, meta, layout: cma.layout });
+  if (cma) return buildFacts({ kind: "pdf", records: cma.records, reported: cma.reported, reportedTotal: cma.reportedTotal, meta, layout: cma.layout, window: opts && opts.window });
   const metrics = extractLabeledMetrics(text.split(/\r?\n/));
   if (!metrics.length) return { error: "no_figures" };
   return buildFacts({ kind: "pdf", records: [], metrics, meta, layout: "labeled_metrics" });
 }
 
 const ERROR_MESSAGES = {
+  no_window_rows: "No listings in this file fall inside those dates. Choose a longer window or a report that covers them.",
   no_text: "This PDF has no readable text. It may be a scan or a photo. Download the report as a text PDF, CSV or Excel file from your MLS and try again.",
   no_figures: "I couldn't find market figures in this file. A report with listing prices, closed prices or days on market works best.",
   no_header: "I couldn't find a header row with price or status columns in this file.",
@@ -1059,11 +1108,12 @@ function summarize(facts, opts) {
   return {
     scopeSentence: scopeSentence(f), scopeNote: scopeNote(f), notice: attributionNotice(f), groups: displayFigures(f),
     warnings: [...(f.warnings || []), ...(geo.message ? [geo.message] : [])], geography: geo.status, notes: f.notes || [],
-    sample: f.sample || null, layout: f.layout, reportDate: f.reportDate || null,
+    sample: f.sample || null, layout: f.layout, reportDate: f.reportDate || null, window: f.window || null,
   };
 }
 
 module.exports = {
+  validateWindow, WINDOW_PRESETS,
   FACTS_VERSION, PERMISSION_VERSION, PERMISSION_TEXT, SMALL_SAMPLE_BELOW, BROAD_WINDOW_DAYS, MAX_RECORDS, STATUS_ORDER, STATUS_PLURAL,
   normStatus, parseMoney, parseDom, parseDate, parseSqft, median, mean, statsFromRecords, formatFigure, scopeSentence, scopeNote, displayFigures,
   verifiedFromReport, attributionNotice, analyzeTrendReport, analyzeTrendEmail, analyzeTrendTable, analyzeWeeklySnapshot, compareText, windowText, geographyCheck, recordsFromRows, extractLabeledMetrics, analyzeCmaPages, cmaMeta, buildFacts, analyzeRows, analyzePages,

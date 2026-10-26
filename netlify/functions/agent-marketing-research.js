@@ -6,7 +6,7 @@
 //                               Reopening saved research never costs a session.
 //   GET  ?schema=1           → the choices the page shows (modes, audiences, geography types)
 //   GET  ?id=<uuid>          → one saved set
-//   POST { action: "start", projectId, request: { mode, audience, geography, focus?, dataSource?: "web"|"upload"|"both", uploadIds? } }
+//   POST { action: "start", projectId, request: { mode, audience, geography, focus?, keywords?, dataSource?: "web"|"upload"|"both", uploadIds? } }
 //        → 202 { research, session } and the work continues in the background; poll GET until status is not "running".
 //        The same request on the same project reuses its saved set and uses no session.
 //   POST { action: "select", projectId, researchId, topicId }
@@ -84,7 +84,7 @@ const who = (session) => (session.pool === "brokerage" ? "Your brokerage has" : 
 // The same request, rebuilt from a saved row, so "same request on the same project" is recognised without a second purchase.
 function keyOfRow(row) {
   const refs = Array.isArray(row.upload_refs) ? row.upload_refs : [];
-  return rl.requestKey({ mode: row.mode, audience: row.audience, geography: row.geography, focus: row.focus || {}, dataSource: row.data_source || "web", uploadIds: refs.map((x) => x && x.id).filter(Boolean) });
+  return rl.requestKey({ mode: row.mode, audience: row.audience, geography: row.geography, focus: row.focus || {}, keywords: (row.focus && row.focus.keywords) || "", dataSource: row.data_source || "web", uploadIds: refs.map((x) => x && x.id).filter(Boolean) });
 }
 
 exports.handler = async (event) => {
@@ -176,7 +176,7 @@ exports.handler = async (event) => {
     }
 
     const ins = await supabase("POST", "agent_marketing_research", {
-      project_id: project.id, user_id: userId, pool_user_id: pool.poolUserId, mode: v.request.mode, geography: v.request.geography, audience: v.request.audience, focus: v.request.focus,
+      project_id: project.id, user_id: userId, pool_user_id: pool.poolUserId, mode: v.request.mode, geography: v.request.geography, audience: v.request.audience, focus: { ...v.request.focus, keywords: v.request.keywords },
       data_source: v.request.dataSource, upload_refs: refs, status: "running", model: rl.researchModel(),
     });
     const row = Array.isArray(ins.data) ? ins.data[0] : null;

@@ -22,6 +22,22 @@
     $("geoType").innerHTML = s.geoTypes.map(function (g) { return '<option value="' + esc(g.key) + '"' + (g.key === "city" ? " selected" : "") + ">" + esc(g.label) + "</option>"; }).join("");
     $("audience").innerHTML = s.audiences.map(function (a) { return '<option value="' + esc(a.key) + '">' + esc(a.label) + "</option>"; }).join("");
     $("geoType").addEventListener("change", applyGeo); applyGeo();
+    $("dataFocus").innerHTML = (s.dataFocus || []).map(function (d) { return '<option value="' + esc(d.key) + '"' + (d.key === "all" ? " selected" : "") + ">" + esc(d.label) + "</option>"; }).join("");
+    $("dataFocus").addEventListener("change", applyFocus);
+    $("period").addEventListener("change", applyFocus);
+    $("modeChoices").addEventListener("change", applyFocus); applyFocus();
+  }
+  // Optional data applies to Local Market Update only; a period is needed for anything but "None".
+  function applyFocus() {
+    var events = picked("mode") === "local_events";
+    $("dataFocusBox").classList.toggle("hidden", events);
+    $("periodBox").classList.toggle("hidden", $("dataFocus").value === "none");
+    $("periodDates").classList.toggle("hidden", $("period").value !== "custom" || $("dataFocus").value === "none");
+  }
+  function collectPeriod() {
+    if ($("dataFocus").value === "none") return null;
+    var v = $("period").value;
+    return v === "custom" ? { start: $("periodFrom").value, end: $("periodTo").value } : { days: Number(v) };
   }
   function applyGeo() {
     var t = $("geoType").value;
@@ -34,7 +50,7 @@
     return {
       mode: picked("mode"), audience: $("audience").value,
       geography: { type: type, name: $("geoName").value, city: type === "neighborhood" ? $("geoCity").value : "" },
-      focus: { active_adult_55: $("f55").checked, new_construction: $("fNew").checked }, keywords: $("keywords").value,
+      focus: { active_adult_55: $("f55").checked, new_construction: $("fNew").checked }, keywords: $("keywords").value, dataFocus: $("dataFocus").value, period: collectPeriod(),
       dataSource: reportSource().dataSource, uploadIds: reportSource().uploadIds,
     };
   }
@@ -120,6 +136,10 @@
     $("geoName").value = g.name || ""; $("geoCity").value = g.city || "";
     $("audience").value = r.audience || $("audience").value;
     $("f55").checked = !!f.active_adult_55; $("fNew").checked = !!f.new_construction; $("keywords").value = f.keywords || "";
+    $("dataFocus").value = f.dataFocus || "all";
+    var p = f.period || { days: 30 };
+    if (p.start) { $("period").value = "custom"; $("periodFrom").value = p.start; $("periodTo").value = p.end; } else { $("period").value = String(p.days || 30); $("periodFrom").value = ""; $("periodTo").value = ""; }
+    applyFocus();
   }
   function renderFailOptions(r) {
     var box = $("resFailOptions"); if (!box) return;
@@ -312,12 +332,19 @@
     var win = state.upload && state.upload.summary && state.upload.summary.window;
     var data = q.dataSource === "both" ? "Your confirmed report (its figures are the source of truth" + (win ? "; closed sales limited to " + win.label : "") + ") plus web research for the story" : "Web research. Each figure names its source, and preliminary figures are flagged";
     var rows = [["Content", mode], ["Area", area], ["Audience", aud], ["Focus", focus || "None"], ["Keywords", (q.keywords || "").trim() || "None"], ["Data", data]];
+    if (q.mode !== "local_events") rows.splice(5, 0, ["Optional data", focusLabel(q)]);
     return rows.map(function (r) { return "<div><b>" + esc(r[0]) + ":</b> " + esc(r[1]) + "</div>"; }).join("");
+  }
+  function focusLabel(q) {
+    var d = (state.schema.dataFocus || []).filter(function (x) { return x.key === q.dataFocus; })[0] || { label: "All available market data" };
+    if (q.dataFocus === "none" || !q.period) return d.label;
+    return d.label + ", " + (q.period.days ? "last " + q.period.days + " days" : q.period.start + " to " + q.period.end);
   }
   function hideConfirm() { $("confirmBox").classList.add("hidden"); $("startBtn").classList.remove("hidden"); }
   function review() {
     if (state.uploadReady && !state.uploadReady()) return;
     var q = collect(); say("startMsg", "");
+    if (q.mode !== "local_events" && q.dataFocus !== "none" && q.period && q.period.start !== undefined && (!q.period.start || !q.period.end)) { say("startMsg", "Enter both dates for the period.", "err"); return; }
     if (!q.mode || !q.geography.name.trim() || !q.audience) { say("startMsg", !q.audience ? "Choose who this is for." : "Enter the place to research.", "err"); return; }
     $("confirmList").innerHTML = confirmLines(q);
     var x = state.session;
@@ -353,7 +380,7 @@
       }
       if (!wired) { wired = true; buildForm(); $("startBtn").addEventListener("click", review); $("confirmBtn").addEventListener("click", start); $("confirmEdit").addEventListener("click", hideConfirm);
         // an edit makes the shown summary stale, so it closes
-        ["geoType", "geoName", "geoCity", "audience", "f55", "fNew", "keywords", "upFile"].forEach(function (id) { $(id).addEventListener("input", hideConfirm); $(id).addEventListener("change", hideConfirm); }); wireIntakeExtras(); }
+        ["geoType", "geoName", "geoCity", "audience", "f55", "fNew", "keywords", "upFile", "dataFocus", "period", "periodFrom", "periodTo"].forEach(function (id) { $(id).addEventListener("input", hideConfirm); $(id).addEventListener("change", hideConfirm); }); wireIntakeExtras(); }
       $("resultPanel").classList.add("hidden");
       var list = await refreshSaved();
       var running = (list || []).filter(function (r) { return r.status === "running"; })[0];

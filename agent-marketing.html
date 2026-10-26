@@ -218,6 +218,25 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
       <input type="text" id="keywords" maxlength="120" placeholder="e.g. 55+, Four Seasons, Heritage, mortgage rates">
       <div class="hint">Separate with commas. The research looks for local news and data that mention them. The market itself is never widened.</div>
 
+      <div id="dataFocusBox">
+        <label class="lbl" for="dataFocus">Optional data to include</label>
+        <select id="dataFocus"></select>
+        <div id="periodBox">
+          <label class="lbl" for="period">Period</label>
+          <select id="period">
+            <option value="30">Last 30 days</option>
+            <option value="60">Last 60 days</option>
+            <option value="90">Last 90 days</option>
+            <option value="custom">Choose dates</option>
+          </select>
+          <div id="periodDates" class="row2 hidden" style="margin-top:8px">
+            <div><label class="lbl" for="periodFrom">From</label><input type="date" id="periodFrom"></div>
+            <div><label class="lbl" for="periodTo">To</label><input type="date" id="periodTo"></div>
+          </div>
+        </div>
+        <div class="hint" id="dataFocusHint">Web research looks for figures that cover this period and says when a source does not. Figures from an uploaded report always come first, and its own dates decide what it covers.</div>
+      </div>
+
       <label class="lbl">Your MLS market report or CMA <span style="font-weight:400;color:var(--muted)">(optional)</span></label>
       <div class="upload" id="uploadBox">
         <div class="ut">Upload MLS Report or CMA</div>

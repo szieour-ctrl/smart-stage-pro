@@ -31,7 +31,7 @@ const TOPIC_COUNT = 5;
 const MAX_UPLOADS = 3;
 const FRESH_DAYS = 30;            // a source for a market update may be at most this old (the GPT prefers 7 and accepts 30)
 const MAX_TOPICS_PER_SITE = 2, MIN_SITES = 3;
-const LIMITS = { name: 60, question: 200, why: 400, signal: 160, scopeNote: 240, sourceTitle: 200, url: 500, eventText: 160 };
+const LIMITS = { name: 60, question: 200, why: 400, signal: 160, scopeNote: 240, recommendReason: 300, recommendEvidence: 160, sourceTitle: 200, url: 500, eventText: 160 };
 
 // Dated, honest planning numbers: the proposed beta allowances from the Oct 24 brief. NOT billing entitlements.
 const ALLOWANCE_BY_PLAN = { solo: 10, team: 30, brokerage: 100 };
@@ -170,6 +170,7 @@ function systemPrompt(mode) {
     "  \"scope\": \"selected\" | \"broader_context\", \"scope_note\": string | null, \"event\": object | null,",
     "  \"sources\": [ { \"title\": string, \"url\": string, \"published\": \"YYYY-MM-DD\" } ] } ] }",
     "Each topic has 1 to 4 sources. De-duplicate overlapping topics.",
+    "Also add a top-level \"recommendation\": { \"topic\": the number 1-5 of the single topic that is strongest for this audience and market right now, \"reason\": string (1-2 sentences saying why, in plain words), \"evidence\": [up to 3 short facts taken from that topic's own sources] }. Recommend only from what the sources show; do not add a new number.",
   ];
   return [...common, "", ...specific, "", ...shape].join("\n");
 }
@@ -288,13 +289,31 @@ function extractTopics(text) {
   return arr;
 }
 
+// The model's pick of the strongest topic (top-level "recommendation"). Missing or odd = no recommendation; it never fails a run.
+function extractRecommendation(text) {
+  try {
+    const obj = planLib.extractJsonObject(text);
+    const r = obj && !Array.isArray(obj) && obj.recommendation;
+    return r && typeof r === "object" ? r : null;
+  } catch (e) { return null; }
+}
+function cleanRecommendation(rec, topicCount) {
+  const r = rec && typeof rec === "object" ? rec : null;
+  if (!r) return null;
+  const n = Number(r.topic);
+  const reason = clean(r.reason, LIMITS.recommendReason);
+  if (!Number.isInteger(n) || n < 1 || n > topicCount || !reason) return null;
+  const evidence = (Array.isArray(r.evidence) ? r.evidence : []).map((e) => clean(e, LIMITS.recommendEvidence)).filter(Boolean).slice(0, 3);
+  return { topicId: `t${n}`, reason, evidence };
+}
+
 /**
  * validateTopics(rawTopics, { mode, today }) → { ok, topics, problems }
  * ok is true ONLY for exactly five valid, distinct topics. `problems` explains each rejection (for logs, never shown raw).
  * Sources that are unreachable by design (not https, paywalled, undated or stale for a market update) are dropped; a topic
  * left with no source is rejected, never kept unsourced.
  */
-function validateTopics(rawTopics, { mode, today } = {}) {
+function validateTopics(rawTopics, { mode, today, recommendation } = {}) {
   const problems = [];
   if (!MODES.includes(mode)) return { ok: false, topics: [], problems: ["unknown mode"] };
   const todayN = dayNumber(today);
@@ -346,6 +365,11 @@ function validateTopics(rawTopics, { mode, today } = {}) {
     else if (perSite.size < MIN_SITES) soft.push(`the topics use only ${perSite.size} different site${perSite.size === 1 ? "" : "s"}; use at least ${MIN_SITES} different publishers`);
   }
   const ok = problems.length === 0 && topics.length === TOPIC_COUNT;
+  if (ok) {
+    const rec = cleanRecommendation(recommendation, topics.length);
+    const pick = rec && topics.filter((t) => t.id === rec.topicId)[0];
+    if (pick) pick.recommended = { reason: rec.reason, evidence: rec.evidence };
+  }
   return { ok, topics: ok ? topics : [], problems, soft: ok ? soft : [] };
 }
 
@@ -407,5 +431,5 @@ function outcomeFields({ validation, usage, model, today, now, error }) {
 module.exports = {
   MODES, MODE_LABELS, DATA_SOURCES, GEO_TYPES, AUDIENCES, AUDIENCE_KEYS, TOPIC_COUNT, MAX_UPLOADS, FRESH_DAYS, ALLOWANCE_BY_PLAN, PAYWALLED_DOMAINS, DEFAULT_MODEL, DEFAULT_COST_TARGET_USD,
   validateGeography, geoLabel, validateResearchRequest, requestKey, researchModel, researchSettings, systemPrompt, buildResearchPayload,
-  extractTopics, validateTopics, similar, usageSummary, monthKeyPT, allowanceFor, sessionStatus, outcomeFields,
+  extractTopics, extractRecommendation, validateTopics, similar, usageSummary, monthKeyPT, allowanceFor, sessionStatus, outcomeFields,
 };

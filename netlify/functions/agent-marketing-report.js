@@ -99,8 +99,10 @@ exports.handler = async (event) => {
     const existing = await supabase("GET", "agent_marketing_uploads", null, `?project_id=eq.${project.id}&user_id=eq.${userId}&select=id&limit=10`);
     if (Array.isArray(existing.data) && existing.data.length >= rl.MAX_UPLOADS) return reply(409, { error: `You can attach up to ${rl.MAX_UPLOADS} reports. Remove one first.`, code: "too_many" });
 
+    const win = lib.validateWindow(b.window);
+    if (win.error) return reply(400, { error: win.error, code: "bad_window" });
     const bytes = Buffer.from(raw, "base64");
-    const read = await readLib.readReport(bytes, String(b.fileName || "").slice(0, 200));
+    const read = await readLib.readReport(bytes, String(b.fileName || "").slice(0, 200), { window: win.window });
     if (!read.ok) return reply(read.code === "too_big" ? 413 : 422, { error: read.message, code: read.code });
 
     const geo = rl.validateGeography(b.geography);

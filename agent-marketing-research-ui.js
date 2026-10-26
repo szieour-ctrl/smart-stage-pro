@@ -205,7 +205,24 @@
       if (s.notice) $("upWarn").innerHTML += '<div class="hint" style="margin-top:8px">Required notice for anything you publish with these figures: <b>' + esc(s.notice) + "</b></div>";
       $("upYes").classList.toggle("hidden", u.status === "confirmed");
       $("upNo").textContent = u.status === "confirmed" ? "Remove this report" : "Not right, remove";
+      var rows = s.layout === "cma_table" || s.layout === "listing_table";
+      $("upWindowBox").classList.toggle("hidden", !rows);
       $("upReview").classList.remove("hidden");
+    }
+    // The date window for a report that has dated rows (a CMA or an MLS export). Trend reports are monthly figures and have none.
+    function chosenWindow() {
+      var v = $("upWindow").value;
+      if (v === "all") return null;
+      if (v === "custom") return { start: $("upFrom").value, end: $("upTo").value };
+      return { days: Number(v) };
+    }
+    function resetWindow() { $("upWindow").value = "all"; $("upFrom").value = ""; $("upTo").value = ""; $("upDates").classList.add("hidden"); }
+    async function reread() {
+      var u = state.upload;
+      if ($("upWindow").value === "custom" && (!$("upFrom").value || !$("upTo").value)) { $("upMsg").textContent = "Enter both dates."; return; }
+      if (u && u.id) { try { await api(REPORT, "POST", "", { action: u.status === "confirmed" ? "remove" : "confirm", uploadId: u.id, correct: false }); } catch (e) { /* replaced below */ } }
+      var keep = chosenWindow(); resetReview(); syncUpload(); state.pendingWindow = keep;
+      await sendUpload();
     }
     async function sendUpload() {
       var file = $("upFile").files[0];
@@ -215,9 +232,10 @@
       $("attestMsg").textContent = "Reading your report…";
       try {
         var b64 = await toBase64(file);
-        var r = await api(REPORT, "POST", "", { action: "upload", projectId: state.projectId, fileName: file.name, fileBase64: b64, permission: true });
+        var r = await api(REPORT, "POST", "", { action: "upload", projectId: state.projectId, fileName: file.name, fileBase64: b64, permission: true, window: state.pendingWindow || null });
         if (!r.ok) { state.upload = null; $("upOk").checked = false; $("attestMsg").textContent = (r.json && r.json.error) || "Could not read that file."; return; }
         state.upload = { id: r.json.upload.id, status: r.json.upload.status, summary: r.json.upload.summary };
+        state.pendingWindow = null;
         $("attestMsg").textContent = "";
         renderReview(state.upload); syncUpload();
         $("upReview").scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -228,14 +246,16 @@
       if (u && u.id) {
         try { await api(REPORT, "POST", "", { action: u.status === "confirmed" ? "remove" : "confirm", uploadId: u.id, correct: false }); } catch (e) { /* the file is gone from the page either way */ }
       }
-      $("upFile").value = ""; $("upOk").checked = false; resetReview(); syncUpload();
+      $("upFile").value = ""; $("upOk").checked = false; resetReview(); resetWindow(); syncUpload();
     }
     $("upOk").addEventListener("change", function () { syncUpload(); if ($("upOk").checked && !state.upload) sendUpload(); });
     $("upFile").addEventListener("change", function () {
       if (state.upload && state.upload.id) removeUpload(); // choosing a different file replaces the old report
-      $("upOk").checked = false; resetReview(); syncUpload();
+      $("upOk").checked = false; resetReview(); resetWindow(); syncUpload();
       if ($("upFile").files.length) $("attestBox").scrollIntoView({ behavior: "smooth", block: "nearest" });
     });
+    $("upWindow").addEventListener("change", function () { $("upDates").classList.toggle("hidden", $("upWindow").value !== "custom"); });
+    $("upWindowGo").addEventListener("click", reread);
     $("upX").addEventListener("click", removeUpload);
     $("upNo").addEventListener("click", removeUpload);
     $("upYes").addEventListener("click", async function () {
@@ -250,7 +270,7 @@
     });
     $("libClose").addEventListener("click", closeLib);
     $("resX").addEventListener("click", function () { $("resultPanel").classList.add("hidden"); });
-    state.resetUpload = function () { $("upFile").value = ""; $("upOk").checked = false; resetReview(); syncUpload(); };
+    state.resetUpload = function () { $("upFile").value = ""; $("upOk").checked = false; resetReview(); resetWindow(); syncUpload(); };
     state.uploadReady = function () {
       var has = $("upFile").files && $("upFile").files.length > 0;
       if (state.upload && state.upload.busy) { $("attestMsg").textContent = "Still reading your report. One moment."; return false; }
@@ -289,7 +309,8 @@
     var aud = (s.audiences.filter(function (a) { return a.key === q.audience; })[0] || {}).label || "";
     var mode = (s.modes.filter(function (m) { return m.key === q.mode; })[0] || {}).label || "";
     var focus = [q.focus.active_adult_55 ? "55+ Active Adult" : "", q.focus.new_construction ? "New Construction" : ""].filter(Boolean).join(", ");
-    var data = q.dataSource === "both" ? "Your confirmed report (its figures are the source of truth) plus web research for the story" : "Web research. Each figure names its source, and preliminary figures are flagged";
+    var win = state.upload && state.upload.summary && state.upload.summary.window;
+    var data = q.dataSource === "both" ? "Your confirmed report (its figures are the source of truth" + (win ? "; closed sales limited to " + win.label : "") + ") plus web research for the story" : "Web research. Each figure names its source, and preliminary figures are flagged";
     var rows = [["Content", mode], ["Area", area], ["Audience", aud], ["Focus", focus || "None"], ["Keywords", (q.keywords || "").trim() || "None"], ["Data", data]];
     return rows.map(function (r) { return "<div><b>" + esc(r[0]) + ":</b> " + esc(r[1]) + "</div>"; }).join("");
   }

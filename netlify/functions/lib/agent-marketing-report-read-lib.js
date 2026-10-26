@@ -125,15 +125,15 @@ function withTimeout(promise, ms) {
  * readReport(bytes, fileName) → { ok: true, kind, facts } | { ok: false, code, message }
  * `facts` is the only thing that leaves this function: figures and a short allow-list of scope strings. See report-lib.
  */
-async function readReport(bytes, fileName) {
+async function readReport(bytes, fileName, opts) {
   const buf = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes || []);
   const k = detectKind(fileName, buf);
   if (k.error) return { ok: false, code: k.error, message: k.error === "too_big" ? "That file is larger than 4 MB. Try one property type or a shorter date range." : lib.errorMessage(k.error) };
   try {
     let result;
-    if (k.kind === "pdf") { const pdf = await withTimeout(readPdf(buf), READ_TIMEOUT_MS); result = lib.analyzePages(pdf.pages, { items: pdf.items }); }
-    else if (k.kind === "xlsx") result = lib.analyzeRows(await withTimeout(readXlsxRows(buf), READ_TIMEOUT_MS), "xlsx");
-    else result = lib.analyzeRows(parseCsv(buf.toString("utf8")), "csv");
+    if (k.kind === "pdf") { const pdf = await withTimeout(readPdf(buf), READ_TIMEOUT_MS); result = lib.analyzePages(pdf.pages, { items: pdf.items, window: opts && opts.window }); }
+    else if (k.kind === "xlsx") result = lib.analyzeRows(await withTimeout(readXlsxRows(buf), READ_TIMEOUT_MS), "xlsx", { window: opts && opts.window });
+    else result = lib.analyzeRows(parseCsv(buf.toString("utf8")), "csv", { window: opts && opts.window });
     if (result.error) return { ok: false, code: result.error, message: lib.errorMessage(result.error) };
     return { ok: true, kind: k.kind, facts: result.facts };
   } catch (e) {

@@ -93,8 +93,7 @@ function validateGeography(input, opts) {
   if (type === "neighborhood" && !city) errors.push({ field: "geography.city", message: "Name the city this neighborhood is in." });
   if (city.length > LIMITS.name) errors.push({ field: "geography.city", message: `Keep the city to ${LIMITS.name} characters or fewer.` });
   if (type === "zip" && name && !/^\d{5}$/.test(name)) errors.push({ field: "geography.name", message: "A ZIP code is five digits." });
-  // The ZIP code (Oct 27, 2026): a ZIP market IS its ZIP; every other market type also carries the 5-digit ZIP the Redfin Market Trends
-  // page is read for. Required for a Local Market Update (see validateResearchRequest); optional elsewhere, but never malformed.
+  // The ZIP code (Oct 27, 2026): a ZIP market IS its ZIP; every other market type also carries the 5-digit ZIP that pins the market. Required for a Local Market Update (see validateResearchRequest); optional elsewhere, but never malformed.
   const zip = type === "zip" ? name : clean(g.zip, 12);
   if (type !== "zip") {
     if (!zip && requireZip) errors.push({ field: "geography.zip", message: "Enter the 5-digit ZIP code for this market." });
@@ -213,7 +212,7 @@ function systemPrompt(mode) {
       "BUILD EACH QUESTION FROM ONE SPECIFIC DEVELOPMENT the article reports: a project, a batch of permits or applications, a rate or policy change, an opening, a closing, a decision, a published figure. The question must point to that development. A question that could be asked about any market in any month (\"Are homes taking longer to sell?\", \"Is competition rising?\") is stale and generic and is not acceptable.",
       "ALWAYS RETURN FIVE TOPICS. Returning none, or fewer than five, is a failure. A small market has few articles of its own: when the exact market has too few, use articles about the county, the region or the metro that bear on this market (scope \"broader_context\", and scope_note says what area the article covers), and never present them as the market's own figures. For a keyword that has no article, use other timely articles instead (keyword_match false).",
       "KEYWORDS. If the input lists keywords, search for articles about those keywords in this market FIRST, before anything else. At least two topics must rest on an article that discusses a keyword, and those topics set keyword_match to true. If you cannot find such an article, do not stretch an unrelated article to fit: fill the rest with other timely topics with keyword_match false.",
-      "Each topic is the story of ONE local article (its story source). Take every figure in a topic from that article and name its period; never mix numbers from different sources in the same topic and never add market statistics from another publisher. Market data comes separately, from the agent's own report or the Redfin Market Trends page for the ZIP code. If a source calls a figure preliminary or the month is not complete, say so in trend_signals. Prefer the most recent complete month.",
+      "Each topic is the story of ONE local article (its story source). Take every figure in a topic from that article and name its period; never mix numbers from different sources in the same topic and never add market statistics from another publisher. Market data comes separately, from the agent's own uploaded report. If a source calls a figure preliminary or the month is not complete, say so in trend_signals. Prefer the most recent complete month.",
     ];
   const shape = [
     "Return ONLY one JSON object, no commentary, in this shape:",
@@ -436,7 +435,7 @@ function validateTopics(rawTopics, { mode, today, recommendation } = {}) {
   for (let i = 0; i < topics.length; i++) for (let j = i + 1; j < topics.length; j++) {
     if (similar(topics[i].question, topics[j].question)) problems.push(`topics ${topics[i].id} and ${topics[j].id} overlap`);
   }
-  // No publisher-variety rule for market updates (Sam, Oct 27): the story source is an article, and the market data comes from the agent's report or Redfin.
+  // No publisher-variety rule for market updates (Sam, Oct 27): the story source is an article, and the market data comes from the agent's own uploaded report.
   const soft = [];
   const ok = problems.length === 0 && topics.length === TOPIC_COUNT;
   if (ok) {

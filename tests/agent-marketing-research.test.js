@@ -423,11 +423,11 @@ test("zip: a different ZIP is a different request", () => {
   assert.notStrictEqual(r.requestKey(mk("95746")), r.requestKey(mk("95678")));
 });
 
-test("source rule: a topic is one local article; market data comes from the report or Redfin, never another publisher", () => {
+test("source rule: a topic is one local article; market data comes from the agent's report, never another publisher", () => {
   const sp = r.systemPrompt("market_update");
   assert.ok(/ONE local article/.test(sp));
   assert.ok(/never add market statistics from another publisher/.test(sp));
-  assert.ok(/Redfin Market Trends page for the ZIP code/.test(sp));
+  assert.ok(/agent's own uploaded report/.test(sp));
   assert.ok(!/from ONE source and name its period/.test(sp));
 });
 

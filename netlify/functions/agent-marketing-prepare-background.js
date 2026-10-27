@@ -206,7 +206,7 @@ exports.handler = async (event) => {
     for (const [slot, v] of Object.entries(images)) { const [sc, f] = slot.split("_"); (imageKeys[sc] = imageKeys[sc] || {})[f] = v.key; }
 
     await patchJob(job.id, { step: "Checking the facts and layout" });
-    const built = assetsLib.buildManifest({ projectId: project.id, formats, narrative, intake: project.intake, reportFigures, notice: { period }, brand, narrationTagged: narrative.narrationTagged, audio: { narration_key: audio.key, duration_sec: audio.duration_sec, words: audio.words }, imageKeys });
+    const built = assetsLib.buildManifest({ voiceShape: assetsLib.voiceShapeFrom(process.env), projectId: project.id, formats, narrative, intake: project.intake, reportFigures, notice: { period }, brand, narrationTagged: narrative.narrationTagged, audio: { narration_key: audio.key, duration_sec: audio.duration_sec, words: audio.words }, imageKeys });
     await patchJob(job.id, { validation: built.validation, manifest: built.manifest });
     if (!built.validation.ok) return await fail(job, "The Reel did not pass its checks: " + built.validation.errors.map((e) => e.message).join(" | ")), { statusCode: 200, body: "" };
 

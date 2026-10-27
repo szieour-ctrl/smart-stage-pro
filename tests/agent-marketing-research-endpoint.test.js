@@ -192,7 +192,8 @@ test("worker: five grounded topics are saved and charged once; the page then rea
   const url = (n) => `https://site${n}.example.org/report-${n}`;
   const topics = Q.map((q, i) => ({ question: q, why_it_matters: "It changes how sellers price.", trend_signals: ["MLS active listings up"], local_intent: true, scope: "selected", event: null, sources: [{ title: `R${i}`, url: url(i), published: dayAgo }] }));
   const original = runLib.callPerplexity;
-  runLib.callPerplexity = async () => ({ status: 200, json: { output_text: JSON.stringify({ topics }), output: [{ type: "search_results", results: Q.map((_, i) => ({ url: url(i) })) }], usage: { input_tokens: 600, output_tokens: 1500, tool_calls_details: { search_web: { invocation: 2 } } } } });
+  // the separate Redfin call (a ZIP is on the request) gets an empty answer: refused, free, and never fails the session
+  runLib.callPerplexity = async (payload) => /ONE web page/.test(payload.instructions) ? { status: 200, json: { output_text: "{}" } } : ({ status: 200, json: { output_text: JSON.stringify({ topics }), output: [{ type: "search_results", results: Q.map((_, i) => ({ url: url(i) })) }], usage: { input_tokens: 600, output_tokens: 1500, tool_calls_details: { search_web: { invocation: 2 } } } } });
   try {
     const w = await worker.handler({ headers: { "x-internal-key": "internal" }, body: JSON.stringify({ researchId: id, owner: U1 }) });
     assert.strictEqual(w.statusCode, 200);

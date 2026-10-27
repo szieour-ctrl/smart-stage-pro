@@ -183,9 +183,12 @@ async function fetchRedfinTrends({ zip, apiKey, callFn, sleepFn, today, env }) {
     const { resp } = await askProvider({ payload, apiKey, callFn, sleepFn, retries: 1 });
     const usage = rl.usageSummary(resp, cfg.costTargetUsd);
     let raw;
-    try { raw = redfinLib.extractRedfin(answerText(resp)); } catch (err) { return { ok: false, redfin: null, problems: [err.message], warnings: [], usage }; }
-    const v = redfinLib.validateRedfin(raw, { zip, today, citations: citationUrls(resp) });
-    return { ok: v.ok, redfin: v.redfin, problems: v.problems, warnings: v.warnings, usage };
+    const text = answerText(resp), cites = citationUrls(resp);
+    // When Redfin cannot be used, keep what the provider actually said (first part only, no key, no user data) so the cause can be seen.
+    const debug = { answer: text.slice(0, 1500), citations: cites.slice(0, 8).map((u) => String(u).slice(0, 200)), model: payload.model };
+    try { raw = redfinLib.extractRedfin(text); } catch (err) { return { ok: false, redfin: null, problems: [err.message], warnings: [], usage, debug }; }
+    const v = redfinLib.validateRedfin(raw, { zip, today, citations: cites });
+    return { ok: v.ok, redfin: v.redfin, problems: v.problems, warnings: v.warnings, usage, debug: v.ok ? null : debug };
   } catch (err) {
     console.error(`[agent-marketing-research] redfin failed: ${String(err && err.message).slice(0, 200)}`);
     return { ok: false, redfin: null, problems: [String(err && err.message || "Redfin could not be read").slice(0, 200)], warnings: [], usage: null };
@@ -215,7 +218,7 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
   const baseInput = payload && payload.input;
   let usage = { promptTokens: null, completionTokens: null, citationTokens: null, reasoningTokens: null, searchQueries: null, costUsd: null };
   let modelUsed = payload ? payload.model : null, grounded = null, attempts = 0, problems = [], validation = null, error = null, providerError = null;
-  let reportNote = null, reportAttempts = 0, fallback = null, redfinNote = null, redfinWarnings = [];
+  let reportNote = null, reportAttempts = 0, fallback = null, redfinNote = null, redfinWarnings = [], redfinDebug = null;
 
   try {
     if (dataSource !== "upload") {
@@ -277,7 +280,7 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
         const rf = await fetchRedfinTrends({ zip, apiKey, callFn, sleepFn, today, env: e });
         if (rf.usage) usage = addUsage(usage, rf.usage);
         if (rf.ok) { validation = { ...validation, topics: validation.topics.map((t) => ({ ...t, marketData: rf.redfin })) }; redfinWarnings = rf.warnings; }
-        else redfinNote = `Redfin Market Trends could not be read for ZIP ${zip}: ${rf.problems.slice(0, 2).join(" ").slice(0, 240)}`;
+        else { redfinNote = `Redfin Market Trends could not be read for ZIP ${zip}: ${rf.problems.slice(0, 2).join(" ").slice(0, 240)}`; redfinDebug = rf.debug || null; }
       }
     }
   } catch (err) {
@@ -288,7 +291,7 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
   // Cost: the provider's own figure when it sent one, otherwise an estimate from tokens (flagged as an estimate).
   const estimated = usage.costUsd == null ? estimateCostUsd(modelUsed, usage) : null;
   const costUsd = usage.costUsd != null ? usage.costUsd : estimated;
-  const finalUsage = { ...usage, costUsd, costEstimated: usage.costUsd == null && estimated != null, targetUsd: cfg.costTargetUsd, withinTarget: costUsd == null ? null : costUsd <= cfg.costTargetUsd, attempts, grounded, providerError, dataSource, reportAttempts, reportNote, redfinNote, redfinWarnings: redfinWarnings.slice(0, 4), problems: problems.slice(0, 6).map((x) => String(x).slice(0, 200)) };
+  const finalUsage = { ...usage, costUsd, costEstimated: usage.costUsd == null && estimated != null, targetUsd: cfg.costTargetUsd, withinTarget: costUsd == null ? null : costUsd <= cfg.costTargetUsd, attempts, grounded, providerError, dataSource, reportAttempts, reportNote, redfinNote, redfinWarnings: redfinWarnings.slice(0, 4), redfinDebug, problems: problems.slice(0, 6).map((x) => String(x).slice(0, 200)) };
   const fields = rl.outcomeFields({ validation: error ? null : validation, usage: finalUsage, model: modelUsed, today, now, error });
   return { fields, problems, attempts };
 }

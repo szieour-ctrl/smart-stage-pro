@@ -132,6 +132,7 @@ test("run: Redfin failing never fails the session; the agent is told", async () 
     assert.ok(r.fields.charged_at);
     assert.ok(r.fields.topics.every((t) => !t.marketData));
     assert.ok(/Redfin Market Trends could not be read for ZIP 95746/.test(r.fields.usage.redfinNote));
+    assert.ok(r.fields.usage.redfinDebug === null || (typeof r.fields.usage.redfinDebug.answer === "string" && r.fields.usage.redfinDebug.answer.length <= 1500));
   }
 });
 
@@ -152,4 +153,14 @@ test("fetchRedfinTrends never throws and reports why", async () => {
   const y = await run.fetchRedfinTrends({ zip: "95746", apiKey: "k", callFn: async () => redfinReply(page()), sleepFn: noSleep, today: TODAY, env: {} });
   assert.strictEqual(y.ok, true);
   assert.strictEqual(y.redfin.figures.length, 4);
+});
+
+test("a refused Redfin answer keeps what the provider said, so the cause can be seen; a good one keeps nothing extra", async () => {
+  const said = { status: 200, json: { citations: ["https://www.redfin.com/zipcode/95843/housing-market"], output: [{ type: "message", content: [{ type: "output_text", text: JSON.stringify({ page_url: "https://www.redfin.com/zipcode/95843/housing-market", period_sentence: "Prices were up over the last quarter.", figures: [{ label: "Median sale price", value: "$520K", sentence: "median price of $520K" }] }) }] }] } };
+  const bad = await run.fetchRedfinTrends({ zip: "95843", apiKey: "k", callFn: async () => said, sleepFn: noSleep, today: TODAY, env: {} });
+  assert.strictEqual(bad.ok, false);
+  assert.ok(/Prices were up over the last quarter/.test(bad.debug.answer));
+  assert.deepStrictEqual(bad.debug.citations, ["https://www.redfin.com/zipcode/95843/housing-market"]);
+  const good = await run.fetchRedfinTrends({ zip: "95746", apiKey: "k", callFn: async () => redfinReply(page()), sleepFn: noSleep, today: TODAY, env: {} });
+  assert.strictEqual(good.debug, null);
 });

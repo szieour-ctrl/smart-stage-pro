@@ -237,7 +237,7 @@ exports.handler = async (event) => {
     // dated sources + an on-screen source line, text cards only for now).
     const fromReport = Array.isArray(reportFigures) && reportFigures.length > 0;
     if (fromReport && !period) return await fail(job, "The report period is missing."), { statusCode: 200, body: "" };
-    if (!fromReport && !sourcesLib.sourceLine(topic.sources, topic.scopeNote)) return await fail(job, "This Reel needs either your uploaded report or at least one checked, dated research source."), { statusCode: 200, body: "" };
+    if (!fromReport && !sourcesLib.sourceLine(topic.sources, topic.scopeNote)) return await fail(job, sourcesLib.usableSources(topic.sources).length ? "The source note for this topic is too long to show on screen. Run the research again to get a shorter one." : "This Reel needs either your uploaded report or at least one checked, dated research source."), { statusCode: 200, body: "" };
     const profile = await getProfileRow(job.user_id);
     if (!profile || !profile.licensed_name || !profile.headshot_key) return await fail(job, "Your Agent Profile needs your name and headshot before a Reel can be made."), { statusCode: 200, body: "" };
     const brand = { primary: profile.brand_primary, secondary: profile.brand_secondary, border: profile.brand_border, font: profile.brand_font || undefined, headshot_key: profile.headshot_key, agent: { name: profile.licensed_name, brokerage: profile.brokerage_name || "" } };

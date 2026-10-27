@@ -25,6 +25,9 @@ test("payload: the exact ZIP, the Redfin page only, copy never calculate; model 
   assert.ok(/ZIP code: 95746/.test(p.input) && p.input.includes("https://www.redfin.com/zipcode/95746/housing-market"));
   assert.ok(/never calculate, round, estimate, average or add anything/.test(p.instructions));
   assert.ok(/Use no other website and no other ZIP code/.test(p.instructions));
+  // a live fetch of the exact page, not the search index (which held an older month for Antelope on Oct 27)
+  assert.deepStrictEqual(p.tools, [{ type: "fetch_url", max_urls: 1 }]);
+  assert.ok(/fetch_url tool/.test(p.instructions) && /Fetch that page now/.test(p.input));
   assert.strictEqual(rf.buildRedfinPayload({ zip: "95746", env: { AGENT_MARKETING_REDFIN_MODEL: "openai/gpt-6-luna" } }).model, "openai/gpt-6-luna");
 });
 

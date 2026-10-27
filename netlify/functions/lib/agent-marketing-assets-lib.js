@@ -2,6 +2,7 @@
 // its verified report figures, the prepared assets and the narration timing. Pure functions; no network.
 "use strict";
 
+const sourcesLib = require("./agent-marketing-sources-lib");
 const director = require("./agent-marketing-director-lib");
 const timing = require("./agent-marketing-timing-lib");
 const manifestLib = require("./agent-marketing-manifest-lib");
@@ -70,7 +71,7 @@ function buildManifest(input) {
   const captions = timing.groupCaptionLines(input.audio.words);
   let manifest = {
     version: manifestLib.MANIFEST_VERSION, project_id: input.projectId, formats: formats.slice(), notice_required: true,
-    notice: { period: input.notice.period, text: manifestLib.metroListNotice(input.notice.period) },
+    ...(input.webTopic ? { notice_required: false, notice: {}, source_line: { sources: sourcesLib.usableSources(input.webTopic.sources).map((x) => ({ title: x.title, url: x.url, published: x.published })), scope_note: input.webTopic.scopeNote || "", text: sourcesLib.sourceLine(input.webTopic.sources, input.webTopic.scopeNote), label: sourcesLib.sourceLabel(input.webTopic.sources) }, verified_numbers: sourcesLib.topicNumbers(input.webTopic) } : { notice: { period: input.notice.period, text: manifestLib.metroListNotice(input.notice.period) } }),
     brand: input.brand,
     figures: figs.filter((f) => used.has(f.ref)).map((f) => ({ ref: f.ref, label: f.label, display: f.display, value: f.value, n: f.n })),
     derived: pl.derived, narration_text: input.narrationTagged,

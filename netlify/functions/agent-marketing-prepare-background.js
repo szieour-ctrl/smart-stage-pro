@@ -18,6 +18,7 @@ const am = require("./lib/agent-marketing-lib");
 const img = require("./lib/agent-marketing-images-lib");
 const timing = require("./lib/agent-marketing-timing-lib");
 const assetsLib = require("./lib/agent-marketing-assets-lib");
+const sourcesLib = require("./lib/agent-marketing-sources-lib");
 
 // Narration model. Eleven v4 (Oct 2026) by default; set AGENT_MARKETING_TTS_MODEL to change it without a code change.
 const TTS_MODEL = process.env.AGENT_MARKETING_TTS_MODEL || "eleven_v4";
@@ -189,9 +190,14 @@ exports.handler = async (event) => {
     if (!project) return await fail(job, "The project was not found."), { statusCode: 200, body: "" };
     const narrative = project.narrative_approved;
     if (!narrative || !project.narrative_approved_at || !Array.isArray(narrative.scenes) || !narrative.narrationTagged) return await fail(job, "The narration has not been approved yet."), { statusCode: 200, body: "" };
-    const reportFigures = project.selected_topic && project.selected_topic.reportFigures;
-    const period = assetsLib.parseNoticePeriod(narrative.notice || (project.selected_topic && project.selected_topic.reportNotice));
-    if (!Array.isArray(reportFigures) || !reportFigures.length || !period) return await fail(job, "The verified report figures or the report period are missing."), { statusCode: 200, body: "" };
+    const topic = project.selected_topic || {};
+    const reportFigures = topic.reportFigures;
+    const period = assetsLib.parseNoticePeriod(narrative.notice || topic.reportNotice);
+    // Two kinds of Reel: from an uploaded MetroList report (verified figures + the MetroList notice), or from web research (checked,
+    // dated sources + an on-screen source line, text cards only for now).
+    const fromReport = Array.isArray(reportFigures) && reportFigures.length > 0;
+    if (fromReport && !period) return await fail(job, "The report period is missing."), { statusCode: 200, body: "" };
+    if (!fromReport && !sourcesLib.sourceLine(topic.sources, topic.scopeNote)) return await fail(job, "This Reel needs either your uploaded report or at least one checked, dated research source."), { statusCode: 200, body: "" };
     const profile = await getProfileRow(job.user_id);
     if (!profile || !profile.licensed_name || !profile.headshot_key) return await fail(job, "Your Agent Profile needs your name and headshot before a Reel can be made."), { statusCode: 200, body: "" };
     const brand = { primary: profile.brand_primary, secondary: profile.brand_secondary, border: profile.brand_border, font: profile.brand_font || undefined, headshot_key: profile.headshot_key, agent: { name: profile.licensed_name, brokerage: profile.brokerage_name || "" } };
@@ -206,7 +212,7 @@ exports.handler = async (event) => {
     for (const [slot, v] of Object.entries(images)) { const [sc, f] = slot.split("_"); (imageKeys[sc] = imageKeys[sc] || {})[f] = v.key; }
 
     await patchJob(job.id, { step: "Checking the facts and layout" });
-    const built = assetsLib.buildManifest({ voiceShape: assetsLib.voiceShapeFrom(process.env), projectId: project.id, formats, narrative, intake: project.intake, reportFigures, notice: { period }, brand, narrationTagged: narrative.narrationTagged, audio: { narration_key: audio.key, duration_sec: audio.duration_sec, words: audio.words }, imageKeys });
+    const built = assetsLib.buildManifest({ voiceShape: assetsLib.voiceShapeFrom(process.env), projectId: project.id, formats, narrative, intake: project.intake, reportFigures: fromReport ? reportFigures : [], notice: fromReport ? { period } : undefined, webTopic: fromReport ? undefined : topic, brand, narrationTagged: narrative.narrationTagged, audio: { narration_key: audio.key, duration_sec: audio.duration_sec, words: audio.words }, imageKeys });
     await patchJob(job.id, { validation: built.validation, manifest: built.manifest });
     if (!built.validation.ok) return await fail(job, "The Reel did not pass its checks: " + built.validation.errors.map((e) => e.message).join(" | ")), { statusCode: 200, body: "" };
 

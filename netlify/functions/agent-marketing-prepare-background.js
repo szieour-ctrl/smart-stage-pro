@@ -19,6 +19,8 @@ const img = require("./lib/agent-marketing-images-lib");
 const timing = require("./lib/agent-marketing-timing-lib");
 const assetsLib = require("./lib/agent-marketing-assets-lib");
 
+// Narration model. Eleven v4 (Oct 2026) by default; set AGENT_MARKETING_TTS_MODEL to change it without a code change.
+const TTS_MODEL = process.env.AGENT_MARKETING_TTS_MODEL || "eleven_v4";
 const IMAGE_MODEL = process.env.OPENAI_IMAGE_MODEL || "gpt-image-2";
 const s3 = new S3Client({ region: process.env.S3_REGION, credentials: { accessKeyId: process.env.S3_ACCESS_KEY_ID, secretAccessKey: process.env.S3_SECRET_ACCESS_KEY } });
 const BUCKET = () => process.env.S3_BUCKET_NAME;
@@ -52,7 +54,7 @@ async function prepareNarration(job, project, tagged) {
   const voiceId = assetsLib.voiceIdFor(project.voice);
   if (!voiceId) throw new Error("This voice is not configured yet.");
   if (!process.env.ELEVENLABS_API_KEY) throw new Error("Narration is not configured.");
-  const res = await postJson("api.elevenlabs.io", timing.endpointPath(voiceId), { "xi-api-key": process.env.ELEVENLABS_API_KEY }, timing.buildRequest(tagged), 180000);
+  const res = await postJson("api.elevenlabs.io", timing.endpointPath(voiceId), { "xi-api-key": process.env.ELEVENLABS_API_KEY }, timing.buildRequest(tagged, { modelId: TTS_MODEL }), 180000);
   const j = res.json;
   if (res.status !== 200 || !j || !j.audio_base64) throw new Error(`The narration service returned ${res.status}${res.json && res.json.detail && res.json.detail.message ? ": " + res.json.detail.message : ""}`);
   const audio = Buffer.from(j.audio_base64, "base64");
@@ -65,7 +67,7 @@ async function prepareNarration(job, project, tagged) {
   const key = `agent-marketing-assets/${job.user_id}/${job.project_id}/${job.id}/narration.mp3`;
   await put(key, audio, "audio/mpeg");
   const durationSec = Math.round(Math.max(lastEnd + 0.4, (audio.length * 8) / 128000) * 100) / 100; // default output is 128 kbps mp3
-  const rec = { key, duration_sec: durationSec, words: words.map((w) => ({ text: w.text, start: w.start, end: w.end })), voice_id: voiceId, characters: tagged.length };
+  const rec = { key, duration_sec: durationSec, words: words.map((w) => ({ text: w.text, start: w.start, end: w.end })), voice_id: voiceId, model_id: TTS_MODEL, characters: tagged.length };
   const usage = { ...(job.usage || {}), narration_characters: tagged.length };
   job.assets = { ...(job.assets || {}), audio: rec }; job.usage = usage;
   await patchJob(job.id, { assets: job.assets, usage });

@@ -102,8 +102,8 @@ function plan(narrative, intake, figures) {
 }
 
 function statement(scene) {
-  const sentences = stripTags(scene.narrationExcerpt).split(/(?<=[.!?])\s+/).filter(Boolean);
-  const w = (sentences[0] || "").replace(/[.!?]+$/, "").split(" "), c = Math.ceil(w.length / 2);
+  const sentences = stripTags(scene.narrationExcerpt).split(/(?<=[.!?…])\s+/).filter(Boolean);
+  const w = (sentences[0] || "").replace(/[.!?…]+$/, "").split(" "), c = Math.ceil(w.length / 2);
   const text = scene.narrationExcerpt;
   const pts = [];
   if (/condition/i.test(text)) pts.push({ title: "Condition", caption: "Well-maintained homes stand out.", icon: "condition" });

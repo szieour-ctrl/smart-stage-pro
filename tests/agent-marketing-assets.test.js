@@ -83,3 +83,22 @@ test("director: figures are matched by value and context, not guessed", () => {
   assert.strictEqual(figs.find((x) => x.ref === "r1.f16").n, 46);
   assert.strictEqual(figs.find((x) => x.ref === "r1.f7").n, 14);
 });
+
+test("the rewritten Natomas script (pauses, ellipses) still builds a valid manifest", () => {
+  const NEW = "[conversational] If you're thinking about selling in Natomas, new construction is part of your competition. Giving buyers more options. [pause] So what does the resale market actually show? Active listings are sitting a median of 41 days before going under contract\u2026 and homes that closed sold at an average of 99.4% of the list price. [thoughtful] But the active market, 6 of 14 listings have already taken a price reduction. That gap between homes that sold and homes that didn't tells a real story. [emphasis] This means condition and pricing precision matter\u2026 New construction sets a baseline so your home has to answer for itself. [warm] Want to talk through where your home fits in that picture? I'm happy to walk you through it.";
+  const EX = [
+    "If you're thinking about selling in Natomas, new construction is part of your competition. Giving buyers more options.",
+    "So what does the resale market actually show? Active listings are sitting a median of 41 days before going under contract\u2026",
+    "and homes that closed sold at an average of 99.4% of the list price. But the active market, 6 of 14 listings have already taken a price reduction. That gap between homes that sold and homes that didn't tells a real story.",
+    "This means condition and pricing precision matter\u2026 New construction sets a baseline so your home has to answer for itself.",
+    "Want to talk through where your home fits in that picture? I'm happy to walk you through it.",
+  ];
+  const narrative = { ...fx.narrative, narrationTagged: NEW, scenes: fx.narrative.scenes.map((s, i) => ({ ...s, narrationExcerpt: EX[i] })) };
+  const w = timing.captionWords(NEW).map((t, i) => ({ text: t, start: 0.3 + i * 0.33, end: 0.3 + i * 0.33 + 0.3 }));
+  const r = lib.buildManifest(input({ narrative, narrationTagged: NEW, audio: { narration_key: "a.mp3", duration_sec: w[w.length - 1].end + 0.5, words: w } }));
+  assert.deepStrictEqual(r.validation.errors, [], JSON.stringify(r.validation.errors));
+  const takeaway = r.manifest.scenes[3].data;
+  assert.deepStrictEqual(takeaway.headline, ["This Means Condition and", "Pricing Precision Matter"]);
+  assert.strictEqual(takeaway.statement, "New construction sets a baseline so your home has to answer for itself.");
+  assert.ok(r.manifest.captions.some((c) => /\u2026/.test(c.text)), "ellipses stay in the captions");
+});

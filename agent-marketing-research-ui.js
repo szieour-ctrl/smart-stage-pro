@@ -46,7 +46,7 @@
     $("geoNameLbl").textContent = t === "zip" ? "ZIP code" : t === "neighborhood" ? "Neighborhood" : t === "county" ? "County" : t === "metro" ? "Metro area" : "City";
     $("geoName").placeholder = t === "zip" ? "e.g. 95678" : t === "neighborhood" ? "e.g. Crocker Ranch" : t === "county" ? "e.g. Placer" : t === "metro" ? "e.g. Sacramento" : "e.g. Roseville";
   }
-  // A Local Market Update needs the 5-digit ZIP (Redfin Market Trends are read for it). A ZIP market already is its ZIP; Local Events does not need one.
+  // A Local Market Update needs the 5-digit ZIP (the market is pinned to it). A ZIP market already is its ZIP; Local Events does not need one.
   function applyZip() {
     var need = picked("mode") !== "local_events" && $("geoType").value !== "zip";
     $("zipWrap").classList.toggle("hidden", !need);

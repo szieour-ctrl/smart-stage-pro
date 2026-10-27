@@ -5,7 +5,7 @@ const run = require("../netlify/functions/lib/agent-marketing-research-run-lib")
 
 const NOW = "2026-10-24T17:00:00Z";
 const ENV = {}; // defaults: perplexity/sonar, medium context, one corrective retry, $0.025 target
-// No ZIP on purpose: these tests are about the topic call and its cost; a ZIP adds the separate Redfin call (agent-marketing-redfin.test.js).
+// No ZIP on purpose: these tests are about the topic call and its cost.
 const row = { id: "r1", mode: "market_update", audience: "sellers", geography: { type: "city", name: "Roseville", city: "", state: "CA", label: "Roseville, CA" }, focus: {}, upload_refs: [] };
 const noSleep = async () => {};
 

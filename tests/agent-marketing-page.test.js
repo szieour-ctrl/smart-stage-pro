@@ -138,3 +138,10 @@ test("the Reel reuses only images the agent approved", () => {
   assert.match(prep, /r\.status === "approved" && r\.generation/);
   assert.doesNotMatch(prep, /r\.status !== "rejected" && r\.generation/);
 });
+
+test("the image preview has no crop box for Agent Marketing, and the Reel note counts only scenes the Reel makes an image for", () => {
+  const html = require("fs").readFileSync(require("path").join(__dirname, "..", "agent-marketing.html"), "utf8");
+  assert.match(html, /var vertical = false;/);
+  assert.match(html, /s\.kind === "GPT_IMAGE_2_CONCEPT" \|\| s\.kind === "AGENT_SCENE"\) && !seen/);
+  assert.match(html, /!picked\[s\.sceneIndex\]/);
+});

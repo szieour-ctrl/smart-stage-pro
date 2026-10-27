@@ -936,7 +936,8 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
   function paintReelNote() {
     var note = $("reelNote"), missing = [], seen = {};
     if (selectedReelFormats().indexOf("16x9") >= 0 && im && im.slots) {
-      im.slots.forEach(function (s) { if (!s.approved && !seen[s.sceneIndex]) { seen[s.sceneIndex] = 1; missing.push(s.sceneIndex + 1); } });
+      // only scenes whose image the Reel would make itself: not re-framed copies, brand cards, or scenes with your own photo
+      im.slots.forEach(function (s) { if (!s.approved && !picked[s.sceneIndex] && (s.kind === "GPT_IMAGE_2_CONCEPT" || s.kind === "AGENT_SCENE") && !seen[s.sceneIndex]) { seen[s.sceneIndex] = 1; missing.push(s.sceneIndex + 1); } });
     }
     note.classList.toggle("hidden", !missing.length);
     if (missing.length) note.textContent = "Scene" + (missing.length > 1 ? "s " : " ") + missing.join(", ") + (missing.length > 1 ? " have" : " has") + " no approved 16:9 image yet. Approve one above, or the Reel will create its own for " + (missing.length > 1 ? "them." : "it.");
@@ -1019,7 +1020,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     var want = st.generating ? "g" : (st.shown && st.shown.url ? "i:" + st.shown.url : "n");
     if (wrap.getAttribute("data-w") !== want) {
       wrap.setAttribute("data-w", want);
-      var vertical = (state.project.formats || []).indexOf("9x16") >= 0;
+      var vertical = false; // Agent Marketing makes a separate image per format, so there is no crop box here (Listing Reels will bring it back)
       wrap.innerHTML = st.generating ? '<span><span class="spinner"></span>Creating your image…</span>' : (st.shown && st.shown.url ? '<span class="cropwrap"><img alt="Generated image" src="' + esc(st.shown.url) + '">' + (vertical ? '<span class="cropbox" id="cropBox" style="left:' + ((cropOf(st.shown) - CROPW / 2) * 100).toFixed(2) + '%"></span>' : "") + "</span>" : "<span>No image yet</span>");
       $("imgmCrop").textContent = !st.generating && st.shown && st.shown.url && vertical ? "Dashed box: the part used for the vertical 9:16 Reel. Drag it left or right to choose what the vertical version shows. The wide 16:9 version always shows the whole image." : "";
     }

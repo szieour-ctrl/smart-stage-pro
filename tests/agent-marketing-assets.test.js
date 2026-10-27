@@ -128,3 +128,19 @@ test("a takeaway statement that starts with a joining word reads as its own sent
   const pl = director.plan(narrative, fx.intake, director.figuresFrom(fx.reportFigures));
   assert.strictEqual(pl.scenes[3].data.statement, "New construction sets a baseline your home has to answer for.");
 });
+
+test("imageNeeds: image of you is generated, own photos override, an unadded optional photo becomes a plate", () => {
+  const n = { scenes: [
+    { visualSource: "GPT_IMAGE_2_CONCEPT", aiGenerationPrompt: "keys" },
+    { visualSource: "GPT_IMAGE_2_CONCEPT", aiGenerationPrompt: "kitchen" },
+    { visualSource: "CONCEPT_REUSE", reuseOfScene: 1 },
+    { visualSource: "AUTHENTIC_AGENT_ASSET" },
+    { visualSource: "AGENT_SCENE", aiGenerationPrompt: "agent on a sidewalk" },
+    { visualSource: "AGENT_PROFILE" },
+  ] };
+  const a = lib.imageNeeds(n);
+  assert.deepStrictEqual(a.map((x) => x.kind), ["generate", "generate", "reuse", "plate", "generate", "unsupported"]);
+  assert.strictEqual(a[4].imageKind, "agent_scene");
+  const b = lib.imageNeeds(n, new Set([0, 2, 3, 5]));
+  assert.deepStrictEqual(b.map((x) => x.kind), ["own", "generate", "reuse", "own", "generate", "own"]); // reuse is never overridden
+});

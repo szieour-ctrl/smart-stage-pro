@@ -25,12 +25,16 @@ function voiceIdFor(voice, env) {
 }
 
 /** What each scene needs, in story order. kind: "generate" (GPT Image 2), "reuse" (another scene's image), "plate" (brand plate drawn in code), "unsupported". */
-function imageNeeds(narrative) {
+// ownScenes: scene indexes where the agent chose their own photo on the Visuals step; that photo is the image for every format.
+function imageNeeds(narrative, ownScenes) {
+  const own = ownScenes instanceof Set ? ownScenes : new Set(ownScenes || []);
   return ((narrative && narrative.scenes) || []).map((s, i) => {
     const src = String(s.visualSource || "");
-    if (src === "GPT_IMAGE_2_CONCEPT" && s.aiGenerationPrompt) return { scene: i, kind: "generate", imageKind: "concept", prompt: s.aiGenerationPrompt, framing: s.framing || {} };
     if (src === "CONCEPT_REUSE" && Number.isInteger(s.reuseOfScene)) return { scene: i, kind: "reuse", owner: s.reuseOfScene };
-    if (src === "BRAND_CARD") return { scene: i, kind: "plate" };
+    if (own.has(i)) return { scene: i, kind: "own" };
+    if (src === "GPT_IMAGE_2_CONCEPT" && s.aiGenerationPrompt) return { scene: i, kind: "generate", imageKind: "concept", prompt: s.aiGenerationPrompt, framing: s.framing || {} };
+    if (src === "AGENT_SCENE" && s.aiGenerationPrompt) return { scene: i, kind: "generate", imageKind: "agent_scene", prompt: s.aiGenerationPrompt, framing: s.framing || {} };
+    if (src === "BRAND_CARD" || src === "AUTHENTIC_AGENT_ASSET") return { scene: i, kind: "plate" }; // an optional real photo the agent did not add
     return { scene: i, kind: "unsupported", source: src };
   });
 }

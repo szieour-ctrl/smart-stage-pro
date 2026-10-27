@@ -58,3 +58,14 @@ test("a report Reel is unchanged: MetroList notice, report figures", () => {
   assert.match(r.manifest.notice.text, /MetroList Services, Inc\./);
   assert.strictEqual(r.manifest.source_line, undefined);
 });
+
+test("a long scope note is cut back at a clause boundary instead of losing the whole source line", () => {
+  const sl = require("../netlify/functions/lib/agent-marketing-sources-lib");
+  const src = [{ url: "https://freddiemac.gcs-web.com/news-releases/news-release-details/mortgage-rates-decrease-732", title: "Mortgage Rates Decrease to 7.32%", published: "2026-10-22" }];
+  const note = "The rate figure is national and dated 2026-10-22; no source found in the available results establishes Lincoln-specific buydown activity or data for the full requested period.";
+  const t = sl.sourceLine(src, note);
+  assert.ok(t && t.length <= sl.MAX_LINE);
+  assert.match(t, /^Source: Mortgage Rates Decrease to 7\.32% \(freddiemac\.gcs-web\.com, Oct 22, 2026\)\./);
+  assert.match(t, /The rate figure is national and dated 2026-10-22\.$/);
+  assert.strictEqual(sl.sourceLine(src, "Figures cover ZIP 95834."), "Source: Mortgage Rates Decrease to 7.32% (freddiemac.gcs-web.com, Oct 22, 2026). Figures cover ZIP 95834.");
+});

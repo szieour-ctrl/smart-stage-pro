@@ -31,11 +31,17 @@ function sourceLine(sources, scopeNote) {
   if (!list.length) return "";
   const first = list[0], more = list.length - 1;
   const scope = String(scopeNote || "").replace(/\s+/g, " ").trim();
-  const tail = (more > 0 ? ` + ${more} more` : "") + "." + (scope ? ` ${/[.!?]$/.test(scope) ? scope : scope + "."}` : "");
   const meta = ` (${hostOf(first.url)}, ${shortDate(first.published)})`;
-  const room = MAX_LINE - ("Source: ".length + meta.length + tail.length);
-  if (room < 20) return "";
-  return `Source: ${trimTitle(first.title, room)}${meta}${tail}`;
+  const end = (t) => (/[.!?]$/.test(t) ? t : t + ".");
+  // A long scope note is cut back at a clause boundary (never mid-word) until the source title still has room; the scope is never dropped.
+  const clauses = scope.split(/;\s+|\s+[—–]\s+/).filter(Boolean);
+  const candidates = [scope, ...clauses.map((_, i) => clauses.slice(0, clauses.length - 1 - i).join("; ")).filter(Boolean)];
+  for (const c of candidates.length ? candidates : [""]) {
+    const tail = (more > 0 ? ` + ${more} more` : "") + "." + (c ? ` ${end(c)}` : "");
+    const room = MAX_LINE - ("Source: ".length + meta.length + tail.length);
+    if (room >= 20) return `Source: ${trimTitle(first.title, room)}${meta}${tail}`;
+  }
+  return "";
 }
 
 /** A short footer label for the figure cards: the publishers' names, e.g. "redfin.com · sacbee.com". */

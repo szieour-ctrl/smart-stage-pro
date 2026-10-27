@@ -84,10 +84,18 @@ async function generateImage(prompt, size) {
   }
   return Buffer.from(b64, "base64");
 }
-async function brandPlate(format, brand) {
+// Closing plate (no picture of its own): a darkened, softly blurred version of the nearest earlier scene's image, so the closing
+// text sits on the same photography as the rest of the Reel. No brand colours; with no earlier picture, a neutral warm charcoal.
+async function objectBuffer(Key) {
+  const r = await s3.send(new GetObjectCommand({ Bucket: BUCKET(), Key }));
+  const chunks = [];
+  for await (const c of r.Body) chunks.push(c);
+  return Buffer.concat(chunks);
+}
+async function closingPlate(format, sourceBuf) {
   const [w, h] = format === "9x16" ? [1080, 1920] : [1920, 1080];
-  const c1 = brand.secondary || "#1a1714", c2 = brand.primary || "#b8975a";
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><defs><linearGradient id="g" x1="0" y1="0" x2="0.4" y2="1"><stop offset="0" stop-color="${c1}"/><stop offset="1" stop-color="${c1}"/></linearGradient><radialGradient id="r" cx="0.8" cy="0.1" r="0.9"><stop offset="0" stop-color="${c2}" stop-opacity="0.28"/><stop offset="1" stop-color="${c2}" stop-opacity="0"/></radialGradient></defs><rect width="100%" height="100%" fill="url(#g)"/><rect width="100%" height="100%" fill="url(#r)"/></svg>`;
+  if (sourceBuf) return sharp(sourceBuf).rotate().resize(w, h, { fit: "cover" }).blur(38).modulate({ brightness: 0.5, saturation: 0.85 }).png().toBuffer();
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><defs><radialGradient id="g" cx="0.3" cy="0.25" r="0.9"><stop offset="0" stop-color="#4a4238"/><stop offset="1" stop-color="#1c1a18"/></radialGradient></defs><rect width="100%" height="100%" fill="url(#g)"/></svg>`;
   return sharp(Buffer.from(svg)).png().toBuffer();
 }
 
@@ -114,7 +122,11 @@ async function prepareImages(job, project, narrative, brand, formats) {
   const worker = async (t) => {
     const base = `agent-marketing-assets/${job.user_id}/${job.project_id}/${job.id}/${t.slot}`;
     let buf, source;
-    if (t.plate) { buf = await brandPlate(t.f, brand); source = "brand_plate"; }
+    if (t.plate) {
+      let src = null;
+      for (let i = t.n.scene - 1; i >= 0 && !src; i--) { const e = images[`${i}_${t.f}`]; if (e && e.key && e.source !== "closing_plate") { try { src = await objectBuffer(e.key); } catch (_) { /* fall back to neutral */ } } }
+      buf = await closingPlate(t.f, src); source = "closing_plate";
+    }
     else {
       const prompt = img.buildFormatPrompt({ kind: t.n.imageKind, scenePrompt: t.n.prompt, format: t.f, framing: t.n.framing && t.n.framing[t.f] });
       buf = await generateImage(prompt, t.f === "9x16" ? img.tallSize() : img.SIZES[img.WIDE]);
@@ -127,9 +139,11 @@ async function prepareImages(job, project, narrative, brand, formats) {
     job.assets = { ...(job.assets || {}), images }; job.usage = usage;
     await patchJob(job.id, { assets: job.assets, usage, step: `Images ${done} of ${todo.length}` });
   };
-  const queue = todo.slice();
+  // pictures first; plates built from them go last
+  const queue = todo.filter((t) => !t.plate), plates = todo.filter((t) => t.plate);
   const runners = Array.from({ length: Math.min(3, queue.length) }, async () => { for (let t = queue.shift(); t; t = queue.shift()) await worker(t); });
   await Promise.all(runners);
+  for (const t of plates) await worker(t);
   job.assets = { ...(job.assets || {}), images };
   return images;
 }

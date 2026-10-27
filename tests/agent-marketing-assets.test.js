@@ -113,3 +113,12 @@ test("a figure card arrives when its number is spoken, and the comparison scene 
   assert.strictEqual(cmp.data.kind, "A Real Story");
   assert.strictEqual(manifest.scenes[0].card_start_sec, undefined);
 });
+
+test("narration shaping comes from the environment, with a deeper default, and reaches the manifest", () => {
+  assert.deepStrictEqual(lib.voiceShapeFrom({}), { semitones: -1.5, bass_db: 3 });
+  assert.deepStrictEqual(lib.voiceShapeFrom({ AGENT_MARKETING_VOICE_SEMITONES: "-9", AGENT_MARKETING_VOICE_BASS_DB: "20" }), { semitones: -4, bass_db: 8 });
+  assert.strictEqual(lib.voiceShapeFrom({ AGENT_MARKETING_VOICE_SEMITONES: "0", AGENT_MARKETING_VOICE_BASS_DB: "0" }), null);
+  const { manifest, validation } = lib.buildManifest(input({ voiceShape: { semitones: -1.5, bass_db: 3 } }));
+  assert.deepStrictEqual(manifest.audio.voice_shape, { semitones: -1.5, bass_db: 3 });
+  assert.deepStrictEqual(validation.errors, []);
+});

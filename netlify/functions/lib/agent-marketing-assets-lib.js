@@ -74,7 +74,7 @@ function buildManifest(input) {
     brand: input.brand,
     figures: figs.filter((f) => used.has(f.ref)).map((f) => ({ ref: f.ref, label: f.label, display: f.display, value: f.value, n: f.n })),
     derived: pl.derived, narration_text: input.narrationTagged,
-    audio: { narration_key: input.audio.narration_key, duration_sec: input.audio.duration_sec },
+    audio: { narration_key: input.audio.narration_key, duration_sec: input.audio.duration_sec, ...(input.voiceShape ? { voice_shape: input.voiceShape } : {}) },
     captions, scenes,
   };
   const q = manifestLib.applySmallSampleQualifiers(manifest);
@@ -83,4 +83,12 @@ function buildManifest(input) {
   return { manifest, edits: q.edits, plan: pl, validation };
 }
 
-module.exports = { parseNoticePeriod, voiceIdFor, imageNeeds, buildManifest };
+/** Narration shaping from the environment: AGENT_MARKETING_VOICE_SEMITONES (default -1.5, 0 to -4) and AGENT_MARKETING_VOICE_BASS_DB (default 3, 0 to 8). */
+function voiceShapeFrom(env) {
+  const num = (v, d) => (v === undefined || v === "" || !Number.isFinite(Number(v)) ? d : Number(v));
+  const semitones = Math.max(-4, Math.min(0, num(env.AGENT_MARKETING_VOICE_SEMITONES, -1.5)));
+  const bass_db = Math.max(0, Math.min(8, num(env.AGENT_MARKETING_VOICE_BASS_DB, 3)));
+  return semitones || bass_db ? { semitones, bass_db } : null;
+}
+
+module.exports = { voiceShapeFrom, parseNoticePeriod, voiceIdFor, imageNeeds, buildManifest };

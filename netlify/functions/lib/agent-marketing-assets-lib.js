@@ -48,13 +48,21 @@ function buildManifest(input) {
   if (tw.error) return { manifest: null, validation: { ok: false, errors: [{ code: "timing", where: "scenes", message: tw.error }], warnings: [] }, plan: pl };
   const used = new Set();
   pl.scenes.forEach((s) => (s.claims || []).forEach((c) => c.figure && used.add(c.figure)));
+  // A figure card should arrive when the number is spoken, not at the start of the sentence that leads up to it.
+  const cardStart = (s, w) => {
+    if (!/^(stat_big_number|compare_two_card)$/.test(s.composition) || !w) return undefined;
+    const hit = (input.audio.words || []).find((x) => x.start >= w.start && x.start < w.end && /\d/.test(String(x.text || x.word || "")));
+    if (!hit) return undefined;
+    const t = Math.round(Math.max(w.start, hit.start - 0.6) * 100) / 100;
+    return t - w.start >= 0.8 ? t : undefined;
+  };
   const scenes = pl.scenes.map((s, i) => {
     const v = s.visual || {};
     const owner = v.visualSource === "CONCEPT_REUSE" && Number.isInteger(v.reuseOfScene) ? v.reuseOfScene : i;
     const keys = (input.imageKeys && input.imageKeys[owner]) || {};
     return {
       n: i + 1, composition: s.composition, narrative_role: s.narrative_role, branding: s.branding,
-      narration_excerpt: s.narration_excerpt, window: tw.windows[i],
+      narration_excerpt: s.narration_excerpt, window: tw.windows[i], ...(cardStart(s, tw.windows[i]) !== undefined ? { card_start_sec: cardStart(s, tw.windows[i]) } : {}),
       visual: { research_visual_context: [v.purpose, v.visualBrief].filter(Boolean).join(" — "), image_keys: keys, motion: s.camera_motion || "static_hold", source: v.visualSource },
       claims: s.claims, data: s.data, reason: s.reason,
     };

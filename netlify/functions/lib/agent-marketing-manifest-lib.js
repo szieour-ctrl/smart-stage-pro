@@ -15,6 +15,7 @@
 const treatments = require("./agent-marketing-treatments");
 const { FONTS } = require("./brand-themes");
 
+const sourcesLib = require("./agent-marketing-sources-lib");
 const MANIFEST_VERSION = "am-manifest-2";
 const FORMATS = ["9x16", "16x9"];
 const SMALL_SAMPLE_BELOW = 10; // Sam, Oct 25: fewer than 10 listings is a count, never a trend on its own
@@ -176,6 +177,15 @@ function validateManifest(manifest) {
   // notice
   const noticeNeeded = m.notice_required !== false;
   const built = metroListNotice(m.notice && m.notice.period);
+  if (!noticeNeeded) {
+    // A web-research Reel (no MetroList report): the bottom bar is the source line, built by code from the checked sources.
+    const sl = m.source_line || {};
+    const want = sourcesLib.sourceLine(sl.sources, sl.scope_note);
+    if (!want) err("source_line", "source_line", "A Reel without a MetroList report needs at least one checked, dated source for its on-screen source line.");
+    else if (sl.text !== want) err("source_line", "source_line.text", "The source line must be built from the checked sources, not typed.");
+  }
+  // numbers the research step recorded for the topic count as verified for words on screen (the narration was already checked against them)
+  (Array.isArray(m.verified_numbers) ? m.verified_numbers : []).forEach((v) => { if (Number.isFinite(v)) verifiedNumbers.add(v); });
   if (noticeNeeded) {
     if (!built) err("notice", "notice.period", "A report period is required to build the MetroList notice.");
     else if (!m.notice || m.notice.text !== built) err("notice", "notice.text", "The notice text must be built from the report period, not typed.");

@@ -111,10 +111,11 @@ const router = (redfin) => { const calls = []; const fn = async (p) => { calls.p
 const row = (geo) => ({ id: "r1", mode: "market_update", audience: "sellers", geography: { type: "city", name: "Lincoln", city: "", state: "CA", label: "Lincoln, CA", ...geo }, focus: {}, upload_refs: [], data_source: "web" });
 const NOW = "2026-10-27T17:00:00Z";
 const noSleep = async () => {};
+const ON = { AGENT_MARKETING_REDFIN_READ: "on" }; // the live Redfin read is paused unless this switch is on
 
 test("run: with a ZIP and no upload, every topic carries the Redfin data; one extra call, session still charged once", async () => {
   const callFn = router(redfinReply(page()));
-  const r = await run.runResearch({ row: row({ zip: "95746" }), apiKey: "k", now: NOW, env: {}, sleepFn: noSleep, callFn });
+  const r = await run.runResearch({ row: row({ zip: "95746" }), apiKey: "k", now: NOW, env: ON, sleepFn: noSleep, callFn });
   assert.strictEqual(r.fields.status, "ready");
   assert.ok(r.fields.charged_at);
   assert.strictEqual(callFn.calls.length, 2);
@@ -124,13 +125,13 @@ test("run: with a ZIP and no upload, every topic carries the Redfin data; one ex
 
 test("run: a ZIP market uses its own ZIP", async () => {
   const callFn = router(redfinReply(page()));
-  const r = await run.runResearch({ row: row({ type: "zip", name: "95746" }), apiKey: "k", now: NOW, env: {}, sleepFn: noSleep, callFn });
+  const r = await run.runResearch({ row: row({ type: "zip", name: "95746" }), apiKey: "k", now: NOW, env: ON, sleepFn: noSleep, callFn });
   assert.strictEqual(r.fields.topics[0].marketData.zip, "95746");
 });
 
 test("run: Redfin failing never fails the session; the agent is told", async () => {
   for (const bad of [{ status: 500, json: {} }, redfinReply({ page_url: "https://www.zillow.com/x", figures: [] }), { status: 200, json: { output: [{ type: "message", content: [{ type: "output_text", text: "I could not open that page." }] }] } }]) {
-    const r = await run.runResearch({ row: row({ zip: "95746" }), apiKey: "k", now: NOW, env: {}, sleepFn: noSleep, callFn: router(() => bad) });
+    const r = await run.runResearch({ row: row({ zip: "95746" }), apiKey: "k", now: NOW, env: ON, sleepFn: noSleep, callFn: router(() => bad) });
     assert.strictEqual(r.fields.status, "ready");
     assert.ok(r.fields.charged_at);
     assert.ok(r.fields.topics.every((t) => !t.marketData));
@@ -141,29 +142,41 @@ test("run: Redfin failing never fails the session; the agent is told", async () 
 
 test("run: no ZIP, an uploaded report, or Local Events means no Redfin call", async () => {
   const noZip = router(redfinReply(page()));
-  const a = await run.runResearch({ row: row({}), apiKey: "k", now: NOW, env: {}, sleepFn: noSleep, callFn: noZip });
+  const a = await run.runResearch({ row: row({}), apiKey: "k", now: NOW, env: ON, sleepFn: noSleep, callFn: noZip });
   assert.strictEqual(noZip.calls.filter((c) => /ONE web page/.test(c.instructions)).length, 0);
   assert.ok(/No ZIP code was given/.test(a.fields.usage.redfinNote));
   const events = router(redfinReply(page()));
-  await run.runResearch({ row: { ...row({ zip: "95746" }), mode: "local_events" }, apiKey: "k", now: NOW, env: {}, sleepFn: noSleep, callFn: events });
+  await run.runResearch({ row: { ...row({ zip: "95746" }), mode: "local_events" }, apiKey: "k", now: NOW, env: ON, sleepFn: noSleep, callFn: events });
   assert.strictEqual(events.calls.filter((c) => /ONE web page/.test(c.instructions)).length, 0); // (the topic call may retry; none is a Redfin call)
 });
 
 test("fetchRedfinTrends never throws and reports why", async () => {
-  const x = await run.fetchRedfinTrends({ zip: "95746", apiKey: "k", callFn: async () => { throw new Error("socket hang up"); }, sleepFn: noSleep, today: TODAY, env: {} });
+  const x = await run.fetchRedfinTrends({ zip: "95746", apiKey: "k", callFn: async () => { throw new Error("socket hang up"); }, sleepFn: noSleep, today: TODAY, env: ON });
   assert.strictEqual(x.ok, false);
   assert.ok(x.problems.length);
-  const y = await run.fetchRedfinTrends({ zip: "95746", apiKey: "k", callFn: async () => redfinReply(page()), sleepFn: noSleep, today: TODAY, env: {} });
+  const y = await run.fetchRedfinTrends({ zip: "95746", apiKey: "k", callFn: async () => redfinReply(page()), sleepFn: noSleep, today: TODAY, env: ON });
   assert.strictEqual(y.ok, true);
   assert.strictEqual(y.redfin.figures.length, 4);
 });
 
 test("a refused Redfin answer keeps what the provider said, so the cause can be seen; a good one keeps nothing extra", async () => {
   const said = { status: 200, json: { citations: ["https://www.redfin.com/zipcode/95843/housing-market"], output: [{ type: "message", content: [{ type: "output_text", text: JSON.stringify({ page_url: "https://www.redfin.com/zipcode/95843/housing-market", period_sentence: "Prices were up over the last quarter.", figures: [{ label: "Median sale price", value: "$520K", sentence: "median price of $520K" }] }) }] }] } };
-  const bad = await run.fetchRedfinTrends({ zip: "95843", apiKey: "k", callFn: async () => said, sleepFn: noSleep, today: TODAY, env: {} });
+  const bad = await run.fetchRedfinTrends({ zip: "95843", apiKey: "k", callFn: async () => said, sleepFn: noSleep, today: TODAY, env: ON });
   assert.strictEqual(bad.ok, false);
   assert.ok(/Prices were up over the last quarter/.test(bad.debug.answer));
   assert.deepStrictEqual(bad.debug.citations, ["https://www.redfin.com/zipcode/95843/housing-market"]);
-  const good = await run.fetchRedfinTrends({ zip: "95746", apiKey: "k", callFn: async () => redfinReply(page()), sleepFn: noSleep, today: TODAY, env: {} });
+  const good = await run.fetchRedfinTrends({ zip: "95746", apiKey: "k", callFn: async () => redfinReply(page()), sleepFn: noSleep, today: TODAY, env: ON });
   assert.strictEqual(good.debug, null);
+});
+
+test("run: the live Redfin read is paused by default; no Redfin call, the session still delivers and the agent is told", async () => {
+  for (const env of [{}, { AGENT_MARKETING_REDFIN_READ: "off" }]) {
+    const callFn = router(redfinReply(page()));
+    const r = await run.runResearch({ row: row({ zip: "95746" }), apiKey: "k", now: NOW, env, sleepFn: noSleep, callFn });
+    assert.strictEqual(r.fields.status, "ready");
+    assert.ok(r.fields.charged_at);
+    assert.strictEqual(callFn.calls.filter((c) => /ONE web page/.test(c.instructions)).length, 0);
+    assert.ok(r.fields.topics.every((t) => !t.marketData));
+    assert.ok(/not read automatically/.test(r.fields.usage.redfinNote));
+  }
 });

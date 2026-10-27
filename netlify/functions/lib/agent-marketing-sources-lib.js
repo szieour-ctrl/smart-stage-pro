@@ -4,7 +4,7 @@
 "use strict";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-const MAX_LINE = 240;
+const MAX_LINE = 170; // the 9:16 bar holds 3 lines (about 190 characters of ordinary text); 170 leaves room for wide words
 const hostOf = (u) => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return ""; } };
 function shortDate(iso) {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ""));
@@ -33,9 +33,13 @@ function sourceLine(sources, scopeNote) {
   const scope = String(scopeNote || "").replace(/\s+/g, " ").trim();
   const meta = ` (${hostOf(first.url)}, ${shortDate(first.published)})`;
   const end = (t) => (/[.!?]$/.test(t) ? t : t + ".");
-  // A long scope note is cut back at a clause boundary (never mid-word) until the source title still has room; the scope is never dropped.
-  const clauses = scope.split(/;\s+|\s+[—–]\s+/).filter(Boolean);
-  const candidates = [scope, ...clauses.map((_, i) => clauses.slice(0, clauses.length - 1 - i).join("; ")).filter(Boolean)];
+  // A long scope note is cut back to the part that says what the figures cover (never mid-word) so the source title still has room;
+  // the coverage statement is kept ahead of anything else, and with no such part the opening clauses are kept.
+  const pieces = scope.split(/(?<=[.!?])\s+|;\s+|\s+[—–]\s+/).map((x) => x.trim()).filter(Boolean);
+  const COVERS = /\b(cover|covers|covering|national|nationwide|statewide|not all|not lincoln|only|limited to)\b/i;
+  const coverage = pieces.filter((x) => COVERS.test(x));
+  const lead = pieces.map((_, i) => pieces.slice(0, pieces.length - 1 - i).join("; ")).filter(Boolean);
+  const candidates = [scope, ...coverage, ...lead];
   for (const c of candidates.length ? candidates : [""]) {
     const tail = (more > 0 ? ` + ${more} more` : "") + "." + (c ? ` ${end(c)}` : "");
     const room = MAX_LINE - ("Source: ".length + meta.length + tail.length);

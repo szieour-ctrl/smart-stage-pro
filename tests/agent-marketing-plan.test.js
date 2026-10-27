@@ -51,7 +51,22 @@ test("a good plan is normalized: captions derived, scenes timed to the duration,
 test("unknown or excess audio tags are removed", () => {
   const t = planLib.sanitizeTags("[whispers] Hi [warm] there [emphasis] a [confident] b [thoughtful] c [conversational] d [warm] e [warm] f");
   assert.ok(!/whispers/.test(t));
-  assert.ok((t.match(/\[/g) || []).length <= 6);
+  assert.ok((t.match(/\[/g) || []).length <= 8);
+});
+
+test("[pause] is an allowed tag and stays where the planner put it", () => {
+  const t = planLib.sanitizeTags("[conversational] Hello there. [pause] So what does it show? [PAUSE] And [whispers] more.");
+  assert.strictEqual(t, "[conversational] Hello there. [pause] So what does it show? [pause] And more.");
+});
+
+test("the planner is told to write for the ear, with pauses, ellipses and joined thoughts", () => {
+  const sys = planLib.buildSystemPrompt();
+  assert.match(sys, /ElevenLabs v4/);
+  assert.match(sys, /one person talking to one neighbor/);
+  assert.match(sys, /\[pause\]/);
+  assert.match(sys, /ellipsis/);
+  assert.doesNotMatch(sys, /Write for the ear: short sentences/);
+  assert.match(sys, /<N> days/, "the style example uses placeholders, never real figures");
 });
 
 test("extra generated images are demoted to concept re-use instead of failing or adding paid generations", () => {

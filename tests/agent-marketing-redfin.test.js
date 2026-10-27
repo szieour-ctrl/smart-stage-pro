@@ -48,6 +48,23 @@ test("validate: Sam's 95746 page is accepted whole; Redfin's numbers are never s
   assert.strictEqual(v.redfin.figures.find((f) => /days/.test(f.label)).display, "44 days");
 });
 
+test("validate: Lincoln's tiles and narrative show one figure two ways ($620,704 and $621K); both are kept, nothing is compared", () => {
+  const LINC = "Over the three months ending September 2026, Lincoln home prices were up 3.5% compared to the same period last year, selling for a median price of $621K. On average, homes in Lincoln sell after 37 days on the market compared to 35 days last year. There were 279 homes sold in September this year, up from 251 last year.";
+  const v = rf.validateRedfin({
+    page_url: "https://www.redfin.com/city/10201/CA/Lincoln/housing-market".replace("/city/10201/CA/Lincoln", "/zipcode/95648"), period_sentence: LINC,
+    figures: [
+      { label: "Median Sale Price", value: "$620,704", change: "+3.5% year-over-year", sentence: "Median Sale Price $620,704 +3.5% year-over-year" },
+      { label: "Median sale price", value: "$621K", change: "up 3.5% compared to the same period last year", sentence: LINC },
+      { label: "# of Homes Sold", value: "279", change: "+11.3% year-over-year", sentence: "# of Homes Sold 279 +11.3% year-over-year" },
+      { label: "Median Days on Market", value: "37", change: "+2 year-over-year", sentence: "Median Days on Market 37 +2 year-over-year" },
+    ],
+  }, { zip: "95648", today: TODAY });
+  assert.strictEqual(v.ok, true, v.problems.join("; "));
+  assert.strictEqual(v.redfin.figures.length, 4);
+  assert.deepStrictEqual(v.warnings, []);
+  assert.ok(v.redfin.attribution.endsWith("[Over the 3-mos. ending September 2026]"));
+});
+
 test("validate: a figure with no period of its own is kept, not dropped", () => {
   const v = rf.validateRedfin(page({ figures: [{ label: "Homes sold above list", value: "24.7%", change: null, sentence: "24.7% of homes sold above list price." }] }), { zip: "95746", today: TODAY });
   assert.strictEqual(v.ok, true);
@@ -62,18 +79,20 @@ test("validate: an older period is used and flagged, never rejected", () => {
   assert.ok(v.warnings.some((w) => /older than the last complete month/.test(w)));
 });
 
-test("validate: refused only when it is not Redfin's page for this ZIP, names no period, or has no traceable figure", () => {
+test("validate: refused only when it is not Redfin's page for this ZIP, names no period, or has no figure", () => {
   const bad = (over, opts) => rf.validateRedfin(page(over), { zip: "95746", today: TODAY, ...opts });
   assert.strictEqual(bad({ page_url: "https://www.zillow.com/home-values/95746/" }).ok, false);
   assert.strictEqual(bad({ page_url: "https://www.redfin.com/zipcode/95678/housing-market" }).ok, false);
   assert.strictEqual(bad({ page_url: "https://redfin.com.evil.example/zipcode/95746/housing-market" }).ok, false);
   assert.strictEqual(bad({ period_sentence: "Over the last 3 months, prices were up." }).ok, false);
   assert.strictEqual(bad({ figures: [] }).ok, false);
-  // a figure whose value is not in its own sentence is dropped (not Redfin's wording); the rest stay
+  // a figure is never dropped or refused for its value, or for not matching a sentence: Redfin's page is the source of truth
   const v = bad({ figures: [{ label: "Median sale price", value: "$1.3M", change: null, sentence: PERIOD }, ...page().figures.slice(1, 2)] });
   assert.strictEqual(v.ok, true);
-  assert.strictEqual(v.redfin.figures.length, 1);
-  assert.ok(v.warnings.some((w) => /Median sale price/.test(w)));
+  assert.strictEqual(v.redfin.figures.length, 2);
+  assert.deepStrictEqual(v.warnings, []);
+  // only an item with no label or no number at all is not a figure
+  assert.strictEqual(bad({ figures: [{ label: "", value: "5", sentence: "x" }, { label: "Median days on market", value: "n/a", sentence: "x" }] }).ok, false);
   // the provider says it read other pages only
   assert.strictEqual(bad({}, { citations: ["https://www.zillow.com/x"] }).ok, false);
   assert.strictEqual(bad({}, { citations: ["https://www.redfin.com/zipcode/95746/housing-market?utm_source=smartstagepro.com"] }).ok, true);

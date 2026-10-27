@@ -171,6 +171,10 @@ exports.handler = async (event) => {
     // approve_narrative
     const n = project.narrative;
     if (!n || !n.narrationTagged) return reply(409, { error: "There is no script to approve yet." });
+    // A script written for another topic or other answers must not be approved for this one (its numbers would have no source here).
+    if (project.template === "local_market_insider" && project.selected_topic && n.intakeHash && n.intakeHash !== planLib.intakeHash(project.intake, project.selected_topic)) {
+      return reply(409, { error: "This script was written for a different topic or different answers. Write a new script for the topic you chose, then approve it.", code: "script_stale" });
+    }
     am.attachNotice(project, n); // scripts saved before the notice was kept still carry it
     const g = gate.evaluate(am.gateInputFor(project, n, n.source === "claude" ? "claude" : "edited"));
     if (!g.ok) return reply(422, { error: gate.explain(g), gate: gateSummary(g) });

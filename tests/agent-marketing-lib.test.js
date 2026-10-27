@@ -20,6 +20,9 @@ test("create: defaults, validation and the not-yet-available cases", () => {
   assert.deepStrictEqual(am.validateCreate({ formats: "9x16", durationSec: 30, voice: "ssp_female" }).row.formats, ["9x16"]);
   assert.ok(am.validateCreate({ durationSec: 20 }).error);
   assert.ok(am.validateCreate({ formats: ["4x3"] }).error);
+  // choosing 16:9 means both formats: each gets its own images and layout
+  assert.deepStrictEqual(am.validateCreate({ formats: ["16x9"] }).row.formats, ["9x16", "16x9"]);
+  assert.deepStrictEqual(am.validateCreate({ formats: ["9x16"] }).row.formats, ["9x16"]);
   assert.match(am.validateCreate({ voice: "custom" }).error, /coming soon/);
   assert.strictEqual(am.validateCreate({ music: "luxury_cinematic" }).row.music, "luxury_cinematic");
   assert.strictEqual(am.validateCreate({ music: "none" }).row.music, "none");

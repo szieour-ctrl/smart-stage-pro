@@ -100,6 +100,7 @@ exports.handler = async (event) => {
   if (!project.narrative_approved_at) return reply(400, { error: "Approve the narration first." });
   let formats = Array.isArray(b.formats) && b.formats.length ? b.formats : project.formats;
   formats = am.FORMATS.filter((f) => formats.includes(f) && (project.formats || []).includes(f));
+  if (formats.includes("16x9") && (project.formats || []).includes("9x16")) formats = am.FORMATS.filter((f) => (project.formats || []).includes(f)); // 16:9 always comes with 9:16
   if (!formats.length) return reply(400, { error: "Choose 9:16, 16:9 or both." });
   // one live job per project at a time
   const live = await supabase("GET", "agent_marketing_jobs", null, `?project_id=eq.${project.id}&status=in.(queued,preparing,ready,rendering)&select=id&limit=1`);

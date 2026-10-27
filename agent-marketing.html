@@ -181,7 +181,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     <section class="panel hidden" id="stepSetup">
       <div class="eyebrow">01 / Setup</div>
       <div class="panel-title">How long, and where will it play?</div>
-      <div class="panel-sub">One story. Each scene gets one wide 16:9 image, and the vertical 9:16 version is cropped from the best part of that same image, so you get both formats without paying twice.</div>
+      <div class="panel-sub">One story, made for each format you choose. Choose 9:16 for Reels, Shorts and TikTok, or both to also get 16:9 for YouTube. Each format gets its own images and layout, so nothing is cropped or stretched.</div>
       <label class="lbl">Length</label>
       <div class="choices row" id="durChoices"></div>
       <label class="lbl">Format</label>
@@ -417,7 +417,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
         <div class="eyebrow">07 / Your Reel</div>
         <div class="panel-title">Make your Reel</div>
         <div class="panel-sub">We create the narration, add any images still needed, and put it together with your captions, your headshot and name, music, and the MetroList notice. It takes a few minutes and you can leave this page; your Reel will be here when you come back. Nothing is charged during the beta.</div>
-        <div class="reel-formats" id="reelFormats" role="group" aria-label="Reel formats"></div>
+        <div class="reel-formats" id="reelFormats"></div>
         <div class="note hidden" id="reelNote"></div>
         <label class="reel-ok"><input type="checkbox" id="reelOk"> <span>I confirm the market statistics and claims in this Reel are accurate and comply with applicable advertising requirements.</span></label>
         <div class="actions"><button class="btn gold" type="button" id="reelGo">Make my Reel</button><button class="btn ghost hidden" type="button" id="reelRetry">Retry</button></div>
@@ -526,7 +526,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
   function pickedValue(name) { var el = document.querySelector('input[name="' + name + '"]:checked'); return el ? el.value : null; }
   function buildSetup() {
     radios($("durChoices"), "dur", state.schema.durations.map(function (d) { return { value: String(d), label: d + " seconds" }; }), "45");
-    radios($("fmtChoices"), "fmt", [{ value: "both", label: "Both" }, { value: "9x16", label: "9:16 vertical" }, { value: "16x9", label: "16:9 horizontal" }], "both");
+    radios($("fmtChoices"), "fmt", [{ value: "9x16", label: "9:16 vertical" }, { value: "both", label: "Both: 9:16 and 16:9" }], "9x16");
     radios($("voiceChoices"), "voice", [{ value: "ssp_male", label: "SSP Male" }, { value: "ssp_female", label: "SSP Female" }], "ssp_male");
     $("musicSelect").innerHTML = (state.schema.music || [{ key: "default", label: "Default: Neutral Ambient" }]).map(function (m) { return '<option value="' + esc(m.key) + '">' + esc(m.label) + "</option>"; }).join("");
   }
@@ -673,7 +673,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
       var fr = s.framing || {};
       return '<div class="scene"><h4>Scene ' + (i + 1) + ' · ' + esc(String(s.role || "").replace(/_/g, " ")) + ' <span class="pill ' + (real || vs === "AGENT_PROFILE" ? "real" : "concept") + '">' + label + '</span><span class="pill">about ' + esc(s.provisionalSeconds) + 's</span></h4>' +
         '<div class="q">“' + esc(s.narrationExcerpt) + '”</div><dl>' + rows +
-        (fr["9x16"] ? "<dt>Vertical crop</dt><dd>" + esc(fr["9x16"]) + "</dd>" : "") + (fr["16x9"] ? "<dt>Wide frame</dt><dd>" + esc(fr["16x9"]) + "</dd>" : "") + "</dl>" + (real ? '<div class="pick" id="pick' + i + '"></div>' : "") + "</div>";
+        (fr["9x16"] ? "<dt>Vertical framing</dt><dd>" + esc(fr["9x16"]) + "</dd>" : "") + (fr["16x9"] ? "<dt>Wide frame</dt><dd>" + esc(fr["16x9"]) + "</dd>" : "") + "</dl>" + (real ? '<div class="pick" id="pick' + i + '"></div>' : "") + "</div>";
     }).join("") || '<div class="hint">No scene plan yet.</div>';
     var m = n.missingAgentInputs || [];
     $("missingBox").classList.toggle("hidden", !m.length);
@@ -768,7 +768,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
   var KIND_OF = { concept: "concept", agent: "agent_scene" };
   var PLANNED_NAME = { GPT_IMAGE_2_CONCEPT: "a concept image", AGENT_SCENE: "an image of you", CONCEPT_REUSE: "a re-framed copy of an earlier image", AGENT_PROFILE: "your profile photo", BRAND_CARD: "a brand card", AUTHENTIC_AGENT_ASSET: "an optional photo of yours" };
   function slotKey(s) { return s.sceneIndex + "_" + s.format; }
-  function fmtName() { return "Wide image (16:9)"; } // one wide image per scene; the vertical version is cropped from it
+  function fmtName() { return "Wide image (16:9)"; } // the wide image; the 9:16 version is made separately for the Reel
   function plural(n) { return n + " Image" + (n === 1 ? "" : "s"); }
   function stopImgPoll() { if (state.imgPoll) { clearInterval(state.imgPoll); state.imgPoll = null; } }
   function anyGenerating() { return im.slots.some(function (s) { return s.latest && s.latest.state === "generating"; }); }
@@ -902,7 +902,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     im.slots.forEach(function (s) { if (!by[s.sceneIndex]) { by[s.sceneIndex] = []; order.push(s.sceneIndex); } by[s.sceneIndex].push(s); });
     $("imagesCount").innerHTML = "Tries used in this project: <b>" + im.total + " of " + im.cap + "</b>. " + (im.charging ? "The first image of each version and one redo are included. Any extra redo shows its price and asks you first, and a try that fails is never charged." : "During the beta, tries are free. A try that fails is not counted.");
     var both = (state.project.formats || []).length > 1;
-    $("imagesSub").textContent = "Choose where each scene's image comes from: your own photo, a generated concept image, or a generated image of you. Each generated image is one wide 16:9 picture; the vertical 9:16 Reel version is cropped from the best part of it. Click any image to open it full size, revise it and use Elaborate with AI. Nothing is used in your Reel until you accept it.";
+    $("imagesSub").textContent = "Choose where each scene's image comes from: your own photo, a generated concept image, or a generated image of you. The images you approve here are your wide 16:9 pictures. Your vertical 9:16 images are made for you when you click Make my Reel, from the same scene description. Click any image to open it full size, revise it and use Elaborate with AI. Nothing is used in your Reel until you accept it.";
     $("imageSlots").innerHTML = order.map(function (idx) { return sceneBlock(idx, by[idx]); }).join("") || '<div class="hint">There are no scenes yet.</div>';
     order.forEach(function (idx) { paintPick(idx); });
     var all = order.length && order.every(function (idx) {
@@ -924,13 +924,10 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
   function rapi(method, qs, body) { return api(method, qs, body, RENDER); }
   function stopReelPoll() { if (reel.timer) { clearTimeout(reel.timer); reel.timer = null; } }
   function reelFormatLabel(f) { return f === "9x16" ? "9:16 (Reels, Shorts, TikTok)" : "16:9 (YouTube)"; }
-  function selectedReelFormats() { var out = []; Array.prototype.forEach.call($("reelFormats").querySelectorAll("input:checked"), function (c) { out.push(c.value); }); return out; }
+  function selectedReelFormats() { return ((state.project && state.project.formats) || []).slice(); }
   function paintReelFormats() {
-    var fs = (state.project && state.project.formats) || [], box = $("reelFormats");
-    if (box.getAttribute("data-for") === fs.join(",")) return;
-    box.setAttribute("data-for", fs.join(","));
-    box.innerHTML = fs.map(function (f) { return '<label><input type="checkbox" value="' + esc(f) + '" checked> ' + esc(reelFormatLabel(f)) + "</label>"; }).join("");
-    Array.prototype.forEach.call(box.querySelectorAll("input"), function (c) { c.addEventListener("change", paintReelNote); });
+    var fs = selectedReelFormats();
+    $("reelFormats").textContent = "Made in " + (fs.length > 1 ? "both formats: 9:16 (Reels, Shorts, TikTok) and 16:9 (YouTube)." : reelFormatLabel(fs[0] || "9x16") + ".");
   }
   // 16:9 uses the images approved above; any scene without one gets a new image made for the Reel.
   function paintReelNote() {
@@ -941,7 +938,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     note.classList.toggle("hidden", !missing.length);
     if (missing.length) note.textContent = "Scene" + (missing.length > 1 ? "s " : " ") + missing.join(", ") + (missing.length > 1 ? " have" : " has") + " no approved 16:9 image yet. Approve one above, or the Reel will create its own for " + (missing.length > 1 ? "them." : "it.");
   }
-  function reelBusyUi(on) { reel.busy = on; $("reelGo").disabled = on; Array.prototype.forEach.call($("reelFormats").querySelectorAll("input"), function (c) { c.disabled = on; }); $("reelOk").disabled = on; }
+  function reelBusyUi(on) { reel.busy = on; $("reelGo").disabled = on; $("reelOk").disabled = on; }
   function showReel(j) {
     reelBusyUi(false);
     say("reelMsg", "Your Reel is ready" + (j.durationSec ? " (" + Math.round(j.durationSec) + " seconds)" : "") + ".", "ok");
@@ -983,7 +980,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
   }
   async function startReel() {
     var formats = selectedReelFormats();
-    if (!formats.length) return say("reelMsg", "Choose at least one format.", "err");
+    if (!formats.length) return say("reelMsg", "This project has no format selected.", "err");
     if (!$("reelOk").checked) return say("reelMsg", "Please tick the confirmation first.", "err");
     reelBusyUi(true); $("reelRetry").classList.add("hidden"); $("reelOut").classList.add("hidden"); say("reelMsg", "Starting …");
     try {
@@ -1019,9 +1016,8 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     var want = st.generating ? "g" : (st.shown && st.shown.url ? "i:" + st.shown.url : "n");
     if (wrap.getAttribute("data-w") !== want) {
       wrap.setAttribute("data-w", want);
-      var vertical = (state.project.formats || []).indexOf("9x16") >= 0;
-      wrap.innerHTML = st.generating ? '<span><span class="spinner"></span>Creating your image…</span>' : (st.shown && st.shown.url ? '<span class="cropwrap"><img alt="Generated image" src="' + esc(st.shown.url) + '">' + (vertical ? '<span class="cropbox" id="cropBox" style="left:' + ((cropOf(st.shown) - CROPW / 2) * 100).toFixed(2) + '%"></span>' : "") + "</span>" : "<span>No image yet</span>");
-      $("imgmCrop").textContent = !st.generating && st.shown && st.shown.url && vertical ? "Dashed box: the part used for the vertical 9:16 Reel. Drag it left or right to choose what the vertical version shows. The wide 16:9 version always shows the whole image." : "";
+      wrap.innerHTML = st.generating ? '<span><span class="spinner"></span>Creating your image…</span>' : (st.shown && st.shown.url ? '<span class="cropwrap"><img alt="Generated image" src="' + esc(st.shown.url) + '">'  + "</span>" : "<span>No image yet</span>");
+      $("imgmCrop").textContent = "";
     }
     var v = st.shown, used = "";
     if (v && (v.description || v.note)) {

@@ -138,3 +138,10 @@ test("the Reel reuses only images the agent approved", () => {
   assert.match(prep, /r\.status === "approved" && r\.generation/);
   assert.doesNotMatch(prep, /r\.status !== "rejected" && r\.generation/);
 });
+
+test("Agent Marketing no longer promises a crop: each format has its own images; 16:9 comes with 9:16", () => {
+  const html = read("agent-marketing.html");
+  assert.doesNotMatch(html, /cropped from|Dashed box|class="cropbox" id="cropBox"/);
+  assert.match(html, /value: "both", label: "Both: 9:16 and 16:9"/);
+  assert.doesNotMatch(html, /value: "16x9", label: "16:9 horizontal"/);
+});

@@ -57,6 +57,7 @@ function validateCreate(body) {
   if (typeof formats === "string") formats = [formats];
   if (!Array.isArray(formats) || formats.length === 0 || !formats.every((f) => FORMATS.includes(f))) return { error: "Choose 9:16, 16:9 or both." };
   formats = FORMATS.filter((f) => formats.includes(f)); // stable order, no duplicates
+  if (formats.includes("16x9")) formats = FORMATS.slice(); // choosing 16:9 means both: each format gets its own images and layout
   const voice = String(b.voice || "ssp_male");
   if (!VOICES.includes(voice)) return { error: voice === "custom" ? "Your own ElevenLabs voice is coming soon." : "Choose SSP Male or SSP Female." };
   const music = String(b.music == null || b.music === "" ? "default" : b.music);

@@ -69,3 +69,13 @@ test("a long scope note is cut back at a clause boundary instead of losing the w
   assert.match(t, /The rate figure is national and dated 2026-10-22\.$/);
   assert.strictEqual(sl.sourceLine(src, "Figures cover ZIP 95834."), "Source: Mortgage Rates Decrease to 7.32% (freddiemac.gcs-web.com, Oct 22, 2026). Figures cover ZIP 95834.");
 });
+
+test("source lines stay within the bar and always keep the sentence that says what the figures cover", () => {
+  const sl = require("../netlify/functions/lib/agent-marketing-sources-lib");
+  const z = sl.sourceLine([{ url: "https://www.zillow.com/research/september-2026-market-report/", title: "Winter Has Arrived Early in the Housing Market as Newly Pending Sales Fall 8.5% (Zillow September Market Report)", published: "2026-10-06" }],
+    "These figures cover the United States, not Lincoln, CA; September 2026 data does not cover the full requested September 27–October 26 period, and the closed-sales nowcast is preliminary.");
+  assert.ok(z.length <= sl.MAX_LINE, z); assert.match(z, /…\s\(zillow\.com, Oct 6, 2026\)/); assert.match(z, /These figures cover the United States, not Lincoln, CA\.$/);
+  const n = sl.sourceLine([{ url: "https://www.redfin.com/a", title: "Redfin 95834 Housing Market", published: "2026-10-20" }, { url: "https://www.sacbee.com/b", title: "B", published: "2026-10-19" }],
+    "Median price is based on the three-month reporting period ending September; closed-sale count is for September. Figures cover ZIP 95834, not all of Natomas.");
+  assert.match(n, /Figures cover ZIP 95834, not all of Natomas\.$/); assert.ok(n.length <= sl.MAX_LINE);
+});

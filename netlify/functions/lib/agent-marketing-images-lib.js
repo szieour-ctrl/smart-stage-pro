@@ -123,10 +123,21 @@ function pickReferenceKey(profileRow) {
 // per-format framing note for the scene.
 const TALL_SIZE = "1440x2560";
 const TALL_RULES = "Tall vertical 9:16 portrait-orientation composition. Text will be laid over the top 45% of the frame, so keep that whole upper area calm and simple: soft wall, sky, window light or blurred background only, with no objects, props, plants or strong edges in it. That upper area must be one continuous surface edge to edge: no window frames, door frames, curtains, shelves, corners or any vertical edge or change of brightness crossing it, especially near the left and right sides. Place the main subject and every key detail in the band between 48% and 78% of the frame height, and keep the lower fifth calm and uncluttered (captions sit there).";
+const TALL_AGENT_RULES = "Tall vertical 9:16 portrait-orientation photograph shot like a real editorial photo, NOT a headshot. Text will be laid over the top 45% of the frame, so keep that whole upper area calm and simple: soft sky, wall or blurred background only, one continuous surface edge to edge with no objects, strong edges or vertical lines in it. Show the person standing or seated naturally, full length or at least to the knees, with their head and body inside the band between 48% and 85% of the frame height, centred horizontally, with the surrounding environment visible around them. Keep the lower fifth calm and uncluttered (captions sit there).";
 function buildFormatPrompt({ kind, scenePrompt, format, framing }) {
   if (format !== "9x16") return buildPrompt({ kind, scenePrompt });
   const base = String(scenePrompt || "").replace(/\s+/g, " ").trim().slice(0, 900);
   const note = framing ? String(framing).replace(/\s+/g, " ").trim().slice(0, 300) : "";
+  if (kind === "agent_scene") {
+    return [
+      "Create a photorealistic editorial photograph showing the real person in the reference photo in this generic setting: " + base,
+      TALL_AGENT_RULES,
+      note ? "Framing: " + note : "",
+      "The person must look exactly like the reference photo: same face, hair, beard, age and build, natural skin texture, natural relaxed expression. Keep their clothing simple and similar to the reference. The person is the ONLY person in the image.",
+      "Natural light, California residential aesthetic, believable proportions and hands.",
+      NO_REAL_THINGS,
+    ].filter(Boolean).join("\n");
+  }
   return [
     "Create a photorealistic editorial concept image: " + base,
     TALL_RULES,

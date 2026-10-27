@@ -224,3 +224,12 @@ test("accepting a generated image retires an approved own photo for that scene (
   assert.strictEqual((await call("POST", { action: "accept", projectId: P1, assetId: g.id })).status, 200);
   assert.strictEqual(g.status, "approved"); assert.strictEqual(own.status, "rejected");
 });
+
+test("tall prompt for the image of you uses the reference-photo rules and keeps the top calm", () => {
+  const p = img.buildFormatPrompt({ kind: "agent_scene", scenePrompt: "standing on a tree-lined sidewalk", format: "9x16" });
+  assert.match(p, /ONLY person/); assert.match(p, /reference photo/); assert.match(p, /top 45%/); assert.match(p, /9:16/);
+  assert.doesNotMatch(p, /No people at all/);
+  const wide = img.buildFormatPrompt({ kind: "agent_scene", scenePrompt: "x", format: "16x9" });
+  assert.match(wide, /ONLY person/);
+  assert.match(img.buildFormatPrompt({ kind: "concept", scenePrompt: "x", format: "9x16" }), /No people at all/);
+});

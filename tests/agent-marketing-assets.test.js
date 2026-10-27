@@ -102,3 +102,14 @@ test("the rewritten Natomas script (pauses, ellipses) still builds a valid manif
   assert.strictEqual(takeaway.statement, "New construction sets a baseline so your home has to answer for itself.");
   assert.ok(r.manifest.captions.some((c) => /\u2026/.test(c.text)), "ellipses stay in the captions");
 });
+
+test("a figure card arrives when its number is spoken, and the comparison scene gets a headline from the script", () => {
+  const { manifest } = lib.buildManifest(input());
+  const stat = manifest.scenes[1], cmp = manifest.scenes[2];
+  const spoken41 = words.find((w) => w.text === "41");
+  assert.ok(stat.card_start_sec > stat.window.start + 0.7, "not at the start of the leading sentence");
+  assert.ok(Math.abs(stat.card_start_sec - (spoken41.start - 0.6)) < 0.02, "about half a second before the number");
+  assert.strictEqual(cmp.data.market, "That Gap Tells");
+  assert.strictEqual(cmp.data.kind, "A Real Story");
+  assert.strictEqual(manifest.scenes[0].card_start_sec, undefined);
+});

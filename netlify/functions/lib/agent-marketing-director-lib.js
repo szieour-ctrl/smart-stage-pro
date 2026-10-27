@@ -89,7 +89,7 @@ function plan(narrative, intake, figures) {
       const pct = hits.find((f) => /%/.test(f.display)), red = hits.find((f) => /reduc/.test(f.key));
       const totalFig = red ? (figures.find((f) => f.key === "count" && f.group === "active" && f.n === parseNumber(f.display)) || hits.find((f) => f !== red && f !== pct)) : null;
       if (pct && red && totalFig && numbersIn(s.narrationExcerpt).includes(totalFig.value)) {
-        out.push({ ...base, composition: "compare_two_card", data: { market, kind: "Market Update", left: { lead: "Homes That Closed Sold At", percent: pct.value, caption: "of list price on average", icon: "sold" }, right: { lead: "But Here in the Active Market,", highlighted: red.value, total: totalFig.value, caption: "listings have already taken a price reduction.", icon: "reduced" } }, claims: [{ field: "left.percent", figure: pct.ref }, { field: "right.highlighted", figure: red.ref }, { field: "right.total", figure: totalFig.ref }], reason: "The scene contrasts two verified figures (sold-to-list and price reductions), so it is shown side by side." });
+        out.push({ ...base, composition: "compare_two_card", data: { market: (sceneHeadline(s.narrationExcerpt) || [])[0] || market, kind: (sceneHeadline(s.narrationExcerpt) || [])[1] || "Market Update", left: { lead: "Homes That Closed Sold At", percent: pct.value, caption: "of list price on average", icon: "sold" }, right: { lead: "But Here in the Active Market,", highlighted: red.value, total: totalFig.value, caption: "listings have already taken a price reduction.", icon: "reduced" } }, claims: [{ field: "left.percent", figure: pct.ref }, { field: "right.highlighted", figure: red.ref }, { field: "right.total", figure: totalFig.ref }], reason: "The scene contrasts two verified figures (sold-to-list and price reductions), so it is shown side by side." });
       } else {
         problems.push(`Scene ${i + 1} states ${hits.length} figures but no comparison layout fits them; it uses the statement card without numbers.`);
         out.push({ ...base, composition: "expert_takeaway", data: statement(s), reason: "Several figures with no matching comparison layout; the numbers stay in the narration." });
@@ -101,6 +101,21 @@ function plan(narrative, intake, figures) {
   return { scenes: out, derived, problems };
 }
 
+// A short headline for a comparison scene, taken from the script's own words: the closing sentence of the scene (when it has no
+// numbers), with a long "between ..." clause folded away ("That gap between homes ... tells a real story" -> "That gap tells a real
+// story"). Returns null when no short sentence like that exists, and the card keeps its market title.
+function sceneHeadline(excerpt) {
+  const sentences = stripTags(excerpt).split(/(?<=[.!?…])\s+/).filter(Boolean);
+  let last = (sentences[sentences.length - 1] || "").replace(/[.!?…]+$/, "").trim();
+  if (!last || /\d/.test(last)) return null;
+  const m = /^(.+?)\s+between\s+.+?\s+((?:tells|shows|means|says|reveals)\s+.+)$/i.exec(last);
+  if (m) last = `${m[1]} ${m[2]}`;
+  const w = last.split(" ");
+  if (w.length < 3 || w.length > 8) return null;
+  const c = Math.ceil(w.length / 2), up = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+  return [up(titleCase(w.slice(0, c).join(" "))), up(titleCase(w.slice(c).join(" ")))];
+}
+
 function statement(scene) {
   const sentences = stripTags(scene.narrationExcerpt).split(/(?<=[.!?…])\s+/).filter(Boolean);
   const w = (sentences[0] || "").replace(/[.!?…]+$/, "").split(" "), c = Math.ceil(w.length / 2);
@@ -108,4 +123,4 @@ function statement(scene) {
   return out;
 }
 
-module.exports = { figuresFrom, figuresInExcerpt, headlineFromHook, closingHeadline, plan, titleCase, stripTags };
+module.exports = { sceneHeadline, figuresFrom, figuresInExcerpt, headlineFromHook, closingHeadline, plan, titleCase, stripTags };

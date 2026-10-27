@@ -71,7 +71,7 @@ test("notice period round-trips and bad text is refused", () => {
 });
 
 test("voices: ssp_male defaults to the ssp-prospect narrator, ssp_female needs a setting", () => {
-  assert.strictEqual(lib.voiceIdFor("ssp_male", {}), "J7X6yWhJQlWW5OoUeuP1");
+  assert.strictEqual(lib.voiceIdFor("ssp_male", {}), "32k6j8e9sZJuuBXxDcVP");
   assert.strictEqual(lib.voiceIdFor("ssp_female", {}), null);
   assert.strictEqual(lib.voiceIdFor("ssp_female", { AGENT_MARKETING_VOICE_SSP_FEMALE: "x" }), "x");
 });

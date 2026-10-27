@@ -122,3 +122,19 @@ test("Research is compact: the report check shows its summary first, topic cards
   assert.doesNotMatch(card, /Required notice:|Report figures:/);   // nothing like that on the card itself
   assert.match(research, /foldSetup\(r\.status === "ready"\)/);
 });
+
+test("the Visuals step has the Make your Reel panel, and it only ever starts a render with the advertising confirmation", () => {
+  const html = read("agent-marketing.html");
+  for (const id of ["reelPanel", "reelFormats", "reelNote", "reelOk", "reelGo", "reelRetry", "reelMsg", "reelOut"]) assert.match(html, new RegExp(`id="${id}"`), id);
+  assert.match(html, /advertisingConfirmed: true/);
+  assert.match(html, /if \(!\$\("reelOk"\)\.checked\)/);
+  assert.match(html, /function go\(step\) \{ stopImgPoll\(\); stopReelPoll\(\);/, "leaving the step stops the progress polling");
+  assert.match(html, /"\?projectId=" \+ encodeURIComponent\(state\.project\.id\)/, "reopening the step finds the project's latest render");
+  assert.doesNotMatch(html, /innerHTML\s*=\s*[^;]*j\.videos/, "video links are set as attributes, not as markup");
+});
+
+test("the Reel reuses only images the agent approved", () => {
+  const prep = read("netlify/functions/agent-marketing-prepare-background.js");
+  assert.match(prep, /r\.status === "approved" && r\.generation/);
+  assert.doesNotMatch(prep, /r\.status !== "rejected" && r\.generation/);
+});

@@ -1,6 +1,7 @@
 // agent-marketing-render.js — Netlify Function. Starts and tracks an Agent Marketing Reel render (Oct 26, 2026).
 //   POST { projectId, formats?, advertisingConfirmed:true }  -> { jobId }                    starts asset preparation (background) then the render
 //   POST { jobId, retry:true }                                -> { jobId }                    retries a stopped job; paid work already done is reused
+//   GET  ?projectId=... -> the project's most recent render in the same shape (plus jobId), or { status: "none" }
 //   GET  ?jobId=...  -> { status, step, error?, formats, usage?, videos?: { "9x16": url, "16x9": url }, checks?, warnings? }
 // The durable record is the agent_marketing_jobs row. Railway keeps only a status cache; if it forgot the job, the row says what is left to do.
 // Beta: nothing is charged here.
@@ -53,7 +54,15 @@ exports.handler = async (event) => {
   };
 
   if (event.httpMethod === "GET") {
-    const { job, err } = await loadJob(event.queryStringParameters && event.queryStringParameters.jobId);
+    const qs = event.queryStringParameters || {};
+    let job, err;
+    if (qs.projectId && !qs.jobId) {
+      // The page asks for a project's latest render when it opens, so a finished or running Reel is still there on return.
+      if (!am.UUID_RE.test(String(qs.projectId))) return reply(400, { error: "Missing or invalid projectId" });
+      const lr = await supabase("GET", "agent_marketing_jobs", null, `?project_id=eq.${qs.projectId}&user_id=eq.${userId}&select=*&order=created_at.desc&limit=1`);
+      job = Array.isArray(lr.data) ? lr.data[0] : null;
+      if (!job) return reply(200, { status: "none" });
+    } else ({ job, err } = await loadJob(qs.jobId));
     if (err) return err;
     try {
       if (job.status === "rendering") {
@@ -63,7 +72,7 @@ exports.handler = async (event) => {
         else if (r.json && r.json.status === "done") { const result = { keys: r.json.result.keys || {}, checks: r.json.result.checks || {}, warnings: r.json.result.warnings || [], durationSec: r.json.result.durationSec }; await patchJob(job.id, { status: "done", result, step: "Done" }); job.status = "done"; job.result = result; }
         else if (r.json) job.step = r.json.step || job.step;
       }
-      const out = { status: job.status, step: job.step, error: job.error || null, formats: job.formats, usage: job.usage || {}, validation: job.validation ? { ok: job.validation.ok, warnings: job.validation.warnings } : null };
+      const out = { jobId: job.id, status: job.status, step: job.step, error: job.error || null, formats: job.formats, usage: job.usage || {}, validation: job.validation ? { ok: job.validation.ok, warnings: job.validation.warnings } : null };
       if (job.status === "done" && job.result) {
         out.videos = {}; for (const [f, k] of Object.entries(job.result.keys || {})) out.videos[f] = await presignDraft(k, 3600);
         out.checks = job.result.checks; out.warnings = job.result.warnings; out.durationSec = job.result.durationSec;

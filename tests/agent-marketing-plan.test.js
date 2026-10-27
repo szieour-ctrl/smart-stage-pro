@@ -251,3 +251,16 @@ test("the planner is told to open with a short, specific hook and to vary its vi
   assert.match(sys, /VISUAL VARIETY AND EDITORIAL QUALITY/);
   assert.match(sys, /do NOT default to a quiet suburban street at golden hour/);
 });
+
+test("source roles: the planner is told the rule, and the first and last scene are always data", async () => {
+  assert.ok(/SOURCE ROLES/.test(planLib.systemPrompt ? planLib.systemPrompt() : require("fs").readFileSync(require.resolve("../netlify/functions/lib/agent-marketing-plan-lib"), "utf8")));
+  const p = goodPlan();
+  p.scenes.forEach((s, i) => { s.source_role = "article"; });            // the planner tries to make every scene an article scene
+  p.scenes[3].source_role = "nonsense";
+  const out = await planLib.generatePlan({ project, anthropicKey: "k", callFn: async () => JSON.stringify(p) });
+  const roles = out.narrative.scenes.map((s) => s.sourceRole);
+  assert.strictEqual(roles[0], "data");
+  assert.strictEqual(roles[roles.length - 1], "data");
+  assert.strictEqual(roles[1], "article");
+  assert.strictEqual(roles[3], "data");                                  // not "article": an unknown value falls back to data
+});

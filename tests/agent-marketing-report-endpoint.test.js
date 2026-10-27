@@ -64,7 +64,7 @@ test("the permission checkbox is required: without it nothing is read or stored"
 
 test("upload stores only the figures: not the file, not its text, not its name, no addresses or contact details", async () => {
   reset(); const p = mkProject();
-  const r = await upload(p, { geography: { type: "city", name: "Roseville" } });
+  const r = await upload(p, { geography: { zip: "95678", type: "city", name: "Roseville" } });
   assert.strictEqual(r.status, 201, JSON.stringify(r.json));
   assert.strictEqual(r.json.upload.status, "pending");
   assert.match(r.json.upload.summary.scopeSentence, /^This MetroList report covers Roseville/);
@@ -82,7 +82,7 @@ test("upload stores only the figures: not the file, not its text, not its name, 
 
 test("a report for a different place than the one chosen is called out", async () => {
   reset(); const p = mkProject();
-  const r = await upload(p, { geography: { type: "city", name: "Folsom" } });
+  const r = await upload(p, { geography: { zip: "95678", type: "city", name: "Folsom" } });
   assert.strictEqual(r.json.upload.summary.geography, "different");
   assert.ok(r.json.upload.summary.warnings.some((w) => /names Roseville, not Folsom/.test(w)));
 });

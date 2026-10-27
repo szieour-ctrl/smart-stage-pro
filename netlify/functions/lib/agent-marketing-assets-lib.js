@@ -66,7 +66,7 @@ function buildManifest(input) {
     const owner = v.visualSource === "CONCEPT_REUSE" && Number.isInteger(v.reuseOfScene) ? v.reuseOfScene : i;
     const keys = (input.imageKeys && input.imageKeys[owner]) || {};
     return {
-      n: i + 1, composition: s.composition, narrative_role: s.narrative_role, branding: s.branding,
+      n: i + 1, composition: s.composition, narrative_role: s.narrative_role, branding: s.branding, source_role: v.sourceRole === "article" && i > 0 && i < pl.scenes.length - 1 ? "article" : "data",
       narration_excerpt: s.narration_excerpt, window: tw.windows[i], ...(cardStart(s, tw.windows[i]) !== undefined ? { card_start_sec: cardStart(s, tw.windows[i]) } : {}),
       visual: { research_visual_context: [v.purpose, v.visualBrief].filter(Boolean).join(" — "), image_keys: keys, motion: s.camera_motion || "static_hold", source: v.visualSource },
       claims: s.claims, data: s.data, reason: s.reason,

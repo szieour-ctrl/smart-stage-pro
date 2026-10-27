@@ -44,7 +44,7 @@ const call = async (method, body, qs) => {
   return { status: res.statusCode, json: JSON.parse(res.body) };
 };
 const mkProject = (over) => { const row = { id: uuid(nextId++), user_id: currentUser, template: "local_market_insider", status: "draft", intake: {}, ...over }; db.agent_marketing_projects.push(row); return row; };
-const REQ = { mode: "market_update", audience: "sellers", geography: { type: "city", name: "Roseville" } };
+const REQ = { mode: "market_update", audience: "sellers", geography: { zip: "95678", type: "city", name: "Roseville" } };
 const reset = () => { db.agent_marketing_projects.length = 0; db.agent_marketing_research.length = 0; fetched = []; currentUser = U1; planCtx = { poolKind: "user" }; process.env.AGENT_MARKETING_ENABLED = "true"; process.env.PERPLEXITY_API_KEY = "pplx-test"; process.env.INTERNAL_API_KEY = "internal"; process.env.URL = "https://site.test"; delete process.env.AGENT_MARKETING_RESEARCH_DEBUG; delete process.env.AGENT_MARKETING_RESEARCH_SESSIONS; };
 
 test("switch off: every call answers 404", async () => {

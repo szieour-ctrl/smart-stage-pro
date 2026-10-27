@@ -20,7 +20,7 @@ const validate = (ctx, raws) => rt.validateReportTopics(raws, ctx, { want: 5 });
 
 // ── Request ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 test("request: the data source defaults sensibly and must match what is attached", () => {
-  const base = { mode: "market_update", audience: "sellers", geography: { type: "city", name: "Roseville" } };
+  const base = { mode: "market_update", audience: "sellers", geography: { zip: "95678", type: "city", name: "Roseville" } };
   const v = (x) => rl.validateResearchRequest({ ...base, ...x });
   assert.strictEqual(v({}).request.dataSource, "web");
   assert.strictEqual(v({ uploadIds: [ID] }).request.dataSource, "both");
@@ -69,7 +69,7 @@ test("a change or trend needs a cited comparison, and never on a small sample", 
   assert.match(r.problems[0], /trend/);
   // a CMA has no comparisons at all, so it can never claim a change
   const c = reportLib.analyzePages(cma.standard().pages).facts;
-  const cctx = rt.buildContext([{ id: ID, facts: c }], { audience: "sellers", geography: { type: "city", name: "Roseville" }, focus: {} });
+  const cctx = rt.buildContext([{ id: ID, facts: c }], { audience: "sellers", geography: { zip: "95678", type: "city", name: "Roseville" }, focus: {} });
   const cid = [...cctx.figures.values()].find((x) => x.fig.key === "median_close_price" && x.fig.status === "closed").ref;
   const bad = validate(cctx, [{ question: "Are Roseville prices rising?", why_it_matters: "Prices are rising fast.", figure_ids: [cid] }]);
   assert.strictEqual(bad.topics.length, 0);
@@ -78,7 +78,7 @@ test("a change or trend needs a cited comparison, and never on a small sample", 
 test("a long closed-sales window cannot be called this month or recent", () => {
   const c = reportLib.analyzePages(cma.standard().pages).facts;
   c.sample.broadWindow = true; c.sample.windowDays = 213;
-  const cctx = rt.buildContext([{ id: ID, facts: c }], { audience: "sellers", geography: { type: "city", name: "Roseville" }, focus: {} });
+  const cctx = rt.buildContext([{ id: ID, facts: c }], { audience: "sellers", geography: { zip: "95678", type: "city", name: "Roseville" }, focus: {} });
   const cid = [...cctx.figures.values()].find((x) => x.fig.key === "median_close_price" && x.fig.status === "closed").ref;
   const r = validate(cctx, [{ question: "What did homes sell for this month?", why_it_matters: "Here is the median sold price.", figure_ids: [cid] }]);
   assert.strictEqual(r.topics.length, 0);

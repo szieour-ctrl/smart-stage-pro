@@ -126,7 +126,7 @@ test("scope sentence and the note for the research provider", () => {
 });
 
 test("the confirmation screen groups figures by status with sample sizes", () => {
-  const sum = lib.summarize(analyze().facts, { geography: { type: "city", name: "Roseville" } });
+  const sum = lib.summarize(analyze().facts, { geography: { zip: "95678", type: "city", name: "Roseville" } });
   assert.strictEqual(sum.geography, "match");
   const closed = sum.groups.find((g) => g.status === "closed");
   assert.match(closed.window, /^Dates closed: /);

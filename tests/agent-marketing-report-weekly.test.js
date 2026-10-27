@@ -74,7 +74,7 @@ test("Pricing Insights (individual listings) and the Market Insights chart are r
 
 test("topics from a weekly report: changes are quotable, but one week is never a trend", () => {
   const facts = analyze(wk.review()).facts;
-  const ctx = rt.buildContext([{ id: "11111111-1111-4111-8111-111111111111", facts }], { audience: "sellers", geography: { type: "metro", name: "MetroList", city: "", state: "CA", label: "MetroList metro area, CA" }, focus: {} });
+  const ctx = rt.buildContext([{ id: "11111111-1111-4111-8111-111111111111", facts }], { audience: "sellers", geography: { zip: "95678", type: "metro", name: "MetroList", city: "", state: "CA", label: "MetroList metro area, CA" }, focus: {} });
   const ref = (key) => [...ctx.figures.values()].find((c) => c.fig.key === key).ref;
   const ok = rt.validateReportTopics([{ question: "Are fewer homes closing this week?", why_it_matters: "There were 31 closed sales, down 10% from the week ending October 10, 2026.", figure_ids: [ref("count_closed")] }], ctx, { want: 5 });
   assert.deepStrictEqual(ok.problems, []);

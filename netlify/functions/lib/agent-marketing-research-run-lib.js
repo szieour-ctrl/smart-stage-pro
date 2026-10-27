@@ -171,6 +171,7 @@ function citationUrls(resp) {
   (Array.isArray(resp && resp.output) ? resp.output : []).forEach((it) => { if (it && it.type === "search_results") (Array.isArray(it.results) ? it.results : []).forEach((x) => out.push(x && x.url)); });
   return out.filter(Boolean);
 }
+function redfinReadOn(env) { return /^(on|1|true|yes)$/i.test(String((env || process.env).AGENT_MARKETING_REDFIN_READ || "").trim()); }
 function redfinZip(request) {
   const g = (request && request.geography) || {};
   const z = g.type === "zip" ? g.name : g.zip;
@@ -282,7 +283,9 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
     // data source. A failure here never fails the session.
     if (dataSource === "web" && request.mode === "market_update" && validation && validation.ok) {
       const zip = redfinZip(request);
-      if (!zip) redfinNote = "No ZIP code was given, so Redfin Market Trends could not be read for this market.";
+      // PAUSED (Sam, Oct 27): Redfin's Terms of Use bar automated querying of its site. The live page read stays off unless AGENT_MARKETING_REDFIN_READ=on.
+      if (!redfinReadOn(e)) redfinNote = "Redfin Market Trends are not read automatically. Upload your Trend or CMA report, or attach the Redfin page you downloaded, to supply the market data.";
+      else if (!zip) redfinNote = "No ZIP code was given, so Redfin Market Trends could not be read for this market.";
       else {
         const rf = await fetchRedfinTrends({ zip, apiKey, callFn, sleepFn, today, env: e });
         if (rf.usage) usage = addUsage(usage, rf.usage);
@@ -311,4 +314,4 @@ function planKeyFromContext(ctx) {
   return "solo";
 }
 
-module.exports = { answerText, PRICES, estimateCostUsd, todayPT, callPerplexity, askProvider, groundTopics, urlKey, requestFromRow, runResearch, planKeyFromContext, fetchRedfinTrends, redfinZip, citationUrls };
+module.exports = { answerText, PRICES, estimateCostUsd, todayPT, callPerplexity, askProvider, groundTopics, urlKey, requestFromRow, runResearch, planKeyFromContext, fetchRedfinTrends, redfinZip, redfinReadOn, citationUrls };

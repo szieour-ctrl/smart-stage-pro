@@ -145,3 +145,11 @@ test("the image preview has no crop box for Agent Marketing, and the Reel note c
   assert.match(html, /s\.kind === "GPT_IMAGE_2_CONCEPT" \|\| s\.kind === "AGENT_SCENE"\) && !seen/);
   assert.match(html, /!picked\[s\.sceneIndex\]/);
 });
+
+test("a re-framed copy scene shows the image it is made from, and the Reel panel names the source line for web Reels", () => {
+  const html = require("fs").readFileSync(require("path").join(__dirname, "..", "agent-marketing.html"), "utf8");
+  assert.match(html, /function reuseSourceImage\(j\)/);
+  assert.match(html, /Same image as Scene ' \+ \(sc\.reuseOfScene \+ 1\)/);
+  assert.match(html, /MetroList notice \(report data\) or your research source line/);
+  assert.match(html, /picked\[j\] && picked\[j\]\.url/);
+});

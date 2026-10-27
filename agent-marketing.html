@@ -416,7 +416,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
       <div class="reel" id="reelPanel">
         <div class="eyebrow">07 / Your Reel</div>
         <div class="panel-title">Make your Reel</div>
-        <div class="panel-sub">We create the narration, add any images still needed, and put it together with your captions, your headshot and name, music, and the MetroList notice. It takes a few minutes and you can leave this page; your Reel will be here when you come back. Nothing is charged during the beta.</div>
+        <div class="panel-sub">We create the narration, add any images still needed, and put it together with your captions, your headshot and name, music, and either the MetroList notice (report data) or your research source line. It takes a few minutes and you can leave this page; your Reel will be here when you come back. Nothing is charged during the beta.</div>
         <div class="reel-formats" id="reelFormats" role="group" aria-label="Reel formats"></div>
         <div class="note hidden" id="reelNote"></div>
         <label class="reel-ok"><input type="checkbox" id="reelOk"> <span>I confirm the market statistics and claims in this Reel are accurate and comply with applicable advertising requirements.</span></label>
@@ -885,6 +885,13 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     if (sc.visualSource === "GPT_IMAGE_2_CONCEPT" || sc.visualSource === "AGENT_SCENE") return sc.visualBrief || "";
     return "A new image will be created for this scene from its narration. Add a note to steer it.";
   }
+  // The picture a re-framed copy is made from: the agent's own photo for that scene, else its approved (or latest finished) generated image.
+  function reuseSourceImage(j) {
+    if (picked[j] && picked[j].url) return picked[j].url;
+    var sl = (im.slots || []).filter(function (x) { return x.sceneIndex === j; })[0];
+    var v = sl && (sl.approved || (sl.latest && sl.latest.state === "done" ? sl.latest : null));
+    return v && v.url ? v.url : "";
+  }
   function sceneBlock(idx, slots) {
     var sc = sceneAt(idx), src = activeSrc(idx);
     var sorted = slots.slice().sort(function (a, b) { return a.format === "9x16" ? -1 : (b.format === "9x16" ? 1 : 0); });
@@ -893,6 +900,12 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
       '<div class="tabs" role="group" aria-label="Image source for scene ' + (idx + 1) + '">' + ["own", "concept", "agent"].map(function (k) { return '<button type="button" class="tab' + (src === k ? " on" : "") + '" data-src="' + k + '" data-scene="' + idx + '">' + SRC_NAME[k] + "</button>"; }).join("") + "</div>";
     if (src === "own") h += '<div class="pick" id="ipick' + idx + '"></div><div class="hint">Your photo is used for this scene in every format. Only use photos you own or have permission to use.</div>';
     else if (src === "concept" || src === "agent") h += '<div class="hint">' + esc(briefFor(sc)) + (src === "agent" ? " Created from your Marketing Profile photo in a generic setting." : " An illustration, not a real place.") + '</div><div class="slot-grid">' + sorted.map(function (s) { return slotView(s, src); }).join("") + "</div>";
+    else if (sc.visualSource === "CONCEPT_REUSE" && Number.isInteger(sc.reuseOfScene)) {
+      // a re-framed copy has no image of its own: show the image it is made from
+      var from = reuseSourceImage(sc.reuseOfScene);
+      h += (from ? '<div class="pick"><img class="sel" alt="Image used for this scene" src="' + esc(from) + '"></div>' : "") +
+        '<div class="hint">Same image as Scene ' + (sc.reuseOfScene + 1) + ", re-framed with a different crop and motion" + (from ? "." : ". It will appear here once Scene " + (sc.reuseOfScene + 1) + " has an approved image.") + " Pick a source above to replace it, or leave it as planned.</div>";
+    }
     else h += '<div class="hint">Planned as ' + esc(PLANNED_NAME[sc.visualSource] || "a scene") + ". Pick a source above to replace it, or leave it as planned.</div>";
     return h + "</div>";
   }

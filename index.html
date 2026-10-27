@@ -8428,7 +8428,8 @@ function updateFinalLabel(roomId, enhId) {
 // — a hard cutoff straight to signOut(), same treatment as discovering an
 // expired token. One clock for the whole tab, started once a real session
 // is confirmed (see initAuth()) and stopped on sign-out (see signOut()).
-const IDLE_LIMIT_MS = 45 * 60 * 1000; // 45 minutes
+// CHANGE (Oct 27, 2026, Sam): 45 minutes -> 2 hours of inactivity.
+const IDLE_LIMIT_MS = 2 * 60 * 60 * 1000; // 2 hours
 let _lastActivityAt = Date.now();
 let _idleCheckHandle = null;
 
@@ -8456,7 +8457,7 @@ function startIdleTimer() {
   );
   _idleCheckHandle = setInterval(() => {
     if (Date.now() - _lastActivityAt > IDLE_LIMIT_MS) {
-      console.warn('Idle timeout reached (45 min of inactivity) — signing out.');
+      console.warn('Idle timeout reached (2 hours of inactivity) — signing out.');
       signOut();
     }
   }, 60 * 1000); // checking once a minute is plenty — no need for finer granularity

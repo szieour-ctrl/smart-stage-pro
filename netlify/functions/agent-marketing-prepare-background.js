@@ -19,6 +19,7 @@ const img = require("./lib/agent-marketing-images-lib");
 const timing = require("./lib/agent-marketing-timing-lib");
 const assetsLib = require("./lib/agent-marketing-assets-lib");
 const sourcesLib = require("./lib/agent-marketing-sources-lib");
+const planLib = require("./lib/agent-marketing-plan-lib");
 
 // Narration model. Eleven v4 (Oct 2026) by default; set AGENT_MARKETING_TTS_MODEL to change it without a code change.
 const TTS_MODEL = process.env.AGENT_MARKETING_TTS_MODEL || "eleven_v4";
@@ -231,6 +232,7 @@ exports.handler = async (event) => {
     const narrative = project.narrative_approved;
     if (!narrative || !project.narrative_approved_at || !Array.isArray(narrative.scenes) || !narrative.narrationTagged) return await fail(job, "The narration has not been approved yet."), { statusCode: 200, body: "" };
     const topic = project.selected_topic || {};
+    if (project.selected_topic && narrative.intakeHash && narrative.intakeHash !== planLib.intakeHash(project.intake, project.selected_topic)) return await fail(job, "Your approved script was written for a different topic or different answers than the ones now on this project. Go back to the Script step, write a new script for your topic, approve it, and make the Reel again."), { statusCode: 200, body: "" };
     const reportFigures = topic.reportFigures;
     const period = assetsLib.parseNoticePeriod(narrative.notice || topic.reportNotice);
     // Two kinds of Reel: from an uploaded MetroList report (verified figures + the MetroList notice), or from web research (checked,

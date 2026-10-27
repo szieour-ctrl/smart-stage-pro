@@ -247,3 +247,20 @@ test("a topic makes the angle and issue optional, fills market and audience from
   const plan = await call("POST", { action: "plan", id: bare.json.project.id });
   assert.strictEqual(plan.status, 409);
 });
+
+test("a script written for another topic cannot be approved for the topic now selected", async () => {
+  currentUser = U1;
+  const c = await call("POST", { action: "create", template: "local_market_insider", durationSec: 45 });
+  const id = c.json.project.id; const row = rows.find((r) => r.id === id);
+  await call("POST", { action: "save_intake", id, intake });
+  await call("POST", { action: "save_narrative", id, narrative: { narrationTagged: script, cta: { text: "Understand your home's competition.", source: "user_edited" } } });
+  const planLib = require("../netlify/functions/lib/agent-marketing-plan-lib");
+  const prior = row.narrative;
+  // the script came from the planner for a different topic
+  row.narrative = { ...prior, intakeHash: planLib.intakeHash(row.intake, { ...TOPIC, id: "t3" }) };
+  const stale = await call("POST", { action: "approve_narrative", id });
+  assert.strictEqual(stale.status, 409); assert.strictEqual(stale.json.code, "script_stale");
+  // the same script for the selected topic is fine
+  row.narrative = { ...prior, intakeHash: planLib.intakeHash(row.intake, row.selected_topic) };
+  assert.strictEqual((await call("POST", { action: "approve_narrative", id })).status, 200);
+});

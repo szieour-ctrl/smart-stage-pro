@@ -208,13 +208,15 @@ function systemPrompt(mode) {
     : [
       "MODE: Local Market Update. Each topic is a question buyers, sellers or residents in this market are asking right now about housing inventory, pricing, days on market, pending or closed sales, competition, new construction or changing conditions.",
       "Prefer sources from the last 7 days; accept up to 30 days only if necessary. Prefer MLS-based or public data. Set event to null.",
-      "Use at least three different publishers across the five topics, and no more than two topics may rest on the same website. Prefer independent or primary sources (an MLS or association report, the city or county, California Association of Realtors, NAR, Redfin, Zillow, Realtor.com, Freddie Mac, local news) over an individual agent's or team's own marketing blog, and never make one agent's blog the main source for the whole set.",
+      "SOURCES MUST BE ARTICLES. Each topic is built on a published article, report or announcement about the market: local news, a city, county or agency page or press release, a school, transit or utility district notice, a builder's or developer's press release, a business journal, a chamber or nonprofit report, or a market report from an association or data company (California Association of Realtors, NAR, Redfin, Zillow or Realtor.com research and news pages, Freddie Mac). NEVER use a real estate agent's, team's or brokerage's website, a listing or property page, a neighborhood or community landing page from a brokerage, an MLS or portal search page, or any page whose main content is homes for sale. A listing page cannot support a question. Several topics may use the same publisher; never choose a source just to vary publishers.",
+      "BUILD EACH QUESTION FROM ONE SPECIFIC DEVELOPMENT the article reports: a project, a batch of permits or applications, a rate or policy change, an opening, a closing, a decision, a published figure. The question must point to that development. A question that could be asked about any market in any month (\"Are homes taking longer to sell?\", \"Is competition rising?\") is stale and generic and is not acceptable.",
+      "KEYWORDS. If the input lists keywords, search for articles about those keywords in this market FIRST, before anything else. At least two topics must rest on an article that discusses a keyword, and those topics set keyword_match to true. If you cannot find such an article, do not stretch an unrelated article to fit: return other timely topics with keyword_match false.",
       "Each topic is the story of ONE local article (its story source). Take every figure in a topic from that article and name its period; never mix numbers from different sources in the same topic and never add market statistics from another publisher. Market data comes separately, from the agent's own report or the Redfin Market Trends page for the ZIP code. If a source calls a figure preliminary or the month is not complete, say so in trend_signals. Prefer the most recent complete month.",
     ];
   const shape = [
     "Return ONLY one JSON object, no commentary, in this shape:",
     "{ \"topics\": [ { \"question\": string, \"why_it_matters\": string (1-2 sentences), \"trend_signals\": [string], \"local_intent\": boolean,",
-    "  \"scope\": \"selected\" | \"broader_context\", \"scope_note\": string | null, \"event\": object | null,",
+    "  \"scope\": \"selected\" | \"broader_context\", \"scope_note\": string | null, \"event\": object | null, \"keyword_match\": boolean,",
     "  \"sources\": [ { \"title\": string, \"url\": string, \"published\": \"YYYY-MM-DD\" } ] } ] }",
     "Each topic has 1 to 4 sources. De-duplicate overlapping topics.",
     "Also add a top-level \"recommendation\": { \"topic\": the number 1-5 of the single topic that is strongest for this audience and market right now, \"reason\": string (1-2 sentences saying why, in plain words), \"evidence\": [up to 3 short facts taken from that topic's own sources] }. Recommend only from what the sources show; do not add a new number.",
@@ -249,7 +251,7 @@ function buildResearchPayload({ request, today, uploadContext, env }) {
     `Audience: ${aud}.`,
     focus.length ? `Narrow the research to: ${focus.join(" and ")}.` : null,
     dataFocusLine(r, today),
-    r.keywords ? `The agent asked the research to look for these keywords and terms (use them to find relevant local items; they do not change the exact market): ${clean(r.keywords, MAX_KEYWORDS_CHARS)}.` : null,
+    r.keywords ? `Keywords from the agent (search for articles about these in this exact market FIRST; at least two topics must rest on an article that discusses them; they never change the market): ${clean(r.keywords, MAX_KEYWORDS_CHARS)}.` : null,
     uploadContext ? `The agent also has a report with this scope (use only as context for what to look for, never quote numbers from this note): ${clean(uploadContext, 600)}` : null,
     `Today: ${today}.`,
     `Goal: ${TOPIC_COUNT} timely topics for a short educational video that shows what this agent knows about the local market right now.`,
@@ -281,6 +283,24 @@ function dayNumber(s) {
 }
 
 function hostOf(url) { try { return new URL(url).hostname.toLowerCase().replace(/^www\./, ""); } catch { return ""; } }
+// A listing page or an agent's own site cannot back a market question (Sam, Oct 27). Heuristic, by address and domain: the model is asked
+// for articles, and anything that still looks like a listing, a brokerage landing page or an agent site is dropped here.
+const LISTING_PATH = /\/(homes?|listings?|property|properties|homedetails|realestateandhomes-detail|mls|idx|forsale|for-sale|sold|open-houses?|neighborhoods?|communities|agents?|our-team)\b|\/\d{2,5}-[a-z0-9-]+-(way|st|street|ave|avenue|dr|drive|ln|lane|ct|court|blvd|boulevard|rd|road|cir|circle|pl|place|ter|terrace)\b|\/home\/\d+/i;
+const AGENT_HOST = /(^|[.-])(realty|realtors?|realestate|real-estate|properties|homesales|homesforsale|brokerage|remax|kw|exprealty|compass|coldwellbanker|century21|bhhs|redfinagent)([.-]|\d|$)|(realty|realestate|realtor|homes?sales|properties)\.[a-z]{2,}$|^homes\./i;
+// Portals and associations publish real research and news: only those paths count. Their listing and market-page paths do not.
+const PORTAL_HOSTS = ["redfin.com", "zillow.com", "realtor.com", "trulia.com", "movoto.com", "homes.com"];
+// Associations and agencies publish research, never listings: any page counts.
+const ASSOCIATION_HOSTS = ["car.org", "nar.realtor", "freddiemac.com", "fanniemae.com", "mba.org", "hud.gov", "census.gov"];
+const PORTAL_ARTICLE_PATH = /^\/(news|research|blog|economic-research|data-center|about\/news|press|housing-market-news)\b/i;
+function isNotArticle(url) {
+  const host = hostOf(url.toString());
+  const path = url.pathname || "/";
+  if (ASSOCIATION_HOSTS.some((d) => host === d || host.endsWith("." + d))) return false;
+  const portal = PORTAL_HOSTS.some((d) => host === d || host.endsWith("." + d));
+  if (portal) return !PORTAL_ARTICLE_PATH.test(path);
+  if (AGENT_HOST.test(host)) return true;
+  return LISTING_PATH.test(path);
+}
 function isPaywalled(host) { return PAYWALLED_DOMAINS.some((d) => host === d || host.endsWith("." + d)); }
 
 function cleanSource(s, mode, todayN) {
@@ -293,6 +313,7 @@ function cleanSource(s, mode, todayN) {
   if (href.length > LIMITS.url) return null;
   const host = hostOf(href);
   if (!host || isPaywalled(host)) return null;
+  if (mode === "market_update" && isNotArticle(url)) return null;   // a listing, a brokerage page or an agent's site is not an article
   const title = clean(s.title, LIMITS.sourceTitle);
   if (!title) return null;
   const published = String(s.published || "").trim();
@@ -401,7 +422,7 @@ function validateTopics(rawTopics, { mode, today, recommendation } = {}) {
       if (c && !seen.has(c.url)) { seen.add(c.url); sources.push(c); }
     });
     if (sources.length === 0) return problems.push(`topic ${n}: no usable source`);
-    const topic = { id: `t${n}`, origin: "web", kind: mode, question, whyItMatters: why, trendSignals: signals, localIntent: x.local_intent === true, scope, scopeNote: scope === "broader_context" ? scopeNote : "", sources: sources.slice(0, 4), event: null };
+    const topic = { id: `t${n}`, origin: "web", kind: mode, question, whyItMatters: why, trendSignals: signals, localIntent: x.local_intent === true, scope, scopeNote: scope === "broader_context" ? scopeNote : "", sources: sources.slice(0, 4), event: null, keywordMatch: x.keyword_match === true };
     if (mode === "local_events") {
       const e = cleanEvent(x.event, todayN);
       if (e.problem) return problems.push(`topic ${n}: ${e.problem}`);
@@ -413,17 +434,8 @@ function validateTopics(rawTopics, { mode, today, recommendation } = {}) {
   for (let i = 0; i < topics.length; i++) for (let j = i + 1; j < topics.length; j++) {
     if (similar(topics[i].question, topics[j].question)) problems.push(`topics ${topics[i].id} and ${topics[j].id} overlap`);
   }
-  // Variety (a SOFT rule): five topics that all rest on one website are one source's opinion, not a market picture. The caller asks for
-  // different publishers once; if the market simply has few sources the set is still delivered, with a note. Market updates only: events
-  // legitimately come from the same city or venue calendar.
+  // No publisher-variety rule for market updates (Sam, Oct 27): the story source is an article, and the market data comes from the agent's report or Redfin.
   const soft = [];
-  if (mode === "market_update" && topics.length === TOPIC_COUNT) {
-    const perSite = new Map();
-    topics.forEach((t) => new Set((t.sources || []).map((x) => String(x.domain || "").replace(/^www\./, ""))).forEach((d) => { if (d) perSite.set(d, (perSite.get(d) || 0) + 1); }));
-    const crowded = [...perSite.entries()].filter(([, n]) => n > MAX_TOPICS_PER_SITE).map(([d]) => d);
-    if (crowded.length) soft.push(`too many topics rely on the same site (${crowded.slice(0, 3).join(", ")}); use different publishers for at least three of them`);
-    else if (perSite.size < MIN_SITES) soft.push(`the topics use only ${perSite.size} different site${perSite.size === 1 ? "" : "s"}; use at least ${MIN_SITES} different publishers`);
-  }
   const ok = problems.length === 0 && topics.length === TOPIC_COUNT;
   if (ok) {
     const rec = cleanRecommendation(recommendation, topics.length);

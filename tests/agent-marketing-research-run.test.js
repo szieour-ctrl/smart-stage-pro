@@ -152,22 +152,26 @@ test("plan key: brokerage and team members use their tier, everyone else Solo", 
   assert.strictEqual(run.planKeyFromContext(null), "solo");
 });
 
-test("run: topics from one site get one wider retry; if the market has few sources the set is still delivered, with a note", async () => {
-  const oneSite = (n) => reply(five().map((t) => ({ ...t, sources: [{ title: "Blog", url: `https://agentblog.example.com/p${n}`, published: "2026-10-20" }] })));
-  const sent = [];
-  const answers = [oneSite(1), oneSite(2)];
-  const withGrounding = (resp) => ({ ...resp, json: { ...resp.json, output: [{ type: "search_results", results: [1, 2].map((i) => ({ url: `https://agentblog.example.com/p${i}` })) }, resp.json.output[1]] } });
-  const r = await run.runResearch({ row, apiKey: "k", now: NOW, env: ENV, sleepFn: noSleep, callFn: async (p) => { sent.push(p); return withGrounding(answers.shift()); } });
-  assert.strictEqual(r.fields.status, "ready");            // still delivered and charged: five valid topics
+test("run: topics that share one publisher are fine: one attempt, no retry, no note (the publisher rule was removed Oct 27)", async () => {
+  const oneSite = reply(five().map((t, n) => ({ ...t, sources: [{ title: "Local news story", url: `https://news.example.org/story-${n}`, published: "2026-10-20" }] })));
+  const grounded = { ...oneSite, json: { ...oneSite.json, output: [{ type: "search_results", results: [0, 1, 2, 3, 4].map((i) => ({ url: `https://news.example.org/story-${i}` })) }, oneSite.json.output[1]] } };
+  const r = await run.runResearch({ row, apiKey: "k", now: NOW, env: ENV, sleepFn: noSleep, callFn: async () => grounded });
+  assert.strictEqual(r.fields.status, "ready");
   assert.ok(r.fields.charged_at);
-  assert.strictEqual(r.attempts, 2);
-  assert.match(sent[1].input, /different publishers/);
-  assert.ok(sent[1].tools[0].max_results >= 20);           // the retry looks wider
-  assert.match(r.fields.usage.reportNote, /one or two websites/);
-  // A varied first answer needs no retry and no note.
-  const ok = await run.runResearch({ row, apiKey: "k", now: NOW, env: ENV, sleepFn: noSleep, callFn: async () => reply(five()) });
-  assert.strictEqual(ok.attempts, 1);
-  assert.strictEqual(ok.fields.usage.reportNote, null);
+  assert.strictEqual(r.attempts, 1);
+  assert.strictEqual(r.fields.usage.reportNote, null);
+});
+
+test("run: keywords asked for but no topic matches them: the agent is told, nothing is passed off as a match", async () => {
+  const kwRow = { ...row, focus: { keywords: "short sales" } };
+  const none = await run.runResearch({ row: kwRow, apiKey: "k", now: NOW, env: ENV, sleepFn: noSleep, callFn: async () => reply(five()) });
+  assert.strictEqual(none.fields.status, "ready");
+  assert.match(none.fields.usage.reportNote, /No article about \u201cshort sales\u201d was found/);
+  const hit = await run.runResearch({ row: kwRow, apiKey: "k", now: NOW, env: ENV, sleepFn: noSleep, callFn: async () => reply(five().map((t, n) => (n < 2 ? { ...t, keyword_match: true } : t))) });
+  assert.strictEqual(hit.fields.usage.reportNote, null);
+  assert.strictEqual(hit.fields.topics.filter((t) => t.keywordMatch).length, 2);
+  const noKw = await run.runResearch({ row, apiKey: "k", now: NOW, env: ENV, sleepFn: noSleep, callFn: async () => reply(five()) });
+  assert.strictEqual(noKw.fields.usage.reportNote, null);
 });
 
 test("run: a failed set records why it was rejected", async () => {

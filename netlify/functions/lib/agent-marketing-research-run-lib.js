@@ -166,6 +166,8 @@ function citationUrls(resp) {
   const out = [];
   (Array.isArray(resp && resp.citations) ? resp.citations : []).forEach((c) => out.push(typeof c === "string" ? c : c && c.url));
   (Array.isArray(resp && resp.search_results) ? resp.search_results : []).forEach((s) => out.push(s && s.url));
+  (Array.isArray(resp && resp.output) ? resp.output : []).forEach((it) => { if (it && Array.isArray(it.fetch_url_results)) it.fetch_url_results.forEach((x) => out.push(x && x.url)); });
+  (Array.isArray(resp && resp.fetch_url_results) ? resp.fetch_url_results : []).forEach((x) => out.push(x && x.url));
   (Array.isArray(resp && resp.output) ? resp.output : []).forEach((it) => { if (it && it.type === "search_results") (Array.isArray(it.results) ? it.results : []).forEach((x) => out.push(x && x.url)); });
   return out.filter(Boolean);
 }
@@ -270,6 +272,10 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
         if (dataSource === "upload") { error = "Topics could not be written from your report this time. This did not use a session."; }
         else reportNote = "Your report could not be turned into topics this time, so these five come from web research only.";
       }
+    }
+    // Keywords asked for but no article found about them: say so, never pass an unrelated article off as a match.
+    if (validation && validation.ok && request.mode === "market_update" && String(request.keywords || "").trim() && !validation.topics.some((t) => t.keywordMatch === true)) {
+      reportNote = `No article about \u201c${String(request.keywords).trim().slice(0, 80)}\u201d was found for this market this time, so these topics cover other timely news. ${reportNote || ""}`.trim();
     }
     // No report uploaded: Redfin Market Trends for the ZIP is the market data. Each topic carries it (marketData) so the Reel can use it as the
     // data source. A failure here never fails the session.

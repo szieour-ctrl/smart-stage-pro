@@ -253,17 +253,60 @@ test("outcome: charged only for a validated five-topic set; failures, timeouts a
   assert.match(timeout.error, /timed out/);
 });
 
-test("topics: five topics resting on one or two websites are usable but flagged as soft problems; events are exempt", () => {
-  const oneSite = fiveMarket().map((t, i) => ({ ...t, sources: [{ title: "Agent blog", url: `https://agentblog.example.com/post-${i}`, published: "2026-10-20" }] }));
+test("topics: no publisher-variety rule for market updates (Oct 27); events are exempt as before", () => {
+  const oneSite = fiveMarket().map((t, i) => ({ ...t, sources: [{ title: "Local news story", url: `https://news.example.com/story-${i}`, published: "2026-10-20" }] }));
   const a = r.validateTopics(oneSite, { mode: "market_update", today: TODAY });
-  assert.strictEqual(a.ok, true);                      // still a valid set: the run decides whether to ask again
-  assert.match(a.soft.join(" "), /same site \(agentblog\.example\.com\)/);
-  const mixed = fiveMarket().map((t, i) => ({ ...t, sources: [{ title: "S", url: `https://${i < 2 ? "agentblog" : "site" + i}.example.com/p-${i}`, published: "2026-10-20" }] }));
-  assert.deepStrictEqual(r.validateTopics(mixed, { mode: "market_update", today: TODAY }).soft, []);
-  const two = fiveMarket().map((t, i) => ({ ...t, sources: [{ title: "S", url: `https://${i % 2 ? "a" : "b"}.example.com/p-${i}`, published: "2026-10-20" }] }));
-  assert.match(r.validateTopics(two, { mode: "market_update", today: TODAY }).soft.join(" "), /same site \(b\.example\.com\)/);
+  assert.strictEqual(a.ok, true);
+  assert.deepStrictEqual(a.soft, []);
   const ev = fiveEvents().map((t, i) => ({ ...t, sources: [{ title: "City", url: `https://www.roseville.ca.gov/events/${i}`, published: null }] }));
   assert.deepStrictEqual(r.validateTopics(ev, { mode: "local_events", today: TODAY }).soft, []);
+});
+
+test("sources: articles only. Listing pages, brokerage landing pages and agent sites are dropped; news, city pages and portal research stay", () => {
+  const one = (url) => { const t = fiveMarket(); t[0] = { ...t[0], sources: [{ title: "S", url, published: "2026-10-20" }] }; return r.validateTopics(t, { mode: "market_update", today: TODAY }); };
+  const dropped = [
+    "https://homes.re.eukreate.com/homes/ca/antelope/4148-crumley-way-3fd1b4d6d6",      // a single listing
+    "https://homes.re.eukreate.com/markets/ca/county/sacramento",                      // a brokerage's market page
+    "https://www.evatagorerealestate.com/neighborhood/163179424/antelope",             // a brokerage neighborhood page
+    "https://www.zillow.com/homedetails/4148-Crumley-Way-Antelope-CA-95843/1_zpid/",
+    "https://www.redfin.com/zipcode/95843/housing-market",                             // a portal market page is data, not an article
+    "https://www.redfin.com/CA/Antelope/4148-Crumley-Way-95843/home/123",
+    "https://www.realtor.com/realestateandhomes-detail/4148-Crumley-Way_Antelope_CA_95843_M12345-67890",
+    "https://smithteamrealty.com/blog/market-update",
+    "https://www.example-city.org/homes/for-sale",
+  ];
+  dropped.forEach((u) => { const v = one(u); assert.strictEqual(v.ok, false, u); assert.match(v.problems.join(" "), /topic 1: no usable source/, u); });
+  const kept = [
+    "https://www.sacbee.com/news/business/real-estate/article12345.html",
+    "https://www.cityofantelope.example.gov/news/2026/10/permits",
+    "https://www.redfin.com/news/housing-market-update-october-2026/",
+    "https://www.zillow.com/research/home-values-october-2026/",
+    "https://www.car.org/marketdata/news/october-2026",
+    "https://sacramentoappraisalblog.com/2026/10/",
+    "https://myfolsom.com/2026/10/sacramento-housing-market-rates-no-crash/",
+  ];
+  kept.forEach((u) => assert.strictEqual(one(u).ok, true, u));
+  // Local Events keeps its own sources: a city calendar page under /events/ or /communities/ is fine
+  const ev = fiveEvents().map((t, i) => ({ ...t, sources: [{ title: "City", url: `https://www.roseville.ca.gov/communities/events/${i}`, published: null }] }));
+  assert.strictEqual(r.validateTopics(ev, { mode: "local_events", today: TODAY }).ok, true);
+});
+
+test("topic prompt: articles only, a specific development behind each question, keywords first, no publisher rule", () => {
+  const sp = r.systemPrompt("market_update");
+  assert.match(sp, /SOURCES MUST BE ARTICLES/);
+  assert.match(sp, /A listing page cannot support a question/);
+  assert.match(sp, /BUILD EACH QUESTION FROM ONE SPECIFIC DEVELOPMENT/);
+  assert.match(sp, /stale and generic/);
+  assert.match(sp, /search for articles about those keywords in this market FIRST/);
+  assert.match(sp, /keyword_match/);
+  assert.doesNotMatch(sp, /at least three different publishers/);
+  assert.doesNotMatch(r.systemPrompt("local_events"), /SOURCES MUST BE ARTICLES/);
+});
+
+test("keyword_match is carried on the topic, and only a literal true counts", () => {
+  const t = fiveMarket().map((x, i) => ({ ...x, keyword_match: i === 0 ? true : i === 1 ? "yes" : undefined }));
+  const v = r.validateTopics(t, { mode: "market_update", today: TODAY });
+  assert.deepStrictEqual(v.topics.map((x) => x.keywordMatch), [true, false, false, false, false]);
 });
 
 test("text that is too long is cut back to a whole word, never mid-word", () => {
@@ -290,8 +333,8 @@ test("keywords: optional, cleaned, kept short, part of the request key and the r
   assert.strictEqual(r.requestKey(kw), r.requestKey(r.validateResearchRequest({ ...base, keywords: "55+, FOUR SEASONS, heritage" }).request));
   assert.ok(r.validateResearchRequest({ ...base, keywords: "x ".repeat(200) }).request.keywords.length <= 120);
   const p = r.buildResearchPayload({ request: kw, today: "2026-10-25", env: {} });
-  assert.ok(/keywords and terms[^\n]*55\+, Four Seasons, Heritage/.test(p.input));
-  assert.ok(!/keywords and terms/.test(r.buildResearchPayload({ request: none, today: "2026-10-25", env: {} }).input));
+  assert.ok(/Keywords from the agent \(search for articles about these[^\n]*55\+, Four Seasons, Heritage/.test(p.input));
+  assert.ok(!/Keywords from the agent/.test(r.buildResearchPayload({ request: none, today: "2026-10-25", env: {} }).input));
 });
 
 test("recommendation: the model's pick is attached to that topic; a missing or odd pick never fails the run", () => {

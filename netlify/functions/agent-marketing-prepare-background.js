@@ -104,9 +104,9 @@ async function prepareImages(job, project, narrative, brand, formats) {
   const needs = assetsLib.imageNeeds(narrative);
   const unsupported = needs.filter((n) => n.kind === "unsupported");
   if (unsupported.length) throw new Error(`Scene ${unsupported[0].scene + 1} uses a visual source (${unsupported[0].source || "none"}) that Agent Marketing rendering does not support yet.`);
-  // approved or proposed wide images already made for this project can be reused as the 16:9 image
+  // wide images the agent has APPROVED on the Visuals step are reused as the 16:9 image; nothing unapproved goes into a Reel
   const rows = await supabase("GET", "agent_marketing_assets", null, `?project_id=eq.${job.project_id}&user_id=eq.${job.user_id}&source=eq.gpt_image_2&select=scene_index,version,status,asset_key,generation&order=version.desc`);
-  const existing = (Array.isArray(rows.data) ? rows.data : []).filter((r) => r.asset_key && r.status !== "rejected" && r.generation && r.generation.state === "done" && r.generation.format === "16x9");
+  const existing = (Array.isArray(rows.data) ? rows.data : []).filter((r) => r.asset_key && r.status === "approved" && r.generation && r.generation.state === "done" && r.generation.format === "16x9");
   const todo = [];
   for (const n of needs) for (const f of formats) {
     const slot = `${n.scene}_${f}`;

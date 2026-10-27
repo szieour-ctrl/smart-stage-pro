@@ -147,6 +147,13 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
 @media(max-width:560px){.row2{grid-template-columns:1fr;}}
 .upload.locked{opacity:0.55;}
 @media(max-width:560px){.scene dl{grid-template-columns:1fr;} .stage{padding:0 14px 80px;}}
+.reel{margin-top:28px;padding-top:22px;border-top:1px solid var(--border);}
+.reel-formats{display:flex;gap:18px;flex-wrap:wrap;margin-top:14px;font-size:0.88rem;}
+.reel-formats label,.reel-ok{display:flex;gap:8px;align-items:flex-start;cursor:pointer;}
+.reel-ok{margin-top:16px;font-size:0.84rem;}
+.reel-out{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:18px;margin-top:16px;}
+.reel-out video{width:100%;max-height:640px;background:#000;border-radius:4px;}
+.reel-out .dl{display:inline-block;margin-top:6px;font-size:0.82rem;color:#ad864b;}
 </style>
 </head>
 <body>
@@ -406,6 +413,17 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
       <div class="note" id="imagesCount"></div>
       <div id="imageSlots"></div>
       <div id="imagesDone" class="note hidden"></div>
+      <div class="reel" id="reelPanel">
+        <div class="eyebrow">07 / Your Reel</div>
+        <div class="panel-title">Make your Reel</div>
+        <div class="panel-sub">We create the narration, add any images still needed, and put it together with your captions, your headshot and name, music, and the MetroList notice. It takes a few minutes and you can leave this page; your Reel will be here when you come back. Nothing is charged during the beta.</div>
+        <div class="reel-formats" id="reelFormats" role="group" aria-label="Reel formats"></div>
+        <div class="note hidden" id="reelNote"></div>
+        <label class="reel-ok"><input type="checkbox" id="reelOk"> <span>I confirm the market statistics and claims in this Reel are accurate and comply with applicable advertising requirements.</span></label>
+        <div class="actions"><button class="btn gold" type="button" id="reelGo">Make my Reel</button><button class="btn ghost hidden" type="button" id="reelRetry">Retry</button></div>
+        <div class="msg" id="reelMsg" role="status"></div>
+        <div id="reelOut" class="reel-out hidden"></div>
+      </div>
       <div class="actions"><button class="btn ghost" type="button" id="backToBoardBtn">Back to storyboard</button></div>
       <div class="msg" id="imagesMsg" role="status"></div>
     </section>
@@ -498,7 +516,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     }).join("");
     Array.prototype.forEach.call($("steps").querySelectorAll(".step-pill.done"), function (b) { b.addEventListener("click", function () { go(Number(b.getAttribute("data-step"))); }); });
   }
-  function go(step) { stopImgPoll(); $("picker").classList.add("hidden"); if (typeof closeModal === "function") { closeModal(); $("photoView").classList.add("hidden"); } show([STEP_IDS[step - 1]]); renderSteps(step); if (step !== 2 && researchUI) researchUI.stop(); if (step === 2) renderResearch(); if (step === 3) renderScript(); if (step === 4) renderBoard(); if (step === 5) renderImages(); window.scrollTo({ top: 0, behavior: "smooth" }); }
+  function go(step) { stopImgPoll(); stopReelPoll(); $("picker").classList.add("hidden"); if (typeof closeModal === "function") { closeModal(); $("photoView").classList.add("hidden"); } show([STEP_IDS[step - 1]]); renderSteps(step); if (step !== 2 && researchUI) researchUI.stop(); if (step === 2) renderResearch(); if (step === 3) renderScript(); if (step === 4) renderBoard(); if (step === 5) renderImages(); window.scrollTo({ top: 0, behavior: "smooth" }); }
   function setProject(p) { state.project = p; if (p) { try { history.replaceState(null, "", "#p=" + p.id); } catch (e) { /* ignore */ } } }
 
   // ── Setup ──
@@ -782,6 +800,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     $("imageSlots").innerHTML = '<span class="spinner"></span>Loading your images…';
     try { await loadSelected(); } catch (e) { /* photos are optional; keep going */ }
     await loadImages();
+    renderReel();
   }
   async function loadImages() {
     try {
@@ -893,8 +912,91 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
       return true;
     });
     $("imagesDone").classList.toggle("hidden", !all);
-    if (all) $("imagesDone").textContent = "Every scene has its image. Narration and captions come next.";
+    if (all) $("imagesDone").textContent = "Every scene has its image. Make your Reel below.";
+    paintReelNote();
     if (im.modal) paintModal();
+  }
+
+
+  // ── Your Reel: order, follow and download the finished video ──
+  var RENDER = "/.netlify/functions/agent-marketing-render";
+  var reel = { job: null, timer: null, busy: false };
+  function rapi(method, qs, body) { return api(method, qs, body, RENDER); }
+  function stopReelPoll() { if (reel.timer) { clearTimeout(reel.timer); reel.timer = null; } }
+  function reelFormatLabel(f) { return f === "9x16" ? "9:16 (Reels, Shorts, TikTok)" : "16:9 (YouTube)"; }
+  function selectedReelFormats() { var out = []; Array.prototype.forEach.call($("reelFormats").querySelectorAll("input:checked"), function (c) { out.push(c.value); }); return out; }
+  function paintReelFormats() {
+    var fs = (state.project && state.project.formats) || [], box = $("reelFormats");
+    if (box.getAttribute("data-for") === fs.join(",")) return;
+    box.setAttribute("data-for", fs.join(","));
+    box.innerHTML = fs.map(function (f) { return '<label><input type="checkbox" value="' + esc(f) + '" checked> ' + esc(reelFormatLabel(f)) + "</label>"; }).join("");
+    Array.prototype.forEach.call(box.querySelectorAll("input"), function (c) { c.addEventListener("change", paintReelNote); });
+  }
+  // 16:9 uses the images approved above; any scene without one gets a new image made for the Reel.
+  function paintReelNote() {
+    var note = $("reelNote"), missing = [], seen = {};
+    if (selectedReelFormats().indexOf("16x9") >= 0 && im && im.slots) {
+      im.slots.forEach(function (s) { if (!s.approved && !seen[s.sceneIndex]) { seen[s.sceneIndex] = 1; missing.push(s.sceneIndex + 1); } });
+    }
+    note.classList.toggle("hidden", !missing.length);
+    if (missing.length) note.textContent = "Scene" + (missing.length > 1 ? "s " : " ") + missing.join(", ") + (missing.length > 1 ? " have" : " has") + " no approved 16:9 image yet. Approve one above, or the Reel will create its own for " + (missing.length > 1 ? "them." : "it.");
+  }
+  function reelBusyUi(on) { reel.busy = on; $("reelGo").disabled = on; Array.prototype.forEach.call($("reelFormats").querySelectorAll("input"), function (c) { c.disabled = on; }); $("reelOk").disabled = on; }
+  function showReel(j) {
+    reelBusyUi(false);
+    say("reelMsg", "Your Reel is ready" + (j.durationSec ? " (" + Math.round(j.durationSec) + " seconds)" : "") + ".", "ok");
+    var out = $("reelOut"); out.innerHTML = ""; out.classList.remove("hidden");
+    Object.keys(j.videos || {}).forEach(function (f) {
+      if (!j.videos[f]) return;
+      var box = document.createElement("div"), h = document.createElement("b"), v = document.createElement("video"), a = document.createElement("a");
+      h.textContent = f === "9x16" ? "9:16" : "16:9";
+      v.controls = true; v.playsInline = true; v.src = j.videos[f];
+      a.href = j.videos[f]; a.className = "dl"; a.textContent = "Download"; a.target = "_blank"; a.rel = "noopener";
+      box.appendChild(h); box.appendChild(v); box.appendChild(document.createElement("br")); box.appendChild(a); out.appendChild(box);
+    });
+  }
+  function pollReel() {
+    stopReelPoll();
+    if (!reel.job) return;
+    rapi("GET", "?jobId=" + encodeURIComponent(reel.job)).then(function (r) {
+      var j = r.json || {};
+      if (!r.ok) { reelBusyUi(false); return say("reelMsg", j.error || "Could not check on your Reel.", "err"); }
+      if (j.status === "done") return showReel(j);
+      if (j.status === "error") {
+        reelBusyUi(false); $("reelRetry").classList.remove("hidden");
+        return say("reelMsg", "We could not finish your Reel: " + (j.error || "an unknown problem") + " Your images and narration are saved, so Retry will not make them again.", "err");
+      }
+      reelBusyUi(true); $("reelRetry").classList.add("hidden");
+      say("reelMsg", (j.step || "Working") + " … this takes a few minutes.");
+      reel.timer = setTimeout(pollReel, 5000);
+    }).catch(function (e) { say("reelMsg", e.message, "err"); reel.timer = setTimeout(pollReel, 8000); });
+  }
+  async function renderReel() {
+    stopReelPoll();
+    paintReelFormats(); paintReelNote();
+    $("reelRetry").classList.add("hidden"); $("reelOut").classList.add("hidden"); $("reelOut").innerHTML = ""; say("reelMsg", "");
+    reelBusyUi(false); reel.job = null;
+    try {
+      var r = await rapi("GET", "?projectId=" + encodeURIComponent(state.project.id));
+      if (r.ok && r.json && r.json.jobId && r.json.status !== "none") { reel.job = r.json.jobId; pollReel(); }
+    } catch (e) { /* the panel still works for a new Reel */ }
+  }
+  async function startReel() {
+    var formats = selectedReelFormats();
+    if (!formats.length) return say("reelMsg", "Choose at least one format.", "err");
+    if (!$("reelOk").checked) return say("reelMsg", "Please tick the confirmation first.", "err");
+    reelBusyUi(true); $("reelRetry").classList.add("hidden"); $("reelOut").classList.add("hidden"); say("reelMsg", "Starting …");
+    try {
+      var r = await rapi("POST", "", { projectId: state.project.id, formats: formats, advertisingConfirmed: true });
+      if (r.status === 409 && r.json.jobId) { reel.job = r.json.jobId; say("reelMsg", "A Reel is already being made for this project; following it …"); return pollReel(); }
+      if (!r.ok) { reelBusyUi(false); return say("reelMsg", r.json.error || "Could not start your Reel.", "err"); }
+      reel.job = r.json.jobId; pollReel();
+    } catch (e) { reelBusyUi(false); say("reelMsg", e.message, "err"); }
+  }
+  async function retryReel() {
+    $("reelRetry").classList.add("hidden"); reelBusyUi(true); say("reelMsg", "Retrying. Images and narration already made are reused …");
+    try { var r = await rapi("POST", "", { jobId: reel.job, retry: true }); if (!r.ok) { reelBusyUi(false); $("reelRetry").classList.remove("hidden"); return say("reelMsg", r.json.error || "Could not retry.", "err"); } pollReel(); }
+    catch (e) { reelBusyUi(false); say("reelMsg", e.message, "err"); }
   }
 
   // ── Full-size window (same pattern as the staging side): image, Elaborate with AI, revise ──
@@ -1117,6 +1219,8 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     $("pickerClose").addEventListener("click", function () { $("picker").classList.add("hidden"); });
     $("toImagesBtn").addEventListener("click", function () { go(5); });
     $("backToBoardBtn").addEventListener("click", function () { go(4); });
+    $("reelGo").addEventListener("click", startReel);
+    $("reelRetry").addEventListener("click", retryReel);
     $("imageSlots").addEventListener("click", onImageClick);
     $("imgModal").addEventListener("click", onModalClick);
     $("photoView").addEventListener("click", onPhotoViewClick);

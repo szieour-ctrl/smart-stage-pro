@@ -254,6 +254,11 @@ test("the planner is told to open with a short, specific hook and to vary its vi
 
 test("source roles: the planner is told the rule, and the first and last scene are always data", async () => {
   assert.ok(/SOURCE ROLES/.test(planLib.systemPrompt ? planLib.systemPrompt() : require("fs").readFileSync(require.resolve("../netlify/functions/lib/agent-marketing-plan-lib"), "utf8")));
+  const src = require("fs").readFileSync(require.resolve("../netlify/functions/lib/agent-marketing-plan-lib"), "utf8");
+  assert.ok(/the data is the source of truth/i.test(src));                                  // Redfin (or the agent's report) wins a conflict
+  assert.ok(/state the data's figure only and never the article's/.test(src));
+  assert.ok(/building permits, an earlier trend/.test(src));                                // article-only figures stay available, attributed to the article
+  assert.ok(!/never put a number from the article and a number from the data in the same scene/.test(src)); // the earlier no-mixing rule is gone
   const p = goodPlan();
   p.scenes.forEach((s, i) => { s.source_role = "article"; });            // the planner tries to make every scene an article scene
   p.scenes[3].source_role = "nonsense";

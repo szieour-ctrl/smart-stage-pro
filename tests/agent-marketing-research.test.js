@@ -45,32 +45,32 @@ test("geography: the agent defines it, a neighborhood must name its city, ZIPs a
 });
 
 test("request: known keys only, both modes, audiences, focus flags, upload limits", () => {
-  const ok = r.validateResearchRequest({ mode: "market_update", audience: "sellers", geography: { type: "city", name: "Roseville" }, focus: { active_adult_55: true, new_construction: "true", junk: 1 }, address: "1 Main St" });
+  const ok = r.validateResearchRequest({ mode: "market_update", audience: "sellers", geography: { zip: "95678", type: "city", name: "Roseville" }, focus: { active_adult_55: true, new_construction: "true", junk: 1 }, address: "1 Main St" });
   assert.strictEqual(ok.ok, true);
   assert.deepStrictEqual(Object.keys(ok.request).sort(), ["audience", "dataFocus", "dataSource", "focus", "geography", "keywords", "mode", "period", "uploadIds"]);
   assert.deepStrictEqual(ok.request.focus, { active_adult_55: true, new_construction: true });
   assert.strictEqual(r.validateResearchRequest({ mode: "local_events", audience: "general", geography: { type: "zip", name: "95661" } }).ok, true);
-  assert.strictEqual(r.validateResearchRequest({ mode: "blog", audience: "sellers", geography: { type: "city", name: "A" } }).ok, false);
-  assert.strictEqual(r.validateResearchRequest({ mode: "market_update", audience: "everyone", geography: { type: "city", name: "A" } }).ok, false);
+  assert.strictEqual(r.validateResearchRequest({ mode: "blog", audience: "sellers", geography: { zip: "95678", type: "city", name: "A" } }).ok, false);
+  assert.strictEqual(r.validateResearchRequest({ mode: "market_update", audience: "everyone", geography: { zip: "95678", type: "city", name: "A" } }).ok, false);
   const id = "11111111-1111-4111-8111-111111111111";
-  assert.strictEqual(r.validateResearchRequest({ mode: "market_update", audience: "both", geography: { type: "city", name: "A" }, uploadIds: [id] }).ok, true);
-  assert.strictEqual(r.validateResearchRequest({ mode: "market_update", audience: "both", geography: { type: "city", name: "A" }, uploadIds: ["nope"] }).ok, false);
+  assert.strictEqual(r.validateResearchRequest({ mode: "market_update", audience: "both", geography: { zip: "95678", type: "city", name: "A" }, uploadIds: [id] }).ok, true);
+  assert.strictEqual(r.validateResearchRequest({ mode: "market_update", audience: "both", geography: { zip: "95678", type: "city", name: "A" }, uploadIds: ["nope"] }).ok, false);
   const four = ["1", "2", "3", "4"].map((d) => `${d.repeat(8)}-1111-4111-8111-111111111111`);
-  assert.strictEqual(r.validateResearchRequest({ mode: "market_update", audience: "both", geography: { type: "city", name: "A" }, uploadIds: four }).ok, false);
+  assert.strictEqual(r.validateResearchRequest({ mode: "market_update", audience: "both", geography: { zip: "95678", type: "city", name: "A" }, uploadIds: four }).ok, false);
 });
 
 test("request key: same request, same key; a different place or focus changes it", () => {
-  const a = r.validateResearchRequest({ mode: "market_update", audience: "sellers", geography: { type: "city", name: "Roseville" } }).request;
-  const b = r.validateResearchRequest({ mode: "market_update", audience: "sellers", geography: { type: "city", name: "roseville" } }).request;
-  const c = r.validateResearchRequest({ mode: "market_update", audience: "sellers", geography: { type: "city", name: "Rocklin" } }).request;
-  const d = r.validateResearchRequest({ mode: "market_update", audience: "sellers", geography: { type: "city", name: "Roseville" }, focus: { new_construction: true } }).request;
+  const a = r.validateResearchRequest({ mode: "market_update", audience: "sellers", geography: { zip: "95678", type: "city", name: "Roseville" } }).request;
+  const b = r.validateResearchRequest({ mode: "market_update", audience: "sellers", geography: { zip: "95678", type: "city", name: "roseville" } }).request;
+  const c = r.validateResearchRequest({ mode: "market_update", audience: "sellers", geography: { zip: "95678", type: "city", name: "Rocklin" } }).request;
+  const d = r.validateResearchRequest({ mode: "market_update", audience: "sellers", geography: { zip: "95678", type: "city", name: "Roseville" }, focus: { new_construction: true } }).request;
   assert.strictEqual(r.requestKey(a), r.requestKey(b));
   assert.notStrictEqual(r.requestKey(a), r.requestKey(c));
   assert.notStrictEqual(r.requestKey(a), r.requestKey(d));
 });
 
 test("payload: exact market, never widened; mode rules; model comes from the environment", () => {
-  const request = r.validateResearchRequest({ mode: "market_update", audience: "sellers", geography: { type: "neighborhood", name: "Crocker Ranch", city: "Roseville" }, focus: { active_adult_55: true } }).request;
+  const request = r.validateResearchRequest({ mode: "market_update", audience: "sellers", geography: { zip: "95678", type: "neighborhood", name: "Crocker Ranch", city: "Roseville" }, focus: { active_adult_55: true } }).request;
   const p = r.buildResearchPayload({ request, today: TODAY, env: {} });
   assert.strictEqual(p.model, "perplexity/sonar");
   assert.strictEqual(p.max_output_tokens, 2200);                             // bounds output cost
@@ -97,7 +97,7 @@ test("settings: enhanced local research at a $0.025 target by default, every kno
   assert.deepStrictEqual(t, { model: "openai/gpt-6-luna", searchContextSize: "low", maxTokens: 1500, costTargetUsd: 0.04 });
   assert.deepStrictEqual(r.researchSettings({ AGENT_MARKETING_RESEARCH_CONTEXT: "huge", AGENT_MARKETING_RESEARCH_MAX_TOKENS: "99999", AGENT_MARKETING_RESEARCH_COST_TARGET_USD: "-1" }), d);
   assert.notStrictEqual(r.researchSettings({}).model, "sonar-deep-research"); // deep research is opt-in only, never the default
-  const lowCtx = r.buildResearchPayload({ request: r.validateResearchRequest({ mode: "market_update", audience: "sellers", geography: { type: "city", name: "Roseville" } }).request, today: TODAY, env: { AGENT_MARKETING_RESEARCH_CONTEXT: "high" } });
+  const lowCtx = r.buildResearchPayload({ request: r.validateResearchRequest({ mode: "market_update", audience: "sellers", geography: { zip: "95678", type: "city", name: "Roseville" } }).request, today: TODAY, env: { AGENT_MARKETING_RESEARCH_CONTEXT: "high" } });
   assert.strictEqual(lowCtx.tools[0].max_results, 20);
 });
 
@@ -281,7 +281,7 @@ test("text that is too long is cut back to a whole word, never mid-word", () => 
 });
 
 test("keywords: optional, cleaned, kept short, part of the request key and the research request", () => {
-  const base = { mode: "market_update", audience: "sellers", geography: { type: "city", name: "Roseville" } };
+  const base = { mode: "market_update", audience: "sellers", geography: { zip: "95678", type: "city", name: "Roseville" } };
   const none = r.validateResearchRequest(base).request;
   assert.strictEqual(none.keywords, "");
   const kw = r.validateResearchRequest({ ...base, keywords: "55+, Four Seasons\nHeritage" }).request;
@@ -313,7 +313,7 @@ test("recommendation: the model's pick is attached to that topic; a missing or o
 });
 
 test("optional data: four choices, default all with the last 30 days; none and Local Events carry no period; the period is checked", () => {
-  const base = { mode: "market_update", audience: "sellers", geography: { type: "city", name: "Roseville" } };
+  const base = { mode: "market_update", audience: "sellers", geography: { zip: "95678", type: "city", name: "Roseville" } };
   assert.deepStrictEqual(r.DATA_FOCUS.map((d) => d.key), ["none", "stats", "recent_sales", "all"]);
   const d = r.validateResearchRequest(base).request;
   assert.strictEqual(d.dataFocus, "all");
@@ -334,7 +334,7 @@ test("optional data: four choices, default all with the last 30 days; none and L
 });
 
 test("optional data: the research is told what data and which dates; periods count back from today; none and events say nothing about data", () => {
-  const base = { mode: "market_update", audience: "sellers", geography: { type: "city", name: "Roseville" } };
+  const base = { mode: "market_update", audience: "sellers", geography: { zip: "95678", type: "city", name: "Roseville" } };
   const input = (x) => r.buildResearchPayload({ request: r.validateResearchRequest({ ...base, ...x }).request, today: "2026-10-25", env: {} }).input;
   assert.match(input({ dataFocus: "recent_sales", period: { days: 30 } }), /Optional data to include: recent listings and sales[^\n]*never individual properties[^\n]*Period: 2026-09-26 to 2026-10-25\./);
   assert.match(input({ dataFocus: "stats", period: { start: "2026-07-01", end: "2026-09-30" } }), /MLS-based market statistics[^\n]*Period: 2026-07-01 to 2026-09-30\./);
@@ -349,4 +349,41 @@ test("the research prompt asks for a short hook, not an article title", () => {
   const sys = r.systemPrompt("market_update");
   assert.match(sys, /HOOK, not an article title: 12 words or fewer/);
   assert.match(sys, /never use a colon, a source name or a date range/);
+});
+
+// ── ZIP required for a Local Market Update (Oct 27, 2026) ─────────────────────────────────────────────────────────
+test("zip: a Local Market Update needs a 5-digit ZIP for every market type except ZIP itself; Local Events does not", () => {
+  const base = { mode: "market_update", audience: "sellers" };
+  for (const geography of [{ type: "city", name: "Roseville" }, { type: "neighborhood", name: "Crocker Ranch", city: "Roseville" }, { type: "county", name: "Placer" }, { type: "metro", name: "Sacramento" }]) {
+    const missing = r.validateResearchRequest({ ...base, geography });
+    assert.strictEqual(missing.ok, false);
+    assert.ok(missing.errors.some((e) => e.field === "geography.zip" && /5-digit ZIP/.test(e.message)), geography.type);
+    const ok = r.validateResearchRequest({ ...base, geography: { ...geography, zip: "95746" } });
+    assert.strictEqual(ok.ok, true);
+    assert.strictEqual(ok.request.geography.zip, "95746");
+  }
+  assert.strictEqual(r.validateResearchRequest({ ...base, geography: { type: "city", name: "Roseville", zip: "9574" } }).ok, false);
+  assert.strictEqual(r.validateResearchRequest({ ...base, geography: { type: "city", name: "Roseville", zip: "ABCDE" } }).ok, false);
+  // a ZIP market is its own ZIP
+  assert.strictEqual(r.validateResearchRequest({ ...base, geography: { type: "zip", name: "95746" } }).request.geography.zip, "95746");
+  // Local Events never needs one, but a malformed one is still refused and a good one is kept
+  assert.strictEqual(r.validateResearchRequest({ mode: "local_events", audience: "general", geography: { type: "city", name: "Roseville" } }).ok, true);
+  assert.strictEqual(r.validateResearchRequest({ mode: "local_events", audience: "general", geography: { type: "city", name: "Roseville", zip: "12" } }).ok, false);
+  // validateGeography alone (report upload check) does not require it
+  assert.strictEqual(r.validateGeography({ type: "city", name: "Roseville" }).ok, true);
+  assert.strictEqual(r.validateGeography({ type: "city", name: "Roseville" }, { requireZip: true }).ok, false);
+});
+
+test("zip: a different ZIP is a different request", () => {
+  const mk = (zip) => r.validateResearchRequest({ mode: "market_update", audience: "sellers", geography: { type: "city", name: "Roseville", zip } }).request;
+  assert.strictEqual(r.requestKey(mk("95746")), r.requestKey(mk("95746")));
+  assert.notStrictEqual(r.requestKey(mk("95746")), r.requestKey(mk("95678")));
+});
+
+test("source rule: a topic is one local article; market data comes from the report or Redfin, never another publisher", () => {
+  const sp = r.systemPrompt("market_update");
+  assert.ok(/ONE local article/.test(sp));
+  assert.ok(/never add market statistics from another publisher/.test(sp));
+  assert.ok(/Redfin Market Trends page for the ZIP code/.test(sp));
+  assert.ok(!/from ONE source and name its period/.test(sp));
 });

@@ -204,6 +204,9 @@ function validateManifest(manifest) {
     const expectRole = i === 0 ? "opening" : i === scenes.length - 1 ? "closing" : "middle";
     if (comp.role !== expectRole) err("composition_role", where, `Scene ${i + 1} is a ${expectRole} scene but "${sc.composition}" is a ${comp.role} composition.`);
     if (!sc.narrative_role) err("narrative_role", where, "Each scene needs a narrative role, separate from its composition.");
+    // One source per scene (Oct 27, 2026): "data" (the agent's Trend/CMA report, else Redfin Market Trends) or "article" (the approved local article). Opening and closing are always data.
+    if (sc.source_role !== undefined && !["data", "article"].includes(sc.source_role)) err("source_role", where, 'A scene\'s source role is "data" or "article".');
+    if ((expectRole === "opening" || expectRole === "closing") && sc.source_role === "article") err("source_role", where, "Opening and closing scenes source the market data, never the article.");
     if (!treatments.BRANDING.includes(sc.branding)) err("branding", where, `Branding must be one of ${treatments.BRANDING.join(", ")}.`);
     if ((expectRole === "opening" || expectRole === "closing") && sc.branding !== "full") err("branding", where, "Opening and closing scenes carry full branding.");
     if ((expectRole === "opening" || expectRole === "closing") && !(b.headshot_key)) err("headshot", "brand.headshot_key", "Opening and closing scenes use the agent's own headshot, and none is attached.");

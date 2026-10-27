@@ -14,7 +14,7 @@ const libPath = require.resolve("../netlify/functions/lib/marketing-profile-lib"
 const authPath = require.resolve("../netlify/functions/lib/reel-auth-lib");
 // A chosen research topic (what the Research step freezes on the project).
 const TOPIC = { id: "t2", researchId: "bbbbbbbb-bbbb-4bbb-8bbb-000000000001", question: "Are homes in Roseville taking longer to sell?", whyItMatters: "Sellers are pricing off old sales.", scope: "selected", scopeNote: "", origin: "web", audience: "sellers",
-  geography: { type: "city", name: "Roseville", state: "CA", label: "Roseville, CA" }, sources: [{ type: "web", url: "https://example.com/a", title: "A", domain: "example.com" }] };
+  geography: { zip: "95678", type: "city", name: "Roseville", state: "CA", label: "Roseville, CA" }, sources: [{ type: "web", url: "https://example.com/a", title: "A", domain: "example.com" }] };
 const uuid = (n) => `aaaaaaaa-aaaa-4aaa-8aaa-${String(n).padStart(12, "0")}`;
 function fakeSupabase(method, table, body, qs = "") {
   assert.strictEqual(table, "agent_marketing_projects");

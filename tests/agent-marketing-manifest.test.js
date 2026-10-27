@@ -111,3 +111,15 @@ test("the notice is the same sentence Railway draws", () => {
   assert.strictEqual(M.metroListNotice(period), "Based on information from MetroList Services, Inc. for the period September 1, 2026 through September 30, 2026.");
   assert.strictEqual(M.metroListNotice({ start: "", end: "" }), null);
 });
+
+test("source role: opening and closing source the data; a middle scene may source the approved article; bad values are refused", () => {
+  const m = natomas();
+  m.scenes[1].source_role = "article";
+  assert.ok(!M.validateManifest(m).errors.some((e) => e.code === "source_role"));
+  const bad = natomas(); bad.scenes[0].source_role = "article";
+  assert.ok(M.validateManifest(bad).errors.some((e) => e.code === "source_role" && /Opening and closing/.test(e.message)));
+  const last = natomas(); last.scenes[last.scenes.length - 1].source_role = "article";
+  assert.ok(M.validateManifest(last).errors.some((e) => e.code === "source_role"));
+  const odd = natomas(); odd.scenes[1].source_role = "redfin";
+  assert.ok(M.validateManifest(odd).errors.some((e) => e.code === "source_role" && /"data" or "article"/.test(e.message)));
+});

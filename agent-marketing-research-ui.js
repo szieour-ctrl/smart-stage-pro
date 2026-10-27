@@ -25,7 +25,7 @@
     $("dataFocus").innerHTML = (s.dataFocus || []).map(function (d) { return '<option value="' + esc(d.key) + '"' + (d.key === "all" ? " selected" : "") + ">" + esc(d.label) + "</option>"; }).join("");
     $("dataFocus").addEventListener("change", applyFocus);
     $("period").addEventListener("change", applyFocus);
-    $("modeChoices").addEventListener("change", applyFocus); applyFocus();
+    $("modeChoices").addEventListener("change", function () { applyFocus(); applyZip(); }); applyFocus();
   }
   // Optional data applies to Local Market Update only; a period is needed for anything but "None".
   function applyFocus() {
@@ -42,14 +42,20 @@
   function applyGeo() {
     var t = $("geoType").value;
     $("cityWrap").classList.toggle("hidden", t !== "neighborhood");
+    applyZip();
     $("geoNameLbl").textContent = t === "zip" ? "ZIP code" : t === "neighborhood" ? "Neighborhood" : t === "county" ? "County" : t === "metro" ? "Metro area" : "City";
     $("geoName").placeholder = t === "zip" ? "e.g. 95678" : t === "neighborhood" ? "e.g. Crocker Ranch" : t === "county" ? "e.g. Placer" : t === "metro" ? "e.g. Sacramento" : "e.g. Roseville";
+  }
+  // A Local Market Update needs the 5-digit ZIP (Redfin Market Trends are read for it). A ZIP market already is its ZIP; Local Events does not need one.
+  function applyZip() {
+    var need = picked("mode") !== "local_events" && $("geoType").value !== "zip";
+    $("zipWrap").classList.toggle("hidden", !need);
   }
   function collect() {
     var type = $("geoType").value;
     return {
       mode: picked("mode"), audience: $("audience").value,
-      geography: { type: type, name: $("geoName").value, city: type === "neighborhood" ? $("geoCity").value : "" },
+      geography: { type: type, name: $("geoName").value, city: type === "neighborhood" ? $("geoCity").value : "", zip: type === "zip" ? "" : $("geoZip").value },
       focus: { active_adult_55: $("f55").checked, new_construction: $("fNew").checked }, keywords: $("keywords").value, dataFocus: $("dataFocus").value, period: collectPeriod(),
       dataSource: reportSource().dataSource, uploadIds: reportSource().uploadIds,
     };
@@ -154,7 +160,7 @@
     var g = r.geography || {}, f = r.focus || {};
     var m = document.querySelector('input[name="mode"][value="' + r.mode + '"]'); if (m) m.checked = true;
     $("geoType").value = g.type || "city"; applyGeo();
-    $("geoName").value = g.name || ""; $("geoCity").value = g.city || "";
+    $("geoName").value = g.name || ""; $("geoCity").value = g.city || ""; $("geoZip").value = g.zip || ""; applyZip();
     $("audience").value = r.audience || $("audience").value;
     $("f55").checked = !!f.active_adult_55; $("fNew").checked = !!f.new_construction; $("keywords").value = f.keywords || "";
     $("dataFocus").value = f.dataFocus || "all";
@@ -368,7 +374,7 @@
   // The agent confirms audience, area, keywords and data before anything is bought. "Research this market" opens this summary; only "Confirm and research" spends a session.
   function confirmLines(q) {
     var s = state.schema, g = q.geography || {};
-    var area = g.name ? (g.type === "neighborhood" && g.city ? g.name + ", " + g.city : g.name) + " (" + (s.geoTypes.filter(function (x) { return x.key === g.type; })[0] || {}).label + ")" : "";
+    var area = g.name ? (g.type === "neighborhood" && g.city ? g.name + ", " + g.city : g.name) + " (" + (s.geoTypes.filter(function (x) { return x.key === g.type; })[0] || {}).label + (g.zip && g.type !== "zip" ? ", ZIP " + g.zip : "") + ")" : "";
     var aud = (s.audiences.filter(function (a) { return a.key === q.audience; })[0] || {}).label || "";
     var mode = (s.modes.filter(function (m) { return m.key === q.mode; })[0] || {}).label || "";
     var focus = [q.focus.active_adult_55 ? "55+ Active Adult" : "", q.focus.new_construction ? "New Construction" : ""].filter(Boolean).join(", ");
@@ -388,6 +394,7 @@
     if (state.uploadReady && !state.uploadReady()) return;
     var q = collect(); say("startMsg", "");
     if (q.mode !== "local_events" && q.dataFocus !== "none" && q.period && q.period.start !== undefined && (!q.period.start || !q.period.end)) { say("startMsg", "Enter both dates for the period.", "err"); return; }
+    if (q.mode !== "local_events" && q.geography.type !== "zip" && !/^\d{5}$/.test(String(q.geography.zip || "").trim())) { say("startMsg", "Enter the 5-digit ZIP code for this market.", "err"); $("geoZip").focus(); return; }
     if (!q.mode || !q.geography.name.trim() || !q.audience) { say("startMsg", !q.audience ? "Choose who this is for." : "Enter the place to research.", "err"); return; }
     $("confirmList").innerHTML = confirmLines(q);
     var x = state.session;
@@ -423,7 +430,7 @@
       }
       if (!wired) { wired = true; buildForm(); $("startBtn").addEventListener("click", review); $("confirmBtn").addEventListener("click", start); $("confirmEdit").addEventListener("click", hideConfirm);
         // an edit makes the shown summary stale, so it closes
-        ["geoType", "geoName", "geoCity", "audience", "f55", "fNew", "keywords", "upFile", "dataFocus", "period", "periodFrom", "periodTo"].forEach(function (id) { $(id).addEventListener("input", hideConfirm); $(id).addEventListener("change", hideConfirm); }); wireIntakeExtras(); }
+        ["geoType", "geoName", "geoCity", "geoZip", "audience", "f55", "fNew", "keywords", "upFile", "dataFocus", "period", "periodFrom", "periodTo"].forEach(function (id) { $(id).addEventListener("input", hideConfirm); $(id).addEventListener("change", hideConfirm); }); wireIntakeExtras(); }
       $("resultPanel").classList.add("hidden");
       var list = await refreshSaved();
       var running = (list || []).filter(function (r) { return r.status === "running"; })[0];

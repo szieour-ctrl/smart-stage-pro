@@ -80,8 +80,9 @@ function stripState(s) { return String(s || "").replace(/,?\s*(?:CA|California)\
  * The agent picks one precise market. State is always California (the product is California-only), a neighborhood
  * must name its city so it cannot silently become another place, and a ZIP must be five digits.
  */
-function validateGeography(input) {
+function validateGeography(input, opts) {
   const g = input && typeof input === "object" ? input : {};
+  const requireZip = !!(opts && opts.requireZip);
   const errors = [];
   const type = String(g.type || "");
   if (!GEO_TYPES.includes(type)) errors.push({ field: "geography.type", message: "Choose city, neighborhood, ZIP, county or metro." });
@@ -92,8 +93,15 @@ function validateGeography(input) {
   if (type === "neighborhood" && !city) errors.push({ field: "geography.city", message: "Name the city this neighborhood is in." });
   if (city.length > LIMITS.name) errors.push({ field: "geography.city", message: `Keep the city to ${LIMITS.name} characters or fewer.` });
   if (type === "zip" && name && !/^\d{5}$/.test(name)) errors.push({ field: "geography.name", message: "A ZIP code is five digits." });
+  // The ZIP code (Oct 27, 2026): a ZIP market IS its ZIP; every other market type also carries the 5-digit ZIP the Redfin Market Trends
+  // page is read for. Required for a Local Market Update (see validateResearchRequest); optional elsewhere, but never malformed.
+  const zip = type === "zip" ? name : clean(g.zip, 12);
+  if (type !== "zip") {
+    if (!zip && requireZip) errors.push({ field: "geography.zip", message: "Enter the 5-digit ZIP code for this market." });
+    else if (zip && !/^\d{5}$/.test(zip)) errors.push({ field: "geography.zip", message: "A ZIP code is five digits." });
+  }
   if (errors.length) return { ok: false, errors, geography: null };
-  const geography = { type, name, city: type === "neighborhood" ? city : "", state: "CA" };
+  const geography = { type, name, city: type === "neighborhood" ? city : "", zip: /^\d{5}$/.test(zip) ? zip : "", state: "CA" };
   geography.label = geoLabel(geography);
   return { ok: true, errors: [], geography };
 }
@@ -121,7 +129,7 @@ function validateResearchRequest(body) {
   if (!MODES.includes(mode)) errors.push({ field: "mode", message: "Choose Local Market Update or Local Events." });
   const audience = String(b.audience || "");
   if (!AUDIENCE_KEYS.includes(audience)) errors.push({ field: "audience", message: "Choose who this is for." });
-  const geo = validateGeography(b.geography);
+  const geo = validateGeography(b.geography, { requireZip: mode === "market_update" }); // a Local Market Update always carries its ZIP
   if (!geo.ok) errors.push(...geo.errors);
   const f = b.focus && typeof b.focus === "object" ? b.focus : {};
   const focus = { active_adult_55: isTrue(f.active_adult_55), new_construction: isTrue(f.new_construction) };
@@ -153,7 +161,7 @@ function validateResearchRequest(body) {
 function requestKey(request) {
   const r = request || {};
   const g = r.geography || {};
-  return JSON.stringify([r.mode, r.audience, g.type, String(g.name || "").toLowerCase(), String(g.city || "").toLowerCase(), !!(r.focus && r.focus.active_adult_55), !!(r.focus && r.focus.new_construction), String(r.keywords || "").toLowerCase(), r.dataFocus || "all", JSON.stringify(r.period || null), (r.uploadIds || []).slice().sort(), r.dataSource || "web"]);
+  return JSON.stringify([r.mode, r.audience, g.type, String(g.name || "").toLowerCase(), String(g.city || "").toLowerCase(), String(g.zip || ""), !!(r.focus && r.focus.active_adult_55), !!(r.focus && r.focus.new_construction), String(r.keywords || "").toLowerCase(), r.dataFocus || "all", JSON.stringify(r.period || null), (r.uploadIds || []).slice().sort(), r.dataSource || "web"]);
 }
 
 // ── Provider request (Perplexity Agent API, POST /v1/agent) ────────────────────────────────────────────────────────
@@ -201,7 +209,7 @@ function systemPrompt(mode) {
       "MODE: Local Market Update. Each topic is a question buyers, sellers or residents in this market are asking right now about housing inventory, pricing, days on market, pending or closed sales, competition, new construction or changing conditions.",
       "Prefer sources from the last 7 days; accept up to 30 days only if necessary. Prefer MLS-based or public data. Set event to null.",
       "Use at least three different publishers across the five topics, and no more than two topics may rest on the same website. Prefer independent or primary sources (an MLS or association report, the city or county, California Association of Realtors, NAR, Redfin, Zillow, Realtor.com, Freddie Mac, local news) over an individual agent's or team's own marketing blog, and never make one agent's blog the main source for the whole set.",
-      "Take every figure in a topic from ONE source and name its period. Never mix numbers from different sources in the same topic. If a source calls a figure preliminary or the month is not complete, say so in trend_signals. Prefer the most recent complete month.",
+      "Each topic is the story of ONE local article (its story source). Take every figure in a topic from that article and name its period; never mix numbers from different sources in the same topic and never add market statistics from another publisher. Market data comes separately, from the agent's own report or the Redfin Market Trends page for the ZIP code. If a source calls a figure preliminary or the month is not complete, say so in trend_signals. Prefer the most recent complete month.",
     ];
   const shape = [
     "Return ONLY one JSON object, no commentary, in this shape:",

@@ -122,3 +122,9 @@ test("narration shaping comes from the environment, with a deeper default, and r
   assert.deepStrictEqual(manifest.audio.voice_shape, { semitones: -1.5, bass_db: 3 });
   assert.deepStrictEqual(validation.errors, []);
 });
+
+test("a takeaway statement that starts with a joining word reads as its own sentence", () => {
+  const narrative = { ...fx.narrative, scenes: fx.narrative.scenes.map((s, i) => (i === 3 ? { ...s, narrationExcerpt: "Condition and pricing precision matter… because new construction sets a baseline your home has to answer for." } : s)) };
+  const pl = director.plan(narrative, fx.intake, director.figuresFrom(fx.reportFigures));
+  assert.strictEqual(pl.scenes[3].data.statement, "New construction sets a baseline your home has to answer for.");
+});

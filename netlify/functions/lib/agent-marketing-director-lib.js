@@ -119,7 +119,7 @@ function sceneHeadline(excerpt) {
 function statement(scene) {
   const sentences = stripTags(scene.narrationExcerpt).split(/(?<=[.!?…])\s+/).filter(Boolean);
   const w = (sentences[0] || "").replace(/[.!?…]+$/, "").split(" "), c = Math.ceil(w.length / 2);
-  const out = { headline: [titleCase(w.slice(0, c).join(" ")), titleCase(w.slice(c).join(" "))], statement: sentences[1] || "", support: sentences.slice(2).join(" ") };
+  const out = { headline: [titleCase(w.slice(0, c).join(" ")), titleCase(w.slice(c).join(" "))], statement: (sentences[1] || "").replace(/^(?:because|and|but|so)\s+/i, "").replace(/^\S/, (c) => c.toUpperCase()), support: sentences.slice(2).join(" ") };
   return out;
 }
 

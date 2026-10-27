@@ -211,7 +211,7 @@ test("run, both: if the report cannot be turned into topics the five web topics 
 
 test("run, web only: unchanged, topics are tagged web, and an attached report is ignored", async () => {
   let called = 0;
-  const r = await run.runResearch({ row: { ...baseRow("web"), upload_refs: refs }, uploads: uploads(), apiKey: "p", callFn: async (p) => { called++; assert.ok(!/MetroList market-trends/.test(p.input)); return webAnswer(); }, claudeFn: async () => { throw new Error("must not be called"); }, now: NOW, env: {} });
+  const r = await run.runResearch({ row: { ...baseRow("web"), upload_refs: refs }, uploads: uploads(), apiKey: "p", callFn: async (p) => { if (!/ONE web page/.test(p.instructions)) called++; assert.ok(!/MetroList market-trends/.test(p.input)); return webAnswer(); } /* a ZIP market also makes the separate Redfin call (Oct 27); this stub answers it with topics, so it is refused and the five web topics still arrive */, claudeFn: async () => { throw new Error("must not be called"); }, now: NOW, env: {} });
   assert.strictEqual(r.fields.status, "ready");
   assert.strictEqual(called, 1);
   assert.deepStrictEqual(r.fields.topics.map((t) => t.origin), Array(5).fill("web"));

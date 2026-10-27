@@ -12,6 +12,7 @@ const https = require("https");
 const rl = require("./agent-marketing-research-lib");
 const reportTopics = require("./agent-marketing-research-report-lib");
 const planLib = require("./agent-marketing-plan-lib");
+const redfinLib = require("./agent-marketing-redfin-lib");
 
 const API_HOST = "api.perplexity.ai";
 const API_PATH = "/v1/agent";
@@ -159,6 +160,38 @@ function requestFromRow(row) {
   };
 }
 
+// ── Redfin Market Trends: the market data when the agent uploaded no report (Oct 27, 2026) ──────────────────────────
+// Its own provider call, separate from the topic research. Never fatal: when it fails the five topics are still delivered and the agent is told.
+function citationUrls(resp) {
+  const out = [];
+  (Array.isArray(resp && resp.citations) ? resp.citations : []).forEach((c) => out.push(typeof c === "string" ? c : c && c.url));
+  (Array.isArray(resp && resp.search_results) ? resp.search_results : []).forEach((s) => out.push(s && s.url));
+  (Array.isArray(resp && resp.output) ? resp.output : []).forEach((it) => { if (it && it.type === "search_results") (Array.isArray(it.results) ? it.results : []).forEach((x) => out.push(x && x.url)); });
+  return out.filter(Boolean);
+}
+function redfinZip(request) {
+  const g = (request && request.geography) || {};
+  const z = g.type === "zip" ? g.name : g.zip;
+  return redfinLib.isZip(z) ? String(z) : "";
+}
+/** fetchRedfinTrends({ zip, apiKey, callFn, sleepFn, today, env }) → { ok, redfin, problems, warnings, usage } (never throws) */
+async function fetchRedfinTrends({ zip, apiKey, callFn, sleepFn, today, env }) {
+  const e = env || process.env;
+  const cfg = rl.researchSettings(e);
+  const payload = redfinLib.buildRedfinPayload({ zip, env: e });
+  try {
+    const { resp } = await askProvider({ payload, apiKey, callFn, sleepFn, retries: 1 });
+    const usage = rl.usageSummary(resp, cfg.costTargetUsd);
+    let raw;
+    try { raw = redfinLib.extractRedfin(answerText(resp)); } catch (err) { return { ok: false, redfin: null, problems: [err.message], warnings: [], usage }; }
+    const v = redfinLib.validateRedfin(raw, { zip, today, citations: citationUrls(resp) });
+    return { ok: v.ok, redfin: v.redfin, problems: v.problems, warnings: v.warnings, usage };
+  } catch (err) {
+    console.error(`[agent-marketing-research] redfin failed: ${String(err && err.message).slice(0, 200)}`);
+    return { ok: false, redfin: null, problems: [String(err && err.message || "Redfin could not be read").slice(0, 200)], warnings: [], usage: null };
+  }
+}
+
 /**
  * runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callFn, sleepFn, now, env }) → { fields, problems, attempts }
  * Where the topics come from is row.data_source:
@@ -182,7 +215,7 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
   const baseInput = payload && payload.input;
   let usage = { promptTokens: null, completionTokens: null, citationTokens: null, reasoningTokens: null, searchQueries: null, costUsd: null };
   let modelUsed = payload ? payload.model : null, grounded = null, attempts = 0, problems = [], validation = null, error = null, providerError = null;
-  let reportNote = null, reportAttempts = 0, fallback = null;
+  let reportNote = null, reportAttempts = 0, fallback = null, redfinNote = null, redfinWarnings = [];
 
   try {
     if (dataSource !== "upload") {
@@ -235,6 +268,18 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
         else reportNote = "Your report could not be turned into topics this time, so these five come from web research only.";
       }
     }
+    // No report uploaded: Redfin Market Trends for the ZIP is the market data. Each topic carries it (marketData) so the Reel can use it as the
+    // data source. A failure here never fails the session.
+    if (dataSource === "web" && request.mode === "market_update" && validation && validation.ok) {
+      const zip = redfinZip(request);
+      if (!zip) redfinNote = "No ZIP code was given, so Redfin Market Trends could not be read for this market.";
+      else {
+        const rf = await fetchRedfinTrends({ zip, apiKey, callFn, sleepFn, today, env: e });
+        if (rf.usage) usage = addUsage(usage, rf.usage);
+        if (rf.ok) { validation = { ...validation, topics: validation.topics.map((t) => ({ ...t, marketData: rf.redfin })) }; redfinWarnings = rf.warnings; }
+        else redfinNote = `Redfin Market Trends could not be read for ZIP ${zip}: ${rf.problems.slice(0, 2).join(" ").slice(0, 240)}`;
+      }
+    }
   } catch (err) {
     error = err.message;
     providerError = err.providerDetail || null;
@@ -243,7 +288,7 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
   // Cost: the provider's own figure when it sent one, otherwise an estimate from tokens (flagged as an estimate).
   const estimated = usage.costUsd == null ? estimateCostUsd(modelUsed, usage) : null;
   const costUsd = usage.costUsd != null ? usage.costUsd : estimated;
-  const finalUsage = { ...usage, costUsd, costEstimated: usage.costUsd == null && estimated != null, targetUsd: cfg.costTargetUsd, withinTarget: costUsd == null ? null : costUsd <= cfg.costTargetUsd, attempts, grounded, providerError, dataSource, reportAttempts, reportNote, problems: problems.slice(0, 6).map((x) => String(x).slice(0, 200)) };
+  const finalUsage = { ...usage, costUsd, costEstimated: usage.costUsd == null && estimated != null, targetUsd: cfg.costTargetUsd, withinTarget: costUsd == null ? null : costUsd <= cfg.costTargetUsd, attempts, grounded, providerError, dataSource, reportAttempts, reportNote, redfinNote, redfinWarnings: redfinWarnings.slice(0, 4), problems: problems.slice(0, 6).map((x) => String(x).slice(0, 200)) };
   const fields = rl.outcomeFields({ validation: error ? null : validation, usage: finalUsage, model: modelUsed, today, now, error });
   return { fields, problems, attempts };
 }
@@ -256,4 +301,4 @@ function planKeyFromContext(ctx) {
   return "solo";
 }
 
-module.exports = { answerText, PRICES, estimateCostUsd, todayPT, callPerplexity, askProvider, groundTopics, urlKey, requestFromRow, runResearch, planKeyFromContext };
+module.exports = { answerText, PRICES, estimateCostUsd, todayPT, callPerplexity, askProvider, groundTopics, urlKey, requestFromRow, runResearch, planKeyFromContext, fetchRedfinTrends, redfinZip, citationUrls };

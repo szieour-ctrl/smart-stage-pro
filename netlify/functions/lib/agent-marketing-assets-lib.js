@@ -20,7 +20,7 @@ function parseNoticePeriod(text) {
 function voiceIdFor(voice, env) {
   const e = env || process.env;
   if (voice === "ssp_female") return e.AGENT_MARKETING_VOICE_SSP_FEMALE || null;
-  return e.AGENT_MARKETING_VOICE_SSP_MALE || "J7X6yWhJQlWW5OoUeuP1";
+  return e.AGENT_MARKETING_VOICE_SSP_MALE || "32k6j8e9sZJuuBXxDcVP";
 }
 
 /** What each scene needs, in story order. kind: "generate" (GPT Image 2), "reuse" (another scene's image), "plate" (brand plate drawn in code), "unsupported". */

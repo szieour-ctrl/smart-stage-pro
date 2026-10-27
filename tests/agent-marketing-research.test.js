@@ -430,3 +430,11 @@ test("source rule: a topic is one local article; market data comes from the repo
   assert.ok(/Redfin Market Trends page for the ZIP code/.test(sp));
   assert.ok(!/from ONE source and name its period/.test(sp));
 });
+
+test("topic prompt: a market update always returns five (wider articles marked broader_context); events may still return fewer", () => {
+  const m = r.systemPrompt("market_update");
+  assert.match(m, /ALWAYS RETURN FIVE TOPICS/);
+  assert.match(m, /Returning none, or fewer than five, is a failure/);
+  assert.doesNotMatch(m, /return fewer rather than guess/);
+  assert.match(r.systemPrompt("local_events"), /return fewer rather than guess/);
+});

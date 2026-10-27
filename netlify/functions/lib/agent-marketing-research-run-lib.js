@@ -220,7 +220,7 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
   const baseInput = payload && payload.input;
   let usage = { promptTokens: null, completionTokens: null, citationTokens: null, reasoningTokens: null, searchQueries: null, costUsd: null };
   let modelUsed = payload ? payload.model : null, grounded = null, attempts = 0, problems = [], validation = null, error = null, providerError = null;
-  let reportNote = null, reportAttempts = 0, fallback = null, redfinNote = null, redfinWarnings = [], redfinDebug = null;
+  let reportNote = null, reportAttempts = 0, fallback = null, redfinNote = null, redfinWarnings = [], redfinDebug = null, topicAnswer = null;
 
   try {
     if (dataSource !== "upload") {
@@ -230,6 +230,7 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
         modelUsed = m;
         usage = addUsage(usage, rl.usageSummary(resp, cfg.costTargetUsd));
         const text = answerText(resp);
+        topicAnswer = { answer: text.slice(0, 1500), citations: citationUrls(resp).slice(0, 8).map((u) => String(u).slice(0, 200)), attempt: attempts };
         try {
           const g = groundTopics(rl.extractTopics(text), resp);
           grounded = g.grounded;
@@ -297,7 +298,7 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
   // Cost: the provider's own figure when it sent one, otherwise an estimate from tokens (flagged as an estimate).
   const estimated = usage.costUsd == null ? estimateCostUsd(modelUsed, usage) : null;
   const costUsd = usage.costUsd != null ? usage.costUsd : estimated;
-  const finalUsage = { ...usage, costUsd, costEstimated: usage.costUsd == null && estimated != null, targetUsd: cfg.costTargetUsd, withinTarget: costUsd == null ? null : costUsd <= cfg.costTargetUsd, attempts, grounded, providerError, dataSource, reportAttempts, reportNote, redfinNote, redfinWarnings: redfinWarnings.slice(0, 4), redfinDebug, problems: problems.slice(0, 6).map((x) => String(x).slice(0, 200)) };
+  const finalUsage = { ...usage, costUsd, costEstimated: usage.costUsd == null && estimated != null, targetUsd: cfg.costTargetUsd, withinTarget: costUsd == null ? null : costUsd <= cfg.costTargetUsd, attempts, grounded, providerError, dataSource, reportAttempts, reportNote, redfinNote, redfinWarnings: redfinWarnings.slice(0, 4), redfinDebug, topicDebug: validation && validation.ok ? null : topicAnswer, problems: problems.slice(0, 6).map((x) => String(x).slice(0, 200)) };
   const fields = rl.outcomeFields({ validation: error ? null : validation, usage: finalUsage, model: modelUsed, today, now, error });
   return { fields, problems, attempts };
 }

@@ -180,3 +180,14 @@ test("run: a failed set records why it was rejected", async () => {
   assert.ok(r.fields.usage.problems.length > 0);
   assert.match(r.fields.usage.problems.join(" "), /expected 5 topics/);
 });
+
+test("run: a refused topic set keeps what the provider said (topicDebug); a good one keeps nothing extra", async () => {
+  const empty = { status: 200, json: { output: [{ type: "message", content: [{ type: "output_text", text: JSON.stringify({ topics: [] }) }] }] } };
+  const bad = await run.runResearch({ row, apiKey: "k", now: NOW, env: { AGENT_MARKETING_RESEARCH_RETRIES: "0" }, sleepFn: noSleep, callFn: async () => empty });
+  assert.strictEqual(bad.fields.status, "failed");
+  assert.match(bad.fields.usage.problems.join(" "), /expected 5 topics, got 0/);
+  assert.match(bad.fields.usage.topicDebug.answer, /"topics":\[\]/);
+  assert.strictEqual(bad.fields.usage.topicDebug.attempt, 1);
+  const good = await run.runResearch({ row, apiKey: "k", now: NOW, env: ENV, sleepFn: noSleep, callFn: async () => reply(five()) });
+  assert.strictEqual(good.fields.usage.topicDebug, null);
+});

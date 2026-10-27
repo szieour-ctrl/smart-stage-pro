@@ -104,12 +104,7 @@ function plan(narrative, intake, figures) {
 function statement(scene) {
   const sentences = stripTags(scene.narrationExcerpt).split(/(?<=[.!?…])\s+/).filter(Boolean);
   const w = (sentences[0] || "").replace(/[.!?…]+$/, "").split(" "), c = Math.ceil(w.length / 2);
-  const text = scene.narrationExcerpt;
-  const pts = [];
-  if (/condition/i.test(text)) pts.push({ title: "Condition", caption: "Well-maintained homes stand out.", icon: "condition" });
-  if (/pric/i.test(text)) pts.push({ title: "Pricing", caption: "Accurate pricing drives results.", icon: "pricing" });
   const out = { headline: [titleCase(w.slice(0, c).join(" ")), titleCase(w.slice(c).join(" "))], statement: sentences[1] || "", support: sentences.slice(2).join(" ") };
-  if (pts.length) out.points = pts;
   return out;
 }
 

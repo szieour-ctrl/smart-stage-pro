@@ -122,7 +122,7 @@ function pickReferenceKey(profileRow) {
 // the tall prompt keeps the subject centred with calm bands at the top (headline) and bottom (captions). `framing` is the planner's
 // per-format framing note for the scene.
 const TALL_SIZE = "1440x2560";
-const TALL_RULES = "Tall vertical 9:16 portrait-orientation composition. Place the main subject and every key detail in the middle of the frame, with calm, simple scenery above and below. Keep the top fifth and the lower third calm and uncluttered (a headline sits at the top and captions at the bottom).";
+const TALL_RULES = "Tall vertical 9:16 portrait-orientation composition. Text will be laid over the top 45% of the frame, so keep that whole upper area calm and simple: soft wall, sky, window light or blurred background only, with no objects, props, plants or strong edges in it. Place the main subject and every key detail in the band between 48% and 78% of the frame height, and keep the lower fifth calm and uncluttered (captions sit there).";
 function buildFormatPrompt({ kind, scenePrompt, format, framing }) {
   if (format !== "9x16") return buildPrompt({ kind, scenePrompt });
   const base = String(scenePrompt || "").replace(/\s+/g, " ").trim().slice(0, 900);

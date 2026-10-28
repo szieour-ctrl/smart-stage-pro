@@ -292,6 +292,21 @@ test("Oct 27 Reel feedback: local home style, no signs of any kind, no abstract 
   assert.strictEqual(msg.cta_angle, a);
 });
 
+test("each Reel gets its own visual look: retries keep it, eight in a row use all eight, and the look never shares a lockstep with the CTA approach", () => {
+  const lib = require("../netlify/functions/lib/agent-marketing-plan-lib");
+  const proj = (i) => ({ id: "project-aaa", user_id: "agent-7", cta_angle_index: i });
+  assert.strictEqual(lib.visualLookFor(proj(2)), lib.visualLookFor(proj(2)), "a retry keeps its look");
+  const seq = [0, 1, 2, 3, 4, 5, 6, 7].map((i) => lib.visualLookIndex(proj(i)));
+  assert.strictEqual(new Set(seq).size, lib.VISUAL_LOOKS.length, "eight Reels in a row use all eight looks");
+  for (let i = 1; i < seq.length; i++) assert.notStrictEqual(seq[i], seq[i - 1]);
+  assert.strictEqual(lib.visualLookIndex(proj(8)), seq[0]);
+  assert.ok(new Set([0, 1, 2, 3, 4, 5].map((i) => lib.visualLookIndex(proj(i)) + ":" + lib.ctaAngleIndex(proj(i)))).size === 6);
+  lib.VISUAL_LOOKS.forEach((l) => assert.doesNotMatch(l, /\bsigns?\b|signage|overcast|gray sky/i));
+  const msg = JSON.parse(lib.buildUserMessage({ ...proj(3), template: "local_market_insider", intake: { market: "Antelope" }, duration_sec: 45, formats: ["9x16"] }));
+  assert.strictEqual(msg.visual_look, lib.visualLookFor(proj(3)));
+  assert.match(lib.buildSystemPrompt(), /9c\. THIS REEL'S LOOK/);
+});
+
 test("no sign of any kind reaches an image prompt: the scrub drops the clause, the final prompt never names signs, and the gate still sees the original", () => {
   const sg = require("../netlify/functions/lib/agent-marketing-signage-lib");
   const imgs = require("../netlify/functions/lib/agent-marketing-images-lib");

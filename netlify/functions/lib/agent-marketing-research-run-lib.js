@@ -55,6 +55,7 @@ function callPerplexity(payload, apiKey) {
       headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json", "Content-Length": Buffer.byteLength(bodyStr) },
     }, (res) => {
       let data = "";
+      res.setEncoding("utf8");
       res.on("data", (c) => (data += c));
       res.on("end", () => { let json = null; try { json = JSON.parse(data); } catch { /* leave null */ } resolve({ status: res.statusCode, json }); });
     });

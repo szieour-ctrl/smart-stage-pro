@@ -23,7 +23,7 @@ function openaiJson(path, bodyObj, apiKey) {
   return new Promise((resolve, reject) => {
     const body = JSON.stringify(bodyObj);
     const req = https.request({ hostname: "api.openai.com", path, method: "POST", headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) } }, (res) => {
-      let d = ""; res.on("data", (c) => (d += c)); res.on("end", () => { try { resolve({ status: res.statusCode, json: JSON.parse(d) }); } catch { resolve({ status: res.statusCode, json: null, raw: d.slice(0, 300) }); } });
+      let d = ""; res.setEncoding("utf8"); res.on("data", (c) => (d += c)); res.on("end", () => { try { resolve({ status: res.statusCode, json: JSON.parse(d) }); } catch { resolve({ status: res.statusCode, json: null, raw: d.slice(0, 300) }); } });
     });
     req.setTimeout(240000, () => req.destroy(new Error("Image request timed out")));
     req.on("error", reject); req.write(body); req.end();
@@ -37,7 +37,7 @@ function openaiEdit(prompt, refBuffer, refMime, size, quality, apiKey) {
     const fileHdr = Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="image[]"; filename="reference.png"\r\nContent-Type: ${refMime}\r\n\r\n`, "utf8");
     const body = Buffer.concat([text, fileHdr, refBuffer, Buffer.from(`\r\n--${boundary}--\r\n`, "utf8")]);
     const req = https.request({ hostname: "api.openai.com", path: "/v1/images/edits", method: "POST", headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": `multipart/form-data; boundary=${boundary}`, "Content-Length": body.length } }, (res) => {
-      let d = ""; res.on("data", (c) => (d += c)); res.on("end", () => { try { resolve({ status: res.statusCode, json: JSON.parse(d) }); } catch { resolve({ status: res.statusCode, json: null, raw: d.slice(0, 300) }); } });
+      let d = ""; res.setEncoding("utf8"); res.on("data", (c) => (d += c)); res.on("end", () => { try { resolve({ status: res.statusCode, json: JSON.parse(d) }); } catch { resolve({ status: res.statusCode, json: null, raw: d.slice(0, 300) }); } });
     });
     req.setTimeout(240000, () => req.destroy(new Error("Image request timed out")));
     req.on("error", reject); req.write(body); req.end();

@@ -97,7 +97,7 @@ function plan(narrative, intake, figures, opts) {
     } else if (hits.length === 1) {
       const f = hits[0], t = (KEY_TEMPLATES[f.key] || {})[f.group];
       const unit = t ? t.unit : /%/.test(f.display) ? "%" : "";
-      out.push({ ...base, composition: "stat_big_number", data: { lead: t ? t.lead : f.label, value: String(f.value), ...(unit ? { unit } : {}), ...(t ? { trail: t.trail } : {}), icon: /dom/.test(f.key) ? "calendar" : "none" }, claims: [{ field: "value", figure: f.ref }], reason: `One verified figure (${f.label}: ${f.display}) is the point of this scene, so it gets the big-number treatment.` });
+      out.push({ ...base, composition: "stat_big_number", data: { lead: t ? t.lead : f.label, value: String(f.value), ...(/^\s*\$/.test(f.display) ? { prefix: "$" } : {}), ...(unit ? { unit } : {}), ...(t ? { trail: t.trail } : {}), icon: /dom/.test(f.key) ? "calendar" : "none" }, claims: [{ field: "value", figure: f.ref }], reason: `One verified figure (${f.label}: ${f.display}) is the point of this scene, so it gets the big-number treatment.` });
     } else if (hits.length >= 2) {
       const pct = hits.find((f) => /%/.test(f.display)), red = hits.find((f) => /reduc/.test(f.key));
       const totalFig = red ? (figures.find((f) => f.key === "count" && f.group === "active" && f.n === parseNumber(f.display)) || hits.find((f) => f !== red && f !== pct)) : null;

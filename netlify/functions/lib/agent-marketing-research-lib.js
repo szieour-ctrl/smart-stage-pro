@@ -215,6 +215,8 @@ function systemPrompt(mode) {
       "BUILD EACH QUESTION FROM ONE SPECIFIC DEVELOPMENT the article reports: a project, a batch of permits or applications, a rate or policy change, an opening, a closing, a decision, a published figure. The question must point to that development. A question that could be asked about any market in any month (\"Are homes taking longer to sell?\", \"Is competition rising?\") is stale and generic and is not acceptable.",
       "ALWAYS RETURN FIVE TOPICS. Returning none, or fewer than five, is a failure. A small market has few articles of its own: when the exact market has too few, use articles about the county, the region or the metro that bear on this market (scope \"broader_context\", and scope_note says what area the article covers), and never present them as the market's own figures. For a keyword that has no article, use other timely articles instead (keyword_match false).",
       "KEYWORDS. If the input lists keywords, search for articles about those keywords in this market FIRST, before anything else. At least two topics must rest on an article that discusses a keyword, and those topics set keyword_match to true. If you cannot find such an article, do not stretch an unrelated article to fit: fill the rest with other timely topics with keyword_match false.",
+      "DIFFERENT ARTICLES. Prefer a different article for each topic. Use two topics from the same article only when you cannot find enough different articles; then give each its own angle taken from what that article reports.",
+      "WIDER-AREA FIGURES. When an article covers a wider area than the market (the county, the city, the metro), list the figures it reports for that wider area in trend_signals, each naming the area and the period (for example \"Sacramento County median days on market was N days in September 2026\"). Include every such figure the article reports about supply, how fast homes sell, pricing or buyer demand. Never present them as the market's own.",
       "Each topic is the story of ONE local article (its story source). Take every figure in a topic from that article and name its period; never mix numbers from different sources in the same topic and never add market statistics from another publisher. Market data comes separately, from the agent's own uploaded report. If a source calls a figure preliminary or the month is not complete, say so in trend_signals. Prefer the most recent complete month.",
     ];
   const shape = [
@@ -369,6 +371,10 @@ function cleanEvent(e, todayN) {
 
 const TREND_WORDS = /\b(?:trending|trends?\s+up|rising\s+(?:searches|interest|demand)|surging|surge|spiking|skyrocketing)\b/i;
 const tokens = (s) => new Set(String(s || "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter((w) => w.length > 2));
+/** One key per article: host (no www) and path, ignoring the query, the fragment and a trailing slash. "" when the URL cannot be read. */
+function articleKey(url) {
+  try { const u = new URL(String(url)); return (u.hostname.replace(/^www\./i, "") + u.pathname.replace(/\/+$/, "")).toLowerCase(); } catch { return ""; }
+}
 function similar(a, b) {
   const A = tokens(a), B = tokens(b);
   if (!A.size || !B.size) return false;
@@ -411,7 +417,7 @@ function cleanRecommendation(rec, topicCount) {
  * Sources that are unreachable by design (not https, paywalled, undated or stale for a market update) are dropped; a topic
  * left with no source is rejected, never kept unsourced.
  */
-function validateTopics(rawTopics, { mode, today, recommendation } = {}) {
+function validateTopics(rawTopics, { mode, today, recommendation, need } = {}) {
   const problems = [];
   if (!MODES.includes(mode)) return { ok: false, topics: [], problems: ["unknown mode"] };
   const todayN = dayNumber(today);
@@ -453,16 +459,26 @@ function validateTopics(rawTopics, { mode, today, recommendation } = {}) {
     const dup = topics.slice(0, j).find((t) => similar(t.question, topics[j].question));
     if (dup) { problems.push(`topics ${dup.id} and ${topics[j].id} overlap`); topics.splice(j, 1); }
   }
+  // Different articles first (Sam, Oct 28): a topic whose story article another topic already uses goes after the topics that rest on a new
+  // article, so the slots fill with different articles and a repeat only takes a slot that no new article can fill. Nothing is padded.
+  const seenArticle = new Set(), firsts = [], repeats = [];
+  topics.forEach((t) => { const k = articleKey(t.sources && t.sources[0] && t.sources[0].url); if (k && seenArticle.has(k)) repeats.push(t); else { if (k) seenArticle.add(k); firsts.push(t); } });
+  const idsBefore = topics.map((t) => t.id).join();
+  topics.splice(0, topics.length, ...firsts, ...repeats);
+  const reordered = topics.map((t) => t.id).join() !== idsBefore;
   topics.splice(TOPIC_COUNT);   // never more than five
+  const needN = Number.isInteger(need) && need >= 1 && need <= TOPIC_COUNT ? need : TOPIC_COUNT;
+  const differentKept = topics.filter((t) => firsts.includes(t)).length;
   // Keep what passed (Sam, Oct 28): a topic with no usable article is left out, it does not sink the others. One good article is a usable run.
   // `soft` asks the caller for one wider retry while fewer than five came back; the partial result is kept if the retry does no better.
-  const partial = topics.length > 0 && topics.length < TOPIC_COUNT;
-  const soft = partial ? [`only ${topics.length} of ${TOPIC_COUNT} topics had a usable article`] : [];
+  const partial = topics.length > 0 && topics.length < needN;
+  const soft = partial ? [`only ${topics.length} of ${needN} topics had a usable article`] : (differentKept < needN && topics.length >= needN ? [`only ${differentKept} different articles for ${needN} topics; find more different articles`] : []);
   const ok = topics.length > 0;
   if (ok) {
     const rec = cleanRecommendation(recommendation, TOPIC_COUNT);
     const pick = rec && topics.filter((t) => t.id === rec.topicId)[0];
     if (pick) pick.recommended = { reason: rec.reason, evidence: rec.evidence };
+    if (reordered) topics.forEach((t, i) => { t.id = `t${i + 1}`; });   // ids follow the order the agent sees
   }
   return { ok, topics: ok ? topics : [], problems, soft, partial };
 }
@@ -525,5 +541,5 @@ function outcomeFields({ validation, usage, model, today, now, error }) {
 module.exports = {
   MODES, MODE_LABELS, DATA_SOURCES, GEO_TYPES, AUDIENCES, AUDIENCE_KEYS, TOPIC_COUNT, MAX_UPLOADS, FRESH_DAYS, ALLOWANCE_BY_PLAN, PAYWALLED_DOMAINS, DEFAULT_MODEL, DEFAULT_COST_TARGET_USD,
   DATA_FOCUS, DATA_FOCUS_KEYS, validatePeriod, periodDates, validateGeography, geoLabel, validateResearchRequest, requestKey, researchModel, researchSettings, systemPrompt, buildResearchPayload,
-  extractTopics, extractRecommendation, validateTopics, similar, usageSummary, monthKeyPT, allowanceFor, sessionStatus, outcomeFields,
+  extractTopics, extractRecommendation, validateTopics, similar, articleKey, usageSummary, monthKeyPT, allowanceFor, sessionStatus, outcomeFields,
 };

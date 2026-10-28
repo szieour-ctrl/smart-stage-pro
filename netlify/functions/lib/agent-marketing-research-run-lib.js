@@ -12,6 +12,7 @@ const https = require("https");
 const rl = require("./agent-marketing-research-lib");
 const reportTopics = require("./agent-marketing-research-report-lib");
 const planLib = require("./agent-marketing-plan-lib");
+const reframeLib = require("./agent-marketing-reframe-lib");
 
 const API_HOST = "api.perplexity.ai";
 const API_PATH = "/v1/agent";
@@ -191,7 +192,7 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
   const baseInput = payload && payload.input;
   let usage = { promptTokens: null, completionTokens: null, citationTokens: null, reasoningTokens: null, searchQueries: null, costUsd: null };
   let modelUsed = payload ? payload.model : null, grounded = null, attempts = 0, problems = [], validation = null, error = null, providerError = null;
-  let reportNote = null, reportAttempts = 0, fallback = null, topicAnswer = null;
+  let reportNote = null, reportAttempts = 0, reframeAttempts = 0, reframed = 0, fallback = null, topicAnswer = null;
 
   try {
     if (dataSource !== "upload") {
@@ -205,7 +206,7 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
         try {
           const g = groundTopics(rl.extractTopics(text), resp);
           grounded = g.grounded;
-          validation = rl.validateTopics(g.topics, { mode: request.mode, today, recommendation: rl.extractRecommendation(text) });
+          validation = rl.validateTopics(g.topics, { mode: request.mode, today, recommendation: rl.extractRecommendation(text), need: dataSource === "both" ? rl.TOPIC_COUNT - reportTopics.REPORT_TOPICS_WHEN_BOTH : rl.TOPIC_COUNT });
           problems = validation.problems;
         } catch (parseErr) {
           validation = { ok: false, topics: [], problems: [parseErr.message] };
@@ -236,7 +237,16 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
         reportAttempts = out.attempts;
         modelUsed = dataSource === "upload" ? planLib.MODEL : modelUsed;
         const combined = reportTopics.combineTopics({ dataSource, reportTopics: out.topics, webTopics: validation && validation.topics });
-        if (combined) validation = { ok: true, topics: dataSource === "both" ? reportTopics.applyReportPrecedence(combined, ctx) : combined, problems: [] }; // the agent's own report wins over a conflicting web figure
+        let toUse = combined;
+        if (combined && dataSource === "both") {
+          // Web topics about a wider area than the agent's market are reframed: the article is the context, the agent's report is the answer.
+          // Failure-safe: any problem leaves the topics exactly as the web research wrote them.
+          try {
+            const rf = await reframeLib.reframeTopics({ topics: combined, ctx, today, anthropicKey, callFn: claudeFn });
+            reframeAttempts = rf.attempts; reframed = rf.reframed; toUse = rf.topics;
+          } catch (rfErr) { console.error(`[agent-marketing-research] reframe skipped: ${String(rfErr && rfErr.message).slice(0, 200)}`); }
+        }
+        if (combined) validation = { ok: true, topics: dataSource === "both" ? reportTopics.applyReportPrecedence(toUse, ctx) : combined, problems: [] }; // the agent's own report wins over a conflicting same-area web figure
         else if (dataSource === "upload") { problems = out.problems.length ? out.problems : [`only ${out.topics.length} topics could be written from the report`]; validation = { ok: false, topics: [], problems }; }
         else reportNote = "Your report could not be turned into topics this time, so these five come from web research only.";
         if (dataSource === "both" && out.topics.length === 0 && !reportNote) reportNote = "Your report could not be turned into topics this time, so these five come from web research only.";
@@ -258,7 +268,7 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
   // Cost: the provider's own figure when it sent one, otherwise an estimate from tokens (flagged as an estimate).
   const estimated = usage.costUsd == null ? estimateCostUsd(modelUsed, usage) : null;
   const costUsd = usage.costUsd != null ? usage.costUsd : estimated;
-  const finalUsage = { ...usage, costUsd, costEstimated: usage.costUsd == null && estimated != null, targetUsd: cfg.costTargetUsd, withinTarget: costUsd == null ? null : costUsd <= cfg.costTargetUsd, attempts, grounded, providerError, dataSource, reportAttempts, reportNote, topicDebug: validation && validation.ok ? null : topicAnswer, problems: problems.slice(0, 6).map((x) => String(x).slice(0, 200)) };
+  const finalUsage = { ...usage, costUsd, costEstimated: usage.costUsd == null && estimated != null, targetUsd: cfg.costTargetUsd, withinTarget: costUsd == null ? null : costUsd <= cfg.costTargetUsd, attempts, grounded, providerError, dataSource, reportAttempts, reframeAttempts, reframed, reportNote, topicDebug: validation && validation.ok ? null : topicAnswer, problems: problems.slice(0, 6).map((x) => String(x).slice(0, 200)) };
   const fields = rl.outcomeFields({ validation: error ? null : validation, usage: finalUsage, model: modelUsed, today, now, error });
   return { fields, problems, attempts };
 }

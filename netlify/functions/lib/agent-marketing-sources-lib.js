@@ -59,6 +59,10 @@ const numTokens = (text) => (String(text || "").match(/\d[\d,]*(?:\.\d+)?/g) || 
 function topicNumbers(topic) {
   const t = topic || {};
   const texts = [t.question, t.whyItMatters, t.scopeNote, ...(Array.isArray(t.trendSignals) ? t.trendSignals : [])];
+  if (t.reframed === true) {
+    (Array.isArray(t.areaContext) ? t.areaContext : []).forEach((c) => texts.push(c && c.text));
+    (Array.isArray(t.answeredBy) ? t.answeredBy : []).forEach((f) => texts.push(f && f.text));
+  }
   return [...new Set(texts.flatMap(numTokens))];
 }
 

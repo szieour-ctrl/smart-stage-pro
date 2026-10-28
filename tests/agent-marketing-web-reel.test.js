@@ -79,3 +79,24 @@ test("source lines stay within the bar and always keep the sentence that says wh
     "Median price is based on the three-month reporting period ending September; closed-sale count is for September. Figures cover ZIP 95834, not all of Natomas.");
   assert.match(n, /Figures cover ZIP 95834, not all of Natomas\.$/); assert.ok(n.length <= sl.MAX_LINE);
 });
+
+test("closing headline and support are held to the word caps, so the landscape card always fits", () => {
+  const director = require("../netlify/functions/lib/agent-marketing-director-lib");
+  const wc = (t) => (String(t).match(/[A-Za-z0-9][A-Za-z0-9'’\-]*/g) || []).length;
+  // The Oct 28 failing case: one 27-word sentence, no question mark.
+  const long = "If you're wondering how all of this fits your own plans, I'd love a quick conversation—no pressure, just numbers that actually cover your neighborhood.";
+  const c = director.closingHeadline(long);
+  assert.ok(wc(c.headline.join(" ")) <= 8, `headline has ${wc(c.headline.join(" "))} words`);
+  assert.ok(c.headline[0] && c.headline[1], "both card lines are filled");
+  // A question within the cap is kept whole, question mark included.
+  const q = director.closingHeadline("Want to talk through where your home fits? I'm happy to walk you through it.");
+  assert.strictEqual(q.headline.join(" "), "Want to talk through where your home fits?");
+  assert.strictEqual(q.support, "I'm happy to walk you through it.");
+  // A long support sentence is cut to a clause within the cap, or dropped; never passed through at full length.
+  const s = director.closingHeadline("Want to talk? " + "This is a very long closing support sentence that keeps going well past the cap, with more words after the comma.");
+  assert.ok(wc(s.support) <= 8);
+  // The narrative's call-to-action fills the support line only within the cap.
+  const plan = director.plan({ hook: "Hook", cta: { text: "Curious how September's numbers affect your plans? Let's talk." }, scenes: [{ role: "hook", narrationExcerpt: "Hook." }, { role: "next_step", narrationExcerpt: long }] }, { market: "Lincoln, CA" }, []);
+  const closing = plan.scenes[1].data;
+  assert.ok(wc(closing.support) <= 8 && closing.support.length > 0);
+});

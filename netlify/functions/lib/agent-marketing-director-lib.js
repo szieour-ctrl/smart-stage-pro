@@ -59,9 +59,21 @@ const marketName = (intake) => String((intake && intake.market) || "").split(","
 function closingHeadline(excerpt) {
   const t = stripTags(excerpt).replace(/\s+/g, " ");
   const q = /^(.*?\?)\s*(.*)$/.exec(t);
-  const question = (q ? q[1] : t).replace(/^want to /i, "Want to ");
-  const words = question.split(" "), cut = Math.ceil(words.length / 2);
-  return { headline: [words.slice(0, cut).join(" "), words.slice(cut).join(" ")], support: q ? q[2] : "" };
+  // The headline is one sentence at most, held to the closing cap (Sam's word caps, Oct 27): a long invitation shows its shortest clause
+  // that carries the point instead of the whole sentence, so the card always fits both frames.
+  const first = (q ? q[1] : t.split(/(?<=[.!?…])\s+/)[0] || t).replace(/^want to /i, "Want to ");
+  const short = wc(first) <= CARD_CAPS.closing ? first : upFirst(fitWords(first, CARD_CAPS.closing));
+  const words = short.split(" ").filter(Boolean), cut = Math.ceil(words.length / 2);
+  return { headline: [words.slice(0, cut).join(" "), words.slice(cut).join(" ")], support: capSupport(q ? q[2] : "") };
+}
+
+/** A support line within the support cap: the first sentence that fits whole, else its first clause that does; "" when none. */
+function capSupport(text) {
+  const sentence = stripTags(text).split(/(?<=[.!?…])\s+/).filter(Boolean).find((x) => wc(dropLead(x)) <= CARD_CAPS.support);
+  if (sentence) return upFirst(dropLead(sentence));
+  const first = stripTags(text).split(/(?<=[.!?…])\s+/)[0] || "";
+  const clause = first ? fitWords(first, CARD_CAPS.support) : "";
+  return clause && wc(clause) <= CARD_CAPS.support ? upFirst(clause) : "";
 }
 
 /**
@@ -81,7 +93,7 @@ function plan(narrative, intake, figures, opts) {
       out.push({ ...base, composition: "opening_headline_focus", data: { market, kind: "Market Update", headline: headlineFromHook(narrative.hook || s.narrationExcerpt, market), eyebrow: "Seller Insight" }, reason: "Opening scene: the hook sets the competitive context over a cinematic establishing image." });
     } else if (last) {
       const c = closingHeadline(s.narrationExcerpt);
-      out.push({ ...base, composition: "closing_headline_focus", data: { headline: c.headline, support: c.support || (narrative.cta && narrative.cta.text) || "", tagline: "Pricing · Condition · Competition" }, reason: "Closing scene: the agent's low-pressure invitation with full branding." });
+      out.push({ ...base, composition: "closing_headline_focus", data: { headline: c.headline, support: c.support || capSupport(narrative.cta && narrative.cta.text) || "", tagline: "Pricing · Condition · Competition" }, reason: "Closing scene: the agent's low-pressure invitation with full branding." });
     } else if (hits.length === 1) {
       const f = hits[0], t = (KEY_TEMPLATES[f.key] || {})[f.group];
       const unit = t ? t.unit : /%/.test(f.display) ? "%" : "";
@@ -117,8 +129,8 @@ function sceneHeadline(excerpt) {
   return [up(titleCase(w.slice(0, c).join(" "))), up(titleCase(w.slice(c).join(" ")))];
 }
 
-// Word caps for the three card lines (Sam, Oct 27): headline 9, statement 7, support 8.
-const CARD_CAPS = { headline: 9, statement: 7, support: 8 };
+// Word caps for the card lines (Sam, Oct 27): headline 9, statement 7, support 8; the closing headline 8 (the closing card also carries the name lockup).
+const CARD_CAPS = { headline: 9, statement: 7, support: 8, closing: 8 };
 const wc = (t) => (String(t || "").match(/[A-Za-z0-9À-ɏ][A-Za-z0-9À-ɏ'’\-]*/g) || []).length;
 const upFirst = (t) => String(t || "").replace(/^\S/, (c) => c.toUpperCase());
 const dropLead = (t) => String(t || "").replace(/^(?:because|and|but|so)\s+/i, "");

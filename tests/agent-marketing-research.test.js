@@ -74,7 +74,9 @@ test("payload: exact market, never widened; mode rules; model comes from the env
   const p = r.buildResearchPayload({ request, today: TODAY, env: {} });
   assert.strictEqual(p.model, "perplexity/sonar");
   assert.strictEqual(p.max_output_tokens, 2200);                             // bounds output cost
-  assert.deepStrictEqual(p.tools, [{ type: "web_search", max_results: 10, max_tokens: 6000, filters: { search_recency_filter: "month" } }]);
+  const dd = new Date(Date.parse(`${TODAY}T00:00:00Z`) - 60 * 86400000), pad = (n) => String(n).padStart(2, "0");
+  const searchAfterExpected = `${pad(dd.getUTCMonth() + 1)}/${pad(dd.getUTCDate())}/${dd.getUTCFullYear()}`; // 60 days back, MM/DD/YYYY
+  assert.deepStrictEqual(p.tools, [{ type: "web_search", max_results: 10, max_tokens: 6000, filters: { search_after_date_filter: searchAfterExpected } }]);
   const user = p.input;
   assert.match(user, /Crocker Ranch, Roseville, CA/);
   assert.match(user, /do not broaden/i);

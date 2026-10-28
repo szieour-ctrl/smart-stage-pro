@@ -120,10 +120,10 @@ const bg = require("../netlify/functions/agent-marketing-plan-background");
 
 const planExcerpts = [
   "Is new construction helping or hurting your resale home?",
-  "Here's what I see near new communities. More interested buyers come in, and that can help.",
+  "Here's what I see near new communities. More interested buyers come in, and that can help, because new homes draw people into the area who might otherwise never have looked at resale.",
   "But it also puts your home next to brand new competition.",
-  "Builders often have incentives and rate buydowns, which changes how buyers compare.",
-  "So don't judge your value on resale listings alone.",
+  "Builders often have incentives and rate buydowns, which changes how buyers compare your home against the ones down the street, which matters before pricing, and that is worth seeing clearly.",
+  "So don't judge your value on resale listings alone, because that alone rarely tells the story.",
   "Compare the full picture, and ask me for a local perspective.",
 ];
 const planJson = JSON.stringify({

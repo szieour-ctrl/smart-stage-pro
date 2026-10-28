@@ -32,7 +32,7 @@ const MUSIC = [
 ];
 const MUSIC_KEYS = MUSIC.map((m) => m.key);
 // Spoken words per duration (addendum A2). Guidance only; the audio length decides final timing.
-const WORD_TARGETS = { 30: [55, 70], 45: [85, 100], 60: [110, 130] };
+const WORD_TARGETS = { 30: [55, 70], 45: [105, 125], 60: [110, 130] };
 const CTA_SOURCES_FROM_CLIENT = ["user_edited", "user_inserted"];
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

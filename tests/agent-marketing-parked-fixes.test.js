@@ -35,3 +35,16 @@ test("a lone dollar figure gets a $ prefix on its big-number card, and the value
   assert.strictEqual(stat.data.value, "482000");
   assert.strictEqual(stat.data.prefix, "$");
 });
+
+// ── Length and scene balance (Oct 28): a 45-second Reel ran 57 seconds and one scene got 3 seconds ────────────────────────────────────────
+const planLib = require("../netlify/functions/lib/agent-marketing-plan-lib");
+const mk = (...texts) => ({ narrationExcerpt: texts.join(" ") });
+const words = (n) => Array(n).fill("word").join(" ");
+test("lengthProblems: too long, too short, a tiny scene and a dominant scene are named; a good plan has none", () => {
+  const ok = { wordCount: 115, scenes: [mk(words(15)), mk(words(25)), mk(words(18)), mk(words(18)), mk(words(14))] };
+  assert.deepStrictEqual(planLib.lengthProblems(ok, 45), []);
+  assert.match(planLib.lengthProblems({ ...ok, wordCount: 136 }, 45)[0], /136 spoken words.*cut at least 11/);
+  assert.match(planLib.lengthProblems({ ...ok, wordCount: 60 }, 45)[0], /add about 45/);
+  assert.ok(planLib.lengthProblems({ wordCount: 90, scenes: [mk(words(30)), mk(words(3)), mk(words(57))] }, 45).some((p) => /Scene 2 has only 3/.test(p)));
+  assert.ok(planLib.lengthProblems({ wordCount: 90, scenes: [mk(words(10)), mk(words(60)), mk(words(20))] }, 45).some((p) => /Scene 2 holds 60 of 90/.test(p)));
+});

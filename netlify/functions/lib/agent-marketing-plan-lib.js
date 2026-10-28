@@ -98,7 +98,7 @@ function buildSystemPrompt() {
     "5. narration_with_audio_tags is for ElevenLabs v4 and must sound like one person talking to one neighbor, not like an article read aloud. Use only these audio tags: [conversational] [emphasis] [warm] [thoughtful] [confident] (at most 5 in total) and [pause] (at most 3, only at a natural breath: after the hook, before the turn from the data to what it means). Never put tags inside words.",
     "5a. WRITE FOR THE EAR. (a) Join thoughts the way people do: carry one idea across a sentence with \"and\", \"so\", \"but\", \"which means\", \"this means\" instead of stacking short declarative fragments. Do not write two or more sentences of four words or fewer in a row. Vary sentence length. (b) Use an ellipsis (…) where a speaker would let a thought hang before it continues or turns, for example before \"and\" or before the consequence. (c) Put each figure inside the sentence that gives it meaning, with its comparison, instead of reading figures as separate facts. (d) Contractions always (it's, that's, you're, didn't). Say \"about\" or \"an average of\" the way people do. (e) Lead into the takeaway with \"This means…\" or \"So…\" rather than announcing it, and keep the close warm and unhurried. (f) No blog or press-release phrasing (\"it is important to note\", \"in today's market\", lists of three abstract nouns). Style example only (placeholders, never copy its words, numbers or claims): \"[conversational] Buyers have more choices right now, new construction included. [pause] So what does the resale market actually show? Active listings are sitting a median of <N> days before going under contract… and homes that closed sold at an average of <P>% of the list price. [thoughtful] But in the active market, <A> of <B> listings have already taken a price reduction. That gap tells a real story. [emphasis] This means condition and pricing precision matter… and your home has to answer for itself. [warm] Want to talk through where your home fits in that picture? I'm happy to walk you through it.\" Keep a clear hook first, one practical insight, a low-pressure close. Avoid clichés and self-congratulation.",
     "5b. THE HOOK. The first spoken sentence must stop a scroll: 14 words or fewer, and it leads with the single most surprising or specific thing in selected_topic (a figure you are allowed to state, a contrast between two of them, or a direct question a local is asking). Never open with a greeting, with \"If you're thinking about selling/buying in\", with the agent's name, or with a restatement of the topic's title. The hook field repeats that sentence.",
-    "6. Spoken words must fit the requested word range. The narration must end on a complete sentence.",
+    "6. Spoken words must fit the requested word range: count them. Going over the top of the range makes the video run too long, so cut rather than exceed it. The narration must end on a complete sentence. Every scene's narration_excerpt is at least 8 spoken words and no scene is more than 40% of the narration, so each shot is on screen long enough to read and no shot drags.",
     "7. Storyboard: the number of scenes you are given, in story order: local hook, tension or misconception, grounded insight and consequence, then solution plus the branded call to action (add comparison/context scenes between them for longer pieces). Every scene has a narration_excerpt that is an exact consecutive slice of your narration (tags removed); together the excerpts cover the whole narration in order.",
     "8. Most agents have NO suitable photos, so the video must work with none. visual_source is one of: GPT_IMAGE_2_CONCEPT (a new conceptual illustration, never presented as documentary evidence; use the number you are given as the TOTAL of generated images, so GPT_IMAGE_2_CONCEPT plus AGENT_SCENE together never exceed generated_images_allowed_total), AGENT_SCENE (a generated image of the agent themself in a generic setting such as a tree-lined street, a bright empty room or a desk, created from their own profile photo; at most 1; ai_generation_prompt describes ONLY the setting, pose and mood; never other people), CONCEPT_REUSE (a different crop of an earlier generated image; set reuse_of_scene to the number of the scene whose image actually shows this content, which must be a GPT_IMAGE_2_CONCEPT or AGENT_SCENE scene; visual_brief must describe ONLY what is visibly present in that source image, never objects, props or places that are not in it; do NOT point every reuse at scene 1, and use at most 2 reuse scenes; if a beat needs content the earlier images do not show, make it its own generated image instead), AGENT_PROFILE (the agent's own headshot or full-body photo from their profile; use only for a personal beat such as the opening or the close; at most 2), BRAND_CARD (a brand-colored text card with the agent's name and a short line; set card_text to at most 8 words; at most 2, typically the closing call to action), or AUTHENTIC_AGENT_ASSET (an optional real photo, at most 1, only if one specific real photo would clearly strengthen that beat; never ask for a person, client, event, closing or place the agent may not have; always give an if_unavailable fallback). Every remaining scene must be CONCEPT_REUSE.",
     "9. ai_generation_prompt (GPT_IMAGE_2_CONCEPT and AGENT_SCENE only): photorealistic editorial image of housing in THIS market: any home shown must look like the ordinary single-family homes actually built in the market area the agent named (their era, stories, rooflines, stucco or siding, garage and lot size; for an Antelope-type 1980s-1990s tract suburb that means plain stucco two- and single-story homes with composition-shingle or concrete-tile roofs and an attached garage, never a Mediterranean villa, mansion or luxury estate), California residential aesthetic, no people (for AGENT_SCENE the only person is the agent, described only by setting, pose and mood, never by appearance), no text, no logos, no signage of any kind, no readable rates or prices, no charts, no identifiable addresses, no real development or builder names, no real landmarks. Each image is generated ONCE as a wide 16:9 frame and the tall 9:16 version is cropped from its middle, so describe a wide composition with the main subject and key details in the central third and calm scenery on the left and right.",
@@ -363,6 +363,26 @@ function normalizePlan(raw, project) {
   };
 }
 
+// How far the spoken script is outside its word range (0 inside), and what is wrong with the length or the scene balance, in the writer's terms.
+const MIN_SCENE_WORDS = 8, MAX_SCENE_SHARE = 0.4;
+function lengthDistance(narrative, dur) {
+  const [lo, hi] = am.WORD_TARGETS[dur];
+  const n = narrative.wordCount;
+  const tiny = (narrative.scenes || []).filter((sc) => am.countWords(sc.narrationExcerpt) < MIN_SCENE_WORDS).length;
+  return (n < lo ? lo - n : n > hi ? n - hi : 0) + tiny * 5;
+}
+function lengthProblems(narrative, dur) {
+  const [lo, hi] = am.WORD_TARGETS[dur], n = narrative.wordCount, out = [];
+  if (n > hi) out.push(`The narration is ${n} spoken words; a ${dur}-second video needs ${lo}-${hi}, so cut at least ${n - hi}.`);
+  else if (n < lo) out.push(`The narration is ${n} spoken words; a ${dur}-second video needs ${lo}-${hi}, so add about ${lo - n}.`);
+  (narrative.scenes || []).forEach((sc, i) => {
+    const w = am.countWords(sc.narrationExcerpt);
+    if (w < MIN_SCENE_WORDS) out.push(`Scene ${i + 1} has only ${w} spoken words; every scene needs at least ${MIN_SCENE_WORDS}.`);
+    else if (n && w / n > MAX_SCENE_SHARE) out.push(`Scene ${i + 1} holds ${w} of ${n} words; no scene may be more than 40% of the narration.`);
+  });
+  return out;
+}
+
 /**
  * generatePlan({ project, anthropicKey, callFn }) → { narrative, warnings, gate }  (throws Error with a user-safe message)
  */
@@ -396,6 +416,20 @@ async function generatePlan({ project, anthropicKey, callFn }) {
     err.gate = g;
     throw err;
   }
+  // Oct 28, 2026 (Sam): a 45-second Reel ran 57 seconds (136 words for what should be about 118) and one scene got 3 seconds. The word range and the
+  // scene balance are held to, not just warned about: one rewrite is asked for, and it is used only if it passes the gate and is closer to the target.
+  const fit = lengthProblems(narrative, project.duration_sec);
+  if (fit.length) {
+    console.error("[agent-marketing-plan] length/balance outside the target:", fit.join("; "));
+    try {
+      const fix = `${user}\n\nYour draft does not fit the requested length: ${fit.join(" ")} Rewrite the complete JSON, keeping the same topic, hook, facts and tone. Keep every number you state exactly as the topic gives it, and drop the least important sentence or clause to get inside the limits.`;
+      const again = normalizePlan(extractJsonObject(await call(buildSystemPrompt(), fix, anthropicKey)), project);
+      const g2 = gateNarrative(project, again.narrative);
+      if (g2.ok && lengthProblems(again.narrative, project.duration_sec).length <= fit.length && lengthDistance(again.narrative, project.duration_sec) < lengthDistance(narrative, project.duration_sec)) {
+        narrative = again.narrative; warnings = again.warnings; g = g2;
+      }
+    } catch (e) { console.error("[agent-marketing-plan] length rewrite skipped:", String(e && e.message).slice(0, 200)); }
+  }
   // The gate has seen the planner's own words; now no sign of any kind survives into anything that reaches the image model (Sam, Oct 27).
   (narrative.scenes || []).forEach((sc) => {
     sc.visualBrief = signage.scrubSignage(sc.visualBrief);
@@ -425,5 +459,5 @@ function gateNarrative(project, narrative) {
 
 module.exports = { topicBrief, blockLines,
   MODEL, stripNotice, SCENE_RANGE, GPT_RANGE, NEW_IMAGE_SOURCES, VISUAL_SOURCES, SOURCE_MAX, MAX_ATTEMPTS, STALE_PLANNING_MS, ALLOWED_TAGS,
-  intakeHash, ctaAngleFor, ctaAngleIndex, CTA_ANGLES, buildSystemPrompt, buildUserMessage, callClaudeText, extractJsonObject, sanitizeTags, normalizePlan, generatePlan,
+  intakeHash, ctaAngleFor, ctaAngleIndex, CTA_ANGLES, buildSystemPrompt, buildUserMessage, lengthProblems, lengthDistance, callClaudeText, extractJsonObject, sanitizeTags, normalizePlan, generatePlan,
 };

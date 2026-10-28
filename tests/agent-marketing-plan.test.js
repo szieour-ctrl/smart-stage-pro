@@ -264,3 +264,24 @@ test("source roles: the planner is told the rule, and the first and last scene a
   assert.strictEqual(roles[1], "article");
   assert.strictEqual(roles[3], "data");                                  // not "article": an unknown value falls back to data
 });
+
+test("Oct 27 Reel feedback: local home style, a plain For Sale sign is allowed, no abstract images, and the CTA angle varies by project", () => {
+  const lib = require("../netlify/functions/lib/agent-marketing-plan-lib");
+  const el = require("../netlify/functions/lib/agent-marketing-image-elaborate-lib");
+  const sys = lib.buildSystemPrompt();
+  assert.match(sys, /ordinary single-family homes actually built in the market area/);
+  assert.match(sys, /only words are \\?"For Sale\\?"/);
+  assert.match(sys, /no abstract metaphors/);
+  assert.match(sys, /Never use the stock lines/);
+  const prompt = el.buildSystemPrompt();
+  assert.match(prompt, /only words are "For Sale"/);
+  assert.match(prompt, /never a villa, mansion or luxury estate/);
+  assert.doesNotMatch(prompt, /^1\. .*signs, letters/m);
+  const a = lib.ctaAngleFor({ id: "project-aaa" }), b = lib.ctaAngleFor({ id: "project-aaa" });
+  assert.strictEqual(a, b, "stable for one project");
+  const picks = new Set(["p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8", "p9", "p10", "p11", "p12"].map((id) => lib.ctaAngleFor({ id })));
+  assert.ok(picks.size >= 3, "different projects get different angles");
+  assert.ok(lib.CTA_ANGLES.includes(a));
+  const msg = JSON.parse(lib.buildUserMessage({ id: "project-aaa", template: "local_market_insider", intake: { market: "Antelope" }, duration_sec: 45, formats: ["9x16"] }));
+  assert.strictEqual(msg.cta_angle, a);
+});

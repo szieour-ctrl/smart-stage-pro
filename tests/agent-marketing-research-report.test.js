@@ -147,7 +147,7 @@ test("upload only needs five report topics; both puts the report's topics first 
   assert.strictEqual(rt.combineTopics({ dataSource: "upload", reportTopics: five.slice(0, 4), webTopics: [] }), null);
   assert.deepStrictEqual(rt.combineTopics({ dataSource: "upload", reportTopics: five, webTopics: [] }).map((t) => t.origin), Array(5).fill("report"));
   const both = rt.combineTopics({ dataSource: "both", reportTopics: [1, 2, 3, 4].map(repTopic), webTopics: [1, 2, 3, 4, 5].map((n) => webTopic(n)) });
-  assert.deepStrictEqual(both.map((t) => t.origin), ["report", "report", "report", "web", "web"]);   // at most three from the report
+  assert.deepStrictEqual(both.map((t) => t.origin), ["report", "web", "web", "web", "web"]);   // the report takes ONE slot (Oct 28): the web article is the context
   assert.deepStrictEqual(both.map((t) => t.id), ["t1", "t2", "t3", "t4", "t5"]);
   const dup = rt.combineTopics({ dataSource: "both", reportTopics: [repTopic(1)], webTopics: [webTopic(1, repTopic(1).question), ...[2, 3, 4, 5].map((n) => webTopic(n))] });
   assert.ok(!dup.slice(1).some((t) => t.question === repTopic(1).question) || dup.length === 5);       // the web copy of a report question goes last
@@ -197,7 +197,7 @@ test("run, both: report topics first, web topics after; only the scope note, nev
   const payloads = [];
   const r = await run.runResearch({ row: baseRow("both"), uploads: uploads(), apiKey: "p", anthropicKey: "k", callFn: async (p) => { payloads.push(p); return webAnswer(); }, claudeFn: async () => JSON.stringify({ topics: reportQs(ctx) }), now: NOW, env: {} });
   assert.strictEqual(r.fields.status, "ready");
-  assert.deepStrictEqual(r.fields.topics.map((t) => t.origin), ["report", "report", "report", "web", "web"]);
+  assert.deepStrictEqual(r.fields.topics.map((t) => t.origin), ["report", "web", "web", "web", "web"]);
   assert.match(payloads[0].input, /market-trends report, covering ZIP 95999/);
   for (const secret of ["715,000", "715000", "5.9", "$7", "avg_dom"]) assert.ok(!payloads[0].input.includes(secret), secret);
 });

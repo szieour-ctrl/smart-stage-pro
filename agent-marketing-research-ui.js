@@ -100,6 +100,7 @@
     var parts = [];
     if (t.scope !== "selected" || (t.origin === "report" && t.scopeNote)) parts.push("<b>" + (t.scope !== "selected" ? "Data covers" : "Note") + ":</b> " + esc(t.scopeNote));
     if (t.origin === "report" && t.reportFigures && t.reportFigures.length) parts.push("<b>Report figures:</b> " + t.reportFigures.map(function (f) { return esc(f.text); }).join(" \u00b7 "));
+    if (t.reframed && t.areaContext && t.areaContext.length) parts.push("<b>Article context:</b> " + t.areaContext.map(function (c) { return esc(c.text); }).join(" \u00b7 "));
     if (t.trendSignals && t.trendSignals.length) parts.push("<b>Trend signals:</b> " + t.trendSignals.map(esc).join(" \u00b7 "));
     if (t.recommended && (t.recommended.evidence || []).length) parts.push("<b>Evidence:</b> " + t.recommended.evidence.map(esc).join(" \u00b7 "));
     if (!parts.length) return "";
@@ -112,7 +113,10 @@
       '<span class="tag ' + (t.origin === "report" ? "ok" : "") + '">' + (t.origin === "report" ? "From your report" : "From web research") + "</span>" +
       (t.recommended ? '<span class="tag ok">Recommended</span>' : "") +
       (t.smallSample ? '<span class="tag warn">Small sample</span>' : "") +
-      (t.localIntent ? '<span class="tag ok">Local intent</span>' : "") + "</div><h3>" + esc(t.question) + '</h3><div class="why">' + esc(t.whyItMatters) + "</div>" +
+      (t.localIntent ? '<span class="tag ok">Local intent</span>' : "") + "</div><h3>" + esc(t.question) + '</h3>' +
+      (t.reframed && t.articleQuestion ? '<div class="kv"><b>From the article:</b> ' + esc(t.articleQuestion) + "</div>" : "") +
+      '<div class="why">' + esc(t.whyItMatters) + "</div>" +
+      (t.reframed && t.answeredBy && t.answeredBy.length ? '<div class="kv"><b>Answered by:</b> ' + t.answeredBy.map(function (f) { return esc(f.text); }).join(" \u00b7 ") + "</div>" : "") +
       (t.recommended ? '<div class="kv"><b>Why this one:</b> ' + esc(t.recommended.reason) + "</div>" : "") +
       topicDetails(t) +
       (ev ? '<div class="kv"><b>' + esc(ev.name) + "</b> · " + esc(ev.date) + (ev.endDate ? " to " + esc(ev.endDate) : "") + " · " + esc(ev.time) + "</div>" +

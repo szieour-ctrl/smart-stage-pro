@@ -22,7 +22,8 @@ const gate = require("./agent-marketing-gate");
 const rl = require("./agent-marketing-research-lib");
 const intakeLib = require("./agent-marketing-intake");
 
-const REPORT_TOPICS_WHEN_BOTH = 3;
+// "Both" (Sam, Oct 28): the report takes ONE slot. The other slots are web context topics; the report is the data that answers them, not a second set of subjects written against the same context.
+const REPORT_TOPICS_WHEN_BOTH = 1;
 const MAX_FIGS_PER_TOPIC = 4;
 const LIMITS = { question: 200, why: 400, scopeNote: 240 };
 const clean = (v, n) => intakeLib.cleanText(v, n);
@@ -241,7 +242,10 @@ function applyReportPrecedence(topics, ctx) {
     if (!t || t.origin !== "web") return t;
     const text = [t.question, t.whyItMatters, ...(Array.isArray(t.trendSignals) ? t.trendSignals : [])].filter(Boolean).join(" . ").toLowerCase();
     const precedence = [];
-    for (const m of MEASURES) {
+    // A topic about a WIDER area than the agent's market (a county article, a city report) does not conflict with the agent's report: its figures
+    // describe a different place. Nothing is superseded; the planner states them with their area named, next to the report's answer (Sam, Oct 28).
+    const wider = t.scope === "broader_context";
+    for (const m of wider ? [] : MEASURES) {
       const mine = figs.filter((cf) => cf.fig.key === m.key);
       if (!mine.length) continue;
       const near = new Set();
@@ -262,4 +266,4 @@ function applyReportPrecedence(topics, ctx) {
   });
 }
 
-module.exports = { applyReportPrecedence, MEASURES, REPORT_TOPICS_WHEN_BOTH, MAX_FIGS_PER_TOPIC, buildContext, figureText, systemPrompt, userMessage, validateReportTopics, generateReportTopics, combineTopics, TREND_CLAIM, NOW_WORDS };
+module.exports = { numbersIn, LIMITS, applyReportPrecedence, MEASURES, REPORT_TOPICS_WHEN_BOTH, MAX_FIGS_PER_TOPIC, buildContext, figureText, systemPrompt, userMessage, validateReportTopics, generateReportTopics, combineTopics, TREND_CLAIM, NOW_WORDS };

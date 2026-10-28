@@ -11,14 +11,27 @@ const keep = (sentence) => !(/\d/.test(sentence) && MARKET_STAT.test(sentence));
 /** The text with every "number + market measure" sentence removed. */
 function withoutMarketStats(text) { return sentencesOf(text).filter(keep).join(" "); }
 
+const areaContextOf = (t) => (Array.isArray(t.areaContext) ? t.areaContext : []).map((c) => ({ area: String(c && c.area || ""), text: String(c && c.text || "") })).filter((c) => c.area && c.text);
+const answeredByOf = (t) => (Array.isArray(t.answeredBy) ? t.answeredBy : []).map((f) => String(f && f.text || "")).filter(Boolean);
+
 /** articleFacts(topic) → { question, whyItMatters, scopeNote, trendSignals } for a web topic, minus market-statistic sentences. */
 function articleFacts(topic) {
   const t = topic && typeof topic === "object" ? topic : {};
+  if (t.reframed === true) {
+    // Oct 28, 2026: a reframed topic's question and explanation were written around the agent's report figures (answeredBy), each number checked
+    // in code, so they pass through whole. The article's own figures stay labeled by area (areaContext) and are never the agent's market.
+    return {
+      question: String(t.question || ""), whyItMatters: String(t.whyItMatters || ""), scopeNote: String(t.scopeNote || ""),
+      trendSignals: (Array.isArray(t.trendSignals) ? t.trendSignals : []).map(String).filter((s) => s && keep(s)),
+      reframed: true, areaContext: areaContextOf(t), answeredBy: answeredByOf(t), articleQuestion: String(t.articleQuestion || ""),
+    };
+  }
   return {
     question: withoutMarketStats(t.question),
     whyItMatters: withoutMarketStats(t.whyItMatters),
     scopeNote: withoutMarketStats(t.scopeNote),
     trendSignals: (Array.isArray(t.trendSignals) ? t.trendSignals : []).map(String).filter((s) => s && keep(s)),
+    areaContext: [], answeredBy: [],
   };
 }
 

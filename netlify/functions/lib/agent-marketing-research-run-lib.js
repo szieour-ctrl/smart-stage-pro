@@ -223,7 +223,8 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
         }
       }
       if (!(validation && validation.ok) && fallback) validation = fallback;
-      if (validation && validation.ok && validation.soft && validation.soft.length && !reportNote) reportNote = "Most of these topics rest on one or two websites, because few independent sources were found for this market this month. Your own MLS report is the best way to add a second source.";
+      if (validation && validation.ok && validation.partial && !reportNote) reportNote = `Only ${validation.topics.length} of 5 topics came back with a usable article this time, because few local news stories matched. Your own MLS report is the best way to add more.`;
+      else if (validation && validation.ok && validation.soft && validation.soft.length && !reportNote) reportNote = "Most of these topics rest on one or two websites, because few independent sources were found for this market this month. Your own MLS report is the best way to add a second source.";
     }
     if (dataSource !== "web" && (dataSource === "upload" || (validation && validation.ok))) {
       // Topics from the agent's own report. In "both", a failure here is not fatal: the five web topics are still delivered, and the agent is told.

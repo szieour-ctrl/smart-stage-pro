@@ -202,7 +202,7 @@ function combineTopics({ dataSource, reportTopics, webTopics }) {
     out = out.concat(fresh, dupes);
   }
   out = out.slice(0, rl.TOPIC_COUNT);
-  if (out.length !== rl.TOPIC_COUNT) return null;
+  if (dataSource === "both" ? out.length < 1 : out.length !== rl.TOPIC_COUNT) return null; // "both" keeps fewer than five when the web gave few articles
   return out.map((t, i) => ({ ...t, id: `t${i + 1}` }));
 }
 

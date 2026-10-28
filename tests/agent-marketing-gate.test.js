@@ -157,8 +157,10 @@ test("a number that is not in the verified topic is still blocked", () => {
 
 test("outcome claims and client stories still need the agent or the topic to have said them", () => {
   const r = gate.evaluate(withVerified(marketTopic, "Homes here sold over asking and my clients loved it."));
-  assert.ok(r.blocks.some((b) => b.rule === "unsupported_outcome"));
+  assert.ok(!r.blocks.some((b) => b.rule === "unsupported_outcome"));   // an opinion about the market is allowed (Sam, Oct 28); it only warns
+  assert.ok(r.warnings.some((w) => w.rule === "outcome_unsupported"));
   assert.ok(r.blocks.some((b) => b.rule === "client_story"));
+  assert.ok(gate.evaluate(withVerified(marketTopic, "I sold a home over asking.")).blocks.some((b) => /unsupported_outcome|ownership_claim/.test(b.rule)));
   // "sold at" / "days on market" are plain vocabulary; only the unsupported outcome blocks
   assert.ok(!r.blocks.some((b) => /sold|days on market/i.test(b.match)));
 });
@@ -238,10 +240,11 @@ test("Local Market Insider may use sold / active / pending in market context; ow
     "Active listings are up, pending sales slowed and price reductions were common.",
     "I can show you how homes sold at 99% of list price and what pending homes mean for you.",
     "Homes are under contract faster in Roseville.",
+    "Homes sold over asking.", "Buyers are not facing bidding wars like last year.",
   ]) assert.strictEqual(run(ok).ok, true, ok);
   for (const bad of [
     "I sold a home at 99% of list price.", "My listing is pending.", "I have a home under contract in Roseville.", "This home is pending.",
-    "This home is listed at $689,000.", "We just sold 3 homes in Roseville.", "Just listed in Roseville.", "Homes sold over asking.",
+    "This home is listed at $689,000.", "We just sold 3 homes in Roseville.", "Just listed in Roseville.",
   ]) assert.strictEqual(run(bad).ok, false, bad);
 });
 
@@ -399,4 +402,26 @@ test("a validated calculation is as good as a written figure, and only when the 
   // derived numbers do nothing outside a verified Local Market Insider piece
   const strict = gate.evaluate(base({ verified: null, derivedNumbers: [42.9], generated: { narration: text, captions: "" } }));
   assert.ok(strict.blocks.some((b) => b.rule === "invented_number"));
+});
+
+test("numbers: only market figures must trace to a source; years, 55+, small counts and 9:16 are just numbers (Sam, Oct 28)", () => {
+  const run = (text) => gate.evaluate(withVerified(marketTopic, text));
+  for (const ok of ["In 2026 the market feels different.", "Here are 3 things sellers should know.", "A 55+ Active Adult Lifestyle community.", "A vertical 9:16 view of two homes."]) assert.deepStrictEqual(run(ok).blocks, [], ok);
+  for (const bad of ["Homes sat 40 days on the market.", "Prices are up 4.5%.", "The median reached 450 last month.", "Inventory rose to 38 this month."]) assert.ok(run(bad).blocks.some((b) => b.rule === "invented_number"), bad);
+});
+
+test("a count of homes beside a street name is not an address; a real address still blocks (Sam, Oct 28)", () => {
+  const run = (text) => gate.evaluate(withVerified(marketTopic, text));
+  assert.ok(!run("132 apartments at Poker Lane could add supply.").blocks.some((b) => b.rule === "street_address"));
+  assert.ok(run("Visit 1550 Maidu Drive today.").blocks.some((b) => b.rule === "street_address"));
+  assert.ok(run("Stop by 123 main street.").blocks.some((b) => b.rule === "street_address"));
+});
+
+test("Fair Housing: 55+ and senior wording passes, steering still blocks, and 'quiet' only warns (Sam, Oct 28)", () => {
+  const run = (text) => gate.evaluate(withVerified(marketTopic, text));
+  assert.ok(!run("Our 55+ Active Adult Lifestyle communities are a fit for many seniors and retirees.").blocks.some((b) => b.rule === "fair_housing"));
+  assert.ok(run("Perfect for young families.").blocks.some((b) => b.rule === "fair_housing"));
+  const q = run("A quiet community near the lake.");
+  assert.ok(!q.blocks.some((b) => b.rule.startsWith("fair_housing")));
+  assert.ok(q.warnings.some((w) => w.rule === "fair_housing_soft"));
 });

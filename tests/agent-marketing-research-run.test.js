@@ -94,20 +94,26 @@ test("run: an unusable first answer gets one corrective retry; both attempts' co
   assert.strictEqual(r.attempts, 2);
   assert.strictEqual(r.fields.usage.promptTokens, 1200);
   assert.strictEqual(r.fields.usage.completionTokens, 3000);
-  assert.match(sent[1].input, /rejected/);
-  assert.ok(sent[1].input.indexOf("rejected") === sent[1].input.lastIndexOf("rejected"));
-  assert.match(sent[1].input, /expected 5 topics/);
+  assert.strictEqual(r.fields.topics.length, 5);
+  assert.match(sent[1].input, /usable but needs work/);
+  assert.match(sent[1].input, /only 4 of 5 topics/);
 });
 
-test("run: two unusable answers fail the session and never charge it", async () => {
+test("run: a partial answer is retried once, then delivered and charged (Sam, Oct 28: one usable article is a usable run)", async () => {
   const r = await run.runResearch({ row, apiKey: "k", now: NOW, env: ENV, sleepFn: noSleep, callFn: async () => reply(five().slice(0, 3)) });
-  assert.strictEqual(r.fields.status, "failed");
-  assert.strictEqual(r.fields.charged_at, null);
-  assert.strictEqual(r.fields.topics, null);
+  assert.strictEqual(r.fields.status, "ready");
+  assert.strictEqual(r.fields.topics.length, 3);
+  assert.ok(r.fields.charged_at);
   assert.strictEqual(r.attempts, 2);
-  assert.ok(r.fields.usage.costUsd > 0); // the spend is recorded even though the subscriber is not charged
+  assert.match(r.fields.usage.reportNote, /Only 3 of 5/);
   const retries0 = await run.runResearch({ row, apiKey: "k", now: NOW, env: { AGENT_MARKETING_RESEARCH_RETRIES: "0" }, sleepFn: noSleep, callFn: async () => reply(five().slice(0, 3)) });
   assert.strictEqual(retries0.attempts, 1);
+  const none = await run.runResearch({ row, apiKey: "k", now: NOW, env: ENV, sleepFn: noSleep, callFn: async () => reply([]) });
+  assert.strictEqual(none.fields.status, "failed");
+  assert.strictEqual(none.fields.charged_at, null);
+  assert.strictEqual(none.fields.topics, null);
+  assert.strictEqual(none.attempts, 2);
+  assert.ok(none.fields.usage.costUsd > 0); // the spend is recorded even though the subscriber is not charged
 });
 
 test("run: prose instead of JSON, invented sources and a dead provider all fail uncharged", async () => {
@@ -116,7 +122,8 @@ test("run: prose instead of JSON, invented sources and a dead provider all fail 
   assert.strictEqual(prose.fields.charged_at, null);
   const invented = five(); invented[2].sources = [{ title: "Fake", url: "https://made-up.example/report", published: "2026-10-20" }];
   const inv = await run.runResearch({ row, apiKey: "k", now: NOW, env: { AGENT_MARKETING_RESEARCH_RETRIES: "0" }, sleepFn: noSleep, callFn: async () => reply(invented) });
-  assert.strictEqual(inv.fields.status, "failed");
+  assert.strictEqual(inv.fields.status, "ready");            // the topic with an invented source is left out; the other four are kept
+  assert.strictEqual(inv.fields.topics.length, 4);
   assert.match(inv.problems.join(" "), /no usable source/);
   const dead = await run.runResearch({ row, apiKey: "SECRET-KEY", now: NOW, env: ENV, sleepFn: noSleep, callFn: async () => ({ status: 500, json: { error: "boom SECRET-KEY" } }) });
   assert.strictEqual(dead.fields.status, "failed");
@@ -175,7 +182,7 @@ test("run: keywords asked for but no topic matches them: the agent is told, noth
 });
 
 test("run: a failed set records why it was rejected", async () => {
-  const r = await run.runResearch({ row, apiKey: "k", now: NOW, env: { AGENT_MARKETING_RESEARCH_RETRIES: "0" }, sleepFn: noSleep, callFn: async () => reply(five().slice(0, 3)) });
+  const r = await run.runResearch({ row, apiKey: "k", now: NOW, env: { AGENT_MARKETING_RESEARCH_RETRIES: "0" }, sleepFn: noSleep, callFn: async () => reply([]) });
   assert.strictEqual(r.fields.status, "failed");
   assert.ok(r.fields.usage.problems.length > 0);
   assert.match(r.fields.usage.problems.join(" "), /expected 5 topics/);

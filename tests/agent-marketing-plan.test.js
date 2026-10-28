@@ -13,8 +13,8 @@ const excerpts = [
   "Is new construction helping or hurting your resale home?",
   "Here's what I see near new communities. More interested buyers come into the neighborhood, and that can help, because new homes draw people into the area who might otherwise never have looked at resale.",
   "But it also puts your home next to brand new competition.",
-  "Builders often have incentives and rate buydowns, which changes how buyers compare your home against the ones down the street, which matters before pricing.",
-  "So don't judge your value on resale listings alone.",
+  "Builders often have incentives and rate buydowns, which changes how buyers compare your home against the ones down the street, which matters before pricing, and that is worth seeing clearly.",
+  "So don't judge your value on resale listings alone, because that alone rarely tells the story.",
   "Compare the full picture, and ask me for a local perspective.",
 ];
 const tagged = `[conversational] ${excerpts[0]} [thoughtful] ${excerpts[1]} ${excerpts[2]} [emphasis] ${excerpts[3]} [confident] ${excerpts[4]} [warm] ${excerpts[5]}`;
@@ -317,15 +317,15 @@ test("the research prompt asks for curiosity hooks with a different pattern each
 });
 
 test("a script outside the word range gets one rewrite; a closer, gate-clean rewrite is used, otherwise the first draft stands", async () => {
-  const long = goodPlan(); long.scenes[1].narration_excerpt += " And that is only the start of what many owners are noticing across the whole area right now.";
+  const long = goodPlan(); long.scenes[1].narration_excerpt += " And that is only the start of what many owners are noticing across the whole area right now, which is why so many of them keep asking me the very same question about timing and price.";
   long.narration_with_audio_tags = `[conversational] ${long.scenes.map((s) => s.narration_excerpt).join(" ")}`;
   let seen = [];
   const a = await planLib.generatePlan({ project, anthropicKey: "k", callFn: async (sys, user) => { seen.push(user); return JSON.stringify(seen.length === 1 ? long : goodPlan()); } });
   assert.strictEqual(seen.length, 2);
-  assert.match(seen[1], /does not fit the requested length: The narration is \d+ spoken words; a 45-second video needs 85-100, so cut at least/);
-  assert.ok(a.narrative.wordCount <= 100);
+  assert.match(seen[1], /does not fit the requested length: The narration is \d+ spoken words; a 45-second video needs 105-125, so cut at least/);
+  assert.ok(a.narrative.wordCount <= 125);
   seen = [];
   const b = await planLib.generatePlan({ project, anthropicKey: "k", callFn: async (sys, user) => { seen.push(user); return JSON.stringify(long); } });
   assert.strictEqual(seen.length, 2);
-  assert.ok(b.narrative.wordCount > 100);   // the rewrite was no closer, so the first draft stands (with the usual warning)
+  assert.ok(b.narrative.wordCount > 125);   // the rewrite was no closer, so the first draft stands (with the usual warning)
 });

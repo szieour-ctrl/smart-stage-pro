@@ -32,7 +32,13 @@ exports.handler = async (event) => {
       await writeNarrative(id, userId, { status: "error", error: "Planning is not configured.", attempts: stub.attempts, intakeHash: stub.intakeHash });
       return { statusCode: 200, body: "" };
     }
-    const { narrative, warnings, gate } = await planLib.generatePlan({ project, anthropicKey: process.env.ANTHROPIC_API_KEY });
+    // CTA rotation: how many of this agent's projects came before this one (tracked by project order, not by anything the agent can edit).
+    let ctaAngleCount = null;
+    try {
+      const prior = await supabase("GET", "agent_marketing_projects", null, `?user_id=eq.${userId}&created_at=lt.${encodeURIComponent(project.created_at)}&select=id&limit=1000`);
+      if (Array.isArray(prior.data)) ctaAngleCount = prior.data.length;
+    } catch (e) { /* the hash-based pick is used instead */ }
+    const { narrative, warnings, gate } = await planLib.generatePlan({ project: ctaAngleCount == null ? project : { ...project, cta_angle_index: ctaAngleCount }, anthropicKey: process.env.ANTHROPIC_API_KEY });
     const gateSummary = { ok: gate.ok, version: gate.version, blocks: gate.blocks, warnings: gate.warnings, agentSuppliedClaims: gate.agentSuppliedClaims, sourcedFacts: gate.sourcedFacts || [] };
     await writeNarrative(id, userId, { ...narrative, warnings, attempts: stub.attempts, intakeHash: stub.intakeHash },
       { status: "narrative_ready", gate_version: gate.version, gate_result: gateSummary });

@@ -82,7 +82,7 @@ function quote(assets, sceneIndex, format, env) {
   };
 }
 
-const NO_REAL_THINGS = "No text, letters, numbers, signs, house numbers, street names, logos, brand names, watermarks, charts, rates or prices. No real landmarks, no identifiable real buildings or addresses. No people other than any person explicitly described below.";
+const NO_REAL_THINGS = "No text, letters, numbers, house numbers, street names, logos, brand names, watermarks, charts, rates or prices. No real landmarks, no identifiable real buildings or addresses. No people other than any person explicitly described below.";
 
 // The prompt actually sent. `kind` is "concept" or "agent_scene". Always ONE wide 16:9 frame: the vertical 9:16 Reel version is a
 // window cropped from the middle of it, so the subject must sit in the central third and the sides must be plain scenery.
@@ -93,7 +93,7 @@ const CROP_WIDTH = 81 / 256;
 function clampCrop(x) { const n = Number(x); if (!isFinite(n)) return 0.5; return Math.min(1 - CROP_WIDTH / 2, Math.max(CROP_WIDTH / 2, Math.round(n * 1000) / 1000)); }
 function defaultCropX(kind) { return kind === "agent_scene" ? 0.34 : 0.5; }
 function buildPrompt({ kind, scenePrompt }) {
-  const base = String(scenePrompt || "").replace(/\s+/g, " ").trim().slice(0, 900);
+  const base = require("./agent-marketing-signage-lib").scrubSignage(String(scenePrompt || "").replace(/\s+/g, " ").trim().slice(0, 900));
   if (kind === "agent_scene") {
     return [
       "Create a photorealistic editorial photograph showing the real person in the reference photo in this generic setting: " + base,

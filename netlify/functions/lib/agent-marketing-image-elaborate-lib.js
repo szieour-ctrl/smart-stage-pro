@@ -28,7 +28,7 @@ function buildSystemPrompt() {
     "2. kind \"concept\": a conceptual still life or scene with NO people at all. kind \"agent_scene\": exactly ONE person, the agent, described only by setting, pose and mood and never by appearance (no age, hair, build, clothing details); no other people.",
     "3. Believable, safe settings. The agent is never standing in a roadway, never at the wheel of a car, never in a dark place or at night. Prefer daylight, golden hour or soft interior light: a sidewalk, front walk, porch, bright room, home office, desk or kitchen table.",
     "4. Compose ONE wide 16:9 frame that is also cropped to a tall 9:16 window from its middle: put the main subject and key details in the central third of the width, keep the left and right thirds as simple calm scenery, and keep the lower third uncluttered (captions go there).",
-    "5. No text, signs of any kind (no For Sale, open house or yard signs), letters, numbers, logos, brand names, watermarks, charts, rates or prices. No real landmarks, real buildings, addresses, named streets, neighborhoods or developments.",
+    "5. No text, signage of any kind, letters, numbers, logos, brand names, watermarks, charts, rates or prices. No real landmarks, real buildings, addresses, named streets, neighborhoods or developments.",
     "5b. Any home shown must look like the ordinary single-family homes actually built in the market area (their era, stories, rooflines, stucco or siding, garage and lot size), never a villa, mansion or luxury estate. Every image is plainly about homes or a neighborhood: no abstract metaphors such as paths, gates or bridges, and no garden or landscape scenes.",
     "6. Nothing about a specific home for sale or lease, a price, an open house, a sold result, a testimonial or a client. Nothing that compares named areas.",
     "7. No Fair Housing steering: do not depict or imply who a neighborhood is for, no families, children or seniors as a target audience, no \"safe\" or \"exclusive\" areas, nothing about schools.",
@@ -90,7 +90,10 @@ async function elaborate({ project, scene, kind, note, anthropicKey, callFn }) {
     console.error("[agent-marketing-images] gate blocked an elaborated description:", JSON.stringify(g2.blocks).slice(0, 400));
     throw codedError("That description included wording Agent Marketing can't use. Please change your note and try again.", "description_blocked", { gate: g2 });
   }
-  return { description: out.description, removed: out.removed, warnings };
+  // The gate has seen the description; no sign of any kind goes on to the image model.
+  const description = require("./agent-marketing-signage-lib").scrubSignage(out.description);
+  if (!description) throw new Error("The description came back empty. Please try again.");
+  return { description, removed: out.removed, warnings };
 }
 
 module.exports = { MAX_NOTE, MAX_DESC, KINDS, cleanNote, cleanDescription, buildSystemPrompt, buildUserMessage, normalize, checkText, elaborate };

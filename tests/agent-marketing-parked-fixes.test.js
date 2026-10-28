@@ -25,3 +25,13 @@ test("the page renews its own Supabase session before it expires", () => {
   assert.match(html, /grant_type=refresh_token/);
   assert.match(html, /await renewSession\(/);
 });
+
+test("a lone dollar figure gets a $ prefix on its big-number card, and the value stays the verified number", () => {
+  const dir = require("../netlify/functions/lib/agent-marketing-director-lib");
+  const figs = dir.figuresFrom([{ ref: "r1.median_close_price", key: "median_close_price", label: "Median sold price", display: "$482,000", text: "Median sold price: $482,000 (Sep 2026)" }]);
+  const out = dir.plan({ scenes: [{ narrationExcerpt: "Hook.", }, { narrationExcerpt: "The median sold price was 482,000 dollars." }, { narrationExcerpt: "Close." }], hook: "Hook.", cta: { text: "Call me." } }, { market: "Antelope" }, figs);
+  const stat = (out.scenes || []).find((s) => s.composition === "stat_big_number");
+  assert.ok(stat, JSON.stringify(out.problems));
+  assert.strictEqual(stat.data.value, "482000");
+  assert.strictEqual(stat.data.prefix, "$");
+});

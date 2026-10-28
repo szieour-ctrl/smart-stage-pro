@@ -221,3 +221,16 @@ test("writeCardCopy asks Claude only for the statement scenes, keeps good cards 
   const none = await cardCopyLib.writeCardCopy({ project: {}, narrative: antelope, intake: { market: "Antelope" }, reportFigures: [], callFn: async () => { throw new Error("down"); } });
   assert.deepStrictEqual(none, {}, "a model failure never fails the Reel");
 });
+
+test("a Market Summary report (printed publication line, no date range) builds a valid manifest whose notice quotes that line", () => {
+  const line = "All reports are published October 2026, based on data available at the end of September 2026";
+  const sentence = `Based on information from MetroList Services, Inc. ${line}.`;
+  assert.deepStrictEqual(lib.parseNotice(sentence), { disclosure: line });
+  assert.strictEqual(lib.parseNotice("Based on information from MetroList Services, Inc. Published whenever."), null, "only the exact printed line is accepted");
+  assert.deepStrictEqual(lib.parseNotice(fx.narrative.notice), { period: lib.parseNoticePeriod(fx.narrative.notice) }, "dated reports still read their period");
+  const r = lib.buildManifest(input({ notice: { disclosure: line } }));
+  assert.ok(r.manifest, JSON.stringify(r.validation));
+  assert.deepStrictEqual(r.validation.errors, [], JSON.stringify(r.validation.errors));
+  assert.strictEqual(r.manifest.notice.text, sentence);
+  assert.strictEqual(r.manifest.notice.period, undefined, "no period is made up");
+});

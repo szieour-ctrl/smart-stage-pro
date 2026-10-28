@@ -191,6 +191,7 @@ function formatFigure(f) {
     case "usd": return usd(f.value);
     case "usd_per_sqft": return `${usd(f.value)} per sq ft`;
     case "pct": return `${round(f.value, 1)}%`;
+    case "pct_change": return `${f.value < 0 ? "down" : f.value > 0 ? "up" : "unchanged"}${f.value === 0 ? "" : ` ${round(Math.abs(f.value), 1)}%`}`;
     case "days": return `${Math.round(f.value)} days`;
     case "months": return `${round(f.value, 1)} months`;
     case "weeks": return `${round(f.value, 1)} weeks`;
@@ -216,6 +217,10 @@ function scopeSentence(facts) {
   if (f.layout === "market_trends" && f.period) {
     const where = placesOf(f);
     return `This ${f.mlsSource ? f.mlsSource + " " : ""}market-trends report covers ${where.length ? listText(where) : "an area it does not name"}${(f.propertyTypes || []).length ? ` (${f.propertyTypes.join(", ")})` : ""}, for ${f.period.label}. It shows ${f.period.months} months of history; the latest month has ${f.sample ? Number(f.sample.closed).toLocaleString("en-US") : "?"} closed ${f.sample && f.sample.closed === 1 ? "sale" : "sales"}.`;
+  }
+  if (f.layout === "market_summary") {
+    const where = placesOf(f);
+    return `This ${f.mlsSource ? f.mlsSource + " " : ""}market summary covers ${where.length ? listText(where) : "an area it does not name"}${(f.propertyTypes || []).length ? ` (${f.propertyTypes.join(", ")})` : ""}, for ${f.period ? f.period.label : "the month it names"}. ${f.disclosure ? `It says: "${f.disclosure}."` : ""}`.trim();
   }
   if (f.layout === "weekly_snapshot" && f.period) {
     const where = placesOf(f);
@@ -259,6 +264,9 @@ function feedbackContext(facts) {
 function scopeNote(facts) {
   const f = facts || {};
   const places = placesOf(f);
+  if (f.layout === "market_summary") {
+    return [`${f.mlsSource ? f.mlsSource + " " : ""}market summary`, places.length ? `covering ${listText(places)}` : null, (f.propertyTypes || []).length ? f.propertyTypes.join(", ") : null, f.period ? `for ${f.period.label}` : null].filter(Boolean).join(", ").slice(0, 400);
+  }
   if ((f.layout === "market_trends" || f.layout === "weekly_snapshot") && f.period) {
     const bits = [`${f.mlsSource ? f.mlsSource + " " : ""}${f.layout === "weekly_snapshot" ? "weekly" : "market-trends"} report`, places.length ? `covering ${listText(places)}` : null, (f.propertyTypes || []).length ? f.propertyTypes.join(", ") : null, `for ${f.period.label}`];
     if (f.sample && f.sample.small) bits.push("a small sample of closed sales");
@@ -278,9 +286,12 @@ function scopeNote(facts) {
  * " (up 12.1%)" for counts, prices, days and months; " (up 1.2 points)" for a figure that is itself a percent. Rounded to one decimal.
  * The text becomes part of the verified figure, so a script may quote it exactly; any other percentage still blocks.
  */
-function changeText(f, earlier) {
+function changeText(f, earlier, which) {
   const now = Number(f && f.value), then = Number(earlier);
   if (!Number.isFinite(now) || !Number.isFinite(then)) return "";
+  // A report that prints its own percent change (the Market Summary) is quoted as printed, never recalculated from rounded values.
+  const printed = f.printed && which && Number.isFinite(f.printed[which]) ? f.printed[which] : null;
+  if (printed !== null) return printed === 0 ? " (unchanged)" : ` (${printed > 0 ? "up" : "down"} ${Math.abs(printed)}%)`;
   const pct = f.unit === "pct";
   if (!pct && then === 0) return "";
   const diff = pct ? now - then : ((now - then) / Math.abs(then)) * 100;
@@ -295,12 +306,13 @@ function compareText(facts, f) {
   if (!p || !f) return "";
   const at = (v) => formatFigure({ ...f, value: v });
   const bits = [];
-  if (f.prior != null) bits.push(`${at(f.prior)} in ${p.priorLabel}${changeText(f, f.prior)}`);
-  if (f.yearAgo != null) bits.push(`${at(f.yearAgo)} in ${p.yearAgoLabel}${changeText(f, f.yearAgo)}`);
+  if (f.prior != null) bits.push(`${at(f.prior)} in ${p.priorLabel}${changeText(f, f.prior, "prior")}`);
+  if (f.yearAgo != null) bits.push(`${at(f.yearAgo)} in ${p.yearAgoLabel}${changeText(f, f.yearAgo, "yearAgo")}`);
   const vs = bits.length ? `vs ${bits.join(" and ")}` : "";
   // Reports that print a percent change instead of the earlier value (the weekly dashboards): "down 1.8% from the week ending October 10, 2026".
   const ch = (Array.isArray(f.changes) ? f.changes : []).map((c) => `${c.pct < 0 ? "down" : c.pct > 0 ? "up" : "unchanged"}${c.pct === 0 ? "" : ` ${Math.abs(c.pct)}%`} from ${c.vs}`);
-  return [vs, ...ch].filter(Boolean).join("; ");
+  const trend = f.trend6 ? `the report's 6-month trend: ${f.trend6}` : "";
+  return [vs, ...ch, trend].filter(Boolean).join("; ");
 }
 function displayFigures(facts) {
   const figs = (facts && facts.figures) || [];
@@ -327,6 +339,7 @@ function verifiedFromReport(facts) {
     texts.push(`${fig.label}: ${shown}${rounded}${fig.window ? ` (${windowText(fig.window)})` : ""}${cmp ? ` ${cmp}` : ""}`);
   });
   if (f.reportDate) texts.push(`Report date: ${longDate(f.reportDate)}`);
+  if (f.marketCondition) texts.push(`Market condition, as the report calls it: ${f.marketCondition} (under 3 months of inventory is a seller's market, 3 to 6 is neutral, over 6 is a buyer's market)`);
   const c = f.statuses && f.statuses.closed;
   if (c && c.dateRange) texts.push(`Closed sales: ${windowText(c.dateRange)}`);
   return { texts: texts.map((t) => t.replace(/\s+/g, " ")) };
@@ -1091,6 +1104,93 @@ function analyzeWeeklySnapshot(pages, items) {
   return { facts };
 }
 
+// ── MetroList "Market Summary" PDFs: a few pages of sentences ("The DOM for September 2026 was 22, down 18.5% from 27 days last month and
+// down 31.2% from 32 days in September of last year."). Every number is read from its own sentence; a percent is never mistaken for a count.
+const MS_MONTH = "(January|February|March|April|May|June|July|August|September|October|November|December)";
+function analyzeMarketSummary(pages) {
+  const all = (Array.isArray(pages) ? pages : [String(pages || "")]).join("\n");
+  const t = all.replace(/\s+/g, " ");
+  if (!/MARKET SUMMARY/.test(all) || !/Months of Inventory based on Closed Sales/i.test(t) || !/MetroList/i.test(t)) return null;
+  const money = (v) => Number(String(v).replace(/,/g, ""));
+  const nm = (v) => Number(String(v).replace(/,/g, ""));
+  const mon = new RegExp(`\\b${MS_MONTH} (\\d{4}) (?:was|Average)`).exec(t) || new RegExp(`\\b${MS_MONTH} (\\d{4})\\b`).exec(t);
+  if (!mon) return null;
+  const mi = MONTH_NAMES.indexOf(mon[1]), y = Number(mon[2]);
+  const priorMonth = mi === 0 ? { m: 11, y: y - 1 } : { m: mi - 1, y };
+  const period = { label: `${mon[1]} ${y}`, priorLabel: `${MONTH_NAMES[priorMonth.m]} ${priorMonth.y}`, yearAgoLabel: `${mon[1]} ${y - 1}`, monthly: true };
+  const figures = [];
+  const add = (key, label, unit, value, extra, status) => { if (Number.isFinite(value)) figures.push({ id: `f${figures.length + 1}`, status: status || "market", key, label, value, unit, n: 0, small: false, reported: true, ...(extra || {}) }); };
+  const pcts = (dir, n) => (dir === "down" ? -1 : 1) * Number(n);
+  let m;
+  // Sold: "September property sales were 22, down 24.1% from 29 in September of 2025 and the same as sales last month."
+  if ((m = /property sales were (\d[\d,]*), (up|down) ([\d.]+)% from (\d[\d,]*) in [A-Za-z]+ of \d{4}( and the same as sales last month)?/i.exec(t)))
+    add("count_closed", "Closed sales", "count", nm(m[1]), { yearAgo: nm(m[4]), printed: { yearAgo: pcts(m[2].toLowerCase(), m[3]), ...(m[5] ? { prior: 0 } : {}) }, ...(m[5] ? { prior: nm(m[1]) } : {}) }, "closed");
+  // Under contract: "There was the same number of pended properties in September, 25 properties."
+  if ((m = /same number of pended properties in [A-Za-z]+, (\d[\d,]*) properties/i.exec(t))) add("count_pending", "Pending sales", "count", nm(m[1]), { prior: nm(m[1]), printed: { prior: 0 } }, "pending");
+  // Days on market
+  if ((m = /DOM for [A-Za-z]+ \d{4} was (\d+), (up|down) ([\d.]+)% from (\d+) days last month and (up|down) ([\d.]+)% from (\d+) days in/i.exec(t)))
+    add("avg_dom", "Average days on market", "days", nm(m[1]), { prior: nm(m[4]), yearAgo: nm(m[7]), printed: { prior: pcts(m[2].toLowerCase(), m[3]), yearAgo: pcts(m[5].toLowerCase(), m[6]) } });
+  // Price per square foot
+  if ((m = /Average Sold Price per Square Foot(?:age)? of \$(\d[\d,]*) was (up|down) ([\d.]+)% from \$(\d[\d,]*) last month and (up|down) ([\d.]+)% from \$(\d[\d,]*) in/i.exec(t)))
+    add("avg_ppsf", "Average price per square foot", "usd_per_sqft", money(m[1]), { prior: money(m[4]), yearAgo: money(m[7]), printed: { prior: pcts(m[2].toLowerCase(), m[3]), yearAgo: pcts(m[5].toLowerCase(), m[6]) } });
+  const priceLine = (re, key, label) => { const x = re.exec(t); if (x) add(key, label, "usd", money(x[1]), { yearAgo: money(x[4]), prior: money(x[7]), printed: { yearAgo: pcts(x[2].toLowerCase(), x[3]), prior: pcts(x[5].toLowerCase(), x[6]) } }); };
+  priceLine(/Average For Sale Price in [A-Za-z]+ was \$(\d[\d,]*), (up|down) ([\d.]+)% from \$(\d[\d,]*) in [A-Za-z]+ of \d{4} and (up|down) ([\d.]+)% from \$(\d[\d,]*) last month/i, "avg_list_price", "Average for-sale price");
+  priceLine(/Average Sold Price in [A-Za-z]+ was \$(\d[\d,]*), (up|down) ([\d.]+)% from \$(\d[\d,]*) in [A-Za-z]+ of \d{4} and (up|down) ([\d.]+)% from \$(\d[\d,]*) last month/i, "avg_close_price", "Average sold price");
+  priceLine(/Median Sold Price in [A-Za-z]+ was \$(\d[\d,]*), (up|down) ([\d.]+)% from \$(\d[\d,]*) in [A-Za-z]+ of \d{4} and (up|down) ([\d.]+)% from \$(\d[\d,]*) last month/i, "median_close_price", "Median sold price");
+  // Months of inventory and absorption rate, on closed sales and on pended sales: each prints its change from last year and last month.
+  const vsLY = `September ${y - 1}`;
+  const two = (re, key, label, unit, extra) => { const x = re.exec(t); if (x) add(key, label, unit, Number(x[1]), { ...(extra || {}), changes: [{ pct: pcts(/^(?:up|increased)/i.test(x[2]) ? "up" : "down", x[3]), vs: period.yearAgoLabel }, { pct: pcts(/^(?:up|increased)/i.test(x[4]) ? "up" : "down", x[5]), vs: period.priorLabel }] }); };
+  const TAIL = "was (increased|decreased|up|down) (?:by )?([\\d.]+)% compared to last year and (up|down|increased|decreased) (?:by )?([\\d.]+)% compared to last month";
+  two(new RegExp(`Months of Inventory based on Closed Sales of ([\\d.]+) ${TAIL}`, "i"), "months_supply", "Months of inventory (closed sales)", "months", { months: true });
+  two(new RegExp(`Months of Inventory based on Pended Sales of ([\\d.]+) ${TAIL}`, "i"), "months_supply_pended", "Months of inventory (pended sales)", "months", { months: true });
+  two(new RegExp(`Absorption Rate based on Closed Sales of ([\\d.]+) ${TAIL}`, "i"), "absorption_rate", "Absorption rate (closed sales)", "pct");
+  two(new RegExp(`Absorption Rate based on Pended Sales of ([\\d.]+) ${TAIL}`, "i"), "absorption_rate_pended", "Absorption rate (pended sales)", "pct");
+  // Sold price versus original list price: "99%, an increase of 3.1% compared to previous year" and "99% was up 1% % from last month"
+  if ((m = /Sold Price vs\. Original List Price of (\d{2,3})%/i.exec(t))) {
+    const ly = /Original List Price was \d+%, an? (increase|decrease) of ([\d.]+)% compared to previous year/i.exec(t);
+    const lm = /Original List Price of \d+% was (up|down) ([\d.]+)%\s*%?\s*from last month/i.exec(t);
+    add("avg_close_to_list_pct", "Sold price as a percent of original list price", "pct", Number(m[1]), { changes: [ly ? { pct: pcts(ly[1].toLowerCase() === "increase" ? "up" : "down", ly[2]), vs: period.yearAgoLabel } : null, lm ? { pct: pcts(lm[1].toLowerCase(), lm[2]), vs: period.priorLabel } : null].filter(Boolean) });
+  }
+  // For-sale inventory and under-contract listings: the report prints how they changed (the counts themselves are only in its charts).
+  if ((m = /number of for sale listings was (up|down) ([\d.]+)% from one year earlier and (up|down) ([\d.]+)% from the previous month/i.exec(t))) {
+    add("active_change_yoy", "For-sale listings, change from a year earlier", "pct_change", pcts(m[1].toLowerCase(), m[2]));
+    add("active_change_mom", "For-sale listings, change from last month", "pct_change", pcts(m[3].toLowerCase(), m[4]));
+  }
+  if ((m = /under contract listings was the same compared to previous month and (up|down) ([\d.]+)% compared to previous year/i.exec(t))) {
+    const pend = figures.find((x) => x.key === "count_pending");
+    if (pend) pend.changes = [{ pct: pcts(m[1].toLowerCase(), m[2]), vs: period.yearAgoLabel }];
+  }
+  // The report's own six-month trend word for each price and time measure, and its market call.
+  const trend = (re, key) => { const x = re.exec(t), f = figures.find((q) => q.key === key); if (x && f) f.trend6 = x[1].replace(/\s+/g, " ").trim(); };
+  trend(/The Days on Market Showed (\w+) Trend\*/i, "avg_dom");
+  trend(/Original List Price Ratio (Remains Steady|Rising|Falling)\*/i, "avg_close_to_list_pct");
+  trend(/The Average Sold Price per Square Footage was (\w+)\*/i, "avg_ppsf");
+  trend(/The Average For Sale Price was (\w+)\*/i, "avg_list_price");
+  trend(/The Average Sold Price was (\w+)\*/i, "avg_close_price");
+  trend(/The Median Sold Price was (\w+)\*/i, "median_close_price");
+  const cond = /It was a (Seller's|Buyer's|Neutral) [Mm]arket/i.exec(t.replace(/[’‘]/g, "'"));
+  if (!figures.length) return null;
+  const city = (/MARKET SUMMARY\s*\n\s*([A-Z][A-Za-z.'\- ]{2,29})\s*\n/.exec(all) || [])[1];
+  const pt = (/PROPERTY TYPE[\s\S]{0,200}?\n\s*([A-Z][A-Za-z ,\/-]{3,40}?)\s{2,}/.exec(all) || [])[1];
+  const closed = (figures.find((x) => x.key === "count_closed") || {}).value;
+  const small = closed != null && closed < SMALL_SAMPLE_BELOW;
+  const warnings = [];
+  if (small) warnings.push(`Only ${closed} closed ${closed === 1 ? "sale" : "sales"} in ${period.label}: a small sample. Topics will say so and will not claim a trend.`);
+  const place = city ? sanitizeCity(city.trim()) : "";
+  if (!place) warnings.push("I couldn't read the area this report covers. Check it before using it.");
+  const disclosure = disclosureFrom(t);
+  if (!disclosure) warnings.push("I couldn't find the MetroList line saying when this report was published. The Reel needs it for its required notice.");
+  return {
+    facts: {
+      version: FACTS_VERSION, kind: "pdf", layout: "market_summary", reportDate: null, mlsSource: "MetroList", propertyTypes: pt ? [pt.trim()] : [], criteria: { closedSince: null },
+      geography: { cities: place ? [place] : [], zips: [], drawnOnMap: false }, period, disclosure: disclosure || null, marketCondition: cond ? `${cond[1]} market` : null,
+      statuses: {}, figures,
+      sample: { total: closed != null ? closed : 0, closed: closed != null ? closed : 0, small, broadWindow: false, windowDays: null },
+      reportedTotal: null, warnings, notes: ["Only market-level figures were kept."],
+    },
+  };
+}
+
 /** analyzePages(pages, { items }) → { facts } | { error }  for PDF text. `items` = positioned text of page 1 (weekly dashboards only). */
 function analyzePages(pages, opts) {
   const list = Array.isArray(pages) ? pages : [String(pages || "")];
@@ -1102,6 +1202,8 @@ function analyzePages(pages, opts) {
   if (trendEmail) return trendEmail;
   const weekly = analyzeWeeklySnapshot(list, opts && opts.items);
   if (weekly) return weekly;
+  const summary = analyzeMarketSummary(list);
+  if (summary) return summary;
   const meta = cmaMeta(text);
   const cma = analyzeCmaPages(list);
   if (cma) return buildFacts({ kind: "pdf", records: cma.records, reported: cma.reported, reportedTotal: cma.reportedTotal, meta, layout: cma.layout, window: opts && opts.window });
@@ -1133,9 +1235,16 @@ const errorMessage = (code) => ERROR_MESSAGES[code] || ERROR_MESSAGES.unreadable
  * MetroList report or the report states no period. Rule 12.9: "Based on information from MetroList Services, Inc. for the period (date)
  * through (date)." The period is the month a trends report covers, or the closed-sales window of a CMA.
  */
+// The sentence MetroList prints on every page of its Market Summary reports, kept word for word (Sam, Oct 27: that is what gets sourced).
+const DISCLOSURE_RE = /^All reports are published ([A-Z][a-z]{2,8}) (\d{4}), based on data available at the end of ([A-Z][a-z]{2,8}) (\d{4})$/;
+function disclosureFrom(text) {
+  const m = /All reports are published ([A-Z][a-z]{2,8}) (\d{4}), based on data available at the end of ([A-Z][a-z]{2,8}) (\d{4})/.exec(String(text || "").replace(/\s+/g, " "));
+  return m && DISCLOSURE_RE.test(m[0]) ? m[0] : null;
+}
 function attributionNotice(facts) {
   const f = facts || {};
   if (f.mlsSource !== "MetroList") return null;
+  if (f.disclosure && DISCLOSURE_RE.test(f.disclosure)) return `Based on information from MetroList Services, Inc. ${f.disclosure}.`;
   const w = f.period ? { start: f.period.start, end: f.period.end } : f.statuses && f.statuses.closed && f.statuses.closed.dateRange;
   if (!w || !w.start || !w.end) return null;
   return `Based on information from MetroList Services, Inc. for the period ${shortDate(w.start, true)} through ${shortDate(w.end, true)}.`;
@@ -1146,7 +1255,7 @@ function summarize(facts, opts) {
   const geo = geographyCheck(f, opts && opts.geography);
   return {
     scopeSentence: scopeSentence(f), scopeNote: scopeNote(f), notice: attributionNotice(f), groups: displayFigures(f),
-    warnings: [...(f.warnings || []), ...(geo.message ? [geo.message] : [])], geography: geo.status, notes: f.notes || [],
+    warnings: [...(f.warnings || []), ...(geo.message ? [geo.message] : []), ...(f.mlsSource === "MetroList" && !attributionNotice(f) ? ["I couldn't find the dates this report covers, and a MetroList Reel needs them for its required notice. Use a report that prints its dates, or the Reel will stop at the last step."] : [])], geography: geo.status, notes: f.notes || [],
     sample: f.sample || null, layout: f.layout, reportDate: f.reportDate || null, window: f.window || null,
   };
 }
@@ -1155,6 +1264,6 @@ module.exports = {
   validateWindow, WINDOW_PRESETS, FEEDBACK_REASONS, cleanFeedback, feedbackContext,
   FACTS_VERSION, PERMISSION_VERSION, PERMISSION_TEXT, SMALL_SAMPLE_BELOW, BROAD_WINDOW_DAYS, MAX_RECORDS, STATUS_ORDER, STATUS_PLURAL,
   normStatus, parseMoney, parseDom, parseDate, parseSqft, median, mean, statsFromRecords, formatFigure, scopeSentence, scopeNote, displayFigures,
-  verifiedFromReport, attributionNotice, analyzeTrendReport, analyzeTrendEmail, analyzeTrendTable, analyzeWeeklySnapshot, compareText, windowText, geographyCheck, recordsFromRows, extractLabeledMetrics, analyzeCmaPages, cmaMeta, buildFacts, analyzeRows, analyzePages,
+  verifiedFromReport, attributionNotice, disclosureFrom, DISCLOSURE_RE, analyzeMarketSummary, analyzeTrendReport, analyzeTrendEmail, analyzeTrendTable, analyzeWeeklySnapshot, compareText, windowText, geographyCheck, recordsFromRows, extractLabeledMetrics, analyzeCmaPages, cmaMeta, buildFacts, analyzeRows, analyzePages,
   errorMessage, summarize,
 };

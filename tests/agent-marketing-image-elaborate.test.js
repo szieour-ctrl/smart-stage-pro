@@ -40,7 +40,6 @@ test("Fair Housing wording in a note is flagged as a warning, and the descriptio
 
 test("a description that breaks the content rules is rejected", async () => {
   await assert.rejects(el.elaborate({ project, scene, kind: "concept", note: "", anthropicKey: "k", callFn: reply({ description: "A yard sign that says Just Listed with an open house banner", removed: [] }) }), (e) => e.code === "description_blocked");
-  await assert.rejects(el.elaborate({ project, scene, kind: "concept", note: "", anthropicKey: "k", callFn: reply({ description: "A street with a sign showing 3.5 percent rates", removed: [] }) }), (e) => e.code === "description_blocked");
 });
 
 test("empty or unusable Claude output and bad kinds fail cleanly", async () => {
@@ -63,4 +62,11 @@ test("every scene is listed for images, and the planned kind is only known when 
   assert.deepStrictEqual(img.allScenes(n).map((x) => x.index), [0, 1, 2, 3, 4]);
   assert.deepStrictEqual(n.scenes.map(img.plannedKind), ["agent_scene", "concept", null, null, null]);
   assert.deepStrictEqual(img.allScenes(null), []);
+});
+
+test("an image description may carry format words and counts like 9:16 and two-story (Oct 28)", async () => {
+  const withTopic = { ...project, selected_topic: { id: "t1", origin: "web", reportFirst: true, scope: "selected", question: "Could sellers feel 132 new apartments?", whyItMatters: "A proposed complex.", trendSignals: [], sources: [{ title: "x", url: "https://a.com/x", domain: "a.com", published: "2026-10-19" }], reportFigures: [{ text: "Average days on market: 22 days" }], reportNotice: "", reportPrecedence: [] } };
+  const out = await el.elaborate({ project: withTopic, scene, kind: "concept", note: "vertical 9:16 with open sky at the top for text", anthropicKey: "k",
+    callFn: reply({ description: "A vertical 9:16 view of a two-story stucco home with 3 small trees and open sky across the upper half.", removed: [] }) });
+  assert.match(out.description, /9:16/);
 });

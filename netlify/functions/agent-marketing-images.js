@@ -173,7 +173,7 @@ exports.handler = async (event) => {
     const note = elab.cleanNote(b.note);
     if (typeof b.description === "string" && b.description.trim()) {
       const d = elab.cleanDescription(b.description);
-      const g = elab.checkText(project, d, false);
+      const g = elab.checkText(project, d, true); // a picture description is held to the sale-content rules only, like the Elaborate step (Sam, Oct 28)
       if (!g.ok) return reply(422, { error: gate.explain(g), code: "description_blocked" });
       scenePrompt = d;
     }

@@ -450,7 +450,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
           <div class="hint" id="imgmSub"></div>
           <div class="hint" id="imgmCrop"></div>
           <div class="elab-row"><button type="button" class="btn sm ghost" id="imgmElab" data-act="elaborate">&#10024; Elaborate with AI</button><span class="hint">AI writing aid. It rewrites your note into a safe description and checks it before anything is created.</span></div>
-          <textarea id="imgmNote" maxlength="300" style="min-height:90px" placeholder='Optional, e.g. "mature trees, soft evening light"'></textarea>
+          <textarea id="imgmNote" maxlength="300" style="min-height:90px" placeholder='Optional. With an image showing, say only what to change, e.g. "make it earlier in the day"; everything else stays the same. For a new image: "mature trees, soft morning light"'></textarea>
           <div class="hint" id="imgmCount" style="text-align:right">0 / 300</div>
           <div id="imgmUsed"></div>
           <div id="imgmDesc"></div>
@@ -1106,7 +1106,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     else {
       if (st.draft) foot += actBtn("reject", "Discard", "ghost", s, ' data-asset="' + esc(st.draft.id) + '"') + actBtn("accept", "Accept this image", "gold", s, ' data-asset="' + esc(st.draft.id) + '"');
       if (!st.draft && st.A) foot += actBtn("reject", "Remove image", "ghost", s, ' data-asset="' + esc(st.A.id) + '"');
-      var label = st.shown ? "Re-create image" : "Create image";
+      var label = d && d.revise ? "Apply change" : (st.shown ? "Re-create image" : "Create image");
       label += st.charged ? " (" + plural(s.nextCredits) + ")" : (st.shown ? " (included)" : "");
       foot += actBtn("generate", label + " →", st.draft ? "ghost" : "gold", s, st.blocked ? " disabled" : "");
     }
@@ -1119,9 +1119,12 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     var note = (im.note[idx] || "").trim();
     im.working[idx] = true; setSlotMsg("n" + idx, ""); repaint();
     try {
-      var r = await api("POST", "", { action: "elaborate", projectId: state.project.id, sceneIndex: idx, kind: kind, note: note }, IMG);
+      // When this scene already has an image on screen, the note is a change to THAT image: only the change is made, the rest stays (like a staging revision).
+      var sl0 = im.slots.filter(function (x) { return x.sceneIndex === idx; })[0], st0 = sl0 ? slotState(sl0, src) : null, shown0 = st0 && st0.shown && st0.shown.url && !st0.generating ? st0.shown : null;
+      var reviseId = note && shown0 ? shown0.id : null;
+      var r = await api("POST", "", { action: "elaborate", projectId: state.project.id, sceneIndex: idx, kind: kind, note: note, reviseAssetId: reviseId || undefined }, IMG);
       if (r.ok) delete im.edit[idx];
-      if (r.ok) im.desc[idx] = { kind: kind, description: r.json.description, removed: r.json.removed || [], warnings: r.json.warnings || [], note: note };
+      if (r.ok) im.desc[idx] = { kind: kind, description: r.json.description, removed: r.json.removed || [], warnings: r.json.warnings || [], note: note, revise: r.json.revise || null };
       else setSlotMsg("n" + idx, r.json.error || "Could not write the description. Please try again.", "err");
     } catch (e) { setSlotMsg("n" + idx, e.message, "err"); }
     delete im.working[idx]; repaint();
@@ -1145,7 +1148,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
       if (!d && !et && (im.note[sceneIndex] || "").trim()) { setSlotMsg("n" + sceneIndex, "Click Elaborate with AI first, so your note is checked before anything is created.", "err"); setSlotMsg(k, ""); return; }
       setSlotMsg(k, "Starting your image…"); repaint();
       var body = { action: "generate", projectId: state.project.id, sceneIndex: sceneIndex, format: format, kind: kind, confirmCharge: confirmCharge === true };
-      if (d) { body.description = d.description; body.note = d.note; }
+      if (d) { body.description = d.description; body.note = d.note; if (d.revise) body.reviseAssetId = d.revise; }
       if (et) { body.description = et; body.note = d ? d.note : (im.note[sceneIndex] || "").trim(); }
       var r = await api("POST", "", body, IMG);
       var code = r.json && r.json.code;

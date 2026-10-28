@@ -70,3 +70,25 @@ test("an image description may carry format words and counts like 9:16 and two-s
     callFn: reply({ description: "A vertical 9:16 view of a two-story stucco home with 3 small trees and open sky across the upper half.", removed: [] }) });
   assert.match(out.description, /9:16/);
 });
+
+test("revision: a short note becomes an edit instruction for the existing image, and the image prompt locks everything else", async () => {
+  let seen;
+  const out = await el.elaborateRevision({ project, kind: "concept", note: "make it just before golden hour", currentPrompt: "A close exterior detail of a stucco home front door", anthropicKey: "k",
+    callFn: async (sys, user) => { seen = { sys, user: JSON.parse(user) }; return JSON.stringify({ description: "Change the light to the soft, low sun just before golden hour, with a clear pale sky.", removed: [] }); } });
+  assert.match(out.description, /golden hour/);
+  assert.strictEqual(seen.user.agent_note, "make it just before golden hour");
+  assert.match(seen.user.image_was_made_from, /front door/);
+  assert.match(seen.sys, /do not invent other changes/i);
+  const prompt = img.buildRevisionPrompt({ instruction: out.description });
+  assert.match(prompt, /^Edit the provided image\. Make ONLY this change: Change the light/);
+  assert.match(prompt, /Keep everything else exactly as it is/);
+  assert.match(prompt, /same composition, camera angle and framing/);
+  assert.match(prompt, /No text, letters, numbers/);
+});
+
+test("revision: a note is required, and a blocked note never reaches Claude", async () => {
+  let called = false; const callFn = async () => { called = true; return "{}"; };
+  await assert.rejects(() => el.elaborateRevision({ project, kind: "concept", note: "  ", currentPrompt: "x", anthropicKey: "k", callFn }), (e) => e.code === "note_needed");
+  await assert.rejects(() => el.elaborateRevision({ project, kind: "concept", note: "Just listed at $450,000, open house Sunday", currentPrompt: "x", anthropicKey: "k", callFn }), (e) => e.code === "note_blocked");
+  assert.strictEqual(called, false);
+});

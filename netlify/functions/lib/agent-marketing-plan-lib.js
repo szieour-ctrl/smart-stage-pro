@@ -103,6 +103,7 @@ function buildSystemPrompt() {
     "8. Most agents have NO suitable photos, so the video must work with none. visual_source is one of: GPT_IMAGE_2_CONCEPT (a new conceptual illustration, never presented as documentary evidence; use the number you are given as the TOTAL of generated images, so GPT_IMAGE_2_CONCEPT plus AGENT_SCENE together never exceed generated_images_allowed_total), AGENT_SCENE (a generated image of the agent themself in a generic setting such as a tree-lined street, a bright empty room or a desk, created from their own profile photo; at most 1; ai_generation_prompt describes ONLY the setting, pose and mood; never other people), CONCEPT_REUSE (a different crop of an earlier generated image; set reuse_of_scene to the number of the scene whose image actually shows this content, which must be a GPT_IMAGE_2_CONCEPT or AGENT_SCENE scene; visual_brief must describe ONLY what is visibly present in that source image, never objects, props or places that are not in it; do NOT point every reuse at scene 1, and use at most 2 reuse scenes; if a beat needs content the earlier images do not show, make it its own generated image instead), AGENT_PROFILE (the agent's own headshot or full-body photo from their profile; use only for a personal beat such as the opening or the close; at most 2), BRAND_CARD (a brand-colored text card with the agent's name and a short line; set card_text to at most 8 words; at most 2, typically the closing call to action), or AUTHENTIC_AGENT_ASSET (an optional real photo, at most 1, only if one specific real photo would clearly strengthen that beat; never ask for a person, client, event, closing or place the agent may not have; always give an if_unavailable fallback). Every remaining scene must be CONCEPT_REUSE.",
     "9. ai_generation_prompt (GPT_IMAGE_2_CONCEPT and AGENT_SCENE only): photorealistic editorial image of housing in THIS market: any home shown must look like the ordinary single-family homes actually built in the market area the agent named (their era, stories, rooflines, stucco or siding, garage and lot size; for an Antelope-type 1980s-1990s tract suburb that means plain stucco two- and single-story homes with composition-shingle or concrete-tile roofs and an attached garage, never a Mediterranean villa, mansion or luxury estate), California residential aesthetic, no people (for AGENT_SCENE the only person is the agent, described only by setting, pose and mood, never by appearance), no text, no logos, no signage of any kind, no readable rates or prices, no charts, no identifiable addresses, no real development or builder names, no real landmarks. Each image is generated ONCE as a wide 16:9 frame and the tall 9:16 version is cropped from its middle, so describe a wide composition with the main subject and key details in the central third and calm scenery on the left and right.",
     "9b. VISUAL VARIETY AND EDITORIAL QUALITY. Each image is something a magazine would run beside THIS story, built from the subject of its own scene and this topic, not a stock backdrop. Never reuse the same two settings across projects: do NOT default to a quiet suburban street at golden hour or to a desk or tabletop with a calendar, a house key and a notepad. Within one piece, no two images may share a subject, composition or scale: mix a wide streetscape, a close exterior detail (a front door, mailbox, garage door, fence or porch), and a scale-model house or an interior detail. No signage of any kind. EVERY image must be plainly about homes or a neighborhood in this market: no abstract metaphors (paths, gates, bridges, scales, forks in a road, doors to nowhere) and no garden or landscape scenes; if a viewer would not know at a glance that it is a housing image, change it. Take the subject from the scene's own narration (for example new homes under construction against established ones for a new-construction story; a single reduced-price tag motif is NOT allowed, so show hesitation or a decision through composition instead). Vary light, season and time of day to match the mood of the beat.",
+    "9c. THIS REEL'S LOOK. The user message carries visual_look: the light, sky, season, home colors and yard character for this whole Reel. Build EVERY ai_generation_prompt around it, so all the images in this Reel share one look and no other Reel in this agent's feed looks the same. The homes are shown at their best: well kept, inviting curb appeal, healthy landscaping, and a lively sky and light, never gray, flat, overcast or drab. Keep the market's own architecture exactly as rule 9 says; the look changes only light, sky, season, paint colors and landscaping. If rule 9b's time-of-day variety conflicts with visual_look, visual_look wins.",
     "10. framing_9x16 says where the tall 9:16 window sits inside the wide image (left, center or right; tight or loose) and what it shows; framing_16x9 says how the full wide frame is used. Both are crops of the same generated image; never plan a crop of a finished video.",
     "11. Camera motion is Ken Burns only (slow, deliberate, minimal): choose from push_in, pull_back, pan_left, pan_right, tilt_up, tilt_down, static_hold.",
     "12. The CTA is low-pressure and about the agent's expertise. No property-sale CTA. Write it fresh for THIS topic and use the cta_angle given in the input as its approach. The CTA must not repeat the closing narration sentence, and its wording must change from one Reel to the next as the cta_angle changes.",
@@ -139,6 +140,29 @@ function ctaAngleIndex(project) {
 }
 function ctaAngleFor(project) { return CTA_ANGLES[ctaAngleIndex(project)]; }
 
+/**
+ * Visual look rotation (Oct 28, 2026): every Reel gets its own look so an agent's Reels are easy to tell apart. Same rotation idea as the CTA approach
+ * (agent's project order, retries keep the look), with a stride of 3 over 8 looks so the look and the CTA approach do not move in lockstep.
+ * A look sets light, sky, season, the colors of the homes and what the yards are like. It never changes the home architecture rule or the no-sign rule.
+ */
+const VISUAL_LOOKS = [
+  "Early morning: low, soft gold sun raking across the fronts of the homes, long gentle shadows, clear pale-blue sky with a few thin high clouds; homes in warm cream and sand stucco with tile or brown shingle roofs; fresh green front lawns with edged beds.",
+  "Mid-morning spring: bright clean light, deep blue sky with big white cumulus clouds; homes in soft sage, light gray and white trim; flowering shrubs, roses and a blossoming ornamental tree in the yards, bright green lawns.",
+  "Late afternoon golden hour: warm amber light on the walls, glowing sky shading from blue to peach; homes in terracotta, tan and warm taupe; mature shade trees and neatly trimmed hedges, a lit window or two.",
+  "Clear midday, crisp and sunny: saturated blue sky, strong clean light with short shadows; homes in white, pale gray-blue and charcoal accents; drought-tolerant landscaping with decorative gravel, ornamental grasses and boulders, a tidy concrete driveway.",
+  "Early autumn afternoon: warm low sun, blue sky with soft streaky clouds; homes in rich tan, brick-red trim and olive; trees showing yellow and orange leaves, a few fallen leaves on a clean lawn, pumpkins or mums by a front door.",
+  "Soft dusk, blue hour: deep twilight-blue sky with a warm glow low on the horizon, warm lights glowing in windows and porch fixtures; homes in muted gray, slate and cream; calm, tidy front yards.",
+  "Bright winter day: low crisp sun, vivid cold blue sky, a little rain-fresh sparkle on green lawns and clean pavement; homes in warm gray-beige and navy trim; evergreen shrubs and bare ornamental trees.",
+  "Hazy warm summer morning: bright light with a touch of soft glow, high light-blue sky; homes in butter yellow, light stone and white; shade trees, crape myrtles in bloom, neatly mown lawns and hanging planters on the porch.",
+];
+const LOOK_STRIDE = 3;
+function visualLookIndex(project) {
+  const n = VISUAL_LOOKS.length;
+  if (project && Number.isInteger(project.cta_angle_index) && project.cta_angle_index >= 0) return (hashOf(project.user_id) + project.cta_angle_index * LOOK_STRIDE) % n;
+  return (hashOf(project && (project.id || project.project_id)) * LOOK_STRIDE) % n;
+}
+function visualLookFor(project) { return VISUAL_LOOKS[visualLookIndex(project)]; }
+
 function buildUserMessage(project) {
   const intake = project.intake || {};
   const schema = intakeLib.schemaFor(project.template);
@@ -152,6 +176,7 @@ function buildUserMessage(project) {
     narrative_architecture: angle ? angle.flow : "Hook on the topic's question → what the sourced facts show (only those) → what it means for the audience → low-pressure next step",
     market: intake.market,
     cta_angle: ctaAngleFor(project),
+    visual_look: visualLookFor(project),
     audience: intake.audience,
     primary_issue: intake.issue,
     desired_viewer_action: intake.action,
@@ -459,5 +484,5 @@ function gateNarrative(project, narrative) {
 
 module.exports = { topicBrief, blockLines,
   MODEL, stripNotice, SCENE_RANGE, GPT_RANGE, NEW_IMAGE_SOURCES, VISUAL_SOURCES, SOURCE_MAX, MAX_ATTEMPTS, STALE_PLANNING_MS, ALLOWED_TAGS,
-  intakeHash, ctaAngleFor, ctaAngleIndex, CTA_ANGLES, buildSystemPrompt, buildUserMessage, lengthProblems, lengthDistance, callClaudeText, extractJsonObject, sanitizeTags, normalizePlan, generatePlan,
+  intakeHash, ctaAngleFor, ctaAngleIndex, CTA_ANGLES, VISUAL_LOOKS, visualLookFor, visualLookIndex, buildSystemPrompt, buildUserMessage, lengthProblems, lengthDistance, callClaudeText, extractJsonObject, sanitizeTags, normalizePlan, generatePlan,
 };

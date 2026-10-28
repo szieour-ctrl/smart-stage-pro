@@ -301,7 +301,7 @@ test("each Reel gets its own visual look: retries keep it, eight in a row use al
   for (let i = 1; i < seq.length; i++) assert.notStrictEqual(seq[i], seq[i - 1]);
   assert.strictEqual(lib.visualLookIndex(proj(8)), seq[0]);
   assert.ok(new Set([0, 1, 2, 3, 4, 5].map((i) => lib.visualLookIndex(proj(i)) + ":" + lib.ctaAngleIndex(proj(i)))).size === 6);
-  lib.VISUAL_LOOKS.forEach((l) => assert.doesNotMatch(l, /\bsigns?\b|signage|overcast|gray sky/i));
+  lib.VISUAL_LOOKS.forEach((l) => assert.doesNotMatch(l, /\bsigns?\b|signage|overcast|gray sky|sunset|twilight|dusk|glow/i));
   const msg = JSON.parse(lib.buildUserMessage({ ...proj(3), template: "local_market_insider", intake: { market: "Antelope" }, duration_sec: 45, formats: ["9x16"] }));
   assert.strictEqual(msg.visual_look, lib.visualLookFor(proj(3)));
   assert.match(lib.buildSystemPrompt(), /9c\. THIS REEL'S LOOK/);

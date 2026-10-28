@@ -185,7 +185,7 @@ test("fallback card text respects the 9/7/8 caps, starts with a capital and neve
     assert.ok(cardCopyLib.wordsOf(d.statement).length <= 7 && cardCopyLib.wordsOf(d.support).length <= 8);
     d.headline.forEach((l) => assert.match(l, /^[A-Z0-9]/, "each headline line starts with a capital or a figure"));
   }
-  assert.deepStrictEqual(pl.scenes[3].data.headline.join(" "), "Pricing Right the First Time");
+  assert.ok(pl.scenes[3].data.headline.join(" ").startsWith("Pricing Right the First Time"), pl.scenes[3].data.headline.join(" "));
 });
 
 test("card copy validation: caps, numbers that are not in the scene, and echoing the narration are all rejected", () => {

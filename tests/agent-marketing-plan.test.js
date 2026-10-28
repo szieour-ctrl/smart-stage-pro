@@ -264,3 +264,51 @@ test("source roles: the planner is told the rule, and the first and last scene a
   assert.strictEqual(roles[1], "article");
   assert.strictEqual(roles[3], "data");                                  // not "article": an unknown value falls back to data
 });
+
+test("Oct 27 Reel feedback: local home style, no signs of any kind, no abstract images, and the CTA angle varies by project", () => {
+  const lib = require("../netlify/functions/lib/agent-marketing-plan-lib");
+  const el = require("../netlify/functions/lib/agent-marketing-image-elaborate-lib");
+  const sys = lib.buildSystemPrompt();
+  assert.match(sys, /ordinary single-family homes actually built in the market area/);
+  assert.match(sys, /no signage of any kind/);
+  assert.doesNotMatch(sys, /for sale|yard sign|open house sign/i, "the idea is never put in a prompt");
+  assert.match(sys, /no abstract metaphors/);
+  assert.match(sys, /Never use the stock lines/);
+  const prompt = el.buildSystemPrompt();
+  assert.match(prompt, /signage of any kind/);
+  assert.doesNotMatch(prompt, /for sale sign|yard sign/i);
+  assert.match(prompt, /never a villa, mansion or luxury estate/);
+  assert.doesNotMatch(prompt, /^1\. .*signs, letters/m);
+  const a = lib.ctaAngleFor({ id: "project-aaa", user_id: "u1", cta_angle_index: 3 }), b = lib.ctaAngleFor({ id: "project-aaa", user_id: "u1", cta_angle_index: 3 });
+  assert.strictEqual(a, b, "a retry of the same project keeps its approach");
+  assert.ok(lib.CTA_ANGLES.includes(a));
+  // rotation: one agent's consecutive projects never share an approach, and six in a row use all six
+  const seq = [0, 1, 2, 3, 4, 5, 6, 7].map((i) => lib.ctaAngleIndex({ user_id: "agent-7", cta_angle_index: i }));
+  for (let i = 1; i < seq.length; i++) assert.notStrictEqual(seq[i], seq[i - 1]);
+  assert.strictEqual(new Set(seq.slice(0, 6)).size, 6);
+  assert.strictEqual(seq[6], seq[0]);
+  const msg = JSON.parse(lib.buildUserMessage({ id: "project-aaa", user_id: "u1", cta_angle_index: 3, template: "local_market_insider", intake: { market: "Antelope" }, duration_sec: 45, formats: ["9x16"] }));
+  assert.strictEqual(msg.cta_angle, a);
+});
+
+test("no sign of any kind reaches an image prompt: the scrub drops the clause, the final prompt never names signs, and the gate still sees the original", () => {
+  const sg = require("../netlify/functions/lib/agent-marketing-signage-lib");
+  const imgs = require("../netlify/functions/lib/agent-marketing-images-lib");
+  assert.strictEqual(sg.scrubSignage("A quiet street of stucco homes, a For Sale sign leaning in the front yard, soft afternoon light."), "A quiet street of stucco homes, soft afternoon light.");
+  assert.strictEqual(sg.scrubSignage("An open house sign by the curb. A row of stucco homes under a clear sky."), "A row of stucco homes under a clear sky.");
+  assert.strictEqual(sg.scrubSignage("A design detail on a front door."), "A design detail on a front door.", "design is not a sign");
+  for (const kind of ["concept", "agent_scene"]) {
+    const prompt = imgs.buildPrompt({ kind, scenePrompt: "Stucco homes on a street with a yard sign in front. Soft light." });
+    assert.doesNotMatch(prompt, /\bsigns?\b|signage|for sale|yard sign/i, kind);
+  }
+});
+
+test("the research prompt asks for curiosity hooks with a different pattern each and a generic-question self-check", () => {
+  const r = require("../netlify/functions/lib/agent-marketing-research-lib");
+  const p = r.buildResearchPayload({ request: { mode: "market_update", audience: "sellers", geography: { label: "Antelope, CA" }, dataSource: "upload", uploadIds: [] }, today: "2026-10-27", uploadContext: "Antelope report", env: {} });
+  assert.match(p.instructions, /stop scrolling/i);
+  assert.match(p.instructions, /DIFFERENT HOOK PATTERN FOR EACH/);
+  assert.match(p.instructions, /swapping the place name/);
+  assert.match(p.input, /local market report can confirm or contrast/);
+  assert.doesNotMatch(p.input, /\d{3},\d{3}/, "no report figures are sent to the research provider");
+});

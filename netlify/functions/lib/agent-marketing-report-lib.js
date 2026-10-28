@@ -1107,7 +1107,26 @@ function analyzePages(pages, opts) {
   if (cma) return buildFacts({ kind: "pdf", records: cma.records, reported: cma.reported, reportedTotal: cma.reportedTotal, meta, layout: cma.layout, window: opts && opts.window });
   const metrics = extractLabeledMetrics(text.split(/\r?\n/));
   if (!metrics.length) return { error: "no_figures" };
-  return buildFacts({ kind: "pdf", records: [], metrics, meta, layout: "labeled_metrics" });
+  const built = buildFacts({ kind: "pdf", records: [], metrics, meta, layout: "labeled_metrics" });
+  // The MetroList disclosure printed on these reports names the period ("...based on data available at the end of September 2026").
+  const dp = disclosurePeriod(text);
+  if (built.facts && dp && !built.facts.period) built.facts.period = dp;
+  return built;
+}
+
+/**
+ * The report period from MetroList's printed disclosure, e.g. "All reports are published October 2026, based on data available at the end of
+ * September 2026" -> September 2026 (first to last day of that month). Null when the sentence is not there.
+ */
+function disclosurePeriod(text) {
+  const m = /based on data available at the end of ([A-Za-z]{3,9})\.?,?\s+(\d{4})/i.exec(String(text || "").replace(/\s+/g, " "));
+  if (!m) return null;
+  const mi = MONTH_NAMES.findIndex((n) => n.slice(0, 3).toLowerCase() === m[1].slice(0, 3).toLowerCase());
+  const y = Number(m[2]);
+  if (mi < 0 || y < 2000 || y > 2100) return null;
+  const last = new Date(Date.UTC(y, mi + 1, 0)).getUTCDate();
+  const p2 = (n) => String(n).padStart(2, "0");
+  return { label: `${MONTH_NAMES[mi]} ${y}`, start: `${y}-${p2(mi + 1)}-01`, end: `${y}-${p2(mi + 1)}-${p2(last)}`, monthly: true, fromDisclosure: true };
 }
 
 const ERROR_MESSAGES = {
@@ -1146,7 +1165,7 @@ function summarize(facts, opts) {
   const geo = geographyCheck(f, opts && opts.geography);
   return {
     scopeSentence: scopeSentence(f), scopeNote: scopeNote(f), notice: attributionNotice(f), groups: displayFigures(f),
-    warnings: [...(f.warnings || []), ...(geo.message ? [geo.message] : [])], geography: geo.status, notes: f.notes || [],
+    warnings: [...(f.warnings || []), ...(geo.message ? [geo.message] : []), ...(f.mlsSource === "MetroList" && !attributionNotice(f) ? ["I couldn't find the dates this report covers, and a MetroList Reel needs them for its required notice. Use a report that prints its dates, or the Reel will stop at the last step."] : [])], geography: geo.status, notes: f.notes || [],
     sample: f.sample || null, layout: f.layout, reportDate: f.reportDate || null, window: f.window || null,
   };
 }
@@ -1155,6 +1174,6 @@ module.exports = {
   validateWindow, WINDOW_PRESETS, FEEDBACK_REASONS, cleanFeedback, feedbackContext,
   FACTS_VERSION, PERMISSION_VERSION, PERMISSION_TEXT, SMALL_SAMPLE_BELOW, BROAD_WINDOW_DAYS, MAX_RECORDS, STATUS_ORDER, STATUS_PLURAL,
   normStatus, parseMoney, parseDom, parseDate, parseSqft, median, mean, statsFromRecords, formatFigure, scopeSentence, scopeNote, displayFigures,
-  verifiedFromReport, attributionNotice, analyzeTrendReport, analyzeTrendEmail, analyzeTrendTable, analyzeWeeklySnapshot, compareText, windowText, geographyCheck, recordsFromRows, extractLabeledMetrics, analyzeCmaPages, cmaMeta, buildFacts, analyzeRows, analyzePages,
+  verifiedFromReport, attributionNotice, disclosurePeriod, analyzeTrendReport, analyzeTrendEmail, analyzeTrendTable, analyzeWeeklySnapshot, compareText, windowText, geographyCheck, recordsFromRows, extractLabeledMetrics, analyzeCmaPages, cmaMeta, buildFacts, analyzeRows, analyzePages,
   errorMessage, summarize,
 };

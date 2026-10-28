@@ -440,3 +440,16 @@ test("topic prompt: a market update always returns five (wider articles marked b
   assert.doesNotMatch(m, /return fewer rather than guess/);
   assert.match(r.systemPrompt("local_events"), /return fewer rather than guess/);
 });
+
+test("source filter: an association on .org is an article source, a builder's inventory page is not, and a dropped source says why (Oct 27)", () => {
+  const good = { title: "Housing Statistics – September 2026", url: "https://sacrealtor.org/housing-statistics-september-2026/", published: "2026-10-20" };
+  const lennar = { title: "Residence 1233", url: "https://www.lennar.com/new-homes/california/sacramento/antelope/antelope-north/calabria-ii/residence-1233/2476510114", published: "2026-10-20" };
+  const old = { title: "Old piece", url: "https://www.sacbee.com/news/article1.html", published: "2026-06-01" };
+  const mk = (sources) => (Array.from({ length: 5 }, (_, i) => ({ question: ["Are Antelope sellers cutting prices?","How fast do Antelope homes go pending?","Is new construction pulling Antelope buyers?","What do rising rates mean on Walerga Road?","Why are Sacramento listings climbing now?"][i], why_it_matters: "It matters to sellers.", trend_signals: [], local_intent: true, scope: "selected", scope_note: null, event: null, keyword_match: false, sources })));
+  const okRes = r.validateTopics(mk([good]), { mode: "market_update", today: "2026-10-27" });
+  assert.strictEqual(okRes.topics.length, 5, "sacrealtor.org must not be dropped as an agent's own site");
+  const bad = r.validateTopics(mk([lennar, old]), { mode: "market_update", today: "2026-10-27" });
+  assert.strictEqual(bad.topics.length, 0);
+  assert.match(bad.problems.join(" "), /lennar\.com: looks like a listing/);
+  assert.match(bad.problems.join(" "), /sacbee\.com: 148 days old/);
+});

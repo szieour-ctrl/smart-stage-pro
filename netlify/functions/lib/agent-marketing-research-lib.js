@@ -298,7 +298,7 @@ function dayNumber(s) {
 function hostOf(url) { try { return new URL(url).hostname.toLowerCase().replace(/^www\./, ""); } catch { return ""; } }
 // A listing page or an agent's own site cannot back a market question (Sam, Oct 27). Heuristic, by address and domain: the model is asked
 // for articles, and anything that still looks like a listing, a brokerage landing page or an agent site is dropped here.
-const LISTING_PATH = /\/(homes?|listings?|property|properties|homedetails|realestateandhomes-detail|mls|idx|forsale|for-sale|sold|open-houses?|neighborhoods?|communities|agents?|our-team)\b|\/\d{2,5}-[a-z0-9-]+-(way|st|street|ave|avenue|dr|drive|ln|lane|ct|court|blvd|boulevard|rd|road|cir|circle|pl|place|ter|terrace)\b|\/home\/\d+/i;
+const LISTING_PATH = /\/(homes?|listings?|property|properties|homedetails|realestateandhomes-detail|mls|idx|forsale|for-sale|sold|open-houses?|neighborhoods?|communities|agents?|our-team)\b|\/\d{2,5}-[a-z0-9-]+-(way|st|street|ave|avenue|dr|drive|ln|lane|ct|court|blvd|boulevard|rd|road|cir|circle|pl|place|ter|terrace)\b|\/home\/\d+|\/new-homes?\/|\/residence-\d+|\/floor-?plans?\b|\/quick-move-in|\/move-in-ready/i;
 const AGENT_HOST = /(^|[.-])(realty|realtors?|realestate|real-estate|properties|homesales|homesforsale|brokerage|remax|kw|exprealty|compass|coldwellbanker|century21|bhhs|redfinagent)([.-]|\d|$)|(realty|realestate|realtor|homes?sales|properties)\.[a-z]{2,}$|^homes\./i;
 // Portals and associations publish real research and news: only those paths count. Their listing and market-page paths do not.
 const PORTAL_HOSTS = ["redfin.com", "zillow.com", "realtor.com", "trulia.com", "movoto.com", "homes.com"];
@@ -311,32 +311,34 @@ function isNotArticle(url) {
   if (ASSOCIATION_HOSTS.some((d) => host === d || host.endsWith("." + d))) return false;
   const portal = PORTAL_HOSTS.some((d) => host === d || host.endsWith("." + d));
   if (portal) return !PORTAL_ARTICLE_PATH.test(path);
+  if (/\.(org|gov|edu)$/.test(host)) return LISTING_PATH.test(path); // an association such as sacrealtor.org is not an agent's own site (Oct 27)
   if (AGENT_HOST.test(host)) return true;
   return LISTING_PATH.test(path);
 }
 function isPaywalled(host) { return PAYWALLED_DOMAINS.some((d) => host === d || host.endsWith("." + d)); }
 
-function cleanSource(s, mode, todayN) {
-  if (!s || typeof s !== "object") return null;
+function cleanSource(s, mode, todayN, why) {
+  const no = (reason) => { if (Array.isArray(why)) why.push(reason); return null; }; // `why` collects the plain-words reason a source was dropped
+  if (!s || typeof s !== "object") return no("not a source");
   let url;
-  try { url = new URL(String(s.url || "").trim()); } catch { return null; }
-  if (url.protocol !== "https:" || !url.hostname.includes(".") || url.username || url.password) return null;
+  try { url = new URL(String(s.url || "").trim()); } catch { return no("not a web address"); }
+  if (url.protocol !== "https:" || !url.hostname.includes(".") || url.username || url.password) return no(`${url.hostname}: not a plain https address`);
   url.hash = "";
   const href = url.toString();
-  if (href.length > LIMITS.url) return null;
+  if (href.length > LIMITS.url) return no("web address too long");
   const host = hostOf(href);
-  if (!host || isPaywalled(host)) return null;
-  if (mode === "market_update" && isNotArticle(url)) return null;   // a listing, a brokerage page or an agent's site is not an article
+  if (!host || isPaywalled(host)) return no(`${host || "site"}: paywalled`);
+  if (mode === "market_update" && isNotArticle(url)) return no(`${host}: looks like a listing or an agent's own site`);   // a listing, a brokerage page or an agent's site is not an article
   const title = clean(s.title, LIMITS.sourceTitle);
-  if (!title) return null;
+  if (!title) return no(`${host}: no title`);
   const published = String(s.published || "").trim();
   const pn = dayNumber(published);
   if (mode === "market_update") {
-    if (pn == null) return null;                    // a market claim needs a dated source
-    if (pn > todayN + 1) return null;               // not from the future (one day of timezone slack)
-    if (todayN - pn > FRESH_DAYS) return null;      // stale
+    if (pn == null) return no(`${host}: no publication date`);                    // a market claim needs a dated source
+    if (pn > todayN + 1) return no(`${host}: dated in the future`);               // not from the future (one day of timezone slack)
+    if (todayN - pn > FRESH_DAYS) return no(`${host}: ${todayN - pn} days old`);      // stale
   } else if (published && pn == null) {
-    return null;                                     // events: a date is optional, but a wrong-format one is not trusted
+    return no(`${host}: date not readable`);                                     // events: a date is optional, but a wrong-format one is not trusted
   }
   return { title, url: href, domain: host, published: pn == null ? null : published };
 }
@@ -430,11 +432,12 @@ function validateTopics(rawTopics, { mode, today, recommendation } = {}) {
     if (scope === "broader_context" && !scopeNote) return problems.push(`topic ${n}: broader data without saying what area it covers`);
     const seen = new Set();
     const sources = [];
+    const dropped = [];
     (Array.isArray(x.sources) ? x.sources : []).forEach((s) => {
-      const c = cleanSource(s, mode, todayN);
+      const c = cleanSource(s, mode, todayN, dropped);
       if (c && !seen.has(c.url)) { seen.add(c.url); sources.push(c); }
     });
-    if (sources.length === 0) return problems.push(`topic ${n}: no usable source`);
+    if (sources.length === 0) return problems.push(`topic ${n}: no usable source${dropped.length ? ` (${dropped.slice(0, 3).join("; ")})` : ""}`);
     const topic = { id: `t${n}`, origin: "web", kind: mode, question, whyItMatters: why, trendSignals: signals, localIntent: x.local_intent === true, scope, scopeNote: scope === "broader_context" ? scopeNote : "", sources: sources.slice(0, 4), event: null, keywordMatch: x.keyword_match === true };
     if (mode === "local_events") {
       const e = cleanEvent(x.event, todayN);

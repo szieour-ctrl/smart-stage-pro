@@ -29,7 +29,7 @@ const AUDIENCE_KEYS = AUDIENCES.map((a) => a.key);
 const DATA_SOURCES = ["web", "upload", "both"];
 const TOPIC_COUNT = 5;
 const MAX_UPLOADS = 3;
-const FRESH_DAYS = 30;            // a source for a market update may be at most this old (the GPT prefers 7 and accepts 30)
+const FRESH_DAYS = 60;            // an ARTICLE for a market update may be at most this old (Sam, Oct 27: the 30-day window belongs to the uploaded trend data, not to articles)
 const MAX_TOPICS_PER_SITE = 2, MIN_SITES = 3;
 const LIMITS = { name: 60, question: 200, why: 400, signal: 160, scopeNote: 240, recommendReason: 300, recommendEvidence: 160, sourceTitle: 200, url: 500, eventText: 160 };
 
@@ -210,7 +210,7 @@ function systemPrompt(mode) {
     ]
     : [
       "MODE: Local Market Update. Each topic is a question buyers, sellers or residents in this market are asking right now about housing inventory, pricing, days on market, pending or closed sales, competition, new construction or changing conditions.",
-      "Prefer sources from the last 7 days; accept up to 30 days only if necessary. Prefer MLS-based or public data. Set event to null.",
+      "Prefer the most recent articles, and accept any article published within the last 60 days. Prefer MLS-based or public data. Set event to null.",
       "SOURCES MUST BE ARTICLES. Each topic is built on a published article, report or announcement about the market: local news, a city, county or agency page or press release, a school, transit or utility district notice, a builder's or developer's press release, a business journal, a chamber or nonprofit report, or a market report from an association or data company (California Association of Realtors, NAR, Redfin, Zillow or Realtor.com research and news pages, Freddie Mac). NEVER use a real estate agent's, team's or brokerage's website, a listing or property page, a neighborhood or community landing page from a brokerage, an MLS or portal search page, or any page whose main content is homes for sale. A listing page cannot support a question. Several topics may use the same publisher; never choose a source just to vary publishers.",
       "BUILD EACH QUESTION FROM ONE SPECIFIC DEVELOPMENT the article reports: a project, a batch of permits or applications, a rate or policy change, an opening, a closing, a decision, a published figure. The question must point to that development. A question that could be asked about any market in any month (\"Are homes taking longer to sell?\", \"Is competition rising?\") is stale and generic and is not acceptable.",
       "ALWAYS RETURN FIVE TOPICS. Returning none, or fewer than five, is a failure. A small market has few articles of its own: when the exact market has too few, use articles about the county, the region or the metro that bear on this market (scope \"broader_context\", and scope_note says what area the article covers), and never present them as the market's own figures. For a keyword that has no article, use other timely articles instead (keyword_match false).",
@@ -245,6 +245,14 @@ function dataFocusLine(r, today) {
   return `Optional data to include: ${what}. ${per} State on every figure the period it covers. If a source does not cover this period, say so in scope_note and treat the figure as preliminary; never present a figure for a different period as if it were for this one.`;
 }
 
+/** MM/DD/YYYY, FRESH_DAYS before `today` (YYYY-MM-DD): the earliest publication date the search may return. */
+function searchAfter(today) {
+  const t = Date.parse(`${today}T00:00:00Z`) - FRESH_DAYS * 86400000;
+  const d = new Date(Number.isFinite(t) ? t : Date.now() - FRESH_DAYS * 86400000);
+  const p = (n) => String(n).padStart(2, "0");
+  return `${p(d.getUTCMonth() + 1)}/${p(d.getUTCDate())}/${d.getUTCFullYear()}`;
+}
+
 function buildResearchPayload({ request, today, uploadContext, env }) {
   const r = request;
   const focus = [r.focus && r.focus.active_adult_55 ? "55+ active adult communities" : null, r.focus && r.focus.new_construction ? "new construction" : null].filter(Boolean);
@@ -272,7 +280,7 @@ function buildResearchPayload({ request, today, uploadContext, env }) {
       type: "web_search",
       max_results: lim.maxResults,
       max_tokens: lim.maxTokens,
-      filters: { search_recency_filter: "month" }, // matches the 30-day freshness rule; the validator still checks every date
+      filters: { search_after_date_filter: searchAfter(today) }, // articles up to FRESH_DAYS old; the validator still checks every date
     }],
   };
 }

@@ -24,7 +24,7 @@ function railwayGet(pathname) {
   return new Promise((resolve, reject) => {
     const url = new URL(`${process.env.RAILWAY_RENDER_URL}${pathname}`);
     const req = https.request({ hostname: url.hostname, path: url.pathname, method: "GET", headers: { "x-railway-secret": process.env.RAILWAY_SECRET } }, (res) => {
-      let d = ""; res.on("data", (c) => (d += c)); res.on("end", () => { let j = null; try { j = JSON.parse(d); } catch { /* */ } resolve({ status: res.statusCode, json: j }); });
+      let d = ""; res.setEncoding("utf8"); res.on("data", (c) => (d += c)); res.on("end", () => { let j = null; try { j = JSON.parse(d); } catch { /* */ } resolve({ status: res.statusCode, json: j }); });
     });
     req.setTimeout(15000, () => req.destroy(new Error("Railway request timed out")));
     req.on("error", reject); req.end();

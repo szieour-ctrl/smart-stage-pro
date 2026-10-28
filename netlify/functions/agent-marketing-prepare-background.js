@@ -86,7 +86,7 @@ function postEdit(prompt, refBuffer, refMime, size) {
     const fileHdr = Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="image[]"; filename="reference.png"\r\nContent-Type: ${refMime}\r\n\r\n`, "utf8");
     const body = Buffer.concat([text, fileHdr, refBuffer, Buffer.from(`\r\n--${boundary}--\r\n`, "utf8")]);
     const req = https.request({ hostname: "api.openai.com", path: "/v1/images/edits", method: "POST", headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, "Content-Type": `multipart/form-data; boundary=${boundary}`, "Content-Length": body.length } }, (res) => {
-      let d = ""; res.on("data", (c) => (d += c)); res.on("end", () => { try { resolve({ status: res.statusCode, json: JSON.parse(d) }); } catch { resolve({ status: res.statusCode, json: null }); } });
+      let d = ""; res.setEncoding("utf8"); res.on("data", (c) => (d += c)); res.on("end", () => { try { resolve({ status: res.statusCode, json: JSON.parse(d) }); } catch { resolve({ status: res.statusCode, json: null }); } });
     });
     req.setTimeout(240000, () => req.destroy(new Error("Image request timed out")));
     req.on("error", reject); req.write(body); req.end();
@@ -197,7 +197,7 @@ function railwayPost(pathname, payload) {
     const url = new URL(`${process.env.RAILWAY_RENDER_URL}${pathname}`);
     const body = JSON.stringify(payload);
     const req = https.request({ hostname: url.hostname, path: url.pathname, method: "POST", headers: { "x-railway-secret": process.env.RAILWAY_SECRET, "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) } }, (res) => {
-      let d = ""; res.on("data", (c) => (d += c)); res.on("end", () => { let j = null; try { j = JSON.parse(d); } catch { /* */ } resolve({ status: res.statusCode, json: j }); });
+      let d = ""; res.setEncoding("utf8"); res.on("data", (c) => (d += c)); res.on("end", () => { let j = null; try { j = JSON.parse(d); } catch { /* */ } resolve({ status: res.statusCode, json: j }); });
     });
     req.setTimeout(30000, () => req.destroy(new Error("Railway request timed out")));
     req.on("error", reject); req.write(body); req.end();

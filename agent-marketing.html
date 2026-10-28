@@ -491,20 +491,52 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
   })();
 
   // Same login the rest of the site uses (the live Supabase session in localStorage).
-  function token() {
+  // Oct 28, 2026: the access token lasts about an hour and this page only ever READ it, so working here (the main tab sleeps in the background)
+  // signed the agent out at 45-60 minutes. The page now renews it itself, from the same stored session, so both tabs keep sharing one login.
+  var SB_URL = "https://dnpaenpwdhjmslymgkse.supabase.co", SB_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRucGFlbnB3ZGhqbXNseW1na3NlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA4NjczNTIsImV4cCI6MjA5NjQ0MzM1Mn0.pEdH1YgINYjj8sAutsJJoO8x4VUxTCfIzVbjSu_yBTY";
+  function liveSession() {
     try {
       for (var i = 0; i < localStorage.length; i++) {
         var k = localStorage.key(i);
         if (!/^sb-.+-auth-token/.test(k)) continue;
         var p = JSON.parse(localStorage.getItem(k) || "null");
-        if (p && p.access_token && p.expires_at && p.expires_at * 1000 > Date.now() + 15000) return p.access_token;
+        if (p && p.access_token) return { key: k, p: p };
       }
     } catch (e) { /* storage blocked */ }
     return null;
   }
+  function validFor(s, ms) { return !!(s && s.p.expires_at && s.p.expires_at * 1000 > Date.now() + ms); }
+  function token() { var s = liveSession(); return validFor(s, 15000) ? s.p.access_token : null; }
+  var refreshing = null;
+  // Renew the session when it has less than margin ms left. Re-reads storage first (the main tab may have just renewed it) and writes the new
+  // session back to the same key, so the main tab's own client picks it up instead of reusing an old refresh token.
+  function renewSession(margin) {
+    if (refreshing) return refreshing;
+    refreshing = (async function () {
+      try {
+        var run = async function () {
+          var s = liveSession();
+          if (!s || validFor(s, margin) || !s.p.refresh_token) return;
+          var res = await fetch(SB_URL + "/auth/v1/token?grant_type=refresh_token", { method: "POST", headers: { apikey: SB_ANON, "Content-Type": "application/json" }, body: JSON.stringify({ refresh_token: s.p.refresh_token }) });
+          if (!res.ok) return;
+          var j = await res.json();
+          if (!j || !j.access_token) return;
+          var next = Object.assign({}, s.p, { access_token: j.access_token, refresh_token: j.refresh_token || s.p.refresh_token, expires_in: j.expires_in, token_type: j.token_type || s.p.token_type, expires_at: j.expires_at || Math.floor(Date.now() / 1000) + (j.expires_in || 3600) });
+          if (j.user) next.user = j.user;
+          localStorage.setItem(s.key, JSON.stringify(next));
+        };
+        if (navigator.locks && navigator.locks.request) await navigator.locks.request("ssp-session-renew", run); else await run();
+      } catch (e) { /* offline or blocked: the next call tries again */ }
+      refreshing = null;
+    })();
+    return refreshing;
+  }
+  setInterval(function () { renewSession(10 * 60 * 1000); }, 60 * 1000);
+  document.addEventListener("visibilitychange", function () { if (!document.hidden) renewSession(10 * 60 * 1000); });
   var MEDIA = "/.netlify/functions/agent-marketing-media";
   function mapi(method, qs, body) { return api(method, qs, body, MEDIA); }
   async function api(method, qs, body, base) {
+    await renewSession(2 * 60 * 1000);
     var t = token();
     if (!t) throw new Error("Your session has expired. Please log in again at smartstagepro.com, then reopen this page.");
     var res = await fetch((base || API) + (qs || ""), { method: method, headers: { Authorization: "Bearer " + t, "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });

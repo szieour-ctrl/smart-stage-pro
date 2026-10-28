@@ -24,7 +24,7 @@ const mediaLib = require("./lib/agent-marketing-media-lib");
 
 const headers = { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json", "Cache-Control": "no-store" };
 const reply = (statusCode, obj) => ({ statusCode, headers, body: JSON.stringify(obj) });
-const PUBLIC_COLS = "id,template,angle,formats,duration_sec,voice,music,intake,narrative,narrative_approved_at,storyboard,selected_topic,status,gate_version,gate_result,created_at,updated_at";
+const PUBLIC_COLS = "id,template,angle,formats,duration_sec,voice,music,intake,narrative,narrative_approved_at,storyboard,selected_topic,status,gate_version,gate_result,created_at,updated_at,hidden_at";
 
 function forClient(row) {
   if (!row) return null;
@@ -32,7 +32,7 @@ function forClient(row) {
     id: row.id, template: row.template, angle: row.angle, formats: row.formats, durationSec: row.duration_sec, voice: row.voice, music: row.music || "default",
     intake: row.intake || {}, narrative: row.narrative || null, narrativeApprovedAt: row.narrative_approved_at || null,
     storyboard: row.storyboard || null, selectedTopic: row.selected_topic || null, status: row.status, gate: row.gate_result || null,
-    createdAt: row.created_at, updatedAt: row.updated_at,
+    createdAt: row.created_at, updatedAt: row.updated_at, hidden: !!row.hidden_at,
   };
 }
 
@@ -78,8 +78,15 @@ exports.handler = async (event) => {
         const o = await loadOwned(qs.id, userId);
         return o.error || reply(200, { project: forClient(o.row) });
       }
-      const r = await supabase("GET", "agent_marketing_projects", null, `?user_id=eq.${userId}&select=${PUBLIC_COLS}&order=created_at.desc&limit=20`);
-      return reply(200, { projects: (Array.isArray(r.data) ? r.data : []).map(forClient) });
+      const r = await supabase("GET", "agent_marketing_projects", null, `?user_id=eq.${userId}&select=${PUBLIC_COLS}&order=created_at.desc&limit=60`);
+      const rows = Array.isArray(r.data) ? r.data : [];
+      // The newest Reel job per project, so each card can say whether the Reel is being made, done or failed (Oct 27).
+      const reel = {};
+      if (rows.length) {
+        const j = await supabase("GET", "agent_marketing_jobs", null, `?user_id=eq.${userId}&project_id=in.(${rows.map((x) => x.id).join(",")})&select=project_id,status,created_at&order=created_at.desc&limit=200`);
+        (Array.isArray(j.data) ? j.data : []).forEach((x) => { if (!reel[x.project_id]) reel[x.project_id] = x.status === "done" ? "done" : x.status === "error" ? "failed" : "making"; });
+      }
+      return reply(200, { projects: rows.map((x) => ({ ...forClient(x), reel: reel[x.id] || null })) });
     }
 
     if (event.httpMethod !== "POST") return reply(405, { error: "Method not allowed" });
@@ -96,6 +103,20 @@ exports.handler = async (event) => {
       const row = Array.isArray(ins.data) ? ins.data[0] : null;
       if (ins.status >= 300 || !row) { console.error("agent-marketing create failed:", ins.status, JSON.stringify(ins.data).slice(0, 200)); return reply(500, { error: "Could not start the project" }); }
       return reply(200, { project: forClient(row) });
+    }
+
+    // Hiding only tidies the list; it never deletes anything and works on any project, even a finished one.
+    if (action === "hide" || action === "unhide") {
+      const h = await loadOwned(b.id, userId);
+      if (h.error) return h.error;
+      const saved = await supabase("PATCH", "agent_marketing_projects", { hidden_at: action === "hide" ? new Date().toISOString() : null }, `?id=eq.${h.row.id}&user_id=eq.${userId}`);
+      if (saved.status >= 300) return reply(500, { error: "Could not update the project" });
+      return reply(200, { ok: true });
+    }
+    if (action === "hide_drafts") { // every project that never got past an empty draft
+      const saved = await supabase("PATCH", "agent_marketing_projects", { hidden_at: new Date().toISOString() }, `?user_id=eq.${userId}&status=eq.draft&hidden_at=is.null&intake-%3E%3Emarket=is.null`);
+      if (saved.status >= 300) return reply(500, { error: "Could not update the projects" });
+      return reply(200, { ok: true, hidden: Array.isArray(saved.data) ? saved.data.length : null });
     }
 
     if (!["save_intake", "save_narrative", "approve_narrative", "plan"].includes(action)) return reply(400, { error: "Unknown action" });

@@ -145,7 +145,10 @@ function verifiedFromTopic(topic) {
   // reportFirst (a web topic when the agent chose "Both"): the agent's uploaded report is the only source of numbers. The web topic's own
   // wording gives the narrative and idea, but its figures are NOT verified; only the report's figures (carried on the topic) are.
   const reportFirst = t.reportFirst === true;
-  const texts = reportFirst ? [] : [t.question, t.whyItMatters, t.scopeNote, ...(Array.isArray(t.trendSignals) ? t.trendSignals : [])];
+  // Oct 27, 2026 (Sam): the approved article is a source too, so its own wording and figures are verified for the script. The report still wins a conflict
+  // (reportPrecedence below), and the planner keeps each scene to one source.
+  const af = reportFirst ? require("./agent-marketing-article-lib").articleFacts(t) : t; // a "Both" topic: the article's market statistics stay out, the report's are the only ones
+  const texts = [af.question, af.whyItMatters, af.scopeNote, ...(Array.isArray(af.trendSignals) ? af.trendSignals : [])];
   // A topic written from the agent's own MLS report carries the exact figures it cited (frozen by agent-marketing-research-report-lib.js)
   // and, for MetroList data, the notice Rule 12.9 requires on anything published with them. Only those figures are verified, not the whole report.
   (Array.isArray(t.reportFigures) ? t.reportFigures : []).forEach((f) => { if (f && typeof f.text === "string") texts.push(f.text); });

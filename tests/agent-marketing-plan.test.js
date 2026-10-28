@@ -273,7 +273,8 @@ test("Oct 27 Reel feedback: local home style, no signs of any kind, no abstract 
   assert.match(sys, /no signage of any kind/);
   assert.doesNotMatch(sys, /for sale|yard sign|open house sign/i, "the idea is never put in a prompt");
   assert.match(sys, /no abstract metaphors/);
-  assert.match(sys, /Never use the stock lines/);
+  assert.match(sys, /wording must change from one Reel to the next/);
+  assert.doesNotMatch(sys, /Never use the stock lines/, "no phrase is banned; the closing only has to change from Reel to Reel");
   const prompt = el.buildSystemPrompt();
   assert.match(prompt, /signage of any kind/);
   assert.doesNotMatch(prompt, /for sale sign|yard sign/i);

@@ -365,10 +365,10 @@ test("report-first: when the agent chose Both, only the report's numbers can be 
   // the report's notice rides along, and the planner never sees the web figures
   assert.strictEqual(topic.reportNotice, NOTICE);
   const brief = plan.topicBrief(topic);
-  assert.strictEqual(brief.numbers_come_only_from_agent_report, true);
+  assert.strictEqual(brief.report_is_source_of_truth_for_market_numbers, true);
   assert.doesNotMatch(JSON.stringify(brief), /660,000|634,000|3\.1%/);
   assert.ok(brief.figures_you_may_state.some((f) => /367/.test(f)));
-  assert.match(plan.buildSystemPrompt(), /numbers_come_only_from_agent_report/);
+  assert.match(plan.buildSystemPrompt(), /report_is_source_of_truth_for_market_numbers/);
   assert.match(plan.buildSystemPrompt(), /never set the median asking price of active listings against the median price of sold homes/);
 });
 

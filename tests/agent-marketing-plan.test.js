@@ -296,6 +296,8 @@ test("no sign of any kind reaches an image prompt: the scrub drops the clause, t
   const imgs = require("../netlify/functions/lib/agent-marketing-images-lib");
   assert.strictEqual(sg.scrubSignage("A quiet street of stucco homes, a For Sale sign leaning in the front yard, soft afternoon light."), "A quiet street of stucco homes, soft afternoon light.");
   assert.strictEqual(sg.scrubSignage("An open house sign by the curb. A row of stucco homes under a clear sky."), "A row of stucco homes under a clear sky.");
+  assert.strictEqual(sg.scrubSignage("Look for signs of a cooling market. A row of stucco homes at dusk."), "Look for signs of a cooling market. A row of stucco homes at dusk.", "ordinary 'signs' stays");
+  assert.strictEqual(sg.scrubSignage("A sign leaning in the front yard. Stucco homes at dusk along the street."), "Stucco homes at dusk along the street.");
   assert.strictEqual(sg.scrubSignage("A design detail on a front door."), "A design detail on a front door.", "design is not a sign");
   for (const kind of ["concept", "agent_scene"]) {
     const prompt = imgs.buildPrompt({ kind, scenePrompt: "Stucco homes on a street with a yard sign in front. Soft light." });

@@ -99,7 +99,13 @@ const WARN_RULES = [
 // Fair Housing: steering language. Blocks Claude's output (it can regenerate); warns on text the agent typed.
 const FAIR_HOUSING = [
   { rule: "fair_housing", message: "Possible Fair Housing steering language.",
-    re: /\b(?:perfect|ideal|great|best)\s+for\s+(?:young\s+)?(?:families|singles|couples|bachelors?|retirees|seniors)\b|\bno\s+(?:kids|children)\b|\badults?\s+only\b|\b(?:safe|exclusive|desirable)\s+(?:neighborhood|area|community)\b|\b(?:good|great|top|best|excellent)\s+schools?\b/i },
+    re: /\b(?:perfect|ideal|great|best)\s+for\s+(?:young\s+)?(?:families|singles|couples|bachelors?)\b|\bno\s+(?:kids|children)\b|\badults?\s+only\b|\b(?:safe|exclusive|desirable)\s+(?:neighborhood|area|community)\b|\b(?:good|great|top|best|excellent)\s+schools?\b/i },
+];
+
+// "55+ Active Adult Lifestyle community" and "senior" describe an age-restricted community, not steering (Sam, Oct 28). "Quiet" is the risky word: a warning, never a block.
+const FAIR_HOUSING_SOFT = [
+  { rule: "fair_housing_soft", message: "\u201cQuiet\u201d can read as describing who lives in a place; make sure it describes the place, not the people.",
+    re: /\bquiet\s+(?:neighborhoods?|areas?|communit(?:y|ies)|streets?|enclaves?)\b/i },
 ];
 
 // Claude may not originate results, testimonials or client stories (control 2).
@@ -222,11 +228,28 @@ function sentenceAround(t, index, len) {
   return t.slice(start, ends.length ? Math.min(...ends) + 1 : t.length);
 }
 
+// "132 apartments at Poker Lane" is a count of homes and a street, not an address (Sam, Oct 28): the words between the number and the street
+// suffix read as a sentence, not a street name.
+const COUNT_WORD = /^(?:homes?|houses?|apartments?|units?|listings?|sales?|sold|new|planned|proposed|more|fewer|buyers?|sellers?|offers?|properties|condos?|lots?|permits?|days?|months?|weeks?|at|on|near|in|of|for|from|to|with|and|that|are|were|have|has)$/i;
+function readsAsCount(matched) {
+  const words = matched.replace(/^\d[\d,]*\s+/, "").split(/\s+/).slice(0, -1);
+  return words.some((w) => COUNT_WORD.test(w));
+}
+
 // Rule 1. An address is fine only when it is the verified event venue ("1550 Maidu Drive" vs "1550 Maidu Dr, Roseville").
 function scanSpecificHome(text, field, addresses, blocks, sourcedFacts) {
   const t = norm(text);
   if (!t) return;
   for (const r of MARKET_HOME_RULES) {
+    if (r.rule === "street_address") {
+      const re0 = new RegExp(r.re.source, r.re.flags.includes("g") ? r.re.flags : r.re.flags + "g");
+      let m0;
+      let flagged = null;
+      while ((m0 = re0.exec(t))) { if (!readsAsCount(m0[0]) && !(addresses.length && addressIsVerified(m0[0], addresses))) { flagged = m0; break; } if (m0[0].length === 0) re0.lastIndex++; }
+      if (flagged) blocks.push({ rule: r.rule, field, match: snippet(flagged), message: r.message });
+      else if (addresses.length) { const re1 = new RegExp(r.re.source, re0.flags); let m1; while ((m1 = re1.exec(t))) { if (addressIsVerified(m1[0], addresses)) sourcedFacts.push(`${field}: ${snippet(m1)}`); if (m1[0].length === 0) re1.lastIndex++; } }
+      continue;
+    }
     if (r.rule !== "street_address" || !addresses.length) { scan(t, field, [r], blocks); continue; }
     const re = new RegExp(r.re.source, r.re.flags.includes("g") ? r.re.flags : r.re.flags + "g");
     let m;
@@ -251,7 +274,7 @@ function scanReportPriority(text, field, precedence, blocks) {
 }
 
 // Claude's own text for a sourced piece. Returns nothing; pushes into blocks / sourcedFacts / agentSuppliedClaims.
-function scanMarketClaims(text, field, ctx, blocks, sourcedFacts, claims) {
+function scanMarketClaims(text, field, ctx, blocks, sourcedFacts, claims, warnings) {
   const t = norm(text);
   for (const r of MARKET_CLAIM_RULES) {
     const m = t.match(r.re);
@@ -265,7 +288,8 @@ function scanMarketClaims(text, field, ctx, blocks, sourcedFacts, claims) {
     const sentence = sentenceAround(t, m.index, m[0].length);
     if (ctx.intakeLower.includes(lower(m[0]))) claims.push(`${field}: ${snippet(m)}`);
     else if (!OWNERSHIP_RE.test(sentence) && (ctx.verifiedLower.includes(lower(m[0])) || [...numberTokens(sentence)].some((n) => ctx.verifiedNumbers.has(n)))) sourcedFacts.push(`${field}: ${snippet(m)}`);
-    else blocks.push({ rule: "unsupported_outcome", field, match: snippet(m), message: `"${m[0]}" claims a market outcome, but no figure in your research or report supports it. Add the figure or reword it.` });
+    else if (OWNERSHIP_RE.test(sentence)) blocks.push({ rule: "unsupported_outcome", field, match: snippet(m), message: `"${m[0]}" is written as the agent's own result, which belongs in a Listing Reel.` });
+    else if (warnings) warnings.push({ rule: "outcome_unsupported", field, match: snippet(m), message: `"${m[0]}" is an opinion about the market with no figure behind it. That is allowed; add a figure if you can.` }); // characterizing the market is allowed (Sam, Oct 28)
   }
 }
 
@@ -276,6 +300,26 @@ function numberTokens(text) {
   let m;
   const t = norm(text);
   while ((m = re.exec(t))) out.add(m[0].replace(/,/g, "").replace(/\.0+$/, ""));
+  return out;
+}
+
+// Only figures that read as market claims must trace to a source: a dollar amount, a percent, a decimal, a figure of 100 or more, or a count with a
+// market unit (22 days, 40 sales). A year, "55+", "3 things" or "9:16" is just a number (Sam, Oct 28).
+const FIGURE_UNIT = /^\s*(?:%|percent\b|per\s?cent\b|[kKmMbB]\b|(?:days?|weeks?|months?|homes?|houses?|listings?|sales?|sold|units?|apartments?|properties|condos?|permits?|buyers?|sellers?|offers?|basis\s+points?|points?)\b)/i;
+const FIGURE_CUE = /(?:median|average|avg|typical|reached|reaches|rose|rises?|fell|falls?|dropped|climbed|sits?|stood|stands?|about|around|roughly|nearly|almost|over|under|up|down|from|to|at|by|of)\s+(?:an?\s+|the\s+)?$/i;
+function marketFigureTokens(text) {
+  const out = new Set();
+  const t = norm(text);
+  const re = /(\$\s?)?(\d[\d,]*(?:\.\d+)?)/g;
+  let m;
+  while ((m = re.exec(t))) {
+    const n = m[2].replace(/,/g, "").replace(/\.0+$/, "");
+    const after = t.slice(m.index + m[0].length);
+    const isYear = /^(?:19|20)\d{2}$/.test(n) && !m[1] && !/^\s*(?:%|percent)/i.test(after);
+    const before = t.slice(Math.max(0, m.index - 30), m.index);
+    const cued = Number(n) >= 10 && Number.isInteger(Number(n)) && !isYear && FIGURE_CUE.test(before);   // "reached 31", "up to 45", "around 60"
+    if (m[1] || m[2].includes(".") || FIGURE_UNIT.test(after) || (!isYear && Number(n) >= 100) || cued) out.add(n);
+  }
   return out;
 }
 
@@ -336,6 +380,7 @@ function evaluate(input) {
     else scan(text, field, BLOCK_RULES, blocks);
     scan(text, field, market ? MARKET_WARN_RULES : WARN_RULES, warnings);
     scan(text, field, FAIR_HOUSING, warnings);
+    scan(text, field, FAIR_HOUSING_SOFT, warnings);
     for (const r of CLAIM_RULES) {
       const m = norm(text).match(r.re);
       if (m) agentSuppliedClaims.push(`${field}: ${snippet(m)}`);
@@ -343,7 +388,7 @@ function evaluate(input) {
     // Approving or saving a script sends Claude's words back as the agent's own text. On a sourced piece the same context rules apply to it
     // (the agent's own intake answers are theirs and are not held to them).
     if (market && !field.startsWith("intake.") && field !== "cta") {
-      scanMarketClaims(text, field, ctx, blocks, sourcedFacts, agentSuppliedClaims);
+      scanMarketClaims(text, field, ctx, blocks, sourcedFacts, agentSuppliedClaims, warnings);
       scanReportPriority(text, field, precedence, blocks);
     }
   }
@@ -363,8 +408,9 @@ function evaluate(input) {
     else scan(text, field, BLOCK_RULES, blocks);
     scan(text, field, market ? MARKET_WARN_RULES : WARN_RULES, warnings);
     scan(text, field, FAIR_HOUSING, blocks);
+    scan(text, field, FAIR_HOUSING_SOFT, warnings);
     if (market) {
-      scanMarketClaims(text, field, ctx, blocks, sourcedFacts, agentSuppliedClaims);
+      scanMarketClaims(text, field, ctx, blocks, sourcedFacts, agentSuppliedClaims, warnings);
       scanReportPriority(text, field, precedence, blocks);
     } else {
       for (const r of CLAIM_RULES) {
@@ -378,7 +424,7 @@ function evaluate(input) {
         }
       }
     }
-    for (const n of numberTokens(text)) {
+    for (const n of (market ? marketFigureTokens(text) : numberTokens(text))) {
       if (intakeNumbers.has(n)) continue;
       if (market && verifiedNumbers.has(n)) sourcedFacts.push(`${field}: ${n}`); // the figure is in the validated source topic
       else blocks.push({ rule: "invented_number", field, match: n, message: market ? (vIn && vIn.reportFirst ? `The number ${n} is not in your uploaded report. You chose to use your report with web research, so your report is the source of truth: use only its figures.` : `The number ${n} is not in your research topic, your uploaded report or your answers. Use only figures from those sources.`) : "Contains a number the agent did not provide." });

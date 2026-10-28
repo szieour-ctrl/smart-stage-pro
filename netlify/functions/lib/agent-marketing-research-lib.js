@@ -211,7 +211,7 @@ function systemPrompt(mode) {
     : [
       "MODE: Local Market Update. Each topic is a question buyers, sellers or residents in this market are asking right now about housing inventory, pricing, days on market, pending or closed sales, competition, new construction or changing conditions.",
       "Prefer the most recent articles, and accept any article published within the last 60 days. Prefer MLS-based or public data. Set event to null.",
-      "SOURCES MUST BE ARTICLES. Each topic is built on a published article, report or announcement about the market: local news, a city, county or agency page or press release, a school, transit or utility district notice, a builder's or developer's press release, a business journal, a chamber or nonprofit report, or a market report from an association or data company (California Association of Realtors, NAR, Redfin, Zillow or Realtor.com research and news pages, Freddie Mac). NEVER use a real estate agent's, team's or brokerage's website, a listing or property page, a neighborhood or community landing page from a brokerage, an MLS or portal search page, or any page whose main content is homes for sale. A listing page cannot support a question. Several topics may use the same publisher; never choose a source just to vary publishers.",
+      "SOURCES MUST BE ARTICLES. Each topic is built on a published article, report or announcement about the market: local news, a city, county or agency page or press release, a school, transit or utility district notice, a builder's or developer's press release, a business journal, a chamber or nonprofit report, or a market report from an association or data company (California Association of Realtors, NAR, Redfin, Zillow or Realtor.com research and news pages, Freddie Mac). A blog post or article is fine wherever it is published, including the blog of a brokerage, builder, agent or portal, when it reports or analyzes something about the market. NEVER use a listing or property page, a community or neighborhood landing page, an agent's, team's or brokerage's home or sales page, an MLS or portal search page, or any page whose main content is homes for sale. A listing page cannot support a question. Several topics may use the same publisher; never choose a source just to vary publishers.",
       "BUILD EACH QUESTION FROM ONE SPECIFIC DEVELOPMENT the article reports: a project, a batch of permits or applications, a rate or policy change, an opening, a closing, a decision, a published figure. The question must point to that development. A question that could be asked about any market in any month (\"Are homes taking longer to sell?\", \"Is competition rising?\") is stale and generic and is not acceptable.",
       "ALWAYS RETURN FIVE TOPICS. Returning none, or fewer than five, is a failure. A small market has few articles of its own: when the exact market has too few, use articles about the county, the region or the metro that bear on this market (scope \"broader_context\", and scope_note says what area the article covers), and never present them as the market's own figures. For a keyword that has no article, use other timely articles instead (keyword_match false).",
       "KEYWORDS. If the input lists keywords, search for articles about those keywords in this market FIRST, before anything else. At least two topics must rest on an article that discusses a keyword, and those topics set keyword_match to true. If you cannot find such an article, do not stretch an unrelated article to fit: fill the rest with other timely topics with keyword_match false.",
@@ -298,21 +298,23 @@ function dayNumber(s) {
 function hostOf(url) { try { return new URL(url).hostname.toLowerCase().replace(/^www\./, ""); } catch { return ""; } }
 // A listing page or an agent's own site cannot back a market question (Sam, Oct 27). Heuristic, by address and domain: the model is asked
 // for articles, and anything that still looks like a listing, a brokerage landing page or an agent site is dropped here.
-const LISTING_PATH = /\/(homes?|listings?|property|properties|homedetails|realestateandhomes-detail|mls|idx|forsale|for-sale|sold|open-houses?|neighborhoods?|communities|agents?|our-team)\b|\/\d{2,5}-[a-z0-9-]+-(way|st|street|ave|avenue|dr|drive|ln|lane|ct|court|blvd|boulevard|rd|road|cir|circle|pl|place|ter|terrace)\b|\/home\/\d+|\/new-homes?\/|\/residence-\d+|\/floor-?plans?\b|\/quick-move-in|\/move-in-ready/i;
+// Only a listing LANDING page is excluded (Sam, Oct 28): a property page, a search-results page, an agent's or builder's home page. A blog post or
+// news story is an article wherever it lives, including on a portal, a brokerage or an agent's own site, so article paths are checked first.
+const ARTICLE_PATH = /(?:^|\/)(?:blog|blogs|news|articles?|research|insights?|press|stories|learn|resources|market-(?:reports?|updates?|trends?|news)|housing-market-news|economic-research|data-center)(?:\/|$)/i;
+const LISTING_PATH = /\/(?:listings?|property|properties|homedetails|realestateandhomes-detail|realestateandhomes-search|mls|idx|forsale|for-sale|sold|open-houses?|homes?[-_]for[-_](?:sale|rent)|homes\/\d)\b|\/\d{2,5}-[a-z0-9-]+-(way|st|street|ave|avenue|dr|drive|ln|lane|ct|court|blvd|boulevard|rd|road|cir|circle|pl|place|ter|terrace)\b|\/home\/\d+|\/new-homes?\/|\/residence-\d+|\/floor-?plans?\b|\/quick-move-in|\/move-in-ready|\/(?:\d+-plus-homes|55-plus-homes|55-plus-communities)\b/i;
 const AGENT_HOST = /(^|[.-])(realty|realtors?|realestate|real-estate|properties|homesales|homesforsale|brokerage|remax|kw|exprealty|compass|coldwellbanker|century21|bhhs|redfinagent)([.-]|\d|$)|(realty|realestate|realtor|homes?sales|properties)\.[a-z]{2,}$|^homes\./i;
-// Portals and associations publish real research and news: only those paths count. Their listing and market-page paths do not.
-const PORTAL_HOSTS = ["redfin.com", "zillow.com", "realtor.com", "trulia.com", "movoto.com", "homes.com"];
+const PORTAL_HOSTS = ["redfin.com", "zillow.com", "realtor.com", "trulia.com", "movoto.com", "homes.com", "55places.com"];
 // Associations and agencies publish research, never listings: any page counts.
 const ASSOCIATION_HOSTS = ["car.org", "nar.realtor", "freddiemac.com", "fanniemae.com", "mba.org", "hud.gov", "census.gov"];
-const PORTAL_ARTICLE_PATH = /^\/(news|research|blog|economic-research|data-center|about\/news|press|housing-market-news)\b/i;
 function isNotArticle(url) {
   const host = hostOf(url.toString());
   const path = url.pathname || "/";
   if (ASSOCIATION_HOSTS.some((d) => host === d || host.endsWith("." + d))) return false;
+  if (ARTICLE_PATH.test(path) && !LISTING_PATH.test(path)) return false;      // a blog or news page, wherever it is published
   const portal = PORTAL_HOSTS.some((d) => host === d || host.endsWith("." + d));
-  if (portal) return !PORTAL_ARTICLE_PATH.test(path);
-  if (/\.(org|gov|edu)$/.test(host)) return LISTING_PATH.test(path); // an association such as sacrealtor.org is not an agent's own site (Oct 27)
-  if (AGENT_HOST.test(host)) return true;
+  if (portal) return true;                                                    // a portal's search, listing and market pages
+  if (/\.(org|gov|edu)$/.test(host)) return LISTING_PATH.test(path);          // an association such as sacrealtor.org is not an agent's own site (Oct 27)
+  if (AGENT_HOST.test(host)) return true;                                     // an agent's or brokerage's own landing page
   return LISTING_PATH.test(path);
 }
 function isPaywalled(host) { return PAYWALLED_DOMAINS.some((d) => host === d || host.endsWith("." + d)); }
@@ -405,7 +407,7 @@ function cleanRecommendation(rec, topicCount) {
 
 /**
  * validateTopics(rawTopics, { mode, today }) → { ok, topics, problems }
- * ok is true ONLY for exactly five valid, distinct topics. `problems` explains each rejection (for logs, never shown raw).
+ * ok is true when at least one valid topic remains (up to five). `problems` explains each topic left out (for logs, never shown raw).
  * Sources that are unreachable by design (not https, paywalled, undated or stale for a market update) are dropped; a topic
  * left with no source is rejected, never kept unsourced.
  */
@@ -446,19 +448,23 @@ function validateTopics(rawTopics, { mode, today, recommendation } = {}) {
     }
     topics.push(topic);
   });
-  // Distinct: no two topics may be the same question in different words.
-  for (let i = 0; i < topics.length; i++) for (let j = i + 1; j < topics.length; j++) {
-    if (similar(topics[i].question, topics[j].question)) problems.push(`topics ${topics[i].id} and ${topics[j].id} overlap`);
+  // Distinct: when two topics are the same question in different words, the later one is left out.
+  for (let j = topics.length - 1; j > 0; j--) {
+    const dup = topics.slice(0, j).find((t) => similar(t.question, topics[j].question));
+    if (dup) { problems.push(`topics ${dup.id} and ${topics[j].id} overlap`); topics.splice(j, 1); }
   }
-  // No publisher-variety rule for market updates (Sam, Oct 27): the story source is an article, and the market data comes from the agent's own uploaded report.
-  const soft = [];
-  const ok = problems.length === 0 && topics.length === TOPIC_COUNT;
+  topics.splice(TOPIC_COUNT);   // never more than five
+  // Keep what passed (Sam, Oct 28): a topic with no usable article is left out, it does not sink the others. One good article is a usable run.
+  // `soft` asks the caller for one wider retry while fewer than five came back; the partial result is kept if the retry does no better.
+  const partial = topics.length > 0 && topics.length < TOPIC_COUNT;
+  const soft = partial ? [`only ${topics.length} of ${TOPIC_COUNT} topics had a usable article`] : [];
+  const ok = topics.length > 0;
   if (ok) {
-    const rec = cleanRecommendation(recommendation, topics.length);
+    const rec = cleanRecommendation(recommendation, TOPIC_COUNT);
     const pick = rec && topics.filter((t) => t.id === rec.topicId)[0];
     if (pick) pick.recommended = { reason: rec.reason, evidence: rec.evidence };
   }
-  return { ok, topics: ok ? topics : [], problems, soft: ok ? soft : [] };
+  return { ok, topics: ok ? topics : [], problems, soft, partial };
 }
 
 // Measured provider usage (tokens, search queries, cost) stored with each session so real cost can be benchmarked.

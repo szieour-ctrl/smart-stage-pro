@@ -111,24 +111,28 @@ test("topics: exactly five distinct sourced market topics are accepted", () => {
   assert.ok(v.topics.every((t) => t.kind === "market_update" && t.sources.length >= 1 && /\.example\.org$/.test(t.sources[0].domain)));
 });
 
-test("topics: four, six or zero topics fail", () => {
-  assert.strictEqual(r.validateTopics(fiveMarket().slice(0, 4), { mode: "market_update", today: TODAY }).ok, false);
-  assert.strictEqual(r.validateTopics([...fiveMarket(), rawMarket(6)], { mode: "market_update", today: TODAY }).ok, false);
+test("topics: fewer than five are kept (one good article is a usable run), more than five are capped, and none fails", () => {
+  const four = r.validateTopics(fiveMarket().slice(0, 4), { mode: "market_update", today: TODAY });
+  assert.strictEqual(four.ok, true);
+  assert.strictEqual(four.topics.length, 4);
+  assert.strictEqual(four.partial, true);
+  assert.strictEqual(r.validateTopics(fiveMarket().slice(0, 1), { mode: "market_update", today: TODAY }).topics.length, 1);
+  assert.strictEqual(r.validateTopics([...fiveMarket(), rawMarket(6)], { mode: "market_update", today: TODAY }).topics.length, 5);
   assert.strictEqual(r.validateTopics([], { mode: "market_update", today: TODAY }).ok, false);
   assert.strictEqual(r.validateTopics(null, { mode: "market_update", today: TODAY }).ok, false);
 });
 
 test("topics: unsafe, paywalled, undated, stale and future sources are dropped and an unsourced topic fails the set", () => {
   const bad = (s) => { const t = fiveMarket(); t[2].sources = s; return r.validateTopics(t, { mode: "market_update", today: TODAY }); };
-  assert.strictEqual(bad([{ title: "x", url: "http://example.org/a", published: "2026-10-20" }]).ok, false);          // not https
-  assert.strictEqual(bad([{ title: "x", url: "https://www.wsj.com/articles/a", published: "2026-10-20" }]).ok, false); // paywalled
-  assert.strictEqual(bad([{ title: "x", url: "https://example.org/a" }]).ok, false);                                  // undated market source
-  assert.strictEqual(bad([{ title: "x", url: "https://example.org/a", published: "2026-08-01" }]).ok, false);         // stale
-  assert.strictEqual(bad([{ title: "x", url: "https://example.org/a", published: "2026-12-01" }]).ok, false);         // from the future
-  assert.strictEqual(bad([{ title: "x", url: "https://user:pw@example.org/a", published: "2026-10-20" }]).ok, false); // credentials
-  assert.strictEqual(bad([{ title: "x", url: "javascript:alert(1)", published: "2026-10-20" }]).ok, false);
-  assert.strictEqual(bad([{ title: "x", url: "https://example.org/a", published: "2026-02-31" }]).ok, false);         // impossible date
-  assert.strictEqual(bad([]).ok, false);
+  assert.strictEqual(bad([{ title: "x", url: "http://example.org/a", published: "2026-10-20" }]).topics.length < 5, true);          // not https
+  assert.strictEqual(bad([{ title: "x", url: "https://www.wsj.com/articles/a", published: "2026-10-20" }]).topics.length < 5, true); // paywalled
+  assert.strictEqual(bad([{ title: "x", url: "https://example.org/a" }]).topics.length < 5, true);                                  // undated market source
+  assert.strictEqual(bad([{ title: "x", url: "https://example.org/a", published: "2026-08-01" }]).topics.length < 5, true);         // stale
+  assert.strictEqual(bad([{ title: "x", url: "https://example.org/a", published: "2026-12-01" }]).topics.length < 5, true);         // from the future
+  assert.strictEqual(bad([{ title: "x", url: "https://user:pw@example.org/a", published: "2026-10-20" }]).topics.length < 5, true); // credentials
+  assert.strictEqual(bad([{ title: "x", url: "javascript:alert(1)", published: "2026-10-20" }]).topics.length < 5, true);
+  assert.strictEqual(bad([{ title: "x", url: "https://example.org/a", published: "2026-02-31" }]).topics.length < 5, true);         // impossible date
+  assert.strictEqual(bad([]).topics.length < 5, true);
   // one bad source beside a good one: the good one keeps the topic
   const t = fiveMarket(); t[2].sources = [{ title: "x", url: "https://www.ft.com/a", published: "2026-10-20" }, src(3)];
   const ok = r.validateTopics(t, { mode: "market_update", today: TODAY });
@@ -138,10 +142,10 @@ test("topics: unsafe, paywalled, undated, stale and future sources are dropped a
 
 test("topics: overlapping questions fail; a trend claim needs a measurable signal", () => {
   const t = fiveMarket(); t[1].question = t[0].question;
-  assert.strictEqual(r.validateTopics(t, { mode: "market_update", today: TODAY }).ok, false);
+  assert.strictEqual(r.validateTopics(t, { mode: "market_update", today: TODAY }).topics.length < 5, true);
   const trend = fiveMarket(); trend[0].question = "Why are listings trending in Roseville?"; trend[0].trend_signals = [];
   const v = r.validateTopics(trend, { mode: "market_update", today: TODAY });
-  assert.strictEqual(v.ok, false);
+  assert.strictEqual(v.topics.length, 4);
   assert.match(v.problems.join(" "), /trend/);
   trend[0].trend_signals = ["County report shows active listings up 12% since August"];
   assert.strictEqual(r.validateTopics(trend, { mode: "market_update", today: TODAY }).ok, true);
@@ -149,7 +153,7 @@ test("topics: overlapping questions fail; a trend claim needs a measurable signa
 
 test("topics: broader-than-selected data must say what area it covers", () => {
   const t = fiveMarket(); t[0].scope = "broader_context";
-  assert.strictEqual(r.validateTopics(t, { mode: "market_update", today: TODAY }).ok, false);
+  assert.strictEqual(r.validateTopics(t, { mode: "market_update", today: TODAY }).topics.length < 5, true);
   t[0].scope_note = "Placer County figures, not Crocker Ranch";
   const v = r.validateTopics(t, { mode: "market_update", today: TODAY });
   assert.strictEqual(v.ok, true);
@@ -169,26 +173,26 @@ test("events: upcoming or ongoing with organizer, place, date and time are accep
 
 test("events: placeholders like 'Not stated in the source' or 'venue not stated' do not count as details", () => {
   const run = (over) => { const t = fiveEvents(); t[0] = rawEvent(1, over); return r.validateTopics(t, { mode: "local_events", today: TODAY }); };
-  assert.strictEqual(run({ time: "Not stated in the source" }).ok, false);
-  assert.strictEqual(run({ location: "Roseville, CA; venue not stated" }).ok, false);
-  assert.strictEqual(run({ organizer: "TBD" }).ok, false);
-  assert.strictEqual(run({ time: "N/A" }).ok, false);
+  assert.strictEqual(run({ time: "Not stated in the source" }).topics.length < 5, true);
+  assert.strictEqual(run({ location: "Roseville, CA; venue not stated" }).topics.length < 5, true);
+  assert.strictEqual(run({ organizer: "TBD" }).topics.length < 5, true);
+  assert.strictEqual(run({ time: "N/A" }).topics.length < 5, true);
   assert.strictEqual(run({ time: "5:30–7:30 PM" }).ok, true);
   assert.match(run({ time: "Not stated in the source" }).problems.join(" "), /time is not confirmed/);
 });
 
 test("events: past, canceled, postponed and incomplete events fail the set", () => {
   const run = (over) => { const t = fiveEvents(); t[0] = rawEvent(1, over); return r.validateTopics(t, { mode: "local_events", today: TODAY }); };
-  assert.strictEqual(run({ date: "2026-10-01" }).ok, false);
-  assert.strictEqual(run({ status: "canceled" }).ok, false);
-  assert.strictEqual(run({ status: "postponed" }).ok, false);
-  assert.strictEqual(run({ organizer: "" }).ok, false);
-  assert.strictEqual(run({ location: "" }).ok, false);
-  assert.strictEqual(run({ time: "" }).ok, false);
-  assert.strictEqual(run({ date: "soon" }).ok, false);
-  assert.strictEqual(run({ end_date: "2026-10-01" }).ok, false);
+  assert.strictEqual(run({ date: "2026-10-01" }).topics.length < 5, true);
+  assert.strictEqual(run({ status: "canceled" }).topics.length < 5, true);
+  assert.strictEqual(run({ status: "postponed" }).topics.length < 5, true);
+  assert.strictEqual(run({ organizer: "" }).topics.length < 5, true);
+  assert.strictEqual(run({ location: "" }).topics.length < 5, true);
+  assert.strictEqual(run({ time: "" }).topics.length < 5, true);
+  assert.strictEqual(run({ date: "soon" }).topics.length < 5, true);
+  assert.strictEqual(run({ end_date: "2026-10-01" }).topics.length < 5, true);
   const none = fiveEvents(); none[0].event = null;
-  assert.strictEqual(r.validateTopics(none, { mode: "local_events", today: TODAY }).ok, false);
+  assert.strictEqual(r.validateTopics(none, { mode: "local_events", today: TODAY }).topics.length < 5, true);
 });
 
 test("extractTopics: reads a fenced or bare JSON response, rejects prose", () => {
@@ -244,8 +248,8 @@ test("outcome: charged only for a validated five-topic set; failures, timeouts a
   assert.strictEqual(ok.topics.length, 5);
   assert.strictEqual(ok.charged_at, "2026-10-24T17:00:00.000Z");
   assert.strictEqual(ok.research_date, TODAY);
-  const four = r.validateTopics(fiveMarket().slice(0, 4), { mode: "market_update", today: TODAY });
-  const bad = r.outcomeFields({ validation: four, today: TODAY });
+  const none = r.validateTopics([], { mode: "market_update", today: TODAY });
+  const bad = r.outcomeFields({ validation: none, today: TODAY });
   assert.strictEqual(bad.status, "failed");
   assert.strictEqual(bad.charged_at, null);
   assert.strictEqual(bad.topics, null);
@@ -274,11 +278,17 @@ test("sources: articles only. Listing pages, brokerage landing pages and agent s
     "https://www.redfin.com/zipcode/95843/housing-market",                             // a portal market page is data, not an article
     "https://www.redfin.com/CA/Antelope/4148-Crumley-Way-95843/home/123",
     "https://www.realtor.com/realestateandhomes-detail/4148-Crumley-Way_Antelope_CA_95843_M12345-67890",
-    "https://smithteamrealty.com/blog/market-update",
+    "https://www.sheahomes.com/55-plus-homes/california/",                              // a builder landing page
+    "https://www.zillow.com/sacramento-ca/55-community/",                              // a portal search page
+    "https://www.55places.com/california",
     "https://www.example-city.org/homes/for-sale",
   ];
-  dropped.forEach((u) => { const v = one(u); assert.strictEqual(v.ok, false, u); assert.match(v.problems.join(" "), /topic 1: no usable source/, u); });
+  dropped.forEach((u) => { const v = one(u); assert.strictEqual(v.topics.length, 4, u); assert.match(v.problems.join(" "), /topic 1: no usable source/, u); });
   const kept = [
+    "https://smithteamrealty.com/blog/market-update",                                   // a blog is an article wherever it lives (Sam, Oct 28)
+    "https://www.redfin.com/blog/sacramento-housing-market-update/",
+    "https://www.sacbee.com/news/local/neighborhoods/article99999.html",               // a news story whose path says neighborhoods
+    "https://www.abc10.com/article/news/local/communities/antelope-apartments/",
     "https://www.sacbee.com/news/business/real-estate/article12345.html",
     "https://www.cityofantelope.example.gov/news/2026/10/permits",
     "https://www.redfin.com/news/housing-market-update-october-2026/",

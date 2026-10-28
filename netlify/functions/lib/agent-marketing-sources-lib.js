@@ -59,6 +59,9 @@ const numTokens = (text) => (String(text || "").match(/\d[\d,]*(?:\.\d+)?/g) || 
 function topicNumbers(topic) {
   const t = topic || {};
   const texts = [t.question, t.whyItMatters, t.scopeNote, ...(Array.isArray(t.trendSignals) ? t.trendSignals : [])];
+  // An event's own date, time and place were confirmed from the organizer's page during research, so their numbers are verified ("November 14", "10 am to 2 pm").
+  const e = t.event && typeof t.event === "object" ? t.event : null;
+  if (e) texts.push(e.name, e.date, e.endDate, e.time, e.location, e.organizer);
   if (t.reframed === true) {
     (Array.isArray(t.areaContext) ? t.areaContext : []).forEach((c) => texts.push(c && c.text));
     (Array.isArray(t.answeredBy) ? t.answeredBy : []).forEach((f) => texts.push(f && f.text));

@@ -265,16 +265,16 @@ test("source roles: the planner is told the rule, and the first and last scene a
   assert.strictEqual(roles[3], "data");                                  // not "article": an unknown value falls back to data
 });
 
-test("Oct 27 Reel feedback: local home style, a plain For Sale sign is allowed, no abstract images, and the CTA angle varies by project", () => {
+test("Oct 27 Reel feedback: local home style, no signs of any kind, no abstract images, and the CTA angle varies by project", () => {
   const lib = require("../netlify/functions/lib/agent-marketing-plan-lib");
   const el = require("../netlify/functions/lib/agent-marketing-image-elaborate-lib");
   const sys = lib.buildSystemPrompt();
   assert.match(sys, /ordinary single-family homes actually built in the market area/);
-  assert.match(sys, /only words are \\?"For Sale\\?"/);
+  assert.match(sys, /no signs of any kind/);
   assert.match(sys, /no abstract metaphors/);
   assert.match(sys, /Never use the stock lines/);
   const prompt = el.buildSystemPrompt();
-  assert.match(prompt, /only words are "For Sale"/);
+  assert.match(prompt, /signs of any kind \(no For Sale/);
   assert.match(prompt, /never a villa, mansion or luxury estate/);
   assert.doesNotMatch(prompt, /^1\. .*signs, letters/m);
   const a = lib.ctaAngleFor({ id: "project-aaa" }), b = lib.ctaAngleFor({ id: "project-aaa" });

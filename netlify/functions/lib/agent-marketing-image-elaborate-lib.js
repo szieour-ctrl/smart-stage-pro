@@ -85,7 +85,8 @@ async function elaborate({ project, scene, kind, note, anthropicKey, callFn }) {
   const call = callFn || planLib.callClaudeText;
   const text = await call(buildSystemPrompt(), buildUserMessage({ scene, kind, note: n }), anthropicKey);
   const out = normalize(planLib.extractJsonObject(text));
-  const g2 = checkText(project, out.description, false);
+  // An image description is an instruction to a picture model, not a market claim: like the planner's image prompts, it is held only to the sale-content rules, so "9:16" or "two-story" is fine (Sam, Oct 28).
+  const g2 = checkText(project, out.description, true);
   if (!g2.ok) {
     console.error("[agent-marketing-images] gate blocked an elaborated description:", JSON.stringify(g2.blocks).slice(0, 400));
     throw codedError("That description included wording Agent Marketing can't use. Please change your note and try again.", "description_blocked", { gate: g2 });

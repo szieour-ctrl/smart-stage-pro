@@ -40,6 +40,21 @@ function imageNeeds(narrative, ownScenes) {
 }
 
 /**
+ * Numbers the uploaded report itself states (Oct 27, 2026): a statement or support line on a card repeats the narration, and the narration
+ * may quote any figure from the subscriber's report, not only the ones a card claims. Each report figure counts as verified, and so does
+ * its whole-number rounding ("a median of 19.5 days" may read "20 days"). Nothing calculated across figures is added here.
+ */
+function reportNumbers(figs) {
+  const out = new Set();
+  (figs || []).forEach((f) => {
+    if (!Number.isFinite(f.value)) return;
+    out.add(f.value);
+    if (!Number.isInteger(f.value) && Math.abs(f.value) >= 10) out.add(Math.round(f.value));
+  });
+  return [...out];
+}
+
+/**
  * buildManifest(input) → { manifest, edits, plan, validation }
  *   input: { projectId, formats, narrative (approved), intake, reportFigures, notice:{period}, brand:{primary,secondary,border,font,agent,headshot_key},
  *            audio:{ narration_key, duration_sec, words[] }, imageKeys: { [sceneIndex]: { "9x16": key, "16x9": key } }, narrationTagged }
@@ -75,7 +90,7 @@ function buildManifest(input) {
   const captions = timing.groupCaptionLines(input.audio.words);
   let manifest = {
     version: manifestLib.MANIFEST_VERSION, project_id: input.projectId, formats: formats.slice(), notice_required: true,
-    ...(input.webTopic ? { notice_required: false, notice: {}, source_line: { sources: sourcesLib.usableSources(input.webTopic.sources).map((x) => ({ title: x.title, url: x.url, published: x.published })), scope_note: input.webTopic.scopeNote || "", text: sourcesLib.sourceLine(input.webTopic.sources, input.webTopic.scopeNote), label: sourcesLib.sourceLabel(input.webTopic.sources) }, verified_numbers: sourcesLib.topicNumbers(input.webTopic) } : { notice: { period: input.notice.period, text: manifestLib.metroListNotice(input.notice.period) } }),
+    ...(input.webTopic ? { notice_required: false, notice: {}, source_line: { sources: sourcesLib.usableSources(input.webTopic.sources).map((x) => ({ title: x.title, url: x.url, published: x.published })), scope_note: input.webTopic.scopeNote || "", text: sourcesLib.sourceLine(input.webTopic.sources, input.webTopic.scopeNote), label: sourcesLib.sourceLabel(input.webTopic.sources) }, verified_numbers: sourcesLib.topicNumbers(input.webTopic) } : { notice: { period: input.notice.period, text: manifestLib.metroListNotice(input.notice.period) }, verified_numbers: reportNumbers(figs) }),
     brand: input.brand,
     figures: figs.filter((f) => used.has(f.ref)).map((f) => ({ ref: f.ref, label: f.label, display: f.display, value: f.value, n: f.n })),
     derived: pl.derived, narration_text: input.narrationTagged,

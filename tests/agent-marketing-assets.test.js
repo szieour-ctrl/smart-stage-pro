@@ -144,3 +144,23 @@ test("imageNeeds: image of you is generated, own photos override, an unadded opt
   const b = lib.imageNeeds(n, new Set([0, 2, 3, 5]));
   assert.deepStrictEqual(b.map((x) => x.kind), ["own", "generate", "reuse", "own", "generate", "own"]); // reuse is never overridden
 });
+
+test("a statement card may repeat any figure the uploaded report states, and a number the report never states still fails", () => {
+  const manifestLib = require("../netlify/functions/lib/agent-marketing-manifest-lib");
+  const { manifest } = lib.buildManifest(input());
+  const stated = fx.reportFigures.find((f) => f.ref && !manifest.figures.some((m) => m.ref === f.ref) && Number.isInteger(director.figuresFrom([f])[0].value) && director.figuresFrom([f])[0].value > 1999 === false);
+  assert.ok(stated, "the fixture has an unclaimed report figure");
+  const val = director.figuresFrom([stated])[0].value;
+  const mk = (text) => { const m = JSON.parse(JSON.stringify(manifest)); m.scenes[3].data = { headline: ["A", "B"], statement: text, support: "" }; return manifestLib.validateManifest(m); };
+  assert.deepStrictEqual(mk(`Listings sat a median of ${val} days.`).errors.filter((e) => e.code === "number"), []);
+  assert.ok(mk("Listings sat a median of 7777 days.").errors.some((e) => e.code === "number"));
+});
+
+test("a report figure with a half value may be read rounded on a statement card", () => {
+  const manifestLib = require("../netlify/functions/lib/agent-marketing-manifest-lib");
+  const rf = [...fx.reportFigures, { ref: "r1.f99", key: "median_dom", label: "Median days on market of closed sales", display: "19.5 days", text: "x" }];
+  const { manifest } = lib.buildManifest(input({ reportFigures: rf }));
+  const m = JSON.parse(JSON.stringify(manifest));
+  m.scenes[3].data = { headline: ["A", "B"], statement: "Closed sales moved in a median of 20 days.", support: "" };
+  assert.deepStrictEqual(manifestLib.validateManifest(m).errors.filter((e) => e.code === "number"), []);
+});

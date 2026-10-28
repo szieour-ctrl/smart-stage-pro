@@ -235,11 +235,11 @@ exports.handler = async (event) => {
     const topic = project.selected_topic || {};
     if (project.selected_topic && narrative.intakeHash && narrative.intakeHash !== planLib.intakeHash(project.intake, project.selected_topic)) return await fail(job, "Your approved script was written for a different topic or different answers than the ones now on this project. Go back to the Script step, write a new script for your topic, approve it, and make the Reel again."), { statusCode: 200, body: "" };
     const reportFigures = topic.reportFigures;
-    const period = assetsLib.parseNoticePeriod(narrative.notice || topic.reportNotice);
+    const noticeInfo = assetsLib.parseNotice(narrative.notice || topic.reportNotice);
     // Two kinds of Reel: from an uploaded MetroList report (verified figures + the MetroList notice), or from web research (checked,
     // dated sources + an on-screen source line, text cards only for now).
     const fromReport = Array.isArray(reportFigures) && reportFigures.length > 0;
-    if (fromReport && !period) return await fail(job, "The report period is missing."), { statusCode: 200, body: "" };
+    if (fromReport && !noticeInfo) return await fail(job, "The report has no dates or printed publication line for the MetroList notice. Upload a MetroList report that shows one."), { statusCode: 200, body: "" };
     if (!fromReport && !sourcesLib.sourceLine(topic.sources, topic.scopeNote)) return await fail(job, sourcesLib.usableSources(topic.sources).length ? "The source note for this topic is too long to show on screen. Run the research again to get a shorter one." : "This Reel needs either your uploaded report or at least one checked, dated research source."), { statusCode: 200, body: "" };
     const profile = await getProfileRow(job.user_id);
     if (!profile || !profile.licensed_name || !profile.headshot_key) return await fail(job, "Your Agent Profile needs your name and headshot before a Reel can be made."), { statusCode: 200, body: "" };
@@ -260,7 +260,7 @@ exports.handler = async (event) => {
     try { cardCopy = await cardCopyLib.writeCardCopy({ project, narrative, intake: project.intake, reportFigures: fromReport ? reportFigures : [], anthropicKey: process.env.ANTHROPIC_API_KEY, log: (m) => console.log("[agent-marketing-card-copy]", m) }); }
     catch (e) { console.error("[agent-marketing-card-copy] failed, using fallback text:", e.message); }
     await patchJob(job.id, { step: "Checking the facts and layout" });
-    const built = assetsLib.buildManifest({ cardCopy, voiceShape: assetsLib.voiceShapeFrom(process.env), projectId: project.id, formats, narrative, intake: project.intake, reportFigures: fromReport ? reportFigures : [], notice: fromReport ? { period } : undefined, webTopic: fromReport ? undefined : topic, brand, narrationTagged: narrative.narrationTagged, audio: { narration_key: audio.key, duration_sec: audio.duration_sec, words: audio.words }, imageKeys });
+    const built = assetsLib.buildManifest({ cardCopy, voiceShape: assetsLib.voiceShapeFrom(process.env), projectId: project.id, formats, narrative, intake: project.intake, reportFigures: fromReport ? reportFigures : [], notice: fromReport ? noticeInfo : undefined, webTopic: fromReport ? undefined : topic, brand, narrationTagged: narrative.narrationTagged, audio: { narration_key: audio.key, duration_sec: audio.duration_sec, words: audio.words }, imageKeys });
     await patchJob(job.id, { validation: built.validation, manifest: built.manifest });
     if (!built.validation.ok) return await fail(job, "The Reel did not pass its checks: " + built.validation.errors.map((e) => e.message).join(" | ")), { statusCode: 200, body: "" };
 

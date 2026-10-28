@@ -16,6 +16,14 @@ function parseNoticePeriod(text) {
   return start && end ? { start, end } : null;
 }
 
+/** The stored notice sentence -> { period } (a dated report), { disclosure } (a Market Summary's printed publication line) or null. */
+function parseNotice(text) {
+  const period = parseNoticePeriod(text);
+  if (period) return { period };
+  const m = /^Based on information from MetroList Services, Inc\. (.+?)\.?$/.exec(String(text || "").trim());
+  return m && manifestLib.metroListDisclosureNotice(m[1]) ? { disclosure: m[1] } : null;
+}
+
 // ElevenLabs voice ids behind the two Agent Marketing voice choices. Set AGENT_MARKETING_VOICE_SSP_MALE / _SSP_FEMALE in Netlify.
 // ssp_male defaults to the narrator Sam already uses for ssp-prospect.
 function voiceIdFor(voice, env) {
@@ -90,7 +98,7 @@ function buildManifest(input) {
   const captions = timing.groupCaptionLines(input.audio.words);
   let manifest = {
     version: manifestLib.MANIFEST_VERSION, project_id: input.projectId, formats: formats.slice(), notice_required: true,
-    ...(input.webTopic ? { notice_required: false, notice: {}, source_line: { sources: sourcesLib.usableSources(input.webTopic.sources).map((x) => ({ title: x.title, url: x.url, published: x.published })), scope_note: input.webTopic.scopeNote || "", text: sourcesLib.sourceLine(input.webTopic.sources, input.webTopic.scopeNote), label: sourcesLib.sourceLabel(input.webTopic.sources) }, verified_numbers: sourcesLib.topicNumbers(input.webTopic) } : { notice: { period: input.notice.period, text: manifestLib.metroListNotice(input.notice.period) }, verified_numbers: reportNumbers(figs) }),
+    ...(input.webTopic ? { notice_required: false, notice: {}, source_line: { sources: sourcesLib.usableSources(input.webTopic.sources).map((x) => ({ title: x.title, url: x.url, published: x.published })), scope_note: input.webTopic.scopeNote || "", text: sourcesLib.sourceLine(input.webTopic.sources, input.webTopic.scopeNote), label: sourcesLib.sourceLabel(input.webTopic.sources) }, verified_numbers: sourcesLib.topicNumbers(input.webTopic) } : { notice: input.notice.disclosure ? { disclosure: input.notice.disclosure, text: manifestLib.metroListDisclosureNotice(input.notice.disclosure) } : { period: input.notice.period, text: manifestLib.metroListNotice(input.notice.period) }, verified_numbers: reportNumbers(figs) }),
     brand: input.brand,
     figures: figs.filter((f) => used.has(f.ref)).map((f) => ({ ref: f.ref, label: f.label, display: f.display, value: f.value, n: f.n })),
     derived: pl.derived, narration_text: input.narrationTagged,
@@ -111,4 +119,4 @@ function voiceShapeFrom(env) {
   return semitones || bass_db ? { semitones, bass_db } : null;
 }
 
-module.exports = { voiceShapeFrom, parseNoticePeriod, voiceIdFor, imageNeeds, buildManifest };
+module.exports = { voiceShapeFrom, parseNoticePeriod, parseNotice, voiceIdFor, imageNeeds, buildManifest };

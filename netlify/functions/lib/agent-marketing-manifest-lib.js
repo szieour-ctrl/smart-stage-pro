@@ -49,6 +49,12 @@ function longDate(iso) {
   if (!m || +m[2] < 1 || +m[2] > 12) return null;
   return `${MONTHS[+m[2] - 1]} ${+m[3]}, ${m[1]}`;
 }
+// MetroList's Market Summary reports carry no date range, only a printed line: "All reports are published October 2026, based on data
+// available at the end of September 2026". The notice quotes that line word for word (Sam, Oct 27); nothing is calculated from it.
+const DISCLOSURE_RE = /^All reports are published [A-Z][a-z]{2,8} \d{4}, based on data available at the end of [A-Z][a-z]{2,8} \d{4}$/;
+function metroListDisclosureNotice(disclosure) {
+  return typeof disclosure === "string" && DISCLOSURE_RE.test(disclosure) ? `Based on information from MetroList Services, Inc. ${disclosure}.` : null;
+}
 function metroListNotice(period) {
   const a = longDate(period && period.start), b = longDate(period && period.end);
   return a && b ? `Based on information from MetroList Services, Inc. for the period ${a} through ${b}.` : null;
@@ -176,7 +182,7 @@ function validateManifest(manifest) {
 
   // notice
   const noticeNeeded = m.notice_required !== false;
-  const built = metroListNotice(m.notice && m.notice.period);
+  const built = m.notice && m.notice.disclosure ? metroListDisclosureNotice(m.notice.disclosure) : metroListNotice(m.notice && m.notice.period);
   if (!noticeNeeded) {
     // A web-research Reel (no MetroList report): the bottom bar is the source line, built by code from the checked sources.
     const sl = m.source_line || {};
@@ -187,8 +193,8 @@ function validateManifest(manifest) {
   // numbers the research step recorded for the topic count as verified for words on screen (the narration was already checked against them)
   (Array.isArray(m.verified_numbers) ? m.verified_numbers : []).forEach((v) => { if (Number.isFinite(v)) verifiedNumbers.add(v); });
   if (noticeNeeded) {
-    if (!built) err("notice", "notice.period", "A report period is required to build the MetroList notice.");
-    else if (!m.notice || m.notice.text !== built) err("notice", "notice.text", "The notice text must be built from the report period, not typed.");
+    if (!built) err("notice", "notice.period", "A report period is required to build the MetroList notice (for a MetroList Market Summary, its printed publication line).");
+    else if (!m.notice || m.notice.text !== built) err("notice", "notice.text", "The notice text must be built from the report period (or the printed publication line), not typed.");
   }
 
   // scenes
@@ -268,4 +274,4 @@ function validateManifest(manifest) {
   return { ok: errors.length === 0, errors, warnings };
 }
 
-module.exports = { MANIFEST_VERSION, FORMATS, SMALL_SAMPLE_BELOW, parseNumber, metroListNotice, verifyDerived, qualifySmallSample, applySmallSampleQualifiers, validateManifest, sceneStrings };
+module.exports = { MANIFEST_VERSION, FORMATS, SMALL_SAMPLE_BELOW, parseNumber, metroListNotice, metroListDisclosureNotice, verifyDerived, qualifySmallSample, applySmallSampleQualifiers, validateManifest, sceneStrings };

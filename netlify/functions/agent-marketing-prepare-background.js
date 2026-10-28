@@ -260,7 +260,7 @@ exports.handler = async (event) => {
     try { cardCopy = await cardCopyLib.writeCardCopy({ project, narrative, intake: project.intake, reportFigures: fromReport ? reportFigures : [], anthropicKey: process.env.ANTHROPIC_API_KEY, log: (m) => console.log("[agent-marketing-card-copy]", m) }); }
     catch (e) { console.error("[agent-marketing-card-copy] failed, using fallback text:", e.message); }
     await patchJob(job.id, { step: "Checking the facts and layout" });
-    const built = assetsLib.buildManifest({ cardCopy, voiceShape: assetsLib.voiceShapeFrom(process.env), projectId: project.id, formats, narrative, intake: project.intake, reportFigures: fromReport ? reportFigures : [], notice: fromReport ? noticeInfo : undefined, webTopic: fromReport ? undefined : topic, brand, narrationTagged: narrative.narrationTagged, audio: { narration_key: audio.key, duration_sec: audio.duration_sec, words: audio.words }, imageKeys });
+    const built = assetsLib.buildManifest({ cardCopy, voiceShape: assetsLib.voiceShapeFrom(process.env), projectId: project.id, formats, narrative, intake: project.intake, reportFigures: fromReport ? reportFigures : [], articleTopic: fromReport && topic.origin === "web" ? topic : undefined, notice: fromReport ? noticeInfo : undefined, webTopic: fromReport ? undefined : topic, brand, narrationTagged: narrative.narrationTagged, audio: { narration_key: audio.key, duration_sec: audio.duration_sec, words: audio.words }, imageKeys });
     await patchJob(job.id, { validation: built.validation, manifest: built.manifest });
     if (!built.validation.ok) return await fail(job, "The Reel did not pass its checks: " + built.validation.errors.map((e) => e.message).join(" | ")), { statusCode: 200, body: "" };
 

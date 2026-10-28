@@ -8433,7 +8433,24 @@ const IDLE_LIMIT_MS = 2 * 60 * 60 * 1000; // 2 hours
 let _lastActivityAt = Date.now();
 let _idleCheckHandle = null;
 
-function _markActivity() { _lastActivityAt = Date.now(); }
+// FIX (Oct 27, 2026): work done in another Smart Stage PRO tab (Agent Marketing opens as its own page) never reached this tab's clock, so
+// this tab signed the whole browser out 2 hours after the LAST click HERE, even mid-session elsewhere. Every page now also stamps the same
+// localStorage key on activity, and the check below counts the newest stamp from any tab.
+const _SHARED_ACTIVITY_KEY = 'ssp_last_activity';
+let _lastSharedStamp = 0;
+function _markActivity() {
+  const now = Date.now();
+  _lastActivityAt = now;
+  if (now - _lastSharedStamp > 5000) { // throttled: storage writes are not free
+    _lastSharedStamp = now;
+    try { localStorage.setItem(_SHARED_ACTIVITY_KEY, String(now)); } catch (e) { /* storage blocked: this tab's own clock still works */ }
+  }
+}
+function _newestActivityAt() {
+  let t = _lastActivityAt;
+  try { const o = Number(localStorage.getItem(_SHARED_ACTIVITY_KEY)); if (Number.isFinite(o) && o > t && o <= Date.now() + 60000) t = o; } catch (e) { /* ignore */ }
+  return t;
+}
 
 // FIX (Oct 8, 2026): this list used to be only click / keydown / touchstart,
 // so a user who was genuinely working but not clicking or typing — scrolling
@@ -8456,7 +8473,7 @@ function startIdleTimer() {
     window.addEventListener(evt, _markActivity, { passive: true, capture: true })
   );
   _idleCheckHandle = setInterval(() => {
-    if (Date.now() - _lastActivityAt > IDLE_LIMIT_MS) {
+    if (Date.now() - _newestActivityAt() > IDLE_LIMIT_MS) {
       console.warn('Idle timeout reached (2 hours of inactivity) — signing out.');
       signOut();
     }

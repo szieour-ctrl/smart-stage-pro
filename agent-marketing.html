@@ -475,6 +475,14 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
   function stripTags(t) { return String(t || "").replace(/\[[^\]\n]{1,40}\]/g, " ").replace(/[ \t]+/g, " ").replace(/\s+([,.;:!?])/g, "$1").trim(); }
   function words(t) { var m = stripTags(t).replace(/\.{2,}/g, " ").match(/[A-Za-z0-9À-ɏ][A-Za-z0-9À-ɏ'’\-]*/g); return m ? m.length : 0; }
 
+  // Tell the main site this tab is in use, so its 2-hour inactivity clock does not sign you out while you work here (same key index.html reads).
+  (function () {
+    var last = 0;
+    function stamp() { var n = Date.now(); if (n - last < 5000) return; last = n; try { localStorage.setItem("ssp_last_activity", String(n)); } catch (e) { /* storage blocked */ } }
+    ["click", "mousedown", "mousemove", "pointerdown", "wheel", "scroll", "keydown", "touchstart", "touchmove"].forEach(function (e) { window.addEventListener(e, stamp, { passive: true, capture: true }); });
+    stamp();
+  })();
+
   // Same login the rest of the site uses (the live Supabase session in localStorage).
   function token() {
     try {

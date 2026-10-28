@@ -20,6 +20,7 @@ const timing = require("./lib/agent-marketing-timing-lib");
 const assetsLib = require("./lib/agent-marketing-assets-lib");
 const sourcesLib = require("./lib/agent-marketing-sources-lib");
 const planLib = require("./lib/agent-marketing-plan-lib");
+const cardCopyLib = require("./lib/agent-marketing-cardcopy-lib");
 
 // Narration model. Eleven v4 (Oct 2026) by default; set AGENT_MARKETING_TTS_MODEL to change it without a code change.
 const TTS_MODEL = process.env.AGENT_MARKETING_TTS_MODEL || "eleven_v4";
@@ -253,8 +254,13 @@ exports.handler = async (event) => {
     const imageKeys = {};
     for (const [slot, v] of Object.entries(images)) { const [sc, f] = slot.split("_"); (imageKeys[sc] = imageKeys[sc] || {})[f] = v.key; }
 
+    await patchJob(job.id, { step: "Writing the card text" });
+    // Claude writes the statement cards' text as the agent's perspective, within the word caps; a card that fails its checks (or any problem here) falls back to capped narration text.
+    let cardCopy = {};
+    try { cardCopy = await cardCopyLib.writeCardCopy({ project, narrative, intake: project.intake, reportFigures: fromReport ? reportFigures : [], anthropicKey: process.env.ANTHROPIC_API_KEY, log: (m) => console.log("[agent-marketing-card-copy]", m) }); }
+    catch (e) { console.error("[agent-marketing-card-copy] failed, using fallback text:", e.message); }
     await patchJob(job.id, { step: "Checking the facts and layout" });
-    const built = assetsLib.buildManifest({ voiceShape: assetsLib.voiceShapeFrom(process.env), projectId: project.id, formats, narrative, intake: project.intake, reportFigures: fromReport ? reportFigures : [], notice: fromReport ? { period } : undefined, webTopic: fromReport ? undefined : topic, brand, narrationTagged: narrative.narrationTagged, audio: { narration_key: audio.key, duration_sec: audio.duration_sec, words: audio.words }, imageKeys });
+    const built = assetsLib.buildManifest({ cardCopy, voiceShape: assetsLib.voiceShapeFrom(process.env), projectId: project.id, formats, narrative, intake: project.intake, reportFigures: fromReport ? reportFigures : [], notice: fromReport ? { period } : undefined, webTopic: fromReport ? undefined : topic, brand, narrationTagged: narrative.narrationTagged, audio: { narration_key: audio.key, duration_sec: audio.duration_sec, words: audio.words }, imageKeys });
     await patchJob(job.id, { validation: built.validation, manifest: built.manifest });
     if (!built.validation.ok) return await fail(job, "The Reel did not pass its checks: " + built.validation.errors.map((e) => e.message).join(" | ")), { statusCode: 200, body: "" };
 

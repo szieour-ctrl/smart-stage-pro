@@ -56,13 +56,13 @@ function reportNumbers(figs) {
 
 /**
  * buildManifest(input) → { manifest, edits, plan, validation }
- *   input: { projectId, formats, narrative (approved), intake, reportFigures, notice:{period}, brand:{primary,secondary,border,font,agent,headshot_key},
+ *   input: { cardCopy (optional, { [sceneIndex]: { headline, statement, support } } from the card copy writer), projectId, formats, narrative (approved), intake, reportFigures, notice:{period}, brand:{primary,secondary,border,font,agent,headshot_key},
  *            audio:{ narration_key, duration_sec, words[] }, imageKeys: { [sceneIndex]: { "9x16": key, "16x9": key } }, narrationTagged }
  */
 function buildManifest(input) {
   const { narrative, formats } = input;
   const figs = director.figuresFrom(input.reportFigures);
-  const pl = director.plan(narrative, input.intake, figs);
+  const pl = director.plan(narrative, input.intake, figs, { cardCopy: input.cardCopy });
   const excerpts = pl.scenes.map((s) => s.narration_excerpt);
   const tw = timing.sceneWindows(input.audio.words, excerpts, input.audio.duration_sec);
   if (tw.error) return { manifest: null, validation: { ok: false, errors: [{ code: "timing", where: "scenes", message: tw.error }], warnings: [] }, plan: pl };

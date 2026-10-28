@@ -99,7 +99,7 @@ test("the rewritten Natomas script (pauses, ellipses) still builds a valid manif
   assert.deepStrictEqual(r.validation.errors, [], JSON.stringify(r.validation.errors));
   const takeaway = r.manifest.scenes[3].data;
   assert.deepStrictEqual(takeaway.headline, ["This Means Condition and", "Pricing Precision Matter"]);
-  assert.strictEqual(takeaway.statement, "New construction sets a baseline so your home has to answer for itself.");
+  assert.strictEqual(takeaway.statement, "", "a 13-word sentence is over the 7-word statement cap, so the card carries no statement");
   assert.ok(r.manifest.captions.some((c) => /\u2026/.test(c.text)), "ellipses stay in the captions");
 });
 
@@ -124,9 +124,9 @@ test("narration shaping comes from the environment, with a deeper default, and r
 });
 
 test("a takeaway statement that starts with a joining word reads as its own sentence", () => {
-  const narrative = { ...fx.narrative, scenes: fx.narrative.scenes.map((s, i) => (i === 3 ? { ...s, narrationExcerpt: "Condition and pricing precision matter… because new construction sets a baseline your home has to answer for." } : s)) };
+  const narrative = { ...fx.narrative, scenes: fx.narrative.scenes.map((s, i) => (i === 3 ? { ...s, narrationExcerpt: "Condition and pricing precision matter… because new construction sets a baseline." } : s)) };
   const pl = director.plan(narrative, fx.intake, director.figuresFrom(fx.reportFigures));
-  assert.strictEqual(pl.scenes[3].data.statement, "New construction sets a baseline your home has to answer for.");
+  assert.strictEqual(pl.scenes[3].data.statement, "New construction sets a baseline.");
 });
 
 test("imageNeeds: image of you is generated, own photos override, an unadded optional photo becomes a plate", () => {
@@ -163,4 +163,61 @@ test("a report figure with a half value may be read rounded on a statement card"
   const m = JSON.parse(JSON.stringify(manifest));
   m.scenes[3].data = { headline: ["A", "B"], statement: "Closed sales moved in a median of 20 days.", support: "" };
   assert.deepStrictEqual(manifestLib.validateManifest(m).errors.filter((e) => e.code === "number"), []);
+});
+
+// ── Claude-written card text (Oct 27, 2026): word caps 9/7/8, opinion not a repeat of the narration, per-scene fallback ──
+const cardCopyLib = require("../netlify/functions/lib/agent-marketing-cardcopy-lib");
+const antelope = { scenes: [
+  { role: "Local hook", narrationExcerpt: "Half of Antelope's active listings have already cut their price." },
+  { role: "Tension", narrationExcerpt: "Right now, 28 of the 56 active listings have taken a price reduction, and 33 out of 56 closed at or above list price." },
+  { role: "Insight", narrationExcerpt: "The difference isn't the market\u2014it's the starting point. Canceled listings sat a median of 49 days and never found a buyer. Closed sales moved in a median of 20 days." },
+  { role: "Consequence", narrationExcerpt: "This means pricing right the first time is what separates a clean close from a listing that quietly disappears." },
+  { role: "Close", narrationExcerpt: "If you'd like a second opinion on pricing, send me a message." },
+], hook: "Half of Antelope's active listings have already cut their price" };
+const antelopeFigs = []; // no matching report figure, so the middle scenes are statement cards as in the real Antelope Reel
+
+test("fallback card text respects the 9/7/8 caps, starts with a capital and never ends on a dangling word", () => {
+  const pl = director.plan(antelope, { market: "Antelope" }, antelopeFigs);
+  for (const i of [1, 2, 3]) {
+    const d = pl.scenes[i].data;
+    assert.ok(pl.scenes[i].composition === "expert_takeaway");
+    assert.ok(cardCopyLib.wordsOf(d.headline.join(" ")).length <= 9, d.headline.join(" "));
+    assert.ok(cardCopyLib.wordsOf(d.statement).length <= 7 && cardCopyLib.wordsOf(d.support).length <= 8);
+    d.headline.forEach((l) => assert.match(l, /^[A-Z0-9]/, "each headline line starts with a capital or a figure"));
+  }
+  assert.deepStrictEqual(pl.scenes[3].data.headline.join(" "), "Pricing Right the First Time");
+});
+
+test("card copy validation: caps, numbers that are not in the scene, and echoing the narration are all rejected", () => {
+  const ctx = { narration: antelope.scenes[2].narrationExcerpt, allowed: [49, 20] };
+  const v = (c) => cardCopyLib.validateCard(c, ctx);
+  assert.ok(v({ headline: "Starting point beats the market", statement: "Price it like a buyer would", support: "That is what moves a home" }).ok);
+  assert.strictEqual(v({ headline: "one two three four five six seven eight nine ten" }).ok, false);
+  assert.strictEqual(v({ headline: "A fine headline", statement: "one two three four five six seven eight" }).ok, false);
+  assert.strictEqual(v({ headline: "A fine headline", support: "one two three four five six seven eight nine" }).ok, false);
+  assert.strictEqual(v({ headline: "Homes sat 62 days before canceling" }).ok, false, "62 is not in the scene");
+  assert.ok(v({ headline: "Canceled homes waited 49 days" }).ok, "49 is in the scene");
+  assert.strictEqual(v({ headline: "Closed sales moved in a median of 20 days" }).ok, false, "repeats the narration");
+  assert.strictEqual(v({ headline: "" }).ok, false);
+});
+
+test("writeCardCopy asks Claude only for the statement scenes, keeps good cards and falls back for bad ones", async () => {
+  const seen = [];
+  const callFn = async (sys, user) => {
+    seen.push(JSON.parse(user));
+    return JSON.stringify({ cards: [
+      { index: 2, headline: "Where you start decides how it ends", statement: "Canceled homes waited the longest", support: "Price like a buyer sees it" },
+      { index: 3, headline: "This means pricing right the first time is what separates a clean close", statement: "", support: "" },
+    ] });
+  };
+  const out = await cardCopyLib.writeCardCopy({ project: { template: "local_market_insider", intake: { market: "Antelope" } }, narrative: antelope, intake: { market: "Antelope" }, reportFigures: [], callFn });
+  assert.deepStrictEqual(seen[0].scenes.map((s) => s.index), [1, 2, 3], "only the middle statement scenes are sent, not the opening or closing");
+  assert.ok(out[2] && out[2].headline === "Where you start decides how it ends");
+  assert.strictEqual(out[3], undefined, "scene 4 copied the narration, so it falls back");
+  const pl = director.plan(antelope, { market: "Antelope" }, [], { cardCopy: out });
+  assert.deepStrictEqual(pl.scenes[2].data.headline.join(" "), "Where You Start Decides How It Ends");
+  assert.strictEqual(pl.scenes[2].data.statement, "Canceled homes waited the longest");
+  assert.match(pl.scenes[2].reason, /agent's perspective/);
+  const none = await cardCopyLib.writeCardCopy({ project: {}, narrative: antelope, intake: { market: "Antelope" }, reportFigures: [], callFn: async () => { throw new Error("down"); } });
+  assert.deepStrictEqual(none, {}, "a model failure never fails the Reel");
 });

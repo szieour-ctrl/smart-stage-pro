@@ -68,7 +68,8 @@ function closingHeadline(excerpt) {
  * plan(narrative, intake, figures) → { scenes[], derived[], reasons[], problems[] }
  * Each scene: { composition, narrative_role, branding, data, claims[], reason }. Windows, images and audio are added later.
  */
-function plan(narrative, intake, figures) {
+function plan(narrative, intake, figures, opts) {
+  const cardCopy = (opts && opts.cardCopy) || {};
   const scenes = (narrative && narrative.scenes) || [];
   const market = marketName(intake);
   const out = [], derived = [], problems = [];
@@ -92,10 +93,10 @@ function plan(narrative, intake, figures) {
         out.push({ ...base, composition: "compare_two_card", data: { market: (sceneHeadline(s.narrationExcerpt) || [])[0] || market, kind: (sceneHeadline(s.narrationExcerpt) || [])[1] || "Market Update", left: { lead: "Homes That Closed Sold At", percent: pct.value, caption: "of list price on average", icon: "sold" }, right: { lead: "But Here in the Active Market,", highlighted: red.value, total: totalFig.value, caption: "listings have already taken a price reduction.", icon: "reduced" } }, claims: [{ field: "left.percent", figure: pct.ref }, { field: "right.highlighted", figure: red.ref }, { field: "right.total", figure: totalFig.ref }], reason: "The scene contrasts two verified figures (sold-to-list and price reductions), so it is shown side by side." });
       } else {
         problems.push(`Scene ${i + 1} states ${hits.length} figures but no comparison layout fits them; it uses the statement card without numbers.`);
-        out.push({ ...base, composition: "expert_takeaway", data: statement(s), reason: "Several figures with no matching comparison layout; the numbers stay in the narration." });
+        out.push({ ...base, composition: "expert_takeaway", data: statement(s, cardCopy[i]), reason: "Several figures with no matching comparison layout; the numbers stay in the narration." + (cardCopy[i] ? " Card text is the agent's perspective." : "") });
       }
     } else {
-      out.push({ ...base, composition: "expert_takeaway", data: statement(s), reason: "No figure is stated here, so the scene carries the takeaway as a statement." });
+      out.push({ ...base, composition: "expert_takeaway", data: statement(s, cardCopy[i]), reason: "No figure is stated here, so the scene carries the takeaway as a statement." + (cardCopy[i] ? " Card text is the agent's perspective." : "") });
     }
   });
   return { scenes: out, derived, problems };
@@ -116,11 +117,35 @@ function sceneHeadline(excerpt) {
   return [up(titleCase(w.slice(0, c).join(" "))), up(titleCase(w.slice(c).join(" ")))];
 }
 
-function statement(scene) {
-  const sentences = stripTags(scene.narrationExcerpt).split(/(?<=[.!?…])\s+/).filter(Boolean);
-  const w = (sentences[0] || "").replace(/[.!?…]+$/, "").split(" "), c = Math.ceil(w.length / 2);
-  const out = { headline: [titleCase(w.slice(0, c).join(" ")), titleCase(w.slice(c).join(" "))], statement: (sentences[1] || "").replace(/^(?:because|and|but|so)\s+/i, "").replace(/^\S/, (c) => c.toUpperCase()), support: sentences.slice(2).join(" ") };
-  return out;
+// Word caps for the three card lines (Sam, Oct 27): headline 9, statement 7, support 8.
+const CARD_CAPS = { headline: 9, statement: 7, support: 8 };
+const wc = (t) => (String(t || "").match(/[A-Za-z0-9À-ɏ][A-Za-z0-9À-ɏ'’\-]*/g) || []).length;
+const upFirst = (t) => String(t || "").replace(/^\S/, (c) => c.toUpperCase());
+const dropLead = (t) => String(t || "").replace(/^(?:because|and|but|so)\s+/i, "");
+/** The first clause that fits the cap (a whole sentence if it fits), else the first `n` words. */
+function fitWords(sentence, n) {
+  const t = dropLead(String(sentence || "").replace(/[.!?…]+$/, "").trim());
+  if (wc(t) <= n) return t;
+  const clause = t.split(/\s*[,;:—–]\s*|\s+-\s+/).map((c) => c.trim()).find((c) => wc(c) >= 3 && wc(c) <= n);
+  if (clause) return clause;
+  // no clause fits: drop a lead-in like "this means", keep the first words, and never end on a dangling joining word
+  let words = t.replace(/^(?:this|that|which) means\s+/i, "").split(/\s+/).slice(0, n);
+  while (words.length > 3 && /^(?:the|a|an|is|are|was|what|that|of|and|or|to|for|from|in|on|with|than|as|by)$/i.test(words[words.length - 1])) words.pop();
+  return words.join(" ");
+}
+/** The headline as the two lines the card draws, each starting with a capital. */
+function headlineLines(text) {
+  const w = String(text || "").split(" ").filter(Boolean), c = Math.ceil(w.length / 2);
+  return [upFirst(titleCase(w.slice(0, c).join(" "))), upFirst(titleCase(w.slice(c).join(" ")))];
 }
 
-module.exports = { sceneHeadline, figuresFrom, figuresInExcerpt, headlineFromHook, closingHeadline, plan, titleCase, stripTags };
+/** Statement card text. `copy` is Claude-written text that already passed its checks; without it, whole narration sentences within the caps are used. */
+function statement(scene, copy) {
+  if (copy && copy.headline) return { headline: headlineLines(copy.headline), statement: upFirst(copy.statement || ""), support: upFirst(copy.support || "") };
+  const sentences = stripTags(scene.narrationExcerpt).split(/(?<=[.!?…])\s+/).filter(Boolean);
+  const pick = (list, n) => { const s = list.find((x) => wc(dropLead(x)) <= n); return s ? upFirst(dropLead(s)) : ""; };
+  const headline = fitWords(sentences[0] || "", CARD_CAPS.headline);
+  return { headline: headlineLines(headline), statement: pick(sentences.slice(1), CARD_CAPS.statement), support: pick(sentences.slice(2), CARD_CAPS.support) };
+}
+
+module.exports = { CARD_CAPS, headlineLines, sceneHeadline, figuresFrom, figuresInExcerpt, headlineFromHook, closingHeadline, plan, titleCase, stripTags };

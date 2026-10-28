@@ -49,6 +49,12 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--gold-light);outl
 @keyframes spin{to{transform:rotate(360deg);}}
 .proj{display:flex;justify-content:space-between;align-items:center;gap:10px;border:1px solid var(--border);border-radius:5px;padding:10px 12px;margin-top:8px;font-size:0.85rem;}
 .proj small{color:var(--muted);}
+.projbtns{display:flex;gap:6px;flex-shrink:0;}
+.pst{font-weight:600;}
+.pst.ok{color:#2f7d4f;}
+.pst.bad{color:#b3372f;}
+.pst.busy{color:#a6812f;}
+.pst.dim{font-weight:400;}
 .caption-preview{background:#1a1714;color:#fff;border-radius:6px;padding:14px 16px;font-weight:600;line-height:1.5;font-size:0.95rem;}
 .pill{display:inline-block;font-size:0.65rem;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;padding:2px 8px;border-radius:10px;background:var(--warm);color:var(--muted);}
 .pill.real{background:#eaf3ee;color:var(--success);} .pill.concept{background:#fdf3d8;color:#8a6d1d;}
@@ -174,6 +180,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
       <div class="eyebrow">Your projects</div>
       <div class="panel-title">Pick up where you left off</div>
       <div id="projList"></div>
+      <div id="projTools" class="actions"></div>
       <div class="actions"><button class="btn gold" type="button" id="newBtn">Start a new one</button></div>
     </section>
 
@@ -1213,16 +1220,40 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
   }
 
   // ── Projects list ──
+  // Each card says where the project stands in plain words. Hiding only tidies the list; nothing is deleted.
+  function statusOf(p) {
+    if (p.reel === "done") return { text: "Reel finished", cls: "ok" };
+    if (p.reel === "failed") return { text: "Reel failed. Open to retry", cls: "bad" };
+    if (p.reel === "making") return { text: "Making your Reel", cls: "busy" };
+    var s = String(p.status || "");
+    if (s === "images") return { text: "Images ready. Make your Reel next", cls: "" };
+    if (s === "narrative_approved") return { text: "Script approved. Images next", cls: "" };
+    if (s === "narrative_ready") return { text: "Script written. Needs your approval", cls: "" };
+    return { text: (p.intake && p.intake.market) ? "Draft. Not started" : "Empty draft", cls: "dim" };
+  }
+  var showHidden = false;
   async function showProjects() {
     var r = await api("GET", "");
-    var list = (r.ok && r.json.projects) || [];
+    var all = (r.ok && r.json.projects) || [];
+    var hiddenCount = all.filter(function (p) { return p.hidden; }).length;
+    var list = all.filter(function (p) { return showHidden ? p.hidden : !p.hidden; });
+    var emptyDrafts = all.filter(function (p) { return !p.hidden && p.status === "draft" && !(p.intake && p.intake.market); }).length;
     $("projList").innerHTML = list.length ? list.map(function (p) {
-      var t = (p.intake && p.intake.market) || "New project", d = new Date(p.createdAt).toLocaleDateString();
-      return '<div class="proj"><div>' + esc(t) + " · " + esc(p.durationSec) + 's<br><small>' + esc(String(p.status).replace(/_/g, " ")) + " · " + esc(d) + '</small></div><button class="btn ghost" type="button" data-id="' + esc(p.id) + '">Open</button></div>';
-    }).join("") : '<div class="hint">No projects yet.</div>';
-    Array.prototype.forEach.call($("projList").querySelectorAll("button"), function (b) {
-      b.addEventListener("click", async function () { var x = await api("GET", "?id=" + encodeURIComponent(b.getAttribute("data-id"))); if (x.ok) { setProject(x.json.project); go(stage()); } });
+      var t = (p.intake && p.intake.market) || "New project", d = new Date(p.createdAt).toLocaleDateString(), st = statusOf(p);
+      return '<div class="proj"><div>' + esc(t) + " · " + esc(p.durationSec) + 's<br><small><span class="pst ' + st.cls + '">' + esc(st.text) + "</span> · " + esc(d) + '</small></div><div class="projbtns"><button class="btn ghost" type="button" data-open="' + esc(p.id) + '">Open</button><button class="btn ghost" type="button" data-hide="' + esc(p.id) + '" data-to="' + (p.hidden ? "unhide" : "hide") + '">' + (p.hidden ? "Restore" : "Hide") + "</button></div></div>";
+    }).join("") : '<div class="hint">' + (showHidden ? "Nothing is hidden." : "No projects yet.") + "</div>";
+    var tools = [];
+    if (!showHidden && emptyDrafts > 1) tools.push('<button class="btn ghost" type="button" id="hideDrafts">Hide ' + emptyDrafts + ' empty drafts</button>');
+    if (hiddenCount || showHidden) tools.push('<button class="btn ghost" type="button" id="toggleHidden">' + (showHidden ? "Back to my projects" : "Show hidden (" + hiddenCount + ")") + "</button>");
+    $("projTools").innerHTML = tools.join(" ");
+    Array.prototype.forEach.call($("projList").querySelectorAll("button[data-open]"), function (b) {
+      b.addEventListener("click", async function () { var x = await api("GET", "?id=" + encodeURIComponent(b.getAttribute("data-open"))); if (x.ok) { setProject(x.json.project); go(stage()); } });
     });
+    Array.prototype.forEach.call($("projList").querySelectorAll("button[data-hide]"), function (b) {
+      b.addEventListener("click", async function () { b.disabled = true; await api("POST", "", { action: b.getAttribute("data-to"), id: b.getAttribute("data-hide") }); showProjects(); });
+    });
+    var hd = $("hideDrafts"); if (hd) hd.addEventListener("click", async function () { hd.disabled = true; await api("POST", "", { action: "hide_drafts" }); showProjects(); });
+    var th = $("toggleHidden"); if (th) th.addEventListener("click", function () { showHidden = !showHidden; showProjects(); });
     show(["stepProjects"]); $("steps").innerHTML = "";
   }
 

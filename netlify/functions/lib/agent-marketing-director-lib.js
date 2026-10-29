@@ -82,6 +82,7 @@ function capSupport(text) {
  */
 function plan(narrative, intake, figures, opts) {
   const cardCopy = (opts && opts.cardCopy) || {};
+  const eventReel = !!(opts && opts.eventReel);   // a Local Events Reel is not a market update: its cards say so
   const scenes = (narrative && narrative.scenes) || [];
   const market = marketName(intake);
   const out = [], derived = [], problems = [];
@@ -90,10 +91,10 @@ function plan(narrative, intake, figures, opts) {
     const hits = figuresInExcerpt(s.narrationExcerpt, figures);
     const base = { narrative_role: s.role, branding: first || last ? "full" : "subtle", narration_excerpt: s.narrationExcerpt, camera_motion: s.cameraMotion, visual: s, claims: [] };
     if (first) {
-      out.push({ ...base, composition: "opening_headline_focus", data: { market, kind: "Market Update", headline: headlineFromHook(narrative.hook || s.narrationExcerpt, market), eyebrow: "Seller Insight" }, reason: "Opening scene: the hook sets the competitive context over a cinematic establishing image." });
+      out.push({ ...base, composition: "opening_headline_focus", data: { market, kind: eventReel ? "Local Events" : "Market Update", headline: headlineFromHook(narrative.hook || s.narrationExcerpt, market), eyebrow: eventReel ? "Happening Locally" : "Seller Insight" }, reason: "Opening scene: the hook sets the competitive context over a cinematic establishing image." });
     } else if (last) {
       const c = closingHeadline(s.narrationExcerpt);
-      out.push({ ...base, composition: "closing_headline_focus", data: { headline: c.headline, support: c.support || capSupport(narrative.cta && narrative.cta.text) || "", tagline: "Pricing · Condition · Competition" }, reason: "Closing scene: the agent's low-pressure invitation with full branding." });
+      out.push({ ...base, composition: "closing_headline_focus", data: { headline: c.headline, support: c.support || capSupport(narrative.cta && narrative.cta.text) || "", tagline: eventReel ? "Local Life · Community" : "Pricing · Condition · Competition" }, reason: "Closing scene: the agent's low-pressure invitation with full branding." });
     } else if (hits.length === 1) {
       const f = hits[0], t = (KEY_TEMPLATES[f.key] || {})[f.group];
       const unit = t ? t.unit : /%/.test(f.display) ? "%" : "";

@@ -718,9 +718,10 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
       else if (vs === "CONCEPT_REUSE") rows = "<dt>Visual</dt><dd>A different crop and motion of Scene " + ((Number(s.reuseOfScene) || 0) + 1) + "'s image (" + (((state.project.narrative.scenes || [])[Number(s.reuseOfScene) || 0] || {}).visualSource === "AGENT_SCENE" ? "image of you" : "concept image") + "), using only what that image shows.</dd>";
       else if (vs === "AGENT_PROFILE") rows = "<dt>Visual</dt><dd>" + esc(s.visualBrief || "Your headshot or full-body photo from your Marketing Profile.") + "</dd>";
       else rows = "<dt>On-screen text</dt><dd>" + esc(s.cardText || s.visualBrief) + "</dd>";
-      var fr = s.framing || {};
+      var fr = s.framing || {}, dr = s.director || {};
+      var dirRows = (dr.objective ? "<dt>Visual goal</dt><dd>" + esc(dr.objective) + "</dd>" : "") + (dr.direction ? "<dt>Camera and light</dt><dd>" + esc(dr.direction) + "</dd>" : "") + (dr.contrast ? "<dt>Different from the last scene</dt><dd>" + esc(dr.contrast) + "</dd>" : "");
       return '<div class="scene"><h4>Scene ' + (i + 1) + ' · ' + esc(String(s.role || "").replace(/_/g, " ")) + ' <span class="pill ' + (real || vs === "AGENT_PROFILE" ? "real" : "concept") + '">' + label + '</span><span class="pill">about ' + esc(s.provisionalSeconds) + 's</span></h4>' +
-        '<div class="q">“' + esc(s.narrationExcerpt) + '”</div><dl>' + rows +
+        '<div class="q">“' + esc(s.narrationExcerpt) + '”</div><dl>' + rows + dirRows +
         (fr["9x16"] ? "<dt>Vertical crop</dt><dd>" + esc(fr["9x16"]) + "</dd>" : "") + (fr["16x9"] ? "<dt>Wide frame</dt><dd>" + esc(fr["16x9"]) + "</dd>" : "") + "</dl>" + (real ? '<div class="pick" id="pick' + i + '"></div>' : "") + "</div>";
     }).join("") || '<div class="hint">No scene plan yet.</div>';
     var m = n.missingAgentInputs || [];

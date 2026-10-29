@@ -30,3 +30,13 @@ test("no entries changes nothing", () => {
   const w = [{ text: "Hello", start: 0, end: 1 }];
   assert.equal(t.restorePronunciations(w, undefined), w);
 });
+
+test("a script with a curly apostrophe and a box entry with a straight one still match the captions", () => {
+  const tagged = "[warm] Visit Denio\u2019s Market and Denio's stalls.";
+  const l = [{ written: "Denio's", say: "Danaio\u2019s" }];
+  const sent = t.applyPronunciations(tagged, l);
+  assert.doesNotMatch(sent, /Denio/);
+  const words = sent.replace(/\[[^\]]*\]/g, " ").split(/\s+/).filter(Boolean).map((w, i) => ({ text: w, start: i, end: i + 1 }));
+  const back = t.restorePronunciations(words, l, tagged);
+  assert.ok(t.wordsMatchCaption(back, tagged), back.map((w) => w.text).join(" "));
+});

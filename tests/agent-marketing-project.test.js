@@ -265,3 +265,16 @@ test("a script written for another topic cannot be approved for the topic now se
   row.narrative = { ...prior, intakeHash: planLib.intakeHash(row.intake, row.selected_topic) };
   assert.strictEqual((await call("POST", { action: "approve_narrative", id })).status, 200);
 });
+
+test("pronunciations are saved with the script and kept through approval", async () => {
+  process.env.AGENT_MARKETING_ENABLED = "true";
+  currentUser = U1;
+  const id = (await call("POST", { action: "create" })).json.project.id;
+  await call("POST", { action: "save_intake", id, intake });
+  const row = rows.find((r) => r.id === id);
+  row.narrative = { status: "ready", source: "claude", narrationTagged: "[warm] Original words here.", scenes: [{ index: 0, narrationExcerpt: "Original words here." }], attempts: 1, intakeHash: "abc" };
+  const r = await call("POST", { action: "save_narrative", id, narrative: { narrationTagged: "[warm] Visit Denio's Market today.", pronunciations: [{ written: "Denio's", say: "Danaio’s" }] } });
+  assert.strictEqual(r.status, 200);
+  assert.deepStrictEqual(row.narrative.pronunciations, [{ written: "Denio's", say: "Danaio’s" }]);
+  assert.deepStrictEqual(r.json.project.narrative.pronunciations, [{ written: "Denio's", say: "Danaio’s" }]);
+});

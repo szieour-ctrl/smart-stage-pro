@@ -23,3 +23,10 @@ test("bad URL and setting are neutralised", () => {
 test("planner rule 9f exists and mentions no invention", () => {
   assert.match(plan.buildSystemPrompt ? plan.buildSystemPrompt({}) : "", /VERIFIED VISUAL CUES/);
 });
+
+test("event research and planner forbid unstated free/cost/history claims", () => {
+  const r = require("../netlify/functions/lib/agent-marketing-research-lib.js");
+  const sys = JSON.stringify(r.systemPrompt ? r.systemPrompt("local_events") : "");
+  assert.match(sys, /FACT FIDELITY FOR EVENTS/);
+  assert.match(plan.buildSystemPrompt({}), /costs nothing/);
+});

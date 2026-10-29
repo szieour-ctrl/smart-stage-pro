@@ -1290,7 +1290,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     var emptyDrafts = all.filter(function (p) { return !p.hidden && p.status === "draft" && !(p.intake && p.intake.market); }).length;
     $("projList").innerHTML = list.length ? list.map(function (p) {
       var t = (p.intake && p.intake.market) || "New project", d = new Date(p.createdAt).toLocaleDateString(), st = statusOf(p);
-      return '<div class="proj"><div>' + esc(t) + " · " + esc(p.durationSec) + 's<br><small><span class="pst ' + st.cls + '">' + esc(st.text) + "</span> · " + esc(d) + '</small></div><div class="projbtns"><button class="btn ghost" type="button" data-open="' + esc(p.id) + '">Open</button><button class="btn ghost" type="button" data-hide="' + esc(p.id) + '" data-to="' + (p.hidden ? "unhide" : "hide") + '">' + (p.hidden ? "Restore" : "Hide") + "</button></div></div>";
+      return '<div class="proj"><div>' + esc(t) + " · " + esc(p.durationSec) + 's<br><small><strong>' + esc(p.reelType || 'Local Market Update') + '</strong> · <span class="pst ' + st.cls + '">' + esc(st.text) + "</span> · " + esc(d) + '</small></div><div class="projbtns"><button class="btn ghost" type="button" data-open="' + esc(p.id) + '">Open</button><button class="btn ghost" type="button" data-hide="' + esc(p.id) + '" data-to="' + (p.hidden ? "unhide" : "hide") + '">' + (p.hidden ? "Restore" : "Hide") + "</button></div></div>";
     }).join("") : '<div class="hint">' + (showHidden ? "Nothing is hidden." : "No projects yet.") + "</div>";
     var tools = [];
     if (!showHidden && emptyDrafts > 1) tools.push('<button class="btn ghost" type="button" id="hideDrafts">Hide ' + emptyDrafts + ' empty drafts</button>');

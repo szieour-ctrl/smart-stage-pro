@@ -69,7 +69,7 @@ function topicBrief(topic) {
   if (t.smallSample) out.small_sample = true;
   if (e) {
     const wd = /^\d{4}-\d{2}-\d{2}$/.test(String(e.date || "")) ? new Date(e.date + "T12:00:00Z").toLocaleDateString("en-US", { weekday: "long", timeZone: "UTC" }) : null;
-    out.event = { name: e.name, date: e.date, ...(wd && wd !== "Invalid Date" ? { weekday: wd } : {}), end_date: e.endDate || null, time: e.time, location: e.location, organizer: e.organizer, ...(Array.isArray(e.details) && e.details.length ? { details: e.details } : {}) };
+    out.event = { name: e.name, date: e.date, ...(wd && wd !== "Invalid Date" ? { weekday: wd } : {}), end_date: e.endDate || null, time: e.time, location: e.location, organizer: e.organizer, ...(Array.isArray(e.details) && e.details.length ? { details: e.details } : {}), ...(e.visualCues ? { visual_cues: e.visualCues } : {}) };
   }
   return out;
 }
@@ -109,6 +109,7 @@ function buildSystemPrompt() {
     "9c. THIS REEL'S LOOK. The user message carries visual_look: the light, sky, season, home colors and yard character for this whole Reel. Build EVERY ai_generation_prompt around it, so all the images in this Reel share one look and no other Reel in this agent's feed looks the same. The homes are shown at their best: well kept, inviting curb appeal, healthy landscaping, and a lively sky and light, never gray, flat, overcast or drab. Keep the market's own architecture exactly as rule 9 says; the look changes only light, sky, season, paint colors and landscaping. If rule 9b's time-of-day variety conflicts with visual_look, visual_look wins.",
     "9d. EVENT REELS. If the input has event_reel true, the images show the event or community happening the topic describes (the venue, the activity, the atmosphere) as ordinary, believable scenes. They do not have to show homes, so the housing requirement in rules 9 and 9b does not apply, though any home that does appear must still look like the area's ordinary homes. People are allowed in these concept images (ordinary people enjoying the event, shown naturally); in an AGENT_SCENE the agent is still the only person. From visual_look use only the light, sky and season.",
     "9e. EDITORIAL IMAGE DIRECTOR (applies to every ai_generation_prompt). Write each image prompt as a photographer's brief, not a keyword list: what the viewer should understand or feel in THIS scene; the subject and what sits in the foreground, middle ground and background; the camera position and lens-like perspective, taken from this scene's entry in shot_plan (adapt it to the scene's meaning); the light, season and mood from visual_look; and where calm space is left for the headline and captions. Consecutive scenes must differ in subject, camera distance and angle, and no two may repeat a facade, a framing or a color palette. For a market Reel, ground the setting in the market's own housing character from the intake and research (era, stories, roofs, streets, landscaping) and let each image express that scene's meaning (a pricing gap, supply, time, a decision) instead of a generic street. For an event Reel, ground it in the event: the event type, the venue's setting, and the activities and seasonal atmosphere named in selected_topic.event (name, location, details), showing the experience being promoted. The images are illustrations: never imply they document the real event or its real participants, or that the agent attended. Keep each ai_generation_prompt at or under 550 characters. Give every scene these extra fields: visual_objective (one sentence), photographic_direction (camera, lens feel, depth, light), contrast_with_previous (how it differs from the previous scene; empty for scene 1) and overlay_relationship (where the headline and captions sit).",
+    "9f. VERIFIED VISUAL CUES (event reels only; optional). If selected_topic.event.visual_cues is present, it holds observations of the event's own official page imagery or wording (seasonal theme, colors, visible items, mood). Use them to make the images feel like THIS event: the season, palette, décor and merchandise they name (for example wreaths, ornaments, handmade crafts). They inform the look only. Keep the scenes varied, never repeat one composition, plan 9:16 and 16:9 as separate compositions with open space where the on-screen text will sit, and do NOT invent vendors, sponsors, performers, attractions, the venue's layout or crowds beyond what selected_topic.event states. If event_setting is unknown, do not decide indoor or outdoor from the imagery. If visual_cues is absent, ignore this rule and follow 9d.",
     "14. EVENT REELS (event_reel true). The story rhythm replaces rule 7's: invitation, then essentials (the event's name, weekday, date, time and venue from selected_topic.event), then highlights (what selected_topic.event.details say is there: activities, vendors, admission, who benefits, how to register), then community connection, then a warm sign-off. The event is the focus. The agent's real estate perspective is one brief, natural sentence (for example about staying connected to what is happening locally), never a sales pitch and never market numbers unless the topic gives them. The hook (14 words or fewer) is an inviting question or line about the event, not rule 5b's surprising figure. Say the weekday from selected_topic.event.weekday and use the date, time, venue, organizer and details exactly as given, in the page's own wording: never make a statement stronger than the page makes it (if the page says proceeds support a foundation, say that, not that they go straight to it or are donated to it); never invent an event detail the page did not give, never say or imply the agent attends or attended, and never describe the event as a market trend. The closing call to action is the warm sign-off described in cta_angle. There is no market data in an event Reel: the first and last scenes keep source_role \"data\" as rule 2g requires and state no figures; scenes that state event facts use source_role \"article\".",
     "10. framing_9x16 says where the tall 9:16 window sits inside the wide image (left, center or right; tight or loose) and what it shows; framing_16x9 says how the full wide frame is used. Both are crops of the same generated image; never plan a crop of a finished video.",
     "11. Camera motion is Ken Burns only (slow, deliberate, minimal): choose from push_in, pull_back, pan_left, pan_right, tilt_up, tilt_down, static_hold.",
@@ -236,7 +237,7 @@ function buildUserMessage(project) {
 }
 
 // ── Claude call (raw https, like the rest of the codebase) ─────────────────────────────────────────────────────
-function callClaudeText(systemPrompt, userText, anthropicKey) {
+function callClaudeText(systemPrompt, userText, anthropicKey, usageSink) {
   return new Promise((resolve, reject) => {
     const bodyStr = JSON.stringify({ model: MODEL, max_tokens: MAX_TOKENS, system: systemPrompt, messages: [{ role: "user", content: userText }] });
     const req = https.request({
@@ -252,6 +253,7 @@ function callClaudeText(systemPrompt, userText, anthropicKey) {
           const text = parsed && parsed.content && parsed.content.find((b) => b.type === "text") && parsed.content.find((b) => b.type === "text").text;
           if (!text) return reject(new Error(`Planner call returned no text: ${data.slice(0, 300)}`));
           if (parsed.stop_reason === "max_tokens") return reject(new Error("Planner response was cut off"));
+          if (Array.isArray(usageSink) && parsed.usage) usageSink.push({ model: MODEL, input_tokens: Number(parsed.usage.input_tokens) || 0, output_tokens: Number(parsed.usage.output_tokens) || 0 });
           resolve(text);
         } catch (e) { reject(new Error(`Planner response parse error: ${e.message}`)); }
       });
@@ -454,21 +456,28 @@ function lengthProblems(narrative, dur) {
   return out;
 }
 
+// Claude usage per planning attempt (Sam, Oct 29, 2026): tokens are recorded so real cost can replace the estimates. Rewrites count as extra calls.
+function summarizeClaudeUsage(sink) {
+  const list = Array.isArray(sink) ? sink : [];
+  return { claude_calls: list.length, claude_input_tokens: list.reduce((a, u) => a + u.input_tokens, 0), claude_output_tokens: list.reduce((a, u) => a + u.output_tokens, 0), claude_model: list.length ? list[0].model : MODEL };
+}
+
 /**
  * generatePlan({ project, anthropicKey, callFn }) → { narrative, warnings, gate }  (throws Error with a user-safe message)
  */
 async function generatePlan({ project, anthropicKey, callFn }) {
   const call = callFn || module.exports.callClaudeText; // looked up at call time so tests can replace it
   const user = buildUserMessage(project);
+  const sink = [];
   let normalized;
   try {
-    normalized = normalizePlan(extractJsonObject(await call(buildSystemPrompt(), user, anthropicKey)), project);
+    normalized = normalizePlan(extractJsonObject(await call(buildSystemPrompt(), user, anthropicKey, sink)), project);
   } catch (err) {
     // A structurally unusable plan (a missing narration excerpt, the wrong scene or image count, no JSON) gets ONE corrective retry inside the
     // same attempt, so it does not use up one of the project's planning attempts. Anything else (a gate block, a cut-off reply) is not retried.
     if (!/narration excerpt|scenes are needed|concept images?|unusable plan|no narration|JSON/i.test(String(err && err.message))) throw err;
     const fix = `${user}\n\nYour previous reply could not be used: ${String(err.message).slice(0, 200)}. Return the complete JSON again. Every scene MUST have a non-empty narration_excerpt taken from your narration, in order, and the scenes together must cover the whole narration.`;
-    normalized = normalizePlan(extractJsonObject(await call(buildSystemPrompt(), fix, anthropicKey)), project);
+    normalized = normalizePlan(extractJsonObject(await call(buildSystemPrompt(), fix, anthropicKey, sink)), project);
   }
   let { narrative, warnings } = normalized;
   let g = gateNarrative(project, narrative);
@@ -477,7 +486,7 @@ async function generatePlan({ project, anthropicKey, callFn }) {
     // wrong and ask for one rewrite. Only a second block reaches the agent, and then with the rule and the reason.
     console.error("[agent-marketing-plan] gate blocked the first draft:", JSON.stringify(g.blocks).slice(0, 500));
     const fix = `${user}\n\nYour draft was rejected by the compliance check for these specific reasons:\n${blockLines(g.blocks)}\nRewrite the complete JSON so none of these happen. Keep the same topic, hook and facts; change only what is listed, and take every number from the topic or the agent's report.`;
-    normalized = normalizePlan(extractJsonObject(await call(buildSystemPrompt(), fix, anthropicKey)), project);
+    normalized = normalizePlan(extractJsonObject(await call(buildSystemPrompt(), fix, anthropicKey, sink)), project);
     narrative = normalized.narrative; warnings = normalized.warnings;
     g = gateNarrative(project, narrative);
   }
@@ -494,7 +503,7 @@ async function generatePlan({ project, anthropicKey, callFn }) {
     console.error("[agent-marketing-plan] length/balance outside the target:", fit.join("; "));
     try {
       const fix = `${user}\n\nYour draft does not fit the requested length: ${fit.join(" ")} Rewrite the complete JSON, keeping the same topic, hook, facts and tone. Keep every number you state exactly as the topic gives it, and drop the least important sentence or clause to get inside the limits.`;
-      const again = normalizePlan(extractJsonObject(await call(buildSystemPrompt(), fix, anthropicKey)), project);
+      const again = normalizePlan(extractJsonObject(await call(buildSystemPrompt(), fix, anthropicKey, sink)), project);
       const g2 = gateNarrative(project, again.narrative);
       if (g2.ok && lengthProblems(again.narrative, project.duration_sec).length <= fit.length && lengthDistance(again.narrative, project.duration_sec) < lengthDistance(narrative, project.duration_sec)) {
         narrative = again.narrative; warnings = again.warnings; g = g2;
@@ -506,7 +515,7 @@ async function generatePlan({ project, anthropicKey, callFn }) {
     sc.visualBrief = signage.scrubSignage(sc.visualBrief);
     if (sc.aiGenerationPrompt) sc.aiGenerationPrompt = signage.scrubSignage(sc.aiGenerationPrompt) || "Ordinary single-story and two-story stucco homes along a quiet residential street in soft daylight.";
   });
-  return { narrative, warnings: warnings.concat(g.warnings.map((w) => w.message)), gate: g };
+  return { narrative, warnings: warnings.concat(g.warnings.map((w) => w.message)), gate: g, usage: summarizeClaudeUsage(sink) };
 }
 
 // What the compliance check says about a draft: "- <what is wrong> (rule, where)". One line per block, at most `max`.
@@ -530,5 +539,5 @@ function gateNarrative(project, narrative) {
 
 module.exports = { topicBrief, blockLines,
   MODEL, stripNotice, SCENE_RANGE, GPT_RANGE, NEW_IMAGE_SOURCES, VISUAL_SOURCES, SOURCE_MAX, MAX_ATTEMPTS, STALE_PLANNING_MS, ALLOWED_TAGS,
-  intakeHash, ctaAngleFor, ctaAngleIndex, CTA_ANGLES, VISUAL_LOOKS, visualLookFor, visualLookIndex, buildSystemPrompt, buildUserMessage, lengthProblems, lengthDistance, callClaudeText, extractJsonObject, sanitizeTags, normalizePlan, generatePlan,
+  intakeHash, ctaAngleFor, ctaAngleIndex, CTA_ANGLES, VISUAL_LOOKS, visualLookFor, visualLookIndex, buildSystemPrompt, buildUserMessage, lengthProblems, lengthDistance, callClaudeText, summarizeClaudeUsage, extractJsonObject, sanitizeTags, normalizePlan, generatePlan,
 };

@@ -71,7 +71,7 @@ exports.handler = async (event) => {
     if (!asset || !asset.generation || asset.generation.state !== "generating") return { statusCode: 200, body: "" }; // late or duplicate call
     if (!process.env.OPENAI_API_KEY) { await markError(asset, "Image generation is not configured.", userId); return { statusCode: 200, body: "" }; }
     const gen = asset.generation;
-    const size = img.SIZES[img.WIDE]; const quality = gen.quality || "medium";
+    const size = img.sizeFor(gen.format); const quality = gen.quality || "medium";
     let res;
     if (gen.referenceKey) {
       const ref = await s3Bytes(gen.referenceKey);

@@ -135,16 +135,16 @@ async function prepareImages(job, project, narrative, brand, formats, profile) {
   const needs = assetsLib.imageNeeds(narrative, new Set(ownRows.keys()));
   const unsupported = needs.filter((n) => n.kind === "unsupported");
   if (unsupported.length) throw new Error(`Scene ${unsupported[0].scene + 1} uses a visual source (${unsupported[0].source || "none"}) that Agent Marketing rendering does not support yet.`);
-  // wide images the agent has APPROVED on the Visuals step are reused as the 16:9 image; nothing unapproved goes into a Reel
+  // images the agent APPROVED on the Visuals step are reused for their own format (a 9:16 image for the 9:16 Reel, a 16:9 image for the 16:9 Reel)
   const rows = await supabase("GET", "agent_marketing_assets", null, `?project_id=eq.${job.project_id}&user_id=eq.${job.user_id}&source=eq.gpt_image_2&select=scene_index,version,status,asset_key,generation&order=version.desc`);
-  const existing = (Array.isArray(rows.data) ? rows.data : []).filter((r) => r.asset_key && r.status === "approved" && r.generation && r.generation.state === "done" && r.generation.format === "16x9");
+  const existing = (Array.isArray(rows.data) ? rows.data : []).filter((r) => r.asset_key && r.status === "approved" && r.generation && r.generation.state === "done" && (r.generation.format === "16x9" || r.generation.format === "9x16"));
   const todo = [];
   for (const n of needs) for (const f of formats) {
     const slot = `${n.scene}_${f}`;
     if (n.kind === "reuse" || (images[slot] && images[slot].key)) continue;
     if (n.kind === "plate") { todo.push({ slot, n, f, plate: true }); continue; }
     if (n.kind === "own") { todo.push({ slot, n, f, own: ownRows.get(n.scene) }); continue; }
-    const adopt = f === "16x9" ? existing.find((r) => r.scene_index === n.scene) : null;
+    const adopt = existing.find((r) => r.scene_index === n.scene && r.generation.format === f);   // the image the agent approved for THIS format
     if (adopt) { images[slot] = { key: adopt.asset_key, source: "existing_project_image" }; continue; }
     todo.push({ slot, n, f });
   }

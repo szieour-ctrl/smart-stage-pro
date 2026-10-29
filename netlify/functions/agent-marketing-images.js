@@ -202,7 +202,7 @@ exports.handler = async (event) => {
     if (q.charged && b.confirmCharge !== true) return reply(402, { error: "This image costs extra.", code: "confirm_charge", credits: q.credits });
     const st = img.settings();
     if (reviseBaseAsset && !(typeof b.description === "string" && b.description.trim())) return reply(400, { error: "Use Elaborate with AI first so we can describe the change.", code: "description_needed" });
-    const prompt = reviseBaseAsset ? img.buildRevisionPrompt({ instruction: scenePrompt }) : img.buildPrompt({ kind, scenePrompt });
+    const prompt = reviseBaseAsset ? img.buildRevisionPrompt({ instruction: scenePrompt }) : img.buildPrompt({ kind, scenePrompt, people: img.peopleAllowedFor(project) });
 
     // Charge first (only for extras); refunded by the worker or the stale check if the image never arrives.
     let charged = null;

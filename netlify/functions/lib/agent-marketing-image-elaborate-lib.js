@@ -9,6 +9,7 @@
 
 const planLib = require("./agent-marketing-plan-lib");
 const gate = require("./agent-marketing-gate");
+const imagesLib = require("./agent-marketing-images-lib");
 
 const MAX_NOTE = 300;
 const MAX_DESC = 600;
@@ -25,7 +26,7 @@ function buildSystemPrompt() {
     "",
     "RULES",
     "1. Describe only what is visible: setting, subject, composition, light and mood. 2 to 4 sentences, under 450 characters.",
-    "2. kind \"concept\": a conceptual still life or scene with NO people at all. kind \"agent_scene\": exactly ONE person, the agent, described only by setting, pose and mood and never by appearance (no age, hair, build, clothing details); no other people.",
+    "2. kind \"concept\": a conceptual still life or scene with NO people at all, unless people_allowed is true (a local event Reel), in which case ordinary people may appear naturally as part of the scene. kind \"agent_scene\": exactly ONE person, the agent, described only by setting, pose and mood and never by appearance (no age, hair, build, clothing details); no other people.",
     "3. Believable, safe settings. The agent is never standing in a roadway, never at the wheel of a car, never in a dark place or at night. Prefer daylight, golden hour or soft interior light: a sidewalk, front walk, porch, bright room, home office, desk or kitchen table.",
     "4. Compose ONE wide 16:9 frame that is also cropped to a tall 9:16 window from its middle: put the main subject and key details in the central third of the width, keep the left and right thirds as simple calm scenery, and keep the lower third uncluttered (captions go there).",
     "5. No text, signage of any kind, letters, numbers, logos, brand names, watermarks, charts, rates or prices. No real landmarks, real buildings, addresses, named streets, neighborhoods or developments.",
@@ -41,11 +42,12 @@ function buildSystemPrompt() {
   ].join("\n");
 }
 
-function buildUserMessage({ scene, kind, note, fresh }) {
+function buildUserMessage({ scene, kind, note, fresh, people }) {
   const s = scene || {};
   const newScene = fresh === true && !!cleanNote(note);   // "make a new image instead": the note IS the subject, the old scene is left behind
   return JSON.stringify({
     image_kind: kind,
+    ...(people ? { people_allowed: true } : {}),
     ...(newScene ? { agent_note_is_the_subject: true } : {}),
     scene_narration: newScene ? null : clean(s.narrationExcerpt, 400),
     // A re-used or brand-card scene's brief is an instruction about OTHER images ("reuse the street scene…"), so it is
@@ -87,7 +89,7 @@ async function elaborate({ project, scene, kind, note, fresh, anthropicKey, call
     g1.warnings.forEach((w) => warnings.push(w.message));
   }
   const call = callFn || planLib.callClaudeText;
-  const text = await call(buildSystemPrompt(), buildUserMessage({ scene, kind, note: n, fresh }), anthropicKey);
+  const text = await call(buildSystemPrompt(), buildUserMessage({ scene, kind, note: n, fresh, people: imagesLib.peopleAllowedFor(project) }), anthropicKey);
   const out = normalize(planLib.extractJsonObject(text));
   // An image description is an instruction to a picture model, not a market claim: like the planner's image prompts, it is held only to the sale-content rules, so "9:16" or "two-story" is fine (Sam, Oct 28).
   const g2 = checkText(project, out.description, true);
@@ -109,14 +111,14 @@ function buildRevisionSystemPrompt() {
     "RULES",
     "1. Do exactly what the note asks and nothing more: do not invent other changes. Be specific about the thing to change (what, where, how it should look). Name the change; do not describe the whole picture again.",
     "2. 1 to 3 sentences, under 350 characters, written as an instruction (\"Change ... to ...\", \"Make ... \", \"Replace ...\"). Do not say what to keep: the editor is already told to keep the rest.",
-    "3. No text, signage of any kind, letters, numbers, logos, brand names, charts, rates or prices. No real landmarks, addresses or named places. Nothing about a specific home for sale, a price, an open house or a sold result. Do not add people unless the note asks and the image is an image of the agent.",
+    "3. No text, signage of any kind, letters, numbers, logos, brand names, charts, rates or prices. No real landmarks, addresses or named places. Nothing about a specific home for sale, a price, an open house or a sold result. Do not add people unless the note asks and the image is an image of the agent, or people_allowed is true (a local event Reel).",
     "4. If the note asks for something these rules do not allow, leave that part out and add a short plain-language reason to \"removed\".",
     "",
     "Return ONLY a JSON object: { \"description\": string, \"removed\": [string] }",
   ].join("\n");
 }
-function buildRevisionUserMessage({ currentPrompt, note }) {
-  return JSON.stringify({ image_was_made_from: clean(currentPrompt, 600) || null, agent_note: cleanNote(note) }, null, 2);
+function buildRevisionUserMessage({ currentPrompt, note, people }) {
+  return JSON.stringify({ ...(people ? { people_allowed: true } : {}), image_was_made_from: clean(currentPrompt, 600) || null, agent_note: cleanNote(note) }, null, 2);
 }
 
 /**
@@ -131,7 +133,7 @@ async function elaborateRevision({ project, kind, note, currentPrompt, anthropic
   if (!g1.ok) throw codedError(gate.explain(g1), "note_blocked", { gate: g1 });
   const warnings = g1.warnings.map((w) => w.message);
   const call = callFn || planLib.callClaudeText;
-  const out = normalize(planLib.extractJsonObject(await call(buildRevisionSystemPrompt(), buildRevisionUserMessage({ currentPrompt, note: n }), anthropicKey)));
+  const out = normalize(planLib.extractJsonObject(await call(buildRevisionSystemPrompt(), buildRevisionUserMessage({ currentPrompt, note: n, people: imagesLib.peopleAllowedFor(project) }), anthropicKey)));
   const g2 = checkText(project, out.description, true);
   if (!g2.ok) throw codedError("That change included wording Agent Marketing can't use. Please change your note and try again.", "description_blocked", { gate: g2 });
   const description = require("./agent-marketing-signage-lib").scrubSignage(out.description);

@@ -84,6 +84,14 @@ function quote(assets, sceneIndex, format, env) {
 
 const NO_REAL_THINGS = "No text, letters, numbers, house numbers, street names, logos, brand names, watermarks, charts, rates or prices. No real landmarks, no identifiable real buildings or addresses. No people other than any person explicitly described below.";
 
+// Local Events Reels may show people (Sam, Oct 28): ordinary people enjoying the event, shown naturally. Every other Reel keeps concept images people-free.
+function peopleAllowedFor(project) {
+  const t = project && project.selected_topic;
+  return !!(t && typeof t === "object" && (t.kind === "local_events" || (t.event && typeof t.event === "object")));
+}
+const NO_REAL_THINGS_PEOPLE_OK = NO_REAL_THINGS.replace(/ No people other than.*$/, "");
+const conceptTail = (people) => people ? NO_REAL_THINGS_PEOPLE_OK + " Ordinary people may appear naturally as part of the scene." : NO_REAL_THINGS + " No people at all.";
+
 // The prompt actually sent. `kind` is "concept" or "agent_scene". Always ONE wide 16:9 frame: the vertical 9:16 Reel version is a
 // window cropped from the middle of it, so the subject must sit in the central third and the sides must be plain scenery.
 const WIDE_RULES = "Wide horizontal 16:9 landscape composition. IMPORTANT: a tall 9:16 vertical window will also be cropped from this same image, so place the main subject and every key detail inside the central third of the width; the left and right thirds should be simple, calm scenery that still reads well as a wide establishing view. Keep the lower third calm and uncluttered (captions go there).";
@@ -92,7 +100,7 @@ const AGENT_RULES = "Wide horizontal 16:9 landscape composition shot like a real
 const CROP_WIDTH = 81 / 256;
 function clampCrop(x) { const n = Number(x); if (!isFinite(n)) return 0.5; return Math.min(1 - CROP_WIDTH / 2, Math.max(CROP_WIDTH / 2, Math.round(n * 1000) / 1000)); }
 function defaultCropX(kind) { return kind === "agent_scene" ? 0.34 : 0.5; }
-function buildPrompt({ kind, scenePrompt }) {
+function buildPrompt({ kind, scenePrompt, people }) {
   const base = require("./agent-marketing-signage-lib").scrubSignage(String(scenePrompt || "").replace(/\s+/g, " ").trim().slice(0, 900));
   if (kind === "agent_scene") {
     return [
@@ -107,7 +115,7 @@ function buildPrompt({ kind, scenePrompt }) {
     "Create a photorealistic editorial concept image: " + base,
     WIDE_RULES,
     "Soft natural light, California residential aesthetic, calm and uncluttered. It is a conceptual illustration, not a documentary photo of a real place.",
-    NO_REAL_THINGS + " No people at all.",
+    conceptTail(people),
   ].join("\n");
 }
 
@@ -136,8 +144,8 @@ function pickReferenceKey(profileRow) {
 const TALL_SIZE = "1440x2560";
 const TALL_RULES = "Tall vertical 9:16 portrait-orientation composition. Text will be laid over the top 45% of the frame, so keep that whole upper area calm and simple: soft wall, sky, window light or blurred background only, with no objects, props, plants or strong edges in it. That upper area must be one continuous surface edge to edge: no window frames, door frames, curtains, shelves, corners or any vertical edge or change of brightness crossing it, especially near the left and right sides. Place the main subject and every key detail in the band between 48% and 78% of the frame height, and keep the lower fifth calm and uncluttered (captions sit there).";
 const TALL_AGENT_RULES = "Tall vertical 9:16 portrait-orientation photograph shot like a real editorial photo, NOT a headshot. Text will be laid over the top 45% of the frame, so keep that whole upper area calm and simple: soft sky, wall or blurred background only, one continuous surface edge to edge with no objects, strong edges or vertical lines in it. Show the person standing or seated naturally, full length or at least to the knees, with their head and body inside the band between 48% and 85% of the frame height, centred horizontally, with the surrounding environment visible around them. Keep the lower fifth calm and uncluttered (captions sit there).";
-function buildFormatPrompt({ kind, scenePrompt, format, framing }) {
-  if (format !== "9x16") return buildPrompt({ kind, scenePrompt });
+function buildFormatPrompt({ kind, scenePrompt, format, framing, people }) {
+  if (format !== "9x16") return buildPrompt({ kind, scenePrompt, people });
   const base = String(scenePrompt || "").replace(/\s+/g, " ").trim().slice(0, 900);
   const note = framing ? String(framing).replace(/\s+/g, " ").trim().slice(0, 300) : "";
   if (kind === "agent_scene") {
@@ -155,7 +163,7 @@ function buildFormatPrompt({ kind, scenePrompt, format, framing }) {
     TALL_RULES,
     note ? "Framing: " + note : "",
     "Soft natural light, California residential aesthetic, calm and uncluttered. It is a conceptual illustration, not a documentary photo of a real place.",
-    NO_REAL_THINGS + " No people at all.",
+    conceptTail(people),
   ].filter(Boolean).join("\n");
 }
 const tallSize = () => validTallSize(process.env.AGENT_MARKETING_IMAGE_SIZE_TALL) || TALL_SIZE;
@@ -167,4 +175,4 @@ function validTallSize(v) {
   return w + "x" + h;
 }
 
-module.exports = { buildFormatPrompt, tallSize, TALL_SIZE, CROP_WIDTH, clampCrop, defaultCropX, WIDE, DEFAULT_SIZE, validWideSize, SIZES, IMAGE_SOURCES, STALE_GENERATING_MS, settings, imageScenes, allScenes, plannedKind, slotAssets, quote, buildPrompt, buildRevisionPrompt, pickReferenceKey, counts, fmtOf, stateOf };
+module.exports = { buildFormatPrompt, tallSize, TALL_SIZE, CROP_WIDTH, clampCrop, defaultCropX, WIDE, DEFAULT_SIZE, validWideSize, SIZES, IMAGE_SOURCES, STALE_GENERATING_MS, settings, imageScenes, allScenes, plannedKind, slotAssets, quote, buildPrompt, buildRevisionPrompt, peopleAllowedFor, pickReferenceKey, counts, fmtOf, stateOf };

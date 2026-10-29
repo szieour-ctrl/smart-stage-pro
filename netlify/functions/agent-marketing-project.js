@@ -26,9 +26,16 @@ const headers = { "Access-Control-Allow-Origin": "*", "Content-Type": "applicati
 const reply = (statusCode, obj) => ({ statusCode, headers, body: JSON.stringify(obj) });
 const PUBLIC_COLS = "id,template,angle,formats,duration_sec,voice,music,intake,narrative,narrative_approved_at,storyboard,selected_topic,status,gate_version,gate_result,created_at,updated_at,hidden_at";
 
+// Reel Type shown in My Projects (Sam, Oct 29, 2026): a project whose selected topic is a local event is a Local Event Reel, anything else a Local Market Update.
+function reelTypeOf(row) {
+  const t = row && row.selected_topic;
+  return t && typeof t === "object" && (t.kind === "local_events" || (t.event && typeof t.event === "object")) ? "Local Event" : "Local Market Update";
+}
+
 function forClient(row) {
   if (!row) return null;
   return {
+    reelType: reelTypeOf(row),
     id: row.id, template: row.template, angle: row.angle, formats: row.formats, durationSec: row.duration_sec, voice: row.voice, music: row.music || "default",
     intake: row.intake || {}, narrative: row.narrative || null, narrativeApprovedAt: row.narrative_approved_at || null,
     storyboard: row.storyboard || null, selectedTopic: row.selected_topic || null, status: row.status, gate: row.gate_result || null,

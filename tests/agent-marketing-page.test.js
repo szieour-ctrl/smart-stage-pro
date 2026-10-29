@@ -107,7 +107,7 @@ test("Research: 'Not right' asks what is wrong and sends it before removing; cho
   assert.match(research, /action: "feedback", uploadId: u\.id, reasons: reasons, message: note/);
   assert.match(html, /<div class="modal-back hidden" id="resNext" role="dialog"/);
   assert.match(html, /id="resContinueBtn">Write my script</);
-  assert.match(html, /onSelected: function \(topic\) \{ state\.project\.selectedTopic = topic; renderSteps\(2\); openCta\(\); \}/);
+  assert.match(html, /onSelected: async function \(topic\) \{[\s\S]*?state\.project\.selectedTopic = topic; renderSteps\(2\); openCta\(\);/);
   assert.match(html, /closeCta\(\); go\(3\);/);
 });
 

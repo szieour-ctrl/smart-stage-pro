@@ -173,7 +173,7 @@ async function prepareImages(job, project, narrative, brand, formats, profile) {
         reference = { buffer: await objectBuffer(refKey), mime: /\.jpe?g$/i.test(refKey) ? "image/jpeg" : /\.webp$/i.test(refKey) ? "image/webp" : "image/png" };
       }
       buf = await generateImage(prompt, t.f === "9x16" ? img.tallSize() : img.SIZES[img.WIDE], reference);
-      source = "gpt_image_2"; usage.images_generated = (usage.images_generated || 0) + 1;
+      source = "gpt_image_2"; usage.images_generated = (usage.images_generated || 0) + 1; usage.image_model = "gpt-image-2"; usage.image_quality = img.settings().quality;
     }
     const key = `${base}_${crypto.randomBytes(3).toString("hex")}.png`;
     await put(key, buf, "image/png");

@@ -40,3 +40,23 @@ test("a script with a curly apostrophe and a box entry with a straight one still
   const back = t.restorePronunciations(words, l, tagged);
   assert.ok(t.wordsMatchCaption(back, tagged), back.map((w) => w.text).join(" "));
 });
+
+test("saved corrections apply only where the word is in the script, and the project's own entry wins", () => {
+  const saved = [{ written: "Denio's", say: "Duh-NYE-oh's" }, { written: "Eskaton", say: "ES-kuh-tun" }];
+  const merged = t.mergePronunciations(saved, [{ written: "Denio's", say: "Danaio’s" }]);
+  assert.deepEqual(merged, [{ written: "Denio's", say: "Danaio’s" }, { written: "Eskaton", say: "ES-kuh-tun" }]);
+  const use = t.usablePronunciations("Visit Denio’s Market today.", merged);
+  assert.deepEqual(use, [{ written: "Denio's", say: "Danaio’s" }]);
+  assert.deepEqual(t.usablePronunciations("Nothing special here.", merged), []);
+});
+test("the pronunciations function and screen wire saved entries, Hear and Remember", () => {
+  const fs = require("fs");
+  const fn = fs.readFileSync(__dirname + "/../netlify/functions/agent-marketing-pronunciations.js", "utf8");
+  assert.match(fn, /agent_marketing_pronunciations/);
+  assert.match(fn, /action === "hear"/);
+  const html = fs.readFileSync(__dirname + "/../agent-marketing.html", "utf8");
+  assert.match(html, /Remember for all my Reels/);
+  assert.match(html, /data-pron-hear/);
+  const prep = fs.readFileSync(__dirname + "/../netlify/functions/agent-marketing-prepare-background.js", "utf8");
+  assert.match(prep, /usablePronunciations\(narrative\.narrationTagged/);
+});

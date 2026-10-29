@@ -201,8 +201,8 @@ function realignScenes(scenes, taggedText) {
 
 // ── Pronunciations (Oct 29, 2026): a name the narrator says wrongly ("Denio's" said "Danaio's") is spoken from a respelling while the captions keep the
 // word as written. The respelling is ONE token (spaces become hyphens), so the word count, the alignment and the caption words stay in step.
-const PRON_MAX = 10, PRON_LEN = 40;
-function cleanPronunciations(list) {
+const PRON_MAX = 40, PRON_LEN = 40;
+function cleanPronunciations(list, max = PRON_MAX) {
   const out = [], seen = new Set();
   for (const x of Array.isArray(list) ? list : []) {
     const written = String((x && x.written) || "").replace(/[\[\]\r\n]/g, " ").replace(/\s+/g, " ").trim().slice(0, PRON_LEN);
@@ -210,11 +210,23 @@ function cleanPronunciations(list) {
     if (!written || !say || written.includes(" ") || written.toLowerCase() === say.toLowerCase() || seen.has(written.toLowerCase())) continue;
     seen.add(written.toLowerCase());
     out.push({ written, say });
-    if (out.length >= PRON_MAX) break;
+    if (out.length >= max) break;
   }
   return out;
 }
 const escRe = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/['\u2019]/g, "['\u2019]");
+
+/** Saved (per agent) and project corrections together: the project's own entry wins for the same written word. */
+function mergePronunciations(saved, project) {
+  const own = cleanPronunciations(project), have = new Set(own.map((x) => x.written.toLowerCase()));
+  return own.concat(cleanPronunciations(saved).filter((x) => !have.has(x.written.toLowerCase())));
+}
+/** Only the corrections whose written word is in this script, so an unrelated saved word can never change the narration. */
+function usablePronunciations(text, list) {
+  const flat = (t) => String(t || "").toLowerCase().replace(/[\u2019']/g, "'");
+  const body = flat(text);
+  return cleanPronunciations(list).filter((p) => new RegExp(`(?<![\\p{L}\\p{N}])${escRe(p.written)}(?![\\p{L}\\p{N}])`, "iu").test(body));
+}
 /** The text sent to the narrator: each written word replaced by its respelling (whole words only). */
 function applyPronunciations(text, list) {
   let out = String(text || "");
@@ -245,4 +257,4 @@ function restorePronunciations(words, list, taggedText) {
   });
 }
 
-module.exports = { healBoundaries, reconcileWords, cleanPronunciations, applyPronunciations, restorePronunciations, realignScenes, buildRequest, endpointPath, checkAlignment, wordsFromAlignment, captionWords, wordsMatchCaption, groupCaptionLines, sceneWindows };
+module.exports = { mergePronunciations, usablePronunciations, healBoundaries, reconcileWords, cleanPronunciations, applyPronunciations, restorePronunciations, realignScenes, buildRequest, endpointPath, checkAlignment, wordsFromAlignment, captionWords, wordsMatchCaption, groupCaptionLines, sceneWindows };

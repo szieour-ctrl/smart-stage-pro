@@ -255,7 +255,11 @@ exports.handler = async (event) => {
     job.music = project.music || "default";
 
     await patchJob(job.id, { step: "Recording the narration" });
-    const audio = await prepareNarration(job, project, narrative.narrationTagged, narrative.pronunciations);
+    // The agent's saved corrections (any word that is common for them: a name, a place) plus this project's own, only where the word is in this script.
+    let savedProns = [];
+    try { const sp = await supabase("GET", "agent_marketing_pronunciations", null, `?user_id=eq.${job.user_id}&select=items&limit=1`); savedProns = (Array.isArray(sp.data) && sp.data[0] && sp.data[0].items) || []; } catch (e) { /* the project's own corrections are still used */ }
+    const prons = timing.usablePronunciations(narrative.narrationTagged, timing.mergePronunciations(savedProns, narrative.pronunciations));
+    const audio = await prepareNarration(job, project, narrative.narrationTagged, prons);
     await patchJob(job.id, { step: "Creating the images" });
     const images = await prepareImages(job, project, narrative, brand, formats, profile);
     const imageKeys = {};

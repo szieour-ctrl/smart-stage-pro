@@ -206,6 +206,7 @@ function systemPrompt(mode) {
       "MODE: Local Events. Each topic is a verified upcoming or ongoing happening in the market: a festival, gathering, civic event, seasonal activity or community announcement.",
       "If you cannot find five confirmed events, return fewer rather than guess.",
       "Each topic must include an \"event\" object: name, date (YYYY-MM-DD, today or later), end_date (or null), time (as published), location (venue and city), organizer, status (\"upcoming\" or \"ongoing\"). Also include details: up to 6 short facts about what the event offers, each confirmed on that same page and in the page's own words (activities, vendors or attractions, admission or cost, who benefits from the proceeds, how to register); leave out anything the page does not say. Confirm these from the organizer's or an official page. Skip anything canceled, postponed or already over. Skip any event whose date, time, venue or organizer you cannot confirm from a page: never write \"not stated\", \"TBD\" or a guess, and find a different event instead. The organizer is who runs the event, not the venue's store or the page that lists it.",
+      "Also add to each event object a \"visual_cues\" object recording what the event's OFFICIAL page shows about how the event looks, so images can be made that fit it: { \"official_image_url\": the page's main event image URL (https) or null, \"seasonal_theme\": string, \"dominant_colors\": up to 4 color words, \"visible_items\": up to 6 short items the imagery shows or the page describes (for example \"holiday ornaments\", \"wreaths\"), \"visual_mood\": a few words, \"event_setting\": \"indoor\" | \"outdoor\" | \"mixed\" | \"unknown\", \"basis\": \"image_inspected\" only if you actually looked at that image, \"page_text\" if you are describing what the page's own words say about the look, otherwise \"unknown\" }. These are observations of the page's imagery, not facts about the event's physical arrangement: a picture of an outdoor market does not mean the event is outdoors, so set event_setting only when the page says where the event is held, else \"unknown\". Use \"unknown\", an empty list or null instead of guessing, and never invent vendors, sponsors, performers or attractions. visual_cues is optional enrichment: leave it out when the page gives nothing visual.",
       "The question is how the event is phrased for neighbors (for example \"What is happening in Old Roseville this weekend?\"). why_it_matters says why it matters to people living in or moving to the area.",
     ]
     : [
@@ -347,6 +348,26 @@ function cleanSource(s, mode, todayN, why) {
   return { title, url: href, domain: host, published: pn == null ? null : published };
 }
 
+// Verified Visual Cues (Sam, Oct 29, 2026): what an event's official page shows about its look, kept as OBSERVATIONS for the image planner, never as
+// facts about the upcoming event's arrangement. Optional: nothing here can block a Reel. Cues are kept only when the research says it actually looked
+// at the image or is describing the page's own words (basis); a bare image URL, or a basis of "unknown", leaves the cues out so nothing unverified
+// reaches the planner. An outdoor-looking picture never makes the event "outdoor": the setting is kept only when stated, else "unknown".
+const SETTINGS = ["indoor", "outdoor", "mixed", "unknown"];
+function cleanVisualCues(v) {
+  if (!v || typeof v !== "object") return null;
+  const basis = v.basis === "image_inspected" || v.basis === "page_text" ? v.basis : "unknown";
+  const list = (a, n, len) => (Array.isArray(a) ? a : []).map((x) => clean(x, len)).filter((x) => x && !PLACEHOLDER.test(x)).slice(0, n);
+  const theme = clean(v.seasonal_theme, 80), mood = clean(v.visual_mood, 60);
+  const colors = list(v.dominant_colors, 4, 24), items = list(v.visible_items, 6, 60);
+  if (basis === "unknown" || !(theme || mood || colors.length || items.length)) return null;
+  const url = /^https:\/\//i.test(String(v.official_image_url || "").trim()) ? String(v.official_image_url).trim().slice(0, LIMITS.url) : null;
+  const setting = SETTINGS.includes(String(v.event_setting || "").toLowerCase()) ? String(v.event_setting).toLowerCase() : "unknown";
+  return {
+    official_image_url: url, seasonal_theme: PLACEHOLDER.test(theme) ? "" : theme, dominant_colors: colors, visible_items: items, visual_mood: PLACEHOLDER.test(mood) ? "" : mood, event_setting: setting,
+    source_type: basis === "image_inspected" ? "official_event_image" : "official_event_page_text", verification_status: "verified",
+  };
+}
+
 // "Not stated in the source", "TBD", "N/A" and the like are not details. An event without a real time and place is not shown to an agent.
 const PLACEHOLDER = /\b(?:not\s+(?:stated|specified|available|provided|listed|given|confirmed)|unknown|tbd|tba|to\s+be\s+(?:determined|announced)|n\/a|none)\b|^\s*[-–—?]*\s*$/i;
 
@@ -369,6 +390,8 @@ function cleanEvent(e, todayN) {
   // What the event offers, confirmed on the same page (activities, vendors, admission, who benefits, how to register): the script and images are built from it.
   const details = (Array.isArray(e.details) ? e.details : []).map((d) => clean(d, 140)).filter((d) => d && !PLACEHOLDER.test(d)).slice(0, 6);
   if (details.length) out.details = details;
+  const cues = cleanVisualCues(e.visual_cues);
+  if (cues) out.visualCues = cues;
   return { event: out };
 }
 
@@ -542,7 +565,7 @@ function outcomeFields({ validation, usage, model, today, now, error }) {
 }
 
 module.exports = {
-  MODES, MODE_LABELS, DATA_SOURCES, GEO_TYPES, AUDIENCES, AUDIENCE_KEYS, TOPIC_COUNT, MAX_UPLOADS, FRESH_DAYS, ALLOWANCE_BY_PLAN, PAYWALLED_DOMAINS, DEFAULT_MODEL, DEFAULT_COST_TARGET_USD,
+  cleanVisualCues, MODES, MODE_LABELS, DATA_SOURCES, GEO_TYPES, AUDIENCES, AUDIENCE_KEYS, TOPIC_COUNT, MAX_UPLOADS, FRESH_DAYS, ALLOWANCE_BY_PLAN, PAYWALLED_DOMAINS, DEFAULT_MODEL, DEFAULT_COST_TARGET_USD,
   DATA_FOCUS, DATA_FOCUS_KEYS, validatePeriod, periodDates, validateGeography, geoLabel, validateResearchRequest, requestKey, researchModel, researchSettings, systemPrompt, buildResearchPayload,
   extractTopics, extractRecommendation, validateTopics, similar, articleKey, usageSummary, monthKeyPT, allowanceFor, sessionStatus, outcomeFields,
 };

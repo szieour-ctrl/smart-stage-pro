@@ -394,6 +394,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
           <div class="hint">If the narrator says a name wrongly, type the word as it is written in your script and how it should sound. The narrator uses the sound; your captions keep the word as written. Example: Denio's &rarr; Duh-NYE-oh's.</div>
           <div id="pronRows"></div>
           <button class="btn sm ghost" type="button" id="pronAdd">Add a word</button>
+          <div id="pronSaved"></div>
         </details>
         <label class="lbl">Captions (what viewers will read)</label>
         <div class="caption-preview" id="captionPreview"></div>
@@ -663,7 +664,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     if (planning) startPoll();
     if (ready && !planning) {
       $("narration").value = n.narrationTagged;
-      paintPron(n.pronunciations);
+      loadSavedPron().then(function () { paintPron(n.pronunciations); });
       $("cta").value = (n.cta && n.cta.text) || "";
       $("angleLine").textContent = n.editorialAngle || "";
       var w = n.warnings || [];
@@ -701,13 +702,61 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     }, 3000);
   }
   function stopPoll() { if (state.poll) { clearInterval(state.poll); state.poll = null; } }
-  function pronRow(w, v) { return '<div class="pron-row" style="display:flex;gap:8px;margin:6px 0"><input type="text" class="pw" maxlength="40" placeholder="Written word" value="' + esc(w || "") + '"><input type="text" class="ps" maxlength="40" placeholder="How it sounds" value="' + esc(v || "") + '"><button class="btn sm ghost" type="button" data-pron-del="1" aria-label="Remove">&times;</button></div>'; }
-  function paintPron(list) {
-    $("pronRows").innerHTML = (list || []).map(function (x) { return pronRow(x.written, x.say); }).join("");
-    $("pronBox").open = !!(list && list.length);
+  var PRON = "/.netlify/functions/agent-marketing-pronunciations";
+  var pron = { saved: null, audio: null };
+  // One row: the word as written, how it sounds, Hear (a short preview in the project's voice) and Remember (kept for all this agent's Reels).
+  function pronRow(w, v, remember) {
+    return '<div class="pron-row" style="display:flex;gap:8px;margin:6px 0;align-items:center;flex-wrap:wrap"><input type="text" class="pw" maxlength="40" placeholder="Written word" value="' + esc(w || "") + '"><input type="text" class="ps" maxlength="40" placeholder="How it sounds" value="' + esc(v || "") + '">' +
+      '<button class="btn sm ghost" type="button" data-pron-hear="1">Hear it</button>' +
+      '<label class="hint" style="margin:0;display:flex;gap:4px;align-items:center"><input type="checkbox" class="pr"' + (remember === false ? "" : " checked") + '> Remember for all my Reels</label>' +
+      '<button class="btn sm ghost" type="button" data-pron-del="1" aria-label="Remove">&times;</button></div>';
   }
-  function pronList() {
-    return Array.prototype.map.call($("pronRows").querySelectorAll(".pron-row"), function (r) { return { written: r.querySelector(".pw").value, say: r.querySelector(".ps").value }; }).filter(function (x) { return x.written.trim() && x.say.trim(); });
+  function flatTxt(t) { return String(t || "").toLowerCase().replace(/[\u2019]/g, "'"); }
+  // Rows: this project's own corrections, then the agent's saved ones whose word is in the script right now.
+  function paintPron(list) {
+    var text = flatTxt($("narration").value), own = list || [], have = {}, rows = [];
+    own.forEach(function (x) { have[flatTxt(x.written)] = true; rows.push(pronRow(x.written, x.say, !!(pron.saved || []).filter(function (y) { return flatTxt(y.written) === flatTxt(x.written); }).length)); });
+    (pron.saved || []).forEach(function (x) { var k = flatTxt(x.written); if (!have[k] && text.indexOf(k) >= 0) rows.push(pronRow(x.written, x.say, true)); });
+    $("pronRows").innerHTML = rows.join("");
+    $("pronBox").open = rows.length > 0;
+    paintSavedList();
+  }
+  function paintSavedList() {
+    var l = pron.saved || [];
+    $("pronSaved").innerHTML = l.length ? '<div class="hint" style="margin-top:8px"><b>Saved for all my Reels:</b></div>' + l.map(function (x, i) { return '<div class="hint" style="margin:2px 0">' + esc(x.written) + " &rarr; " + esc(x.say) + ' <button class="btn sm ghost" type="button" data-pron-forget="' + i + '">Remove</button></div>'; }).join("") : "";
+  }
+  async function loadSavedPron() {
+    if (pron.saved) return;
+    try { var r = await api("GET", "", null, PRON); pron.saved = r.ok && r.json.items ? r.json.items : []; } catch (e) { pron.saved = []; }
+  }
+  function pronRows() {
+    return Array.prototype.map.call($("pronRows").querySelectorAll(".pron-row"), function (r) { return { written: r.querySelector(".pw").value, say: r.querySelector(".ps").value, remember: r.querySelector(".pr").checked }; }).filter(function (x) { return x.written.trim() && x.say.trim(); });
+  }
+  function pronList() { return pronRows().map(function (x) { return { written: x.written, say: x.say }; }); }
+  // After the script is saved: ticked rows are remembered for the agent; an unticked row that had been remembered is forgotten.
+  async function syncSavedPron() {
+    await loadSavedPron();
+    var rows = pronRows(), next = (pron.saved || []).slice();
+    rows.forEach(function (x) {
+      var k = flatTxt(x.written.trim()), at = -1; next.forEach(function (y, i) { if (flatTxt(y.written) === k) at = i; });
+      if (x.remember) { if (at >= 0) next[at] = { written: x.written.trim(), say: x.say.trim() }; else next.push({ written: x.written.trim(), say: x.say.trim() }); }
+      else if (at >= 0) next.splice(at, 1);
+    });
+    if (JSON.stringify(next) === JSON.stringify(pron.saved)) return;
+    var r = await api("POST", "", { action: "save", items: next }, PRON);
+    if (r.ok) { pron.saved = r.json.items || next; paintSavedList(); }
+  }
+  async function hearPron(btn) {
+    var row = btn.parentNode, sound = row.querySelector(".ps").value.trim(), old = btn.textContent;
+    if (!sound) { say("scriptMsg", "Type how the word should sound, then press Hear it.", "err"); return; }
+    btn.disabled = true; btn.textContent = "Playing…";
+    try {
+      var r = await api("POST", "", { action: "hear", say: sound, projectId: state.project && state.project.id }, PRON);
+      if (!r.ok) throw new Error(r.json.error || "Could not make the preview.");
+      if (pron.audio) { try { pron.audio.pause(); } catch (e) { /* ignore */ } }
+      pron.audio = new Audio("data:" + r.json.mime + ";base64," + r.json.audio_base64); pron.audio.play();
+    } catch (e) { say("scriptMsg", e.message, "err"); }
+    btn.disabled = false; btn.textContent = old;
   }
   function scriptBody() { return { narrationTagged: $("narration").value, cta: { text: $("cta").value, source: "user_edited" }, pronunciations: pronList() }; }
   async function saveScript(thenApprove) {
@@ -716,6 +765,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
       var r = await api("POST", "", { action: "save_narrative", id: state.project.id, narrative: scriptBody() });
       if (!r.ok) throw new Error(r.json.error || "Could not save");
       setProject(r.json.project);
+      try { await syncSavedPron(); } catch (e) { /* the script is saved; the saved list can be updated next time */ }
       if (thenApprove) {
         var a = await api("POST", "", { action: "approve_narrative", id: state.project.id });
         if (!a.ok) throw new Error(a.json.error || "Could not approve");
@@ -1376,7 +1426,16 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     $("saveScriptBtn").addEventListener("click", function () { saveScript(false); });
     $("approveBtn").addEventListener("click", function () { saveScript(true); });
     $("pronAdd").addEventListener("click", function () { $("pronRows").insertAdjacentHTML("beforeend", pronRow("", "")); });
-    $("pronRows").addEventListener("click", function (ev) { var b = ev.target.closest && ev.target.closest("button[data-pron-del]"); if (b) b.parentNode.parentNode.removeChild(b.parentNode); });
+    $("pronRows").addEventListener("click", function (ev) {
+      var d = ev.target.closest && ev.target.closest("button[data-pron-del]"); if (d) { d.parentNode.parentNode.removeChild(d.parentNode); return; }
+      var h = ev.target.closest && ev.target.closest("button[data-pron-hear]"); if (h) hearPron(h);
+    });
+    $("pronSaved").addEventListener("click", async function (ev) {
+      var f = ev.target.closest && ev.target.closest("button[data-pron-forget]"); if (!f) return;
+      var next = (pron.saved || []).filter(function (x, i) { return i !== Number(f.getAttribute("data-pron-forget")); });
+      var r = await api("POST", "", { action: "save", items: next }, PRON);
+      if (r.ok) { pron.saved = r.json.items || next; paintPron(pronList()); }
+    });
     var m = /#p=([0-9a-f-]{36})/i.exec(location.hash || "");
     if (m) { var x = await api("GET", "?id=" + m[1]); if (x.ok) { setProject(x.json.project); return go(stage()); } }
     var l = await api("GET", "");

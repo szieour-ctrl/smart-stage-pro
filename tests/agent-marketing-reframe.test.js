@@ -88,3 +88,10 @@ test("planner rules keep the article-scene requirement and allow labeled area co
 test("validateTopics puts unique articles first and only repeats an article to fill open slots", () => {
   assert.strictEqual(rl.articleKey("https://www.SacRealtor.org/a/b/"), "sacrealtor.org/a/b");
 });
+
+test("an event's date, time and venue numbers count as verified for words on screen (a Reel headline saying November 14 must not fail the number check)", () => {
+  const sources = require("../netlify/functions/lib/agent-marketing-sources-lib");
+  const nums = sources.topicNumbers({ question: "Can a holiday craft fair help you picture life at Eskaton Village?", whyItMatters: "A chance to meet local vendors.", event: { name: "Annual Holiday Craft Fair", date: "2026-11-14", endDate: null, time: "10:00 am - 2:00 pm", location: "Eskaton Village Roseville, Roseville", organizer: "Eskaton Village" } });
+  [14, 11, 2026, 10, 2].forEach((n) => assert.ok(nums.includes(n), `${n} is verified`));
+  assert.ok(!nums.includes(99), "other numbers are still unverified");
+});

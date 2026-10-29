@@ -92,3 +92,42 @@ test("revision: a note is required, and a blocked note never reaches Claude", as
   await assert.rejects(() => el.elaborateRevision({ project, kind: "concept", note: "Just listed at $450,000, open house Sunday", currentPrompt: "x", anthropicKey: "k", callFn }), (e) => e.code === "note_blocked");
   assert.strictEqual(called, false);
 });
+
+test("make a new image instead: the note is the subject, the old scene is left out, and a non-home subject like a county fair is allowed", async () => {
+  let seen;
+  await el.elaborate({ project, scene, kind: "concept", note: "a county fair with a Ferris wheel", fresh: true, anthropicKey: "k",
+    callFn: async (sys, user) => { seen = { sys, user: JSON.parse(user) }; return JSON.stringify({ description: "A bright morning at a county fair, a tall Ferris wheel in the central third against a clear sky, empty midway and food stalls with striped awnings below.", removed: [] }); } });
+  assert.strictEqual(seen.user.agent_note_is_the_subject, true);
+  assert.strictEqual(seen.user.scene_narration, null);
+  assert.strictEqual(seen.user.planner_visual_brief, null);
+  assert.match(seen.sys, /county fair with a Ferris wheel/);
+  assert.match(seen.sys, /does not have to show homes/);
+  // without fresh, the scene still anchors the description
+  await el.elaborate({ project, scene, kind: "concept", note: "mature trees", anthropicKey: "k", callFn: async (s, u) => { seen = JSON.parse(u); return JSON.stringify({ description: "A quiet street with mature trees.", removed: [] }); } });
+  assert.ok(seen.scene_narration && !seen.agent_note_is_the_subject);
+});
+
+test("people are allowed in concept images for Local Events Reels only", async () => {
+  const eventProject = { ...project, selected_topic: { kind: "local_events", event: { name: "Annual Holiday Craft Fair", date: "2026-11-14" } } };
+  const marketProject = { ...project, selected_topic: { kind: "market_update", event: null } };
+  assert.strictEqual(img.peopleAllowedFor(eventProject), true);
+  assert.strictEqual(img.peopleAllowedFor(marketProject), false);
+  assert.strictEqual(img.peopleAllowedFor(project), false);
+  const withPeople = img.buildPrompt({ kind: "concept", scenePrompt: "A busy county fair midway", people: true });
+  const without = img.buildPrompt({ kind: "concept", scenePrompt: "A quiet street", people: false });
+  assert.doesNotMatch(withPeople, /No people at all/);
+  assert.match(withPeople, /Ordinary people may appear naturally/);
+  assert.match(withPeople, /No text, letters, numbers/);
+  assert.match(without, /No people at all/);
+  assert.match(img.buildFormatPrompt({ kind: "concept", scenePrompt: "x", format: "9x16", people: true }), /Ordinary people may appear naturally/);
+  assert.match(img.buildFormatPrompt({ kind: "concept", scenePrompt: "x", format: "9x16" }), /No people at all/);
+  let seen;
+  await el.elaborate({ project: eventProject, scene, kind: "concept", note: "families at the fair", anthropicKey: "k", callFn: async (s, u) => { seen = JSON.parse(u); return JSON.stringify({ description: "Families strolling the midway of a county fair under a Ferris wheel.", removed: [] }); } });
+  assert.strictEqual(seen.people_allowed, true);
+  await el.elaborate({ project, scene, kind: "concept", note: "mature trees", anthropicKey: "k", callFn: async (s, u) => { seen = JSON.parse(u); return JSON.stringify({ description: "A quiet street with mature trees.", removed: [] }); } });
+  assert.strictEqual(seen.people_allowed, undefined);
+  const planLib = require("../netlify/functions/lib/agent-marketing-plan-lib");
+  const msg = JSON.parse(planLib.buildUserMessage({ ...eventProject, id: "p1", user_id: "u1", intake: { market: "Roseville" }, duration_sec: 30, formats: ["9x16"] }));
+  assert.strictEqual(msg.event_reel, true);
+  assert.match(planLib.buildSystemPrompt(), /9d\. EVENT REELS/);
+});

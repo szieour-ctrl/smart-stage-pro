@@ -449,7 +449,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
           <div class="imgm-title" id="imgmTitle"></div>
           <div class="hint" id="imgmSub"></div>
           <div class="hint" id="imgmCrop"></div>
-          <div class="elab-row"><button type="button" class="btn sm ghost" id="imgmElab" data-act="elaborate">&#10024; Elaborate with AI</button><span class="hint">AI writing aid. It rewrites your note into a safe description and checks it before anything is created.</span></div>
+          <div class="elab-row"><button type="button" class="btn sm ghost" id="imgmElab" data-act="elaborate">&#10024; Elaborate with AI</button><button type="button" class="btn sm ghost hidden" id="imgmElabNew" data-act="elaborate_new" style="margin-left:6px">&#10024; Make a new image instead</button><span class="hint">AI writing aid. It rewrites your note into a safe description and checks it before anything is created.</span></div>
           <textarea id="imgmNote" maxlength="300" style="min-height:90px" placeholder='Optional. With an image showing, say only what to change, e.g. "make it earlier in the day"; everything else stays the same. For a new image: "mature trees, soft morning light"'></textarea>
           <div class="hint" id="imgmCount" style="text-align:right">0 / 300</div>
           <div id="imgmUsed"></div>
@@ -1093,7 +1093,8 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
         (v.fullPrompt ? '<details style="margin-top:6px"><summary style="cursor:pointer">Show the full prompt sent to the image model</summary><div style="white-space:pre-wrap;font-size:0.78rem;margin-top:6px">' + esc(v.fullPrompt) + "</div></details>" : "") + "</div>";
     }
     $("imgmUsed").innerHTML = used;
-    $("imgmElab").disabled = working; $("imgmElab").setAttribute("data-scene", m.scene); $("imgmElab").innerHTML = working ? "Elaborating…" : "&#10024; Elaborate with AI";
+    $("imgmElab").disabled = working; $("imgmElab").setAttribute("data-scene", m.scene); $("imgmElab").innerHTML = working ? "Elaborating…" : (st.shown && st.shown.url ? "&#10024; Elaborate a change to this image" : "&#10024; Elaborate with AI");
+    $("imgmElabNew").classList.toggle("hidden", !(st.shown && st.shown.url && KIND_OF[src] && !st.generating)); $("imgmElabNew").disabled = working; $("imgmElabNew").setAttribute("data-scene", m.scene);
     var ek = m.scene + ":" + src + ":" + (d ? d.description.length : 0), ew = $("imgmEditWrap");
     ew.classList.toggle("hidden", !KIND_OF[src] || st.generating);
     if (ew.getAttribute("data-k") !== ek && document.activeElement !== $("imgmEdit")) { ew.setAttribute("data-k", ek); $("imgmEdit").value = editText(m.scene, src); $("imgmEditCount").textContent = $("imgmEdit").value.length + " / 600"; }
@@ -1114,15 +1115,16 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
   }
 
   function setSlotMsg(k, text, kind) { im.sig = ""; if (text) im.msgs[k] = { text: text, kind: kind || "" }; else delete im.msgs[k]; }
-  async function elaborateScene(idx) {
+  async function elaborateScene(idx, fresh) {
     var src = activeSrc(idx), kind = KIND_OF[src]; if (!kind || im.working[idx]) return;
     var note = (im.note[idx] || "").trim();
     im.working[idx] = true; setSlotMsg("n" + idx, ""); repaint();
     try {
       // When this scene already has an image on screen, the note is a change to THAT image: only the change is made, the rest stays (like a staging revision).
       var sl0 = im.slots.filter(function (x) { return x.sceneIndex === idx; })[0], st0 = sl0 ? slotState(sl0, src) : null, shown0 = st0 && st0.shown && st0.shown.url && !st0.generating ? st0.shown : null;
-      var reviseId = note && shown0 ? shown0.id : null;
-      var r = await api("POST", "", { action: "elaborate", projectId: state.project.id, sceneIndex: idx, kind: kind, note: note, reviseAssetId: reviseId || undefined }, IMG);
+      var reviseId = note && shown0 && !fresh ? shown0.id : null;
+      // "Make a new image instead": the note is the whole subject of a fresh image, the picture on screen is left behind.
+      var r = await api("POST", "", { action: "elaborate", projectId: state.project.id, sceneIndex: idx, kind: kind, note: note, reviseAssetId: reviseId || undefined, fresh: fresh === true ? true : undefined }, IMG);
       if (r.ok) delete im.edit[idx];
       if (r.ok) im.desc[idx] = { kind: kind, description: r.json.description, removed: r.json.removed || [], warnings: r.json.warnings || [], note: note, revise: r.json.revise || null };
       else setSlotMsg("n" + idx, r.json.error || "Could not write the description. Please try again.", "err");
@@ -1193,6 +1195,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
   function handleAct(b) {
     var act = b.getAttribute("data-act"), si = Number(b.getAttribute("data-scene")), f = b.getAttribute("data-format"), k = si + "_" + f;
     if (act === "elaborate") return elaborateScene(si);
+    if (act === "elaborate_new") return elaborateScene(si, true);
     if (act === "cancel") { delete im.confirming[k]; return repaint(); }
     if (act === "confirm") return genSlot(si, f, true);
     if (act === "generate") {

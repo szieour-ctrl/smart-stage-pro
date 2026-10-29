@@ -165,7 +165,7 @@ async function prepareImages(job, project, narrative, brand, formats, profile) {
       buf = await sharp(src).rotate().resize(w, h, { fit: "cover", position: t.f === "9x16" ? sharp.strategy.attention : "centre" }).png().toBuffer(); source = "own_photo";
     }
     else {
-      const prompt = img.buildFormatPrompt({ kind: t.n.imageKind, scenePrompt: t.n.prompt, format: t.f, framing: t.n.framing && t.n.framing[t.f] });
+      const prompt = img.buildFormatPrompt({ kind: t.n.imageKind, scenePrompt: t.n.prompt, format: t.f, framing: t.n.framing && t.n.framing[t.f], people: img.peopleAllowedFor(project) });
       let reference = null;
       if (t.n.imageKind === "agent_scene") {
         const refKey = img.pickReferenceKey(profile);

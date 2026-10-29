@@ -153,7 +153,7 @@ exports.handler = async (event) => {
           const out = await elab.elaborateRevision({ project, kind, note: b.note, currentPrompt: base.generation.basePrompt || base.generation.scenePrompt, anthropicKey: process.env.ANTHROPIC_API_KEY });
           return reply(200, { description: out.description, removed: out.removed, warnings: out.warnings, kind, revise: base.id });
         }
-        const out = await elab.elaborate({ project, scene: tgt.scene, kind: b.kind, note: b.note, anthropicKey: process.env.ANTHROPIC_API_KEY });
+        const out = await elab.elaborate({ project, scene: tgt.scene, kind: b.kind, note: b.note, fresh: b.fresh === true, anthropicKey: process.env.ANTHROPIC_API_KEY });
         return reply(200, { description: out.description, removed: out.removed, warnings: out.warnings, kind: b.kind });
       } catch (e) {
         if (e.code) return reply(e.code === "bad_kind" ? 400 : 422, { error: e.message, code: e.code });
@@ -202,7 +202,7 @@ exports.handler = async (event) => {
     if (q.charged && b.confirmCharge !== true) return reply(402, { error: "This image costs extra.", code: "confirm_charge", credits: q.credits });
     const st = img.settings();
     if (reviseBaseAsset && !(typeof b.description === "string" && b.description.trim())) return reply(400, { error: "Use Elaborate with AI first so we can describe the change.", code: "description_needed" });
-    const prompt = reviseBaseAsset ? img.buildRevisionPrompt({ instruction: scenePrompt }) : img.buildPrompt({ kind, scenePrompt });
+    const prompt = reviseBaseAsset ? img.buildRevisionPrompt({ instruction: scenePrompt }) : img.buildPrompt({ kind, scenePrompt, people: img.peopleAllowedFor(project) });
 
     // Charge first (only for extras); refunded by the worker or the stale check if the image never arrives.
     let charged = null;

@@ -9,6 +9,7 @@
 
 const planLib = require("./agent-marketing-plan-lib");
 const gate = require("./agent-marketing-gate");
+const imagesLib = require("./agent-marketing-images-lib");
 
 const MAX_NOTE = 300;
 const MAX_DESC = 600;
@@ -25,29 +26,33 @@ function buildSystemPrompt() {
     "",
     "RULES",
     "1. Describe only what is visible: setting, subject, composition, light and mood. 2 to 4 sentences, under 450 characters.",
-    "2. kind \"concept\": a conceptual still life or scene with NO people at all. kind \"agent_scene\": exactly ONE person, the agent, described only by setting, pose and mood and never by appearance (no age, hair, build, clothing details); no other people.",
+    "2. kind \"concept\": a conceptual still life or scene with NO people at all, unless people_allowed is true (a local event Reel), in which case ordinary people may appear naturally as part of the scene. kind \"agent_scene\": exactly ONE person, the agent, described only by setting, pose and mood and never by appearance (no age, hair, build, clothing details); no other people.",
     "3. Believable, safe settings. The agent is never standing in a roadway, never at the wheel of a car, never in a dark place or at night. Prefer daylight, golden hour or soft interior light: a sidewalk, front walk, porch, bright room, home office, desk or kitchen table.",
     "4. Compose ONE wide 16:9 frame that is also cropped to a tall 9:16 window from its middle: put the main subject and key details in the central third of the width, keep the left and right thirds as simple calm scenery, and keep the lower third uncluttered (captions go there).",
     "5. No text, signage of any kind, letters, numbers, logos, brand names, watermarks, charts, rates or prices. No real landmarks, real buildings, addresses, named streets, neighborhoods or developments.",
-    "5b. Any home shown must look like the ordinary single-family homes actually built in the market area (their era, stories, rooflines, stucco or siding, garage and lot size), never a villa, mansion or luxury estate. Every image is plainly about homes or a neighborhood: no abstract metaphors such as paths, gates or bridges, and no garden or landscape scenes.",
+    "5b. Any home shown must look like the ordinary single-family homes actually built in the market area (their era, stories, rooflines, stucco or siding, garage and lot size), never a villa, mansion or luxury estate. Unless the agent's note names a different literal subject (for example a county fair with a Ferris wheel, a farmers market or a park concert), every image is plainly about homes or a neighborhood: no abstract metaphors such as paths, gates or bridges, and no garden or landscape scenes. When the note names such a subject, show exactly that subject as a real, ordinary scene; it does not have to show homes.",
     "5c. Aerial, overview and whole-area images show the FRONTS of homes and the street, seen from above or from the street: rooflines, front yards, driveways and tree-lined streets. Never show a fenced backyard, a rear yard, a back fence line or the rear of a home.",
     "6. Nothing about a specific home for sale or lease, a price, an open house, a sold result, a testimonial or a client. Nothing that compares named areas.",
     "7. No Fair Housing steering: do not depict or imply who a neighborhood is for, no families, children or seniors as a target audience, no \"safe\" or \"exclusive\" areas, nothing about schools.",
     "8. If the note asks for something these rules do not allow, leave it out and add a short plain-language reason to \"removed\". Do not argue and do not mention these rules in the description.",
     "9. If there is no note, base the description on the narration and the visual brief.",
+    "9b. If the input says agent_note_is_the_subject, the note names the scene the agent wants and it replaces whatever the image showed before: build the whole description around the note's subject and add the setting, time of day, light and composition that make it a complete, believable still (for example \"a county fair with a Ferris wheel\" becomes a morning scene at a county fair with the Ferris wheel in the central third). Do not carry over anything from an earlier image.",
     "",
     "Return ONLY a JSON object: { \"description\": string, \"removed\": [string] }",
   ].join("\n");
 }
 
-function buildUserMessage({ scene, kind, note }) {
+function buildUserMessage({ scene, kind, note, fresh, people }) {
   const s = scene || {};
+  const newScene = fresh === true && !!cleanNote(note);   // "make a new image instead": the note IS the subject, the old scene is left behind
   return JSON.stringify({
     image_kind: kind,
-    scene_narration: clean(s.narrationExcerpt, 400),
+    ...(people ? { people_allowed: true } : {}),
+    ...(newScene ? { agent_note_is_the_subject: true } : {}),
+    scene_narration: newScene ? null : clean(s.narrationExcerpt, 400),
     // A re-used or brand-card scene's brief is an instruction about OTHER images ("reuse the street scene…"), so it is
     // only passed along for scenes the planner meant to generate.
-    planner_visual_brief: (s.visualSource === "GPT_IMAGE_2_CONCEPT" || s.visualSource === "AGENT_SCENE") ? clean(s.visualBrief, 400) : null,
+    planner_visual_brief: !newScene && (s.visualSource === "GPT_IMAGE_2_CONCEPT" || s.visualSource === "AGENT_SCENE") ? clean(s.visualBrief, 400) : null,
     agent_note: cleanNote(note) || null,
   }, null, 2);
 }
@@ -74,7 +79,7 @@ function codedError(message, code, extra) { const e = new Error(message); e.code
  * elaborate({ project, scene, kind, note, anthropicKey, callFn }) → { description, removed, warnings }
  * Throws Error with .code = "note_blocked" | "description_blocked" | "bad_kind" (messages are safe to show).
  */
-async function elaborate({ project, scene, kind, note, anthropicKey, callFn }) {
+async function elaborate({ project, scene, kind, note, fresh, anthropicKey, callFn }) {
   if (!KINDS.includes(kind)) throw codedError("Choose a concept image or an image of you.", "bad_kind");
   const n = cleanNote(note);
   const warnings = [];
@@ -84,7 +89,7 @@ async function elaborate({ project, scene, kind, note, anthropicKey, callFn }) {
     g1.warnings.forEach((w) => warnings.push(w.message));
   }
   const call = callFn || planLib.callClaudeText;
-  const text = await call(buildSystemPrompt(), buildUserMessage({ scene, kind, note: n }), anthropicKey);
+  const text = await call(buildSystemPrompt(), buildUserMessage({ scene, kind, note: n, fresh, people: imagesLib.peopleAllowedFor(project) }), anthropicKey);
   const out = normalize(planLib.extractJsonObject(text));
   // An image description is an instruction to a picture model, not a market claim: like the planner's image prompts, it is held only to the sale-content rules, so "9:16" or "two-story" is fine (Sam, Oct 28).
   const g2 = checkText(project, out.description, true);
@@ -106,14 +111,14 @@ function buildRevisionSystemPrompt() {
     "RULES",
     "1. Do exactly what the note asks and nothing more: do not invent other changes. Be specific about the thing to change (what, where, how it should look). Name the change; do not describe the whole picture again.",
     "2. 1 to 3 sentences, under 350 characters, written as an instruction (\"Change ... to ...\", \"Make ... \", \"Replace ...\"). Do not say what to keep: the editor is already told to keep the rest.",
-    "3. No text, signage of any kind, letters, numbers, logos, brand names, charts, rates or prices. No real landmarks, addresses or named places. Nothing about a specific home for sale, a price, an open house or a sold result. Do not add people unless the note asks and the image is an image of the agent.",
+    "3. No text, signage of any kind, letters, numbers, logos, brand names, charts, rates or prices. No real landmarks, addresses or named places. Nothing about a specific home for sale, a price, an open house or a sold result. Do not add people unless the note asks and the image is an image of the agent, or people_allowed is true (a local event Reel).",
     "4. If the note asks for something these rules do not allow, leave that part out and add a short plain-language reason to \"removed\".",
     "",
     "Return ONLY a JSON object: { \"description\": string, \"removed\": [string] }",
   ].join("\n");
 }
-function buildRevisionUserMessage({ currentPrompt, note }) {
-  return JSON.stringify({ image_was_made_from: clean(currentPrompt, 600) || null, agent_note: cleanNote(note) }, null, 2);
+function buildRevisionUserMessage({ currentPrompt, note, people }) {
+  return JSON.stringify({ ...(people ? { people_allowed: true } : {}), image_was_made_from: clean(currentPrompt, 600) || null, agent_note: cleanNote(note) }, null, 2);
 }
 
 /**
@@ -128,7 +133,7 @@ async function elaborateRevision({ project, kind, note, currentPrompt, anthropic
   if (!g1.ok) throw codedError(gate.explain(g1), "note_blocked", { gate: g1 });
   const warnings = g1.warnings.map((w) => w.message);
   const call = callFn || planLib.callClaudeText;
-  const out = normalize(planLib.extractJsonObject(await call(buildRevisionSystemPrompt(), buildRevisionUserMessage({ currentPrompt, note: n }), anthropicKey)));
+  const out = normalize(planLib.extractJsonObject(await call(buildRevisionSystemPrompt(), buildRevisionUserMessage({ currentPrompt, note: n, people: imagesLib.peopleAllowedFor(project) }), anthropicKey)));
   const g2 = checkText(project, out.description, true);
   if (!g2.ok) throw codedError("That change included wording Agent Marketing can't use. Please change your note and try again.", "description_blocked", { gate: g2 });
   const description = require("./agent-marketing-signage-lib").scrubSignage(out.description);

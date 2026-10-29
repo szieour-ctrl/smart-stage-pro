@@ -115,7 +115,14 @@ exports.handler = async (event) => {
       if (p.error) return p.error;
       const r = await supabase("GET", "agent_marketing_research", null, `?project_id=eq.${p.row.id}&user_id=eq.${userId}&select=*&order=created_at.desc&limit=10`);
       const rows = await settleStale(Array.isArray(r.data) ? r.data : []);
-      return reply(200, { research: rows.map(forClient), selectedResearchId: p.row.selected_research_id || null, selectedTopic: p.row.selected_topic || null, session: await sessionFor(await poolFor(userId)) });
+      // Saved research from the agent's other projects (Sam, Oct 29, 2026): the Research Library is the agent's, so a fresh project still finds earlier sets.
+      // Opening one costs nothing; choosing a topic from one copies the set into this project (see "select").
+      let earlier = [];
+      try {
+        const er = await supabase("GET", "agent_marketing_research", null, `?user_id=eq.${userId}&project_id=neq.${p.row.id}&status=eq.ready&select=*&order=created_at.desc&limit=20`);
+        earlier = (Array.isArray(er.data) ? er.data : []).filter((x) => !(x.usage && x.usage.copiedFrom)).map(forClient); // copies are hidden: the original is listed
+      } catch (e) { /* the library still shows this project's own sets */ }
+      return reply(200, { earlier, research: rows.map(forClient), selectedResearchId: p.row.selected_research_id || null, selectedTopic: p.row.selected_topic || null, session: await sessionFor(await poolFor(userId)) });
     }
 
     if (event.httpMethod !== "POST") return reply(405, { error: "Method not allowed" });
@@ -132,8 +139,18 @@ exports.handler = async (event) => {
 
     if (action === "select") {
       if (!am.UUID_RE.test(String(b.researchId || ""))) return reply(400, { error: "Missing or invalid research id" });
-      const rr = await supabase("GET", "agent_marketing_research", null, `?id=eq.${b.researchId}&user_id=eq.${userId}&project_id=eq.${project.id}&select=*&limit=1`);
-      const row = Array.isArray(rr.data) ? rr.data[0] : null;
+      let rr = await supabase("GET", "agent_marketing_research", null, `?id=eq.${b.researchId}&user_id=eq.${userId}&select=*&limit=1`);
+      let row = Array.isArray(rr.data) ? rr.data[0] : null;
+      if (row && row.status === "ready" && row.project_id !== project.id) {
+        // A set saved under another of the agent's projects: copy it here, so this project owns it. No session is used.
+        const copy = await supabase("POST", "agent_marketing_research", {
+          project_id: project.id, user_id: userId, pool_user_id: row.pool_user_id, mode: row.mode, geography: row.geography, audience: row.audience, focus: row.focus || {},
+          upload_refs: row.upload_refs || [], status: "ready", model: row.model, topics: row.topics, research_date: row.research_date, data_source: row.data_source || "web",
+          usage: { copiedFrom: row.id }, charged_at: null,
+        });
+        row = Array.isArray(copy.data) ? copy.data[0] : null;
+        if (!row) return reply(500, { error: "Could not open that saved set" });
+      }
       if (!row || row.status !== "ready") return reply(404, { error: "That research set was not found." });
       const topic = (row.topics || []).find((t) => t && t.id === String(b.topicId || ""));
       if (!topic) return reply(400, { error: "Choose one of the five topics." });

@@ -170,7 +170,8 @@ exports.handler = async (event) => {
       const narrative = {
         editorialAngle: prev.editorialAngle, hook: prev.hook, claimsToVerify: prev.claimsToVerify, missingAgentInputs: prev.missingAgentInputs,
         attempts: prev.attempts, intakeHash: prev.intakeHash,
-        ...v.narrative, scenes: clientScenes, cta: v.narrative.cta || prev.cta || null,
+        ...v.narrative, scenes: clientScenes,
+        pronunciations: Array.isArray(b.narrative && b.narrative.pronunciations) ? require("./lib/agent-marketing-timing-lib").cleanPronunciations(b.narrative.pronunciations) : (prev.pronunciations || []), cta: v.narrative.cta || prev.cta || null,
         scenesStale: false,
         source: "edited", status: "ready", savedAt: new Date().toISOString(),
       };

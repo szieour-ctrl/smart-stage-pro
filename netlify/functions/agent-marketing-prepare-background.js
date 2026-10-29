@@ -52,26 +52,27 @@ async function fail(job, message) {
 }
 
 // ── 1. narration ──────────────────────────────────────────────────────────────────────────────────────────────
-async function prepareNarration(job, project, tagged) {
+async function prepareNarration(job, project, tagged, pronunciations) {
   if (job.assets && job.assets.audio && job.assets.audio.key) return job.assets.audio;
   const voiceId = assetsLib.voiceIdFor(project.voice);
   if (!voiceId) throw new Error("This voice is not configured yet.");
   if (!process.env.ELEVENLABS_API_KEY) throw new Error("Narration is not configured.");
-  const res = await postJson("api.elevenlabs.io", timing.endpointPath(voiceId), { "xi-api-key": process.env.ELEVENLABS_API_KEY }, timing.buildRequest(tagged, { modelId: TTS_MODEL }), 180000);
+  const sent = timing.applyPronunciations(tagged, pronunciations); // respellings are spoken, never shown: the captions below are mapped back to the written words
+  const res = await postJson("api.elevenlabs.io", timing.endpointPath(voiceId), { "xi-api-key": process.env.ELEVENLABS_API_KEY }, timing.buildRequest(sent, { modelId: TTS_MODEL }), 180000);
   const j = res.json;
   if (res.status !== 200 || !j || !j.audio_base64) throw new Error(`The narration service returned ${res.status}${res.json && res.json.detail && res.json.detail.message ? ": " + res.json.detail.message : ""}`);
   const audio = Buffer.from(j.audio_base64, "base64");
   const al = j.alignment;
   const lastEnd = al && al.character_end_times_seconds && al.character_end_times_seconds[al.character_end_times_seconds.length - 1];
-  const check = timing.checkAlignment(al, tagged, lastEnd);
+  const check = timing.checkAlignment(al, sent, lastEnd);
   if (!check.ok) throw new Error("The narration timings were not usable: " + check.problems.join(" "));
-  const words = timing.wordsFromAlignment(al);
+  const words = timing.restorePronunciations(timing.wordsFromAlignment(al), pronunciations);
   if (!timing.wordsMatchCaption(words, tagged)) throw new Error("The narration timings do not match the approved words.");
   const key = `agent-marketing-assets/${job.user_id}/${job.project_id}/${job.id}/narration.mp3`;
   await put(key, audio, "audio/mpeg");
   const durationSec = Math.round(Math.max(lastEnd + 0.4, (audio.length * 8) / 128000) * 100) / 100; // default output is 128 kbps mp3
-  const rec = { key, duration_sec: durationSec, words: words.map((w) => ({ text: w.text, start: w.start, end: w.end })), voice_id: voiceId, model_id: TTS_MODEL, characters: tagged.length };
-  const usage = { ...(job.usage || {}), narration_characters: tagged.length };
+  const rec = { key, duration_sec: durationSec, words: words.map((w) => ({ text: w.text, start: w.start, end: w.end })), voice_id: voiceId, model_id: TTS_MODEL, characters: sent.length };
+  const usage = { ...(job.usage || {}), narration_characters: sent.length };
   job.assets = { ...(job.assets || {}), audio: rec }; job.usage = usage;
   await patchJob(job.id, { assets: job.assets, usage });
   return rec;
@@ -250,7 +251,7 @@ exports.handler = async (event) => {
     job.music = project.music || "default";
 
     await patchJob(job.id, { step: "Recording the narration" });
-    const audio = await prepareNarration(job, project, narrative.narrationTagged);
+    const audio = await prepareNarration(job, project, narrative.narrationTagged, narrative.pronunciations);
     await patchJob(job.id, { step: "Creating the images" });
     const images = await prepareImages(job, project, narrative, brand, formats, profile);
     const imageKeys = {};

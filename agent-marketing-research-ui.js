@@ -206,14 +206,18 @@
       var b = $("selBar"); if (b) b.scrollIntoView({ behavior: "smooth", block: "center" });
     } catch (e) { say("selMsg", e.message, "err"); }
   }
-  function renderSaved(list) {
-    $("savedList").innerHTML = !list.length ? '<div class="hint" style="padding:14px 0">No saved research yet. Run a request and it will appear here.</div>' : list.map(function (r) {
+  function renderSaved(list, earlier) {
+    earlier = earlier || [];
+    var all = list.concat(earlier);
+    var rowHtml = function (r) {
       return '<div class="saved"><div><b>' + esc(r.mode === "local_events" ? "Local Events" : "Market Update") + "</b> · " + esc(r.geography && r.geography.label) + " · " + esc(r.audience) +
         '<div class="hint">' + esc(r.status === "ready" ? "Five topics, " + (r.researchDate || "") : r.status === "failed" ? "Failed, not charged" : "Running") + "</div></div>" +
         '<button class="btn ghost small" type="button" data-open="' + esc(r.id) + '">Open</button></div>';
-    }).join("");
+    };
+    $("savedList").innerHTML = !all.length ? '<div class="hint" style="padding:14px 0">No saved research yet. Run a request and it will appear here.</div>'
+      : (list.length ? list.map(rowHtml).join("") : "") + (earlier.length ? '<div class="hint" style="padding:10px 0 4px">' + (list.length ? "From your earlier projects" : "Your saved research from earlier projects") + "</div>" + earlier.map(rowHtml).join("") : "");
     Array.prototype.forEach.call($("savedList").querySelectorAll("[data-open]"), function (b) {
-      b.addEventListener("click", function () { var r = list.filter(function (x) { return x.id === b.getAttribute("data-open"); })[0]; if (r) { closeLib(); showResult(r); if (r.status === "running") startPoll(r.id); } });
+      b.addEventListener("click", function () { var r = all.filter(function (x) { return x.id === b.getAttribute("data-open"); })[0]; if (r) { closeLib(); showResult(r); if (r.status === "running") startPoll(r.id); } });
     });
   }
   function openLib() { $("libModal").classList.remove("hidden"); $("libX").focus(); }
@@ -357,7 +361,7 @@
     if (!g.ok) return;
     state.selected = g.json.selectedTopic || null;
     renderSession(g.json.session);
-    renderSaved(g.json.research || []);
+    renderSaved(g.json.research || [], g.json.earlier || []);
     return g.json.research || [];
   }
 

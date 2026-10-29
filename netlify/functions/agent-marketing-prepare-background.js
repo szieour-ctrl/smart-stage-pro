@@ -66,7 +66,7 @@ async function prepareNarration(job, project, tagged, pronunciations) {
   const lastEnd = al && al.character_end_times_seconds && al.character_end_times_seconds[al.character_end_times_seconds.length - 1];
   const check = timing.checkAlignment(al, sent, lastEnd);
   if (!check.ok) throw new Error("The narration timings were not usable: " + check.problems.join(" "));
-  let words = timing.restorePronunciations(timing.wordsFromAlignment(al), pronunciations);
+  let words = timing.restorePronunciations(timing.wordsFromAlignment(al), pronunciations, tagged);
   if (!timing.wordsMatchCaption(words, tagged)) {
     const same = timing.reconcileWords(words, tagged); // differs only in punctuation or case: the caption keeps the approved spelling
     if (!same) throw new Error("The narration timings do not match the approved words.");
@@ -75,7 +75,7 @@ async function prepareNarration(job, project, tagged, pronunciations) {
   const key = `agent-marketing-assets/${job.user_id}/${job.project_id}/${job.id}/narration.mp3`;
   await put(key, audio, "audio/mpeg");
   const durationSec = Math.round(Math.max(lastEnd + 0.4, (audio.length * 8) / 128000) * 100) / 100; // default output is 128 kbps mp3
-  const rec = { key, duration_sec: durationSec, words: words.map((w) => ({ text: w.text, start: w.start, end: w.end })), voice_id: voiceId, model_id: TTS_MODEL, characters: sent.length };
+  const rec = { key, duration_sec: durationSec, words: words.map((w) => ({ text: w.text, start: w.start, end: w.end })), voice_id: voiceId, model_id: TTS_MODEL, characters: sent.length, pronunciations_applied: sent !== tagged ? timing.cleanPronunciations(pronunciations).length : 0 };
   const usage = { ...(job.usage || {}), narration_characters: sent.length };
   job.assets = { ...(job.assets || {}), audio: rec }; job.usage = usage;
   await patchJob(job.id, { assets: job.assets, usage });

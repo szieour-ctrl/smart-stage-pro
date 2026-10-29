@@ -190,18 +190,27 @@ function applyPronunciations(text, list) {
   for (const p of cleanPronunciations(list)) out = out.replace(new RegExp(`(?<![\\p{L}\\p{N}])${escRe(p.written)}(?![\\p{L}\\p{N}])`, "giu"), p.say);
   return out;
 }
-/** The timed words with each respelling turned back into the word as written, so captions never show it. */
-function restorePronunciations(words, list) {
+/**
+ * The timed words with each respelling turned back into the word as the script has it, so captions never show the respelling. When the narration text is
+ * given, the script's own spelling is used (its apostrophes and punctuation included): Oct 29, 2026, a script with a curly apostrophe and a box entry typed with
+ * a straight one stopped the Reel on "The narration timings do not match the approved words".
+ */
+function restorePronunciations(words, list, taggedText) {
   const prons = cleanPronunciations(list);
   if (!prons.length) return words;
-  return words.map((w) => {
+  const want = taggedText == null ? null : captionWords(taggedText);
+  const bare = (t) => String(t).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+  return words.map((w, i) => {
     const m = /^([^\p{L}\p{N}]*)(.*?)([^\p{L}\p{N}]*)$/su.exec(w.text);
     const core = m ? m[2] : w.text;
     for (const p of prons) {
       const c = core.toLowerCase(), q = p.say.toLowerCase();
-      if (c === q || (c.startsWith(q) && /^['\u2019]?s?$/.test(c.slice(q.length)))) return { ...w, text: (m ? m[1] : "") + p.written + core.slice(p.say.length) + (m ? m[3] : "") };
+      if (c === q || (c.startsWith(q) && /^['\u2019]?s?$/.test(c.slice(q.length)))) {
+        if (want && want.length === words.length) return { ...w, text: want[i] };
+        return { ...w, text: (m ? m[1] : "") + p.written + core.slice(p.say.length) + (m ? m[3] : "") };
+      }
     }
-    return w;
+    return want && want.length === words.length && bare(want[i]) === bare(w.text) ? { ...w, text: want[i] } : w;
   });
 }
 

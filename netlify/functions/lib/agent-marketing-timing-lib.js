@@ -134,6 +134,28 @@ function sceneWindows(words, excerpts, audioSeconds) {
 }
 
 /**
+ * Mends a scene boundary that falls inside a sentence because a word was left at the end of one scene and the next scene carries on in lower case
+ * ("... without you even noticing. Denio's" | "has been a Roseville gathering spot ..."). A short fragment (up to 3 words) after the last full stop of
+ * the earlier scene moves to the start of the next. Scenes the planner split at a sentence end are never touched.
+ */
+function healBoundaries(scenes) {
+  const list = (Array.isArray(scenes) ? scenes : []).map((sc) => ({ ...sc }));
+  const end = /[.!?\u2026]["')\]]*$/;
+  for (let k = 0; k + 1 < list.length; k++) {
+    const a = captionWords(list[k].narrationExcerpt), b = captionWords(list[k + 1].narrationExcerpt);
+    if (!a.length || !b.length || end.test(a[a.length - 1]) || !/^[a-z]/.test(b[0])) continue;
+    let t = -1;
+    for (let i = a.length - 2; i >= 0; i--) if (end.test(a[i])) { t = i; break; }
+    if (t < 0) continue;
+    const frag = a.slice(t + 1);
+    if (frag.length < 1 || frag.length > 3) continue;
+    list[k].narrationExcerpt = a.slice(0, t + 1).join(" ");
+    list[k + 1].narrationExcerpt = frag.concat(b).join(" ");
+  }
+  return list;
+}
+
+/**
  * Re-match the scenes' narrationExcerpt to an edited narration (Oct 29, 2026: an edited script left the scene text one word off and the Reel failed its check).
  * The old excerpts are aligned to the new words (longest common run of words); a word the agent added joins the scene of the word before it, a word
  * removed simply leaves its scene. If the alignment would leave a scene with no words, the new words are split by the scenes' old word shares instead.
@@ -145,17 +167,26 @@ function realignScenes(scenes, taggedText) {
   const oldWords = [], owner = [];
   list.forEach((sc, i) => captionWords(sc && sc.narrationExcerpt).forEach((w) => { oldWords.push(w); owner.push(i); }));
   if (!list.length || !words.length) return { scenes: list, changed: false };
-  if (oldWords.length === words.length && oldWords.every((w, i) => w === words[i])) return { scenes: list, changed: false };
+  if (oldWords.length === words.length && oldWords.every((w, i) => w === words[i])) { const h = healBoundaries(list); return { scenes: h, changed: h.some((x, i) => x.narrationExcerpt !== list[i].narrationExcerpt) }; }
   const norm = (w) => w.toLowerCase().replace(/[^a-z0-9$%]+/g, "");
   const a = oldWords.map(norm), b = words.map(norm), n = a.length, m = b.length;
   const dp = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
   for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
-  const sceneOf = new Array(m).fill(-1);
+  // Matched words keep their scene. Between two matches, the new words take the scenes of the old words that stood there (a word that replaced another
+  // stays in that word's scene, even when it opens the next scene); extra new words join the last of them, and words added where nothing stood join the
+  // scene of the word before them.
+  const pairs = [];
   for (let i = 0, j = 0; i < n && j < m;) {
-    if (a[i] === b[j]) { sceneOf[j] = owner[i]; i++; j++; } else if (dp[i + 1][j] >= dp[i][j + 1]) i++; else j++;
+    if (a[i] === b[j]) { pairs.push([i, j]); i++; j++; } else if (dp[i + 1][j] >= dp[i][j + 1]) i++; else j++;
   }
-  let prev = 0;
-  for (let j = 0; j < m; j++) { if (sceneOf[j] < 0) sceneOf[j] = prev; else prev = sceneOf[j]; }
+  const sceneOf = new Array(m).fill(0);
+  let pi = -1, pj = -1;
+  for (const [ni, nj] of pairs.concat([[n, m]])) {
+    const oldGap = []; for (let i = pi + 1; i < ni; i++) oldGap.push(i);
+    for (let j = pj + 1, t = 0; j < nj; j++, t++) sceneOf[j] = oldGap.length ? owner[oldGap[Math.min(t, oldGap.length - 1)]] : (pi >= 0 ? owner[pi] : 0);
+    if (nj < m) sceneOf[nj] = owner[ni];
+    pi = ni; pj = nj;
+  }
   let counts = list.map((_, i) => sceneOf.filter((x) => x === i).length);
   if (counts.some((c) => c === 0) && m >= list.length) {
     const share = list.map((sc) => Math.max(1, captionWords(sc && sc.narrationExcerpt).length)), tot = share.reduce((x, y) => x + y, 0);
@@ -165,7 +196,7 @@ function realignScenes(scenes, taggedText) {
   }
   let at = 0;
   const out = list.map((sc, i) => { const ex = words.slice(at, at + counts[i]).join(" "); at += counts[i]; return { ...sc, narrationExcerpt: ex }; });
-  return { scenes: out, changed: true };
+  return { scenes: healBoundaries(out), changed: true };
 }
 
 // ── Pronunciations (Oct 29, 2026): a name the narrator says wrongly ("Denio's" said "Danaio's") is spoken from a respelling while the captions keep the
@@ -214,4 +245,4 @@ function restorePronunciations(words, list, taggedText) {
   });
 }
 
-module.exports = { reconcileWords, cleanPronunciations, applyPronunciations, restorePronunciations, realignScenes, buildRequest, endpointPath, checkAlignment, wordsFromAlignment, captionWords, wordsMatchCaption, groupCaptionLines, sceneWindows };
+module.exports = { healBoundaries, reconcileWords, cleanPronunciations, applyPronunciations, restorePronunciations, realignScenes, buildRequest, endpointPath, checkAlignment, wordsFromAlignment, captionWords, wordsMatchCaption, groupCaptionLines, sceneWindows };

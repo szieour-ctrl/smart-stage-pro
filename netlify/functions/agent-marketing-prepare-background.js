@@ -264,8 +264,16 @@ exports.handler = async (event) => {
     await patchJob(job.id, { step: "Writing the card text" });
     // Claude writes the statement cards' text as the agent's perspective, within the word caps; a card that fails its checks (or any problem here) falls back to capped narration text.
     let cardCopy = {};
-    try { cardCopy = await cardCopyLib.writeCardCopy({ project, narrative, intake: project.intake, reportFigures: fromReport ? reportFigures : [], anthropicKey: process.env.ANTHROPIC_API_KEY, log: (m) => console.log("[agent-marketing-card-copy]", m) }); }
-    catch (e) { console.error("[agent-marketing-card-copy] failed, using fallback text:", e.message); }
+    const ccNotes = [];
+    const askCardCopy = () => cardCopyLib.writeCardCopy({ project, narrative, intake: project.intake, reportFigures: fromReport ? reportFigures : [], anthropicKey: process.env.ANTHROPIC_API_KEY, log: (m) => { ccNotes.push(String(m).slice(0, 160)); console.log("[agent-marketing-card-copy]", m); } });
+    try {
+      cardCopy = await askCardCopy();
+      // Oct 29, 2026: a Reel came back with no statement or support lines on its middle cards (the writer's reply was unusable); one more ask before falling back.
+      if (!Object.keys(cardCopy).length && cardCopyLib.statementScenes(narrative, project.intake, []).length) cardCopy = await askCardCopy();
+    }
+    catch (e) { ccNotes.push("failed: " + String(e.message).slice(0, 160)); console.error("[agent-marketing-card-copy] failed, using fallback text:", e.message); }
+    job.usage = { ...(job.usage || {}), card_copy: { accepted: Object.keys(cardCopy).length, notes: ccNotes.slice(0, 8) } };
+    await patchJob(job.id, { usage: job.usage });
     await patchJob(job.id, { step: "Checking the facts and layout" });
     const built = assetsLib.buildManifest({ imageProvenance: assetsLib.imageProvenance(images), disclosureKind: assetsLib.disclosureKind(project), cardCopy, voiceShape: assetsLib.voiceShapeFrom(process.env), projectId: project.id, formats, narrative, intake: project.intake, reportFigures: fromReport ? reportFigures : [], articleTopic: fromReport && topic.origin === "web" ? topic : undefined, notice: fromReport ? noticeInfo : undefined, webTopic: fromReport ? undefined : topic, brand, narrationTagged: narrative.narrationTagged, audio: { narration_key: audio.key, duration_sec: audio.duration_sec, words: audio.words }, imageKeys });
     await patchJob(job.id, { validation: built.validation, manifest: built.manifest });

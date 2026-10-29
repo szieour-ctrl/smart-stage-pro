@@ -209,7 +209,7 @@ test("plan: a failed Claude call is recorded as an error and can be retried, up 
   } finally { global.fetch = realFetch; planLib.callClaudeText = realCall; }
 });
 
-test("edits keep the planner's scenes and counters and flag stale scenes", async () => {
+test("edits keep the planner's scenes and counters and re-match the scene text to the edited words", async () => {
   process.env.AGENT_MARKETING_ENABLED = "true";
   currentUser = U1;
   const id = (await call("POST", { action: "create" })).json.project.id;
@@ -222,7 +222,8 @@ test("edits keep the planner's scenes and counters and flag stale scenes", async
   assert.strictEqual(row.narrative.scenes.length, 1);
   assert.strictEqual(row.narrative.attempts, 1);
   assert.strictEqual(row.narrative.intakeHash, "abc");
-  assert.strictEqual(row.narrative.scenesStale, true);
+  assert.strictEqual(row.narrative.scenesStale, false);
+  assert.strictEqual(row.narrative.scenes[0].narrationExcerpt, "My own edited words here.");
   assert.deepStrictEqual(row.narrative.claimsToVerify, ["x"]);
 });
 

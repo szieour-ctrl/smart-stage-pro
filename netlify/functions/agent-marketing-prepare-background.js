@@ -230,8 +230,10 @@ exports.handler = async (event) => {
     const pr = await supabase("GET", "agent_marketing_projects", null, `?id=eq.${job.project_id}&user_id=eq.${job.user_id}&select=*&limit=1`);
     const project = Array.isArray(pr.data) ? pr.data[0] : null;
     if (!project) return await fail(job, "The project was not found."), { statusCode: 200, body: "" };
-    const narrative = project.narrative_approved;
+    let narrative = project.narrative_approved;
     if (!narrative || !project.narrative_approved_at || !Array.isArray(narrative.scenes) || !narrative.narrationTagged) return await fail(job, "The narration has not been approved yet."), { statusCode: 200, body: "" };
+    // A script approved before its scene text was re-matched to an edited narration is re-matched here (the words and their order are the narration's own).
+    narrative = { ...narrative, scenes: require("./lib/agent-marketing-timing-lib").realignScenes(narrative.scenes, narrative.narrationTagged).scenes };
     const topic = project.selected_topic || {};
     if (project.selected_topic && narrative.intakeHash && narrative.intakeHash !== planLib.intakeHash(project.intake, project.selected_topic)) return await fail(job, "Your approved script was written for a different topic or different answers than the ones now on this project. Go back to the Script step, write a new script for your topic, approve it, and make the Reel again."), { statusCode: 200, body: "" };
     const reportFigures = topic.reportFigures;

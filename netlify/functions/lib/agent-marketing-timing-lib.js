@@ -121,4 +121,39 @@ function sceneWindows(words, excerpts, audioSeconds) {
   return { windows };
 }
 
-module.exports = { buildRequest, endpointPath, checkAlignment, wordsFromAlignment, captionWords, wordsMatchCaption, groupCaptionLines, sceneWindows };
+/**
+ * Re-match the scenes' narrationExcerpt to an edited narration (Oct 29, 2026: an edited script left the scene text one word off and the Reel failed its check).
+ * The old excerpts are aligned to the new words (longest common run of words); a word the agent added joins the scene of the word before it, a word
+ * removed simply leaves its scene. If the alignment would leave a scene with no words, the new words are split by the scenes' old word shares instead.
+ * Returns { scenes, changed }: the scenes unchanged when the excerpts already add up to exactly the narration's words.
+ */
+function realignScenes(scenes, taggedText) {
+  const list = Array.isArray(scenes) ? scenes : [];
+  const words = captionWords(taggedText);
+  const oldWords = [], owner = [];
+  list.forEach((sc, i) => captionWords(sc && sc.narrationExcerpt).forEach((w) => { oldWords.push(w); owner.push(i); }));
+  if (!list.length || !words.length) return { scenes: list, changed: false };
+  if (oldWords.length === words.length && oldWords.every((w, i) => w === words[i])) return { scenes: list, changed: false };
+  const norm = (w) => w.toLowerCase().replace(/[^a-z0-9$%]+/g, "");
+  const a = oldWords.map(norm), b = words.map(norm), n = a.length, m = b.length;
+  const dp = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
+  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+  const sceneOf = new Array(m).fill(-1);
+  for (let i = 0, j = 0; i < n && j < m;) {
+    if (a[i] === b[j]) { sceneOf[j] = owner[i]; i++; j++; } else if (dp[i + 1][j] >= dp[i][j + 1]) i++; else j++;
+  }
+  let prev = 0;
+  for (let j = 0; j < m; j++) { if (sceneOf[j] < 0) sceneOf[j] = prev; else prev = sceneOf[j]; }
+  let counts = list.map((_, i) => sceneOf.filter((x) => x === i).length);
+  if (counts.some((c) => c === 0) && m >= list.length) {
+    const share = list.map((sc) => Math.max(1, captionWords(sc && sc.narrationExcerpt).length)), tot = share.reduce((x, y) => x + y, 0);
+    counts = share.map((x) => Math.max(1, Math.round((x / tot) * m)));
+    let diff = m - counts.reduce((x, y) => x + y, 0);
+    for (let k = counts.length - 1; diff !== 0; k = (k - 1 + counts.length) % counts.length) { if (diff > 0) { counts[k]++; diff--; } else if (counts[k] > 1) { counts[k]--; diff++; } }
+  }
+  let at = 0;
+  const out = list.map((sc, i) => { const ex = words.slice(at, at + counts[i]).join(" "); at += counts[i]; return { ...sc, narrationExcerpt: ex }; });
+  return { scenes: out, changed: true };
+}
+
+module.exports = { realignScenes, buildRequest, endpointPath, checkAlignment, wordsFromAlignment, captionWords, wordsMatchCaption, groupCaptionLines, sceneWindows };

@@ -163,12 +163,15 @@ exports.handler = async (event) => {
       // Keep what the planner produced (scene plan, photo shopping list, claims to verify, planning counters) and replace only
       // what the agent edited. If the words changed, the scene excerpts no longer match them: flag that for the next step.
       const prev = project.narrative && typeof project.narrative === "object" ? project.narrative : {};
-      const clientScenes = v.narrative.scenes && v.narrative.scenes.length ? v.narrative.scenes : (prev.scenes || []);
+      let clientScenes = v.narrative.scenes && v.narrative.scenes.length ? v.narrative.scenes : (prev.scenes || []);
+      // The scene text follows the agent's wording: re-matched here, so an edited script never leaves the scenes one word off.
+      const aligned = require("./lib/agent-marketing-timing-lib").realignScenes(clientScenes, v.narrative.narrationTagged);
+      clientScenes = aligned.scenes;
       const narrative = {
         editorialAngle: prev.editorialAngle, hook: prev.hook, claimsToVerify: prev.claimsToVerify, missingAgentInputs: prev.missingAgentInputs,
         attempts: prev.attempts, intakeHash: prev.intakeHash,
         ...v.narrative, scenes: clientScenes, cta: v.narrative.cta || prev.cta || null,
-        scenesStale: !!(prev.narrationTagged && prev.narrationTagged !== v.narrative.narrationTagged) || !!prev.scenesStale,
+        scenesStale: false,
         source: "edited", status: "ready", savedAt: new Date().toISOString(),
       };
       const saved = await patch(project.id, userId, { narrative, status: "narrative_ready", gate_version: g.version, gate_result: gateSummary(g) });

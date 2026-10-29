@@ -54,6 +54,20 @@ function headlineFromHook(hook, market) {
   t = t.replace(/^if you(?:'|’)re (?:thinking about )?(?:selling|buying)[^,]*,\s*/i, "");
   return titleCase(t.charAt(0).toUpperCase() + t.slice(1));
 }
+
+// The opening headline comes from the planner's hook. When the agent has EDITED the script, that hook may describe the old wording (Oct 29, 2026: an edited
+// event script still opened with "Free Cars and Coffee"), so it is used only while every word of it is still in the first scene's text; otherwise the
+// headline is taken from the edited first sentence, whole and not cut off.
+function openingHook(narrative, excerpt) {
+  const hook = narrative && narrative.hook;
+  if (hook && !(narrative.source === "edited")) return hook;
+  const words = (t) => String(t || "").toLowerCase().replace(/[\u2019']/g, "'").match(/[a-z0-9$%']{4,}/g) || [];
+  const have = new Set(words(excerpt));
+  if (hook && words(stripTags(hook)).every((w) => have.has(w))) return hook;
+  const first = (String(excerpt || "").split(/(?<=[.!?\u2026])\s+/)[0] || excerpt || "");
+  const clause = first.split(/\s*[\u2014\u2013,:;\u2026]\s*|\s+-\s+/)[0].replace(/[.!?]+$/, "").trim() || first;
+  return wc(clause) <= 11 ? clause : fitWords(clause, CARD_CAPS.headline);
+}
 const marketName = (intake) => String((intake && intake.market) || "").split(",")[0].trim();
 
 /** A whole sentence, or a whole clause of it, that fits `cap` words (never a sentence cut off mid-thought); null when none does. */
@@ -122,7 +136,7 @@ function plan(narrative, intake, figures, opts) {
     const hits = figuresInExcerpt(s.narrationExcerpt, figures);
     const base = { narrative_role: s.role, branding: first || last ? "full" : "subtle", narration_excerpt: s.narrationExcerpt, camera_motion: s.cameraMotion, visual: s, claims: [] };
     if (first) {
-      out.push({ ...base, composition: "opening_headline_focus", data: { market, kind: eventReel ? "Local Events" : "Market Update", headline: headlineFromHook(narrative.hook || s.narrationExcerpt, market), eyebrow: eventReel ? (eventWhen(opts && opts.event) || "Happening Locally") : "Seller Insight" }, reason: "Opening scene: the hook sets the competitive context over a cinematic establishing image." });
+      out.push({ ...base, composition: "opening_headline_focus", data: { market, kind: eventReel ? "Local Events" : "Market Update", headline: headlineFromHook(openingHook(narrative, s.narrationExcerpt), market), eyebrow: eventReel ? (eventWhen(opts && opts.event) || "Happening Locally") : "Seller Insight" }, reason: "Opening scene: the hook sets the competitive context over a cinematic establishing image." });
     } else if (last) {
       const c = closingHeadline(s.narrationExcerpt);
       out.push({ ...base, composition: "closing_headline_focus", data: { headline: c.headline, support: c.support || capSupport(narrative.cta && narrative.cta.text) || "", tagline: eventReel ? "Local Life · Community" : "Pricing · Condition · Competition" }, reason: "Closing scene: the agent's low-pressure invitation with full branding." });

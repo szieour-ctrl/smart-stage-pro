@@ -79,6 +79,18 @@ function wordsMatchCaption(words, taggedText) {
 }
 
 /**
+ * The timed words with the caption's own spelling, when they differ only in punctuation or case (Oct 29, 2026: a Reel stopped on "The narration timings do
+ * not match the approved words" although the words were the same). Returns null when the words themselves differ, so a real mismatch still stops the Reel.
+ */
+function reconcileWords(words, taggedText) {
+  const want = captionWords(taggedText);
+  if (want.length !== words.length) return null;
+  const key = (t) => String(t).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+  if (!want.every((w, i) => key(w) === key(words[i].text))) return null;
+  return words.map((w, i) => ({ ...w, text: want[i] }));
+}
+
+/**
  * Group timed words into caption lines. A line breaks at a sentence end, or when it is full (characters or words) or runs too long.
  * Each line shows from its first word's start to its last word's end (held a little so it can be read), never past the next line.
  */
@@ -193,4 +205,4 @@ function restorePronunciations(words, list) {
   });
 }
 
-module.exports = { cleanPronunciations, applyPronunciations, restorePronunciations, realignScenes, buildRequest, endpointPath, checkAlignment, wordsFromAlignment, captionWords, wordsMatchCaption, groupCaptionLines, sceneWindows };
+module.exports = { reconcileWords, cleanPronunciations, applyPronunciations, restorePronunciations, realignScenes, buildRequest, endpointPath, checkAlignment, wordsFromAlignment, captionWords, wordsMatchCaption, groupCaptionLines, sceneWindows };

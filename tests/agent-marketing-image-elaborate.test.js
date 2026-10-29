@@ -92,3 +92,17 @@ test("revision: a note is required, and a blocked note never reaches Claude", as
   await assert.rejects(() => el.elaborateRevision({ project, kind: "concept", note: "Just listed at $450,000, open house Sunday", currentPrompt: "x", anthropicKey: "k", callFn }), (e) => e.code === "note_blocked");
   assert.strictEqual(called, false);
 });
+
+test("make a new image instead: the note is the subject, the old scene is left out, and a non-home subject like a county fair is allowed", async () => {
+  let seen;
+  await el.elaborate({ project, scene, kind: "concept", note: "a county fair with a Ferris wheel", fresh: true, anthropicKey: "k",
+    callFn: async (sys, user) => { seen = { sys, user: JSON.parse(user) }; return JSON.stringify({ description: "A bright morning at a county fair, a tall Ferris wheel in the central third against a clear sky, empty midway and food stalls with striped awnings below.", removed: [] }); } });
+  assert.strictEqual(seen.user.agent_note_is_the_subject, true);
+  assert.strictEqual(seen.user.scene_narration, null);
+  assert.strictEqual(seen.user.planner_visual_brief, null);
+  assert.match(seen.sys, /county fair with a Ferris wheel/);
+  assert.match(seen.sys, /does not have to show homes/);
+  // without fresh, the scene still anchors the description
+  await el.elaborate({ project, scene, kind: "concept", note: "mature trees", anthropicKey: "k", callFn: async (s, u) => { seen = JSON.parse(u); return JSON.stringify({ description: "A quiet street with mature trees.", removed: [] }); } });
+  assert.ok(seen.scene_narration && !seen.agent_note_is_the_subject);
+});

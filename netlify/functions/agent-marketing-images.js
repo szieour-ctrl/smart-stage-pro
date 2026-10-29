@@ -63,6 +63,15 @@ async function reapStale(assets, userId) {
   }
 }
 
+// The image a revision edits: this project's own finished image for this scene (kept or waiting for approval), never a failed or rejected one.
+function reviseBase(assets, id, sceneIndex) {
+  const a = (assets || []).find((x) => x.id === id);
+  if (!a || a.scene_index !== sceneIndex || !a.asset_key) return null;
+  const g = a.generation || {};
+  if (g.state !== "done" || (a.status !== "proposed" && a.status !== "approved")) return null;
+  return a;
+}
+
 async function viewOf(a) {
   const g = a.generation || {};
   return { id: a.id, sceneIndex: a.scene_index, format: g.format, kind: g.kind || null, state: g.state, status: a.status, version: a.version, error: g.state === "error" ? g.error : null, description: g.scenePrompt || null, note: g.note || null, fullPrompt: g.prompt || null, cropX: typeof g.cropX === "number" ? img.clampCrop(g.cropX) : img.defaultCropX(g.kind), url: g.state === "done" && a.asset_key ? await presignGet(a.asset_key) : null };
@@ -136,6 +145,14 @@ exports.handler = async (event) => {
       const tgt = img.allScenes(project.narrative).find((x) => x.index === Number(b.sceneIndex));
       if (!tgt) return reply(400, { error: "Unknown scene." });
       try {
+        if (b.reviseAssetId) {
+          // Revision: the note is an edit of the image already on screen (Oct 28, Sam), so only that change is made and the rest stays.
+          const base = reviseBase(assets, b.reviseAssetId, Number(b.sceneIndex));
+          if (!base) return reply(400, { error: "That image is not available to change. Create a new one instead." });
+          const kind = base.generation.kind || b.kind;
+          const out = await elab.elaborateRevision({ project, kind, note: b.note, currentPrompt: base.generation.basePrompt || base.generation.scenePrompt, anthropicKey: process.env.ANTHROPIC_API_KEY });
+          return reply(200, { description: out.description, removed: out.removed, warnings: out.warnings, kind, revise: base.id });
+        }
         const out = await elab.elaborate({ project, scene: tgt.scene, kind: b.kind, note: b.note, anthropicKey: process.env.ANTHROPIC_API_KEY });
         return reply(200, { description: out.description, removed: out.removed, warnings: out.warnings, kind: b.kind });
       } catch (e) {
@@ -161,7 +178,11 @@ exports.handler = async (event) => {
     let referenceKey = null; const fromApproved = false;
     const planned = img.plannedKind(target.scene);
     let kind = b.kind || planned || (target.scene.visualSource === "AGENT_SCENE" ? "agent_scene" : "concept");
-    if (kind === "agent_scene") {
+    // Revision: edit the image already made for this scene; it is the reference, so no profile photo is looked up.
+    const reviseBaseAsset = b.reviseAssetId ? reviseBase(assets, b.reviseAssetId, sceneIndex) : null;
+    if (b.reviseAssetId && !reviseBaseAsset) return reply(400, { error: "That image is not available to change. Create a new one instead.", code: "revise_unavailable" });
+    if (reviseBaseAsset) { kind = reviseBaseAsset.generation.kind || kind; referenceKey = reviseBaseAsset.asset_key; }
+    if (kind === "agent_scene" && !reviseBaseAsset) {
       const pr = rowsOf(await supabase("GET", "marketing_profiles", null, `?user_id=eq.${userId}&select=headshot_key,fullbody_key&limit=1`))[0];
       referenceKey = img.pickReferenceKey(pr);
       if (!referenceKey) return reply(409, { error: "Add a headshot or full-body photo to your Marketing Profile first.", code: "profile_photo_needed" });
@@ -180,7 +201,8 @@ exports.handler = async (event) => {
     if (!scenePrompt && !fromApproved) return reply(400, { error: "Use Elaborate with AI first so we can describe this image.", code: "description_needed" });
     if (q.charged && b.confirmCharge !== true) return reply(402, { error: "This image costs extra.", code: "confirm_charge", credits: q.credits });
     const st = img.settings();
-    const prompt = img.buildPrompt({ kind, scenePrompt });
+    if (reviseBaseAsset && !(typeof b.description === "string" && b.description.trim())) return reply(400, { error: "Use Elaborate with AI first so we can describe the change.", code: "description_needed" });
+    const prompt = reviseBaseAsset ? img.buildRevisionPrompt({ instruction: scenePrompt }) : img.buildPrompt({ kind, scenePrompt });
 
     // Charge first (only for extras); refunded by the worker or the stale check if the image never arrives.
     let charged = null;
@@ -194,7 +216,7 @@ exports.handler = async (event) => {
     const version = Math.max(0, ...assets.filter((a) => a.scene_index === sceneIndex).map((a) => a.version || 0)) + 1;
     // A new draft replaces any unaccepted earlier draft for this slot.
     for (const o of assets) if (o.scene_index === sceneIndex && img.fmtOf(o) === format && o.status === "proposed") await supabase("PATCH", "agent_marketing_assets", { status: "rejected" }, `?id=eq.${o.id}&user_id=eq.${userId}`);
-    const generation = { state: "generating", format, kind, prompt, scenePrompt: scenePrompt || null, note: note || null, elaborated: !!(b.description && String(b.description).trim()), referenceKey, fromApproved, quality: st.quality, size: img.SIZES[format], charged, startedAt: new Date().toISOString(), attempt: q.used + 1 };
+    const generation = { state: "generating", format, kind, prompt, scenePrompt: scenePrompt || null, note: note || null, elaborated: !!(b.description && String(b.description).trim()), referenceKey, revisionOf: reviseBaseAsset ? reviseBaseAsset.id : null, basePrompt: reviseBaseAsset ? (reviseBaseAsset.generation.basePrompt || reviseBaseAsset.generation.scenePrompt || null) : null, fromApproved, quality: st.quality, size: img.SIZES[format], charged, startedAt: new Date().toISOString(), attempt: q.used + 1 };
     const ins = await supabase("POST", "agent_marketing_assets", { project_id: project.id, user_id: userId, scene_index: sceneIndex, version, source: "gpt_image_2", ai_generated: true, status: "proposed", asset_key: null, generation, rights: { route: "generated", aiGenerated: true } });
     const row = rowsOf(ins)[0];
     if (!ins || ins.status >= 300 || !row) {

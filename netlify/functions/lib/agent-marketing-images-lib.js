@@ -111,6 +111,18 @@ function buildPrompt({ kind, scenePrompt }) {
   ].join("\n");
 }
 
+// Revision (Oct 28, 2026, Sam): when the scene already has an image and the agent adds a note, the note is an EDIT of that image, like a
+// virtual-staging revision: the picture is sent to the image model as the thing to edit and everything the note does not name stays locked.
+function buildRevisionPrompt({ instruction }) {
+  const base = require("./agent-marketing-signage-lib").scrubSignage(String(instruction || "").replace(/\s+/g, " ").trim().slice(0, 700));
+  return [
+    "Edit the provided image. Make ONLY this change: " + base,
+    "Keep everything else exactly as it is in the provided image: the same composition, camera angle and framing, the same home or subject, building shapes, colors, materials, landscaping, objects, layout and image size. For a person, keep exactly the same face, hair, build and clothing. Change only what the instruction names and what that change directly affects (for example the light, shadows and sky when the time of day changes). Do not add, remove or move anything else.",
+    "Keep the calm, uncluttered areas of the frame calm (open sky or wall at the top, a clear lower third for captions).",
+    NO_REAL_THINGS,
+  ].join("\n");
+}
+
 // Which profile photo to use as the agent reference (full body preferred when the scene is a full figure).
 function pickReferenceKey(profileRow) {
   const r = profileRow || {};
@@ -155,4 +167,4 @@ function validTallSize(v) {
   return w + "x" + h;
 }
 
-module.exports = { buildFormatPrompt, tallSize, TALL_SIZE, CROP_WIDTH, clampCrop, defaultCropX, WIDE, DEFAULT_SIZE, validWideSize, SIZES, IMAGE_SOURCES, STALE_GENERATING_MS, settings, imageScenes, allScenes, plannedKind, slotAssets, quote, buildPrompt, pickReferenceKey, counts, fmtOf, stateOf };
+module.exports = { buildFormatPrompt, tallSize, TALL_SIZE, CROP_WIDTH, clampCrop, defaultCropX, WIDE, DEFAULT_SIZE, validWideSize, SIZES, IMAGE_SOURCES, STALE_GENERATING_MS, settings, imageScenes, allScenes, plannedKind, slotAssets, quote, buildPrompt, buildRevisionPrompt, pickReferenceKey, counts, fmtOf, stateOf };

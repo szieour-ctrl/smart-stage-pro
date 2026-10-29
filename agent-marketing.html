@@ -389,6 +389,12 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
         <label class="lbl" for="narration">Narration</label>
         <textarea id="narration" style="min-height:190px"></textarea>
         <div class="hint">Words in [brackets] are delivery cues for the narrator. They never appear in captions. <span id="wordInfo"></span></div>
+        <details id="pronBox" style="margin:10px 0">
+          <summary style="cursor:pointer;font-weight:600">Pronunciation (a name said wrongly)</summary>
+          <div class="hint">If the narrator says a name wrongly, type the word as it is written in your script and how it should sound. The narrator uses the sound; your captions keep the word as written. Example: Denio's &rarr; Duh-NYE-oh's.</div>
+          <div id="pronRows"></div>
+          <button class="btn sm ghost" type="button" id="pronAdd">Add a word</button>
+        </details>
         <label class="lbl">Captions (what viewers will read)</label>
         <div class="caption-preview" id="captionPreview"></div>
         <label class="lbl" for="cta">Closing call to action</label>
@@ -657,6 +663,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     if (planning) startPoll();
     if (ready && !planning) {
       $("narration").value = n.narrationTagged;
+      paintPron(n.pronunciations);
       $("cta").value = (n.cta && n.cta.text) || "";
       $("angleLine").textContent = n.editorialAngle || "";
       var w = n.warnings || [];
@@ -694,7 +701,15 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     }, 3000);
   }
   function stopPoll() { if (state.poll) { clearInterval(state.poll); state.poll = null; } }
-  function scriptBody() { return { narrationTagged: $("narration").value, cta: { text: $("cta").value, source: "user_edited" } }; }
+  function pronRow(w, v) { return '<div class="pron-row" style="display:flex;gap:8px;margin:6px 0"><input type="text" class="pw" maxlength="40" placeholder="Written word" value="' + esc(w || "") + '"><input type="text" class="ps" maxlength="40" placeholder="How it sounds" value="' + esc(v || "") + '"><button class="btn sm ghost" type="button" data-pron-del="1" aria-label="Remove">&times;</button></div>'; }
+  function paintPron(list) {
+    $("pronRows").innerHTML = (list || []).map(function (x) { return pronRow(x.written, x.say); }).join("");
+    $("pronBox").open = !!(list && list.length);
+  }
+  function pronList() {
+    return Array.prototype.map.call($("pronRows").querySelectorAll(".pron-row"), function (r) { return { written: r.querySelector(".pw").value, say: r.querySelector(".ps").value }; }).filter(function (x) { return x.written.trim() && x.say.trim(); });
+  }
+  function scriptBody() { return { narrationTagged: $("narration").value, cta: { text: $("cta").value, source: "user_edited" }, pronunciations: pronList() }; }
   async function saveScript(thenApprove) {
     $("saveScriptBtn").disabled = true; $("approveBtn").disabled = true; say("scriptMsg", "");
     try {
@@ -1360,6 +1375,8 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     $("narration").addEventListener("input", refreshPreview);
     $("saveScriptBtn").addEventListener("click", function () { saveScript(false); });
     $("approveBtn").addEventListener("click", function () { saveScript(true); });
+    $("pronAdd").addEventListener("click", function () { $("pronRows").insertAdjacentHTML("beforeend", pronRow("", "")); });
+    $("pronRows").addEventListener("click", function (ev) { var b = ev.target.closest && ev.target.closest("button[data-pron-del]"); if (b) b.parentNode.parentNode.removeChild(b.parentNode); });
     var m = /#p=([0-9a-f-]{36})/i.exec(location.hash || "");
     if (m) { var x = await api("GET", "?id=" + m[1]); if (x.ok) { setProject(x.json.project); return go(stage()); } }
     var l = await api("GET", "");

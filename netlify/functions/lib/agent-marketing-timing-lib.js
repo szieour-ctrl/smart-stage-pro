@@ -156,4 +156,41 @@ function realignScenes(scenes, taggedText) {
   return { scenes: out, changed: true };
 }
 
-module.exports = { realignScenes, buildRequest, endpointPath, checkAlignment, wordsFromAlignment, captionWords, wordsMatchCaption, groupCaptionLines, sceneWindows };
+// ── Pronunciations (Oct 29, 2026): a name the narrator says wrongly ("Denio's" said "Danaio's") is spoken from a respelling while the captions keep the
+// word as written. The respelling is ONE token (spaces become hyphens), so the word count, the alignment and the caption words stay in step.
+const PRON_MAX = 10, PRON_LEN = 40;
+function cleanPronunciations(list) {
+  const out = [], seen = new Set();
+  for (const x of Array.isArray(list) ? list : []) {
+    const written = String((x && x.written) || "").replace(/[\[\]\r\n]/g, " ").replace(/\s+/g, " ").trim().slice(0, PRON_LEN);
+    const say = String((x && x.say) || "").replace(/[\[\]\r\n]/g, " ").trim().replace(/\s+/g, "-").slice(0, PRON_LEN);
+    if (!written || !say || written.includes(" ") || written.toLowerCase() === say.toLowerCase() || seen.has(written.toLowerCase())) continue;
+    seen.add(written.toLowerCase());
+    out.push({ written, say });
+    if (out.length >= PRON_MAX) break;
+  }
+  return out;
+}
+const escRe = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/['\u2019]/g, "['\u2019]");
+/** The text sent to the narrator: each written word replaced by its respelling (whole words only). */
+function applyPronunciations(text, list) {
+  let out = String(text || "");
+  for (const p of cleanPronunciations(list)) out = out.replace(new RegExp(`(?<![\\p{L}\\p{N}])${escRe(p.written)}(?![\\p{L}\\p{N}])`, "giu"), p.say);
+  return out;
+}
+/** The timed words with each respelling turned back into the word as written, so captions never show it. */
+function restorePronunciations(words, list) {
+  const prons = cleanPronunciations(list);
+  if (!prons.length) return words;
+  return words.map((w) => {
+    const m = /^([^\p{L}\p{N}]*)(.*?)([^\p{L}\p{N}]*)$/su.exec(w.text);
+    const core = m ? m[2] : w.text;
+    for (const p of prons) {
+      const c = core.toLowerCase(), q = p.say.toLowerCase();
+      if (c === q || (c.startsWith(q) && /^['\u2019]?s?$/.test(c.slice(q.length)))) return { ...w, text: (m ? m[1] : "") + p.written + core.slice(p.say.length) + (m ? m[3] : "") };
+    }
+    return w;
+  });
+}
+
+module.exports = { cleanPronunciations, applyPronunciations, restorePronunciations, realignScenes, buildRequest, endpointPath, checkAlignment, wordsFromAlignment, captionWords, wordsMatchCaption, groupCaptionLines, sceneWindows };

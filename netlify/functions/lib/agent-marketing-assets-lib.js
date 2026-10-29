@@ -63,6 +63,30 @@ function reportNumbers(figs) {
 }
 
 /**
+ * Which scenes show an AI-generated picture, per format: { [sceneIndex]: { "9x16": "ai" | "photo", ... } } from the prepared image slots.
+ * A generated or adopted GPT Image 2 image is "ai"; a subscriber photo is "photo" unless its record says it was AI-generated; the closing plate
+ * is a darkened, blurred copy of the nearest earlier picture, so it takes that picture's provenance (a neutral plate with none is "photo").
+ */
+function imageProvenance(images) {
+  const out = {};
+  const slots = Object.entries(images || {}).map(([slot, v]) => { const [sc, f] = slot.split("_"); return { sc: Number(sc), f, v: v || {} }; });
+  const direct = (v) => v.source === "gpt_image_2" || v.source === "existing_project_image" || (v.source === "own_photo" && v.ai === true);
+  slots.filter((x) => x.v.source !== "closing_plate").forEach((x) => { (out[x.sc] = out[x.sc] || {})[x.f] = direct(x.v) ? "ai" : "photo"; });
+  slots.filter((x) => x.v.source === "closing_plate").forEach((x) => {
+    let ai = false;
+    for (let i = x.sc - 1; i >= 0; i--) { const e = (images || {})[`${i}_${x.f}`]; if (e && e.key && e.source !== "closing_plate") { ai = direct(e); break; } }
+    (out[x.sc] = out[x.sc] || {})[x.f] = ai ? "ai" : "photo";
+  });
+  return out;
+}
+/** Which disclosure wording applies: an event Reel, a Local Market Insider Reel, or any other Agent Marketing Reel. */
+function disclosureKind(project) {
+  const t = project && project.selected_topic;
+  if (t && typeof t === "object" && (t.kind === "local_events" || (t.event && typeof t.event === "object"))) return "event";
+  return project && project.template === "local_market_insider" ? "market" : "default";
+}
+
+/**
  * buildManifest(input) → { manifest, edits, plan, validation }
  *   input: { cardCopy (optional, { [sceneIndex]: { headline, statement, support } } from the card copy writer), projectId, formats, narrative (approved), intake, reportFigures, notice:{period}, brand:{primary,secondary,border,font,agent,headshot_key},
  *            audio:{ narration_key, duration_sec, words[] }, imageKeys: { [sceneIndex]: { "9x16": key, "16x9": key } }, narrationTagged }
@@ -70,7 +94,7 @@ function reportNumbers(figs) {
 function buildManifest(input) {
   const { narrative, formats } = input;
   const figs = director.figuresFrom(input.reportFigures);
-  const pl = director.plan(narrative, input.intake, figs, { cardCopy: input.cardCopy, eventReel: !!(input.webTopic && input.webTopic.event) });
+  const pl = director.plan(narrative, input.intake, figs, { cardCopy: input.cardCopy, eventReel: !!(input.webTopic && input.webTopic.event), event: input.webTopic && input.webTopic.event });
   const excerpts = pl.scenes.map((s) => s.narration_excerpt);
   const tw = timing.sceneWindows(input.audio.words, excerpts, input.audio.duration_sec);
   if (tw.error) return { manifest: null, validation: { ok: false, errors: [{ code: "timing", where: "scenes", message: tw.error }], warnings: [] }, plan: pl };
@@ -91,7 +115,7 @@ function buildManifest(input) {
     return {
       n: i + 1, composition: s.composition, narrative_role: s.narrative_role, branding: s.branding, source_role: v.sourceRole === "article" && i > 0 && i < pl.scenes.length - 1 ? "article" : "data",
       narration_excerpt: s.narration_excerpt, window: tw.windows[i], ...(cardStart(s, tw.windows[i]) !== undefined ? { card_start_sec: cardStart(s, tw.windows[i]) } : {}),
-      visual: { research_visual_context: [v.purpose, v.visualBrief].filter(Boolean).join(" — "), image_keys: keys, motion: s.camera_motion || "static_hold", source: v.visualSource },
+      visual: { research_visual_context: [v.purpose, v.visualBrief].filter(Boolean).join(" — "), image_keys: keys, motion: s.camera_motion || "static_hold", source: v.visualSource, ...(input.imageProvenance && input.imageProvenance[owner] ? { image_provenance: input.imageProvenance[owner] } : {}) },
       claims: s.claims, data: s.data, reason: s.reason,
     };
   });
@@ -105,6 +129,7 @@ function buildManifest(input) {
     audio: { narration_key: input.audio.narration_key, duration_sec: input.audio.duration_sec, ...(input.voiceShape ? { voice_shape: input.voiceShape } : {}) },
     captions, scenes,
   };
+  if (scenes.some((sc) => Object.values((sc.visual || {}).image_provenance || {}).includes("ai"))) manifest.disclosure = { kind: input.disclosureKind || "default", text: manifestLib.AI_DISCLOSURES[input.disclosureKind] || manifestLib.AI_DISCLOSURES.default };
   const q = manifestLib.applySmallSampleQualifiers(manifest);
   manifest = q.manifest;
   const validation = manifestLib.validateManifest(manifest);
@@ -119,4 +144,4 @@ function voiceShapeFrom(env) {
   return semitones || bass_db ? { semitones, bass_db } : null;
 }
 
-module.exports = { voiceShapeFrom, parseNoticePeriod, parseNotice, voiceIdFor, imageNeeds, buildManifest };
+module.exports = { imageProvenance, disclosureKind, voiceShapeFrom, parseNoticePeriod, parseNotice, voiceIdFor, imageNeeds, buildManifest };

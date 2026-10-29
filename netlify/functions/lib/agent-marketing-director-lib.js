@@ -56,13 +56,27 @@ function headlineFromHook(hook, market) {
 }
 const marketName = (intake) => String((intake && intake.market) || "").split(",")[0].trim();
 
+/** A whole sentence, or a whole clause of it, that fits `cap` words (never a sentence cut off mid-thought); null when none does. */
+function wholePart(sentence, cap) {
+  const whole = String(sentence || "").trim();
+  if (!whole) return null;
+  if (wc(whole) <= cap) return whole;                       // fits as written, punctuation included
+  const t = dropLead(whole.replace(/[.!?…]+$/, "").trim());
+  const clause = t.split(/\s*[,;:—–]\s*|\s+-\s+/).map((c) => c.trim()).find((c) => wc(c) >= 3 && wc(c) <= cap);
+  return clause ? upFirst(clause) : null;
+}
+
 function closingHeadline(excerpt) {
   const t = stripTags(excerpt).replace(/\s+/g, " ");
   const q = /^(.*?\?)\s*(.*)$/.exec(t);
-  // The headline is one sentence at most, held to the closing cap (Sam's word caps, Oct 27): a long invitation shows its shortest clause
-  // that carries the point instead of the whole sentence, so the card always fits both frames.
-  const first = (q ? q[1] : t.split(/(?<=[.!?…])\s+/)[0] || t).replace(/^want to /i, "Want to ");
-  const short = wc(first) <= CARD_CAPS.closing ? first : upFirst(fitWords(first, CARD_CAPS.closing));
+  // The headline is held to the closing cap (Sam's word caps, Oct 27): a long invitation shows a clause that carries the point instead of
+  // the whole sentence, so the card always fits both frames. Oct 29 (Eskaton test): it must also read as a complete thought, so when the first
+  // sentence has no clause that fits, the next sentence that does is used; only when nothing fits is the first sentence shortened.
+  const sentences = q ? [q[1]] : t.split(/(?<=[.!?…])\s+/).filter(Boolean);
+  const first = (sentences[0] || t).replace(/^want to /i, "Want to ");
+  let short = null;
+  for (const s of sentences) { short = wholePart(s, CARD_CAPS.closing); if (short) break; }
+  if (!short) short = upFirst(fitWords(first, CARD_CAPS.closing));
   const words = short.split(" ").filter(Boolean), cut = Math.ceil(words.length / 2);
   return { headline: [words.slice(0, cut).join(" "), words.slice(cut).join(" ")], support: capSupport(q ? q[2] : "") };
 }
@@ -74,6 +88,23 @@ function capSupport(text) {
   const first = stripTags(text).split(/(?<=[.!?…])\s+/)[0] || "";
   const clause = first ? fitWords(first, CARD_CAPS.support) : "";
   return clause && wc(clause) <= CARD_CAPS.support ? upFirst(clause) : "";
+}
+
+// The opening card of a Local Events Reel carries when the event happens (Sam, Oct 29 Eskaton test): "Saturday, Nov 14 · 10 a.m. to 2 p.m.".
+// Built from the research step's confirmed date and time, so every number on it is already verified.
+const WEEKDAY = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const ymd = (v) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(v || "")); return m && +m[2] >= 1 && +m[2] <= 12 ? { y: +m[1], m: +m[2], d: +m[3] } : null; };
+function niceTime(t) {
+  return String(t || "").replace(/\s+/g, " ").trim().replace(/(\d{1,2})(?::00)?\s*([ap])\.?m\b\.?/gi, (_, h, ap) => `${h} ${ap.toLowerCase()}.m.`);
+}
+function eventWhen(e) {
+  const a = ymd(e && e.date);
+  if (!a) return "";
+  const b = ymd(e.endDate);
+  let day = `${WEEKDAY[new Date(Date.UTC(a.y, a.m - 1, a.d)).getUTCDay()]}, ${MON[a.m - 1]} ${a.d}`;
+  if (b && (b.y !== a.y || b.m !== a.m || b.d !== a.d)) day = a.m === b.m ? `${MON[a.m - 1]} ${a.d}\u2013${b.d}` : `${MON[a.m - 1]} ${a.d} \u2013 ${MON[b.m - 1]} ${b.d}`;
+  return [day, niceTime(e.time)].filter(Boolean).join(" \u00b7 ");
 }
 
 /**
@@ -91,7 +122,7 @@ function plan(narrative, intake, figures, opts) {
     const hits = figuresInExcerpt(s.narrationExcerpt, figures);
     const base = { narrative_role: s.role, branding: first || last ? "full" : "subtle", narration_excerpt: s.narrationExcerpt, camera_motion: s.cameraMotion, visual: s, claims: [] };
     if (first) {
-      out.push({ ...base, composition: "opening_headline_focus", data: { market, kind: eventReel ? "Local Events" : "Market Update", headline: headlineFromHook(narrative.hook || s.narrationExcerpt, market), eyebrow: eventReel ? "Happening Locally" : "Seller Insight" }, reason: "Opening scene: the hook sets the competitive context over a cinematic establishing image." });
+      out.push({ ...base, composition: "opening_headline_focus", data: { market, kind: eventReel ? "Local Events" : "Market Update", headline: headlineFromHook(narrative.hook || s.narrationExcerpt, market), eyebrow: eventReel ? (eventWhen(opts && opts.event) || "Happening Locally") : "Seller Insight" }, reason: "Opening scene: the hook sets the competitive context over a cinematic establishing image." });
     } else if (last) {
       const c = closingHeadline(s.narrationExcerpt);
       out.push({ ...base, composition: "closing_headline_focus", data: { headline: c.headline, support: c.support || capSupport(narrative.cta && narrative.cta.text) || "", tagline: eventReel ? "Local Life · Community" : "Pricing · Condition · Competition" }, reason: "Closing scene: the agent's low-pressure invitation with full branding." });
@@ -161,4 +192,4 @@ function statement(scene, copy) {
   return { headline: headlineLines(headline), statement: pick(sentences.slice(1), CARD_CAPS.statement), support: pick(sentences.slice(2), CARD_CAPS.support) };
 }
 
-module.exports = { CARD_CAPS, headlineLines, sceneHeadline, figuresFrom, figuresInExcerpt, headlineFromHook, closingHeadline, plan, titleCase, stripTags };
+module.exports = { CARD_CAPS, headlineLines, sceneHeadline, figuresFrom, figuresInExcerpt, headlineFromHook, closingHeadline, eventWhen, plan, titleCase, stripTags };

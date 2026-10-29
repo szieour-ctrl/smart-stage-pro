@@ -237,7 +237,7 @@ function buildUserMessage(project) {
 }
 
 // ── Claude call (raw https, like the rest of the codebase) ─────────────────────────────────────────────────────
-function callClaudeText(systemPrompt, userText, anthropicKey) {
+function callClaudeText(systemPrompt, userText, anthropicKey, usageSink) {
   return new Promise((resolve, reject) => {
     const bodyStr = JSON.stringify({ model: MODEL, max_tokens: MAX_TOKENS, system: systemPrompt, messages: [{ role: "user", content: userText }] });
     const req = https.request({
@@ -253,6 +253,7 @@ function callClaudeText(systemPrompt, userText, anthropicKey) {
           const text = parsed && parsed.content && parsed.content.find((b) => b.type === "text") && parsed.content.find((b) => b.type === "text").text;
           if (!text) return reject(new Error(`Planner call returned no text: ${data.slice(0, 300)}`));
           if (parsed.stop_reason === "max_tokens") return reject(new Error("Planner response was cut off"));
+          if (Array.isArray(usageSink) && parsed.usage) usageSink.push({ model: MODEL, input_tokens: Number(parsed.usage.input_tokens) || 0, output_tokens: Number(parsed.usage.output_tokens) || 0 });
           resolve(text);
         } catch (e) { reject(new Error(`Planner response parse error: ${e.message}`)); }
       });
@@ -455,21 +456,28 @@ function lengthProblems(narrative, dur) {
   return out;
 }
 
+// Claude usage per planning attempt (Sam, Oct 29, 2026): tokens are recorded so real cost can replace the estimates. Rewrites count as extra calls.
+function summarizeClaudeUsage(sink) {
+  const list = Array.isArray(sink) ? sink : [];
+  return { claude_calls: list.length, claude_input_tokens: list.reduce((a, u) => a + u.input_tokens, 0), claude_output_tokens: list.reduce((a, u) => a + u.output_tokens, 0), claude_model: list.length ? list[0].model : MODEL };
+}
+
 /**
  * generatePlan({ project, anthropicKey, callFn }) → { narrative, warnings, gate }  (throws Error with a user-safe message)
  */
 async function generatePlan({ project, anthropicKey, callFn }) {
   const call = callFn || module.exports.callClaudeText; // looked up at call time so tests can replace it
   const user = buildUserMessage(project);
+  const sink = [];
   let normalized;
   try {
-    normalized = normalizePlan(extractJsonObject(await call(buildSystemPrompt(), user, anthropicKey)), project);
+    normalized = normalizePlan(extractJsonObject(await call(buildSystemPrompt(), user, anthropicKey, sink)), project);
   } catch (err) {
     // A structurally unusable plan (a missing narration excerpt, the wrong scene or image count, no JSON) gets ONE corrective retry inside the
     // same attempt, so it does not use up one of the project's planning attempts. Anything else (a gate block, a cut-off reply) is not retried.
     if (!/narration excerpt|scenes are needed|concept images?|unusable plan|no narration|JSON/i.test(String(err && err.message))) throw err;
     const fix = `${user}\n\nYour previous reply could not be used: ${String(err.message).slice(0, 200)}. Return the complete JSON again. Every scene MUST have a non-empty narration_excerpt taken from your narration, in order, and the scenes together must cover the whole narration.`;
-    normalized = normalizePlan(extractJsonObject(await call(buildSystemPrompt(), fix, anthropicKey)), project);
+    normalized = normalizePlan(extractJsonObject(await call(buildSystemPrompt(), fix, anthropicKey, sink)), project);
   }
   let { narrative, warnings } = normalized;
   let g = gateNarrative(project, narrative);
@@ -478,7 +486,7 @@ async function generatePlan({ project, anthropicKey, callFn }) {
     // wrong and ask for one rewrite. Only a second block reaches the agent, and then with the rule and the reason.
     console.error("[agent-marketing-plan] gate blocked the first draft:", JSON.stringify(g.blocks).slice(0, 500));
     const fix = `${user}\n\nYour draft was rejected by the compliance check for these specific reasons:\n${blockLines(g.blocks)}\nRewrite the complete JSON so none of these happen. Keep the same topic, hook and facts; change only what is listed, and take every number from the topic or the agent's report.`;
-    normalized = normalizePlan(extractJsonObject(await call(buildSystemPrompt(), fix, anthropicKey)), project);
+    normalized = normalizePlan(extractJsonObject(await call(buildSystemPrompt(), fix, anthropicKey, sink)), project);
     narrative = normalized.narrative; warnings = normalized.warnings;
     g = gateNarrative(project, narrative);
   }
@@ -495,7 +503,7 @@ async function generatePlan({ project, anthropicKey, callFn }) {
     console.error("[agent-marketing-plan] length/balance outside the target:", fit.join("; "));
     try {
       const fix = `${user}\n\nYour draft does not fit the requested length: ${fit.join(" ")} Rewrite the complete JSON, keeping the same topic, hook, facts and tone. Keep every number you state exactly as the topic gives it, and drop the least important sentence or clause to get inside the limits.`;
-      const again = normalizePlan(extractJsonObject(await call(buildSystemPrompt(), fix, anthropicKey)), project);
+      const again = normalizePlan(extractJsonObject(await call(buildSystemPrompt(), fix, anthropicKey, sink)), project);
       const g2 = gateNarrative(project, again.narrative);
       if (g2.ok && lengthProblems(again.narrative, project.duration_sec).length <= fit.length && lengthDistance(again.narrative, project.duration_sec) < lengthDistance(narrative, project.duration_sec)) {
         narrative = again.narrative; warnings = again.warnings; g = g2;
@@ -507,7 +515,7 @@ async function generatePlan({ project, anthropicKey, callFn }) {
     sc.visualBrief = signage.scrubSignage(sc.visualBrief);
     if (sc.aiGenerationPrompt) sc.aiGenerationPrompt = signage.scrubSignage(sc.aiGenerationPrompt) || "Ordinary single-story and two-story stucco homes along a quiet residential street in soft daylight.";
   });
-  return { narrative, warnings: warnings.concat(g.warnings.map((w) => w.message)), gate: g };
+  return { narrative, warnings: warnings.concat(g.warnings.map((w) => w.message)), gate: g, usage: summarizeClaudeUsage(sink) };
 }
 
 // What the compliance check says about a draft: "- <what is wrong> (rule, where)". One line per block, at most `max`.
@@ -531,5 +539,5 @@ function gateNarrative(project, narrative) {
 
 module.exports = { topicBrief, blockLines,
   MODEL, stripNotice, SCENE_RANGE, GPT_RANGE, NEW_IMAGE_SOURCES, VISUAL_SOURCES, SOURCE_MAX, MAX_ATTEMPTS, STALE_PLANNING_MS, ALLOWED_TAGS,
-  intakeHash, ctaAngleFor, ctaAngleIndex, CTA_ANGLES, VISUAL_LOOKS, visualLookFor, visualLookIndex, buildSystemPrompt, buildUserMessage, lengthProblems, lengthDistance, callClaudeText, extractJsonObject, sanitizeTags, normalizePlan, generatePlan,
+  intakeHash, ctaAngleFor, ctaAngleIndex, CTA_ANGLES, VISUAL_LOOKS, visualLookFor, visualLookIndex, buildSystemPrompt, buildUserMessage, lengthProblems, lengthDistance, callClaudeText, summarizeClaudeUsage, extractJsonObject, sanitizeTags, normalizePlan, generatePlan,
 };

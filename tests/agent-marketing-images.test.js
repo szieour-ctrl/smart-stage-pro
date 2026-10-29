@@ -6,7 +6,7 @@ process.env.OPENAI_API_KEY = "x"; process.env.INTERNAL_API_KEY = "ik"; process.e
 const img = require("../netlify/functions/lib/agent-marketing-images-lib");
 
 test("settings defaults and clamping", () => {
-  assert.deepStrictEqual(img.settings({}), { freeRedos: 1, projectCap: 12, credits: 1, quality: "medium", charging: true });
+  assert.deepStrictEqual(img.settings({}), { freeRedos: 1, projectCap: 12, credits: 1, quality: "low", charging: true });
   assert.strictEqual(img.settings({ AGENT_MARKETING_IMAGE_PROJECT_CAP: "999" }).projectCap, 12);
   assert.strictEqual(img.settings({ AGENT_MARKETING_IMAGE_QUALITY: "high", AGENT_MARKETING_IMAGE_FREE_REDOS: "0" }).freeRedos, 0);
 });

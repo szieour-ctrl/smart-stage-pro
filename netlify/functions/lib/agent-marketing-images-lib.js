@@ -9,7 +9,7 @@
 //   AGENT_MARKETING_IMAGE_FREE_REDOS    default 1
 //   AGENT_MARKETING_IMAGE_PROJECT_CAP   default 12   (generations per project, errors that were refunded excluded)
 //   AGENT_MARKETING_IMAGE_CREDITS       default 1    (Images charged per extra generation)
-//   AGENT_MARKETING_IMAGE_QUALITY       default "medium"  (low | medium | high)
+//   AGENT_MARKETING_IMAGE_QUALITY       default "low"     (low | medium | high)
 //   AGENT_MARKETING_IMAGE_CHARGING      default "on"      ("off" = every try is free during beta; the project cap still applies)
 //   AGENT_MARKETING_IMAGE_SIZE          default "2560x1440" (a 16:9 size; edges multiples of 16, max 3840; above 2560x1440 is experimental)
 "use strict";
@@ -39,12 +39,12 @@ const num = (v, d, min, max) => { const n = Number(v); return Number.isFinite(n)
 
 function settings(env) {
   const e = env || process.env;
-  const q = String(e.AGENT_MARKETING_IMAGE_QUALITY || "medium").toLowerCase();
+  const q = String(e.AGENT_MARKETING_IMAGE_QUALITY || "low").toLowerCase();
   return {
     freeRedos: num(e.AGENT_MARKETING_IMAGE_FREE_REDOS, 1, 0, 5),
     projectCap: num(e.AGENT_MARKETING_IMAGE_PROJECT_CAP, 12, 1, 60),
     credits: num(e.AGENT_MARKETING_IMAGE_CREDITS, 1, 1, 20),
-    quality: ["low", "medium", "high"].includes(q) ? q : "medium",
+    quality: ["low", "medium", "high"].includes(q) ? q : "low",
     charging: String(e.AGENT_MARKETING_IMAGE_CHARGING || "on").trim().toLowerCase() !== "off",
   };
 }

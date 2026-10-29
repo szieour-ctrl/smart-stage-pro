@@ -622,7 +622,13 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     if (!researchUI) {
       researchUI = AMResearchUI({
         api: function (base, method, qs, body) { return api(method, qs, body, base); },
-        onSelected: function (topic) { state.project.selectedTopic = topic; renderSteps(2); openCta(); },
+        onSelected: async function (topic) {
+          // Choosing a different topic makes the server reset the intake and drop the project back to draft, so reload it: otherwise this page keeps the
+          // earlier topic's market, script and status and the Script step has no "Write my script" button (Sam, Oct 29, 2026).
+          var prevId = state.project.id;
+          try { var x = await api("GET", "?id=" + encodeURIComponent(prevId)); if (x.ok && x.json.project) setProject(x.json.project); } catch (e) { /* the local copy below is used */ }
+          state.project.selectedTopic = topic; renderSteps(2); openCta();
+        },
         onContinue: function () { openCta(); },
       });
       $("resContinueBtn").addEventListener("click", continueWithTopic);
@@ -639,7 +645,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
   function narr() { return state.project && state.project.narrative; }
   function renderScript() {
     stopPoll();
-    var n = narr(), planning = n && n.status === "planning", ready = n && n.narrationTagged;
+    var n = narr(), planning = n && n.status === "planning", ready = n && n.narrationTagged && !state.project.scriptStale;
     $("scriptEmpty").classList.toggle("hidden", !!(planning || ready));
     $("scriptWait").classList.toggle("hidden", !planning);
     $("scriptReady").classList.toggle("hidden", !ready || planning);

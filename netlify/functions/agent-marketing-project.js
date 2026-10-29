@@ -26,9 +26,17 @@ const headers = { "Access-Control-Allow-Origin": "*", "Content-Type": "applicati
 const reply = (statusCode, obj) => ({ statusCode, headers, body: JSON.stringify(obj) });
 const PUBLIC_COLS = "id,template,angle,formats,duration_sec,voice,music,intake,narrative,narrative_approved_at,storyboard,selected_topic,status,gate_version,gate_result,created_at,updated_at,hidden_at";
 
+// A saved script written for another topic or other answers is kept for the agent to see, but the page must offer "Write my script" again (Sam, Oct 29, 2026).
+function scriptStale(row) {
+  const n = row && row.narrative;
+  if (!n || !n.narrationTagged || !n.intakeHash || !row.selected_topic) return false;
+  try { return n.intakeHash !== planLib.intakeHash(row.intake || {}, row.selected_topic); } catch (e) { return false; }
+}
+
 function forClient(row) {
   if (!row) return null;
   return {
+    scriptStale: scriptStale(row),
     id: row.id, template: row.template, angle: row.angle, formats: row.formats, durationSec: row.duration_sec, voice: row.voice, music: row.music || "default",
     intake: row.intake || {}, narrative: row.narrative || null, narrativeApprovedAt: row.narrative_approved_at || null,
     storyboard: row.storyboard || null, selectedTopic: row.selected_topic || null, status: row.status, gate: row.gate_result || null,

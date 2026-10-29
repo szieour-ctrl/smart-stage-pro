@@ -818,7 +818,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
   }
 
   // ── Images: for every scene the agent picks a source ──
-  var im = { slots: [], total: 0, cap: 0, per: 1, charging: true, sig: "", urls: {}, src: {}, note: {}, desc: {}, edit: {}, crops: {}, working: {}, confirming: {}, msgs: {}, kept: {}, busy: {} };
+  var im = { slots: [], total: 0, cap: 0, per: 1, charging: true, sig: "", urls: {}, src: {}, note: {}, desc: {}, edit: {}, crops: {}, working: {}, confirming: {}, msgs: {}, kept: {}, busy: {}, also: {} };
   var SRC_NAME = { own: "Use my own photo instead", concept: "Generate concept image", agent: "Generate image of you" };
   var KIND_OF = { concept: "concept", agent: "agent_scene" };
   var PLANNED_NAME = { GPT_IMAGE_2_CONCEPT: "a concept image", AGENT_SCENE: "an image of you", CONCEPT_REUSE: "a re-framed copy of an earlier image", AGENT_PROFILE: "your profile photo", BRAND_CARD: "a brand card", AUTHENTIC_AGENT_ASSET: "an optional photo of yours" };
@@ -1116,6 +1116,12 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     if (im.confirming[k]) foot += '<span class="hint" style="margin:0 auto 0 8px">This extra try costs <b>' + plural(im.confirming[k]) + "</b>. Continue?</span>" + actBtn("cancel", "Cancel", "ghost", s) + actBtn("confirm", "Yes, create it", "gold", s);
     else if (st.generating) foot += '<span class="hint" style="margin:0 auto 0 8px">Creating… you can close this window.</span>';
     else {
+      // Subscribers who ordered BOTH formats can carry a change they asked for in a note over to the 16:9 image (Sam, Oct 29, 2026). Off by default;
+      // the cost is shown, and ticking the box is the agreement to it.
+      var other = s.format === "9x16" && (state.project.formats || []).length > 1 ? slotOf(m.scene, "16x9") : null, dnote = st.draft && String(st.draft.note || "").trim();
+      if (st.draft && other && dnote && !other.capReached && !slotState(other, src).generating) {
+        foot += '<label class="hint" style="margin:0 auto 0 8px;display:flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" id="imgmAlso"' + (im.also[m.scene] ? " checked" : "") + '> Also apply this change to 16:9 (' + (other.nextCredits > 0 ? "costs " + plural(other.nextCredits) : "included") + ")</label>";
+      }
       if (st.draft) foot += actBtn("reject", "Discard", "ghost", s, ' data-asset="' + esc(st.draft.id) + '"') + actBtn("accept", "Accept this image", "gold", s, ' data-asset="' + esc(st.draft.id) + '"');
       if (!st.draft && st.A) foot += actBtn("reject", "Remove image", "ghost", s, ' data-asset="' + esc(st.A.id) + '"');
       var label = d && d.revise ? "Apply change" : (st.shown ? "Re-create image" : "Create image");
@@ -1179,8 +1185,22 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
       await loadImages(); repaint();
     }
   }
+  // The accepted 9:16 change, asked for again on the 16:9 image: the same note is checked (Elaborate) and then applied to that format's own image.
+  async function applyToWide(si, note) {
+    var src = activeSrc(si), s2 = slotOf(si, "16x9"); if (!s2 || !note) return;
+    im.note[si] = note;
+    await elaborateScene(si, false, "16x9");
+    if (!descFor(si, src, "16x9")) { say("imagesMsg", "The change could not be carried over to 16:9. Open the 16:9 image and use Elaborate there.", "err"); return; }
+    await genSlot(si, "16x9", true);
+  }
   async function imageAction(act, assetId, k) {
     setSlotMsg(k, "");
+    var also = null;
+    if (act === "accept") {
+      var si0 = Number(String(k).split("_")[0]), s0 = slotOf(si0, "9x16"), d0 = s0 ? slotState(s0, activeSrc(si0)).draft : null;
+      if (im.also[si0] && String(k).split("_")[1] === "9x16" && d0 && String(d0.note || "").trim()) also = { si: si0, note: String(d0.note).trim() };
+      delete im.also[si0];
+    }
     try {
       var r = await api("POST", "", { action: act, projectId: state.project.id, assetId: assetId }, IMG);
       if (!r.ok) setSlotMsg(k, r.json.error || "That did not work. Please try again.", "err");
@@ -1194,6 +1214,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
       }
     } catch (e) { setSlotMsg(k, e.message, "err"); }
     await loadImages();
+    if (also) { try { await applyToWide(also.si, also.note); } catch (e) { say("imagesMsg", e.message, "err"); } }
   }
   function startIfEmpty(si) {
     var first = im.slots.filter(function (x) { return x.sceneIndex === si; }).sort(function (a, b) { return a.format === "9x16" ? -1 : (b.format === "9x16" ? 1 : 0); })[0];
@@ -1327,6 +1348,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     $("reelRetry").addEventListener("click", retryReel);
     $("imageSlots").addEventListener("click", onImageClick);
     $("imgModal").addEventListener("click", onModalClick);
+    $("imgModal").addEventListener("change", function (ev) { var t = ev.target; if (t && t.id === "imgmAlso" && im.modal) im.also[im.modal.scene] = !!t.checked; });
     $("photoView").addEventListener("click", onPhotoViewClick);
     $("imgmNote").addEventListener("input", onModalInput);
     $("imgmEdit").addEventListener("input", onEditInput);

@@ -19,6 +19,13 @@ const sourcesLib = require("./agent-marketing-sources-lib");
 const MANIFEST_VERSION = "am-manifest-2";
 const FORMATS = ["9x16", "16x9"];
 const SMALL_SAMPLE_BELOW = 10; // Sam, Oct 25: fewer than 10 listings is a count, never a trend on its own
+// The automatic AI-image disclosure (Sam, Oct 29, 2026). The words are fixed here, never written by Claude and never placed in a GPT Image 2 prompt;
+// the renderer draws them in the bottom source area of every scene whose visible image is AI-generated (per the image's recorded provenance).
+const AI_DISCLOSURES = {
+  default: "AI-generated illustration. Not an actual photograph.",
+  market: "AI-generated neighborhood illustration. Not an actual location photograph.",
+  event: "AI-generated event illustration. Not actual event photography.",
+};
 
 const NUMERIC_FIELDS = new Set(["value", "percent", "highlighted", "total"]);
 const OPS = {
@@ -199,6 +206,10 @@ function validateManifest(manifest) {
 
   // scenes
   const scenes = Array.isArray(m.scenes) ? m.scenes : [];
+  // AI image disclosure: a scene whose image is AI-generated in some format needs the approved wording, built by code
+  if (scenes.some((sc) => Object.values((sc.visual || {}).image_provenance || {}).includes("ai")) && !(m.disclosure && Object.values(AI_DISCLOSURES).includes(m.disclosure.text))) {
+    err("disclosure", "disclosure.text", "A Reel with AI-generated images needs the approved AI image disclosure, built by code.");
+  }
   if (scenes.length < 3) err("scenes", "scenes", "A Reel needs at least three scenes.");
   const audio = m.audio || {};
   let prevEnd = 0;
@@ -274,4 +285,4 @@ function validateManifest(manifest) {
   return { ok: errors.length === 0, errors, warnings };
 }
 
-module.exports = { MANIFEST_VERSION, FORMATS, SMALL_SAMPLE_BELOW, parseNumber, metroListNotice, metroListDisclosureNotice, verifyDerived, qualifySmallSample, applySmallSampleQualifiers, validateManifest, sceneStrings };
+module.exports = { AI_DISCLOSURES, MANIFEST_VERSION, FORMATS, SMALL_SAMPLE_BELOW, parseNumber, metroListNotice, metroListDisclosureNotice, verifyDerived, qualifySmallSample, applySmallSampleQualifiers, validateManifest, sceneStrings };

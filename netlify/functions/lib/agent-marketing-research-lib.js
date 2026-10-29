@@ -205,7 +205,7 @@ function systemPrompt(mode) {
     ? [
       "MODE: Local Events. Each topic is a verified upcoming or ongoing happening in the market: a festival, gathering, civic event, seasonal activity or community announcement.",
       "If you cannot find five confirmed events, return fewer rather than guess.",
-      "Each topic must include an \"event\" object: name, date (YYYY-MM-DD, today or later), end_date (or null), time (as published), location (venue and city), organizer, status (\"upcoming\" or \"ongoing\"). Confirm these from the organizer's or an official page. Skip anything canceled, postponed or already over. Skip any event whose date, time, venue or organizer you cannot confirm from a page: never write \"not stated\", \"TBD\" or a guess, and find a different event instead. The organizer is who runs the event, not the venue's store or the page that lists it.",
+      "Each topic must include an \"event\" object: name, date (YYYY-MM-DD, today or later), end_date (or null), time (as published), location (venue and city), organizer, status (\"upcoming\" or \"ongoing\"). Also include details: up to 6 short facts about what the event offers, each confirmed on that same page and in the page's own words (activities, vendors or attractions, admission or cost, who benefits from the proceeds, how to register); leave out anything the page does not say. Confirm these from the organizer's or an official page. Skip anything canceled, postponed or already over. Skip any event whose date, time, venue or organizer you cannot confirm from a page: never write \"not stated\", \"TBD\" or a guess, and find a different event instead. The organizer is who runs the event, not the venue's store or the page that lists it.",
       "The question is how the event is phrased for neighbors (for example \"What is happening in Old Roseville this weekend?\"). why_it_matters says why it matters to people living in or moving to the area.",
     ]
     : [
@@ -366,6 +366,9 @@ function cleanEvent(e, todayN) {
     if (!out[k]) return { problem: `the event ${label} is missing` };
     if (PLACEHOLDER.test(out[k])) return { problem: `the event ${label} is not confirmed ("${out[k].slice(0, 40)}"); only use events whose ${label} is published` };
   }
+  // What the event offers, confirmed on the same page (activities, vendors, admission, who benefits, how to register): the script and images are built from it.
+  const details = (Array.isArray(e.details) ? e.details : []).map((d) => clean(d, 140)).filter((d) => d && !PLACEHOLDER.test(d)).slice(0, 6);
+  if (details.length) out.details = details;
   return { event: out };
 }
 

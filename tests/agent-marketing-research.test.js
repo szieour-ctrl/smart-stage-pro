@@ -463,3 +463,13 @@ test("source filter: an association on .org is an article source, a builder's in
   assert.match(bad.problems.join(" "), /lennar\.com: looks like a listing/);
   assert.match(bad.problems.join(" "), /sacbee\.com: 148 days old/);
 });
+
+test("event details: what the event offers is kept (short, up to six, placeholders dropped) and absent when the page lists none", () => {
+  const withD = r.validateTopics([rawEvent(1, { details: ["Browse dozens of local vendors", "A bake sale and an antique sale", "Free and open to the public", "Proceeds support the Eskaton Foundation", "Register through the online form", "TBD", "extra one", "extra two"] })], { mode: "local_events", today: TODAY });
+  assert.deepStrictEqual(withD.topics[0].event.details.slice(0, 2), ["Browse dozens of local vendors", "A bake sale and an antique sale"]);
+  assert.ok(withD.topics[0].event.details.length <= 6);
+  assert.ok(!withD.topics[0].event.details.includes("TBD"));
+  const none = r.validateTopics([rawEvent(1)], { mode: "local_events", today: TODAY });
+  assert.strictEqual(none.topics[0].event.details, undefined);
+  assert.match(r.systemPrompt("local_events"), /details: up to 6 short facts/);
+});

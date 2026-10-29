@@ -131,3 +131,28 @@ test("people are allowed in concept images for Local Events Reels only", async (
   assert.strictEqual(msg.event_reel, true);
   assert.match(planLib.buildSystemPrompt(), /9d\. EVENT REELS/);
 });
+
+test("one image per scene per ordered format: formats, sizes, project limit and the tall composition rule", async () => {
+  assert.deepStrictEqual(img.formatsOf({ formats: ["16x9", "9x16"] }), ["9x16", "16x9"]);
+  assert.deepStrictEqual(img.formatsOf({ formats: ["9x16"] }), ["9x16"]);
+  assert.deepStrictEqual(img.formatsOf({ formats: ["bogus"] }), ["16x9"]);
+  assert.deepStrictEqual(img.formatsOf({}), ["16x9"]);
+  assert.strictEqual(img.sizeFor("16x9"), img.SIZES["16x9"]);
+  assert.strictEqual(img.sizeFor("9x16"), img.tallSize());
+  // the project limit is per format: 12 tries for one format, 24 for two
+  const assets = Array.from({ length: 12 }, (_, i) => ({ source: "gpt_image_2", scene_index: i % 4, generation: { format: "9x16", state: "done" } }));
+  assert.strictEqual(img.quote(assets, 0, "9x16", undefined, 1).capReached, true);
+  assert.strictEqual(img.quote(assets, 0, "9x16", undefined, 2).capReached, false);
+  assert.strictEqual(img.quote(assets, 0, "9x16", undefined, 2).projectCap, 24);
+  // slots are per format: a 9:16 image does not use up the 16:9 slot's free try
+  assert.strictEqual(img.quote(assets, 0, "16x9", undefined, 2).used, 0);
+  // the tall format gets its own prompt (calm top for text) and Elaborate writes for the tall frame
+  const tall = img.buildFormatPrompt({ kind: "concept", scenePrompt: "A vendor table", format: "9x16", framing: "Center crop" });
+  assert.match(tall, /Tall vertical 9:16/);
+  assert.match(tall, /top 45% of the frame/);
+  assert.match(el.buildSystemPrompt("9x16"), /Compose ONE tall 9:16 frame/);
+  assert.match(el.buildSystemPrompt(), /Compose ONE wide 16:9 frame/);
+  let sys;
+  await el.elaborate({ project, scene, kind: "concept", note: "a craft table", format: "9x16", anthropicKey: "k", callFn: async (s) => { sys = s; return JSON.stringify({ description: "A craft table.", removed: [] }); } });
+  assert.match(sys, /Compose ONE tall 9:16 frame/);
+});

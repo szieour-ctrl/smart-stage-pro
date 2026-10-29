@@ -67,7 +67,10 @@ function topicBrief(topic) {
     out.agent_report_takes_priority = t.reportPrecedence.map((p) => ({ measure: String(p.label || ""), agent_report_figure: String(p.reportText || ""), never_state: (p.supersededNumbers || []).map(String) }));
   }
   if (t.smallSample) out.small_sample = true;
-  if (e) out.event = { name: e.name, date: e.date, end_date: e.endDate || null, time: e.time, location: e.location, organizer: e.organizer };
+  if (e) {
+    const wd = /^\d{4}-\d{2}-\d{2}$/.test(String(e.date || "")) ? new Date(e.date + "T12:00:00Z").toLocaleDateString("en-US", { weekday: "long", timeZone: "UTC" }) : null;
+    out.event = { name: e.name, date: e.date, ...(wd && wd !== "Invalid Date" ? { weekday: wd } : {}), end_date: e.endDate || null, time: e.time, location: e.location, organizer: e.organizer, ...(Array.isArray(e.details) && e.details.length ? { details: e.details } : {}) };
+  }
   return out;
 }
 
@@ -105,6 +108,8 @@ function buildSystemPrompt() {
     "9b. VISUAL VARIETY AND EDITORIAL QUALITY. Each image is something a magazine would run beside THIS story, built from the subject of its own scene and this topic, not a stock backdrop. Never reuse the same two settings across projects: do NOT default to a quiet suburban street at golden hour or to a desk or tabletop with a calendar, a house key and a notepad. Within one piece, no two images may share a subject, composition or scale: mix a wide streetscape, a close exterior detail (a front door, mailbox, garage door, fence or porch), and a scale-model house or an interior detail. No signage of any kind. EVERY image must be plainly about homes or a neighborhood in this market: no abstract metaphors (paths, gates, bridges, scales, forks in a road, doors to nowhere) and no garden or landscape scenes; if a viewer would not know at a glance that it is a housing image, change it. Take the subject from the scene's own narration (for example new homes under construction against established ones for a new-construction story; a single reduced-price tag motif is NOT allowed, so show hesitation or a decision through composition instead). Vary light, season and time of day to match the mood of the beat.",
     "9c. THIS REEL'S LOOK. The user message carries visual_look: the light, sky, season, home colors and yard character for this whole Reel. Build EVERY ai_generation_prompt around it, so all the images in this Reel share one look and no other Reel in this agent's feed looks the same. The homes are shown at their best: well kept, inviting curb appeal, healthy landscaping, and a lively sky and light, never gray, flat, overcast or drab. Keep the market's own architecture exactly as rule 9 says; the look changes only light, sky, season, paint colors and landscaping. If rule 9b's time-of-day variety conflicts with visual_look, visual_look wins.",
     "9d. EVENT REELS. If the input has event_reel true, the images show the event or community happening the topic describes (the venue, the activity, the atmosphere) as ordinary, believable scenes. They do not have to show homes, so the housing requirement in rules 9 and 9b does not apply, though any home that does appear must still look like the area's ordinary homes. People are allowed in these concept images (ordinary people enjoying the event, shown naturally); in an AGENT_SCENE the agent is still the only person. From visual_look use only the light, sky and season.",
+    "9e. EDITORIAL IMAGE DIRECTOR (applies to every ai_generation_prompt). Write each image prompt as a photographer's brief, not a keyword list: what the viewer should understand or feel in THIS scene; the subject and what sits in the foreground, middle ground and background; the camera position and lens-like perspective, taken from this scene's entry in shot_plan (adapt it to the scene's meaning); the light, season and mood from visual_look; and where calm space is left for the headline and captions. Consecutive scenes must differ in subject, camera distance and angle, and no two may repeat a facade, a framing or a color palette. For a market Reel, ground the setting in the market's own housing character from the intake and research (era, stories, roofs, streets, landscaping) and let each image express that scene's meaning (a pricing gap, supply, time, a decision) instead of a generic street. For an event Reel, ground it in the event: the event type, the venue's setting, and the activities and seasonal atmosphere named in selected_topic.event (name, location, details), showing the experience being promoted. The images are illustrations: never imply they document the real event or its real participants, or that the agent attended. Keep each ai_generation_prompt at or under 550 characters. Give every scene these extra fields: visual_objective (one sentence), photographic_direction (camera, lens feel, depth, light), contrast_with_previous (how it differs from the previous scene; empty for scene 1) and overlay_relationship (where the headline and captions sit).",
+    "14. EVENT REELS (event_reel true). The story rhythm replaces rule 7's: invitation, then essentials (the event's name, weekday, date, time and venue from selected_topic.event), then highlights (what selected_topic.event.details say is there: activities, vendors, admission, who benefits, how to register), then community connection, then a warm sign-off. The event is the focus. The agent's real estate perspective is one brief, natural sentence (for example about staying connected to what is happening locally), never a sales pitch and never market numbers unless the topic gives them. The hook (14 words or fewer) is an inviting question or line about the event, not rule 5b's surprising figure. Say the weekday from selected_topic.event.weekday and use the date, time, venue, organizer and details exactly as given; never invent an event detail the page did not give, never say or imply the agent attends or attended, and never describe the event as a market trend. The closing call to action is the warm sign-off described in cta_angle. There is no market data in an event Reel: the first and last scenes keep source_role \"data\" as rule 2g requires and state no figures; scenes that state event facts use source_role \"article\".",
     "10. framing_9x16 says where the tall 9:16 window sits inside the wide image (left, center or right; tight or loose) and what it shows; framing_16x9 says how the full wide frame is used. Both are crops of the same generated image; never plan a crop of a finished video.",
     "11. Camera motion is Ken Burns only (slow, deliberate, minimal): choose from push_in, pull_back, pan_left, pan_right, tilt_up, tilt_down, static_hold.",
     "12. The CTA is low-pressure and about the agent's expertise. No property-sale CTA. Write it fresh for THIS topic and use the cta_angle given in the input as its approach. The CTA must not repeat the closing narration sentence, and its wording must change from one Reel to the next as the cta_angle changes.",
@@ -114,7 +119,8 @@ function buildSystemPrompt() {
     "{ \"editorial_angle\": string (1-2 sentences), \"hook\": string, \"narration_with_audio_tags\": string,",
     "  \"scenes\": [ { \"role\": string, \"narration_excerpt\": string, \"purpose\": string, \"visual_source\": \"GPT_IMAGE_2_CONCEPT\"|\"AGENT_SCENE\"|\"CONCEPT_REUSE\"|\"AGENT_PROFILE\"|\"BRAND_CARD\"|\"AUTHENTIC_AGENT_ASSET\", \"reuse_of_scene\": number | null, \"card_text\": string | null, \"source_role\": \"data\"|\"article\",",
     "    \"visual_brief\": string, \"authentic_photo_request\": { \"best_image\": string, \"should_contain\": string, \"avoid\": string, \"if_unavailable\": string } | null,",
-    "    \"ai_generation_prompt\": string | null, \"camera_motion\": string, \"framing_9x16\": string, \"framing_16x9\": string, \"text_safe_placement\": string } ],",
+    "    \"ai_generation_prompt\": string | null, \"camera_motion\": string, \"framing_9x16\": string, \"framing_16x9\": string, \"text_safe_placement\": string,",
+    "    \"visual_objective\": string, \"photographic_direction\": string, \"contrast_with_previous\": string, \"overlay_relationship\": string } ],",
     "  \"cta_suggestion\": string (70 characters or fewer, a complete sentence), \"claims_to_verify\": [string], \"missing_agent_inputs\": [string] }",
   ].join("\n");
 }
@@ -164,6 +170,41 @@ function visualLookIndex(project) {
 }
 function visualLookFor(project) { return VISUAL_LOOKS[visualLookIndex(project)]; }
 
+/**
+ * Shot plan (Oct 28, 2026, Editorial Image Director): the camera distance, angle and subject scale for each scene are assigned in code so the scenes of one
+ * Reel differ from each other and an agent's Reels differ from each other, with no extra Claude call. Stride 3 over 8 shots gives every scene of a Reel a different one.
+ */
+const MARKET_SHOTS = [
+  "Wide establishing view from across the street: the homes small in a deep frame, open sky above.",
+  "Medium eye-level view of one front elevation with a foreground element (low shrubs, a mailbox post, a curved driveway) giving depth.",
+  "Low-angle view along a driveway or front walk leading toward the entry, soft background.",
+  "Elevated view looking down a gently curving street, rooflines and tree canopies receding, no single dominant home.",
+  "Close architectural detail (garage door panels, a tile roof edge, stucco texture beside a window), shallow depth of field, with plain sky or a soft blur kept across the upper 45% of the frame.",
+  "Interior window-light still life: a living-room corner or entry bench with window light and a blurred view of the street outside.",
+  "Side-angle view across a lawn and low hedge toward the home, strong foreground blur.",
+  "Two homes of different scale and color on the same street, showing variety without repeating a facade.",
+];
+const EVENT_SHOTS = [
+  "Wide establishing view of the venue grounds with the event's activity small in a deep frame and open sky above.",
+  "Medium eye-level view of the main activity (for example rows of vendor tables under canopies) with a foreground table edge giving depth.",
+  "Close detail of what is on display (crafts, baked goods, seasonal goods), shallow depth of field, with a soft blurred background kept calm across the upper 45% of the frame.",
+  "Low-angle view along an aisle or walkway lined with the event's stalls or decor, leading toward the center.",
+  "Seasonal atmosphere detail (garlands, string lights, wreaths, banners without readable text) in warm light.",
+  "Elevated view over the grounds showing the layout of the event with visitors as small figures.",
+  "Candid mid-distance moment of a few visitors browsing or chatting, faces turned away or small in the frame.",
+  "Warm view of the venue entrance area, inviting, with open space kept for the closing card.",
+];
+const peopleEvent = (project) => require("./agent-marketing-images-lib").peopleAllowedFor(project);
+function shotPlanFor(project) {
+  const events = require("./agent-marketing-images-lib").peopleAllowedFor(project);
+  const list = events ? EVENT_SHOTS : MARKET_SHOTS, n = list.length;
+  const dur = project && project.duration_sec;
+  const count = (SCENE_RANGE[dur] || [4, 8])[1];
+  const start = visualLookIndex(project) % n;
+  return Array.from({ length: Math.min(count, n) }, (_, i) => `Scene ${i + 1}: ${list[(start + i * 3) % n]}`);
+}
+const EVENT_CTA = "a warm sign-off that wishes viewers a good time at the event (for example hoping they enjoy it), optionally pointing them to the organizer's own page for details or to register; no offer to discuss buying or selling";
+
 function buildUserMessage(project) {
   const intake = project.intake || {};
   const schema = intakeLib.schemaFor(project.template);
@@ -174,10 +215,11 @@ function buildUserMessage(project) {
     ...(brief ? { selected_topic: brief } : {}),
     template: schema ? schema.label : project.template,
     insider_angle: angle ? angle.label : null,
-    narrative_architecture: angle ? angle.flow : "Hook on the topic's question → what the sourced facts show (only those) → what it means for the audience → low-pressure next step",
+    narrative_architecture: peopleEvent(project) ? "Invitation → essentials (event name, day, date, time, venue) → highlights (what the event offers) → community connection with one brief local Realtor perspective → warm sign-off" : angle ? angle.flow : "Hook on the topic's question → what the sourced facts show (only those) → what it means for the audience → low-pressure next step",
     market: intake.market,
-    cta_angle: ctaAngleFor(project),
+    cta_angle: peopleEvent(project) ? EVENT_CTA : ctaAngleFor(project),
     visual_look: visualLookFor(project),
+    shot_plan: shotPlanFor(project),
     ...(require("./agent-marketing-images-lib").peopleAllowedFor(project) ? { event_reel: true, people_allowed: true } : {}),
     audience: intake.audience,
     primary_issue: intake.issue,
@@ -334,6 +376,8 @@ function normalizePlan(raw, project) {
       visualBrief: str(s && s.visual_brief, 500),
       cameraMotion: MOTIONS.includes(s && s.camera_motion) ? s.camera_motion : "push_in",
       framing: { "9x16": str(s && s.framing_9x16, 300), "16x9": str(s && s.framing_16x9, 300) },
+      // Editorial Image Director notes (supplementary: shown in the storyboard, never part of the image prompt itself or any claim check)
+      director: { objective: str(s && s.visual_objective, 240), direction: str(s && s.photographic_direction, 300), contrast: str(s && s.contrast_with_previous, 240), overlay: str(s && s.overlay_relationship, 240) },
       textSafePlacement: str(s && s.text_safe_placement, 200),
       // First and last scenes always source the market data; a middle scene is "article" only when the planner said so.
       sourceRole: i === 0 || i === rawScenes.length - 1 ? "data" : (s && s.source_role === "article" ? "article" : "data"),

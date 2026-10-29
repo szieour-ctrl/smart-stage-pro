@@ -174,6 +174,7 @@ function verifiedFromTopic(topic) {
   const e = t.event && typeof t.event === "object" ? t.event : null;
   if (e) {
     texts.push(e.name, e.date, e.endDate, e.time, e.location, e.organizer);
+    if (Array.isArray(e.details)) texts.push(...e.details);
     if (e.location) addresses.push(e.location);
   }
   const clean = texts.filter((x) => typeof x === "string" && x.trim()).map(norm);

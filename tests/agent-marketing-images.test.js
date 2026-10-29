@@ -95,36 +95,37 @@ test("off by default", async () => { delete process.env.AGENT_MARKETING_ENABLED;
 test("slots list every scene (any scene can get a generated image); first generation is free, dispatches the worker with the internal key", async () => {
   process.env.AGENT_MARKETING_ENABLED = "true";
   const l = await call("GET", null, { projectId: P1 });
-  assert.deepStrictEqual(l.json.slots.map((s) => `${s.sceneIndex}:${s.format}`), ["0:16x9", "1:16x9", "2:16x9"]);
-  assert.deepStrictEqual(l.json.slots.map((x) => x.plannedKind), ["agent_scene", "concept", null]);
-  const g = await call("POST", { action: "generate", projectId: P1, sceneIndex: 0, format: "9x16" });
+  assert.deepStrictEqual(l.json.slots.map((s) => `${s.sceneIndex}:${s.format}`), ["0:9x16", "0:16x9", "1:9x16", "1:16x9", "2:9x16", "2:16x9"]);   // one slot per scene per ordered format
+  assert.deepStrictEqual(l.json.slots.filter((x) => x.format === "16x9").map((x) => x.plannedKind), ["agent_scene", "concept", null]);
+  assert.strictEqual(l.json.projectCap, 24);   // the project limit is per format ordered
+  const g = await call("POST", { action: "generate", projectId: P1, sceneIndex: 0, format: "16x9" });
   assert.strictEqual(g.status, 202); assert.strictEqual(g.json.charged, false); assert.strictEqual(debits.length, 0);
   assert.strictEqual(dispatched[0].key, "ik"); assert.ok(dispatched[0].url.endsWith("agent-marketing-image-background"));
   const a = db.agent_marketing_assets[0];
   assert.strictEqual(a.generation.referenceKey, "agent-marketing/h.jpg"); assert.match(a.generation.prompt, /ONLY person/); assert.strictEqual(a.ai_generated, true);
-  assert.strictEqual((await call("POST", { action: "generate", projectId: P1, sceneIndex: 0, format: "9x16" })).status, 409); // already generating
+  assert.strictEqual((await call("POST", { action: "generate", projectId: P1, sceneIndex: 0, format: "16x9" })).status, 409); // already generating
 });
 
 test("redo: one included, the next needs confirmation and is charged; failed dispatch refunds", async () => {
   finish(db.agent_marketing_assets[0]);
-  assert.strictEqual((await call("POST", { action: "generate", projectId: P1, sceneIndex: 0, format: "9x16" })).status, 202); // free redo
+  assert.strictEqual((await call("POST", { action: "generate", projectId: P1, sceneIndex: 0, format: "16x9" })).status, 202); // free redo
   assert.strictEqual(db.agent_marketing_assets[0].status, "rejected"); // earlier unaccepted draft retired
   finish(db.agent_marketing_assets[1]);
-  const need = await call("POST", { action: "generate", projectId: P1, sceneIndex: 0, format: "9x16" });
+  const need = await call("POST", { action: "generate", projectId: P1, sceneIndex: 0, format: "16x9" });
   assert.strictEqual(need.status, 402); assert.strictEqual(need.json.code, "confirm_charge"); assert.strictEqual(need.json.credits, 1); assert.strictEqual(debits.length, 0);
   dispatchOk = false;
-  const bad = await call("POST", { action: "generate", projectId: P1, sceneIndex: 0, format: "9x16", confirmCharge: true });
+  const bad = await call("POST", { action: "generate", projectId: P1, sceneIndex: 0, format: "16x9", confirmCharge: true });
   assert.strictEqual(bad.status, 502);
   assert.deepStrictEqual(debits.map((d) => [d.c, d.refund]), [[1, false], [1, true]]);
   dispatchOk = true; debits.length = 0;
-  const ok = await call("POST", { action: "generate", projectId: P1, sceneIndex: 0, format: "9x16", confirmCharge: true });
+  const ok = await call("POST", { action: "generate", projectId: P1, sceneIndex: 0, format: "16x9", confirmCharge: true });
   assert.strictEqual(ok.status, 202); assert.strictEqual(ok.json.credits, 1); assert.deepStrictEqual(debits.map((d) => d.refund), [false]);
 });
 
 test("insufficient Images blocks without creating a draft", async () => {
   const before = db.agent_marketing_assets.length;
   finish(db.agent_marketing_assets.at(-1)); debitStatus = 402;
-  const r = await call("POST", { action: "generate", projectId: P1, sceneIndex: 0, format: "9x16", confirmCharge: true });
+  const r = await call("POST", { action: "generate", projectId: P1, sceneIndex: 0, format: "16x9", confirmCharge: true });
   assert.strictEqual(r.status, 402); assert.strictEqual(r.json.code, "insufficient_credits");
   assert.strictEqual(db.agent_marketing_assets.length, before); debitStatus = 200;
 });
@@ -134,7 +135,7 @@ test("accept approves one image per scene; a redo of an approved scene is a new 
   assert.strictEqual((await call("POST", { action: "accept", projectId: P1, assetId: done.id })).status, 200);
   assert.strictEqual(done.status, "approved");
   assert.strictEqual(done.generation.format, "16x9"); // every generation is the one wide image
-  const g = await call("POST", { action: "generate", projectId: P1, sceneIndex: 0, format: "9x16", confirmCharge: true }); // a requested format is ignored: still the wide image
+  const g = await call("POST", { action: "generate", projectId: P1, sceneIndex: 0, format: "16x9", confirmCharge: true }); // a requested format is ignored: still the wide image
   assert.strictEqual(g.status, 202);
   const w = db.agent_marketing_assets.at(-1);
   assert.strictEqual(w.generation.format, "16x9"); assert.strictEqual(w.generation.fromApproved, false); assert.match(w.generation.prompt, /NOT a portrait/);
@@ -147,17 +148,17 @@ test("accept approves one image per scene; a redo of an approved scene is a new 
 });
 
 test("guards: no prompt for the scene, unknown scene, no profile photo, script not approved, cap", async () => {
-  const np0 = await call("POST", { action: "generate", projectId: P1, sceneIndex: 2, format: "9x16" });
+  const np0 = await call("POST", { action: "generate", projectId: P1, sceneIndex: 2, format: "16x9" });
   assert.strictEqual(np0.status, 400); assert.strictEqual(np0.json.code, "description_needed"); // brand-card scene: the planner gave no image prompt
-  assert.strictEqual((await call("POST", { action: "generate", projectId: P1, sceneIndex: 9, format: "9x16" })).status, 400);
+  assert.strictEqual((await call("POST", { action: "generate", projectId: P1, sceneIndex: 9, format: "16x9" })).status, 400);
   const prof = db.marketing_profiles[0]; const h = prof.headshot_key; prof.headshot_key = null;
-  const np = await call("POST", { action: "generate", projectId: P1, sceneIndex: 0, format: "9x16" });
+  const np = await call("POST", { action: "generate", projectId: P1, sceneIndex: 0, format: "16x9" });
   assert.strictEqual(np.json.code === "profile_photo_needed" || np.status === 409, true); prof.headshot_key = h;
   db.agent_marketing_projects[0].status = "narrative_ready";
-  assert.strictEqual((await call("POST", { action: "generate", projectId: P1, sceneIndex: 1, format: "9x16" })).status, 409);
+  assert.strictEqual((await call("POST", { action: "generate", projectId: P1, sceneIndex: 1, format: "16x9" })).status, 409);
   db.agent_marketing_projects[0].status = "images";
   process.env.AGENT_MARKETING_IMAGE_PROJECT_CAP = "1";
-  assert.strictEqual((await call("POST", { action: "generate", projectId: P1, sceneIndex: 1, format: "9x16" })).json.code, "cap_reached");
+  assert.strictEqual((await call("POST", { action: "generate", projectId: P1, sceneIndex: 1, format: "16x9" })).json.code, "cap_reached");
   delete process.env.AGENT_MARKETING_IMAGE_PROJECT_CAP;
 });
 
@@ -190,7 +191,7 @@ test("elaborate: returns a scrubbed description, spends no try and creates no dr
 });
 
 test("generate on a scene the planner gave no image: needs a description, checks it again on the server, records kind and note", async () => {
-  const ok = await call("POST", { action: "generate", projectId: P1, sceneIndex: 2, format: "9x16", kind: "concept", note: "mature trees", description: "A calm street lined with mature trees in soft light." });
+  const ok = await call("POST", { action: "generate", projectId: P1, sceneIndex: 2, format: "16x9", kind: "concept", note: "mature trees", description: "A calm street lined with mature trees in soft light." });
   assert.strictEqual(ok.status, 202);
   const a = db.agent_marketing_assets.at(-1);
   assert.strictEqual(a.generation.kind, "concept"); assert.strictEqual(a.generation.note, "mature trees"); assert.strictEqual(a.generation.elaborated, true);
@@ -204,13 +205,13 @@ test("generate on a scene the planner gave no image: needs a description, checks
 
   const tampered = await call("POST", { action: "generate", projectId: P1, sceneIndex: 2, format: "16x9", kind: "concept", description: "A yard sign that says Just Listed with an open house banner" });
   assert.strictEqual(tampered.status, 422); assert.strictEqual(tampered.json.code, "description_blocked"); assert.strictEqual(mark(), before);
-  assert.strictEqual((await call("POST", { action: "generate", projectId: P1, sceneIndex: 2, format: "9x16", kind: "sketch", description: "x" })).status, 400);
+  assert.strictEqual((await call("POST", { action: "generate", projectId: P1, sceneIndex: 2, format: "16x9", kind: "sketch", description: "x" })).status, 400);
 });
 
 test("choosing the other kind on a planned scene does not reuse the planner's prompt; the same kind does", async () => {
-  const wrong = await call("POST", { action: "generate", projectId: P1, sceneIndex: 1, format: "9x16", kind: "agent_scene" }); // scene 1 is a planned concept image
+  const wrong = await call("POST", { action: "generate", projectId: P1, sceneIndex: 1, format: "16x9", kind: "agent_scene" }); // scene 1 is a planned concept image
   assert.strictEqual(wrong.status, 400); assert.strictEqual(wrong.json.code, "description_needed");
-  const withDesc = await call("POST", { action: "generate", projectId: P1, sceneIndex: 1, format: "9x16", kind: "agent_scene", description: "The agent sits at a bright kitchen table, relaxed." });
+  const withDesc = await call("POST", { action: "generate", projectId: P1, sceneIndex: 1, format: "16x9", kind: "agent_scene", description: "The agent sits at a bright kitchen table, relaxed." });
   assert.strictEqual(withDesc.status, 202);
   const a = db.agent_marketing_assets.at(-1);
   assert.strictEqual(a.generation.kind, "agent_scene"); assert.strictEqual(a.generation.referenceKey, "agent-marketing/h.jpg"); assert.match(a.generation.prompt, /ONLY person/);
@@ -232,4 +233,20 @@ test("tall prompt for the image of you uses the reference-photo rules and keeps 
   const wide = img.buildFormatPrompt({ kind: "agent_scene", scenePrompt: "x", format: "16x9" });
   assert.match(wide, /ONLY person/);
   assert.match(img.buildFormatPrompt({ kind: "concept", scenePrompt: "x", format: "9x16" }), /No people at all/);
+});
+
+test("9:16 is its own image: the vertical generate records the tall format and size, uses the tall prompt with the planner's vertical framing, and a 16:9 image cannot be revised into a 9:16 one", async () => {
+  process.env.AGENT_MARKETING_ENABLED = "true";
+  const before = db.agent_marketing_assets.length;
+  const g = await call("POST", { action: "generate", projectId: P1, sceneIndex: 1, format: "9x16", kind: "concept" });
+  assert.strictEqual(g.status, 202);
+  const a = db.agent_marketing_assets[db.agent_marketing_assets.length - 1];
+  assert.ok(db.agent_marketing_assets.length > before);
+  assert.strictEqual(a.generation.format, "9x16");
+  assert.strictEqual(a.generation.size, img.tallSize());
+  assert.match(a.generation.prompt, /Tall vertical 9:16/);
+  const bad = await call("POST", { action: "generate", projectId: P1, sceneIndex: 2, format: "9x16", kind: "concept", reviseAssetId: "00000000-0000-4000-8000-000000000001", description: "make it earlier" });
+  assert.strictEqual(bad.status, 400);
+  const nope = await call("POST", { action: "generate", projectId: P1, sceneIndex: 1, format: "4x5", kind: "concept" });
+  assert.strictEqual(nope.status, 400);
 });

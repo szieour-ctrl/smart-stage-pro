@@ -70,7 +70,7 @@ function reportNumbers(figs) {
 function buildManifest(input) {
   const { narrative, formats } = input;
   const figs = director.figuresFrom(input.reportFigures);
-  const pl = director.plan(narrative, input.intake, figs, { cardCopy: input.cardCopy });
+  const pl = director.plan(narrative, input.intake, figs, { cardCopy: input.cardCopy, eventReel: !!(input.webTopic && input.webTopic.event) });
   const excerpts = pl.scenes.map((s) => s.narration_excerpt);
   const tw = timing.sceneWindows(input.audio.words, excerpts, input.audio.duration_sec);
   if (tw.error) return { manifest: null, validation: { ok: false, errors: [{ code: "timing", where: "scenes", message: tw.error }], warnings: [] }, plan: pl };

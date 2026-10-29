@@ -64,9 +64,10 @@ async function reapStale(assets, userId) {
 }
 
 // The image a revision edits: this project's own finished image for this scene (kept or waiting for approval), never a failed or rejected one.
-function reviseBase(assets, id, sceneIndex) {
+function reviseBase(assets, id, sceneIndex, format) {
   const a = (assets || []).find((x) => x.id === id);
   if (!a || a.scene_index !== sceneIndex || !a.asset_key) return null;
+  if (format && img.fmtOf(a) !== format) return null;   // a 9:16 image is only revised into a 9:16 image
   const g = a.generation || {};
   if (g.state !== "done" || (a.status !== "proposed" && a.status !== "approved")) return null;
   return a;
@@ -93,15 +94,15 @@ exports.handler = async (event) => {
       const st = img.settings();
       const slots = [];
       for (const { index, scene } of img.allScenes(p.row.narrative)) {
-        for (const format of [img.WIDE]) {
+        for (const format of img.formatsOf(p.row)) {
           const mine = assets.filter((a) => a.scene_index === index && img.fmtOf(a) === format);
           const latest = mine[mine.length - 1];
           const approved = mine.filter((a) => a.status === "approved").pop();
-          const q = img.quote(assets, index, format);
+          const q = img.quote(assets, index, format, undefined, img.formatsOf(p.row).length);
           slots.push({ sceneIndex: index, kind: scene.visualSource, plannedKind: img.plannedKind(scene), format, latest: latest ? await viewOf(latest) : null, approved: approved ? await viewOf(approved) : null, used: q.used, included: q.included, nextCredits: q.credits, capReached: q.capReached });
         }
       }
-      return reply(200, { slots, projectTotal: assets.filter(img.counts).length, projectCap: st.projectCap, creditsPerExtra: st.credits, charging: st.charging });
+      return reply(200, { slots, projectTotal: assets.filter(img.counts).length, projectCap: st.projectCap * img.formatsOf(p.row).length, creditsPerExtra: st.credits, charging: st.charging, formats: img.formatsOf(p.row) });
     }
 
     if (event.httpMethod !== "POST") return reply(405, { error: "Method not allowed" });
@@ -147,13 +148,13 @@ exports.handler = async (event) => {
       try {
         if (b.reviseAssetId) {
           // Revision: the note is an edit of the image already on screen (Oct 28, Sam), so only that change is made and the rest stays.
-          const base = reviseBase(assets, b.reviseAssetId, Number(b.sceneIndex));
+          const base = reviseBase(assets, b.reviseAssetId, Number(b.sceneIndex), b.format ? String(b.format) : null);
           if (!base) return reply(400, { error: "That image is not available to change. Create a new one instead." });
           const kind = base.generation.kind || b.kind;
           const out = await elab.elaborateRevision({ project, kind, note: b.note, currentPrompt: base.generation.basePrompt || base.generation.scenePrompt, anthropicKey: process.env.ANTHROPIC_API_KEY });
           return reply(200, { description: out.description, removed: out.removed, warnings: out.warnings, kind, revise: base.id });
         }
-        const out = await elab.elaborate({ project, scene: tgt.scene, kind: b.kind, note: b.note, fresh: b.fresh === true, anthropicKey: process.env.ANTHROPIC_API_KEY });
+        const out = await elab.elaborate({ project, scene: tgt.scene, kind: b.kind, note: b.note, fresh: b.fresh === true, format: b.format === img.TALL ? img.TALL : img.WIDE, anthropicKey: process.env.ANTHROPIC_API_KEY });
         return reply(200, { description: out.description, removed: out.removed, warnings: out.warnings, kind: b.kind });
       } catch (e) {
         if (e.code) return reply(e.code === "bad_kind" ? 400 : 422, { error: e.message, code: e.code });
@@ -165,13 +166,17 @@ exports.handler = async (event) => {
     if (b.action !== "generate") return reply(400, { error: "Unknown action" });
     if (!SELECTABLE.includes(project.status)) return reply(409, { error: "Approve your script before creating images." });
     if (!process.env.OPENAI_API_KEY) return reply(500, { error: "Image generation is not configured." });
-    const sceneIndex = Number(b.sceneIndex), format = img.WIDE; // one wide image per scene; the vertical Reel version is cropped from it
+    // One image per scene per ordered format (Oct 28, 2026): the 9:16 and 16:9 versions are composed, inspected, revised and approved separately.
+    const ordered = img.formatsOf(project);
+    const format = b.format == null || b.format === "" ? (ordered.includes(img.WIDE) ? img.WIDE : ordered[0]) : String(b.format);
+    if (!ordered.includes(format)) return reply(400, { error: "That format is not part of this Reel." });
+    const sceneIndex = Number(b.sceneIndex);
     const target = img.allScenes(project.narrative).find((x) => x.index === sceneIndex);
     if (!target) return reply(400, { error: "Unknown scene." });
     if (b.kind != null && !elab.KINDS.includes(b.kind)) return reply(400, { error: "Choose a concept image or an image of you." });
     if ((assets.filter((a) => a.scene_index === sceneIndex && img.fmtOf(a) === format && img.stateOf(a) === "generating")).length) return reply(409, { error: "This image is already being created." });
 
-    const q = img.quote(assets, sceneIndex, format);
+    const q = img.quote(assets, sceneIndex, format, undefined, ordered.length);
     if (q.capReached) return reply(409, { error: `This project has reached its limit of ${q.projectCap} generated images.`, code: "cap_reached" });
 
     // Reference: the agent scene uses the agent's own profile photo.
@@ -179,7 +184,7 @@ exports.handler = async (event) => {
     const planned = img.plannedKind(target.scene);
     let kind = b.kind || planned || (target.scene.visualSource === "AGENT_SCENE" ? "agent_scene" : "concept");
     // Revision: edit the image already made for this scene; it is the reference, so no profile photo is looked up.
-    const reviseBaseAsset = b.reviseAssetId ? reviseBase(assets, b.reviseAssetId, sceneIndex) : null;
+    const reviseBaseAsset = b.reviseAssetId ? reviseBase(assets, b.reviseAssetId, sceneIndex, format) : null;
     if (b.reviseAssetId && !reviseBaseAsset) return reply(400, { error: "That image is not available to change. Create a new one instead.", code: "revise_unavailable" });
     if (reviseBaseAsset) { kind = reviseBaseAsset.generation.kind || kind; referenceKey = reviseBaseAsset.asset_key; }
     if (kind === "agent_scene" && !reviseBaseAsset) {
@@ -202,7 +207,7 @@ exports.handler = async (event) => {
     if (q.charged && b.confirmCharge !== true) return reply(402, { error: "This image costs extra.", code: "confirm_charge", credits: q.credits });
     const st = img.settings();
     if (reviseBaseAsset && !(typeof b.description === "string" && b.description.trim())) return reply(400, { error: "Use Elaborate with AI first so we can describe the change.", code: "description_needed" });
-    const prompt = reviseBaseAsset ? img.buildRevisionPrompt({ instruction: scenePrompt }) : img.buildPrompt({ kind, scenePrompt, people: img.peopleAllowedFor(project) });
+    const prompt = reviseBaseAsset ? img.buildRevisionPrompt({ instruction: scenePrompt }) : img.buildFormatPrompt({ kind, scenePrompt, format, framing: target.scene.framing && target.scene.framing[format], people: img.peopleAllowedFor(project) });
 
     // Charge first (only for extras); refunded by the worker or the stale check if the image never arrives.
     let charged = null;
@@ -216,7 +221,7 @@ exports.handler = async (event) => {
     const version = Math.max(0, ...assets.filter((a) => a.scene_index === sceneIndex).map((a) => a.version || 0)) + 1;
     // A new draft replaces any unaccepted earlier draft for this slot.
     for (const o of assets) if (o.scene_index === sceneIndex && img.fmtOf(o) === format && o.status === "proposed") await supabase("PATCH", "agent_marketing_assets", { status: "rejected" }, `?id=eq.${o.id}&user_id=eq.${userId}`);
-    const generation = { state: "generating", format, kind, prompt, scenePrompt: scenePrompt || null, note: note || null, elaborated: !!(b.description && String(b.description).trim()), referenceKey, revisionOf: reviseBaseAsset ? reviseBaseAsset.id : null, basePrompt: reviseBaseAsset ? (reviseBaseAsset.generation.basePrompt || reviseBaseAsset.generation.scenePrompt || null) : null, fromApproved, quality: st.quality, size: img.SIZES[format], charged, startedAt: new Date().toISOString(), attempt: q.used + 1 };
+    const generation = { state: "generating", format, kind, prompt, scenePrompt: scenePrompt || null, note: note || null, elaborated: !!(b.description && String(b.description).trim()), referenceKey, revisionOf: reviseBaseAsset ? reviseBaseAsset.id : null, basePrompt: reviseBaseAsset ? (reviseBaseAsset.generation.basePrompt || reviseBaseAsset.generation.scenePrompt || null) : null, fromApproved, quality: st.quality, size: img.sizeFor(format), charged, startedAt: new Date().toISOString(), attempt: q.used + 1 };
     const ins = await supabase("POST", "agent_marketing_assets", { project_id: project.id, user_id: userId, scene_index: sceneIndex, version, source: "gpt_image_2", ai_generated: true, status: "proposed", asset_key: null, generation, rights: { route: "generated", aiGenerated: true } });
     const row = rowsOf(ins)[0];
     if (!ins || ins.status >= 300 || !row) {

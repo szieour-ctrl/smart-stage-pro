@@ -25,6 +25,14 @@ function validWideSize(v) {
   return w + "x" + h;
 }
 const SIZES = { [WIDE]: validWideSize(process.env.AGENT_MARKETING_IMAGE_SIZE) || DEFAULT_SIZE };
+const TALL = "9x16";
+const FORMATS = [TALL, WIDE];
+// The formats an agent ordered for a project, in a fixed order; a project with none recorded gets the wide one.
+function formatsOf(project) {
+  const f = project && Array.isArray(project.formats) ? project.formats.filter((x) => FORMATS.includes(x)) : [];
+  const out = FORMATS.filter((x) => f.includes(x));
+  return out.length ? out : [WIDE];
+}
 const IMAGE_SOURCES = ["GPT_IMAGE_2_CONCEPT", "AGENT_SCENE"];
 const STALE_GENERATING_MS = 8 * 60 * 1000;
 const num = (v, d, min, max) => { const n = Number(v); return Number.isFinite(n) && n >= min && n <= max ? Math.floor(n) : d; };
@@ -70,7 +78,7 @@ function slotAssets(assets, sceneIndex, format) {
 }
 
 // What the NEXT generation for this slot costs and whether it is allowed.
-function quote(assets, sceneIndex, format, env) {
+function quote(assets, sceneIndex, format, env, formatsCount) {
   const st = settings(env);
   const used = slotAssets(assets, sceneIndex, format).length;
   const projectTotal = (assets || []).filter(counts).length;
@@ -78,7 +86,8 @@ function quote(assets, sceneIndex, format, env) {
   const charged = st.charging && used >= included;
   return {
     used, included, charged, credits: charged ? st.credits : 0,
-    capReached: projectTotal >= st.projectCap, projectTotal, projectCap: st.projectCap,
+    // The project limit is per format ordered: a Reel in both formats needs twice the first images.
+    capReached: projectTotal >= st.projectCap * Math.max(1, formatsCount || 1), projectTotal, projectCap: st.projectCap * Math.max(1, formatsCount || 1),
   };
 }
 
@@ -167,6 +176,7 @@ function buildFormatPrompt({ kind, scenePrompt, format, framing, people }) {
   ].filter(Boolean).join("\n");
 }
 const tallSize = () => validTallSize(process.env.AGENT_MARKETING_IMAGE_SIZE_TALL) || TALL_SIZE;
+const sizeFor = (format) => (format === TALL ? tallSize() : SIZES[WIDE]);
 function validTallSize(v) {
   const m = /^(\d{3,4})x(\d{3,4})$/.exec(String(v || "").trim());
   if (!m) return null;
@@ -175,4 +185,4 @@ function validTallSize(v) {
   return w + "x" + h;
 }
 
-module.exports = { buildFormatPrompt, tallSize, TALL_SIZE, CROP_WIDTH, clampCrop, defaultCropX, WIDE, DEFAULT_SIZE, validWideSize, SIZES, IMAGE_SOURCES, STALE_GENERATING_MS, settings, imageScenes, allScenes, plannedKind, slotAssets, quote, buildPrompt, buildRevisionPrompt, peopleAllowedFor, pickReferenceKey, counts, fmtOf, stateOf };
+module.exports = { buildFormatPrompt, tallSize, sizeFor, formatsOf, TALL, FORMATS, TALL_SIZE, CROP_WIDTH, clampCrop, defaultCropX, WIDE, DEFAULT_SIZE, validWideSize, SIZES, IMAGE_SOURCES, STALE_GENERATING_MS, settings, imageScenes, allScenes, plannedKind, slotAssets, quote, buildPrompt, buildRevisionPrompt, peopleAllowedFor, pickReferenceKey, counts, fmtOf, stateOf };

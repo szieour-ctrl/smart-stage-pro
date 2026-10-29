@@ -344,3 +344,38 @@ test("a script outside the word range gets one rewrite; a closer, gate-clean rew
   assert.strictEqual(seen.length, 2);
   assert.ok(b.narrative.wordCount > 125);   // the rewrite was no closer, so the first draft stands (with the usual warning)
 });
+
+test("Editorial Image Director: shot plans differ scene to scene and Reel to Reel; the event Reel gets its own rhythm, sign-off, details and card labels", () => {
+  const lib = require("../netlify/functions/lib/agent-marketing-plan-lib");
+  const director = require("../netlify/functions/lib/agent-marketing-director-lib");
+  const sys = lib.buildSystemPrompt();
+  assert.match(sys, /9e\. EDITORIAL IMAGE DIRECTOR/);
+  assert.match(sys, /14\. EVENT REELS/);
+  assert.match(sys, /\\?"visual_objective\\?": string/);
+  assert.match(sys, /at or under 550 characters/);
+  const market = (i) => ({ id: "p1", user_id: "agent-7", cta_angle_index: i, template: "local_market_insider", intake: { market: "Antelope" }, duration_sec: 60, formats: ["9x16"] });
+  const m0 = JSON.parse(lib.buildUserMessage(market(0))), m1 = JSON.parse(lib.buildUserMessage(market(1)));
+  assert.strictEqual(m0.shot_plan.length, 8);
+  assert.strictEqual(new Set(m0.shot_plan.map((x) => x.replace(/^Scene \d+: /, ""))).size, 8, "every scene of a Reel has a different shot");
+  assert.notStrictEqual(m0.shot_plan[0], m1.shot_plan[0].replace("Scene 1", "Scene 1"), "the next Reel starts on a different shot");
+  assert.strictEqual(m0.event_reel, undefined);
+  const ev = { ...market(2), selected_topic: { id: "t2", kind: "local_events", question: "Looking for a little holiday inspiration in Roseville?", whyItMatters: "A community craft fair.", scope: "selected", origin: "web", sources: [{ title: "Eskaton", url: "https://discover.eskaton.org/x", published: null }],
+    event: { name: "Annual Holiday Craft Fair", date: "2026-11-14", endDate: null, time: "10:00 am to 2:00 pm", location: "Eskaton Village Roseville, Roseville", organizer: "Eskaton Village Roseville", status: "upcoming", details: ["Browse dozens of local vendors", "Free and open to the public"] } } };
+  const e = JSON.parse(lib.buildUserMessage(ev));
+  assert.strictEqual(e.event_reel, true);
+  assert.match(e.cta_angle, /warm sign-off/);
+  assert.match(e.narrative_architecture, /^Invitation/);
+  assert.strictEqual(e.selected_topic.event.weekday, "Saturday");
+  assert.deepStrictEqual(e.selected_topic.event.details, ["Browse dozens of local vendors", "Free and open to the public"]);
+  assert.match(e.shot_plan[0], /venue grounds|Scene 1/);
+  assert.ok(e.shot_plan.every((x) => !/street|facade|garage/i.test(x)), "event shots are about the event, not housing");
+  // cards: an event Reel does not say Market Update / Seller Insight / Pricing · Condition · Competition
+  const narrative = { hook: "Looking for a little holiday inspiration in Roseville?", scenes: [{ role: "hook", narrationExcerpt: "Looking for a little holiday inspiration in Roseville?" }, { role: "details", narrationExcerpt: "You will find dozens of local vendors." }, { role: "close", narrationExcerpt: "Hope you enjoy the fair!" }] };
+  const plan = director.plan(narrative, { market: "Roseville, CA" }, [], { eventReel: true });
+  assert.strictEqual(plan.scenes[0].data.kind, "Local Events");
+  assert.strictEqual(plan.scenes[0].data.eyebrow, "Happening Locally");
+  assert.strictEqual(plan.scenes[2].data.tagline, "Local Life · Community");
+  const plain = director.plan(narrative, { market: "Roseville, CA" }, []);
+  assert.strictEqual(plain.scenes[0].data.kind, "Market Update");
+  assert.strictEqual(plain.scenes[2].data.tagline, "Pricing · Condition · Competition");
+});

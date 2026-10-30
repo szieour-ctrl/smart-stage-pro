@@ -1,4 +1,5 @@
 // Run with: npm test
+process.env.AGENT_MARKETING_READABILITY = "off"; // these tests run research with no network; the readability check has its own tests
 const test = require("node:test");
 const assert = require("node:assert");
 const run = require("../netlify/functions/lib/agent-marketing-research-run-lib");

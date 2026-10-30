@@ -10,7 +10,8 @@
 //        → 202 { research, session } and the work continues in the background; poll GET until status is not "running".
 //        The same request on the same project reuses its saved set and uses no session.
 //   POST { action: "select", projectId, researchId, topicId }
-//        → freezes the chosen topic (with its sources and research date) on the project.
+//        → freezes the chosen topic (with its sources and research date) on the project. A set built from a report that is not this project's own
+//          answers 409 { code: "report_choice", reports } until the request carries reportChoice: "use".
 //
 // A session is charged only when five validated topics are delivered (see agent-marketing-research-lib.js outcomeFields).
 // Failures, timeouts and unusable results are never charged. The Perplexity key stays on the server.
@@ -25,6 +26,48 @@ const headers = { "Access-Control-Allow-Origin": "*", "Content-Type": "applicati
 const reply = (statusCode, obj) => ({ statusCode, headers, body: JSON.stringify(obj) });
 const STALE_RUNNING_MS = 6 * 60 * 1000;      // a run that never reported back is treated as failed (and was never charged)
 const CHARGE_LOOKBACK_MS = 40 * 24 * 60 * 60 * 1000;
+
+// A saved set opened from another project points at that project's report. The report is the agent's own, so, once the agent says "use", it is copied into THIS project
+// (confirmed as it was) and the set's references are remapped to the copy. Without it the project had no report: nothing showed on the page,
+// it could not be replaced, and the script and cards had only what the topic had frozen (Oct 30, 2026).
+// The reports a saved set was built from that are not yet this project's own. The agent decides what happens to them (use / update); nothing is copied silently.
+async function pendingReports(row, project, userId) {
+  const oldIds = (Array.isArray(row.upload_refs) ? row.upload_refs : []).map((x) => x && x.id).filter((id) => am.UUID_RE.test(String(id || "")));
+  if (!oldIds.length) return [];
+  const r = await supabase("GET", "agent_marketing_uploads", null, `?id=in.(${oldIds.join(",")})&user_id=eq.${userId}&status=eq.confirmed&select=id,project_id,scope_note,created_at`);
+  return (Array.isArray(r.data) ? r.data : []).filter((u) => u.project_id !== project.id).map((u) => ({ id: u.id, scopeNote: u.scope_note || "", uploadedAt: u.created_at || null }));
+}
+async function attachReports(row, project, userId) {
+  const refs = Array.isArray(row.upload_refs) ? row.upload_refs : [];
+  const oldIds = refs.map((x) => x && x.id).filter((id) => am.UUID_RE.test(String(id || "")));
+  if (!oldIds.length) return row;
+  const [srcR, hereR] = await Promise.all([
+    supabase("GET", "agent_marketing_uploads", null, `?id=in.(${oldIds.join(",")})&user_id=eq.${userId}&status=eq.confirmed&select=*`),
+    supabase("GET", "agent_marketing_uploads", null, `?project_id=eq.${project.id}&user_id=eq.${userId}&select=*`),
+  ]);
+  const src = Array.isArray(srcR.data) ? srcR.data : [];
+  const here = Array.isArray(hereR.data) ? hereR.data : [];
+  const idMap = {};
+  for (const u of src) {
+    if (u.project_id === project.id) continue; // already this project's own report
+    const same = here.find((h) => h.status === "confirmed" && h.file_bytes === u.file_bytes && (h.scope_note || "") === (u.scope_note || "") && JSON.stringify(h.facts) === JSON.stringify(u.facts));
+    if (same) { idMap[u.id] = same.id; continue; }
+    if (here.length >= rl.MAX_UPLOADS) continue;
+    const ins = await supabase("POST", "agent_marketing_uploads", {
+      project_id: project.id, user_id: userId, file_kind: u.file_kind, file_bytes: u.file_bytes, status: "confirmed", facts: u.facts, scope_note: u.scope_note,
+      permission_at: u.permission_at, permission_version: u.permission_version, confirmed_at: u.confirmed_at || new Date().toISOString(),
+    });
+    const made = Array.isArray(ins.data) ? ins.data[0] : null;
+    if (ins.status >= 300 || !made) { console.error("agent-marketing-research report copy failed:", ins.status, JSON.stringify(ins.data).slice(0, 200)); continue; }
+    here.push(made); idMap[u.id] = made.id;
+  }
+  if (!Object.keys(idMap).length) return row;
+  const remap = (v) => { let t = JSON.stringify(v); for (const [o, n] of Object.entries(idMap)) t = t.split(o).join(n); return JSON.parse(t); };
+  const fields = { upload_refs: remap(refs), topics: remap(row.topics || []), updated_at: new Date().toISOString() };
+  const up = await supabase("PATCH", "agent_marketing_research", fields, `?id=eq.${row.id}&user_id=eq.${userId}`);
+  const out = Array.isArray(up.data) ? up.data[0] : null;
+  return up.status < 300 && out ? out : row;
+}
 
 function forClient(row) {
   if (!row) return null;
@@ -141,6 +184,11 @@ exports.handler = async (event) => {
       if (!am.UUID_RE.test(String(b.researchId || ""))) return reply(400, { error: "Missing or invalid research id" });
       let rr = await supabase("GET", "agent_marketing_research", null, `?id=eq.${b.researchId}&user_id=eq.${userId}&select=*&limit=1`);
       let row = Array.isArray(rr.data) ? rr.data[0] : null;
+      // The report behind a saved set may be last month's. The agent chooses: "use" it as it is (it is copied into this project), or update it
+      // (the page then asks for the newer report and researches again). Without the choice nothing is selected and nothing is copied.
+      let pending = [];
+      if (row && row.status === "ready") { try { pending = await pendingReports(row, project, userId); } catch (e) { console.error("agent-marketing-research pendingReports failed:", e.message); } }
+      if (pending.length && b.reportChoice !== "use") return reply(409, { code: "report_choice", error: "Choose whether to use the report this research was built from, or update it.", reports: pending, researchId: row.id });
       if (row && row.status === "ready" && row.project_id !== project.id) {
         // A set saved under another of the agent's projects: copy it here, so this project owns it. No session is used.
         const copy = await supabase("POST", "agent_marketing_research", {
@@ -152,6 +200,7 @@ exports.handler = async (event) => {
         if (!row) return reply(500, { error: "Could not open that saved set" });
       }
       if (!row || row.status !== "ready") return reply(404, { error: "That research set was not found." });
+      if (pending.length) { try { row = await attachReports(row, project, userId); } catch (e) { console.error("agent-marketing-research attachReports failed:", e.message); } }
       const topic = (row.topics || []).find((t) => t && t.id === String(b.topicId || ""));
       if (!topic) return reply(400, { error: "Choose one of the five topics." });
       const frozen = { ...topic, researchId: row.id, researchDate: row.research_date, mode: row.mode, audience: row.audience, focus: row.focus || {}, geography: row.geography };
@@ -164,7 +213,7 @@ exports.handler = async (event) => {
       if (changed) fields.intake = {};
       const saved = await supabase("PATCH", "agent_marketing_projects", fields, `?id=eq.${project.id}&user_id=eq.${userId}`);
       if (saved.status >= 300 || !Array.isArray(saved.data) || !saved.data[0]) return reply(500, { error: "Could not save your choice" });
-      return reply(200, { selectedResearchId: row.id, selectedTopic: frozen });
+      return reply(200, { selectedResearchId: row.id, selectedTopic: frozen, reportAttached: Array.isArray(row.upload_refs) && row.upload_refs.length > 0 });
     }
 
     // start

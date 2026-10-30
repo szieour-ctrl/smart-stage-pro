@@ -198,12 +198,39 @@
       });
     });
   }
-  async function pick(researchId, topicId) {
+  // A saved set built from a report asks first: use that report as it is, or update it. The server will not select the topic until the agent answers.
+  function askReport(researchId, topicId, reports) {
+    return new Promise(function (resolve) {
+      var m = $("rcModal");
+      $("rcList").innerHTML = (reports || []).map(function (x) { return '<div class="saved"><div><b>' + esc(x.scopeNote || "Your MLS report") + '</b>' + (x.uploadedAt ? '<div class="hint">Attached ' + esc(String(x.uploadedAt).slice(0, 10)) + "</div>" : "") + "</div></div>"; }).join("");
+      var done = function (v) { m.classList.add("hidden"); $("rcUse").onclick = $("rcUpdate").onclick = $("rcX").onclick = null; resolve(v); };
+      $("rcUse").onclick = function () { done("use"); };
+      $("rcUpdate").onclick = function () { done("update"); };
+      $("rcX").onclick = function () { done("cancel"); };
+      m.classList.remove("hidden");
+    });
+  }
+  async function pick(researchId, topicId, reportChoice) {
     say("selMsg", "Saving your choice…");
     try {
-      var r = await api(API, "POST", "", { action: "select", projectId: state.projectId, researchId: researchId, topicId: topicId });
+      var r = await api(API, "POST", "", { action: "select", projectId: state.projectId, researchId: researchId, topicId: topicId, reportChoice: reportChoice });
+      if (!r.ok && r.json && r.json.code === "report_choice") {
+        say("selMsg", "");
+        var c = await askReport(researchId, topicId, r.json.reports);
+        if (c === "use") return pick(researchId, topicId, "use");
+        if (c === "update") {
+          // The newer report starts a new request: the form is filled from this set, the agent attaches the report and confirms it, then researches again.
+          var set = state.current && state.current.id === researchId ? state.current : null;
+          if (set) setForm(set);
+          hideConfirm(); $("resultPanel").classList.add("hidden"); foldSetup(false);
+          say("startMsg", "Attach your newer report below and confirm it, then research this market again. Your saved research stays in the library.", "ok");
+          var f = $("upFile"); if (f) f.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+        return;
+      }
       if (!r.ok) return say("selMsg", r.json.error || "Could not save your choice.", "err");
       state.selected = r.json.selectedTopic;
+      if (r.json.reportAttached && state.restoreUpload) await state.restoreUpload(); // a saved set brings its report along
       if (opts.onSelected) opts.onSelected(state.selected);
       opts.__pickedNow = true; showResult(state.current); opts.__pickedNow = false;
       say("selMsg", "Saved. Resuming this project later restores this topic without a new research call.", "ok");
@@ -351,6 +378,18 @@
     $("resX").addEventListener("click", function () { $("resultPanel").classList.add("hidden"); foldSetup(false); });
     $("setupEdit").addEventListener("click", function () { foldSetup(false); $("setupBody").scrollIntoView({ behavior: "smooth", block: "start" }); });
     $("libBtn2").addEventListener("click", openLib);
+    // The page used to know a report only from the file chosen in this visit, so a report already on the project (opened later, or copied in with a
+    // saved set) showed nothing and could not be replaced. This reads the project's confirmed report back into the page.
+    state.restoreUpload = async function () {
+      if (!state.projectId || (state.upload && (state.upload.busy || state.upload.id))) return;
+      try {
+        var r = await api(REPORT, "GET", "?projectId=" + encodeURIComponent(state.projectId));
+        var u = ((r.ok && r.json && r.json.uploads) || []).filter(function (x) { return x.status === "confirmed"; })[0];
+        if (!u) return;
+        state.upload = { id: u.id, status: u.status, summary: u.summary };
+        renderReview(state.upload); syncUpload();
+      } catch (e) { /* the research step still works without it */ }
+    };
     state.resetUpload = function () { $("upFile").value = ""; $("upOk").checked = false; resetReview(); resetWindow(); syncUpload(); };
     state.uploadReady = function () {
       var has = $("upFile").files && $("upFile").files.length > 0;
@@ -445,6 +484,7 @@
         ["geoType", "geoName", "geoCity", "geoZip", "audience", "f55", "fNew", "keywords", "upFile", "dataFocus", "period", "periodFrom", "periodTo"].forEach(function (id) { $(id).addEventListener("input", hideConfirm); $(id).addEventListener("change", hideConfirm); }); wireIntakeExtras(); }
       $("resultPanel").classList.add("hidden");
       var list = await refreshSaved();
+      if (state.restoreUpload) await state.restoreUpload();
       var running = (list || []).filter(function (r) { return r.status === "running"; })[0];
       if (running) { showResult(running); $("startBtn").disabled = true; startPoll(running.id); }
       else if (state.selected && !state.current) {

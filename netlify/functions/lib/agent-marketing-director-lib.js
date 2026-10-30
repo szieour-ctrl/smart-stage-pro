@@ -119,7 +119,10 @@ const WEEKDAY = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday
 const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const ymd = (v) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(v || "")); return m && +m[2] >= 1 && +m[2] <= 12 ? { y: +m[1], m: +m[2], d: +m[3] } : null; };
 function niceTime(t) {
-  return String(t || "").replace(/\s+/g, " ").trim().replace(/(\d{1,2})(?::00)?\s*([ap])\.?m\b\.?/gi, (_, h, ap) => `${h} ${ap.toLowerCase()}.m.`);
+  // The card shows the published time only: the first clause, never a research note ("all day; page also describes ...").
+  let x = String(t || "").replace(/\s+/g, " ").trim().split(/\s*[;(]\s*/)[0];
+  if (x.length > 26) x = "";
+  return x.replace(/(\d{1,2})(?::00)?\s*([ap])\.?m\b\.?/gi, (_, h, ap) => `${h} ${ap.toLowerCase()}.m.`);
 }
 function eventWhen(e) {
   const a = ymd(e && e.date);

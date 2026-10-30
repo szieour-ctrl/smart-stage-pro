@@ -390,7 +390,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
         <textarea id="narration" style="min-height:190px"></textarea>
         <div class="hint">Words in [brackets] are delivery cues for the narrator. They never appear in captions. <span id="wordInfo"></span></div>
         <details id="pronBox" style="margin:10px 0">
-          <summary style="cursor:pointer;font-weight:600">Pronunciation (a name said wrongly)</summary>
+          <summary id="pronSum" style="cursor:pointer;font-weight:600">Pronunciation (a name said wrongly)</summary>
           <div class="hint">If the narrator says a name wrongly, type the word as it is written in your script and how it should sound. The narrator uses the sound; your captions keep the word as written. Example: Denio's &rarr; Duh-NYE-oh's.</div>
           <div id="pronRows"></div>
           <button class="btn sm ghost" type="button" id="pronAdd">Add a word</button>
@@ -718,9 +718,11 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     own.forEach(function (x) { have[flatTxt(x.written)] = true; rows.push(pronRow(x.written, x.say, !!(pron.saved || []).filter(function (y) { return flatTxt(y.written) === flatTxt(x.written); }).length)); });
     (pron.saved || []).forEach(function (x) { var k = flatTxt(x.written); if (!have[k] && text.indexOf(k) >= 0) rows.push(pronRow(x.written, x.say, true)); });
     $("pronRows").innerHTML = rows.join("");
-    $("pronBox").open = rows.length > 0;
+    sumPron(rows.length);
     paintSavedList();
   }
+  // The box stays closed (it only says how many corrections apply) until the agent opens it; saving the script closes it again.
+  function sumPron(n) { $("pronSum").textContent = "Pronunciation (a name said wrongly)" + (n ? " \u00b7 " + n + " applied" : ""); }
   function paintSavedList() {
     var l = pron.saved || [];
     $("pronSaved").innerHTML = l.length ? '<div class="hint" style="margin-top:8px"><b>Saved for all my Reels:</b></div>' + l.map(function (x, i) { return '<div class="hint" style="margin:2px 0">' + esc(x.written) + " &rarr; " + esc(x.say) + ' <button class="btn sm ghost" type="button" data-pron-forget="' + i + '">Remove</button></div>'; }).join("") : "";
@@ -766,6 +768,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
       if (!r.ok) throw new Error(r.json.error || "Could not save");
       setProject(r.json.project);
       try { await syncSavedPron(); } catch (e) { /* the script is saved; the saved list can be updated next time */ }
+      $("pronBox").open = false; sumPron(pronRows().length);
       if (thenApprove) {
         var a = await api("POST", "", { action: "approve_narrative", id: state.project.id });
         if (!a.ok) throw new Error(a.json.error || "Could not approve");
@@ -1425,7 +1428,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     $("narration").addEventListener("input", refreshPreview);
     $("saveScriptBtn").addEventListener("click", function () { saveScript(false); });
     $("approveBtn").addEventListener("click", function () { saveScript(true); });
-    $("pronAdd").addEventListener("click", function () { $("pronRows").insertAdjacentHTML("beforeend", pronRow("", "")); });
+    $("pronAdd").addEventListener("click", function () { $("pronRows").insertAdjacentHTML("beforeend", pronRow("", "")); $("pronBox").open = true; });
     $("pronRows").addEventListener("click", function (ev) {
       var d = ev.target.closest && ev.target.closest("button[data-pron-del]"); if (d) { d.parentNode.parentNode.removeChild(d.parentNode); return; }
       var h = ev.target.closest && ev.target.closest("button[data-pron-hear]"); if (h) hearPron(h);

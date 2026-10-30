@@ -455,3 +455,15 @@ test("Oct 30: a project fact the planner takes from the article is kept only if 
   const noFacts = am.gateInputFor(project, { ...out.narrative, articleFacts: [], captionText: "x", scenes: [] }, "claude");
   assert.ok(!noFacts.verified.texts.some((t) => /132 apartments/.test(t)));
 });
+
+// Oct 30, 2026: after the sourcing list and article facts were added, scripts were cut off at the old 4,000-token output limit.
+test("a cut-off planner reply gets one corrective retry that asks for shorter fields; the sourcing list is bounded", async () => {
+  const calls = [];
+  const out = await planLib.generatePlan({ project, anthropicKey: "k", callFn: async (sys, user) => { calls.push(user); if (calls.length === 1) throw new Error("Planner response was cut off"); return JSON.stringify(goodPlan()); } });
+  assert.strictEqual(calls.length, 2);
+  assert.match(calls[1], /ran out of room: keep every visual_brief and ai_generation_prompt under 50 words/);
+  assert.strictEqual(out.narrative.scenes.length, 6);
+  assert.match(planLib.buildSystemPrompt(), /one entry per distinct figure \(at most 12, kept short\)/);
+  // a second cut-off is not retried again and reaches the agent as the plain message
+  await assert.rejects(planLib.generatePlan({ project, anthropicKey: "k", callFn: async () => { throw new Error("Planner response was cut off"); } }), /cut off/);
+});

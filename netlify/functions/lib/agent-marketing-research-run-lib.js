@@ -1,7 +1,7 @@
 // lib/agent-marketing-research-run-lib.js — Netlify (shared). Runs ONE Local Market Insider research session (Oct 24, 2026).
 //
-// Calls Perplexity, then holds the answer to the rules in agent-marketing-research-lib.js. The only network call is
-// callPerplexity(); tests pass their own callFn. The API key is used in one header and is never logged or returned.
+// Calls Perplexity, then holds the answer to the rules in agent-marketing-research-lib.js. The network calls are callPerplexity() and, for a
+// market update, a readability check of each article page (agent-marketing-article-fetch-lib.js); tests pass their own callFn and fetch. The API key is used in one header and is never logged or returned.
 //
 //   runResearch({ row, apiKey }) → { fields, problems, attempts }
 //     `fields` is exactly what to PATCH onto the agent_marketing_research row: status "ready" with five topics and charged_at,
@@ -9,6 +9,7 @@
 "use strict";
 
 const https = require("https");
+const articleFetch = require("./agent-marketing-article-fetch-lib");
 const rl = require("./agent-marketing-research-lib");
 const reportTopics = require("./agent-marketing-research-report-lib");
 const planLib = require("./agent-marketing-plan-lib");
@@ -180,7 +181,7 @@ function citationUrls(resp) {
  * answer was rejected. All attempts' usage is added together, so the stored cost is the real cost of the session.
  * A session is charged only when FIVE validated topics are delivered, whatever the source.
  */
-async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callFn, sleepFn, now, env }) {
+async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callFn, sleepFn, now, env, articleFetchFn }) {
   const e = env || process.env;
   const cfg = rl.researchSettings(e);
   const extra = Number(e.AGENT_MARKETING_RESEARCH_RETRIES);
@@ -209,6 +210,17 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
           grounded = g.grounded;
           validation = rl.validateTopics(g.topics, { mode: request.mode, today, recommendation: rl.extractRecommendation(text), need: dataSource === "both" ? rl.TOPIC_COUNT - reportTopics.REPORT_TOPICS_WHEN_BOTH : rl.TOPIC_COUNT });
           problems = validation.problems;
+          // Oct 30, 2026 (Sam): Claude reads the whole article, so only articles that load and hold real text are kept (no paywall, no bot wall).
+          // An unreadable article is dropped; a retry is asked for replacements, and a partial set is kept if the retry does no better.
+          if (validation.ok && request.mode === "market_update" && (e.AGENT_MARKETING_READABILITY || process.env.AGENT_MARKETING_READABILITY) !== "off") {
+            const rf = await articleFetch.readabilityFilter(validation.topics, { fetchFn: articleFetchFn });
+            if (rf.dropped.length) {
+              console.error(`[agent-marketing-research] unreadable articles dropped: ${rf.dropped.map((d) => `${d.reason} ${String(d.url).slice(0, 80)}`).join("; ").slice(0, 400)}`);
+              const need = dataSource === "both" ? rl.TOPIC_COUNT - reportTopics.REPORT_TOPICS_WHEN_BOTH : rl.TOPIC_COUNT;
+              if (!rf.kept.length) { validation = { ok: false, topics: [], problems: [`none of the ${validation.topics.length} articles could be opened and read (paywalled or blocking); use different articles that load without a login`] }; problems = validation.problems; }
+              else validation = { ...validation, topics: rf.kept, partial: validation.partial || rf.kept.length < need, soft: [...(validation.soft || []), `${rf.dropped.length} article${rf.dropped.length === 1 ? "" : "s"} could not be opened and read (${[...new Set(rf.dropped.map((d) => { try { return new URL(d.url).hostname.replace(/^www\./, ""); } catch (x) { return "no link"; } }))].slice(0, 4).join(", ")}); use different articles that load without a login`] };
+            }
+          }
         } catch (parseErr) {
           validation = { ok: false, topics: [], problems: [parseErr.message] };
           problems = validation.problems;

@@ -50,7 +50,7 @@ function neutralizeFigures(text) {
 /** The figures the article states about the market (never the agent's report, never a project fact): the numbers a script must not repeat. */
 function articleNumbers(topic) {
   const t = topic && typeof topic === "object" ? topic : {};
-  const fields = [t.question, t.whyItMatters, t.scopeNote, ...(Array.isArray(t.trendSignals) ? t.trendSignals : [])];
+  const fields = [t.question, t.whyItMatters, t.scopeNote, ...(Array.isArray(t.trendSignals) ? t.trendSignals : []), t.articleText]; // articleText: the page itself, when it was read
   return [...new Set(fields.flatMap((x) => sentencesOf(x).filter((sent) => !keep(sent)).flatMap((sent) => figureMatches(sent).map((f) => f.value))))];
 }
 

@@ -1,5 +1,6 @@
 // Topics written from the agent's confirmed MLS reports: the request choice, the checks on what the model returns, the merge of report and
 // web topics, the research run for each data source, and the gate's use of the frozen figures and MetroList notice.
+process.env.AGENT_MARKETING_READABILITY = "off"; // these tests run research with no network; the readability check has its own tests
 const test = require("node:test");
 const assert = require("node:assert");
 const reportLib = require("../netlify/functions/lib/agent-marketing-report-lib");

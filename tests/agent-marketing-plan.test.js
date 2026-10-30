@@ -414,3 +414,39 @@ test("a script with an article scene is not asked again, and a project with no a
   await planLib.generatePlan({ project, anthropicKey: "k", callFn: async () => { n++; return JSON.stringify(goodPlan()); } });
   assert.strictEqual(n, 1);
 });
+
+test("Oct 30: the planner reads the whole article with the directive; its sourcing is shown with the claims to verify and an unknown source is reported", async () => {
+  const seen = [];
+  const body = "Builders price against what a buyer nets after incentives, not the sticker. " + "Sellers can compete on a closing date they control and a finished yard. ".repeat(8);
+  const plan = withArticleScene(); plan.sourcing = [{ figure: "93 sales", ref: "r1.f1" }, { figure: "a made-up figure", ref: "r9.f9" }];
+  const out = await planLib.generatePlan({ project: articleProject(), anthropicKey: "k", articleText: body, callFn: async (sys, user) => { seen.push(JSON.parse(user)); return JSON.stringify(plan); } });
+  assert.strictEqual(seen.length, 1);
+  assert.match(seen[0].selected_topic.directive, /You may not use a single market statistic from the article/);
+  assert.match(seen[0].selected_topic.article_text, /price against what a buyer nets/);
+  assert.strictEqual(seen[0].selected_topic.topic_question, "Could 81 builder listings change what resale sellers can ask?", "the question reaches the planner as written");
+  assert.deepStrictEqual(seen[0].selected_topic.figure_refs[0], { ref: "r1.f1", figure: "Closed sales: 93 vs 89 in September 2025 (up 4.5%)" });
+  assert.deepStrictEqual(out.narrative.sourcing[0], { figure: "93 sales", ref: "r1.f1" });
+  assert.match(out.narrative.claimsToVerify[0], /^Source for 93 sales: Closed sales: 93 vs 89/);
+  assert.ok(out.warnings.some((w) => /names a source for a made-up figure/.test(w)));
+});
+
+test("Oct 30: the article text is never saved on the narrative and a script with no article text uses the summary", async () => {
+  const out = await planLib.generatePlan({ project: articleProject(), anthropicKey: "k", articleText: "Builders price against net. ".repeat(30), callFn: async () => JSON.stringify(withArticleScene()) });
+  assert.doesNotMatch(JSON.stringify(out.narrative), /Builders price against net/);
+  let user;
+  await planLib.generatePlan({ project: articleProject(), anthropicKey: "k", callFn: async (s, u) => { user = JSON.parse(u); return JSON.stringify(withArticleScene()); } });
+  assert.strictEqual(user.selected_topic.article_read, false);
+  assert.strictEqual(user.selected_topic.article_text, undefined);
+});
+
+test("Oct 30: a project fact the planner takes from the article is kept only if the article says it, and later checks count it as verified", async () => {
+  const body = "The city approved a plan for 132 apartments near the downtown core in July. " + "Builders price against what a buyer nets after incentives. ".repeat(10);
+  const plan = withArticleScene(); plan.article_facts = ["a plan for 132 apartments near the downtown core", "a plan for 400 apartments near the mall"];
+  const project = articleProject();
+  const out = await planLib.generatePlan({ project, anthropicKey: "k", articleText: body, callFn: async () => JSON.stringify(plan) });
+  assert.deepStrictEqual(out.narrative.articleFacts, ["a plan for 132 apartments near the downtown core"], "the invented 400 is not in the article");
+  const input = am.gateInputFor(project, { ...out.narrative, captionText: "The city approved a plan for 132 apartments." , narrationTagged: "x", scenes: [] }, "claude");
+  assert.ok(input.verified.texts.some((t) => /132 apartments/.test(t)), "a later check (edit, approve) knows the fact without the article");
+  const noFacts = am.gateInputFor(project, { ...out.narrative, articleFacts: [], captionText: "x", scenes: [] }, "claude");
+  assert.ok(!noFacts.verified.texts.some((t) => /132 apartments/.test(t)));
+});

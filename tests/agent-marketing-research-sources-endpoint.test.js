@@ -1,4 +1,5 @@
 // Start and run research with an uploaded report, end to end against an in-memory database (no network).
+process.env.AGENT_MARKETING_READABILITY = "off"; // these tests run research with no network; the readability check has its own tests
 const test = require("node:test");
 const assert = require("node:assert");
 

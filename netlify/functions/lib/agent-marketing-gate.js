@@ -177,6 +177,9 @@ function verifiedFromTopic(topic) {
     if (Array.isArray(e.details)) texts.push(...e.details);
     if (e.location) addresses.push(e.location);
   }
+  // The article, when it was read in full (script time): its project and event facts (every sentence that is not a market statistic) are verified, so a
+  // plan for 132 apartments in the body may be stated; its market statistics are not (Directive A).
+  if (reportFirst && t.reframed !== true && typeof t.articleText === "string" && t.articleText.trim()) texts.push(require("./agent-marketing-article-lib").withoutMarketStats(t.articleText));
   const clean = texts.filter((x) => typeof x === "string" && x.trim()).map(norm);
   // Directive A (Sam, Oct 30, 2026): the article's own figures may not be stated when the agent's report is the source. They are listed so the
   // script is refused if it repeats one that the report does not also carry.

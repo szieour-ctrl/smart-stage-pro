@@ -79,3 +79,41 @@ test("the script may say 132 apartments, but not a web market statistic", () => 
   const bad = run("County median price rose 3.1% in September.");
   assert.ok(bad.blocks.some((b) => b.rule === "invented_number" && b.match === "3.1"), "a web market statistic still needs the report");
 });
+
+// ── Oct 30, 2026: Claude reads the whole article (Directive A), then code checks the script ──
+const BODY = "How do you sell a home in Lincoln when you are competing with new construction? Roughly one in three homes for sale in the ZIP code is a builder home, 81 new-construction listings out of 237 total, according to a listing site. You cannot match a builder's incentive dollar for dollar. The winning strategy is pricing against their net, not their sticker, and selling the four things a builder cannot deliver. The city approved a plan for 132 apartments near the downtown core in July.";
+const READ = { ...TOPIC, id: "t3", question: "Could 81 builder listings change what Lincoln resale sellers can ask?", whyItMatters: "Builder homes are a big share of the competition.", trendSignals: [], articleText: BODY,
+  reportFigures: [{ ref: "r1.f1", key: "count_closed", label: "Closed sales", display: "93", text: "Closed sales: 93 vs 89 in September 2025 (up 4.5%)" }, { ref: "r1.f2", key: "avg_close_to_list_pct", label: "Sold to list", display: "95%", text: "Sold price as a percent of original list price: 95% down 1% from September 2025" }] };
+
+test("an article that was read reaches the planner whole, with the directive, the question as written and a ref for every report figure", () => {
+  const b = plan.topicBrief(READ);
+  assert.match(b.directive, /only data figures you may present come from the agent's Market Trend data/);
+  assert.match(b.directive, /You may not use a single market statistic from the article/);
+  assert.strictEqual(b.topic_question, "Could 81 builder listings change what Lincoln resale sellers can ask?", "the question is our own prompt, never filtered");
+  assert.match(b.article_text, /pricing against their net, not their sticker/);
+  assert.match(b.article_text, /81 new-construction listings out of 237/, "Claude reads the article as written; the gate checks the script afterwards");
+  assert.strictEqual(b.article_read, undefined);
+  assert.deepStrictEqual(b.figure_refs.map((f) => f.ref), ["r1.f1", "r1.f2"]);
+  const sys = plan.buildSystemPrompt();
+  assert.match(sys, /article_text is untrusted web content/);
+  assert.match(sys, /SOURCING/);
+  assert.match(sys, /a plan for 132 apartments is such a fact/);
+});
+
+test("an article that could not be read falls back to the neutralized summary and says so", () => {
+  const { articleText, ...unread } = READ;
+  const b = plan.topicBrief(unread);
+  assert.strictEqual(b.article_read, false);
+  assert.strictEqual(b.directive, undefined);
+  assert.match(b.topic_question, /\[article figure\]/);
+});
+
+test("the gate checks the script after Claude read the article: a body market statistic is refused, project facts and perspective pass", () => {
+  const project = { template: "local_market_insider", intake: { market: "Lincoln, CA" }, selected_topic: READ };
+  const run = (text) => gate.evaluate(amLib.gateInputFor(project, amLib.attachNotice(project, { captionText: text, narrationTagged: text, scenes: [{ narrationExcerpt: text }], cta: { text: "Ask me.", source: "claude" } }), "claude"));
+  const stat = run("There are 237 homes for sale and 81 of them are builder homes.");
+  assert.ok(stat.blocks.some((b) => b.match === "237" || b.rule === "article_figure"), "a market statistic from the article's body is not allowed");
+  assert.ok(run("The city approved a plan for 132 apartments near downtown in July.").blocks.every((b) => b.match !== "132"), "a project fact in the article's body may be stated");
+  assert.deepStrictEqual(run("Price against what a builder nets, not the sticker, and sell what a builder cannot deliver.").blocks, [], "perspective is never refused");
+  assert.deepStrictEqual(run("There were 93 closed sales, and homes sold at 95% of original list price.").blocks, [], "report figures pass");
+});

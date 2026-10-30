@@ -415,16 +415,21 @@ test("a script with an article scene is not asked again, and a project with no a
   assert.strictEqual(n, 1);
 });
 
-test("Oct 30: the planner reads the whole article with the directive; its sourcing is shown with the claims to verify and an unknown source is reported", async () => {
+test("Oct 30: the planner gets the article's perspective (never its text) with the directive; sourcing is shown with the claims to verify and an unknown source is reported", async () => {
   const seen = [];
-  const body = "Builders price against what a buyer nets after incentives, not the sticker. " + "Sellers can compete on a closing date they control and a finished yard. ".repeat(8);
+  const body = "Builders price against what a buyer nets after incentives, not the sticker. Roughly one in three homes for sale is a builder home, 81 new-construction listings out of 237. " + "Sellers can compete on a closing date they control and a finished yard. ".repeat(8);
+  const perspective = { idea: "Sellers must price against what a buyer nets.", perspective_points: ["Price against the builder's net, not the sticker.", "Sell what a builder cannot deliver."], opinion_angles: ["Incentives change how buyers compare."], context: [], questions_to_ponder: ["Are buyers weighing your home against new ones?"] };
   const plan = withArticleScene(); plan.sourcing = [{ figure: "93 sales", ref: "r1.f1" }, { figure: "a made-up figure", ref: "r9.f9" }];
-  const out = await planLib.generatePlan({ project: articleProject(), anthropicKey: "k", articleText: body, callFn: async (sys, user) => { seen.push(JSON.parse(user)); return JSON.stringify(plan); } });
+  const out = await planLib.generatePlan({ project: articleProject(), anthropicKey: "k", articleText: body, perspective, callFn: async (sys, user) => { seen.push(user); return JSON.stringify(plan); } });
   assert.strictEqual(seen.length, 1);
-  assert.match(seen[0].selected_topic.directive, /You may not use a single market statistic from the article/);
-  assert.match(seen[0].selected_topic.article_text, /price against what a buyer nets/);
-  assert.strictEqual(seen[0].selected_topic.topic_question, "Could 81 builder listings change what resale sellers can ask?", "the question reaches the planner as written");
-  assert.deepStrictEqual(seen[0].selected_topic.figure_refs[0], { ref: "r1.f1", figure: "Closed sales: 93 vs 89 in September 2025 (up 4.5%)" });
+  const sent = JSON.parse(seen[0]).selected_topic;
+  assert.match(sent.directive, /it gives no market statistic/);
+  assert.deepStrictEqual(sent.article_perspective, perspective);
+  assert.strictEqual(sent.article_text, undefined);
+  assert.doesNotMatch(seen[0], /one in three homes|out of 237|closing date they control/, "none of the article's own text reaches the planner");
+  assert.strictEqual(sent.topic_question, "Could 81 builder listings change what resale sellers can ask?", "the question reaches the planner as written");
+  assert.deepStrictEqual(sent.figure_refs[0], { ref: "r1.f1", figure: "Closed sales: 93 vs 89 in September 2025 (up 4.5%)" });
+  assert.deepStrictEqual(out.narrative.articlePerspective, perspective, "what the planner was told is kept for the review");
   assert.deepStrictEqual(out.narrative.sourcing[0], { figure: "93 sales", ref: "r1.f1" });
   assert.match(out.narrative.claimsToVerify[0], /^Source for 93 sales: Closed sales: 93 vs 89/);
   assert.ok(out.warnings.some((w) => /names a source for a made-up figure/.test(w)));

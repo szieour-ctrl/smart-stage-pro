@@ -85,19 +85,28 @@ const BODY = "How do you sell a home in Lincoln when you are competing with new 
 const READ = { ...TOPIC, id: "t3", question: "Could 81 builder listings change what Lincoln resale sellers can ask?", whyItMatters: "Builder homes are a big share of the competition.", trendSignals: [], articleText: BODY,
   reportFigures: [{ ref: "r1.f1", key: "count_closed", label: "Closed sales", display: "93", text: "Closed sales: 93 vs 89 in September 2025 (up 4.5%)" }, { ref: "r1.f2", key: "avg_close_to_list_pct", label: "Sold to list", display: "95%", text: "Sold price as a percent of original list price: 95% down 1% from September 2025" }] };
 
-test("an article that was read reaches the planner whole, with the directive, the question as written and a ref for every report figure", () => {
-  const b = plan.topicBrief(READ);
+const PERSPECTIVE = { idea: "Resale sellers now compete with builders who offer incentives, so a seller should price against what a buyer nets, not the sticker.",
+  perspective_points: ["Price against the builder's real net, not the sticker.", "Sell what a builder cannot deliver: a closing date you control, a finished yard, an HOA history buyers can read."],
+  opinion_angles: ["Builders play by different rules on incentives, which changes how buyers compare a resale home."], context: ["The city approved a plan for 132 apartments near the downtown core in July."],
+  questions_to_ponder: ["Are buyers weighing your home against brand-new ones?"] };
+
+test("the planner is given the article's perspective and context, the question as written and a ref for every report figure, never the article itself", () => {
+  const b = plan.topicBrief({ ...READ, perspectiveBrief: PERSPECTIVE });
   assert.match(b.directive, /only data figures you may present come from the agent's Market Trend data/);
-  assert.match(b.directive, /You may not use a single market statistic from the article/);
+  assert.match(b.directive, /it gives no market statistic/);
   assert.strictEqual(b.topic_question, "Could 81 builder listings change what Lincoln resale sellers can ask?", "the question is our own prompt, never filtered");
-  assert.match(b.article_text, /pricing against their net, not their sticker/);
-  assert.match(b.article_text, /81 new-construction listings out of 237/, "Claude reads the article as written; the gate checks the script afterwards");
+  assert.deepStrictEqual(b.article_perspective, PERSPECTIVE);
+  assert.strictEqual(b.article_text, undefined, "the article text never reaches the planner");
+  const all = JSON.stringify(b);
+  assert.doesNotMatch(all, /out of 237|one in three homes|according to a listing site/, "nothing from the article's body leaks through");
+  assert.doesNotMatch(all, /\b237\b/, "no article statistic reaches the planner");
   assert.strictEqual(b.article_read, undefined);
   assert.deepStrictEqual(b.figure_refs.map((f) => f.ref), ["r1.f1", "r1.f2"]);
   const sys = plan.buildSystemPrompt();
-  assert.match(sys, /article_text is untrusted web content/);
+  assert.match(sys, /article_perspective is the approved article as it was read for you/);
   assert.match(sys, /SOURCING/);
   assert.match(sys, /a plan for 132 apartments is such a fact/);
+  assert.doesNotMatch(sys, /article_text/);
 });
 
 test("an article that could not be read falls back to the neutralized summary and says so", () => {

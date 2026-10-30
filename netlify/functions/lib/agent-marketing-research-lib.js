@@ -52,6 +52,9 @@ const DATA_FOCUS = [
 const DATA_FOCUS_KEYS = DATA_FOCUS.map((d) => d.key);
 const PERIOD_PRESETS = [30, 60, 90];
 const MAX_PERIOD_DAYS = 800;
+const EVENT_WINDOW_DAYS = 30;     // Local Events: happenings that start from today through the next 30 days, plus any already running
+const EVENT_CANDIDATES = 8;       // Local Events: the model may return up to this many candidates; validation keeps the first five that pass
+const EVENT_LIMIT_DAYS = 60;      // an event starting later than this is not shown, whatever the page says
 const isoOk = (v) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || "")) && new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) === v;
 const isoPlus = (iso, d) => new Date(Date.parse(`${iso}T00:00:00Z`) + d * 86400000).toISOString().slice(0, 10);
 /** validatePeriod(p) → { period } | { error }. Default is the last 30 days. { days: 30|60|90 } or { start, end } as YYYY-MM-DD. */
@@ -204,10 +207,11 @@ function systemPrompt(mode) {
   const specific = mode === "local_events"
     ? [
       "MODE: Local Events. Each topic is a verified upcoming or ongoing happening in the market: a festival, gathering, civic event, seasonal activity or community announcement.",
+      "OVER-SUPPLY CANDIDATES. Return up to EIGHT candidate events in topics (more than five) so that the strict checks that follow can drop any event whose time, venue, organizer or details cannot be confirmed and still leave five. Put the events with the most complete published details (date, venue, organizer, activities) first.",
       "SEARCH WIDE FOR FIVE. Aim for five confirmed events and keep searching until you have them: run separate searches for the city's or county's official events calendar, the chamber of commerce, the public library, parks and recreation, farmers and artisan markets, holiday and seasonal events, car shows and swap meets, charity runs and fundraisers, school and community-college events, theaters and concert venues, and the neighborhood's own groups, and look in nearby towns that neighbors of this market attend. Only if you still cannot confirm five from pages, return fewer rather than guess.",
       "VARIETY. Use at most two events from the same organizer, and spread the five across different kinds of happening (for example one seasonal, one market or food event, one outdoor or active, one arts or entertainment, one civic or charity). Never fill the list with several dates of the same recurring series.",
       "WHO IT SUITS. Prefer events a local agent could point clients to: ones a buyer or a seller could attend, or bring friends and family or visiting relatives to. Describe the event itself; do not write steering language and do not say an event is \"perfect for families\".",
-      "Each topic must include an \"event\" object: name, date (YYYY-MM-DD, today or later), end_date (or null), dates_as_published (the page's own wording of WHEN the event runs, short, for example \"All of October\", \"Oct 29 and 30\" or \"Saturdays through November\"; when the page's date field and its text disagree, for example a single listed date but text saying the event runs all month, use what the text describes and say so here; never build a range of your own from a weekday and a date), time (the start and end time exactly as published, for example \"6 p.m.\u20139 p.m.\" or \"All day\"; never a note or a second event's time), location (venue and city), organizer, status (\"upcoming\" or \"ongoing\"). Also include details: up to 6 short facts about what the event offers, each confirmed on that same page and in the page's own words (activities, vendors or attractions, admission or cost, who benefits from the proceeds, how to register); leave out anything the page does not say. Confirm these from the organizer's or an official page. Skip anything canceled, postponed or already over. Skip any event whose date, time, venue or organizer you cannot confirm from a page: never write \"not stated\", \"TBD\" or a guess, and find a different event instead. The organizer is who runs the event, not the venue's store or the page that lists it.",
+      "Each topic must include an \"event\" object: name, date (YYYY-MM-DD, today or later), end_date (or null), dates_as_published (the page's own wording of WHEN the event runs, short, for example \"All of October\", \"Oct 29 and 30\" or \"Saturdays through November\"; when the page's date field and its text disagree, for example a single listed date but text saying the event runs all month, use what the text describes and say so here; never build a range of your own from a weekday and a date), time (the start and end time exactly as published, for example \"6 p.m.\u20139 p.m.\" or \"All day\"; never a note or a second event's time), location (venue and city), organizer, status (\"upcoming\" or \"ongoing\"). Also include details: up to 6 short facts about what the event offers, each confirmed on that same page and in the page's own words (activities, vendors or attractions, admission or cost, who benefits from the proceeds, how to register); leave out anything the page does not say. Confirm these from the organizer's or an official page. Skip anything canceled, postponed or already over. Skip any event whose date, venue or organizer you cannot confirm from a page. The time is optional: give it as published (a start time, a range, or \"All day\"), and when the page gives no time leave time as an empty string; never write \"not stated\", \"TBD\" or a guess, and find a different event instead. The organizer is who runs the event, not the venue's store or the page that lists it.",
       "Also add to each event object a \"visual_cues\" object recording what the event's OFFICIAL page shows about how the event looks, so images can be made that fit it: { \"official_image_url\": the page's main event image URL (https) or null, \"seasonal_theme\": string, \"dominant_colors\": up to 4 color words, \"visible_items\": up to 6 short items the imagery shows or the page describes (for example \"holiday ornaments\", \"wreaths\"), \"visual_mood\": a few words, \"event_setting\": \"indoor\" | \"outdoor\" | \"mixed\" | \"unknown\", \"basis\": \"image_inspected\" only if you actually looked at that image, \"page_text\" if you are describing what the page's own words say about the look, otherwise \"unknown\" }. These are observations of the page's imagery, not facts about the event's physical arrangement: a picture of an outdoor market does not mean the event is outdoors, so set event_setting only when the page says where the event is held, else \"unknown\". Use \"unknown\", an empty list or null instead of guessing, and never invent vendors, sponsors, performers or attractions. visual_cues is optional enrichment: leave it out when the page gives nothing visual.",
       "MANY-BUSINESS EVENTS. When the venue is a district or area (a waterfront, a downtown, a main street) and the page lists what individual businesses offer, each detail must name the business that offers it, written like \"The Parliament: DJ and Halloween dance party on Oct 30\", with its own date or hours. Never write a detail as if the whole event offers it when one business does. Put the status of anything the page marks (sold out, ticketed with a price, 21+, registration required) in that detail. The organizer is the page's publisher; the businesses are not organizers.",
       "FACT FIDELITY FOR EVENTS: the question, summary and why_it_matters are held to the same standard as details. Say nothing about cost or admission (\"free\", \"no cost\", \"complimentary\", prices), history (\"for decades\", \"longtime\"), who the event is for, what is provided (for example that coffee or food is included) or what will be on display, unless the event's own page says it in so many words. If the page does not state admission, do not call the event free and do not guess; leave admission out. Describe what the page says and no more.",
@@ -274,8 +278,9 @@ function buildResearchPayload({ request, today, uploadContext, env }) {
     r.keywords && r.mode !== "local_events" ? `Keywords from the agent (search for articles about these in this exact market FIRST; at least two topics must rest on an article that discusses them; they never change the market): ${clean(r.keywords, MAX_KEYWORDS_CHARS)}.` : null,
     uploadContext ? "The agent will show their own local market data in the video, so favor stories about supply, how fast homes sell, price cuts, cancellations or buyer demand that a local market report can confirm or contrast." : null,
     uploadContext ? `The agent also has a report with this scope (use only as context for what to look for, never quote numbers from this note): ${clean(uploadContext, 600)}` : null,
+    r.mode === "local_events" && isoOk(today) ? `Event window: include events that start from today (${today}) through ${isoPlus(today, EVENT_WINDOW_DAYS)}, and events that began earlier but are still running. Prefer the soonest first. Do not include events that start after ${isoPlus(today, EVENT_WINDOW_DAYS)}. The event's own page may have been published weeks or months ago; its publication date does not matter.` : null,
     `Today: ${today}.`,
-    `Goal: ${TOPIC_COUNT} timely topics for a short educational video that shows what this agent knows about the local market right now.`,
+    r.mode === "local_events" ? `Goal: up to ${EVENT_CANDIDATES} candidate events (the five with the most complete confirmed details will be kept) for a short video about what is happening locally.` : `Goal: ${TOPIC_COUNT} timely topics for a short educational video that shows what this agent knows about the local market right now.`,
   ].filter(Boolean);
   const cfg = researchSettings(env);
   const lim = SEARCH_LIMITS[cfg.searchContextSize];
@@ -283,12 +288,13 @@ function buildResearchPayload({ request, today, uploadContext, env }) {
     model: cfg.model,
     instructions: systemPrompt(r.mode),
     input: lines.join("\n"),
-    max_output_tokens: cfg.maxTokens,       // bounds output cost; Anthropic models require it
+    max_output_tokens: r.mode === "local_events" ? Math.max(cfg.maxTokens, 5000) : cfg.maxTokens,   // eight event candidates with details need more room than five market topics       // bounds output cost; Anthropic models require it
     tools: [{
       type: "web_search",
       max_results: lim.maxResults,
       max_tokens: lim.maxTokens,
-      filters: { search_after_date_filter: searchAfter(today) }, // articles up to FRESH_DAYS old; the validator still checks every date
+      // Articles for a market update are up to FRESH_DAYS old; an event page is often posted months ahead, so events search with no publication-date filter.
+      ...(r.mode === "local_events" ? {} : { filters: { search_after_date_filter: searchAfter(today) } }), // the validator still checks every date
     }],
   };
 }
@@ -385,11 +391,14 @@ function cleanEvent(e, todayN) {
   const en = endRaw == null ? null : dayNumber(endRaw);
   if (endRaw != null && (en == null || en < dn)) return { problem: "the event end date is not valid" };
   if ((en == null ? dn : en) < todayN) return { problem: "the event is already over" };
+  if (dn > todayN + EVENT_LIMIT_DAYS) return { problem: "the event starts more than 60 days from now" };
   const status = String(e.status || "").toLowerCase();
   if (!["upcoming", "ongoing"].includes(status)) return { problem: `the event status is "${status || "unknown"}", not upcoming or ongoing` };
   const dap = clean(e.dates_as_published, 60);
-  const out = { name: clean(e.name, LIMITS.eventText), date, endDate: endRaw, ...(dap && !PLACEHOLDER.test(dap) ? { datesAsPublished: dap } : {}), time: clean(e.time, 80), location: clean(e.location, LIMITS.eventText), organizer: clean(e.organizer, LIMITS.eventText), status };
-  for (const [k, label] of [["time", "time"], ["location", "location"], ["organizer", "organizer"], ["name", "name"]]) {
+  let time = clean(e.time, 80);
+  if (PLACEHOLDER.test(time)) time = "";   // Sam, Oct 29: a start time, "All day" or no time at all is fine; the Reel tells viewers to check the event page for the latest details
+  const out = { name: clean(e.name, LIMITS.eventText), date, endDate: endRaw, ...(dap && !PLACEHOLDER.test(dap) ? { datesAsPublished: dap } : {}), time, location: clean(e.location, LIMITS.eventText), organizer: clean(e.organizer, LIMITS.eventText), status };
+  for (const [k, label] of [["location", "location"], ["organizer", "organizer"], ["name", "name"]]) {
     if (!out[k]) return { problem: `the event ${label} is missing` };
     if (PLACEHOLDER.test(out[k])) return { problem: `the event ${label} is not confirmed ("${out[k].slice(0, 40)}"); only use events whose ${label} is published` };
   }
@@ -455,7 +464,7 @@ function validateTopics(rawTopics, { mode, today, recommendation, need } = {}) {
   const todayN = dayNumber(today);
   if (todayN == null) return { ok: false, topics: [], problems: ["today's date is not valid"] };
   const raw = Array.isArray(rawTopics) ? rawTopics : [];
-  if (raw.length !== TOPIC_COUNT) problems.push(`expected ${TOPIC_COUNT} topics, got ${raw.length}`);
+  if (raw.length !== TOPIC_COUNT && !(mode === "local_events" && raw.length > TOPIC_COUNT && raw.length <= EVENT_CANDIDATES)) problems.push(`expected ${TOPIC_COUNT} topics, got ${raw.length}`);
   const topics = [];
   raw.forEach((t, i) => {
     const n = i + 1;

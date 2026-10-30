@@ -173,12 +173,16 @@ test("events: upcoming or ongoing with organizer, place, date and time are accep
 
 test("events: placeholders like 'Not stated in the source' or 'venue not stated' do not count as details", () => {
   const run = (over) => { const t = fiveEvents(); t[0] = rawEvent(1, over); return r.validateTopics(t, { mode: "local_events", today: TODAY }); };
-  assert.strictEqual(run({ time: "Not stated in the source" }).topics.length < 5, true);
+  // Sam, Oct 29: the time is optional ("All day", a start time, or none); a placeholder time is simply left out, the event stays.
+  assert.strictEqual(run({ time: "Not stated in the source" }).topics.length, 5);
+  assert.strictEqual(run({ time: "Not stated in the source" }).topics[0].event.time, "");
+  assert.strictEqual(run({ time: "All day" }).topics[0].event.time, "All day");
+  assert.strictEqual(run({ time: "6 p.m." }).topics[0].event.time, "6 p.m.");
   assert.strictEqual(run({ location: "Roseville, CA; venue not stated" }).topics.length < 5, true);
   assert.strictEqual(run({ organizer: "TBD" }).topics.length < 5, true);
-  assert.strictEqual(run({ time: "N/A" }).topics.length < 5, true);
+  assert.strictEqual(run({ time: "N/A" }).topics.length, 5);
   assert.strictEqual(run({ time: "5:30–7:30 PM" }).ok, true);
-  assert.match(run({ time: "Not stated in the source" }).problems.join(" "), /time is not confirmed/);
+  assert.match(run({ location: "Roseville, CA; venue not stated" }).problems.join(" "), /location is not confirmed/);
 });
 
 test("events: past, canceled, postponed and incomplete events fail the set", () => {
@@ -188,7 +192,7 @@ test("events: past, canceled, postponed and incomplete events fail the set", () 
   assert.strictEqual(run({ status: "postponed" }).topics.length < 5, true);
   assert.strictEqual(run({ organizer: "" }).topics.length < 5, true);
   assert.strictEqual(run({ location: "" }).topics.length < 5, true);
-  assert.strictEqual(run({ time: "" }).topics.length < 5, true);
+  assert.strictEqual(run({ time: "" }).topics.length, 5);   // no time is allowed
   assert.strictEqual(run({ date: "soon" }).topics.length < 5, true);
   assert.strictEqual(run({ end_date: "2026-10-01" }).topics.length < 5, true);
   const none = fiveEvents(); none[0].event = null;

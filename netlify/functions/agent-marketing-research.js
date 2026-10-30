@@ -26,6 +26,41 @@ const reply = (statusCode, obj) => ({ statusCode, headers, body: JSON.stringify(
 const STALE_RUNNING_MS = 6 * 60 * 1000;      // a run that never reported back is treated as failed (and was never charged)
 const CHARGE_LOOKBACK_MS = 40 * 24 * 60 * 60 * 1000;
 
+// A saved set opened from another project points at that project's report. The report is the agent's own, so it is copied into THIS project
+// (confirmed as it was) and the set's references are remapped to the copy. Without it the project had no report: nothing showed on the page,
+// it could not be replaced, and the script and cards had only what the topic had frozen (Oct 30, 2026).
+async function attachReports(row, project, userId) {
+  const refs = Array.isArray(row.upload_refs) ? row.upload_refs : [];
+  const oldIds = refs.map((x) => x && x.id).filter((id) => am.UUID_RE.test(String(id || "")));
+  if (!oldIds.length) return row;
+  const [srcR, hereR] = await Promise.all([
+    supabase("GET", "agent_marketing_uploads", null, `?id=in.(${oldIds.join(",")})&user_id=eq.${userId}&status=eq.confirmed&select=*`),
+    supabase("GET", "agent_marketing_uploads", null, `?project_id=eq.${project.id}&user_id=eq.${userId}&select=*`),
+  ]);
+  const src = Array.isArray(srcR.data) ? srcR.data : [];
+  const here = Array.isArray(hereR.data) ? hereR.data : [];
+  const idMap = {};
+  for (const u of src) {
+    if (u.project_id === project.id) continue; // already this project's own report
+    const same = here.find((h) => h.status === "confirmed" && h.file_bytes === u.file_bytes && (h.scope_note || "") === (u.scope_note || "") && JSON.stringify(h.facts) === JSON.stringify(u.facts));
+    if (same) { idMap[u.id] = same.id; continue; }
+    if (here.length >= rl.MAX_UPLOADS) continue;
+    const ins = await supabase("POST", "agent_marketing_uploads", {
+      project_id: project.id, user_id: userId, file_kind: u.file_kind, file_bytes: u.file_bytes, status: "confirmed", facts: u.facts, scope_note: u.scope_note,
+      permission_at: u.permission_at, permission_version: u.permission_version, confirmed_at: u.confirmed_at || new Date().toISOString(),
+    });
+    const made = Array.isArray(ins.data) ? ins.data[0] : null;
+    if (ins.status >= 300 || !made) { console.error("agent-marketing-research report copy failed:", ins.status, JSON.stringify(ins.data).slice(0, 200)); continue; }
+    here.push(made); idMap[u.id] = made.id;
+  }
+  if (!Object.keys(idMap).length) return row;
+  const remap = (v) => { let t = JSON.stringify(v); for (const [o, n] of Object.entries(idMap)) t = t.split(o).join(n); return JSON.parse(t); };
+  const fields = { upload_refs: remap(refs), topics: remap(row.topics || []), updated_at: new Date().toISOString() };
+  const up = await supabase("PATCH", "agent_marketing_research", fields, `?id=eq.${row.id}&user_id=eq.${userId}`);
+  const out = Array.isArray(up.data) ? up.data[0] : null;
+  return up.status < 300 && out ? out : row;
+}
+
 function forClient(row) {
   if (!row) return null;
   const out = {
@@ -152,6 +187,7 @@ exports.handler = async (event) => {
         if (!row) return reply(500, { error: "Could not open that saved set" });
       }
       if (!row || row.status !== "ready") return reply(404, { error: "That research set was not found." });
+      try { row = await attachReports(row, project, userId); } catch (e) { console.error("agent-marketing-research attachReports failed:", e.message); }
       const topic = (row.topics || []).find((t) => t && t.id === String(b.topicId || ""));
       if (!topic) return reply(400, { error: "Choose one of the five topics." });
       const frozen = { ...topic, researchId: row.id, researchDate: row.research_date, mode: row.mode, audience: row.audience, focus: row.focus || {}, geography: row.geography };
@@ -164,7 +200,7 @@ exports.handler = async (event) => {
       if (changed) fields.intake = {};
       const saved = await supabase("PATCH", "agent_marketing_projects", fields, `?id=eq.${project.id}&user_id=eq.${userId}`);
       if (saved.status >= 300 || !Array.isArray(saved.data) || !saved.data[0]) return reply(500, { error: "Could not save your choice" });
-      return reply(200, { selectedResearchId: row.id, selectedTopic: frozen });
+      return reply(200, { selectedResearchId: row.id, selectedTopic: frozen, reportAttached: Array.isArray(row.upload_refs) && row.upload_refs.length > 0 });
     }
 
     // start

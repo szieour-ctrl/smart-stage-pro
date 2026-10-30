@@ -52,6 +52,8 @@ const DATA_FOCUS = [
 const DATA_FOCUS_KEYS = DATA_FOCUS.map((d) => d.key);
 const PERIOD_PRESETS = [30, 60, 90];
 const MAX_PERIOD_DAYS = 800;
+const EVENT_WINDOW_DAYS = 30;     // Local Events: happenings that start from today through the next 30 days, plus any already running
+const EVENT_LIMIT_DAYS = 60;      // an event starting later than this is not shown, whatever the page says
 const isoOk = (v) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || "")) && new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) === v;
 const isoPlus = (iso, d) => new Date(Date.parse(`${iso}T00:00:00Z`) + d * 86400000).toISOString().slice(0, 10);
 /** validatePeriod(p) → { period } | { error }. Default is the last 30 days. { days: 30|60|90 } or { start, end } as YYYY-MM-DD. */
@@ -274,6 +276,7 @@ function buildResearchPayload({ request, today, uploadContext, env }) {
     r.keywords && r.mode !== "local_events" ? `Keywords from the agent (search for articles about these in this exact market FIRST; at least two topics must rest on an article that discusses them; they never change the market): ${clean(r.keywords, MAX_KEYWORDS_CHARS)}.` : null,
     uploadContext ? "The agent will show their own local market data in the video, so favor stories about supply, how fast homes sell, price cuts, cancellations or buyer demand that a local market report can confirm or contrast." : null,
     uploadContext ? `The agent also has a report with this scope (use only as context for what to look for, never quote numbers from this note): ${clean(uploadContext, 600)}` : null,
+    r.mode === "local_events" && isoOk(today) ? `Event window: include events that start from today (${today}) through ${isoPlus(today, EVENT_WINDOW_DAYS)}, and events that began earlier but are still running. Prefer the soonest first. Do not include events that start after ${isoPlus(today, EVENT_WINDOW_DAYS)}. The event's own page may have been published weeks or months ago; its publication date does not matter.` : null,
     `Today: ${today}.`,
     `Goal: ${TOPIC_COUNT} timely topics for a short educational video that shows what this agent knows about the local market right now.`,
   ].filter(Boolean);
@@ -288,7 +291,8 @@ function buildResearchPayload({ request, today, uploadContext, env }) {
       type: "web_search",
       max_results: lim.maxResults,
       max_tokens: lim.maxTokens,
-      filters: { search_after_date_filter: searchAfter(today) }, // articles up to FRESH_DAYS old; the validator still checks every date
+      // Articles for a market update are up to FRESH_DAYS old; an event page is often posted months ahead, so events search with no publication-date filter.
+      ...(r.mode === "local_events" ? {} : { filters: { search_after_date_filter: searchAfter(today) } }), // the validator still checks every date
     }],
   };
 }
@@ -385,6 +389,7 @@ function cleanEvent(e, todayN) {
   const en = endRaw == null ? null : dayNumber(endRaw);
   if (endRaw != null && (en == null || en < dn)) return { problem: "the event end date is not valid" };
   if ((en == null ? dn : en) < todayN) return { problem: "the event is already over" };
+  if (dn > todayN + EVENT_LIMIT_DAYS) return { problem: "the event starts more than 60 days from now" };
   const status = String(e.status || "").toLowerCase();
   if (!["upcoming", "ongoing"].includes(status)) return { problem: `the event status is "${status || "unknown"}", not upcoming or ongoing` };
   const dap = clean(e.dates_as_published, 60);

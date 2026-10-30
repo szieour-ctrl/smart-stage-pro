@@ -125,6 +125,9 @@ function niceTime(t) {
   return x.replace(/(\d{1,2})(?::00)?\s*([ap])\.?m\b\.?/gi, (_, h, ap) => `${h} ${ap.toLowerCase()}.m.`);
 }
 function eventWhen(e) {
+  // The page's own wording of when the event runs wins over a date range built from the research window.
+  const pub = e && e.datesAsPublished ? String(e.datesAsPublished).replace(/\s+/g, " ").trim() : "";
+  if (pub && pub.length <= 30) return pub.charAt(0).toUpperCase() + pub.slice(1);
   const a = ymd(e && e.date);
   if (!a) return "";
   const b = ymd(e.endDate);

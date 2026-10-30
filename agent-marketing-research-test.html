@@ -242,6 +242,21 @@ input:focus,select:focus{outline:2px solid var(--gold-light);outline-offset:1px;
   </div>
 </main>
 
+<div class="modal-back hidden" id="rcModal" role="dialog" aria-modal="true" aria-labelledby="rcTitle">
+  <div class="modal">
+    <div class="modal-head">
+      <div><div class="eyebrow">Your report</div><div class="panel-title" id="rcTitle">Use this report, or update it?</div><div class="panel-sub">This research was built from a report you attached earlier. Its figures are what your script and cards will use.</div></div>
+      <button class="closepill" type="button" id="rcX" aria-label="Close"><span>Close</span><i>&times;</i></button>
+    </div>
+    <div class="modal-list" id="rcList"></div>
+    <div class="hint" style="padding:0 18px 6px" id="rcNote">Update report: attach your newer report and run the research again. Your saved research stays in the library.</div>
+    <div class="modal-foot" style="display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">
+      <button class="btn ghost small" type="button" id="rcUpdate">Update report</button>
+      <button class="btn gold small" type="button" id="rcUse">Use this report</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-back hidden" id="libModal" role="dialog" aria-modal="true" aria-labelledby="libTitle">
   <div class="modal">
     <div class="modal-head">

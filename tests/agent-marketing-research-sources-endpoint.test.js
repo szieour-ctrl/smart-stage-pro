@@ -173,7 +173,14 @@ test("select from another project's saved set copies the report into this projec
   reset();
   const old = mkProject(); const u = mkUpload(old); const set = mkSavedSet(old, u);
   const now = mkProject();
-  const r = await call("POST", { action: "select", projectId: now.id, researchId: set.id, topicId: "t3" });
+  const ask = await call("POST", { action: "select", projectId: now.id, researchId: set.id, topicId: "t3" });
+  assert.strictEqual(ask.status, 409, "the agent is asked first; nothing is chosen or copied");
+  assert.strictEqual(ask.json.code, "report_choice");
+  assert.strictEqual(ask.json.reports[0].id, u.id);
+  assert.ok(ask.json.reports[0].scopeNote);
+  assert.strictEqual(db.agent_marketing_uploads.filter((x) => x.project_id === now.id).length, 0);
+  assert.strictEqual(db.agent_marketing_projects.find((x) => x.id === now.id).selected_topic, undefined);
+  const r = await call("POST", { action: "select", projectId: now.id, researchId: set.id, topicId: "t3", reportChoice: "use" });
   assert.strictEqual(r.status, 200);
   const mine = db.agent_marketing_uploads.filter((x) => x.project_id === now.id);
   assert.strictEqual(mine.length, 1, "the report now belongs to this project");
@@ -185,7 +192,7 @@ test("select from another project's saved set copies the report into this projec
   assert.strictEqual(copy.upload_refs[0].id, mine[0].id);
   assert.strictEqual(db.agent_marketing_uploads.filter((x) => x.project_id === old.id).length, 1, "the original project keeps its report");
   // choosing again does not add a second copy
-  await call("POST", { action: "select", projectId: now.id, researchId: set.id, topicId: "t3" });
+  await call("POST", { action: "select", projectId: now.id, researchId: set.id, topicId: "t3", reportChoice: "use" });
   assert.strictEqual(db.agent_marketing_uploads.filter((x) => x.project_id === now.id).length, 1);
 });
 

@@ -164,7 +164,7 @@ test("worker: another user's dispatch cannot read this user's report", async () 
 // Oct 30, 2026: choosing a topic from a saved set of another project brought no report with it (the project had zero uploads).
 const mkSavedSet = (p, u, over) => {
   const row = { id: uuid(nextId++), project_id: p.id, user_id: currentUser, mode: "market_update", audience: "sellers", geography: { type: "zip", name: "95999" }, focus: {}, status: "ready", data_source: "both",
-    upload_refs: [{ id: u.id, scope_note: u.scope_note }], research_date: "2026-10-27",
+    upload_refs: [{ id: u.id, scope_note: u.scope_note }], research_date: new Date().toISOString().slice(0, 10),
     topics: [{ id: "t3", origin: "report", question: "Q?", reportFigures: [{ ref: "r1.f7", uploadId: u.id, key: "median_close_price", label: "Median sold price", display: "$482,000", text: "Median sold price: $482,000" }] }], ...over };
   db.agent_marketing_research.push(row); return row;
 };
@@ -206,4 +206,45 @@ test("select from a set of this project changes nothing about its report, and a 
   const web = mkSavedSet(p, u, { upload_refs: [], data_source: "web", topics: [{ id: "t1", origin: "web", question: "Q?" }] });
   const w = await call("POST", { action: "select", projectId: p.id, researchId: web.id, topicId: "t1" });
   assert.strictEqual(w.status, 200); assert.strictEqual(w.json.reportAttached, false);
+});
+
+// Oct 30, 2026: a research set is usable for 7 days.
+const daysAgo = (n) => new Date(Date.now() - n * 86400000).toISOString().slice(0, 10);
+
+test("setAge: day 0 to 6 is usable, day 7 on is expired, and the expiry date is shown", () => {
+  const rl = require("../netlify/functions/lib/agent-marketing-research-lib");
+  const now = new Date("2026-11-05T12:00:00Z");
+  assert.deepStrictEqual(rl.setAge("2026-11-05", null, now), { ageDays: 0, expired: false, expiresOn: "2026-11-12" });
+  assert.strictEqual(rl.setAge("2026-10-30", null, now).expired, false, "6 days old");
+  assert.strictEqual(rl.setAge("2026-10-29", null, now).expired, true, "7 days old");
+  assert.strictEqual(rl.setAge(null, "2026-10-01T10:00:00Z", now).expired, true, "falls back to the created date");
+  assert.strictEqual(rl.setAge(null, null, now).expired, false, "no date: not expired");
+});
+
+test("an expired set is listed with its age, cannot have a topic chosen, and is not reused by the same request", async () => {
+  reset();
+  const p = mkProject(); const u = mkUpload(p);
+  const set = mkSavedSet(p, u, { research_date: daysAgo(8), created_at: new Date(Date.now() - 8 * 86400000).toISOString(), upload_refs: [], data_source: "web", topics: [{ id: "t1", origin: "web", question: "Q?" }] });
+  const list = await call("GET", null, { projectId: p.id });
+  const shown = list.json.research.find((x) => x.id === set.id);
+  assert.strictEqual(shown.expired, true); assert.strictEqual(shown.ageDays, 8);
+  const sel = await call("POST", { action: "select", projectId: p.id, researchId: set.id, topicId: "t1" });
+  assert.strictEqual(sel.status, 409); assert.strictEqual(sel.json.code, "research_expired");
+  assert.strictEqual(sel.json.research.expired, true);
+  assert.strictEqual(db.agent_marketing_projects.find((x) => x.id === p.id).selected_topic, undefined, "nothing was chosen");
+  const before = db.agent_marketing_research.length;
+  const again = await call("POST", { action: "start", projectId: p.id, request: { ...REQ, dataSource: "web" } });
+  assert.strictEqual(again.status, 202, "the same request runs again instead of reusing the old set");
+  assert.strictEqual(db.agent_marketing_research.length, before + 1);
+});
+
+test("a set chosen before it expired keeps working, and a 6-day-old set can still be chosen", async () => {
+  reset();
+  const p = mkProject(); const u = mkUpload(p);
+  const fresh = mkSavedSet(p, u, { research_date: daysAgo(6), upload_refs: [], data_source: "web", topics: [{ id: "t1", origin: "web", question: "Q?" }] });
+  assert.strictEqual((await call("POST", { action: "select", projectId: p.id, researchId: fresh.id, topicId: "t1" })).status, 200);
+  fresh.research_date = daysAgo(9); fresh.created_at = new Date(Date.now() - 9 * 86400000).toISOString();
+  const again = await call("POST", { action: "select", projectId: p.id, researchId: fresh.id, topicId: "t1" });
+  assert.strictEqual(again.status, 200, "this project already chose from this set");
+  assert.strictEqual(again.json.selectedTopic.id, "t1");
 });

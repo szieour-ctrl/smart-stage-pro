@@ -155,7 +155,20 @@
       (opts.onContinue ? '<button class="btn gold small" type="button" id="selContinue">Choose the call to action</button>' : "") + "</div>" : "";
     var hasNotice = r.status === "ready" && r.topics.some(function (t) { return t.reportNotice; });
     var noticeLine = hasNotice ? '<div class="hint" style="margin-top:10px">Topics that use your report carry MetroList\u2019s required notice automatically; you do not need to write it.</div>' : "";
-    $("resTopics").innerHTML = bar + noticeLine + (r.status === "ready" ? r.topics.map(function (t) { return renderTopic(t, pickedId); }).join("") : "");
+    // A set is usable for 7 days. An older one can be read but not chosen from; a Reel already started from it keeps going, with a warning.
+    var stale = "";
+    if (r.status === "ready" && r.expired) {
+      var kept = !!pickedId;
+      stale = '<div id="staleBar" style="border:1px solid #c9a86a;background:#fff7e6;border-radius:6px;padding:12px 14px;margin-top:12px"><div style="font-size:0.92rem;line-height:1.45"><b>This research is ' + esc(r.ageDays) + " days old and may be outdated.</b> " +
+        (kept ? "Your Reel keeps the research it was written from, but the market may have moved. Run it again if you want current data."
+              : "Market data and comparisons go stale, so research is usable for 7 days. Run the same request again for current data.") + "</div>" +
+        '<div class="actions" style="margin-top:8px"><button class="btn gold small" type="button" id="staleRun">Run again</button></div></div>';
+    }
+    $("resTopics").innerHTML = stale + bar + noticeLine + (r.status === "ready" ? r.topics.map(function (t) { return renderTopic(t, pickedId); }).join("") : "");
+    if (r.status === "ready" && r.expired) {
+      if (!pickedId) Array.prototype.forEach.call($("resTopics").querySelectorAll("[data-pick]"), function (b) { b.disabled = true; b.textContent = "Outdated: run again"; });
+      if ($("staleRun")) $("staleRun").addEventListener("click", function () { runAgain(r); });
+    }
     if ($("selContinue")) $("selContinue").addEventListener("click", function () { opts.onContinue(state.selected); });
     renderCost(r);
     foldSetup(r.status === "ready");
@@ -198,6 +211,13 @@
       });
     });
   }
+  // "Run again": the same request is filled back in (no new intake). A set that used a report asks for the newer one (Update report); without it, it runs as web research.
+  function runAgain(r) {
+    setForm(r); hideConfirm(); $("resultPanel").classList.add("hidden"); foldSetup(false);
+    var hadReport = r.dataSource && r.dataSource !== "web";
+    say("startMsg", hadReport ? "This research used your report from " + (r.researchDate || "earlier") + ". Attach your newer report below and confirm it (Update report), then research again. Without one it runs as web research only." : "Your request is filled in. Research this market again to refresh it.", "ok");
+    var t = hadReport ? $("upFile") : $("startBtn"); if (t && t.scrollIntoView) t.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
   // A saved set built from a report asks first: use that report as it is, or update it. The server will not select the topic until the agent answers.
   function askReport(researchId, topicId, reports) {
     return new Promise(function (resolve) {
@@ -214,6 +234,7 @@
     say("selMsg", "Saving your choice…");
     try {
       var r = await api(API, "POST", "", { action: "select", projectId: state.projectId, researchId: researchId, topicId: topicId, reportChoice: reportChoice });
+      if (!r.ok && r.json && r.json.code === "research_expired") { say("selMsg", ""); if (r.json.research) { showResult(r.json.research); } return; }
       if (!r.ok && r.json && r.json.code === "report_choice") {
         say("selMsg", "");
         var c = await askReport(researchId, topicId, r.json.reports);
@@ -242,7 +263,7 @@
     var all = list.concat(earlier);
     var rowHtml = function (r) {
       return '<div class="saved"><div><b>' + esc(r.mode === "local_events" ? "Local Events" : "Market Update") + "</b> · " + esc(r.geography && r.geography.label) + " · " + esc(r.audience) +
-        '<div class="hint">' + esc(r.status === "ready" ? "Five topics, " + (r.researchDate || "") : r.status === "failed" ? "Failed, not charged" : "Running") + "</div></div>" +
+        '<div class="hint">' + esc(r.status === "ready" ? "Five topics, " + (r.researchDate || "") + (r.expired ? " \u00b7 outdated, run again" : "") : r.status === "failed" ? "Failed, not charged" : "Running") + "</div></div>" +
         '<button class="btn ghost small" type="button" data-open="' + esc(r.id) + '">Open</button></div>';
     };
     $("savedList").innerHTML = !all.length ? '<div class="hint" style="padding:14px 0">No saved research yet. Run a request and it will appear here.</div>'

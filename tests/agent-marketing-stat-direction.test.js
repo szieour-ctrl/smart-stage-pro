@@ -13,5 +13,6 @@ test("a big-number card for a change figure says which way it moved", () => {
   const card = pl.scenes[1];
   assert.equal(card.composition, "stat_big_number");
   assert.match(card.data.lead, /down from a year earlier/i);
+  assert.equal(card.data.direction, "down");
   assert.equal(card.data.value, "5.9");
 });

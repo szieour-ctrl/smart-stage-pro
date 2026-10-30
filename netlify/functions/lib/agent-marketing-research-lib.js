@@ -53,6 +53,7 @@ const DATA_FOCUS_KEYS = DATA_FOCUS.map((d) => d.key);
 const PERIOD_PRESETS = [30, 60, 90];
 const MAX_PERIOD_DAYS = 800;
 const EVENT_WINDOW_DAYS = 30;     // Local Events: happenings that start from today through the next 30 days, plus any already running
+const EVENT_CANDIDATES = 8;       // Local Events: the model may return up to this many candidates; validation keeps the first five that pass
 const EVENT_LIMIT_DAYS = 60;      // an event starting later than this is not shown, whatever the page says
 const isoOk = (v) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || "")) && new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) === v;
 const isoPlus = (iso, d) => new Date(Date.parse(`${iso}T00:00:00Z`) + d * 86400000).toISOString().slice(0, 10);
@@ -206,6 +207,7 @@ function systemPrompt(mode) {
   const specific = mode === "local_events"
     ? [
       "MODE: Local Events. Each topic is a verified upcoming or ongoing happening in the market: a festival, gathering, civic event, seasonal activity or community announcement.",
+      "OVER-SUPPLY CANDIDATES. Return up to EIGHT candidate events in topics (more than five) so that the strict checks that follow can drop any event whose time, venue, organizer or details cannot be confirmed and still leave five. Put the events with the most complete published details (date, start time, venue, organizer, activities) first.",
       "SEARCH WIDE FOR FIVE. Aim for five confirmed events and keep searching until you have them: run separate searches for the city's or county's official events calendar, the chamber of commerce, the public library, parks and recreation, farmers and artisan markets, holiday and seasonal events, car shows and swap meets, charity runs and fundraisers, school and community-college events, theaters and concert venues, and the neighborhood's own groups, and look in nearby towns that neighbors of this market attend. Only if you still cannot confirm five from pages, return fewer rather than guess.",
       "VARIETY. Use at most two events from the same organizer, and spread the five across different kinds of happening (for example one seasonal, one market or food event, one outdoor or active, one arts or entertainment, one civic or charity). Never fill the list with several dates of the same recurring series.",
       "WHO IT SUITS. Prefer events a local agent could point clients to: ones a buyer or a seller could attend, or bring friends and family or visiting relatives to. Describe the event itself; do not write steering language and do not say an event is \"perfect for families\".",
@@ -278,7 +280,7 @@ function buildResearchPayload({ request, today, uploadContext, env }) {
     uploadContext ? `The agent also has a report with this scope (use only as context for what to look for, never quote numbers from this note): ${clean(uploadContext, 600)}` : null,
     r.mode === "local_events" && isoOk(today) ? `Event window: include events that start from today (${today}) through ${isoPlus(today, EVENT_WINDOW_DAYS)}, and events that began earlier but are still running. Prefer the soonest first. Do not include events that start after ${isoPlus(today, EVENT_WINDOW_DAYS)}. The event's own page may have been published weeks or months ago; its publication date does not matter.` : null,
     `Today: ${today}.`,
-    `Goal: ${TOPIC_COUNT} timely topics for a short educational video that shows what this agent knows about the local market right now.`,
+    r.mode === "local_events" ? `Goal: up to ${EVENT_CANDIDATES} candidate events (the five with the most complete confirmed details will be kept) for a short video about what is happening locally.` : `Goal: ${TOPIC_COUNT} timely topics for a short educational video that shows what this agent knows about the local market right now.`,
   ].filter(Boolean);
   const cfg = researchSettings(env);
   const lim = SEARCH_LIMITS[cfg.searchContextSize];
@@ -286,7 +288,7 @@ function buildResearchPayload({ request, today, uploadContext, env }) {
     model: cfg.model,
     instructions: systemPrompt(r.mode),
     input: lines.join("\n"),
-    max_output_tokens: cfg.maxTokens,       // bounds output cost; Anthropic models require it
+    max_output_tokens: r.mode === "local_events" ? Math.max(cfg.maxTokens, 5000) : cfg.maxTokens,   // eight event candidates with details need more room than five market topics       // bounds output cost; Anthropic models require it
     tools: [{
       type: "web_search",
       max_results: lim.maxResults,
@@ -460,7 +462,7 @@ function validateTopics(rawTopics, { mode, today, recommendation, need } = {}) {
   const todayN = dayNumber(today);
   if (todayN == null) return { ok: false, topics: [], problems: ["today's date is not valid"] };
   const raw = Array.isArray(rawTopics) ? rawTopics : [];
-  if (raw.length !== TOPIC_COUNT) problems.push(`expected ${TOPIC_COUNT} topics, got ${raw.length}`);
+  if (raw.length !== TOPIC_COUNT && !(mode === "local_events" && raw.length > TOPIC_COUNT && raw.length <= EVENT_CANDIDATES)) problems.push(`expected ${TOPIC_COUNT} topics, got ${raw.length}`);
   const topics = [];
   raw.forEach((t, i) => {
     const n = i + 1;

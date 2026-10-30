@@ -31,6 +31,10 @@
   function applyFocus() {
     var events = picked("mode") === "local_events";
     $("dataFocusBox").classList.toggle("hidden", events);
+    // Event keywords are event words, not market words.
+    $("keywordsLblText").textContent = events ? "Event types or names to look for" : "Keywords or brand names to look for";
+    $("keywords").placeholder = events ? "e.g. car show, holiday market, farmers market, concert" : "e.g. 55+, Four Seasons, Heritage, mortgage rates";
+    $("keywordsHint").textContent = events ? "Separate with commas. The research looks for upcoming events that match. The place itself is never widened." : "Separate with commas. The research looks for local news and data that mention them. The market itself is never widened.";
     $("periodBox").classList.toggle("hidden", $("dataFocus").value === "none");
     $("periodDates").classList.toggle("hidden", $("period").value !== "custom" || $("dataFocus").value === "none");
   }

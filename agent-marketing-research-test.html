@@ -127,9 +127,9 @@ input:focus,select:focus{outline:2px solid var(--gold-light);outline-offset:1px;
         <label class="choice"><input type="checkbox" id="fNew"><span>New Construction</span></label>
       </div>
 
-      <label class="lbl" for="keywords">Keywords or brand names to look for <span style="font-weight:400;color:var(--muted)">(optional)</span></label>
+      <label class="lbl" for="keywords" id="keywordsLbl"><span id="keywordsLblText">Keywords or brand names to look for</span> <span style="font-weight:400;color:var(--muted)">(optional)</span></label>
       <input type="text" id="keywords" maxlength="120" placeholder="e.g. 55+, Four Seasons, Heritage, mortgage rates">
-      <div class="hint">Separate with commas. The research looks for local news and data that mention them. The market itself is never widened.</div>
+      <div class="hint" id="keywordsHint">Separate with commas. The research looks for local news and data that mention them. The market itself is never widened.</div>
 
       <div id="dataFocusBox">
         <label class="lbl" for="dataFocus">Optional data to include</label>

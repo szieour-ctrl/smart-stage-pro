@@ -78,6 +78,7 @@ function forClient(row) {
     error: row.status === "failed" ? (row.error || "The research could not be completed.") : null,
     charged: !!row.charged_at, createdAt: row.created_at,
   };
+  if (row.status === "ready") Object.assign(out, rl.setAge(row.research_date, row.created_at)); // ageDays, expired, expiresOn: a set is usable for 7 days
   // Measured cost is for tuning during the beta only: AGENT_MARKETING_RESEARCH_DEBUG=true shows it, otherwise subscribers never see it.
   if (String(process.env.AGENT_MARKETING_RESEARCH_DEBUG || "").toLowerCase() === "true") out.usage = row.usage || null;
   return out;
@@ -184,6 +185,11 @@ exports.handler = async (event) => {
       if (!am.UUID_RE.test(String(b.researchId || ""))) return reply(400, { error: "Missing or invalid research id" });
       let rr = await supabase("GET", "agent_marketing_research", null, `?id=eq.${b.researchId}&user_id=eq.${userId}&select=*&limit=1`);
       let row = Array.isArray(rr.data) ? rr.data[0] : null;
+      // A set is usable for 7 days. After that it can be read but no topic can be chosen from it; the agent runs the same request again.
+      // A set this project already chose its topic from keeps working (the Reel survives, with a warning on the page).
+      if (row && row.status === "ready" && project.selected_research_id !== row.id && rl.setAge(row.research_date, row.created_at).expired) {
+        return reply(409, { code: "research_expired", error: "This research is more than 7 days old and may be outdated. Run it again for current data.", research: forClient(row) });
+      }
       // The report behind a saved set may be last month's. The agent chooses: "use" it as it is (it is copied into this project), or update it
       // (the page then asks for the newer report and researches again). Without the choice nothing is selected and nothing is copied.
       let pending = [];
@@ -222,7 +228,7 @@ exports.handler = async (event) => {
     const existing = await settleStale((await supabase("GET", "agent_marketing_research", null, `?project_id=eq.${project.id}&user_id=eq.${userId}&select=*&order=created_at.desc&limit=10`)).data || []);
     const wantKey = rl.requestKey(v.request);
     // Saved results are reused, never re-bought. The agent asks for a NEW set with a different request (or "New Topics", below).
-    const reuse = !b.newTopics && existing.find((r) => r.status === "ready" && keyOfRow(r) === wantKey);
+    const reuse = !b.newTopics && existing.find((r) => r.status === "ready" && keyOfRow(r) === wantKey && !rl.setAge(r.research_date, r.created_at).expired); // an expired set is never reused: the same request runs again
     const pool = await poolFor(userId);
     if (reuse) return reply(200, { research: forClient(reuse), reused: true, session: await sessionFor(pool) });
     const mine = await supabase("GET", "agent_marketing_research", null, `?user_id=eq.${userId}&status=eq.running&created_at=gte.${encodeURIComponent(new Date(Date.now() - STALE_RUNNING_MS).toISOString())}&select=id&limit=1`);

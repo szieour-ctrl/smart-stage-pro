@@ -29,6 +29,18 @@ const AUDIENCE_KEYS = AUDIENCES.map((a) => a.key);
 const DATA_SOURCES = ["web", "upload", "both"];
 const TOPIC_COUNT = 5;
 const MAX_UPLOADS = 3;
+// A research SET is usable for 7 days from the day it was made (Sam, Oct 30, 2026): market data and a comparison against old figures go stale, so after a
+// week the subscriber is asked to run the same request again. A set already chosen for a Reel keeps working, with a warning.
+const SET_FRESH_DAYS = 7;
+/** setAge(researchDate "YYYY-MM-DD" or createdAt, now) → { ageDays, expired, expiresOn } (UTC dates; day 0 is the day it was made). */
+function setAge(researchDate, createdAt, now) {
+  const day = (v) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(v || "")); return m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) : null; };
+  const made = day(researchDate) ?? day(createdAt);
+  if (made == null) return { ageDays: null, expired: false, expiresOn: null };
+  const t = now instanceof Date ? now : new Date(now || Date.now());
+  const ageDays = Math.floor((Date.UTC(t.getUTCFullYear(), t.getUTCMonth(), t.getUTCDate()) - made) / 86400000);
+  return { ageDays, expired: ageDays >= SET_FRESH_DAYS, expiresOn: new Date(made + SET_FRESH_DAYS * 86400000).toISOString().slice(0, 10) };
+}
 const FRESH_DAYS = 60;            // an ARTICLE for a market update may be at most this old (Sam, Oct 27: the 30-day window belongs to the uploaded trend data, not to articles)
 const MAX_TOPICS_PER_SITE = 2, MIN_SITES = 3;
 const LIMITS = { name: 60, question: 200, why: 400, signal: 160, scopeNote: 240, recommendReason: 300, recommendEvidence: 160, sourceTitle: 200, url: 500, eventText: 160 };
@@ -580,7 +592,7 @@ function outcomeFields({ validation, usage, model, today, now, error }) {
 }
 
 module.exports = {
-  cleanVisualCues, MODES, MODE_LABELS, DATA_SOURCES, GEO_TYPES, AUDIENCES, AUDIENCE_KEYS, TOPIC_COUNT, MAX_UPLOADS, FRESH_DAYS, ALLOWANCE_BY_PLAN, PAYWALLED_DOMAINS, DEFAULT_MODEL, DEFAULT_COST_TARGET_USD,
+  cleanVisualCues, MODES, MODE_LABELS, DATA_SOURCES, GEO_TYPES, AUDIENCES, AUDIENCE_KEYS, TOPIC_COUNT, MAX_UPLOADS, FRESH_DAYS, SET_FRESH_DAYS, setAge, ALLOWANCE_BY_PLAN, PAYWALLED_DOMAINS, DEFAULT_MODEL, DEFAULT_COST_TARGET_USD,
   DATA_FOCUS, DATA_FOCUS_KEYS, validatePeriod, periodDates, validateGeography, geoLabel, validateResearchRequest, requestKey, researchModel, researchSettings, systemPrompt, buildResearchPayload,
   extractTopics, extractRecommendation, validateTopics, similar, articleKey, usageSummary, monthKeyPT, allowanceFor, sessionStatus, outcomeFields,
 };

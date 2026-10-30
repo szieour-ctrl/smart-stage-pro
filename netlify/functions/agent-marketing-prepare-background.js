@@ -276,6 +276,11 @@ exports.handler = async (event) => {
       if (!Object.keys(cardCopy).length && cardCopyLib.statementScenes(narrative, project.intake, []).length) cardCopy = await askCardCopy();
     }
     catch (e) { ccNotes.push("failed: " + String(e.message).slice(0, 160)); console.error("[agent-marketing-card-copy] failed, using fallback text:", e.message); }
+    // Oct 30, 2026: big-number cards without a template line (median sold price, average for-sale price) showed the figure alone; Claude writes the comparison line from the scene's own narration.
+    try {
+      const trails = await cardCopyLib.writeTrails({ project, narrative, intake: project.intake, reportFigures: fromReport ? reportFigures : [], anthropicKey: process.env.ANTHROPIC_API_KEY, log: (m) => { ccNotes.push(String(m).slice(0, 160)); console.log("[agent-marketing-card-copy]", m); } });
+      for (const [k, v] of Object.entries(trails)) cardCopy[k] = { ...(cardCopy[k] || {}), ...v };
+    } catch (e) { ccNotes.push("trail failed: " + String(e.message).slice(0, 120)); }
     job.usage = { ...(job.usage || {}), card_copy: { accepted: Object.keys(cardCopy).length, notes: ccNotes.slice(0, 8) } };
     await patchJob(job.id, { usage: job.usage });
     await patchJob(job.id, { step: "Checking the facts and layout" });

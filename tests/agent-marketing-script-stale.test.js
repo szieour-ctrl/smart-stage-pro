@@ -8,3 +8,13 @@ test("project payload flags a script written for another topic, and the page off
   assert.match(html, /!state\.project\.scriptStale/);
   assert.match(html, /Choosing a different topic makes the server reset the intake/);
 });
+
+test("event Reels offer their own call-to-action choices, accepted by intake validation", () => {
+  const intake = require("../netlify/functions/lib/agent-marketing-intake");
+  assert.ok(intake.EVENT_ACTIONS.length >= 4);
+  assert.ok(intake.EVENT_ACTIONS.includes("Ask for a local perspective"));
+  for (const a of intake.EVENT_ACTIONS) {
+    const v = intake.validateIntake({ template: "local_market_insider", audience: "Home buyers", market: "Roseville, CA", action: a });
+    assert.ok(!(v.errors || []).some((e) => e.field === "action"), a);
+  }
+});

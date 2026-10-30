@@ -608,8 +608,10 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     var has = !!(state.project && state.project.selectedTopic);
     if (has) {
       $("ctaTopic").textContent = state.project.selectedTopic.question || "";
-      var acts = state.schema.actions, i = (state.project.intake && state.project.intake.action) || "Ask for a local perspective";
-      if (!$("resAction").options.length) $("resAction").innerHTML = acts.map(function (a) { return '<option value="' + esc(a) + '">' + esc(a) + "</option>"; }).join("");
+      var ev = state.project.reelType === "Local Event" && state.schema.eventActions && state.schema.eventActions.length;
+      var acts = ev ? state.schema.eventActions : state.schema.actions, i = (state.project.intake && state.project.intake.action) || "Ask for a local perspective";
+      var key = ev ? "event" : "market";
+      if ($("resAction").getAttribute("data-set") !== key || !$("resAction").options.length) { $("resAction").innerHTML = acts.map(function (a) { return '<option value="' + esc(a) + '">' + esc(a) + "</option>"; }).join(""); $("resAction").setAttribute("data-set", key); }
       $("resAction").value = acts.indexOf(i) >= 0 ? i : acts[0];
     }
   }
@@ -950,7 +952,16 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     return (kind && sc && ((kind === "concept" && sc.visualSource === "GPT_IMAGE_2_CONCEPT") || (kind === "agent_scene" && sc.visualSource === "AGENT_SCENE"))) ? (sc.visualBrief || "") : "";
   }
   // A description (and the image it edits) belongs to one format: a 9:16 description never goes into the 16:9 image.
-  function descFor(i, src, fmt) { var d = im.desc[i]; return d && KIND_OF[src] && d.kind === KIND_OF[src] && (!fmt || !d.format || d.format === fmt) ? d : null; }
+  function descFor(i, src, fmt) {
+    var d = im.desc[i];
+    if (!(d && KIND_OF[src] && d.kind === KIND_OF[src] && (!fmt || !d.format || d.format === fmt))) return null;
+    // A "change this image" description only means something while that very image is still on screen; otherwise it is stale and is dropped.
+    if (d.revise) {
+      var sl = fmt ? slotOf(i, fmt) : null, shown = sl ? slotState(sl, src).shown : null;
+      if (!shown || shown.id !== d.revise) { delete im.desc[i]; return null; }
+    }
+    return d;
+  }
 
   function openPhotoView(i) {
     var it = picked[i]; if (!it || !it.url) return;

@@ -10,6 +10,8 @@ const AUDIENCES = ["Home sellers", "Home buyers", "Both buyers and sellers"];
 // Spec: Make a better decision / Compare options / Ask for a local perspective. "Understand the trade-off" comes from
 // the sample prototype and is kept so the reference Roseville example is still expressible.
 const ACTIONS = ["Make a better decision", "Compare options", "Ask for a local perspective", "Understand the trade-off"];
+// Local Event Reels offer their own choices (Oct 29, Sam): the event is the subject, so the ask is about going, sharing and staying in touch.
+const EVENT_ACTIONS = ["Ask for a local perspective", "Save the date and plan a visit", "Invite a friend or family member to go", "Follow for more local happenings", "Ask me about the neighborhood"];
 
 const LOCAL_MARKET_INSIDER = {
   template: "local_market_insider",
@@ -123,7 +125,7 @@ function validateIntake(template, values, opts) {
   } else if (clean.issue) { clean.issue = ""; }
 
   clean.action = String(v.action || ACTIONS[0]);
-  if (!ACTIONS.includes(clean.action)) errors.push({ field: "action", message: "Choose what you want viewers to do." });
+  if (!ACTIONS.includes(clean.action) && !EVENT_ACTIONS.includes(clean.action)) errors.push({ field: "action", message: "Choose what you want viewers to do." });
 
   clean.observation = cleanText(v.observation, LIMITS.observation + 1);
   if (clean.observation.length > LIMITS.observation) {
@@ -136,4 +138,4 @@ function validateIntake(template, values, opts) {
   return { ok: errors.length === 0, errors, clean, needsInput };
 }
 
-module.exports = { AUDIENCE_FROM_RESEARCH, AUDIENCES, ACTIONS, LIMITS, SCHEMAS, schemaFor, validateIntake, cleanText, cleanWords };
+module.exports = { AUDIENCE_FROM_RESEARCH, AUDIENCES, ACTIONS, EVENT_ACTIONS, LIMITS, SCHEMAS, schemaFor, validateIntake, cleanText, cleanWords };

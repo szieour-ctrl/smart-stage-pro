@@ -38,3 +38,8 @@ test("event closing always includes the standard check-the-event-page line; time
   assert.match(plan.buildSystemPrompt(), /say the time only when selected_topic\.event\.time is present/);
   assert.match(require("../netlify/functions/lib/agent-marketing-research-lib").systemPrompt("local_events"), /The time is optional/);
 });
+
+test("when the page states the cause of an event, research lists it first and the script always says it", () => {
+  assert.match(plan.buildSystemPrompt(), /the highlights ALWAYS say it, in the page's own wording/);
+  assert.match(require("../netlify/functions/lib/agent-marketing-research-lib").systemPrompt("local_events"), /make it the FIRST detail/);
+});

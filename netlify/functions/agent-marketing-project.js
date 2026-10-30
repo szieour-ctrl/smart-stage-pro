@@ -83,7 +83,7 @@ exports.handler = async (event) => {
       if (qs.schema) {
         return reply(200, {
           templates: gate.ENABLED_TEMPLATES.map((t) => ({ key: t, ...intakeLib.schemaFor(t) })),
-          audiences: intakeLib.AUDIENCES, actions: intakeLib.ACTIONS, limits: intakeLib.LIMITS,
+          audiences: intakeLib.AUDIENCES, actions: intakeLib.ACTIONS, eventActions: intakeLib.EVENT_ACTIONS, limits: intakeLib.LIMITS,
           durations: am.DURATIONS, formats: am.FORMATS, voices: am.VOICES, music: am.MUSIC, wordTargets: am.WORD_TARGETS,
           attestation: { version: gate.ATTESTATION_VERSION, text: gate.ATTESTATION_TEXT },
           uploadAttestation: { version: mediaLib.UPLOAD_ATTESTATION_VERSION, text: mediaLib.UPLOAD_ATTESTATION_TEXT },

@@ -473,3 +473,16 @@ test("event details: what the event offers is kept (short, up to six, placeholde
   assert.strictEqual(none.topics[0].event.details, undefined);
   assert.match(r.systemPrompt("local_events"), /details: up to 6 short facts/);
 });
+
+test("events research: keywords search for events, wide source sweep, organizer variety, buyer/seller friends-and-family angle", () => {
+  const req = r.validateResearchRequest({ mode: "local_events", audience: "buyers", geography: { zip: "95678", type: "city", name: "Roseville" }, keywords: "car show, holiday market" }).request;
+  const p = r.buildResearchPayload({ request: req, today: "2026-10-29", env: {} });
+  assert.ok(/search for events matching these[^\n]*car show, holiday market/.test(p.input));
+  assert.ok(!/search for articles about these/.test(p.input));
+  const sp = r.systemPrompt("local_events");
+  assert.match(sp, /SEARCH WIDE FOR FIVE/);
+  assert.match(sp, /events calendar/);
+  assert.match(sp, /at most two events from the same organizer/);
+  assert.match(sp, /friends and family/);
+  assert.match(sp, /do not say an event is "perfect for families"/);
+});

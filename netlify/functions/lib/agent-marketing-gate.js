@@ -178,7 +178,16 @@ function verifiedFromTopic(topic) {
     if (e.location) addresses.push(e.location);
   }
   const clean = texts.filter((x) => typeof x === "string" && x.trim()).map(norm);
-  return clean.length ? { texts: clean, addresses: addresses.map(norm), reportNotice, precedence, reportFirst } : null;
+  // Directive A (Sam, Oct 30, 2026): the article's own figures may not be stated when the agent's report is the source. They are listed so the
+  // script is refused if it repeats one that the report does not also carry.
+  let articleOnly = [];
+  if (reportFirst && t.reframed !== true) {
+    const art = require("./agent-marketing-article-lib");
+    const reportNums = new Set();
+    (Array.isArray(t.reportFigures) ? t.reportFigures : []).forEach((f) => { if (f && typeof f.text === "string") numberTokens(f.text).forEach((n) => reportNums.add(n)); });
+    articleOnly = art.articleNumbers(t).filter((n) => !reportNums.has(n));
+  }
+  return clean.length ? { texts: clean, addresses: addresses.map(norm), reportNotice, precedence, reportFirst, articleNumbers: articleOnly } : null;
 }
 
 /** verifiedFromProject(project) → verified facts for a stored project row, or null (any other template, no topic). */
@@ -430,6 +439,12 @@ function evaluate(input) {
           if (intakeLower.includes(lower(m[0]))) agentSuppliedClaims.push(`${field}: ${snippet(m)}`); // the agent said it first
           else blocks.push({ rule: r.rule, field, match: snippet(m), message: r.message });
         }
+      }
+    }
+    if (market && vIn && Array.isArray(vIn.articleNumbers) && vIn.articleNumbers.length) {
+      const caught = marketFigureTokens(text); // a number the figure check below already refuses (with its own message) is not reported twice
+      for (const n of numberTokens(text)) {
+        if (vIn.articleNumbers.includes(n) && !caught.has(n) && !intakeNumbers.has(n) && !verifiedNumbers.has(n)) blocks.push({ rule: "article_figure", field, match: n, message: `The number ${n} comes from the article. With your report attached, every figure comes from your report; the article gives the idea and perspective only, so say it without the number.` });
       }
     }
     for (const n of (market ? marketFigureTokens(text) : numberTokens(text))) {

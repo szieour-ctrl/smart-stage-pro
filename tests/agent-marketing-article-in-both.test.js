@@ -14,16 +14,56 @@ const TOPIC = {
   reportFigures: [{ ref: "r1.f1", text: "Average days on market: 22 days vs 32 days in September 2025 (down 31.2%)" }], reportNotice: "", reportPrecedence: [],
 };
 
-test("the article's project facts reach the planner; its market statistics do not", () => {
+test("the article's project facts and ideas reach the planner; its market statistics arrive with the figure neutralized", () => {
   const f = art.articleFacts(TOPIC);
-  assert.match(f.question, /132 apartments planned at Poker Lane/);
+  assert.match(f.question, /132 apartments planned at Poker Lane/, "a project fact is the article's story and stays");
   assert.match(f.whyItMatters, /132-unit affordable apartment complex/);
   assert.doesNotMatch(f.whyItMatters, /2,523|6\.2/, "the county listing statistic is the report's job");
-  assert.deepStrictEqual(f.trendSignals, [TOPIC.trendSignals[0]]);
+  assert.match(f.whyItMatters, /County active listings were \[article figure\], up \[article figure\] from August/, "the sentence and its idea stay; only the figures are neutralized");
+  assert.strictEqual(f.trendSignals.length, 2, "no trend signal is deleted any more");
+  assert.strictEqual(f.trendSignals[0], TOPIC.trendSignals[0]);
+  assert.match(f.trendSignals[1], /median price rose \[article figure\] in September/);
   const brief = plan.topicBrief(TOPIC);
   assert.match(brief.topic_question, /132 apartments/);
   assert.ok(brief.trend_signals.some((x) => /Poker Lane/.test(x)));
+  assert.match(brief.article_figure_rule, /\[article figure\]/);
   assert.doesNotMatch(JSON.stringify(brief), /2,523|3\.1%/);
+});
+
+test("Oct 30 (Lincoln): a question whose number is a market count is never sent empty", () => {
+  const lincoln = { ...TOPIC, id: "t3", question: "Could 81 builder listings change what Lincoln resale sellers can ask?",
+    whyItMatters: "A local article says builder homes made up 81 of 237 listings in Lincoln's 95648 ZIP code, putting new construction in the comparison set for resale sellers.",
+    trendSignals: ["As reported in an article updated October 27, 2026, 81 of 237 listings in ZIP code 95648 were new-construction listings", "The article says the City of Lincoln approved a Village 7 amendment on July 28, 2026, increasing allocated units from 570 to 1,205."] };
+  const brief = plan.topicBrief(lincoln);
+  assert.strictEqual(brief.topic_question, "Could [article figure] builder listings change what Lincoln resale sellers can ask?");
+  assert.match(brief.why_it_matters, /builder homes made up \[article figure\] of \[article figure\] listings/, "the idea stays");
+  assert.strictEqual(brief.trend_signals.length, 2);
+  assert.match(brief.trend_signals[1], /Village 7 amendment on July 28, 2026/, "a project fact and its date are untouched");
+  assert.deepStrictEqual(art.articleNumbers(lincoln).sort(), ["237", "81", "95648"].sort());
+});
+
+test("Oct 30: the script is refused if it states a market figure that only the article has, and accepted when it says the idea without it", () => {
+  const lincoln = { ...TOPIC, id: "t3", question: "Could 81 builder listings change what Lincoln resale sellers can ask?",
+    whyItMatters: "Builder homes made up 81 of 237 listings in the ZIP code.", trendSignals: [] };
+  const project = { template: "local_market_insider", intake: { market: "Lincoln, CA" }, selected_topic: lincoln };
+  const run = (text) => gate.evaluate(amLib.gateInputFor(project, amLib.attachNotice(project, { captionText: text, narrationTagged: text, scenes: [{ narrationExcerpt: text }], cta: { text: "Ask me.", source: "claude" } }), "claude"));
+  const bad = run("There are 81 builder listings competing with your home.");
+  assert.ok(bad.blocks.some((b) => b.rule === "article_figure" && b.match === "81"));
+  assert.match(bad.blocks.find((b) => b.rule === "article_figure").message, /comes from the article/);
+  assert.ok(!run("Builder homes are a big part of what resale sellers compete with.").blocks.some((b) => b.rule === "article_figure"));
+});
+
+test("Oct 30: an article-backed script with no article scene is found, and a script with one is not", () => {
+  const project = { selected_topic: { ...TOPIC, question: "Could builder listings change what resale sellers can ask?", whyItMatters: "Builder homes are a large share of the competition.", trendSignals: [] } };
+  const scene = (role, text) => ({ sourceRole: role, narrationExcerpt: text });
+  const allData = { scenes: [scene("data", "Prices per square foot are down."), scene("data", "More homes closed last month."), scene("data", "Pricing matters.")] };
+  assert.strictEqual(plan.articleSceneProblems(allData, project).length, 1);
+  const withArticle = { scenes: [scene("data", "Prices per square foot are down."), scene("article", "Buyers also walk into a builder's sales office."), scene("data", "Pricing matters.")] };
+  assert.deepStrictEqual(plan.articleSceneProblems(withArticle, project), []);
+  const wrongTopic = { scenes: [scene("data", "Prices are down."), scene("article", "Weather has been lovely lately."), scene("data", "Pricing matters.")] };
+  assert.strictEqual(plan.articleSceneProblems(wrongTopic, project).length, 1, "an article label with no article idea in it does not count");
+  assert.deepStrictEqual(plan.articleSceneProblems(allData, { selected_topic: { ...TOPIC, reportFirst: false } }), [], "no article involved");
+  assert.deepStrictEqual(plan.articleSceneProblems(allData, { selected_topic: { ...TOPIC, reframed: true } }), [], "a reframed topic keeps its own rules");
 });
 
 test("the planner is told to build a scene on the article", () => {

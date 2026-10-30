@@ -27,6 +27,9 @@ test("events: up to eight candidates are accepted and the first five that pass a
   const raw = [mk(1, "unknown"), mk(2, "6 p.m."), mk(3, "7 p.m."), mk(4, "unknown"), mk(5, "5 p.m."), mk(6, "8 p.m."), mk(7, "4 p.m."), mk(8, "3 p.m.")];
   const v = r.validateTopics(raw, { mode: "local_events", today: "2026-10-29" });
   assert.equal(v.topics.length, 5);
-  assert.deepEqual(v.topics.map((t) => t.event.name), ["Event 2", "Event 3", "Event 5", "Event 6", "Event 7"]);
+  assert.deepEqual(v.topics.map((t) => t.event.name), ["Event 1", "Event 2", "Event 3", "Event 4", "Event 5"]);   // an unpublished time no longer drops an event
   assert.ok(!v.problems.some((p) => /expected 5 topics/.test(p)));
+  // a missing venue still drops a candidate, so the later ones fill in
+  raw[0].event.location = "";
+  assert.deepEqual(r.validateTopics(raw, { mode: "local_events", today: "2026-10-29" }).topics.map((t) => t.event.name), ["Event 2", "Event 3", "Event 4", "Event 5", "Event 6"]);
 });

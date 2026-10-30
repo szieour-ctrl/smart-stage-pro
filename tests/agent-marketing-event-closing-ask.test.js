@@ -31,3 +31,10 @@ test("planner rule 14 requires the ask, and the content gate accepts a sign-off 
     assert.deepEqual(r.blocks, [], text);
   }
 });
+
+test("event closing always includes the standard check-the-event-page line; time is optional in the planner rule", () => {
+  const c = JSON.parse(plan.buildUserMessage(project("Follow for more local happenings"))).cta_angle;
+  assert.match(c, /ALWAYS also includes the standard line telling viewers to check the event page/);
+  assert.match(plan.buildSystemPrompt(), /say the time only when selected_topic\.event\.time is present/);
+  assert.match(require("../netlify/functions/lib/agent-marketing-research-lib").systemPrompt("local_events"), /The time is optional/);
+});

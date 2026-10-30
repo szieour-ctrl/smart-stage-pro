@@ -22,6 +22,15 @@ const numbersIn = (text) => (String(text || "").match(/\d[\d,]*(?:\.\d+)?/g) || 
 const groupOf = (label) => (/closed/i.test(label) ? "closed" : /active/i.test(label) ? "active" : /pending/i.test(label) ? "pending" : "other");
 
 /** Report figures → manifest figures. n (the listings behind a figure) is the count figure that shares its period. */
+
+// A change figure's display is "down 5.9%" / "up 3.1%", but the big number keeps only 5.9, so the direction has to be in the card's own words
+// (Oct 29, 2026: "For-sale listings, change from a year earlier 5.9%" read as growth when inventory was down).
+function changeLead(f) {
+  const dir = /^\s*(down|up)\b/i.exec(String(f.display || ""));
+  if (!dir) return f.label;
+  const d = dir[1].toLowerCase();
+  return /change from/i.test(f.label) ? f.label.replace(/change from/i, `${d} from`) : `${f.label}, ${d}`;
+}
 function figuresFrom(reportFigures) {
   const rows = Array.isArray(reportFigures) ? reportFigures : [];
   const periodOf = (r) => (/\(([^)]+)\)\s*$/.exec(r.text || "") || [])[1] || "";
@@ -143,7 +152,7 @@ function plan(narrative, intake, figures, opts) {
     } else if (hits.length === 1) {
       const f = hits[0], t = (KEY_TEMPLATES[f.key] || {})[f.group];
       const unit = t ? t.unit : /%/.test(f.display) ? "%" : "";
-      out.push({ ...base, composition: "stat_big_number", data: { lead: t ? t.lead : f.label, value: String(f.value), ...(/^\s*\$/.test(f.display) ? { prefix: "$" } : {}), ...(unit ? { unit } : {}), ...(t ? { trail: t.trail } : {}), icon: /dom/.test(f.key) ? "calendar" : "none" }, claims: [{ field: "value", figure: f.ref }], reason: `One verified figure (${f.label}: ${f.display}) is the point of this scene, so it gets the big-number treatment.` });
+      out.push({ ...base, composition: "stat_big_number", data: { lead: t ? t.lead : changeLead(f), value: String(f.value), ...(/^\s*\$/.test(f.display) ? { prefix: "$" } : {}), ...(unit ? { unit } : {}), ...(t ? { trail: t.trail } : {}), icon: /dom/.test(f.key) ? "calendar" : "none" }, claims: [{ field: "value", figure: f.ref }], reason: `One verified figure (${f.label}: ${f.display}) is the point of this scene, so it gets the big-number treatment.` });
     } else if (hits.length >= 2) {
       const pct = hits.find((f) => /%/.test(f.display)), red = hits.find((f) => /reduc/.test(f.key));
       const totalFig = red ? (figures.find((f) => f.key === "count" && f.group === "active" && f.n === parseNumber(f.display)) || hits.find((f) => f !== red && f !== pct)) : null;

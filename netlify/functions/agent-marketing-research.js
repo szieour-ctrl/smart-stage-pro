@@ -225,6 +225,9 @@ exports.handler = async (event) => {
     // start
     const v = rl.validateResearchRequest(b.request);
     if (!v.ok) return reply(400, { error: v.errors[0].message, errors: v.errors });
+    // A Local Market Update is built on the subscriber's own confirmed MLS Trends/CMA report. Web articles supply the story, never the numbers
+    // (Sam, Oct 30, 2026), so a request with no confirmed report is not run. Local Events do not use a report. (AGENT_MARKETING_ALLOW_WEB_MARKET_UPDATE=true lifts this; it exists for tests and is unset in production.)
+    if (v.request.mode === "market_update" && v.request.dataSource === "web" && process.env.AGENT_MARKETING_ALLOW_WEB_MARKET_UPDATE !== "true") return reply(400, { code: "report_required", error: "Attach and confirm your MLS Trends or CMA report first. A Local Market Update uses your report for the numbers; web research only adds the story." });
     const existing = await settleStale((await supabase("GET", "agent_marketing_research", null, `?project_id=eq.${project.id}&user_id=eq.${userId}&select=*&order=created_at.desc&limit=10`)).data || []);
     const wantKey = rl.requestKey(v.request);
     // Saved results are reused, never re-bought. The agent asks for a NEW set with a different request (or "New Topics", below).

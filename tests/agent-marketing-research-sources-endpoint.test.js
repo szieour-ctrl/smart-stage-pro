@@ -47,7 +47,7 @@ const call = async (method, body, qs) => {
   return { status: res.statusCode, json: JSON.parse(res.body) };
 };
 const REQ = { mode: "market_update", audience: "sellers", geography: { type: "zip", name: "95999" } };
-const reset = () => { for (const k of Object.keys(db)) db[k].length = 0; fetched = []; currentUser = U1; process.env.AGENT_MARKETING_ENABLED = "true"; process.env.PERPLEXITY_API_KEY = "pplx-test"; process.env.ANTHROPIC_API_KEY = "sk-ant-test"; process.env.INTERNAL_API_KEY = "internal"; process.env.URL = "https://site.test"; delete process.env.AGENT_MARKETING_RESEARCH_SESSIONS; };
+const reset = () => { for (const k of Object.keys(db)) db[k].length = 0; fetched = []; currentUser = U1; process.env.AGENT_MARKETING_ENABLED = "true"; process.env.AGENT_MARKETING_ALLOW_WEB_MARKET_UPDATE = "true"; process.env.PERPLEXITY_API_KEY = "pplx-test"; process.env.ANTHROPIC_API_KEY = "sk-ant-test"; process.env.INTERNAL_API_KEY = "internal"; process.env.URL = "https://site.test"; delete process.env.AGENT_MARKETING_RESEARCH_SESSIONS; };
 const mkProject = (over) => { const row = { id: uuid(nextId++), user_id: currentUser, template: "local_market_insider", status: "draft", intake: {}, ...over }; db.agent_marketing_projects.push(row); return row; };
 const mkUpload = (p, over) => {
   const facts = reportLib.analyzePages(tv.standard().pages).facts; facts.mlsSource = "MetroList";
@@ -247,4 +247,20 @@ test("a set chosen before it expired keeps working, and a 6-day-old set can stil
   const again = await call("POST", { action: "select", projectId: p.id, researchId: fresh.id, topicId: "t1" });
   assert.strictEqual(again.status, 200, "this project already chose from this set");
   assert.strictEqual(again.json.selectedTopic.id, "t1");
+});
+
+// Oct 30, 2026: a Local Market Update is built on the subscriber's confirmed report; web articles are not a source of numbers.
+test("a Local Market Update with no confirmed report is refused; with a report, and Local Events without one, it starts", async () => {
+  reset(); delete process.env.AGENT_MARKETING_ALLOW_WEB_MARKET_UPDATE;
+  try {
+    const p = mkProject(); const u = mkUpload(p);
+    const web = await call("POST", { action: "start", projectId: p.id, request: { ...REQ, dataSource: "web" } });
+    assert.strictEqual(web.status, 400); assert.strictEqual(web.json.code, "report_required");
+    assert.strictEqual(db.agent_marketing_research.length, 0, "nothing was saved or charged");
+    const ok = await call("POST", { action: "start", projectId: p.id, request: { ...REQ, dataSource: "both", uploadIds: [u.id] } });
+    assert.strictEqual(ok.status, 202);
+    db.agent_marketing_research[0].status = "failed"; // one run at a time per user
+    const ev = await call("POST", { action: "start", projectId: mkProject().id, request: { mode: "local_events", audience: "buyers", geography: { type: "city", name: "Roseville" }, dataSource: "web" } });
+    assert.strictEqual(ev.status, 202, "events use web pages, not a report");
+  } finally { process.env.AGENT_MARKETING_ALLOW_WEB_MARKET_UPDATE = "true"; }
 });

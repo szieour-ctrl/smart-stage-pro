@@ -214,9 +214,9 @@
   // "Run again": the same request is filled back in (no new intake). A set that used a report asks for the newer one (Update report); without it, it runs as web research.
   function runAgain(r) {
     setForm(r); hideConfirm(); $("resultPanel").classList.add("hidden"); foldSetup(false);
-    var hadReport = r.dataSource && r.dataSource !== "web";
-    say("startMsg", hadReport ? "This research used your report from " + (r.researchDate || "earlier") + ". Attach your newer report below and confirm it (Update report), then research again. Without one it runs as web research only." : "Your request is filled in. Research this market again to refresh it.", "ok");
-    var t = hadReport ? $("upFile") : $("startBtn"); if (t && t.scrollIntoView) t.scrollIntoView({ behavior: "smooth", block: "center" });
+    var market = r.mode !== "local_events", hadReport = r.dataSource && r.dataSource !== "web";
+    say("startMsg", market ? (hadReport ? "This research used your report from " + (r.researchDate || "earlier") + ". Attach your newer MLS Trends or CMA report below and confirm it (Update report), then research again." : "Attach your MLS Trends or CMA report below and confirm it, then research again.") : "Your request is filled in. Research again to refresh it.", "ok");
+    var t = market ? $("upFile") : $("startBtn"); if (t && t.scrollIntoView) t.scrollIntoView({ behavior: "smooth", block: "center" });
   }
   // A saved set built from a report asks first: use that report as it is, or update it. The server will not select the topic until the agent answers.
   function askReport(researchId, topicId, reports) {
@@ -465,6 +465,8 @@
   function review() {
     if (state.uploadReady && !state.uploadReady()) return;
     var q = collect(); say("startMsg", "");
+    // A Local Market Update uses the agent's own confirmed report for its numbers; web articles only add the story.
+    if (q.mode !== "local_events" && q.dataSource === "web") { say("startMsg", "Attach your MLS Trends or CMA report and confirm it first. A Local Market Update uses your report for the numbers; web research only adds the story.", "err"); var uf = $("upFile"); if (uf && uf.scrollIntoView) uf.scrollIntoView({ behavior: "smooth", block: "center" }); return; }
     if (q.mode !== "local_events" && q.dataFocus !== "none" && q.period && q.period.start !== undefined && (!q.period.start || !q.period.end)) { say("startMsg", "Enter both dates for the period.", "err"); return; }
     if (q.mode !== "local_events" && q.geography.type !== "zip" && !/^\d{5}$/.test(String(q.geography.zip || "").trim())) { say("startMsg", "Enter the 5-digit ZIP code for this market.", "err"); $("geoZip").focus(); return; }
     if (!q.mode || !q.geography.name.trim() || !q.audience) { say("startMsg", !q.audience ? "Choose who this is for." : "Enter the place to research.", "err"); return; }

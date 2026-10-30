@@ -11,8 +11,8 @@ const narrative = { scenes: [
   { role: "Close", narrationExcerpt: "Reach out and let's take a look together." },
 ], hook: "Antelope home values are drifting down" };
 const rows = [
-  { key: "median_price", label: "Closed median sold price", display: "$482,000", ref: "f1", text: "x" },
-  { key: "avg_price", label: "Active average for-sale price", display: "$524,000", ref: "f2", text: "x" },
+  { key: "median_price", label: "Median sold price", display: "$482,000", ref: "f1", text: "Median sold price: $482,000 (Sep 2026)" },
+  { key: "avg_price", label: "Average for-sale price", display: "$524,000", ref: "f2", text: "Average for-sale price: $524,000 (Sep 2026)" },
 ];
 const base = { project: { template: "local_market_insider" }, narrative, intake: { market: "Antelope" }, reportFigures: rows };
 
@@ -52,4 +52,13 @@ test("a failed trail is asked again with the reason, an empty one stays bare, an
   assert.match(seen[1].fix_these[0].problem, /over 8 words/);
   assert.deepEqual(await cc.writeTrails({ ...base, callFn: async () => { throw new Error("down"); } }), {});
   assert.deepEqual(await cc.writeTrails({ ...base, project: { selected_topic: { kind: "local_events" } }, callFn }), {}, "event Reels have no stat cards");
+});
+
+test("a big-number card names the area it describes and shows the report period, so it is not read as one home's price", () => {
+  const pl = director.plan(narrative, { market: "Antelope" }, director.figuresFrom(rows));
+  assert.equal(pl.scenes[1].data.lead, "Antelope's median sold price");
+  assert.equal(pl.scenes[1].data.trail, "Sep 2026");
+  assert.equal(pl.scenes[2].data.lead, "Antelope's average for-sale price");
+  const withTrail = director.plan(narrative, { market: "Antelope" }, director.figuresFrom(rows), { cardCopy: { 1: { trail: "Lower than last month and last year" } } });
+  assert.equal(withTrail.scenes[1].data.trail, "Lower than last month and last year", "the written comparison replaces the period line");
 });

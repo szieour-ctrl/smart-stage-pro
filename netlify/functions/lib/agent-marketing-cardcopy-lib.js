@@ -39,7 +39,9 @@ function statementScenes(narrative, intake, figures) {
 /** Big-number scenes the director could not give a trail line (only days-on-market figures have a template): median sold price, average for-sale price and so on. */
 function statTrailScenes(narrative, intake, figures) {
   const pl = director.plan(narrative, intake, figures);
-  return pl.scenes.map((s, i) => (s.composition === "stat_big_number" && !(s.data && s.data.trail) ? i : -1)).filter((i) => i >= 0);
+  // The director's own line for such a card is just the report period; a template line (days on market) is kept as it is.
+  const periodOf = (s) => { const c = (s.claims || [])[0], f = c && figures.find((x) => x.ref === c.figure); return f ? f.period : ""; };
+  return pl.scenes.map((s, i) => (s.composition === "stat_big_number" && (!(s.data && s.data.trail) || s.data.trail === periodOf(s)) ? i : -1)).filter((i) => i >= 0);
 }
 
 /** True for a Local Event Reel (the topic is an event). */

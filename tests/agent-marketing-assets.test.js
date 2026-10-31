@@ -234,3 +234,16 @@ test("a Market Summary report (printed publication line, no date range) builds a
   assert.strictEqual(r.manifest.notice.text, sentence);
   assert.strictEqual(r.manifest.notice.period, undefined, "no period is made up");
 });
+
+// Oct 30, 2026: a Reel failed its final check on "350" and "89" in a card's trail: the report prints them (the year-ago values), but only each figure's headline value was accepted.
+test("the numbers a report prints for a figure (year-ago and prior values, printed changes) are accepted on a card; numbers it does not print are not", () => {
+  const assetsLib = require("../netlify/functions/lib/agent-marketing-assets-lib");
+  const rows = [
+    { ref: "r1.f4", key: "avg_ppsf", label: "Average price per square foot", display: "$325 per sq ft", text: "Average price per square foot: $325 per sq ft vs $345 per sq ft in August 2026 (down 5.8%) and $350 per sq ft in September 2025 (down 7.1%); the report's 6-month trend: Depreciating" },
+    { ref: "r1.f1", key: "count_closed", label: "Closed sales", display: "93", text: "Closed sales: 93 vs 89 in September 2025 (up 4.5%)" },
+  ];
+  const nums = assetsLib.reportNumbers(director.figuresFrom(rows), rows);
+  for (const n of [325, 345, 350, 5.8, 7.1, 93, 89, 4.5]) assert.ok(nums.includes(n), `${n} is the report's`);
+  assert.ok(!nums.includes(412) && !nums.includes(2.2), "a number the report does not print is not accepted");
+  assert.ok(assetsLib.reportNumbers(director.figuresFrom(rows)).includes(325) && !assetsLib.reportNumbers(director.figuresFrom(rows)).includes(350), "the headline value alone is still what it was without the rows");
+});

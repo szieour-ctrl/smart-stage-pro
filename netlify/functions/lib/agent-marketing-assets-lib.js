@@ -52,13 +52,16 @@ function imageNeeds(narrative, ownScenes) {
  * may quote any figure from the subscriber's report, not only the ones a card claims. Each report figure counts as verified, and so does
  * its whole-number rounding ("a median of 19.5 days" may read "20 days"). Nothing calculated across figures is added here.
  */
-function reportNumbers(figs) {
+function reportNumbers(figs, rows) {
   const out = new Set();
   (figs || []).forEach((f) => {
     if (!Number.isFinite(f.value)) return;
     out.add(f.value);
     if (!Number.isInteger(f.value) && Math.abs(f.value) >= 10) out.add(Math.round(f.value));
   });
+  // Every number the report prints for a figure is the report's: the prior-month and year-ago values and the printed changes ("$350 per sq ft in September
+  // 2025 (down 7.1%)"). A card line that says "down from $350 a year ago" is sourced, so the final check must accept it (Oct 30, 2026: a Reel failed on 350 and 89).
+  (rows || []).forEach((r) => (String(r && r.text || "").match(/\d[\d,]*(?:\.\d+)?/g) || []).forEach((t) => { const v = Number(t.replace(/,/g, "")); if (Number.isFinite(v)) out.add(v); }));
   return [...out];
 }
 
@@ -122,7 +125,7 @@ function buildManifest(input) {
   const captions = timing.groupCaptionLines(input.audio.words);
   let manifest = {
     version: manifestLib.MANIFEST_VERSION, project_id: input.projectId, formats: formats.slice(), notice_required: true,
-    ...(input.webTopic ? { notice_required: false, notice: {}, source_line: { sources: sourcesLib.usableSources(input.webTopic.sources).map((x) => ({ title: x.title, url: x.url, published: x.published })), scope_note: input.webTopic.scopeNote || "", text: sourcesLib.sourceLine(input.webTopic.sources, input.webTopic.scopeNote), label: sourcesLib.sourceLabel(input.webTopic.sources) }, verified_numbers: sourcesLib.topicNumbers(input.webTopic) } : { notice: input.notice.disclosure ? { disclosure: input.notice.disclosure, text: manifestLib.metroListDisclosureNotice(input.notice.disclosure) } : { period: input.notice.period, text: manifestLib.metroListNotice(input.notice.period) }, verified_numbers: [...new Set([...reportNumbers(figs), ...(input.articleTopic ? sourcesLib.topicNumbers(require("./agent-marketing-article-lib").articleFacts(input.articleTopic)) : [])])] }),
+    ...(input.webTopic ? { notice_required: false, notice: {}, source_line: { sources: sourcesLib.usableSources(input.webTopic.sources).map((x) => ({ title: x.title, url: x.url, published: x.published })), scope_note: input.webTopic.scopeNote || "", text: sourcesLib.sourceLine(input.webTopic.sources, input.webTopic.scopeNote), label: sourcesLib.sourceLabel(input.webTopic.sources) }, verified_numbers: sourcesLib.topicNumbers(input.webTopic) } : { notice: input.notice.disclosure ? { disclosure: input.notice.disclosure, text: manifestLib.metroListDisclosureNotice(input.notice.disclosure) } : { period: input.notice.period, text: manifestLib.metroListNotice(input.notice.period) }, verified_numbers: [...new Set([...reportNumbers(figs, input.reportFigures), ...(input.articleTopic ? sourcesLib.topicNumbers(require("./agent-marketing-article-lib").articleFacts(input.articleTopic)) : [])])] }),
     brand: input.brand,
     figures: figs.filter((f) => used.has(f.ref)).map((f) => ({ ref: f.ref, label: f.label, display: f.display, value: f.value, n: f.n })),
     derived: pl.derived, narration_text: input.narrationTagged,
@@ -144,4 +147,4 @@ function voiceShapeFrom(env) {
   return semitones || bass_db ? { semitones, bass_db } : null;
 }
 
-module.exports = { imageProvenance, disclosureKind, voiceShapeFrom, parseNoticePeriod, parseNotice, voiceIdFor, imageNeeds, buildManifest };
+module.exports = { reportNumbers, imageProvenance, disclosureKind, voiceShapeFrom, parseNoticePeriod, parseNotice, voiceIdFor, imageNeeds, buildManifest };

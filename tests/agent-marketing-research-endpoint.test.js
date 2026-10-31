@@ -1,5 +1,4 @@
 // End-to-end test of the research endpoint and worker with an in-memory fake database (no network).
-process.env.AGENT_MARKETING_READABILITY = "off"; // these tests run research with no network; the readability check has its own tests
 const test = require("node:test");
 const assert = require("node:assert");
 

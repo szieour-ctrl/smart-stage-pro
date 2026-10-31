@@ -133,9 +133,6 @@ function attachNotice(project, narrative) {
 function gateInputFor(project, narrative, source) {
   const n = narrative || {};
   const base = { template: project.template, intake: project.intake || {}, verified: gate.verifiedFromProject(project) }; // verified: Local Market Insider only, from the stored research topic
-  // Project and event facts the planner took from the article (a plan for 132 apartments) were checked against the article text when the script was written
-  // and are kept on the narrative; the article itself is never stored. Later checks (edit, approve, render) count them as verified, nothing else from the article.
-  if (base.verified && base.verified.reportFirst && Array.isArray(n.articleFacts) && n.articleFacts.length) base.verified = { ...base.verified, texts: [...base.verified.texts, ...n.articleFacts.map((x) => String(x).replace(/\s+/g, " ").trim()).filter(Boolean)] };
   const sceneTexts = (n.scenes || []).map((s) => s.narrationExcerpt).filter(Boolean);
   if (source === "claude") {
     return { ...base, fullPiece: true, generated: { narration: n.captionText || stripAudioTags(n.narrationTagged), captions: n.captionText, sceneTexts, overlays: n.notice ? [n.notice] : [] }, cta: n.cta || null };

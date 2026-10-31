@@ -6,8 +6,6 @@
 const { supabase } = require("./lib/marketing-profile-lib");
 const am = require("./lib/agent-marketing-lib");
 const planLib = require("./lib/agent-marketing-plan-lib");
-const articleFetch = require("./lib/agent-marketing-article-fetch-lib");
-const articleBrief = require("./lib/agent-marketing-article-brief-lib");
 
 async function writeNarrative(id, userId, narrative, extra) {
   return supabase("PATCH", "agent_marketing_projects", { narrative, updated_at: new Date().toISOString(), ...(extra || {}) }, `?id=eq.${id}&user_id=eq.${userId}`);
@@ -40,23 +38,7 @@ exports.handler = async (event) => {
       const prior = await supabase("GET", "agent_marketing_projects", null, `?user_id=eq.${userId}&created_at=lt.${encodeURIComponent(project.created_at)}&select=id&limit=1000`);
       if (Array.isArray(prior.data)) ctaAngleCount = prior.data.length;
     } catch (e) { /* the hash-based pick is used instead */ }
-    // An article-backed topic (the agent's report plus an approved article): Claude reads the whole article and keeps only its perspective, opinion and
-    // context; the planner gets that, never the article. Read now, so it is current, and nothing is stored. If the page cannot be read, or no usable
-    // perspective comes back, the script is written from the research summary and the review notes say so.
-    let articleText = null, perspective = null, articleNote = null;
-    const topic = project.selected_topic;
-    if (topic && topic.reportFirst === true && topic.origin === "web" && topic.reframed !== true && process.env.AGENT_MARKETING_READABILITY !== "off") {
-      const read = await articleFetch.fetchArticle(articleFetch.primaryUrl(topic));
-      if (!read.ok) articleNote = "The article could not be opened and read this time, so this script uses the research summary of it only. Run it again later or choose a different topic if you want its full perspective.";
-      else {
-        articleText = read.text;
-        const pb = await articleBrief.perspectiveFromArticle({ articleText, topic, intake: project.intake, anthropicKey: process.env.ANTHROPIC_API_KEY });
-        if (pb.ok) perspective = pb.brief;
-        else articleNote = "The article was opened but its perspective could not be extracted this time, so this script uses the research summary of it only. Run it again if you want its full perspective.";
-      }
-    }
-    const { narrative, warnings: planWarnings, gate, usage: planUsage } = await planLib.generatePlan({ project: ctaAngleCount == null ? project : { ...project, cta_angle_index: ctaAngleCount }, anthropicKey: process.env.ANTHROPIC_API_KEY, articleText, perspective });
-    const warnings = articleNote ? [articleNote, ...(planWarnings || [])] : planWarnings;
+    const { narrative, warnings, gate, usage: planUsage } = await planLib.generatePlan({ project: ctaAngleCount == null ? project : { ...project, cta_angle_index: ctaAngleCount }, anthropicKey: process.env.ANTHROPIC_API_KEY });
     const gateSummary = { ok: gate.ok, version: gate.version, blocks: gate.blocks, warnings: gate.warnings, agentSuppliedClaims: gate.agentSuppliedClaims, sourcedFacts: gate.sourcedFacts || [] };
     await writeNarrative(id, userId, { ...narrative, warnings, plan_usage: planUsage, attempts: stub.attempts, intakeHash: stub.intakeHash },
       { status: "narrative_ready", gate_version: gate.version, gate_result: gateSummary });

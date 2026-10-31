@@ -9,7 +9,7 @@ const noSleep = async () => {};
 const mkRow = (geo, extra) => ({ id: "r1", mode: "market_update", audience: "sellers", geography: geo, focus: {}, upload_refs: [], data_source: "web", ...(extra || {}) });
 const GEO = {
   lincoln: { type: "city", name: "Lincoln", city: "", zip: "95648", state: "CA", label: "Lincoln, CA" },
-  natomas: { type: "neighborhood", name: "Natomas", city: "Sacramento", zip: "95835", state: "CA", label: "Natomas, Sacramento, CA" },
+  natomas: { type: "neighborhood", name: "Natomas", city: "Sacramento", zip: "95834", state: "CA", label: "Natomas, Sacramento, CA" },
   crocker: { type: "neighborhood", name: "Crocker Ranch", city: "Roseville", zip: "95747", state: "CA", label: "Crocker Ranch, Roseville, CA" },
   thin: { type: "city", name: "Colfax", city: "", zip: "95713", state: "CA", label: "Colfax, CA" },
 };

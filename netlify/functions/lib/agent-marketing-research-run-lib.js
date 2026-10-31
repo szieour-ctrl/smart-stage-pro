@@ -125,6 +125,10 @@ function answerText(resp) {
   return parts.join("\n");
 }
 
+// Diagnostics isolation (PR 1): every statement that only RECORDS goes through this; an exception in it is swallowed, so a diagnostics fault can never
+// change which sources or topics survive grounding. Nothing a recording statement does feeds back into the result.
+function diagOnly(fn) { try { return fn(); } catch (_) { return undefined; } }
+
 // `diag` (optional) is a diagnostics collector: it only receives a record of each decision below and never changes the result.
 function groundTopics(rawTopics, resp, diag) {
   const known = new Map();
@@ -134,15 +138,15 @@ function groundTopics(rawTopics, resp, diag) {
   });
   (Array.isArray(resp && resp.citations) ? resp.citations : []).forEach((c) => add(typeof c === "string" ? c : c && c.url));
   (Array.isArray(resp && resp.search_results) ? resp.search_results : []).forEach((s) => s && add(s.url, s.date || s.last_updated));
-  if (known.size === 0) { if (diag) diag.grounding = { applicable: false, provider_urls: 0 }; return { topics: rawTopics, grounded: false }; } // the provider gave nothing to check against
-  if (diag) diag.grounding = { applicable: true, provider_urls: known.size };
+  if (known.size === 0) { if (diag) diagOnly(() => { diag.grounding = { applicable: false, provider_urls: 0 }; }); return { topics: rawTopics, grounded: false }; } // the provider gave nothing to check against
+  if (diag) diagOnly(() => { diag.grounding = { applicable: true, provider_urls: known.size }; });
   const topics = (Array.isArray(rawTopics) ? rawTopics : []).map((t, ti) => {
     if (!t || typeof t !== "object") return t;
-    if (diag) (Array.isArray(t.sources) ? t.sources : []).forEach((s) => {
+    if (diag) diagOnly(() => (Array.isArray(t.sources) ? t.sources : []).forEach((s) => {
       if (!s) return;
       const ok = known.has(urlKey(s.url)), d = ok ? known.get(urlKey(s.url)) : null;
       diagLib.pushSource(diag, { topic: ti + 1, url: s.url, title: s.title, model_date: s.published, provider_date: d, date_from: ok ? (d ? "provider" : "model") : null, outcome: ok ? "kept" : "dropped", stage: "provider_grounding", code: ok ? "grounded" : "not_in_provider_results" });
-    });
+    }));
     const sources = (Array.isArray(t.sources) ? t.sources : []).filter((s) => s && known.has(urlKey(s.url))).map((s) => {
       const d = known.get(urlKey(s.url));
       return d ? { ...s, published: d } : s;

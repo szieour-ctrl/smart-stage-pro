@@ -6,7 +6,8 @@
 //
 // What is stored is bounded and sanitized: no credentials, no uploaded-report content, no URL query strings or fragments, no article text, no
 // raw provider answer (the existing failure-only usage.topicDebug is untouched). Titles are cut to 120 characters, the agent-facing hook to 140.
-// Size is capped (MAX_BYTES) and every record carries a retention date (RETENTION_DAYS). See docs/research-diagnostics.md.
+// Size is capped (MAX_BYTES) and every record carries a retention DATE (RETENTION_DAYS): metadata only, nothing deletes expired records until the
+// purge in docs/research-diagnostics.md is scheduled (a required operational task). See that file.
 
 const crypto = require("crypto");
 

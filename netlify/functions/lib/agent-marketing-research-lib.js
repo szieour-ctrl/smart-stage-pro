@@ -337,9 +337,13 @@ function isNotArticle(url) {
 }
 function isPaywalled(host) { return PAYWALLED_DOMAINS.some((d) => host === d || host.endsWith("." + d)); }
 
+// Diagnostics isolation (PR 1): every statement that only RECORDS goes through this. An exception inside it is swallowed, so a diagnostics fault can
+// never change whether a topic is accepted, rejected, reordered or returned. Nothing a recording statement does may feed back into the result.
+function diagOnly(fn) { try { return fn(); } catch (_) { return undefined; } }
+
 function cleanSource(s, mode, todayN, why, info) {
   // `why` collects the plain-words reason a source was dropped. `info` (optional, diagnostics only) receives the stage and code of the drop; it never changes the result.
-  const no = (reason, stage, code) => { if (Array.isArray(why)) why.push(reason); if (info && stage) { info.stage = stage; info.code = code; info.detail = reason; } return null; };
+  const no = (reason, stage, code) => { if (Array.isArray(why)) why.push(reason); if (info && stage) diagOnly(() => { info.stage = stage; info.code = code; info.detail = reason; }); return null; };
   if (!s || typeof s !== "object") return no("not a source", "article_eligibility", "not_a_source");
   let url;
   try { url = new URL(String(s.url || "").trim()); } catch { return no("not a web address", "article_eligibility", "not_a_web_address"); }
@@ -466,15 +470,16 @@ function cleanRecommendation(rec, topicCount) {
 function validateTopics(rawTopics, { mode, today, recommendation, need, diag } = {}) {
   const problems = [];
   // `diag` (optional) is a diagnostics collector from agent-marketing-research-diag-lib. It only RECEIVES records; nothing below reads it back.
-  const dg = diag ? require("./agent-marketing-research-diag-lib") : null;
-  const tRec = (topic, outcome, code, detail, extra) => { if (dg) dg.pushTopic(diag, { topic, outcome, stage: "topic_selection", code, detail, ...(extra || {}) }); };
+  const dg = diag ? (diagOnly(() => require("./agent-marketing-research-diag-lib")) || null) : null;
+  const rec = (fn) => { if (dg) diagOnly(fn); };   // every recording statement below goes through here
+  const tRec = (topic, outcome, code, detail, extra) => rec(() => dg.pushTopic(diag, { topic, outcome, stage: "topic_selection", code, detail, ...(extra || {}) }));
   if (!MODES.includes(mode)) return { ok: false, topics: [], problems: ["unknown mode"] };
   const todayN = dayNumber(today);
   if (todayN == null) return { ok: false, topics: [], problems: ["today's date is not valid"] };
   const raw = Array.isArray(rawTopics) ? rawTopics : [];
   if (raw.length !== TOPIC_COUNT && !(mode === "local_events" && raw.length > TOPIC_COUNT && raw.length <= EVENT_CANDIDATES)) problems.push(`expected ${TOPIC_COUNT} topics, got ${raw.length}`);
   const topics = [];
-  const nOf = new Map();   // topic object -> its position in the model's answer (diagnostics only)
+  const nOf = new Map();   // topic object -> its position in the model's answer (written and read only by recording statements)
   raw.forEach((t, i) => {
     const n = i + 1;
     const x = t && typeof t === "object" ? t : {};
@@ -495,12 +500,12 @@ function validateTopics(rawTopics, { mode, today, recommendation, need, diag } =
       const info = dg ? {} : null;
       const c = cleanSource(s, mode, todayN, dropped, info);
       if (c && !seen.has(c.url)) { seen.add(c.url); sources.push(c); }
-      if (dg) {
+      rec(() => {
         const base = { topic: n, url: s && s.url, title: s && s.title, model_date: s && s.published };
         if (!c) dg.pushSource(diag, { ...base, outcome: "dropped", stage: info.stage, code: info.code, detail: info.detail });
         else if (sources.length && sources[sources.length - 1] !== c) dg.pushSource(diag, { ...base, outcome: "dropped", stage: "duplicate", code: "duplicate_address_in_topic", detail: null });
         else dg.pushSource(diag, { ...base, outcome: "kept", stage: "accepted", code: "accepted", detail: null });
-      }
+      });
     });
     if (sources.length === 0) { tRec(n, "left_out", "no_usable_source", dropped.slice(0, 3).join("; "), { hook: question }); return problems.push(`topic ${n}: no usable source${dropped.length ? ` (${dropped.slice(0, 3).join("; ")})` : ""}`); }
     const topic = { id: `t${n}`, origin: "web", kind: mode, question, whyItMatters: why, trendSignals: signals, localIntent: x.local_intent === true, scope, scopeNote: scope === "broader_context" ? scopeNote : "", sources: sources.slice(0, 4), event: null, keywordMatch: x.keyword_match === true };
@@ -510,7 +515,7 @@ function validateTopics(rawTopics, { mode, today, recommendation, need, diag } =
       topic.event = e.event;
     }
     topics.push(topic);
-    nOf.set(topic, n);
+    rec(() => nOf.set(topic, n));
   });
   // Distinct: when two topics are the same question in different words, the later one is left out.
   for (let j = topics.length - 1; j > 0; j--) {
@@ -524,9 +529,9 @@ function validateTopics(rawTopics, { mode, today, recommendation, need, diag } =
   const idsBefore = topics.map((t) => t.id).join();
   topics.splice(0, topics.length, ...firsts, ...repeats);
   const reordered = topics.map((t) => t.id).join() !== idsBefore;
-  if (dg) topics.slice(TOPIC_COUNT).forEach((t) => tRec(nOf.get(t), "left_out", "ranked_beyond_five", null, { hook: t.question }));
+  rec(() => topics.slice(TOPIC_COUNT).forEach((t) => tRec(nOf.get(t), "left_out", "ranked_beyond_five", null, { hook: t.question })));
   topics.splice(TOPIC_COUNT);   // never more than five
-  if (dg) topics.forEach((t, i) => tRec(nOf.get(t), "kept", repeats.includes(t) ? "kept_repeat_article" : "kept", repeats.includes(t) ? "another topic already uses this article; placed after topics with a new article" : null, { hook: t.question, final_rank: i + 1 }));
+  rec(() => topics.forEach((t, i) => tRec(nOf.get(t), "kept", repeats.includes(t) ? "kept_repeat_article" : "kept", repeats.includes(t) ? "another topic already uses this article; placed after topics with a new article" : null, { hook: t.question, final_rank: i + 1 })));
   const needN = Number.isInteger(need) && need >= 1 && need <= TOPIC_COUNT ? need : TOPIC_COUNT;
   const differentKept = topics.filter((t) => firsts.includes(t)).length;
   // Keep what passed (Sam, Oct 28): a topic with no usable article is left out, it does not sink the others. One good article is a usable run.

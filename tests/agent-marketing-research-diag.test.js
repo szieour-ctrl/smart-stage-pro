@@ -26,16 +26,88 @@ for (const sc of fx.scenarios()) {
   });
 }
 
-test("unchanged: a diagnostics failure cannot change the research result", async () => {
-  const sc = byName("all_lost_then_retry_ok");
-  for (const name of ["buildRecord", "attemptConfig", "candidatesOf", "newAttemptDiag", "depthOf", "bound"]) {
-    const orig = dg[name];
-    dg[name] = () => { throw new Error(`boom ${name}`); };
-    try {
-      const { result } = await quiet(() => fx.runScenario(run, sc));
-      assert.deepStrictEqual(strip(result.fields), golden[sc.name].fields, `${name} threw`);
-      assert.strictEqual(result.attempts, golden[sc.name].attempts);
-    } finally { dg[name] = orig; }
+test("unchanged: a diagnostics failure anywhere cannot change the research result (every scenario, every diagnostics function)", async () => {
+  const names = ["buildRecord", "attemptConfig", "candidatesOf", "newAttemptDiag", "depthOf", "bound", "pushSource", "pushTopic", "mergeSources", "funnelOf", "safeUrl", "safeText", "sourceKind"];
+  for (const sc of fx.scenarios()) {
+    for (const name of names) {
+      const orig = dg[name];
+      dg[name] = () => { throw new Error(`boom ${name}`); };
+      try {
+        const { result, sent } = await quiet(() => fx.runScenario(run, sc));
+        assert.deepStrictEqual(strip(result.fields), golden[sc.name].fields, `${sc.name}: ${name} threw`);
+        assert.deepStrictEqual(result.problems, golden[sc.name].problems);
+        assert.strictEqual(result.attempts, golden[sc.name].attempts);
+        assert.deepStrictEqual(sent, golden[sc.name].payloads);
+      } finally { dg[name] = orig; }
+    }
+  }
+});
+
+// ── Fault injection at the exact locations: groundTopics() and validateTopics() ────────────────────
+const rawOf = (resp) => rl.extractTopics(run.answerText(resp));
+const deepFreeze = (o) => { Object.values(o).forEach((v) => v && typeof v === "object" && deepFreeze(v)); return Object.freeze(o); };
+const boom = () => { throw new Error("diagnostics fault"); };
+// Collectors that fail in different ways: every access throws; one field throws; a write throws; the collector is frozen.
+const FAULTS = {
+  "every access throws": () => new Proxy({}, { get: boom, set: boom, has: boom, ownKeys: boom, getOwnPropertyDescriptor: boom }),
+  "reading .sources throws": () => ({ get sources() { boom(); }, topics: [], grounding: null }),
+  "reading .topics throws": () => ({ sources: [], get topics() { boom(); }, grounding: null }),
+  "writing .grounding throws": () => ({ sources: [], topics: [], set grounding(v) { boom(); } }),
+  "frozen collector": () => deepFreeze({ sources: [], topics: [], grounding: null }),
+  "pushes are not arrays": () => ({ sources: { push: boom, length: 0 }, topics: { push: boom, length: 0 }, grounding: null }),
+};
+const CASES = () => {
+  const cases = fx.scenarios().filter((sc) => sc.answers[0] && sc.answers[0].json && sc.answers[0].json.output).map((sc) => ({ name: sc.name, mode: "market_update", today: "2026-10-24", resp: sc.answers[0].json, raw: null }));
+  cases.forEach((c) => { c.raw = rawOf(c.resp); });
+  // Events take the topic-level event path (an event problem is a topic-selection decision).
+  const ev = [{ question: "What is happening downtown this weekend?", why_it_matters: "It brings neighbors together.", trend_signals: [], scope: "selected", sources: [{ title: "City calendar", url: "https://city.example/events/a", published: "" }] }];
+  cases.push({ name: "local_events_missing_event", mode: "local_events", today: "2026-10-24", resp: { search_results: [{ url: "https://city.example/events/a" }] }, raw: ev });
+  return cases;
+};
+
+test("fault injection in groundTopics(): every collector failure gives exactly the production result", () => {
+  for (const c of CASES()) {
+    const clean = run.groundTopics(c.raw, c.resp);
+    for (const [fault, make] of Object.entries(FAULTS)) {
+      assert.deepStrictEqual(run.groundTopics(c.raw, c.resp, make()), clean, `${c.name} / ${fault}`);
+    }
+    for (const fn of ["pushSource", "pushTopic"]) {
+      const orig = dg[fn]; dg[fn] = boom;
+      try { assert.deepStrictEqual(run.groundTopics(c.raw, c.resp, dg.newAttemptDiag()), clean, `${c.name} / ${fn} throws`); } finally { dg[fn] = orig; }
+    }
+  }
+  // no provider list at all: the other early return
+  const none = run.groundTopics(CASES()[0].raw, { choices: [] });
+  for (const [fault, make] of Object.entries(FAULTS)) assert.deepStrictEqual(run.groundTopics(CASES()[0].raw, { choices: [] }, make()), none, `no provider list / ${fault}`);
+});
+
+test("fault injection in validateTopics(): accepted, rejected, reordered and returned topics are identical under every collector failure", () => {
+  for (const c of CASES()) {
+    const grounded = run.groundTopics(c.raw, c.resp).topics;
+    const opts = { mode: c.mode, today: c.today };
+    const clean = rl.validateTopics(JSON.parse(JSON.stringify(grounded)), opts);
+    for (const [fault, make] of Object.entries(FAULTS)) {
+      const got = rl.validateTopics(JSON.parse(JSON.stringify(grounded)), { ...opts, diag: make() });
+      assert.deepStrictEqual(got, clean, `${c.name} / ${fault}`);
+    }
+    for (const fn of ["pushSource", "pushTopic"]) {
+      const orig = dg[fn]; dg[fn] = boom;
+      try { assert.deepStrictEqual(rl.validateTopics(JSON.parse(JSON.stringify(grounded)), { ...opts, diag: dg.newAttemptDiag() }), clean, `${c.name} / ${fn} throws`); } finally { dg[fn] = orig; }
+    }
+  }
+});
+
+test("fault injection: the cases cover every topic-selection and source-stage decision, so the injection is not vacuous", () => {
+  const seen = new Set();
+  for (const c of CASES()) {
+    const d = dg.newAttemptDiag();
+    rl.validateTopics(run.groundTopics(c.raw, c.resp, d).topics, { mode: c.mode, today: c.today, diag: d });
+    dg.mergeSources(d.sources).forEach((x) => seen.add(`${x.stage}/${x.code}`));
+    d.topics.forEach((t) => seen.add(`${t.stage}/${t.code}`));
+  }
+  for (const want of ["provider_grounding/not_in_provider_results", "article_eligibility/paywalled", "article_eligibility/listing_or_agent_site", "publication_date/stale", "publication_date/no_publication_date", "publication_date/future_dated",
+    "duplicate/duplicate_address_in_topic", "topic_selection/no_usable_source", "topic_selection/overlaps_earlier_topic", "topic_selection/ranked_beyond_five", "topic_selection/kept_repeat_article", "topic_selection/event_problem", "accepted/accepted", "topic_selection/kept"]) {
+    assert.ok(seen.has(want), `no case reaches ${want}`);
   }
 });
 
@@ -228,4 +300,19 @@ test("baseline summary: one row per market and cell, with candidates, depth and 
   const md = baseline.summaryMarkdown(rows);
   assert.ok(/\| lincoln \| r10_c6000 \| 2 \| 1 \| 10\.0 \| 3\.0 \| 2\.5 \|/.test(md));
   assert.ok(/Total provider cost of these runs: \$0\.0300/.test(md));
+});
+
+test("baseline harness: nothing it writes or prints can contain a credential, and result folders are git-ignored", () => {
+  const key = "pplx-TESTKEY1234567890";
+  assert.ok(!baseline.redact(`failed: Bearer abc.def ${key} and sk-ABCDEFGH12345`, key).match(/TESTKEY|Bearer abc|ABCDEFGH/));
+  assert.strictEqual(baseline.redact("plain text", key), "plain text");
+  const fs = require("fs"), os = require("os"), path = require("path"), cp = require("child_process");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rb-"));
+  const out = cp.execFileSync(process.execPath, [path.join(__dirname, "..", "scripts", "research-baseline.js"), "--replay", "--markets", "lincoln", "--repeats", "1", "--out", dir], { env: { ...process.env, PERPLEXITY_API_KEY: key }, encoding: "utf8" });
+  const files = fs.readdirSync(dir);
+  assert.ok(files.includes("runs.jsonl") && files.includes("summary.md") && files.some((f) => f.endsWith(".discovery.json")));
+  for (const f of files) assert.ok(!fs.readFileSync(path.join(dir, f), "utf8").includes(key), `key found in ${f}`);
+  assert.ok(!out.includes(key));
+  assert.ok(/^research-baseline-\*\/$/m.test(fs.readFileSync(path.join(__dirname, "..", ".gitignore"), "utf8")));
+  assert.throws(() => cp.execFileSync(process.execPath, [path.join(__dirname, "..", "scripts", "research-baseline.js"), "--live"], { env: { ...process.env, PERPLEXITY_API_KEY: "" }, stdio: "pipe" }), /PERPLEXITY_API_KEY|Command failed/);
 });

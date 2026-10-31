@@ -9,7 +9,7 @@ No database migration is needed: `usage` is already JSON. A diagnostics error is
 ```
 usage.discovery
   schema                 1
-  retention              { days: 90, expires: "YYYY-MM-DD" }
+  retention              { days: 90, expires: "YYYY-MM-DD" }   (metadata only: it does not delete anything; see "Retention")
   request                mode, data_source, audience, geography {type,name,city,zip}, period, keywords_given (true/false only), data_focus
   reproduce              instructions_sha256, input_sha256 (hashes only; the prompt text is not stored), code_version
   settings.configured    model, search_context, max_output_tokens
@@ -57,23 +57,33 @@ If the rubric changes meaning, `DEPTH_RUBRIC_VERSION` is bumped so runs are neve
 
 Keys or anything key-like; the prompt or any request text (hashes only); keywords (a true/false only); the uploaded report, its scope note or any figure from it; URL query strings, fragments, credentials, ports and long opaque path segments; article text or snippets; trend signals or the model's explanation text (counts only); the raw provider answer (the existing failure-only `usage.topicDebug` is untouched).
 
-## Limits and retention
+## Limits
 
 * Size: 24,000 bytes per session. Over that, the least useful detail goes first (candidates past 12, source titles, all candidates, earlier attempts' source detail, topic detail) and `trimmed` lists what went.
 * Per attempt: 30 candidates, 40 source records, 12 topic records. Titles 120 characters, hooks 140, details 160.
-* Retention: 90 days. Each record carries its `expires` date. **Enforcement needs a scheduled purge, which this PR does not add** (no migration or deployment is authorized). The purge to approve later:
+## Retention: the date is metadata; deletion is a required task
+
+Every record carries `retention.expires` (90 days after the research date). **That field does not delete anything.** Nothing in this PR, and nothing in the running app, removes expired diagnostics. Until a purge exists the records simply accumulate (about 7-11 KB per session today, capped at 24 KB).
+
+**Required operational task before diagnostics accumulate in production: schedule the purge below** (daily is enough). It is deliberately not part of PR 1: no migration, scheduled job or deployment is authorized by it. It removes only the diagnostics block, never the session, its topics or its cost fields:
 
 ```sql
--- Removes only the diagnostics block, never the session, topics or cost fields.
 update agent_marketing_research
 set usage = usage - 'discovery'
 where usage ? 'discovery'
   and (usage->'discovery'->'retention'->>'expires')::date < current_date;
 ```
 
+Until it is scheduled, run it by hand on or after the first expiry date, and check that the oldest `retention.expires` in the table is not in the past:
+
+```sql
+select min((usage->'discovery'->'retention'->>'expires')::date) as oldest_expiry, count(*) filter (where usage ? 'discovery') as with_diagnostics
+from agent_marketing_research;
+```
+
 ## Baseline runs
 
-`scripts/research-baseline.js` runs today's discovery for Lincoln, Natomas, Crocker Ranch and a thin market (Colfax; the ZIPs and the thin market are assumptions in `tests/fixtures/research-diag/markets.json`, edit to change) across five cells:
+`scripts/research-baseline.js` runs today's discovery for Lincoln (95648), Natomas (95834), Crocker Ranch (95747) and Colfax (95713, the thin market), as approved Oct 31, 2026 (`tests/fixtures/research-diag/markets.json`), across five cells:
 
 | cell | results | context tokens | retries |
 | --- | --- | --- | --- |
@@ -89,10 +99,10 @@ PERPLEXITY_API_KEY=... node scripts/research-baseline.js --live         # 4 mark
 PERPLEXITY_API_KEY=... node scripts/research-baseline.js --live --markets lincoln --repeats 3
 ```
 
-Live runs use the same `runResearch` as the app, write nothing to Supabase and charge no subscriber session. They write `runs.jsonl` (one line per run: full search configuration per attempt, tokens, searches, actual cost, funnel, depth), one `*.discovery.json` per run and `summary.md`. Stored web research sessions averaged $0.0134 each (max $0.0205, 11 sessions), so the full 40-run baseline should cost roughly $0.50 to $1.00.
+Live runs use the current prompt and the same `runResearch` as the app. Results stay on disk (the `research-baseline-*` folders are git-ignored) and nothing is written to Supabase; no subscriber session is charged. The key is read from the environment only; everything the harness writes or prints is redacted of credentials first. They write `runs.jsonl` (one line per run: full search configuration per attempt, tokens, searches, actual cost, funnel, depth), one `*.discovery.json` per run and `summary.md`. Stored web research sessions averaged $0.0134 each (max $0.0205, 11 sessions), so the full 40-run baseline should cost roughly $0.50 to $1.00.
 
 The search limits for a cell are set through two optional settings, `AGENT_MARKETING_RESEARCH_MAX_RESULTS` (1-30) and `AGENT_MARKETING_RESEARCH_SEARCH_TOKENS` (1,000-16,000). Unset, the named context size decides exactly as before; out-of-range values are ignored.
 
 ## An observation, not changed here
 
-When the first answer is usable but partial and the retry is also usable but worse, the retry's answer is the one kept (the "keep the first" fallback applies only when the retry is not usable at all). Scenario `partial_then_worse_retry` shows it: 3 topics on the first answer, 2 delivered. This PR records it (`used_attempt`) and does not change it.
+When the first answer is usable but partial and the retry is also usable but worse, the retry's answer is the one kept (the "keep the first" fallback applies only when the retry is not usable at all). Scenario `partial_then_worse_retry` shows it: 3 topics on the first answer, 2 delivered. PR 1 records it (`used_attempt`) and does not change it. It is to be fixed in the BP-01 redesign, so that a weaker retry cannot silently replace a stronger result.

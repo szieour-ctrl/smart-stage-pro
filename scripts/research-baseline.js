@@ -7,6 +7,8 @@
 //
 // Live runs call Perplexity through the same runResearch() the app uses (same prompt, same validation). They write NOTHING to Supabase and charge
 // no subscriber session; the only cost is the provider's. Every run records its full search configuration and its actual cost.
+// The key is read from the environment only. It is never written, printed or committed: every output passes through redact(), and result
+// folders (research-baseline-*) are git-ignored.
 //
 // Cells (the 10-versus-20 comparison separates result count from context-token allowance):
 //   as_shipped  today's settings including the retry that widens the search (what production does now)
@@ -29,6 +31,13 @@ const CELLS = Object.freeze([
 ]);
 const MARKETS = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "tests", "fixtures", "research-diag", "markets.json"), "utf8"));
 delete MARKETS._note;
+
+/** Nothing the harness writes or prints may contain a credential: the key itself and anything key-shaped is removed first. */
+function redact(text, key) {
+  let t = String(text);
+  if (key && String(key).length >= 4) t = t.split(String(key)).join("[key]");
+  return t.replace(/pplx-[A-Za-z0-9_-]+/g, "[key]").replace(/sk-[A-Za-z0-9_-]{8,}/g, "[key]").replace(/Bearer\s+\S+/gi, "Bearer [key]");
+}
 
 function parseArgs(argv) {
   const a = { live: false, replay: false, markets: Object.keys(MARKETS), repeats: 2, out: null, today: null };
@@ -126,14 +135,14 @@ async function main() {
     finally { console.error = origErr; }
     const sum = summarizeRun(job, result, Date.now() - t0, args.replay);
     rows.push(sum);
-    fs.appendFileSync(path.join(dir, "runs.jsonl"), JSON.stringify(sum) + "\n");
+    fs.appendFileSync(path.join(dir, "runs.jsonl"), redact(JSON.stringify(sum), key) + "\n");
     // The full diagnostics record of the run, for investigating a weak result.
-    fs.writeFileSync(path.join(dir, `${job.market}-${job.cell.id}-${job.repeat}.discovery.json`), JSON.stringify(result.fields.usage && result.fields.usage.discovery || null, null, 1));
-    process.stdout.write(`${job.market} ${job.cell.id} #${job.repeat}: ${sum.status} topics=${sum.topics_kept} cost=${sum.cost_usd == null ? "n/a" : "$" + sum.cost_usd}\n`);
+    fs.writeFileSync(path.join(dir, `${job.market}-${job.cell.id}-${job.repeat}.discovery.json`), redact(JSON.stringify(result.fields.usage && result.fields.usage.discovery || null, null, 1), key));
+    process.stdout.write(redact(`${job.market} ${job.cell.id} #${job.repeat}: ${sum.status} topics=${sum.topics_kept} cost=${sum.cost_usd == null ? "n/a" : "$" + sum.cost_usd}${sum.error ? " error=" + sum.error : ""}`, key) + "\n");
   }
-  fs.writeFileSync(path.join(dir, "summary.md"), summaryMarkdown(rows));
+  fs.writeFileSync(path.join(dir, "summary.md"), redact(summaryMarkdown(rows), key));
   process.stdout.write(`\nWrote ${rows.length} runs to ${dir}\n`);
 }
 
-module.exports = { CELLS, MARKETS, parseArgs, plan, cellEnv, summarizeRun, summaryMarkdown };
-if (require.main === module) main().catch((e) => { console.error(e.message); process.exit(1); });
+module.exports = { CELLS, MARKETS, parseArgs, plan, cellEnv, summarizeRun, summaryMarkdown, redact };
+if (require.main === module) main().catch((e) => { console.error(redact(e.message, process.env.PERPLEXITY_API_KEY)); process.exit(1); });

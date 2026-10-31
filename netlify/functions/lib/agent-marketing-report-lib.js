@@ -1127,30 +1127,16 @@ function analyzeMarketSummary(pages) {
     add("count_closed", "Closed sales", "count", nm(m[1]), { yearAgo: nm(m[4]), printed: { yearAgo: pcts(m[2].toLowerCase(), m[3]), ...(m[5] ? { prior: 0 } : {}) }, ...(m[5] ? { prior: nm(m[1]) } : {}) }, "closed");
   // Under contract: "There was the same number of pended properties in September, 25 properties."
   if ((m = /same number of pended properties in [A-Za-z]+, (\d[\d,]*) properties/i.exec(t))) add("count_pending", "Pending sales", "count", nm(m[1]), { prior: nm(m[1]), printed: { prior: 0 } }, "pending");
-  // "There was a decrease of 10.9% in the pended properties in September, with 82 properties versus 92 last month. This month's pended property sales were 11.8% lower than at this time last year."
-  if (!figures.some((x) => x.key === "count_pending") && (m = /(increase|decrease) of ([\d.]+)% in the pended properties in [A-Za-z]+, with (\d[\d,]*) properties versus (\d[\d,]*) last month/i.exec(t))) {
-    const ly = /pended property sales were ([\d.]+)% (higher|lower) than at this time last year/i.exec(t);
-    add("count_pending", "Pending sales", "count", nm(m[3]), { prior: nm(m[4]), printed: { prior: pcts(/^increase/i.test(m[1]) ? "up" : "down", m[2]) }, ...(ly ? { changes: [{ pct: pcts(/^higher/i.test(ly[2]) ? "up" : "down", ly[1]), vs: period.yearAgoLabel }] } : {}) }, "pending");
-  }
   // Days on market
   if ((m = /DOM for [A-Za-z]+ \d{4} was (\d+), (up|down) ([\d.]+)% from (\d+) days last month and (up|down) ([\d.]+)% from (\d+) days in/i.exec(t)))
     add("avg_dom", "Average days on market", "days", nm(m[1]), { prior: nm(m[4]), yearAgo: nm(m[7]), printed: { prior: pcts(m[2].toLowerCase(), m[3]), yearAgo: pcts(m[5].toLowerCase(), m[6]) } });
   // Price per square foot
   if ((m = /Average Sold Price per Square Foot(?:age)? of \$(\d[\d,]*) was (up|down) ([\d.]+)% from \$(\d[\d,]*) last month and (up|down) ([\d.]+)% from \$(\d[\d,]*) in/i.exec(t)))
     add("avg_ppsf", "Average price per square foot", "usd_per_sqft", money(m[1]), { prior: money(m[4]), yearAgo: money(m[7]), printed: { prior: pcts(m[2].toLowerCase(), m[3]), yearAgo: pcts(m[5].toLowerCase(), m[6]) } });
-  // "Median Sold Price in September was $625,000, the same as in September of 2025 and down 2.8% from $643,000 last month." Either comparison may read
-  // "the same as"; a change prints "up/down P% from $V". (Oct 30, 2026: the "the same as" wording made the whole median line unreadable and it was dropped.)
-  const CHG_Y = "(?:(up|down) ([\\d.]+)% from \\$(\\d[\\d,]*) in [A-Za-z]+ of \\d{4}|the same as in [A-Za-z]+ of \\d{4})";
-  const CHG_M = "(?:(up|down) ([\\d.]+)% from \\$(\\d[\\d,]*) last month|the same as last month)";
-  const priceLine = (name, key, label) => {
-    const x = new RegExp(`${name} in [A-Za-z]+ was \\$(\\d[\\d,]*), ${CHG_Y} and ${CHG_M}`, "i").exec(t);
-    if (!x) return;
-    const v = money(x[1]);
-    add(key, label, "usd", v, { yearAgo: x[2] ? money(x[4]) : v, prior: x[5] ? money(x[7]) : v, printed: { yearAgo: x[2] ? pcts(x[2].toLowerCase(), x[3]) : 0, prior: x[5] ? pcts(x[5].toLowerCase(), x[6]) : 0 } });
-  };
-  priceLine("Average For Sale Price", "avg_list_price", "Average for-sale price");
-  priceLine("Average Sold Price", "avg_close_price", "Average sold price");
-  priceLine("Median Sold Price", "median_close_price", "Median sold price");
+  const priceLine = (re, key, label) => { const x = re.exec(t); if (x) add(key, label, "usd", money(x[1]), { yearAgo: money(x[4]), prior: money(x[7]), printed: { yearAgo: pcts(x[2].toLowerCase(), x[3]), prior: pcts(x[5].toLowerCase(), x[6]) } }); };
+  priceLine(/Average For Sale Price in [A-Za-z]+ was \$(\d[\d,]*), (up|down) ([\d.]+)% from \$(\d[\d,]*) in [A-Za-z]+ of \d{4} and (up|down) ([\d.]+)% from \$(\d[\d,]*) last month/i, "avg_list_price", "Average for-sale price");
+  priceLine(/Average Sold Price in [A-Za-z]+ was \$(\d[\d,]*), (up|down) ([\d.]+)% from \$(\d[\d,]*) in [A-Za-z]+ of \d{4} and (up|down) ([\d.]+)% from \$(\d[\d,]*) last month/i, "avg_close_price", "Average sold price");
+  priceLine(/Median Sold Price in [A-Za-z]+ was \$(\d[\d,]*), (up|down) ([\d.]+)% from \$(\d[\d,]*) in [A-Za-z]+ of \d{4} and (up|down) ([\d.]+)% from \$(\d[\d,]*) last month/i, "median_close_price", "Median sold price");
   // Months of inventory and absorption rate, on closed sales and on pended sales: each prints its change from last year and last month.
   const vsLY = `September ${y - 1}`;
   const two = (re, key, label, unit, extra) => { const x = re.exec(t); if (x) add(key, label, unit, Number(x[1]), { ...(extra || {}), changes: [{ pct: pcts(/^(?:up|increased)/i.test(x[2]) ? "up" : "down", x[3]), vs: period.yearAgoLabel }, { pct: pcts(/^(?:up|increased)/i.test(x[4]) ? "up" : "down", x[5]), vs: period.priorLabel }] }); };
@@ -1189,11 +1175,6 @@ function analyzeMarketSummary(pages) {
   const closed = (figures.find((x) => x.key === "count_closed") || {}).value;
   const small = closed != null && closed < SMALL_SAMPLE_BELOW;
   const warnings = [];
-  // A measure the report prints in words the reader did not understand is named, never dropped without a word (Oct 30, 2026).
-  [[/Median Sold Price in [A-Za-z]+ was/i, "median_close_price", "median sold price"], [/Average Sold Price in [A-Za-z]+ was/i, "avg_close_price", "average sold price"],
-   [/Average For Sale Price in [A-Za-z]+ was/i, "avg_list_price", "average for-sale price"], [/pended properties in [A-Za-z]+/i, "count_pending", "number of pending (under contract) sales"],
-   [/Average Sold Price per Square Foot(?:age)? of/i, "avg_ppsf", "average price per square foot"], [/DOM for [A-Za-z]+ \d{4} was/i, "avg_dom", "average days on market"]]
-    .forEach(([re, key, name]) => { if (re.test(t) && !figures.some((x) => x.key === key)) warnings.push(`I could not read the ${name} from this report, so it will not be used. Check the figures I read before relying on it.`); });
   if (small) warnings.push(`Only ${closed} closed ${closed === 1 ? "sale" : "sales"} in ${period.label}: a small sample. Topics will say so and will not claim a trend.`);
   const place = city ? sanitizeCity(city.trim()) : "";
   if (!place) warnings.push("I couldn't read the area this report covers. Check it before using it.");

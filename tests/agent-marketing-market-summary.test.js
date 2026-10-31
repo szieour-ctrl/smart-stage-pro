@@ -63,33 +63,3 @@ test("a MetroList report with no readable dates or publication line warns at upl
   const ok = rl.summarize(read()).warnings.join(" ");
   assert.doesNotMatch(ok, /couldn't find the dates/);
 });
-
-// Oct 30, 2026 (Lincoln): the median line says "the same as in September of 2025" and the pended line gives counts. Both were dropped without a word.
-const lincolnPages = () => PAGES.map((p) => p
-  .replace(/The Median Sold Price in September was[\s\S]*?last month\./, "The Median Sold Price in September was $625,000, the same as in September of 2025 and down 2.8% from $643,000 last\nmonth.")
-  .replace(/under contract listings was the same compared to previous month and down 24\.2% compared to previous\s+year/, "under contract listings was down 10.9% compared to previous month and down 11.8% compared to previous year")
-  .replace(/There was the same number of pended properties in September, 25 properties\./, "There was a decrease of 10.9% in the pended properties in September, with 82 properties versus 92 last month. This month's pended property sales were 11.8% lower than at this time last year."));
-
-test("a median that is 'the same as' a year ago, and a pended count with its change, are read (not dropped)", () => {
-  const pages = lincolnPages();
-  assert.notDeepStrictEqual(pages, PAGES, "the fixture sentences were replaced");
-  const f = rl.analyzePages(pages).facts;
-  const med = fig(f, "median_close_price"), pend = fig(f, "count_pending");
-  assert.ok(med && pend, "both figures are kept");
-  assert.deepStrictEqual([med.value, med.prior, med.yearAgo], [625000, 643000, 625000]);
-  assert.deepStrictEqual(med.printed, { yearAgo: 0, prior: -2.8 });
-  assert.deepStrictEqual([pend.value, pend.prior], [82, 92]);
-  assert.strictEqual(pend.printed.prior, -10.9);
-  assert.strictEqual(pend.changes[0].pct, -11.8);
-  assert.match(rl.compareText(f, med), /\$643,000 in August 2026 \(down 2\.8%\)/);
-  assert.deepStrictEqual(f.warnings.filter((w) => /could not read/.test(w)), [], "nothing was left unread");
-});
-
-test("a measure printed in words the reader does not understand is named in a warning, never dropped in silence", () => {
-  const pages = PAGES.map((p) => p.replace(/The Median Sold Price in September was[\s\S]*?last month\./, "The Median Sold Price in September was around six hundred thousand dollars, give or take."));
-  const f = rl.analyzePages(pages).facts;
-  assert.ok(!fig(f, "median_close_price"));
-  assert.ok(f.warnings.some((w) => /could not read the median sold price/.test(w)), JSON.stringify(f.warnings));
-  const s = rl.summarize(f, {});
-  assert.ok(s.warnings.some((w) => /median sold price/.test(w)), "the agent sees it on the upload summary");
-});

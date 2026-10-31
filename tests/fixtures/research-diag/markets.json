@@ -1,0 +1,7 @@
+{
+  "_note": "Baseline markets for scripts/research-baseline.js, as approved Oct 31, 2026: Lincoln 95648, Natomas 95834, Crocker Ranch 95747, Colfax 95713 (the thin market). Geography shape is the same one the research request validates.",
+  "lincoln": { "type": "city", "name": "Lincoln", "city": "", "zip": "95648", "state": "CA", "label": "Lincoln, CA" },
+  "natomas": { "type": "neighborhood", "name": "Natomas", "city": "Sacramento", "zip": "95834", "state": "CA", "label": "Natomas, Sacramento, CA" },
+  "crocker": { "type": "neighborhood", "name": "Crocker Ranch", "city": "Roseville", "zip": "95747", "state": "CA", "label": "Crocker Ranch, Roseville, CA" },
+  "thin": { "type": "city", "name": "Colfax", "city": "", "zip": "95713", "state": "CA", "label": "Colfax, CA" }
+}

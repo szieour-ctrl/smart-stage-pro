@@ -13,6 +13,7 @@ const rl = require("./agent-marketing-research-lib");
 const reportTopics = require("./agent-marketing-research-report-lib");
 const planLib = require("./agent-marketing-plan-lib");
 const reframeLib = require("./agent-marketing-reframe-lib");
+const diagLib = require("./agent-marketing-research-diag-lib");
 
 const API_HOST = "api.perplexity.ai";
 const API_PATH = "/v1/agent";
@@ -124,7 +125,12 @@ function answerText(resp) {
   return parts.join("\n");
 }
 
-function groundTopics(rawTopics, resp) {
+// Diagnostics isolation (PR 1): every statement that only RECORDS goes through this; an exception in it is swallowed, so a diagnostics fault can never
+// change which sources or topics survive grounding. Nothing a recording statement does feeds back into the result.
+function diagOnly(fn) { try { return fn(); } catch (_) { return undefined; } }
+
+// `diag` (optional) is a diagnostics collector: it only receives a record of each decision below and never changes the result.
+function groundTopics(rawTopics, resp, diag) {
   const known = new Map();
   const add = (url, date) => { const k = urlKey(url); if (k && !known.has(k)) known.set(k, providerDay(date)); };
   (Array.isArray(resp && resp.output) ? resp.output : []).forEach((it) => {
@@ -132,9 +138,15 @@ function groundTopics(rawTopics, resp) {
   });
   (Array.isArray(resp && resp.citations) ? resp.citations : []).forEach((c) => add(typeof c === "string" ? c : c && c.url));
   (Array.isArray(resp && resp.search_results) ? resp.search_results : []).forEach((s) => s && add(s.url, s.date || s.last_updated));
-  if (known.size === 0) return { topics: rawTopics, grounded: false }; // the provider gave nothing to check against
-  const topics = (Array.isArray(rawTopics) ? rawTopics : []).map((t) => {
+  if (known.size === 0) { if (diag) diagOnly(() => { diag.grounding = { applicable: false, provider_urls: 0 }; }); return { topics: rawTopics, grounded: false }; } // the provider gave nothing to check against
+  if (diag) diagOnly(() => { diag.grounding = { applicable: true, provider_urls: known.size }; });
+  const topics = (Array.isArray(rawTopics) ? rawTopics : []).map((t, ti) => {
     if (!t || typeof t !== "object") return t;
+    if (diag) diagOnly(() => (Array.isArray(t.sources) ? t.sources : []).forEach((s) => {
+      if (!s) return;
+      const ok = known.has(urlKey(s.url)), d = ok ? known.get(urlKey(s.url)) : null;
+      diagLib.pushSource(diag, { topic: ti + 1, url: s.url, title: s.title, model_date: s.published, provider_date: d, date_from: ok ? (d ? "provider" : "model") : null, outcome: ok ? "kept" : "dropped", stage: "provider_grounding", code: ok ? "grounded" : "not_in_provider_results" });
+    }));
     const sources = (Array.isArray(t.sources) ? t.sources : []).filter((s) => s && known.has(urlKey(s.url))).map((s) => {
       const d = known.get(urlKey(s.url));
       return d ? { ...s, published: d } : s;
@@ -194,37 +206,62 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
   let usage = { promptTokens: null, completionTokens: null, citationTokens: null, reasoningTokens: null, searchQueries: null, costUsd: null };
   let modelUsed = payload ? payload.model : null, grounded = null, attempts = 0, problems = [], validation = null, error = null, providerError = null;
   let reportNote = null, reportAttempts = 0, reframeAttempts = 0, reframed = 0, fallback = null, topicAnswer = null;
+  // Diagnostics (PR 1): everything below that touches `diag*` only RECORDS. It is wrapped so a diagnostics error can never change the result.
+  const safe = (fn) => { try { return fn(); } catch (err) { console.error(`[agent-marketing-research] diagnostics skipped: ${String(err && err.message).slice(0, 160)}`); return undefined; } };
+  const diagAttempts = [];
+  let usedAttempt = null, fallbackAttempt = null, lastWhy = null, webTopics = null, webOverlaps = 0;
+  const firstPayload = payload;
 
   try {
     if (dataSource !== "upload") {
       while (attempts < maxAttempts) {
         attempts++;
-        const { resp, modelUsed: m } = await askProvider({ payload, apiKey, callFn, sleepFn, retries: providerRetries });
+        const attemptDiag = safe(() => diagLib.newAttemptDiag()) || null;
+        const attemptCfg = safe(() => diagLib.attemptConfig(payload, cfg));
+        const t0 = Date.now(), retryReason = lastWhy;
+        let provided;
+        try { provided = await askProvider({ payload, apiKey, callFn, sleepFn, retries: providerRetries }); }
+        catch (pe) { safe(() => diagAttempts.push({ n: attempts, config: attemptCfg, ms: Date.now() - t0, retry_reason: retryReason, provider_error: true, diag: attemptDiag })); throw pe; }
+        const { resp, modelUsed: m } = provided;
         modelUsed = m;
-        usage = addUsage(usage, rl.usageSummary(resp, cfg.costTargetUsd));
+        const attemptUsage = rl.usageSummary(resp, cfg.costTargetUsd);
+        usage = addUsage(usage, attemptUsage);
         const text = answerText(resp);
         topicAnswer = { answer: text.slice(0, 1500), citations: citationUrls(resp).slice(0, 8).map((u) => String(u).slice(0, 200)), attempt: attempts };
         try {
-          const g = groundTopics(rl.extractTopics(text), resp);
+          const g = groundTopics(rl.extractTopics(text), resp, attemptDiag);
           grounded = g.grounded;
-          validation = rl.validateTopics(g.topics, { mode: request.mode, today, recommendation: rl.extractRecommendation(text), need: dataSource === "both" ? rl.TOPIC_COUNT - reportTopics.REPORT_TOPICS_WHEN_BOTH : rl.TOPIC_COUNT });
+          validation = rl.validateTopics(g.topics, { mode: request.mode, today, recommendation: rl.extractRecommendation(text), need: dataSource === "both" ? rl.TOPIC_COUNT - reportTopics.REPORT_TOPICS_WHEN_BOTH : rl.TOPIC_COUNT, diag: attemptDiag });
           problems = validation.problems;
         } catch (parseErr) {
           validation = { ok: false, topics: [], problems: [parseErr.message] };
           problems = validation.problems;
         }
         const soft = validation.ok && validation.soft ? validation.soft : [];
+        usedAttempt = attempts;
+        safe(() => diagAttempts.push({
+          n: attempts, config: attemptCfg, ms: Date.now() - t0, retry_reason: retryReason, grounding: attemptDiag.grounding, diag: attemptDiag, candidates: diagLib.candidatesOf(resp),
+          usage: { promptTokens: attemptUsage.promptTokens, completionTokens: attemptUsage.completionTokens, reasoningTokens: attemptUsage.reasoningTokens, searchQueries: attemptUsage.searchQueries, costUsd: attemptUsage.costUsd, costEstimatedUsd: attemptUsage.costUsd == null ? estimateCostUsd(m, attemptUsage) : null },
+        }));
         if (validation.ok && !soft.length) break;
+        if (validation.ok && !fallback) fallbackAttempt = attempts;
         if (validation.ok) fallback = fallback || validation;   // usable, but too few different sites: keep it in case the retry does worse
         if (attempts < maxAttempts) {
           const why = validation.ok ? soft : problems;
+          lastWhy = why;
           const tool = payload.tools && payload.tools[0];
           // A retry also looks wider (more results, more search context) so there is more to choose publishers from.
           const tools = tool ? [{ ...tool, max_results: Math.max(tool.max_results || 0, 20), max_tokens: Math.max(tool.max_tokens || 0, 10000) }] : payload.tools;
           payload = { ...payload, tools, input: `${baseInput}\n\nYour previous answer was ${validation.ok ? "usable but needs work" : "rejected"}: ${why.slice(0, 6).join("; ").slice(0, 600)}. Return the JSON again with exactly 5 topics that fix this. Do not invent sources, dates or events.` };
         }
       }
-      if (!(validation && validation.ok) && fallback) validation = fallback;
+      if (!(validation && validation.ok) && fallback) { validation = fallback; usedAttempt = fallbackAttempt; }
+      // What the web research alone delivered (before the report topics are added): the yardstick for discovery quality.
+      safe(() => {
+        webTopics = validation && validation.ok ? validation.topics.slice() : [];
+        const used = diagAttempts.find((a) => a.n === usedAttempt);
+        webOverlaps = used && used.diag ? used.diag.topics.filter((t) => t.code === "overlaps_earlier_topic").length : 0;
+      });
       if (validation && validation.ok && validation.partial && !reportNote) reportNote = `Only ${validation.topics.length} of 5 topics came back with a usable article this time, because few local news stories matched. Your own MLS report is the best way to add more.`;
       else if (validation && validation.ok && validation.soft && validation.soft.length && !reportNote) reportNote = "Most of these topics rest on one or two websites, because few independent sources were found for this market this month. Your own MLS report is the best way to add a second source.";
     }
@@ -269,7 +306,14 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
   // Cost: the provider's own figure when it sent one, otherwise an estimate from tokens (flagged as an estimate).
   const estimated = usage.costUsd == null ? estimateCostUsd(modelUsed, usage) : null;
   const costUsd = usage.costUsd != null ? usage.costUsd : estimated;
-  const finalUsage = { ...usage, costUsd, costEstimated: usage.costUsd == null && estimated != null, targetUsd: cfg.costTargetUsd, withinTarget: costUsd == null ? null : costUsd <= cfg.costTargetUsd, attempts, grounded, providerError, dataSource, reportAttempts, reframeAttempts, reframed, reportNote, topicDebug: validation && validation.ok ? null : topicAnswer, problems: problems.slice(0, 6).map((x) => String(x).slice(0, 200)) };
+  const discovery = safe(() => {
+    const rec = diagLib.buildRecord({ request, dataSource, cfg, firstPayload, attempts: diagAttempts, usedAttempt, finalTopics: webTopics, today, codeVersion: e.COMMIT_REF || e.DEPLOY_ID || null });
+    rec.depth = webTopics ? diagLib.depthOf({ topics: webTopics, geography: request.geography, today, overlaps: webOverlaps }) : null;
+    const fin = validation && validation.ok ? validation.topics : null;
+    rec.final = fin ? { topics: fin.length, origin: { web: fin.filter((t) => t.origin !== "report").length, report: fin.filter((t) => t.origin === "report").length }, scope: { selected: fin.filter((t) => t.scope !== "broader_context").length, broader_context: fin.filter((t) => t.scope === "broader_context").length }, reframed: fin.filter((t) => t.reframed === true).length } : null;
+    return diagLib.bound(rec);
+  });
+  const finalUsage = { ...usage, ...(discovery ? { discovery } : {}), costUsd, costEstimated: usage.costUsd == null && estimated != null, targetUsd: cfg.costTargetUsd, withinTarget: costUsd == null ? null : costUsd <= cfg.costTargetUsd, attempts, grounded, providerError, dataSource, reportAttempts, reframeAttempts, reframed, reportNote, topicDebug: validation && validation.ok ? null : topicAnswer, problems: problems.slice(0, 6).map((x) => String(x).slice(0, 200)) };
   const fields = rl.outcomeFields({ validation: error ? null : validation, usage: finalUsage, model: modelUsed, today, now, error });
   return { fields, problems, attempts };
 }

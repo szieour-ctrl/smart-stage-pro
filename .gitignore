@@ -1,2 +1,5 @@
 node_modules/
 .env
+
+# Research baseline results (measurement output; never committed)
+research-baseline-*/

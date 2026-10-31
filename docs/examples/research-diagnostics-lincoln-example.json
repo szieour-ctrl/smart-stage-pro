@@ -1,0 +1,599 @@
+{
+ "_note": "EXAMPLE of usage.discovery, produced by replaying a recorded-style Lincoln answer through the real research code (scripts/research-baseline.js --replay uses the same fixtures). Sources and hosts are fictional (.example). It is NOT a live Perplexity run. The first answer loses every topic at a different stage; the retry widens the search and delivers five.",
+ "usage.discovery": {
+  "schema": 1,
+  "retention": {
+   "days": 90,
+   "expires": "2027-01-22"
+  },
+  "request": {
+   "mode": "market_update",
+   "data_source": "web",
+   "audience": "sellers",
+   "geography": {
+    "type": "city",
+    "name": "Lincoln",
+    "city": "",
+    "zip": "95648"
+   },
+   "period": null,
+   "keywords_given": false,
+   "data_focus": "all"
+  },
+  "reproduce": {
+   "instructions_sha256": "3772d02613ab809b",
+   "input_sha256": "88fc8deddc0bd2f5",
+   "code_version": null
+  },
+  "settings": {
+   "configured": {
+    "model": "perplexity/sonar",
+    "search_context": "medium",
+    "max_output_tokens": 2200
+   }
+  },
+  "used_attempt": 2,
+  "attempts": [
+   {
+    "n": 1,
+    "config": {
+     "model": "perplexity/sonar",
+     "search_context": "medium",
+     "max_results": 10,
+     "search_context_tokens": 6000,
+     "max_output_tokens": 2200,
+     "published_after": "08/25/2026"
+    },
+    "usage": {
+     "promptTokens": 4002,
+     "completionTokens": 1502,
+     "reasoningTokens": 200,
+     "searchQueries": 2,
+     "costUsd": 0.012700000000000001,
+     "costEstimatedUsd": null
+    },
+    "ms": 6,
+    "retry_reason": null,
+    "provider_error": false,
+    "grounding": {
+     "applicable": true,
+     "provider_urls": 4
+    },
+    "candidates": [
+     {
+      "url": "https://old.example/news/old",
+      "host": "old.example",
+      "provider_date": null,
+      "via": "search_results"
+     },
+     {
+      "url": "https://nodate.example/news/nodate",
+      "host": "nodate.example",
+      "provider_date": null,
+      "via": "search_results"
+     },
+     {
+      "url": "https://wsj.com/articles/lincoln-listings",
+      "host": "wsj.com",
+      "provider_date": "2026-10-12",
+      "via": "search_results"
+     },
+     {
+      "url": "https://zillow.com/homedetails/123-main-st/1_zpid/",
+      "host": "zillow.com",
+      "provider_date": "2026-10-13",
+      "via": "search_results"
+     }
+    ],
+    "candidates_total": 4,
+    "sources": [
+     {
+      "topic": 1,
+      "url": "https://invented.example/news/ghost",
+      "host": "invented.example",
+      "title": "Local housing story",
+      "model_date": "2026-10-20",
+      "provider_date": null,
+      "date_from": null,
+      "outcome": "dropped",
+      "stage": "provider_grounding",
+      "code": "not_in_provider_results",
+      "detail": null
+     },
+     {
+      "topic": 2,
+      "url": "https://wsj.com/articles/lincoln-listings",
+      "host": "wsj.com",
+      "title": "Local housing story",
+      "model_date": "2026-10-20",
+      "provider_date": "2026-10-12",
+      "date_from": "provider",
+      "outcome": "dropped",
+      "stage": "article_eligibility",
+      "code": "paywalled",
+      "detail": "wsj.com: paywalled"
+     },
+     {
+      "topic": 3,
+      "url": "https://old.example/news/old",
+      "host": "old.example",
+      "title": "Local housing story",
+      "model_date": "2026-07-01",
+      "provider_date": null,
+      "date_from": "model",
+      "outcome": "dropped",
+      "stage": "publication_date",
+      "code": "stale",
+      "detail": "old.example: 115 days old"
+     },
+     {
+      "topic": 4,
+      "url": "https://nodate.example/news/nodate",
+      "host": "nodate.example",
+      "title": "Local housing story",
+      "model_date": null,
+      "provider_date": null,
+      "date_from": "model",
+      "outcome": "dropped",
+      "stage": "publication_date",
+      "code": "no_publication_date",
+      "detail": "nodate.example: no publication date"
+     },
+     {
+      "topic": 5,
+      "url": "https://zillow.com/homedetails/123-main-st/1_zpid/",
+      "host": "zillow.com",
+      "title": "Local housing story",
+      "model_date": "2026-10-20",
+      "provider_date": "2026-10-13",
+      "date_from": "provider",
+      "outcome": "dropped",
+      "stage": "article_eligibility",
+      "code": "listing_or_agent_site",
+      "detail": "zillow.com: looks like a listing or an agent's own site"
+     }
+    ],
+    "topics": [
+     {
+      "topic": 1,
+      "outcome": "left_out",
+      "stage": "topic_selection",
+      "code": "no_usable_source",
+      "detail": null,
+      "hook": "Did builders cut prices in Lincoln this month?",
+      "final_rank": null
+     },
+     {
+      "topic": 2,
+      "outcome": "left_out",
+      "stage": "topic_selection",
+      "code": "no_usable_source",
+      "detail": "wsj.com: paywalled",
+      "hook": "Why are Lincoln listings sitting longer?",
+      "final_rank": null
+     },
+     {
+      "topic": 3,
+      "outcome": "left_out",
+      "stage": "topic_selection",
+      "code": "no_usable_source",
+      "detail": "old.example: 115 days old",
+      "hook": "Is Lincoln inventory still growing?",
+      "final_rank": null
+     },
+     {
+      "topic": 4,
+      "outcome": "left_out",
+      "stage": "topic_selection",
+      "code": "no_usable_source",
+      "detail": "nodate.example: no publication date",
+      "hook": "Are Lincoln buyers waiting on rates?",
+      "final_rank": null
+     },
+     {
+      "topic": 5,
+      "outcome": "left_out",
+      "stage": "topic_selection",
+      "code": "no_usable_source",
+      "detail": "zillow.com: looks like a listing or an agent's own site",
+      "hook": "What is a Lincoln home worth now?",
+      "final_rank": null
+     }
+    ],
+    "funnel": {
+     "provider_candidates": 4,
+     "named_by_model": 5,
+     "grounded_by_provider": 4,
+     "article_eligible": 2,
+     "date_ok": 0,
+     "unique_sources": 0,
+     "topics_answered": 5,
+     "topics_kept": 0,
+     "topics_final": null
+    }
+   },
+   {
+    "n": 2,
+    "config": {
+     "model": "perplexity/sonar",
+     "search_context": "medium",
+     "max_results": 20,
+     "search_context_tokens": 10000,
+     "max_output_tokens": 2200,
+     "published_after": "08/25/2026"
+    },
+    "usage": {
+     "promptTokens": 4003,
+     "completionTokens": 1503,
+     "reasoningTokens": 200,
+     "searchQueries": 2,
+     "costUsd": 0.0128,
+     "costEstimatedUsd": null
+    },
+    "ms": 6,
+    "retry_reason": [
+     "topic 1: no usable source",
+     "topic 2: no usable source (wsj.com: paywalled)",
+     "topic 3: no usable source (old.example: 115 days old)",
+     "topic 4: no usable source (nodate.example: no publication date)",
+     "topic 5: no usable source (zillow.com: looks like a listing or an agent's own site)"
+    ],
+    "provider_error": false,
+    "grounding": {
+     "applicable": true,
+     "provider_urls": 7
+    },
+    "candidates": [
+     {
+      "url": "https://site1.example/news/story-1",
+      "host": "site1.example",
+      "provider_date": "2026-10-10",
+      "via": "search_results"
+     },
+     {
+      "url": "https://site2.example/news/story-2",
+      "host": "site2.example",
+      "provider_date": "2026-10-11",
+      "via": "search_results"
+     },
+     {
+      "url": "https://site3.example/news/story-3",
+      "host": "site3.example",
+      "provider_date": "2026-10-12",
+      "via": "search_results"
+     },
+     {
+      "url": "https://site4.example/news/story-4",
+      "host": "site4.example",
+      "provider_date": "2026-10-13",
+      "via": "search_results"
+     },
+     {
+      "url": "https://site5.example/news/story-5",
+      "host": "site5.example",
+      "provider_date": "2026-10-14",
+      "via": "search_results"
+     },
+     {
+      "url": "https://extra1.example/news/x",
+      "host": "extra1.example",
+      "provider_date": "2026-10-15",
+      "via": "search_results"
+     },
+     {
+      "url": "https://extra2.example/news/y",
+      "host": "extra2.example",
+      "provider_date": "2026-10-16",
+      "via": "search_results"
+     }
+    ],
+    "candidates_total": 7,
+    "sources": [
+     {
+      "topic": 1,
+      "url": "https://site1.example/news/story-1",
+      "host": "site1.example",
+      "title": "Local housing story",
+      "model_date": "2026-10-18",
+      "provider_date": "2026-10-10",
+      "date_from": "provider",
+      "outcome": "kept",
+      "stage": "accepted",
+      "code": "accepted",
+      "detail": null
+     },
+     {
+      "topic": 2,
+      "url": "https://site2.example/news/story-2",
+      "host": "site2.example",
+      "title": "Local housing story",
+      "model_date": "2026-10-18",
+      "provider_date": "2026-10-11",
+      "date_from": "provider",
+      "outcome": "kept",
+      "stage": "accepted",
+      "code": "accepted",
+      "detail": null
+     },
+     {
+      "topic": 3,
+      "url": "https://site3.example/news/story-3",
+      "host": "site3.example",
+      "title": "Local housing story",
+      "model_date": "2026-10-18",
+      "provider_date": "2026-10-12",
+      "date_from": "provider",
+      "outcome": "kept",
+      "stage": "accepted",
+      "code": "accepted",
+      "detail": null
+     },
+     {
+      "topic": 4,
+      "url": "https://site4.example/news/story-4",
+      "host": "site4.example",
+      "title": "Local housing story",
+      "model_date": "2026-10-18",
+      "provider_date": "2026-10-13",
+      "date_from": "provider",
+      "outcome": "kept",
+      "stage": "accepted",
+      "code": "accepted",
+      "detail": null
+     },
+     {
+      "topic": 5,
+      "url": "https://site5.example/news/story-5",
+      "host": "site5.example",
+      "title": "Local housing story",
+      "model_date": "2026-10-18",
+      "provider_date": "2026-10-14",
+      "date_from": "provider",
+      "outcome": "kept",
+      "stage": "accepted",
+      "code": "accepted",
+      "detail": null
+     }
+    ],
+    "topics": [
+     {
+      "topic": 1,
+      "outcome": "kept",
+      "stage": "topic_selection",
+      "code": "kept",
+      "detail": null,
+      "hook": "Are new subdivisions pulling buyers from resale homes?",
+      "final_rank": 1
+     },
+     {
+      "topic": 2,
+      "outcome": "kept",
+      "stage": "topic_selection",
+      "code": "kept",
+      "detail": null,
+      "hook": "Why did the city approve more apartments this fall?",
+      "final_rank": 2
+     },
+     {
+      "topic": 3,
+      "outcome": "kept",
+      "stage": "topic_selection",
+      "code": "kept",
+      "detail": null,
+      "hook": "What do higher mortgage rates mean for move-up buyers?",
+      "final_rank": 3
+     },
+     {
+      "topic": 4,
+      "outcome": "kept",
+      "stage": "topic_selection",
+      "code": "kept",
+      "detail": null,
+      "hook": "Is the school-year calendar shifting listing timing?",
+      "final_rank": 4
+     },
+     {
+      "topic": 5,
+      "outcome": "kept",
+      "stage": "topic_selection",
+      "code": "kept",
+      "detail": null,
+      "hook": "Which price bands saw pending sales slip last month?",
+      "final_rank": 5
+     }
+    ],
+    "funnel": {
+     "provider_candidates": 7,
+     "named_by_model": 5,
+     "grounded_by_provider": 5,
+     "article_eligible": 5,
+     "date_ok": 5,
+     "unique_sources": 5,
+     "topics_answered": 5,
+     "topics_kept": 5,
+     "topics_final": 5
+    }
+   }
+  ],
+  "funnel": {
+   "provider_candidates": 7,
+   "named_by_model": 5,
+   "grounded_by_provider": 5,
+   "article_eligible": 5,
+   "date_ok": 5,
+   "unique_sources": 5,
+   "topics_answered": 5,
+   "topics_kept": 5,
+   "topics_final": 5
+  },
+  "depth": {
+   "rubric": 1,
+   "topics": [
+    {
+     "id": "t1",
+     "origin": "web",
+     "scope": "selected",
+     "geographic_relationship": "exact_market",
+     "names_market_in_hook": false,
+     "sources": 1,
+     "distinct_publishers": 1,
+     "distinct_articles": 1,
+     "source_kinds": [
+      "other"
+     ],
+     "newest_source_days": 14,
+     "oldest_source_days": 14,
+     "trend_signals": 1,
+     "signals_with_period": 1,
+     "signals_with_figure": 1,
+     "why_chars": 138,
+     "substance": {
+      "multi_source": false,
+      "multi_signal": false,
+      "figure_with_period": true,
+      "explained": true,
+      "score": 2
+     },
+     "substantive": false
+    },
+    {
+     "id": "t2",
+     "origin": "web",
+     "scope": "selected",
+     "geographic_relationship": "exact_market",
+     "names_market_in_hook": false,
+     "sources": 1,
+     "distinct_publishers": 1,
+     "distinct_articles": 1,
+     "source_kinds": [
+      "other"
+     ],
+     "newest_source_days": 13,
+     "oldest_source_days": 13,
+     "trend_signals": 1,
+     "signals_with_period": 1,
+     "signals_with_figure": 1,
+     "why_chars": 138,
+     "substance": {
+      "multi_source": false,
+      "multi_signal": false,
+      "figure_with_period": true,
+      "explained": true,
+      "score": 2
+     },
+     "substantive": false
+    },
+    {
+     "id": "t3",
+     "origin": "web",
+     "scope": "selected",
+     "geographic_relationship": "exact_market",
+     "names_market_in_hook": false,
+     "sources": 1,
+     "distinct_publishers": 1,
+     "distinct_articles": 1,
+     "source_kinds": [
+      "other"
+     ],
+     "newest_source_days": 12,
+     "oldest_source_days": 12,
+     "trend_signals": 1,
+     "signals_with_period": 1,
+     "signals_with_figure": 1,
+     "why_chars": 138,
+     "substance": {
+      "multi_source": false,
+      "multi_signal": false,
+      "figure_with_period": true,
+      "explained": true,
+      "score": 2
+     },
+     "substantive": false
+    },
+    {
+     "id": "t4",
+     "origin": "web",
+     "scope": "selected",
+     "geographic_relationship": "exact_market",
+     "names_market_in_hook": false,
+     "sources": 1,
+     "distinct_publishers": 1,
+     "distinct_articles": 1,
+     "source_kinds": [
+      "other"
+     ],
+     "newest_source_days": 11,
+     "oldest_source_days": 11,
+     "trend_signals": 1,
+     "signals_with_period": 1,
+     "signals_with_figure": 1,
+     "why_chars": 138,
+     "substance": {
+      "multi_source": false,
+      "multi_signal": false,
+      "figure_with_period": true,
+      "explained": true,
+      "score": 2
+     },
+     "substantive": false
+    },
+    {
+     "id": "t5",
+     "origin": "web",
+     "scope": "selected",
+     "geographic_relationship": "exact_market",
+     "names_market_in_hook": false,
+     "sources": 1,
+     "distinct_publishers": 1,
+     "distinct_articles": 1,
+     "source_kinds": [
+      "other"
+     ],
+     "newest_source_days": 10,
+     "oldest_source_days": 10,
+     "trend_signals": 1,
+     "signals_with_period": 1,
+     "signals_with_figure": 1,
+     "why_chars": 138,
+     "substance": {
+      "multi_source": false,
+      "multi_signal": false,
+      "figure_with_period": true,
+      "explained": true,
+      "score": 2
+     },
+     "substantive": false
+    }
+   ],
+   "set": {
+    "topics": 5,
+    "distinct_articles": 5,
+    "distinct_publishers": 5,
+    "distinct_developments_proxy": 5,
+    "overlapping_topics_removed": 0,
+    "exact_market": 5,
+    "broader_context": 0,
+    "wider_area_with_note": 0,
+    "substantive_topics": 0,
+    "multi_publisher_topics": 0,
+    "topics_with_government_source": 0,
+    "topics_with_housing_research_source": 0,
+    "median_newest_source_days": 12
+   }
+  },
+  "final": {
+   "topics": 5,
+   "origin": {
+    "web": 5,
+    "report": 0
+   },
+   "scope": {
+    "selected": 5,
+    "broader_context": 0
+   },
+   "reframed": 0
+  },
+  "trimmed": [],
+  "bytes": 10868
+ }
+}

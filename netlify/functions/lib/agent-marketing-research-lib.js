@@ -283,7 +283,11 @@ function buildResearchPayload({ request, today, uploadContext, env }) {
     r.mode === "local_events" ? `Goal: up to ${EVENT_CANDIDATES} candidate events (the five with the most complete confirmed details will be kept) for a short video about what is happening locally.` : `Goal: ${TOPIC_COUNT} timely topics for a short educational video that shows what this agent knows about the local market right now.`,
   ].filter(Boolean);
   const cfg = researchSettings(env);
-  const lim = SEARCH_LIMITS[cfg.searchContextSize];
+  // Optional tuning knobs for measurement (PR 1): unset, the named size decides exactly as before. Out-of-range values are ignored.
+  const lim = { ...SEARCH_LIMITS[cfg.searchContextSize] };
+  const envInt = (name, lo, hi) => { const v = Number((env || process.env)[name]); return Number.isInteger(v) && v >= lo && v <= hi ? v : null; };
+  lim.maxResults = envInt("AGENT_MARKETING_RESEARCH_MAX_RESULTS", 1, 30) || lim.maxResults;
+  lim.maxTokens = envInt("AGENT_MARKETING_RESEARCH_SEARCH_TOKENS", 1000, 16000) || lim.maxTokens;
   return {
     model: cfg.model,
     instructions: systemPrompt(r.mode),
@@ -333,28 +337,29 @@ function isNotArticle(url) {
 }
 function isPaywalled(host) { return PAYWALLED_DOMAINS.some((d) => host === d || host.endsWith("." + d)); }
 
-function cleanSource(s, mode, todayN, why) {
-  const no = (reason) => { if (Array.isArray(why)) why.push(reason); return null; }; // `why` collects the plain-words reason a source was dropped
-  if (!s || typeof s !== "object") return no("not a source");
+function cleanSource(s, mode, todayN, why, info) {
+  // `why` collects the plain-words reason a source was dropped. `info` (optional, diagnostics only) receives the stage and code of the drop; it never changes the result.
+  const no = (reason, stage, code) => { if (Array.isArray(why)) why.push(reason); if (info && stage) { info.stage = stage; info.code = code; info.detail = reason; } return null; };
+  if (!s || typeof s !== "object") return no("not a source", "article_eligibility", "not_a_source");
   let url;
-  try { url = new URL(String(s.url || "").trim()); } catch { return no("not a web address"); }
-  if (url.protocol !== "https:" || !url.hostname.includes(".") || url.username || url.password) return no(`${url.hostname}: not a plain https address`);
+  try { url = new URL(String(s.url || "").trim()); } catch { return no("not a web address", "article_eligibility", "not_a_web_address"); }
+  if (url.protocol !== "https:" || !url.hostname.includes(".") || url.username || url.password) return no(`${url.hostname}: not a plain https address`, "article_eligibility", "not_plain_https");
   url.hash = "";
   const href = url.toString();
-  if (href.length > LIMITS.url) return no("web address too long");
+  if (href.length > LIMITS.url) return no("web address too long", "article_eligibility", "address_too_long");
   const host = hostOf(href);
-  if (!host || isPaywalled(host)) return no(`${host || "site"}: paywalled`);
-  if (mode === "market_update" && isNotArticle(url)) return no(`${host}: looks like a listing or an agent's own site`);   // a listing, a brokerage page or an agent's site is not an article
+  if (!host || isPaywalled(host)) return no(`${host || "site"}: paywalled`, "article_eligibility", "paywalled");
+  if (mode === "market_update" && isNotArticle(url)) return no(`${host}: looks like a listing or an agent's own site`, "article_eligibility", "listing_or_agent_site");   // a listing, a brokerage page or an agent's site is not an article
   const title = clean(s.title, LIMITS.sourceTitle);
-  if (!title) return no(`${host}: no title`);
+  if (!title) return no(`${host}: no title`, "article_eligibility", "no_title");
   const published = String(s.published || "").trim();
   const pn = dayNumber(published);
   if (mode === "market_update") {
-    if (pn == null) return no(`${host}: no publication date`);                    // a market claim needs a dated source
-    if (pn > todayN + 1) return no(`${host}: dated in the future`);               // not from the future (one day of timezone slack)
-    if (todayN - pn > FRESH_DAYS) return no(`${host}: ${todayN - pn} days old`);      // stale
+    if (pn == null) return no(`${host}: no publication date`, "publication_date", "no_publication_date");                    // a market claim needs a dated source
+    if (pn > todayN + 1) return no(`${host}: dated in the future`, "publication_date", "future_dated");               // not from the future (one day of timezone slack)
+    if (todayN - pn > FRESH_DAYS) return no(`${host}: ${todayN - pn} days old`, "publication_date", "stale");      // stale
   } else if (published && pn == null) {
-    return no(`${host}: date not readable`);                                     // events: a date is optional, but a wrong-format one is not trusted
+    return no(`${host}: date not readable`, "publication_date", "unreadable_date");                                     // events: a date is optional, but a wrong-format one is not trusted
   }
   return { title, url: href, domain: host, published: pn == null ? null : published };
 }
@@ -458,47 +463,59 @@ function cleanRecommendation(rec, topicCount) {
  * Sources that are unreachable by design (not https, paywalled, undated or stale for a market update) are dropped; a topic
  * left with no source is rejected, never kept unsourced.
  */
-function validateTopics(rawTopics, { mode, today, recommendation, need } = {}) {
+function validateTopics(rawTopics, { mode, today, recommendation, need, diag } = {}) {
   const problems = [];
+  // `diag` (optional) is a diagnostics collector from agent-marketing-research-diag-lib. It only RECEIVES records; nothing below reads it back.
+  const dg = diag ? require("./agent-marketing-research-diag-lib") : null;
+  const tRec = (topic, outcome, code, detail, extra) => { if (dg) dg.pushTopic(diag, { topic, outcome, stage: "topic_selection", code, detail, ...(extra || {}) }); };
   if (!MODES.includes(mode)) return { ok: false, topics: [], problems: ["unknown mode"] };
   const todayN = dayNumber(today);
   if (todayN == null) return { ok: false, topics: [], problems: ["today's date is not valid"] };
   const raw = Array.isArray(rawTopics) ? rawTopics : [];
   if (raw.length !== TOPIC_COUNT && !(mode === "local_events" && raw.length > TOPIC_COUNT && raw.length <= EVENT_CANDIDATES)) problems.push(`expected ${TOPIC_COUNT} topics, got ${raw.length}`);
   const topics = [];
+  const nOf = new Map();   // topic object -> its position in the model's answer (diagnostics only)
   raw.forEach((t, i) => {
     const n = i + 1;
     const x = t && typeof t === "object" ? t : {};
     const question = clean(x.question, LIMITS.question + 1);
     const why = clean(x.why_it_matters, LIMITS.why + 1);
-    if (!question) return problems.push(`topic ${n}: no question`);
-    if (question.length > LIMITS.question) return problems.push(`topic ${n}: question too long`);
-    if (!why) return problems.push(`topic ${n}: no explanation`);
+    if (!question) { tRec(n, "left_out", "no_question"); return problems.push(`topic ${n}: no question`); }
+    if (question.length > LIMITS.question) { tRec(n, "left_out", "question_too_long", null, { hook: question }); return problems.push(`topic ${n}: question too long`); }
+    if (!why) { tRec(n, "left_out", "no_explanation", null, { hook: question }); return problems.push(`topic ${n}: no explanation`); }
     const signals = (Array.isArray(x.trend_signals) ? x.trend_signals : []).map((s) => clean(s, LIMITS.signal)).filter(Boolean).slice(0, 4);
-    if (TREND_WORDS.test(`${question} ${why}`) && signals.length === 0) return problems.push(`topic ${n}: claims a trend with no measurable signal`);
+    if (TREND_WORDS.test(`${question} ${why}`) && signals.length === 0) { tRec(n, "left_out", "trend_without_signal", null, { hook: question }); return problems.push(`topic ${n}: claims a trend with no measurable signal`); }
     const scope = x.scope === "broader_context" ? "broader_context" : "selected";
     const scopeNote = clean(x.scope_note, LIMITS.scopeNote);
-    if (scope === "broader_context" && !scopeNote) return problems.push(`topic ${n}: broader data without saying what area it covers`);
+    if (scope === "broader_context" && !scopeNote) { tRec(n, "left_out", "broader_without_scope_note", null, { hook: question }); return problems.push(`topic ${n}: broader data without saying what area it covers`); }
     const seen = new Set();
     const sources = [];
     const dropped = [];
     (Array.isArray(x.sources) ? x.sources : []).forEach((s) => {
-      const c = cleanSource(s, mode, todayN, dropped);
+      const info = dg ? {} : null;
+      const c = cleanSource(s, mode, todayN, dropped, info);
       if (c && !seen.has(c.url)) { seen.add(c.url); sources.push(c); }
+      if (dg) {
+        const base = { topic: n, url: s && s.url, title: s && s.title, model_date: s && s.published };
+        if (!c) dg.pushSource(diag, { ...base, outcome: "dropped", stage: info.stage, code: info.code, detail: info.detail });
+        else if (sources.length && sources[sources.length - 1] !== c) dg.pushSource(diag, { ...base, outcome: "dropped", stage: "duplicate", code: "duplicate_address_in_topic", detail: null });
+        else dg.pushSource(diag, { ...base, outcome: "kept", stage: "accepted", code: "accepted", detail: null });
+      }
     });
-    if (sources.length === 0) return problems.push(`topic ${n}: no usable source${dropped.length ? ` (${dropped.slice(0, 3).join("; ")})` : ""}`);
+    if (sources.length === 0) { tRec(n, "left_out", "no_usable_source", dropped.slice(0, 3).join("; "), { hook: question }); return problems.push(`topic ${n}: no usable source${dropped.length ? ` (${dropped.slice(0, 3).join("; ")})` : ""}`); }
     const topic = { id: `t${n}`, origin: "web", kind: mode, question, whyItMatters: why, trendSignals: signals, localIntent: x.local_intent === true, scope, scopeNote: scope === "broader_context" ? scopeNote : "", sources: sources.slice(0, 4), event: null, keywordMatch: x.keyword_match === true };
     if (mode === "local_events") {
       const e = cleanEvent(x.event, todayN);
-      if (e.problem) return problems.push(`topic ${n}: ${e.problem}`);
+      if (e.problem) { tRec(n, "left_out", "event_problem", e.problem, { hook: question }); return problems.push(`topic ${n}: ${e.problem}`); }
       topic.event = e.event;
     }
     topics.push(topic);
+    nOf.set(topic, n);
   });
   // Distinct: when two topics are the same question in different words, the later one is left out.
   for (let j = topics.length - 1; j > 0; j--) {
     const dup = topics.slice(0, j).find((t) => similar(t.question, topics[j].question));
-    if (dup) { problems.push(`topics ${dup.id} and ${topics[j].id} overlap`); topics.splice(j, 1); }
+    if (dup) { problems.push(`topics ${dup.id} and ${topics[j].id} overlap`); tRec(nOf.get(topics[j]), "left_out", "overlaps_earlier_topic", `same question as topic ${nOf.get(dup)}`, { hook: topics[j].question }); topics.splice(j, 1); }
   }
   // Different articles first (Sam, Oct 28): a topic whose story article another topic already uses goes after the topics that rest on a new
   // article, so the slots fill with different articles and a repeat only takes a slot that no new article can fill. Nothing is padded.
@@ -507,7 +524,9 @@ function validateTopics(rawTopics, { mode, today, recommendation, need } = {}) {
   const idsBefore = topics.map((t) => t.id).join();
   topics.splice(0, topics.length, ...firsts, ...repeats);
   const reordered = topics.map((t) => t.id).join() !== idsBefore;
+  if (dg) topics.slice(TOPIC_COUNT).forEach((t) => tRec(nOf.get(t), "left_out", "ranked_beyond_five", null, { hook: t.question }));
   topics.splice(TOPIC_COUNT);   // never more than five
+  if (dg) topics.forEach((t, i) => tRec(nOf.get(t), "kept", repeats.includes(t) ? "kept_repeat_article" : "kept", repeats.includes(t) ? "another topic already uses this article; placed after topics with a new article" : null, { hook: t.question, final_rank: i + 1 }));
   const needN = Number.isInteger(need) && need >= 1 && need <= TOPIC_COUNT ? need : TOPIC_COUNT;
   const differentKept = topics.filter((t) => firsts.includes(t)).length;
   // Keep what passed (Sam, Oct 28): a topic with no usable article is left out, it does not sink the others. One good article is a usable run.

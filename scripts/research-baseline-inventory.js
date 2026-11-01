@@ -48,7 +48,7 @@ function redact(text) {
 function readRuns(dir) {
   const out = [];
   fs.readdirSync(dir).filter((f) => f.endsWith(".discovery.json")).sort().forEach((f) => {
-    const m = /^(.+?)-(as_shipped|v2_[a-z0-9_]+|r\d+_c\d+)-(\d+)\.discovery\.json$/.exec(f);
+    const m = /^(.+?)-(as_shipped|v2_[a-z0-9_]+|compact_[a-z0-9_]+|detailed_[a-z0-9_]+|r\d+_c\d+)-(\d+)\.discovery\.json$/.exec(f);
     if (!m) return;
     let d = null;
     try { d = JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")); } catch { return; }
@@ -123,6 +123,15 @@ function markdown(inv, samples) {
     L.push(`### ${s.market} / ${s.cell} / run ${s.repeat}`, "");
     if (s.cards && s.cards.length) {   // Article-Led (v2): the full card next to its sources
       s.cards.forEach((c) => {
+        if (c.candidateId) {   // compact Stage A candidate
+          const g = c.geography || {}, st = c.status || {};
+          L.push(`${c.n}. **${c.question}** (${c.relationship}${c.route ? `; route: ${c.route}` : ""}; strength ${c.strength}, relevance ${c.relevance}; status ${st.value}${st.conflict ? ` (CONFLICT: ${st.conflict.note || st.conflict.states.join(" vs ")})` : st.reason ? ` (${st.reason})` : ""}; id ${c.candidateId})`,
+            `   - Development / angle: ${c.development} / ${c.angle}; why: ${c.why}`,
+            `   - Geography: ${g.nameFoundInSource === true ? "name found in " + (g.nameEvidence && g.nameEvidence.where) + " (boundary NOT verified)" : g.nameFoundInSource === false ? "UNSUPPORTED name (provisional, no ranking weight)" : "wider level, route stated"}; model said: ${(g.modelSourceGeography || []).join(" | ")}`,
+            `   - Event: ${c.event ? `${c.event.kind} ${c.event.date || ""}${c.event.deadline ? " deadline " + c.event.deadline : ""} (${c.event.status})` : "none"}; selection: ${c.selection ? `rank ${c.selection.rank}, scores ${[c.selection.editorialScore, c.selection.sourceSupport, c.selection.geoSpecificity, c.selection.corroboration].join("/")}` : "n/a"}${c.review && c.review.needsReview ? "; NEEDS REVIEW: " + c.review.reasons.join("; ") : ""}`, `   - Gap: ${c.gap || "none"}`);
+          (c.sources || []).forEach((src) => L.push(`   - Source ${src.ref}: ${src.host} (${src.outletClass}; ${src.role}, ${src.kind}), "${src.title}", published ${src.published}, ${src.window}; about ${src.sourceGeography || "n/a"}, period ${src.reportingPeriod || "n/a"}; establishes: ${src.whatItEstablishes || "n/a"}`));
+          return;
+        }
         L.push(`${c.n}. **${c.question}** (${c.relationship}${c.routeToMarket ? `; route: ${c.routeToMarket}` : ""}; status ${c.status}${c.statusReason ? ` (${c.statusReason})` : ""}; access ${c.accessConfidence && c.accessConfidence.value} [provisional])`,
           `   - Development / angle: ${c.development} / ${c.angle}`, `   - Geography check: ${c.geographyCheck ? (c.geographyCheck.supported === false ? "UNSUPPORTED (model assertion only)" : c.geographyCheck.supported === true ? "named by " + c.geographyCheck.evidence : "wider area") : "n/a"}; qualification: ${c.qualification ? c.qualification.stage + ", publication authorized: " + c.qualification.publicationAuthorized : "n/a"}${c.review && c.review.needsReview ? "; NEEDS REVIEW" : ""}`, `   - Perspective: ${c.thesis}`, `   - Homeowner decision: ${c.homeownerDecision || "n/a"}`,
           `   - Source-reported (not verified): ${(c.sourceReportedFacts || []).join(" | ") || "none"}`, `   - Possible, not proven: ${(c.possibleExplanations || []).join(" | ") || "none"}`,

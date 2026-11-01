@@ -9,7 +9,7 @@ const al = require("../netlify/functions/lib/agent-marketing-article-led-lib");
 const fx = require("./fixtures/research-diag/scenarios");
 
 const NOW = fx.NOW;                                   // 2026-10-24
-const ON = { AGENT_MARKETING_ARTICLE_LED_ENABLED: "true" };
+const ON = { AGENT_MARKETING_ARTICLE_LED_ENABLED: "true", AGENT_MARKETING_ARTICLE_LED_DESIGN: "detailed" };
 const quiet = async (fn) => { const e = console.error; console.error = () => {}; try { return await fn(); } finally { console.error = e; } };
 const noSleep = async () => {};
 const row = { id: "r1", mode: "market_update", audience: "sellers", geography: fx.GEO.lincoln, focus: {}, upload_refs: [], data_source: "web" };
@@ -79,7 +79,7 @@ test("v2 request: measurement knobs apply; output tokens are measured separately
   const k = await go([reply2(five())], { env: { ...ON, AGENT_MARKETING_RESEARCH_MAX_RESULTS: "10", AGENT_MARKETING_RESEARCH_SEARCH_TOKENS: "6000", AGENT_MARKETING_RESEARCH_MAX_TOKENS: "2200" } });
   assert.deepStrictEqual([k.sent[0].tools[0].max_results, k.sent[0].tools[0].max_tokens, k.sent[0].max_output_tokens], [10, 6000, 2200]);
   const partial = [opp(1), opp(2), opp(3)];
-  const { sent, r } = await go([reply2(partial), reply2(partial)]);
+  const { sent, r } = await go([reply2(partial), reply2(partial)], { env: { ...ON, AGENT_MARKETING_ARTICLE_LED_RETRIES: "1" } });
   assert.strictEqual(sent.length, 2);
   assert.deepStrictEqual(sent[1].tools, sent[0].tools, "no widening to 10,000 on a retry");
   assert.ok(/several may rest on the same article only when their evidence and angle differ/.test(sent[1].input) && !/different articles/.test(sent[1].input));
@@ -296,6 +296,9 @@ test("harness: v2 cells are 20/6,000 with 5,000 output tokens, the output-token 
     [["v2", 20, 6000, 5000, 0], ["v2", 20, 6000, 2200, 0], ["v2", null, null, null, null]]);
   assert.deepStrictEqual(baseline.cellsFor("v1").map((c) => c.id), ["as_shipped", "r10_c6000", "r20_c6000", "r10_c10000", "r20_c10000"]);
   assert.deepStrictEqual(baseline.cellsFor("v2").map((c) => c.id), ["v2_r20_c6000_o5000", "v2_r20_c6000_o2200", "v2_default"]);
+  assert.deepStrictEqual(baseline.cellsFor("compact").map((c) => c.id), ["compact_r20_c6000_o4500", "compact_r20_c6000_o6000", "detailed_r20_c6000_o8000"]);
+  const bench20 = baseline.plan(Object.keys(baseline.MARKETS), 2, baseline.cellsFor("compact"));
+  assert.deepStrictEqual(["compact_r20_c6000_o4500", "compact_r20_c6000_o6000", "detailed_r20_c6000_o8000"].map((id) => bench20.filter((j) => j.cell.id === id).length), [8, 8, 4], "the approved 20-run evaluation");
   assert.strictEqual(baseline.plan(Object.keys(baseline.MARKETS), 2).length, 40, "the default plan is still the v1 baseline, 40 runs");
   assert.strictEqual(baseline.plan(Object.keys(baseline.MARKETS), 2, baseline.cellsFor("v2")).length, 24);
   assert.deepStrictEqual(baseline.plan(["lincoln"], 1, ["r10_c6000", "v2_default"]).map((j) => j.cell.id), ["r10_c6000", "v2_default"], "cell ids from --cells resolve to cells");

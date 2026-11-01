@@ -14,7 +14,7 @@ const rt = require("../netlify/functions/lib/agent-marketing-research-report-lib
 const tv = require("./helpers/trend-fixture");
 const fx = require("./fixtures/research-diag/scenarios");
 
-const NOW = fx.NOW, ON = { AGENT_MARKETING_ARTICLE_LED_ENABLED: "true", AGENT_MARKETING_RESEARCH_RETRIES: "0" };
+const NOW = fx.NOW, ON = { AGENT_MARKETING_ARTICLE_LED_ENABLED: "true", AGENT_MARKETING_ARTICLE_LED_DESIGN: "detailed", AGENT_MARKETING_RESEARCH_RETRIES: "0" };
 const quiet = async (fn) => { const e = console.error; console.error = () => {}; try { return await fn(); } finally { console.error = e; } };
 const ID = "11111111-1111-4111-8111-111111111111";
 const GEO_ZIP = { type: "zip", name: "95999", city: "", state: "CA", label: "ZIP 95999, CA" };

@@ -54,8 +54,8 @@ const al = require("../netlify/functions/lib/agent-marketing-article-led-lib");
 const HOUR = 3600 * 1000;
 const iso = (agoMs) => new Date(Date.now() - agoMs).toISOString();
 const partialRow = (agoMs, over) => { db.agent_marketing_research.push({ id: uuid(nextId++), user_id: currentUser, project_id: uuid(1), mode: "market_update", status: "ready", charged_at: null, created_at: iso(agoMs), updated_at: iso(agoMs), topics: [], usage: { pathway: "article_led", articleLed: { delivered: 3, charged: false, offerMlsTrend: true } }, ...(over || {}) }); };
-const ON = () => { process.env.AGENT_MARKETING_ARTICLE_LED_ENABLED = "true"; };
-const cleanEnv = () => { delete process.env.AGENT_MARKETING_ARTICLE_LED_ENABLED; delete process.env.AGENT_MARKETING_PARTIAL_DAILY_LIMIT; delete process.env.AGENT_MARKETING_PARTIAL_MONTHLY_LIMIT; delete process.env.AGENT_MARKETING_REQUEST_DAILY_LIMIT; delete process.env.AGENT_MARKETING_REQUEST_MONTHLY_LIMIT; };
+const ON = () => { process.env.AGENT_MARKETING_ARTICLE_LED_ENABLED = "true"; process.env.AGENT_MARKETING_ARTICLE_LED_DESIGN = "detailed"; };
+const cleanEnv = () => { delete process.env.AGENT_MARKETING_ARTICLE_LED_ENABLED; delete process.env.AGENT_MARKETING_ARTICLE_LED_DESIGN; delete process.env.AGENT_MARKETING_PARTIAL_DAILY_LIMIT; delete process.env.AGENT_MARKETING_PARTIAL_MONTHLY_LIMIT; delete process.env.AGENT_MARKETING_REQUEST_DAILY_LIMIT; delete process.env.AGENT_MARKETING_REQUEST_MONTHLY_LIMIT; };
 
 test("schema tells the page whether the Article-Led pathway is on", async () => {
   reset(); cleanEnv();
@@ -109,8 +109,8 @@ test("partial limit: the monthly protection limit applies on its own and is conf
 test("partial limit: report-only and Local Events requests are not Article-Led and are never limited by it", () => {
   const rows = Array.from({ length: 9 }, (_, i) => ({ created_at: iso(i * HOUR), charged_at: null, status: "ready", pathway: "article_led" }));
   assert.strictEqual(al.partialLimit(rows, Date.now(), {}).blocked, true);
-  assert.strictEqual(al.isArticleLed({ mode: "market_update", dataSource: "upload" }, { AGENT_MARKETING_ARTICLE_LED_ENABLED: "true" }), false);
-  assert.strictEqual(al.isArticleLed({ mode: "local_events", dataSource: "web" }, { AGENT_MARKETING_ARTICLE_LED_ENABLED: "true" }), false);
+  assert.strictEqual(al.isArticleLed({ mode: "market_update", dataSource: "upload" }, { AGENT_MARKETING_ARTICLE_LED_ENABLED: "true", AGENT_MARKETING_ARTICLE_LED_DESIGN: "detailed" }), false);
+  assert.strictEqual(al.isArticleLed({ mode: "local_events", dataSource: "web" }, { AGENT_MARKETING_ARTICLE_LED_ENABLED: "true", AGENT_MARKETING_ARTICLE_LED_DESIGN: "detailed" }), false);
   assert.deepStrictEqual(al.partialLimits({}), { daily: 5, monthly: 30 });
   assert.deepStrictEqual(al.partialLimits({ AGENT_MARKETING_PARTIAL_DAILY_LIMIT: "9", AGENT_MARKETING_PARTIAL_MONTHLY_LIMIT: "x" }), { daily: 9, monthly: 30 });
 });

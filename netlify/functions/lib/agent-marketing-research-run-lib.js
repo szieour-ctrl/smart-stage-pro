@@ -15,6 +15,7 @@ const planLib = require("./agent-marketing-plan-lib");
 const reframeLib = require("./agent-marketing-reframe-lib");
 const diagLib = require("./agent-marketing-research-diag-lib");
 const articleLed = require("./agent-marketing-article-led-lib");
+const compact = require("./agent-marketing-compact-lib");
 
 const API_HOST = "api.perplexity.ai";
 const API_PATH = "/v1/agent";
@@ -189,6 +190,12 @@ function strengthOf(validation) {
   const topics = validation && validation.ok && Array.isArray(validation.topics) ? validation.topics : [];
   const srcs = topics.flatMap((t) => (Array.isArray(t.sources) ? t.sources : []));
   const host = (u) => { try { return new URL(String(u)).hostname.replace(/^www\./i, "").toLowerCase(); } catch { return ""; } };
+  if (topics.length && topics.every((t) => t.discovery === compact.DESIGN)) {
+    // Compact Stage A: valid selected candidates, then editorial substance (rank scores), then official-primary support, then total sources.
+    const sel = topics.map((t) => (t.candidate && t.candidate.selection) || {});
+    const sum = (k) => sel.reduce((n, x) => n + (x[k] || 0), 0);
+    return [topics.length, sum("editorialScore"), sum("sourceSupport"), srcs.length];
+  }
   if (topics.length && topics.every((t) => t.discovery === "v2")) {
     // Article-Led (v2): valid distinct opportunities, then supporting-source quality (primary records, authoritative primary records, then total sources).
     // Different articles or publishers are not a strength here: several opportunities may rest on one article.
@@ -224,14 +231,17 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
   const e = env || process.env;
   const cfg = rl.researchSettings(e);
   const extra = Number(e.AGENT_MARKETING_RESEARCH_RETRIES);
-  const maxAttempts = 1 + (Number.isInteger(extra) && extra >= 0 && extra <= 2 ? extra : 1);
   const providerRetries = 2;
   const today = todayPT(now);
   const { request, uploadContext } = requestFromRow(row);
   const dataSource = request.dataSource;
   // Article-Led pathway (PR 2): only with AGENT_MARKETING_ARTICLE_LED_ENABLED, a Market Update that is not report-only. Flag off: everything below is v1.
   const alOn = articleLed.isArticleLed(request, e);
-  let payload = dataSource === "upload" ? null : (alOn ? articleLed.buildPayloadV2({ request, today, env: e }) : rl.buildResearchPayload({ request, today, uploadContext, env: e }));
+  // Article-Led runs the compact Stage A design by default (up to eight short candidates; code qualifies, ranks and keeps up to five). AGENT_MARKETING_ARTICLE_LED_DESIGN=detailed keeps the earlier prompt for diagnostics.
+  const cmp = alOn && compact.designOf(e) === "compact";
+  // The ordinary retry is off for Article-Led until a targeted second pass is evaluated (AGENT_MARKETING_ARTICLE_LED_RETRIES to measure it). Legacy keeps its one retry.
+  const maxAttempts = 1 + (alOn ? compact.retriesFor(e) : (Number.isInteger(extra) && extra >= 0 && extra <= 2 ? extra : 1));
+  let payload = dataSource === "upload" ? null : (cmp ? compact.buildPayloadCompact({ request, today, env: e }) : alOn ? articleLed.buildPayloadV2({ request, today, env: e }) : rl.buildResearchPayload({ request, today, uploadContext, env: e }));
   const baseInput = payload && payload.input;
   let usage = { promptTokens: null, completionTokens: null, citationTokens: null, reasoningTokens: null, searchQueries: null, costUsd: null };
   let modelUsed = payload ? payload.model : null, grounded = null, attempts = 0, problems = [], validation = null, error = null, providerError = null;
@@ -262,9 +272,11 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
         const text = answerText(resp);
         topicAnswer = { answer: text.slice(0, 1500), citations: citationUrls(resp).slice(0, 8).map((u) => String(u).slice(0, 200)), attempt: attempts };
         try {
-          const g = groundTopics(alOn ? articleLed.extractOpportunities(text) : rl.extractTopics(text), resp, attemptDiag);
+          const g = groundTopics(cmp ? compact.extractCandidates(text) : alOn ? articleLed.extractOpportunities(text) : rl.extractTopics(text), resp, attemptDiag);
           grounded = g.grounded;
-          validation = alOn
+          validation = cmp
+            ? compact.validateCandidates(g.topics, { today, geography: request.geography, limits: articleLed.extractLimits(text), diag: attemptDiag })
+            : alOn
             ? articleLed.validateOpportunities(g.topics, { today, geography: request.geography, limits: articleLed.extractLimits(text), recommendation: rl.extractRecommendation(text), diag: attemptDiag })
             : rl.validateTopics(g.topics, { mode: request.mode, today, recommendation: rl.extractRecommendation(text), need: dataSource === "both" ? rl.TOPIC_COUNT - reportTopics.REPORT_TOPICS_WHEN_BOTH : rl.TOPIC_COUNT, diag: attemptDiag });
           problems = validation.problems;
@@ -288,7 +300,8 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
           // A retry also looks wider (more results, more search context) so there is more to choose publishers from.
           // Article-Led (v2) does not widen the search on a retry: search-context limits are not raised without evidence that they help (Sam, Oct 31).
           const tools = alOn ? payload.tools : (tool ? [{ ...tool, max_results: Math.max(tool.max_results || 0, 20), max_tokens: Math.max(tool.max_tokens || 0, 10000) }] : payload.tools);
-          if (alOn) payload = { ...payload, tools, input: articleLed.retryInstructionV2(why, baseInput) };
+          if (cmp) payload = { ...payload, tools, input: compact.retryInstructionCompact(why, baseInput) };
+          else if (alOn) payload = { ...payload, tools, input: articleLed.retryInstructionV2(why, baseInput) };
           else payload = { ...payload, tools, input: `${baseInput}\n\nYour previous answer was ${validation.ok ? "usable but needs work" : "rejected"}: ${why.slice(0, 6).join("; ").slice(0, 600)}. Return the JSON again with exactly 5 topics that fix this. Do not invent sources, dates or events.` };
         }
       }
@@ -369,7 +382,8 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
     const rec = diagLib.buildRecord({ request, dataSource, cfg, firstPayload, attempts: diagAttempts, usedAttempt, finalTopics: webTopics, today, codeVersion: e.COMMIT_REF || e.DEPLOY_ID || null });
     rec.selection = { rule: "strongest_valid_attempt", chosen: usedAttempt, order: "topics, articles, publishers, sources; tie = later answer", attempts: strengthLog };
     rec.pathway = alOn ? "article_led" : "legacy";
-    if (alOn && webTopics) rec.depth_v2 = articleLed.depthV2(webTopics);
+    if (alOn && webTopics) rec.depth_v2 = cmp ? compact.depthCompact(webTopics, validation && validation.summary) : articleLed.depthV2(webTopics);
+    if (cmp && validation && validation.candidates) rec.candidate_selection = { design: compact.DESIGN, summary: validation.summary, candidates: validation.candidates, retries: compact.retriesFor(e), max_output_tokens: firstPayload && firstPayload.max_output_tokens };
     rec.depth = webTopics ? diagLib.depthOf({ topics: webTopics, geography: request.geography, today, overlaps: webOverlaps }) : null;
     const fin = validation && validation.ok ? validation.topics : null;
     rec.final = fin ? { topics: fin.length, origin: { web: fin.filter((t) => t.origin !== "report").length, report: fin.filter((t) => t.origin === "report").length }, scope: { selected: fin.filter((t) => t.scope !== "broader_context").length, broader_context: fin.filter((t) => t.scope === "broader_context").length }, reframed: fin.filter((t) => t.reframed === true).length } : null;

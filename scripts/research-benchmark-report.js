@@ -42,7 +42,7 @@ function opportunitiesOf(run) {
     return {
       market: run.market, cell: run.cell, repeat: run.repeat, hook, development: card ? card.development : null,
       relationship: card ? card.relationship : (depth.scope === "broader_context" ? "broader_context" : "exact_market"),   // v1: the model's label, unchecked
-      geographySupported: card && card.geographyCheck ? card.geographyCheck.supported : null,
+      geographySupported: card && card.geographyCheck ? card.geographyCheck.supported : card && card.geography ? card.geography.nameFoundInSource : null,
       sources: srcs, officialSource, brokerageOnly: srcs.length > 0 && classes.every((c) => c === "brokerage_or_agent"),
       brokerageAny: classes.includes("brokerage_or_agent"), localNewsOrGov: classes.some((c) => c === "news_like" || c === "government") || officialSource,
       statisticsLedHook: statisticsLedHook(hook),

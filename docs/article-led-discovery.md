@@ -81,6 +81,29 @@ Each opportunity states what MLS evidence it has (`mlsEvidence`) and **never say
 
 **Future PRs, not in this one:** the structured evidence registry (a complete, validated, metric-aware set of report figures with periods and geographies, replacing the 40-figure attachment), the structured editorial brief and full Article-Led Planner integration, article retrieval and primary-source verification, and claim-level publication validation. Planner, renderer, gate and Local Events research are not changed by PR 2.
 
+## Compact Stage A (the default Article-Led design)
+
+Decided Oct 31, 2026, after the live benchmark: the detailed five-card prompt under-produced because the model self-limited and five cards of analysis pressed against the output allowance. Stage A is now **discovery only**: up to **eight compact, traceable candidates** (about 250 to 400 output tokens each). Heavy analysis, competing explanations, project-fact verification and the ten-question exploration belong to the selected article in Stage B (a later PR; no article fetcher or evidence registry here). `AGENT_MARKETING_ARTICLE_LED_DESIGN=detailed` keeps the earlier prompt for diagnostics.
+
+* **Code qualifies, ranks and selects up to five.** A weak slot is never filled and eight are not required. Billing is unchanged: five qualifying opportunities are one charged session; fewer is an uncharged partial result with the MLS Market Trend option.
+* **Qualify first:** grounded sources, a named development and angle, homeowner relevance, not low strength, a legitimate geographic attribution (wider-area information needs a route), timeliness (60 days for news, 12 months for official primary records), and no expired event.
+* **Then rank:** editorial substance and homeowner relevance first (strength, relevance, a dated development), then authoritative or original-source support, geographic specificity (only when a name was actually found in a title, address or host), corroboration, recency. Source type alone does not outrank a more useful story. Brokerage and agent sources are not banned; they are labelled.
+* **Geography:** relationship vocabulary `market, district, zip, city, county, region, state, national`. Only the selected subdivision or market itself is scope `market`. Crocker Ranch is a subdivision within West Roseville, ZIP 95747, the City of Roseville and Placer County; levels are separate and are never assumed to share boundaries. A Roseville planning action can matter greatly to Crocker Ranch homeowners without being a Crocker-specific development. The model's `source_geography` is provisional and is not corroboration; a name found in a title or URL is recorded as name evidence, never as verification of project boundaries. An unsupported claim is kept provisional, flagged for review and given no ranking weight.
+* **Events:** an expired event or past comment deadline is not presented as upcoming. It stays only when the research explains what continues AND a kept source published after the event supports it; the `continues_after_event` flag alone is not enough.
+* **Status:** the enum includes `unresolved`. Conflicting approval, entitlement, construction or completion evidence (a model-stated conflict, or sources showing different states) stays unresolved, even when one source is official.
+* **Publisher classification** is deterministic where reliable (government record, original local reporting, trade aggregation, brokerage or agent commentary, syndicated release, and others) from an outlet registry plus official hosts.
+* **Retries:** the ordinary retry is **off** for Article-Led (`AGENT_MARKETING_ARTICLE_LED_RETRIES`, default 0, only to measure it). A targeted second discovery pass is to be evaluated later. Legacy keeps its strongest-attempt retry.
+* **Output allowance:** 4,500 tokens is the initial compact configuration, compared with 6,000. Neither is locked for production until the benchmark shows acceptable yield and cost.
+* **Stage B handoff record** (stored with each selected candidate, as `candidate`): a stable candidate ID (a hash of market, development, angle and the first non-background article), source references (`<id>:s1`...) with outlet class, the development's identity (name and angle keys), geographic context (relationship, route, hierarchy, name evidence, provisional flags), status including any conflict, the event, selection scores, and a provisional evidence status (`publicationAuthorized: false`, claims source-reported and not verified, project facts not investigated until Stage B).
+
+Benchmark (20 runs, provider-access session): eight compact runs at 4,500 output tokens, eight at 6,000, and four runs of the detailed prompt at 8,000 (one per market):
+
+```
+PERPLEXITY_API_KEY=placeholder NODE_USE_ENV_PROXY=1 node scripts/research-baseline.js --live --prompt compact --repeats 2 --out /tmp/rb-compact
+node scripts/research-baseline-inventory.js /tmp/rb-compact --sample-cells compact_r20_c6000_o4500 > /tmp/rb-compact-inventory.md
+node scripts/research-benchmark-report.js --v1 /tmp/rb-full --v2 /tmp/rb-compact --out /tmp/compact-review.md --json /tmp/compact-review.json
+```
+
 ## Benchmarking v1 against v2
 
 Same markets, same controlled configurations, one search, retries off. The v1 reference is the completed 40-run baseline (its `r10_c6000` and `r20_c6000` cells, plus `as_shipped`).

@@ -333,8 +333,8 @@ test("harness and review package: the lanes cell is one session of three request
   node([bl, "--replay", "--prompt", "lanes", "--markets", "lincoln", "--repeats", "2", "--out", d2]);
   node([path.join(__dirname, "..", "scripts", "research-lanes-report.js"), "--single", d1, "--lanes", d2, "--lanes-cell", "lanes3_r20_c6000_o4500", "--out", out, "--json", js]);
   const md = fs.readFileSync(out, "utf8"), res = JSON.parse(fs.readFileSync(js, "utf8"));
-  for (const sec of ["## Overall", "## By market", "### lincoln", "## The three lanes (actual cost, yield and rate-limit handling)", "## Duplicate developments collapsed (three lanes)", "## Excluded candidates and qualification reasons", "## The actual cards, with source provenance", "Runs delivering five DISTINCT developments (charged)", "Cost per five-opportunity session"]) assert.ok(md.includes(sec), sec);
-  assert.ok(/Also found \(duplicates collapsed\)/.test(md) && /Source cand_[0-9a-f]{12}:s1/.test(md) && /not adopted/.test(md));
+  for (const sec of ["## Overall", "## By market", "### lincoln", "## The lanes: municipal + housing + economy (actual cost, yield and rate-limit handling)", "## Duplicate developments collapsed (three lanes)", "## Excluded candidates and qualification reasons", "## The actual cards, with source provenance", "Runs delivering five DISTINCT developments (charged)", "Cost per five-opportunity session"]) assert.ok(md.includes(sec), sec);
+  assert.ok(/Also found \(duplicates collapsed\)/.test(md) && /Source cand_[0-9a-f]{12}:s1/.test(md) && /until approved/.test(md));
   assert.deepStrictEqual([res.single.runs, res.lanes.runs, res.lanes.runs_with_five], [2, 2, 2]);
   assert.ok(res.lanes.mean_duplicates > 0 && res.single.mean_duplicates === 0 && res.lanes.total_cost_usd > res.single.total_cost_usd);
   assert.deepStrictEqual(Object.keys(res.lane_table).sort(), ["economy", "housing", "municipal"]);
@@ -602,4 +602,27 @@ test("two lanes, deduplicated: the same development in both lanes is one opportu
   const { r } = await runLaneSession((lane) => ({ municipal: ok(pair.filter((p) => p._lane === "municipal").concat(others(2).slice(0, 2))), housing: ok(pair.filter((p) => p._lane === "housing").concat(others(4).slice(2))) }[lane]), { env: LANES2 });
   // (this scenario runs at the fixture's dates: today is 2026-10-24 in these sessions, so the 2026-10-31 sources are future-dated and dropped; the validation-level tests above pin the dedupe itself)
   assert.ok(r.fields.usage.discovery.lanes.length === 2);
+});
+
+test("two-lane review package: headings say Two lanes (never Three), the four tiers are reported apart, and a county-scope story is never counted as directly relevant with a supported geography", () => {
+  const fs = require("fs"), os = require("os"), path = require("path"), cp = require("child_process");
+  const d1 = fs.mkdtempSync(path.join(os.tmpdir(), "t21-")), d2 = fs.mkdtempSync(path.join(os.tmpdir(), "t22-")), out = path.join(d2, "r.md"), js = path.join(d2, "r.json");
+  const bl = path.join(__dirname, "..", "scripts", "research-baseline.js"), node = (a) => cp.execFileSync(process.execPath, a, { encoding: "utf8" });
+  node([bl, "--replay", "--cells", "compact_r20_c6000_o4500", "--markets", "lincoln", "--repeats", "2", "--out", d1]);
+  node([bl, "--replay", "--prompt", "lanes2", "--markets", "lincoln", "--repeats", "2", "--out", d2]);
+  node([path.join(__dirname, "..", "scripts", "research-lanes-report.js"), "--single", d1, "--lanes", d2, "--out", out, "--json", js]);
+  const md = fs.readFileSync(out, "utf8"), res = JSON.parse(fs.readFileSync(js, "utf8"));
+  assert.ok(/# Single pass versus two lanes: review package/.test(md) && /Two lanes \(municipal \+ housing\)/.test(md) && /\| Measure \| Single pass \| Two lanes \|/.test(md));
+  assert.ok(!/three lanes/i.test(md) && !/THREE-LANE/.test(md), "no stale three-lane wording");
+  for (const t of ["Tier 1: qualified by deterministic validation", "Tier 2: unique underlying developments", "Tier 3: delivered, directly relevant with a source-supported", "Tier 4: provisional discovery"]) assert.ok(md.includes(t), t);
+  assert.ok(res.lanes.tier_qualified_validation >= res.lanes.tier_unique_development && res.lanes.tier_provisional === res.lanes.mean_delivered);
+  // the tier-3 test: a county story marked direct does not count
+  const rep = require("../scripts/research-lanes-report");
+  const mk = (rel, found) => ({ n: 1, candidateId: "cand_x", relevance: "direct", relationship: rel, geography: { nameFoundInSource: found }, provisionalEvidence: { publicationAuthorized: false } });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "t23-"));
+  const row = { market: "thin", cell: "lanes2_r20_c6000_o4500", repeat: 1, status: "ready", delivered: 4, charged: false, cost_usd: 0.01, v2: { candidates_returned: 4, qualified: 4, duplicates: 0 }, lanes: [{ lane: "municipal", state: "success", returned: 2 }, { lane: "housing", state: "success", returned: 2 }] };
+  fs.writeFileSync(path.join(dir, "runs.jsonl"), JSON.stringify(row)); fs.writeFileSync(path.join(dir, "thin-lanes2_r20_c6000_o4500-1.cards.json"), JSON.stringify([mk("market", true), mk("district", true), mk("county", true), mk("market", false)]));
+  fs.writeFileSync(path.join(dir, "thin-lanes2_r20_c6000_o4500-1.discovery.json"), JSON.stringify({ attempts: [{ topics: [] }], lanes: row.lanes }));
+  const stats = rep.stats(rep.load(dir, "lanes2_r20_c6000_o4500"));
+  assert.strictEqual(stats.tier_direct_supported, 2, "market and district with a found name count; a county relationship and an unsupported market claim do not");
 });

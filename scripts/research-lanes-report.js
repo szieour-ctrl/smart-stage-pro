@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// scripts/research-lanes-report.js — single-pass versus three-lane review package (PR 2 experiment, Oct 31, 2026).
+// scripts/research-lanes-report.js — single-pass versus multi-lane review package (PR 2 experiment, Oct 31, 2026).
 //
 //   node scripts/research-lanes-report.js --single <folder> --lanes <folder> [--single-cell compact_r20_c6000_o4500] [--lanes-cell lanes3_r20_c6000_o4500] --out review.md [--json review.json]
 //
@@ -28,9 +28,21 @@ function load(dir, cell) {
 function stats(runs) {
   const v = (r) => r.v2 || {};
   const delivered = runs.map((r) => r.delivered || 0);
+  // The four tiers, kept apart: (1) qualified by deterministic validation, (2) a unique underlying development, (3) directly relevant with a source-supported geographic
+  // relationship, (4) provisional discovery (every delivered candidate: none is publication-authorized).
+  const cardsOf = (r) => r.cards || [];
+  const directSupported = (c) => c.relevance === "direct" && ["market", "district", "zip"].includes(c.relationship) && c.geography && c.geography.nameFoundInSource === true;
+  const tier = {
+    returned: runs.map((r) => (r.v2 && r.v2.candidates_returned) || 0),
+    qualified_validation: runs.map((r) => ((r.v2 && r.v2.qualified) || 0) + ((r.v2 && r.v2.duplicates) || 0)),   // before duplicates are removed
+    unique_development: runs.map((r) => (r.v2 && r.v2.qualified) || 0),                                       // after duplicates are removed
+    direct_supported: runs.map((r) => cardsOf(r).filter(directSupported).length),                             // among the delivered
+    provisional: runs.map((r) => cardsOf(r).filter((c) => c.provisionalEvidence && c.provisionalEvidence.publicationAuthorized === false).length),
+  };
   // five DISTINCT developments (identity-based; older records without it fall back to the delivered count)
   const distinctN = runs.map((r) => (r.v2 && r.v2.distinct_developments != null ? Math.min(r.v2.distinct_developments, r.delivered || 0) : r.delivered || 0));
   return {
+    tier_returned: mean(tier.returned), tier_qualified_validation: mean(tier.qualified_validation), tier_unique_development: mean(tier.unique_development), tier_direct_supported: mean(tier.direct_supported), tier_provisional: mean(tier.provisional),
     runs: runs.length, ready: runs.filter((r) => r.status === "ready").length,
     mean_returned: mean(runs.map((r) => v(r).candidates_returned)), mean_qualified: mean(runs.map((r) => v(r).qualified)), mean_delivered: mean(delivered),
     runs_with_five: distinctN.filter((n) => n >= 5).length, mean_distinct: mean(distinctN), identity_collisions: sum(runs.map((r) => (r.v2 && r.v2.identity_collisions) || 0)), duplicates_total: sum(runs.map((r) => (r.v2 && r.v2.duplicates) || 0)), charged: runs.filter((r) => r.charged).length, mean_duplicates: mean(runs.map((r) => v(r).duplicates || 0)),
@@ -43,7 +55,7 @@ function stats(runs) {
     strong_or_direct: mean(runs.map((r) => v(r).strong_or_direct)), needs_review: mean(runs.map((r) => v(r).needs_review)), unresolved: mean(runs.map((r) => v(r).status_unresolved)),
   };
 }
-const ROWS = [["Runs", "runs", 0], ["Runs ready", "ready", 0], ["Candidates returned (mean/run)", "mean_returned", 1], ["Qualified, after duplicates (mean/run)", "mean_qualified", 1], ["Delivered (mean/run)", "mean_delivered", 1],
+const ROWS = [["Runs", "runs", 0], ["Tier 0: candidates returned (mean/run)", "tier_returned", 1], ["Tier 1: qualified by deterministic validation, before duplicates (mean/run)", "tier_qualified_validation", 1], ["Tier 2: unique underlying developments (mean/run)", "tier_unique_development", 1], ["Tier 3: delivered, directly relevant with a source-supported market, district or ZIP relationship (mean/run)", "tier_direct_supported", 1], ["Tier 4: provisional discovery, none publication-authorized (mean/run)", "tier_provisional", 1], ["Runs ready", "ready", 0], ["Candidates returned (mean/run)", "mean_returned", 1], ["Qualified, after duplicates (mean/run)", "mean_qualified", 1], ["Delivered (mean/run)", "mean_delivered", 1],
   ["Runs delivering five DISTINCT developments (charged)", "runs_with_five", 0], ["Distinct developments delivered (mean/run)", "mean_distinct", 2], ["Duplicate developments collapsed (total)", "duplicates_total", 0], ["Identity collisions left in the delivered five (audit, should be 0)", "identity_collisions", 0], ["Duplicates collapsed (mean/run)", "mean_duplicates", 1], ["Distinct developments (mean/run)", "distinct_developments", 1],
   ["Market-scope candidates (mean/run)", "market_scope", 1], ["Market name found in a source (mean/run)", "name_found", 1], ["Geography unsupported, provisional (mean/run)", "geography_unsupported", 1],
   ["With an official primary source (mean/run)", "official_primary", 1], ["With original local reporting (mean/run)", "original_local", 1], ["Strong or directly relevant (mean/run)", "strong_or_direct", 1],
@@ -83,17 +95,20 @@ function build(singleDir, lanesDir, singleCell, lanesCell) {
 
 function markdown(b, singleDir, lanesDir) {
   const { S, L, markets, out } = b;
-  const o = [`# Single pass versus three lanes: review package`, "",
-    `Single pass: ${out.single.cell}, ${S.length} runs (${singleDir}). Three lanes: ${out.lanes.cell}, ${L.length} runs (${lanesDir}). Markets: ${markets.join(", ")}.`, "",
-    ...(() => { const bad = Object.values(out.lane_table).reduce((n, x) => n + x.errors, 0), total = Object.values(out.lane_table).reduce((n, x) => n + x.runs, 0); return bad ? [`**NOT A VALID THREE-LANE TEST: ${bad} of ${total} lane requests failed (see the lane table).** Do not read the comparison below as a result for the lanes.`, ""] : [`All ${total} lane requests completed.`, ""]; })(),
-    "**Status of everything below: discovery candidates.** Provider-grounded and model-reported; none is checked against article text, records or project facts, and none is publication-authorized. The measures are structural proxies; the cards at the end are for human judgment. The three-lane architecture is an experiment and is not adopted.", "",
-    "## Overall", "", "| Measure | Single pass | Three lanes |", "| --- | --- | --- |"];
+  const nLanes = Object.keys(out.lane_table).length;
+  const LBL = nLanes === 2 ? "Two lanes" : nLanes === 3 ? "Three lanes" : `${nLanes || "Multi"} lanes`, lbl = LBL.toLowerCase();
+  const laneNames = Object.keys(out.lane_table).join(" + ") || "none";
+  const o = [`# Single pass versus ${lbl}: review package`, "",
+    `Single pass: ${out.single.cell}, ${S.length} runs (${singleDir}). ${LBL} (${laneNames}): ${out.lanes.cell}, ${L.length} runs (${lanesDir}). Markets: ${markets.join(", ")}.`, "",
+    ...(() => { const bad = Object.values(out.lane_table).reduce((n, x) => n + x.errors, 0), total = Object.values(out.lane_table).reduce((n, x) => n + x.runs, 0); return bad ? [`**NOT A VALID ${LBL.toUpperCase().replace(/ /g, "-").replace("LANES", "LANE")} TEST: ${bad} of ${total} lane requests failed (see the lane table).** Do not read the comparison below as a result for the lane configuration.`, ""] : [`All ${total} lane requests completed.`, ""]; })(),
+    "**Status of everything below: discovery candidates.** Provider-grounded and model-reported; none is checked against article text, records or project facts, and none is publication-authorized. The measures are structural proxies; the cards at the end are for human judgment. Lane configuration is an experiment until approved.", "",
+    "## Overall", "", `| Measure | Single pass | ${LBL} |`, "| --- | --- | --- |"];
   ROWS.forEach(([n, k, d]) => o.push(`| ${n} | ${f(out.single[k], d)} | ${f(out.lanes[k], d)} |`));
   o.push("", "## By market", "");
-  markets.forEach((m) => { const x = out.by_market[m]; o.push(`### ${m}`, "", "| Measure | Single pass | Three lanes |", "| --- | --- | --- |"); ROWS.filter(([, k]) => ["runs", "mean_returned", "mean_qualified", "mean_delivered", "runs_with_five", "mean_duplicates", "market_scope", "official_primary", "original_local", "needs_review", "mean_cost_per_run_usd", "cost_per_delivered_usd"].includes(k)).forEach(([n, k, d]) => o.push(`| ${n} | ${f(x.single[k], d)} | ${f(x.lanes[k], d)} |`)); o.push(""); });
-  o.push("## The three lanes (actual cost, yield and rate-limit handling)", "", "| Lane | Runs | Success | Rate limited | Failed | Not attempted | Provider requests | HTTP 429s | Wait total s | Candidates returned | Selected in the final five | Duplicates collapsed | Provider cost $ | Mean cost/run $ |", "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
+  markets.forEach((m) => { const x = out.by_market[m]; o.push(`### ${m}`, "", `| Measure | Single pass | ${LBL} |`, "| --- | --- | --- |"); ROWS.filter(([, k]) => ["runs", "mean_returned", "mean_qualified", "mean_delivered", "runs_with_five", "mean_duplicates", "market_scope", "official_primary", "original_local", "needs_review", "mean_cost_per_run_usd", "cost_per_delivered_usd"].includes(k)).forEach(([n, k, d]) => o.push(`| ${n} | ${f(x.single[k], d)} | ${f(x.lanes[k], d)} |`)); o.push(""); });
+  o.push(`## The lanes: ${laneNames} (actual cost, yield and rate-limit handling)`, "", "| Lane | Runs | Success | Rate limited | Failed | Not attempted | Provider requests | HTTP 429s | Wait total s | Candidates returned | Selected in the final five | Duplicates collapsed | Provider cost $ | Mean cost/run $ |", "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
   Object.entries(out.lane_table).forEach(([lane, x]) => o.push(`| ${lane} | ${x.runs} | ${x.success} | ${x.rate_limited} | ${x.failed} | ${x.not_attempted} | ${x.attempts} | ${x.http_429} | ${f(x.wait_ms / 1000, 1)} | ${x.returned} | ${x.selected} | ${x.duplicates} | ${f(x.cost, 4)} | ${f(x.runs ? x.cost / x.runs : null, 4)} |`));
-  o.push("", "## Duplicate developments collapsed (three lanes)", "");
+  o.push("", `## Duplicate developments collapsed (${lbl})`, "");
   const dups = L.flatMap((r) => r.topicsLog.filter((t) => /^duplicate_|^overlaps_/.test(t.code || "")).map((t) => ({ r, t })));
   if (!dups.length) o.push("None."); else dups.forEach(({ r, t }) => o.push(`- ${r.market} #${r.repeat}: "${t.hook}" (lane ${t.lane || "n/a"}) dropped as ${t.code}: ${t.detail}`));
   o.push("", "## Distinct-development identities (the delivered candidates)", "", "Each delivered candidate's identity: project names and identifiers. Two delivered candidates sharing an identity would be a defect.", "");
@@ -102,7 +117,7 @@ function markdown(b, singleDir, lanesDir) {
   L.forEach((r) => { const sel = r.selection || {}; (sel.duplicate_groups || []).forEach((g) => o.push(`- ${r.market} #${r.repeat}: kept ${g.kept} [${g.keptLane}]${g.selected ? "" : " (not selected)"} absorbed ${g.members.map((m) => `${m.lane || "?"} "${m.hook}" (${m.basis})`).join("; ")}`)); (sel.replacements || []).forEach((x) => o.push(`- ${r.market} #${r.repeat}: replacement ${x.candidateId} [${x.lane}] "${x.hook}" moved from rank ${x.rankBeforeDuplicates} to ${x.rankAfter} after duplicates were removed`)); });
   if (!L.some((r) => r.selection && ((r.selection.duplicate_groups || []).length || (r.selection.replacements || []).length))) o.push("None in these runs.");
   o.push("", "## Excluded candidates and qualification reasons", "", "Every candidate that was not delivered, with the reason code, for both designs.", "");
-  [["Single pass", S], ["Three lanes", L]].forEach(([label, runs]) => {
+  [["Single pass", S], [LBL, L]].forEach(([label, runs]) => {
     o.push(`### ${label}`, "");
     const tally = {}; runs.forEach((r) => r.topicsLog.filter((t) => t.outcome === "left_out").forEach((t) => { tally[t.code] = (tally[t.code] || 0) + 1; }));
     o.push(`Reasons: ${Object.entries(tally).map(([k, n]) => `${k} ${n}`).join(", ") || "none"}`, "");
@@ -110,7 +125,7 @@ function markdown(b, singleDir, lanesDir) {
     o.push("");
   });
   o.push("## The actual cards, with source provenance", "");
-  markets.forEach((m) => { o.push(`### ${m}`, ""); [["Single pass", S], ["Three lanes", L]].forEach(([label, runs]) => runs.filter((r) => r.market === m).forEach((r) => {
+  markets.forEach((m) => { o.push(`### ${m}`, ""); [["Single pass", S], [LBL, L]].forEach(([label, runs]) => runs.filter((r) => r.market === m).forEach((r) => {
     o.push(`#### ${label}, run ${r.repeat}: delivered ${r.delivered}${r.charged ? " (five, charged)" : " (uncharged partial)"}, cost $${r.cost_usd}`, "");
     if (!r.cards.length) o.push("(no cards)", ""); else { r.cards.forEach((c) => o.push(...cardLines(c))); o.push(""); }
   })); });

@@ -77,9 +77,38 @@ test("outlet registry: reliability is stated, unknown hosts stay unclassified fo
   assert.deepStrictEqual(outlets.classifyOutlet("kcra.com"), { class: "original_local_reporting", basis: "registry", host: "kcra.com" });
   assert.strictEqual(outlets.classifyOutlet("ceqanet.lci.ca.gov").basis, "official_host");
   assert.deepStrictEqual(outlets.classifyOutlet("smithrealty.com").basis, "pattern");     // a brokerage-looking name: lower confidence, labelled as a pattern
-  for (const h of ["houseberry.com", "resideline.com", "colfax-ca.example", "", "not a host"]) assert.strictEqual(outlets.classifyOutlet(h).class === "unclassified" || outlets.classifyOutlet(h).basis !== "registry", true, h);
+  for (const h of ["houseberry.com", "onsiteobserver.com", "colfax-ca.example", "", "not a host"]) assert.strictEqual(outlets.classifyOutlet(h).class === "unclassified" || outlets.classifyOutlet(h).basis !== "registry", true, h);
   assert.deepStrictEqual(outlets.classifyOutlet("houseberry.com"), { class: "unclassified", basis: "none", host: "houseberry.com" });
   assert.ok(outlets.CLASSES.includes("brokerage_or_agent_commentary") && !("banned" in outlets));
   assert.strictEqual(outlets.isOriginalLocalReporting(outlets.classifyOutlet("kcra.com")), true);
   assert.strictEqual(outlets.isOriginalLocalReporting(outlets.classifyOutlet("cahousingmarketnews.com")), false);
+});
+
+test("Natomas sub-areas and named developments are recognized without being treated as ZIP 95834; a missing hierarchy level is provisional, not a rejection", () => {
+  const NAT = { type: "neighborhood", name: "Natomas", city: "Sacramento", zip: "95834", state: "CA" };
+  const h = gh.hierarchyFor(NAT);
+  assert.ok(h.subareas.includes("North Natomas") && h.subareas.includes("South Natomas") && h.subareas.includes("ParkBridge"));
+  assert.ok(/not equivalent to the ZIP code/.test(gh.hierarchyLine(h)));
+  // "district" is not a level for Natomas: the market name or a known sub-area is looked for instead, and the result is provisional
+  const topgolf = gh.nameEvidence(h, "district", { title: "South Natomas Topgolf plan stalls", url: "https://www.nsarrow.com/topgolf" });
+  assert.deepStrictEqual([topgolf.found, topgolf.via, topgolf.provisional, topgolf.boundaryVerified], [true, "market_name", true, false]);
+  const parkbridge = gh.nameEvidence(h, "market", { title: "Public Comment Open: Village 5 ParkBridge Homes (DR26-197)", url: "https://natomaschamber.org/comment" });
+  assert.deepStrictEqual([parkbridge.found, parkbridge.via, parkbridge.names], [true, "subarea", ["ParkBridge"]]);
+  const none = gh.nameEvidence(h, "district", { title: "A new development opens", url: "https://example.com/story" });
+  assert.deepStrictEqual([none.found, none.reason], [false, "name_not_found"]);
+  assert.strictEqual(gh.normalizeRelationship("district", h), "district", "not rejected for a missing level");
+  // levels the market does have are unchanged: a ZIP claim still needs the ZIP
+  assert.strictEqual(gh.nameEvidence(h, "zip", { title: "North Natomas homes", url: "https://x.example/a" }).found, false);
+});
+
+test("publisher registry additions: syndicated and aggregated material gets no original-reporting credit; CBS counts only on its Sacramento newsroom paths; unknown hosts stay usable", () => {
+  const c = (u) => outlets.classifyOutlet(u).class;
+  assert.strictEqual(c("https://sacramentoappraisalblog.com/post"), "professional_commentary");
+  assert.strictEqual(c("https://whatnow.com/sacramento/restaurants/x"), "local_business_news");
+  assert.strictEqual(c("https://www.yahoo.com/news/x"), "syndicated_release");
+  assert.strictEqual(c("https://www.resideline.com/zip/95747"), "portal");
+  assert.strictEqual(c("https://www.cbsnews.com/sacramento/news/x"), "original_local_reporting");
+  assert.strictEqual(c("https://www.cbsnews.com/news/x"), "syndicated_release");
+  assert.strictEqual(c("https://www.onsiteobserver.com/x"), "unclassified");
+  for (const u of ["https://sacramentoappraisalblog.com/post", "https://whatnow.com/a", "https://www.yahoo.com/news/x", "https://cahousingmarketnews.com/x", "https://hoodline.com/x"]) assert.strictEqual(outlets.isOriginalLocalReporting(outlets.classifyOutlet(u)), false, u);
 });

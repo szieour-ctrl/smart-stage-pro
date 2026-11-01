@@ -86,6 +86,7 @@ function pushTopic(diag, rec) {
     diag.topics.push({
       topic: rec.topic, outcome: rec.outcome, stage: rec.stage, code: rec.code, detail: rec.detail ? safeText(rec.detail, DETAIL_CHARS) : null,
       hook: rec.hook ? safeText(rec.hook, HOOK_CHARS) : null, final_rank: rec.final_rank == null ? null : rec.final_rank,
+      ...(rec.lane ? { lane: safeText(rec.lane, 24) } : {}), ...(rec.duplicate_of ? { duplicate_of: safeText(rec.duplicate_of, 80) } : {}),
     });
   } catch { /* ignore */ }
 }

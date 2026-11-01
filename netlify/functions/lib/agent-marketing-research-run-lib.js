@@ -240,7 +240,9 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
   // Article-Led runs the compact Stage A design by default (up to eight short candidates; code qualifies, ranks and keeps up to five). AGENT_MARKETING_ARTICLE_LED_DESIGN=detailed keeps the earlier prompt for diagnostics.
   const cmp = alOn && compact.designOf(e) === "compact";
   // The ordinary retry is off for Article-Led until a targeted second pass is evaluated (AGENT_MARKETING_ARTICLE_LED_RETRIES to measure it). Legacy keeps its one retry.
-  const maxAttempts = 1 + (alOn ? compact.retriesFor(e) : (Number.isInteger(extra) && extra >= 0 && extra <= 2 ? extra : 1));
+  // Three-lane experiment (AGENT_MARKETING_ARTICLE_LED_LANES=three): three independent compact passes over the same market; merged, deduplicated and ranked in code. No retry.
+  const lanesMode = cmp && compact.lanesOn(e);
+  const maxAttempts = lanesMode ? 1 : 1 + (alOn ? compact.retriesFor(e) : (Number.isInteger(extra) && extra >= 0 && extra <= 2 ? extra : 1));
   let payload = dataSource === "upload" ? null : (cmp ? compact.buildPayloadCompact({ request, today, env: e }) : alOn ? articleLed.buildPayloadV2({ request, today, env: e }) : rl.buildResearchPayload({ request, today, uploadContext, env: e }));
   const baseInput = payload && payload.input;
   let usage = { promptTokens: null, completionTokens: null, citationTokens: null, reasoningTokens: null, searchQueries: null, costUsd: null };
@@ -254,6 +256,7 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
   let best = null;            // the strongest usable answer so far: { validation, attempt }
   const strengthLog = [];     // diagnostics: how each answer compared
   const firstPayload = payload;
+  let laneLog = null;         // three-lane experiment: per-lane cost, yield and errors
 
   try {
     if (dataSource !== "upload") {
@@ -262,16 +265,40 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
         const attemptDiag = safe(() => diagLib.newAttemptDiag()) || null;
         const attemptCfg = safe(() => diagLib.attemptConfig(payload, cfg));
         const t0 = Date.now(), retryReason = lastWhy;
-        let provided;
-        try { provided = await askProvider({ payload, apiKey, callFn, sleepFn, retries: providerRetries }); }
-        catch (pe) { safe(() => diagAttempts.push({ n: attempts, config: attemptCfg, ms: Date.now() - t0, retry_reason: retryReason, provider_error: true, diag: attemptDiag })); throw pe; }
+        let provided, laneRaw = null;
+        if (lanesMode) {
+          // Each lane is its own provider request; one lane failing does not lose the others. Everything fails only when every lane fails.
+          const settled = await Promise.all(compact.LANES.map((lane) => askProvider({ payload: compact.buildPayloadCompact({ request, today, env: e, lane }), apiKey, callFn, sleepFn, retries: providerRetries })
+            .then((ok) => ({ lane, ok }), (err) => ({ lane, err }))));
+          const good = settled.filter((x) => x.ok);
+          if (!good.length) { const pe = settled[0].err; safe(() => diagAttempts.push({ n: attempts, config: attemptCfg, ms: Date.now() - t0, retry_reason: retryReason, provider_error: true, diag: attemptDiag })); throw pe; }
+          laneRaw = settled.map((x) => {
+            if (!x.ok) return { lane: x.lane.id, error: String(x.err && x.err.message || "failed").slice(0, 120), usage: null, topics: [], text: "", resp: null };
+            const r = x.ok.resp, t = answerText(r), us = rl.usageSummary(r, cfg.costTargetUsd);
+            let topics = [], parseError = null, groundedLane = null;
+            try { const g = groundTopics(compact.extractCandidates(t), r, null); groundedLane = g.grounded; topics = g.topics.map((c) => (c && typeof c === "object" ? { ...c, _lane: x.lane.id } : c)); } catch (pe) { parseError = pe.message; }
+            return { lane: x.lane.id, error: parseError, usage: us, topics, text: t, resp: r, grounded: groundedLane, model: x.ok.modelUsed };
+          });
+          provided = { resp: { output: laneRaw.flatMap((l) => (l.resp && Array.isArray(l.resp.output) ? l.resp.output : [])), citations: laneRaw.flatMap((l) => (l.resp && Array.isArray(l.resp.citations) ? l.resp.citations : [])) }, modelUsed: good[0].ok.modelUsed };
+        } else {
+          try { provided = await askProvider({ payload, apiKey, callFn, sleepFn, retries: providerRetries }); }
+          catch (pe) { safe(() => diagAttempts.push({ n: attempts, config: attemptCfg, ms: Date.now() - t0, retry_reason: retryReason, provider_error: true, diag: attemptDiag })); throw pe; }
+        }
         const { resp, modelUsed: m } = provided;
         modelUsed = m;
-        const attemptUsage = rl.usageSummary(resp, cfg.costTargetUsd);
+        const attemptUsage = lanesMode ? laneRaw.reduce((tot, l) => (l.usage ? addUsage(tot, l.usage) : tot), { promptTokens: null, completionTokens: null, citationTokens: null, reasoningTokens: null, searchQueries: null, costUsd: null }) : rl.usageSummary(resp, cfg.costTargetUsd);
         usage = addUsage(usage, attemptUsage);
-        const text = answerText(resp);
+        const text = lanesMode ? laneRaw.map((l) => `[${l.lane}] ${l.text}`).join("\n") : answerText(resp);
         topicAnswer = { answer: text.slice(0, 1500), citations: citationUrls(resp).slice(0, 8).map((u) => String(u).slice(0, 200)), attempt: attempts };
+        if (lanesMode) safe(() => { laneLog = laneRaw.map((l) => ({ lane: l.lane, error: l.error || null, returned: l.topics.length, grounded: l.grounded, cost_usd: l.usage ? l.usage.costUsd : null, prompt_tokens: l.usage ? l.usage.promptTokens : null, completion_tokens: l.usage ? l.usage.completionTokens : null, searches: l.usage ? l.usage.searchQueries : null })); });
         try {
+          if (lanesMode) {
+            const merged = laneRaw.flatMap((l) => l.topics);
+            if (!merged.length && laneRaw.every((l) => l.error)) throw new Error(laneRaw.map((l) => l.error).filter(Boolean)[0]);
+            grounded = laneRaw.some((l) => l.grounded);
+            validation = compact.validateCandidates(merged, { today, geography: request.geography, diag: attemptDiag, maxCandidates: compact.MAX_CANDIDATES * compact.LANES.length });
+            problems = validation.problems;
+          } else {
           const g = groundTopics(cmp ? compact.extractCandidates(text) : alOn ? articleLed.extractOpportunities(text) : rl.extractTopics(text), resp, attemptDiag);
           grounded = g.grounded;
           validation = cmp
@@ -280,6 +307,7 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
             ? articleLed.validateOpportunities(g.topics, { today, geography: request.geography, limits: articleLed.extractLimits(text), recommendation: rl.extractRecommendation(text), diag: attemptDiag })
             : rl.validateTopics(g.topics, { mode: request.mode, today, recommendation: rl.extractRecommendation(text), need: dataSource === "both" ? rl.TOPIC_COUNT - reportTopics.REPORT_TOPICS_WHEN_BOTH : rl.TOPIC_COUNT, diag: attemptDiag });
           problems = validation.problems;
+          }
         } catch (parseErr) {
           validation = { ok: false, topics: [], problems: [parseErr.message] };
           problems = validation.problems;
@@ -382,6 +410,7 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
     const rec = diagLib.buildRecord({ request, dataSource, cfg, firstPayload, attempts: diagAttempts, usedAttempt, finalTopics: webTopics, today, codeVersion: e.COMMIT_REF || e.DEPLOY_ID || null });
     rec.selection = { rule: "strongest_valid_attempt", chosen: usedAttempt, order: "topics, articles, publishers, sources; tie = later answer", attempts: strengthLog };
     rec.pathway = alOn ? "article_led" : "legacy";
+    if (laneLog) rec.lanes = laneLog;
     if (alOn && webTopics) rec.depth_v2 = cmp ? compact.depthCompact(webTopics, validation && validation.summary) : articleLed.depthV2(webTopics);
     if (cmp && validation && validation.candidates) rec.candidate_selection = { design: compact.DESIGN, summary: validation.summary, candidates: validation.candidates, retries: compact.retriesFor(e), max_output_tokens: firstPayload && firstPayload.max_output_tokens };
     rec.depth = webTopics ? diagLib.depthOf({ topics: webTopics, geography: request.geography, today, overlaps: webOverlaps }) : null;

@@ -26,7 +26,10 @@ const REGISTRY = Object.freeze({
     note: "Crocker Ranch is a subdivision within West Roseville, ZIP 95747, the City of Roseville and Placer County. West Roseville and ZIP 95747 are not assumed to share boundaries." },
   "lincoln|": { type: "city", zip: "95648", city: null, county: "Placer", note: "The City of Lincoln, Placer County." },
   "colfax|": { type: "city", zip: "95713", city: null, county: "Placer", note: "The City of Colfax, Placer County." },
-  "natomas|sacramento": { type: "neighborhood", district: null, zip: "95834", city: "Sacramento", county: "Sacramento", note: "Natomas is a neighborhood within the City of Sacramento, Sacramento County; ZIP 95834 is one of several Natomas ZIP codes." },
+  "natomas|sacramento": { type: "neighborhood", district: null, zip: "95834", city: "Sacramento", county: "Sacramento",
+    // Sub-areas and named developments inside the Natomas market. They are NOT equivalent to ZIP 95834 (Natomas spans several ZIP codes) and none is a boundary verification.
+    subareas: ["North Natomas", "South Natomas", "Northlake", "Westlake", "Greenbriar", "ParkBridge", "Innovation Park", "Metro Air Park", "Gateway Park", "Natomas Park", "Natomas Crossing"],
+    note: "Natomas is a neighborhood within the City of Sacramento, Sacramento County; ZIP 95834 is one of several Natomas ZIP codes." },
 });
 
 const norm = (s) => String(s == null ? "" : s).toLowerCase().replace(/\s+/g, " ").trim();
@@ -57,7 +60,8 @@ function hierarchyFor(geography) {
   if (county) add("county", `${county} County`, [`${county} County`, `County of ${county}`]);
   const derived = !reg;
   const note = reg ? reg.note : `Derived from the request${county ? "" : " (no county known)"}: ${levels.map((l) => l.name).join(" > ")}.`;
-  return { market: name || (zipOnly ? `ZIP ${zipOnly}` : ""), marketType: reg ? reg.type : type, marketIsCity: !!marketIsCity, levels, derived, note };
+  const subareas = reg && Array.isArray(reg.subareas) ? reg.subareas.slice() : [];
+  return { market: name || (zipOnly ? `ZIP ${zipOnly}` : ""), marketType: reg ? reg.type : type, marketIsCity: !!marketIsCity, levels, subareas, derived, note };
 }
 
 /** The relationships a source can be given for this market: city is the market itself for a city market, so it is not offered separately. */
@@ -71,7 +75,8 @@ function normalizeRelationship(rel, hierarchy) {
 /** One line for the prompt: the chain from the market outward, and a reminder that levels are not the same area. */
 function hierarchyLine(h) {
   const chain = h.levels.map((l) => `${l.name}${l.level === "market" ? ` (the selected market${h.marketType && h.marketType !== "city" ? `, a ${h.marketType}` : h.marketIsCity ? ", a city" : ""})` : ` (${l.level})`}`).join(" > ");
-  return `Where the market sits: ${chain}. ${h.note} Treat each level as its own area; do not assume two levels share boundaries.`;
+  const sub = h.subareas && h.subareas.length ? ` Known sub-areas and named developments inside the market: ${h.subareas.join(", ")}; they are not equivalent to the ZIP code or to each other, and a sub-area is not verified to be inside a boundary.` : "";
+  return `Where the market sits: ${chain}. ${h.note}${sub} Treat each level as its own area; do not assume two levels share boundaries.`;
 }
 
 const esc = (x) => String(x).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -81,13 +86,20 @@ const esc = (x) => String(x).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
  */
 function nameEvidence(hierarchy, level, source) {
   const lv = hierarchy.levels.find((l) => l.level === level);
-  if (!lv) return { level, found: false, where: null, names: [], boundaryVerified: false, reason: level === "region" || level === "state" || level === "national" ? "not_checked" : "level_not_in_hierarchy" };
+  const marketLv = hierarchy.levels.find((l) => l.level === "market");
+  const subareas = hierarchy.subareas || [];
+  // A missing hierarchy entry is not grounds for rejecting a relevant development. When the claimed level has no entry (a "district" for a market with none), or
+  // the claim is about the market itself, the market's own name and its known sub-areas are the names to look for, and the result stays provisional.
+  const fallback = !lv && (level === "district" || level === "market") && marketLv;
+  const sets = lv && level !== "market" ? [{ via: "level", names: lv.names }]
+    : [{ via: fallback || level === "market" ? "market_name" : "level", names: (lv || marketLv || { names: [] }).names }, { via: "subarea", names: subareas }];
+  if (!lv && !fallback) return { level, found: false, where: null, names: [], boundaryVerified: false, reason: level === "region" || level === "state" || level === "national" ? "not_checked" : "level_not_in_hierarchy" };
   const places = { title: String(source && source.title || ""), url: String(source && source.url || ""), host: String(source && source.host || source && source.domain || "") };
   const slug = (x) => x.toLowerCase().replace(/[-_/.+%20]+/g, " ");
-  for (const where of ["title", "url", "host"]) {
+  for (const set of sets) for (const where of ["title", "url", "host"]) {
     const text = where === "title" ? places.title : slug(places[where]);
-    const hit = lv.names.filter((n) => new RegExp(`(^|[^a-z0-9])${esc(n.toLowerCase().replace(/[-_]+/g, " "))}($|[^a-z0-9])`, "i").test(text.toLowerCase()));
-    if (hit.length) return { level, found: true, where, names: hit, boundaryVerified: false, reason: null };
+    const hit = set.names.filter((n) => new RegExp(`(^|[^a-z0-9])${esc(n.toLowerCase().replace(/[-_]+/g, " "))}($|[^a-z0-9])`, "i").test(text.toLowerCase()));
+    if (hit.length) return { level, found: true, where, names: hit, via: set.via, provisional: set.via !== "level" || undefined, boundaryVerified: false, reason: null };
   }
   return { level, found: false, where: null, names: [], boundaryVerified: false, reason: "name_not_found" };
 }

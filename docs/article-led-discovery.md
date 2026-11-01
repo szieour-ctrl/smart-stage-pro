@@ -104,6 +104,23 @@ node scripts/research-baseline-inventory.js /tmp/rb-compact --sample-cells compa
 node scripts/research-benchmark-report.js --v1 /tmp/rb-full --v2 /tmp/rb-compact --out /tmp/compact-review.md --json /tmp/compact-review.json
 ```
 
+## Three-lane experiment, expired events, Natomas sub-areas, publisher registry (Oct 31, after the compact benchmark)
+
+The compact benchmark (20 runs) delivered 2.2 opportunities per run and no run delivered five; the model returned 2.9 candidates on average while using 550 to 2,100 of 4,500 to 6,000 output tokens. The output allowance was not the limit. Decisions approved for the next experiment (none permanently adopted until results are reviewed):
+
+* **Three lanes (experiment only, `AGENT_MARKETING_ARTICLE_LED_LANES=three`).** Three independent compact passes: Municipal and Local Developments; Housing and New Construction; Financing and Local Economic Forces. Every lane gets the identical selected market and geographic hierarchy and may not enlarge the market. Code merges the candidates, deduplicates by underlying development (the strongest version is kept; duplicates are recorded on it as `alsoFoundIn`), then qualifies and ranks the strongest five. No lane or publisher quotas, no padding. One lane failing does not lose the others. No retry. Per-lane cost, yield and errors are recorded (`discovery.lanes`). Harness: `--prompt lanes` (one `lanes3_r20_c6000_o4500` session = three provider requests); review package: `scripts/research-lanes-report.js`. Default behaviour is the single compact pass.
+* **A past event is not an upcoming opportunity; a consequential decision, appeal or process after it can still be a discovery.** An expired meeting, hearing, workshop or comment period is never presented as upcoming (`presentedAs: past_event_outcome`). It stays only with source-supported continuing relevance: a kept source published on or after the event that states what it establishes, AND an open process (explained next steps, a still-open state such as pending, appealed, proposed or under construction in `status_by_source`, or conflicting status evidence). `continues_after_event` alone never decides it. Regression: the Sierra View shopping-center appeal.
+* **Natomas.** North Natomas, South Natomas and named developments (for example ParkBridge, Northlake, Innovation Park) are recognized sub-areas, not treated as equivalent to ZIP 95834. A relationship level the hierarchy lacks (a `district` for Natomas) is not rejected: the market name and the known sub-areas are looked for instead, and the result stays provisional; the boundary is never verified.
+* **Publisher registry.** Added `professional_commentary` (sacramentoappraisalblog.com), `local_business_news` (whatnow.com), syndicated (yahoo.com, aol.com, msn.com, newsbreak.com), portal (resideline.com) and a path rule for CBS News (only its Sacramento newsroom paths count as original local reporting). Syndicated, aggregated and professional-commentary material gets no original-reporting credit. Unknown hosts stay `unclassified` and usable; `onsiteobserver.com` is deliberately left unclassified because its nature was not verified.
+* **Thin markets and billing.** Crocker Ranch is a subdivision in West Roseville in the City of Roseville; West Roseville and Roseville municipal actions can be relevant without being Crocker-specific, and geographic attribution stays separate from relevance. The MLS Market Trend fallback is unchanged when fewer than five qualified opportunities are found. The five-opportunity charging threshold and the approved request and partial limits are unchanged.
+
+Eight-session experiment (four markets, two repeats), then the review package:
+
+```
+PERPLEXITY_API_KEY=placeholder NODE_USE_ENV_PROXY=1 node scripts/research-baseline.js --live --prompt lanes --repeats 2 --out /tmp/rb-lanes
+node scripts/research-lanes-report.js --single /tmp/rb-compact --lanes /tmp/rb-lanes --out /tmp/lanes-review.md --json /tmp/lanes-review.json
+```
+
 ## Benchmarking v1 against v2
 
 Same markets, same controlled configurations, one search, retries off. The v1 reference is the completed 40-run baseline (its `r10_c6000` and `r20_c6000` cells, plus `as_shipped`).

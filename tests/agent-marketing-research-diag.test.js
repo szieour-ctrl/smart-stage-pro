@@ -279,7 +279,7 @@ test("baseline: four markets by five cells; the 10/20 comparison separates resul
 });
 
 test("baseline: a fixed cell sends exactly one search with the stated limits, and records them", async () => {
-  for (const cell of baseline.CELLS.filter((c) => c.results != null)) {
+  for (const cell of baseline.CELLS.filter((c) => c.results != null && !c.lanes)) {
     const sc = byName("five_clean");
     const { result, sent } = await quiet(() => fx.runScenario(run, { ...sc, env: baseline.cellEnv({}, cell) }));
     assert.strictEqual(sent.length, 1);

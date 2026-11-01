@@ -182,6 +182,26 @@ function citationUrls(resp) {
   (Array.isArray(resp && resp.output) ? resp.output : []).forEach((it) => { if (it && it.type === "search_results") (Array.isArray(it.results) ? it.results : []).forEach((x) => out.push(x && x.url)); });
   return out.filter(Boolean);
 }
+// Which answer to keep when more than one is usable (Sam, Oct 31, 2026): a weaker retry must not silently replace a stronger earlier answer.
+// Strength, in order: valid distinct topics, then distinct articles, then distinct publishers, then total sources. Equal strength: the later answer.
+function strengthOf(validation) {
+  const topics = validation && validation.ok && Array.isArray(validation.topics) ? validation.topics : [];
+  const srcs = topics.flatMap((t) => (Array.isArray(t.sources) ? t.sources : []));
+  const host = (u) => { try { return new URL(String(u)).hostname.replace(/^www\./i, "").toLowerCase(); } catch { return ""; } };
+  return [
+    topics.length,
+    new Set(topics.map((t) => rl.articleKey(t.sources && t.sources[0] && t.sources[0].url)).filter(Boolean)).size,
+    new Set(srcs.map((s) => host(s.url)).filter(Boolean)).size,
+    srcs.length,
+  ];
+}
+/** > 0 when a is stronger than b, < 0 when weaker, 0 when equal. */
+function compareStrength(a, b) {
+  const x = strengthOf(a), y = strengthOf(b);
+  for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return x[i] - y[i];
+  return 0;
+}
+
 /**
  * runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callFn, sleepFn, now, env }) → { fields, problems, attempts }
  * Where the topics come from is row.data_source:
@@ -205,11 +225,13 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
   const baseInput = payload && payload.input;
   let usage = { promptTokens: null, completionTokens: null, citationTokens: null, reasoningTokens: null, searchQueries: null, costUsd: null };
   let modelUsed = payload ? payload.model : null, grounded = null, attempts = 0, problems = [], validation = null, error = null, providerError = null;
-  let reportNote = null, reportAttempts = 0, reframeAttempts = 0, reframed = 0, fallback = null, topicAnswer = null;
+  let reportNote = null, reportAttempts = 0, reframeAttempts = 0, reframed = 0, topicAnswer = null;
   // Diagnostics (PR 1): everything below that touches `diag*` only RECORDS. It is wrapped so a diagnostics error can never change the result.
   const safe = (fn) => { try { return fn(); } catch (err) { console.error(`[agent-marketing-research] diagnostics skipped: ${String(err && err.message).slice(0, 160)}`); return undefined; } };
   const diagAttempts = [];
-  let usedAttempt = null, fallbackAttempt = null, lastWhy = null, webTopics = null, webOverlaps = 0;
+  let usedAttempt = null, lastWhy = null, webTopics = null, webOverlaps = 0;
+  let best = null;            // the strongest usable answer so far: { validation, attempt }
+  const strengthLog = [];     // diagnostics: how each answer compared
   const firstPayload = payload;
 
   try {
@@ -239,13 +261,13 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
         }
         const soft = validation.ok && validation.soft ? validation.soft : [];
         usedAttempt = attempts;
+        if (validation.ok && (!best || compareStrength(validation, best.validation) >= 0)) best = { validation, attempt: attempts };   // equal strength: the later answer
+        safe(() => strengthLog.push({ n: attempts, ok: !!validation.ok, strength: strengthOf(validation) }));
         safe(() => diagAttempts.push({
           n: attempts, config: attemptCfg, ms: Date.now() - t0, retry_reason: retryReason, grounding: attemptDiag.grounding, diag: attemptDiag, candidates: diagLib.candidatesOf(resp),
           usage: { promptTokens: attemptUsage.promptTokens, completionTokens: attemptUsage.completionTokens, reasoningTokens: attemptUsage.reasoningTokens, searchQueries: attemptUsage.searchQueries, costUsd: attemptUsage.costUsd, costEstimatedUsd: attemptUsage.costUsd == null ? estimateCostUsd(m, attemptUsage) : null },
         }));
         if (validation.ok && !soft.length) break;
-        if (validation.ok && !fallback) fallbackAttempt = attempts;
-        if (validation.ok) fallback = fallback || validation;   // usable, but too few different sites: keep it in case the retry does worse
         if (attempts < maxAttempts) {
           const why = validation.ok ? soft : problems;
           lastWhy = why;
@@ -255,7 +277,8 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
           payload = { ...payload, tools, input: `${baseInput}\n\nYour previous answer was ${validation.ok ? "usable but needs work" : "rejected"}: ${why.slice(0, 6).join("; ").slice(0, 600)}. Return the JSON again with exactly 5 topics that fix this. Do not invent sources, dates or events.` };
         }
       }
-      if (!(validation && validation.ok) && fallback) { validation = fallback; usedAttempt = fallbackAttempt; }
+      // Keep the strongest usable answer: an earlier one when a later answer is weaker or unusable (never the reverse).
+      if (best && (!(validation && validation.ok) || best.validation !== validation)) { validation = best.validation; usedAttempt = best.attempt; }
       // What the web research alone delivered (before the report topics are added): the yardstick for discovery quality.
       safe(() => {
         webTopics = validation && validation.ok ? validation.topics.slice() : [];
@@ -308,6 +331,7 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
   const costUsd = usage.costUsd != null ? usage.costUsd : estimated;
   const discovery = safe(() => {
     const rec = diagLib.buildRecord({ request, dataSource, cfg, firstPayload, attempts: diagAttempts, usedAttempt, finalTopics: webTopics, today, codeVersion: e.COMMIT_REF || e.DEPLOY_ID || null });
+    rec.selection = { rule: "strongest_valid_attempt", chosen: usedAttempt, order: "topics, articles, publishers, sources; tie = later answer", attempts: strengthLog };
     rec.depth = webTopics ? diagLib.depthOf({ topics: webTopics, geography: request.geography, today, overlaps: webOverlaps }) : null;
     const fin = validation && validation.ok ? validation.topics : null;
     rec.final = fin ? { topics: fin.length, origin: { web: fin.filter((t) => t.origin !== "report").length, report: fin.filter((t) => t.origin === "report").length }, scope: { selected: fin.filter((t) => t.scope !== "broader_context").length, broader_context: fin.filter((t) => t.scope === "broader_context").length }, reframed: fin.filter((t) => t.reframed === true).length } : null;
@@ -326,4 +350,4 @@ function planKeyFromContext(ctx) {
   return "solo";
 }
 
-module.exports = { answerText, PRICES, estimateCostUsd, todayPT, callPerplexity, askProvider, groundTopics, urlKey, requestFromRow, runResearch, planKeyFromContext, citationUrls };
+module.exports = { strengthOf, compareStrength, answerText, PRICES, estimateCostUsd, todayPT, callPerplexity, askProvider, groundTopics, urlKey, requestFromRow, runResearch, planKeyFromContext, citationUrls };

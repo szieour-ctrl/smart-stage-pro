@@ -251,3 +251,30 @@ test("admission fails closed: if the rows cannot be read after the insert, the r
   stub("../netlify/functions/lib/marketing-profile-lib", { supabase: fakeSupabase });
   cleanEnv();
 });
+
+// ── What the browser receives (PR 2, final review): no provider metadata, credentials or internal diagnostics ─────────
+test("client response: an Article-Led set, a chosen topic and a saved project expose no candidate internals, discovery trace, usage, model or credentials; storage is unchanged", async () => {
+  reset(); cleanEnv();
+  const fx = require("./fixtures/research-diag/scenarios"), ARENA = require("./fixtures/research-diag/arena-crossing.json");
+  const c = JSON.parse(JSON.stringify(ARENA));
+  const reply = { status: 200, json: { output: [{ type: "search_results", results: c.sources.map((s) => ({ url: s.url })) }, { type: "message", content: [{ type: "output_text", text: "```json\n" + JSON.stringify({ research_lane: "x", candidates: [c] }) + "\n```" }] }] } };
+  const quietErr = console.error; console.error = () => {};
+  let out; try { out = await runLib.runResearch({ row: { id: "r", mode: "market_update", audience: "sellers", geography: fx.GEO.lincoln, focus: {}, upload_refs: [], data_source: "web" }, apiKey: "SECRET-KEY-VALUE", now: "2026-10-31T20:00:00Z", env: { AGENT_MARKETING_ARTICLE_LED_ENABLED: "true" }, sleepFn: async () => {}, clock: () => 0, rand: () => 0.5, callFn: async () => reply }); } finally { console.error = quietErr; }
+  assert.ok(out.fields.topics.length >= 1 && out.fields.topics[0].candidate, "the stored topic keeps the candidate record for the plan stage");
+  const project = mkProject({});
+  const row = { id: uuid(nextId++), user_id: currentUser, project_id: project.id, mode: "market_update", audience: "sellers", geography: fx.GEO.lincoln, focus: {}, status: "ready", charged_at: iso(HOUR), created_at: iso(HOUR), research_date: "2026-10-31", model: "perplexity/sonar", topics: out.fields.topics, usage: { ...out.fields.usage } };
+  db.agent_marketing_research.push(row);
+  const FORBIDDEN = ["candidate", "discovery", "developmentKey", "angleKey", "modelRelevance", "relevanceCapReason", "provisionalEvidence", "providerRequests", "providerError", "topicDebug", "perplexity", "costUsd", "SECRET-KEY-VALUE", "usage"];
+  const clean = (label, json) => { const s = JSON.stringify(json); for (const k of FORBIDDEN) assert.ok(!s.includes(`"${k}"`) && !s.toLowerCase().includes(k.toLowerCase().replace(/^usage$/, "\u0000")), `${label} exposes ${k}`); };
+  const g = await call("GET", null, { id: row.id });
+  assert.strictEqual(g.status, 200); assert.ok(g.json.research.topics.length >= 1); assert.strictEqual(g.json.research.model, null); assert.ok(!("usage" in g.json.research));
+  clean("GET research", g.json);
+  const t = g.json.research.topics[0];
+  assert.ok(t.id && t.question && t.whyItMatters && Array.isArray(t.sources), "the fields the page uses are still sent");
+  const sel = await call("POST", { action: "select", projectId: project.id, researchId: row.id, topicId: t.id, reportChoice: "skip" });
+  assert.strictEqual(sel.status, 200, JSON.stringify(sel.json).slice(0, 200));
+  { clean("select", sel.json); assert.ok(db.agent_marketing_projects.find((p) => p.id === project.id).selected_topic.candidate, "the project keeps the full topic for the plan stage"); }
+  assert.ok(db.agent_marketing_research.find((r) => r.id === row.id).topics[0].candidate && db.agent_marketing_research.find((r) => r.id === row.id).usage.discovery, "stored research is unchanged");
+  const legacy = { id: "t9", question: "q", discovery: { keep: "legacy shape" } };
+  assert.strictEqual(al.clientTopic(legacy), legacy, "a legacy topic (no candidate record) passes through untouched");
+});

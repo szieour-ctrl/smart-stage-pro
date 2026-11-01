@@ -75,7 +75,7 @@ function forClient(row) {
   const out = {
     id: row.id, projectId: row.project_id, mode: row.mode, geography: row.geography, audience: row.audience, focus: row.focus || {},
     dataSource: row.data_source || "web", note: (row.usage && row.usage.reportNote) || null,
-    status: row.status, model: row.model || null, topics: row.status === "ready" ? (row.topics || []) : [], researchDate: row.research_date || null,
+    status: row.status, model: (row.usage && row.usage.pathway === "article_led") ? null : (row.model || null), topics: row.status === "ready" ? (row.topics || []).map(articleLed.clientTopic) : [], researchDate: row.research_date || null,
     error: row.status === "failed" ? (row.error || "The research could not be completed.") : null,
     charged: !!row.charged_at, createdAt: row.created_at,
   };
@@ -170,7 +170,7 @@ exports.handler = async (event) => {
         const er = await supabase("GET", "agent_marketing_research", null, `?user_id=eq.${userId}&project_id=neq.${p.row.id}&status=eq.ready&select=*&order=created_at.desc&limit=20`);
         earlier = (Array.isArray(er.data) ? er.data : []).filter((x) => !(x.usage && x.usage.copiedFrom)).map(forClient); // copies are hidden: the original is listed
       } catch (e) { /* the library still shows this project's own sets */ }
-      return reply(200, { earlier, research: rows.map(forClient), selectedResearchId: p.row.selected_research_id || null, selectedTopic: p.row.selected_topic || null, session: await sessionFor(await poolFor(userId)) });
+      return reply(200, { earlier, research: rows.map(forClient), selectedResearchId: p.row.selected_research_id || null, selectedTopic: articleLed.clientTopic(p.row.selected_topic) || null, session: await sessionFor(await poolFor(userId)) });
     }
 
     if (event.httpMethod !== "POST") return reply(405, { error: "Method not allowed" });
@@ -218,7 +218,7 @@ exports.handler = async (event) => {
       if (changed) fields.intake = {};
       const saved = await supabase("PATCH", "agent_marketing_projects", fields, `?id=eq.${project.id}&user_id=eq.${userId}`);
       if (saved.status >= 300 || !Array.isArray(saved.data) || !saved.data[0]) return reply(500, { error: "Could not save your choice" });
-      return reply(200, { selectedResearchId: row.id, selectedTopic: frozen, reportAttached: Array.isArray(row.upload_refs) && row.upload_refs.length > 0 });
+      return reply(200, { selectedResearchId: row.id, selectedTopic: articleLed.clientTopic(frozen), reportAttached: Array.isArray(row.upload_refs) && row.upload_refs.length > 0 });
     }
 
     // start

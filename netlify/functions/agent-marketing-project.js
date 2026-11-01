@@ -46,7 +46,7 @@ function forClient(row) {
     reelType: reelTypeOf(row),
     id: row.id, template: row.template, angle: row.angle, formats: row.formats, durationSec: row.duration_sec, voice: row.voice, music: row.music || "default",
     intake: row.intake || {}, narrative: row.narrative || null, narrativeApprovedAt: row.narrative_approved_at || null,
-    storyboard: row.storyboard || null, selectedTopic: row.selected_topic || null, status: row.status, gate: row.gate_result || null,
+    storyboard: row.storyboard || null, selectedTopic: require("./lib/agent-marketing-article-led-lib").clientTopic(row.selected_topic) || null, status: row.status, gate: row.gate_result || null,
     createdAt: row.created_at, updatedAt: row.updated_at, hidden: !!row.hidden_at,
   };
 }

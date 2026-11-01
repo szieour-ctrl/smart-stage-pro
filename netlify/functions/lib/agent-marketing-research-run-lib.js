@@ -229,7 +229,7 @@ function compareStrength(a, b) {
  * answer was rejected. All attempts' usage is added together, so the stored cost is the real cost of the session.
  * A session is charged only when FIVE validated topics are delivered, whatever the source.
  */
-async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callFn, sleepFn, now, env, clock: opts_clock, rand: opts_rand, quotaFn, onDispatch }) {
+async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callFn, sleepFn, now, env, clock: opts_clock, rand: opts_rand, quotaFn, onDispatch, startingRequests }) {
   const e = env || process.env;
   const cfg = rl.researchSettings(e);
   const extra = Number(e.AGENT_MARKETING_RESEARCH_RETRIES);
@@ -256,7 +256,8 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
   // Provider request accounting: usage.providerRequests is the authoritative count of actual outbound provider requests. EVERY dispatched call goes through this one gate,
   // so each request (first tries, retries, failed requests, lanes, the gap-fill pass) is counted exactly once and by nothing else. Before each dispatch the request-limit
   // check (quotaFn, when given) must allow it; a refused request is never sent and is not counted. onDispatch persists the count BEFORE the request is sent.
-  let providerRequests = 0;
+  // A re-executed worker (Netlify re-runs a background function that crashed) resumes from what the row already persisted, so requests sent by the earlier execution still count.
+  let providerRequests = Number.isInteger(startingRequests) && startingRequests > 0 ? startingRequests : 0;
   const countedCall = async (pl, key) => {
     if (quotaFn) {
       const q = await quotaFn(providerRequests);

@@ -512,6 +512,16 @@ function admit(rows, me, nowMs, env, staleMs) {
   return { blocked: false, status: 200, code: null, scope: null, message: null };
 }
 
+/**
+ * What a subscriber's browser receives for a topic. Article-Led topics carry the full candidate record (identity keys, lane, selection and review internals, relevance caps)
+ * and the discovery trace for diagnostics and the plan stage; those stay in storage and are never sent. Legacy topics (no candidate record) pass through unchanged.
+ */
+const clientTopic = (t) => {
+  if (!t || typeof t !== "object" || !t.candidate) return t;
+  const { candidate, discovery, ...rest } = t;
+  return rest;
+};
+
 // ── Research depth for v2 (human-checkable measures; not a substitute for reading the opportunities) ───────────
 function depthV2(topics) {
   const list = Array.isArray(topics) ? topics : [];
@@ -548,5 +558,5 @@ module.exports = {
   TOPIC_COUNT, NEWS_DAYS, AUTHORITATIVE_DAYS, STATUS_CHECK_DAYS, RELATIONSHIPS, SELECTED_RELATIONSHIPS, STATUSES, ACCESS, ROLES, KINDS, AUTHORITATIVE_KINDS,
   articleLedEnabled, isArticleLed, systemPromptV2, retryInstructionV2, buildPayloadV2, extractOpportunities, extractLimits,
   eligibleSource, applyFreshness, validateOpportunities, shouldCharge, partialNote, depthV2, mlsEvidenceOf, mlsEvidenceNote,
-  PARTIAL_DAILY_LIMIT, PARTIAL_MONTHLY_LIMIT, REQUEST_DAILY_LIMIT, REQUEST_MONTHLY_LIMIT, partialLimits, requestLimits, partialLimit, admit, requestAllowance, requestsOf,
+  PARTIAL_DAILY_LIMIT, PARTIAL_MONTHLY_LIMIT, REQUEST_DAILY_LIMIT, REQUEST_MONTHLY_LIMIT, partialLimits, requestLimits, partialLimit, admit, clientTopic, requestAllowance, requestsOf,
 };

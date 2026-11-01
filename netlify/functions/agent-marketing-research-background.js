@@ -55,7 +55,7 @@ exports.handler = async (event) => {
       return articleLed.requestAllowance(pr.data, Date.now(), process.env, id, dispatched);
     } : undefined;
     const onDispatch = isAL ? async (n) => { await supabase("PATCH", "agent_marketing_research", { usage: { pathway: "article_led", providerRequests: n } }, `?id=eq.${id}&user_id=eq.${userId}&status=eq.running`); } : undefined;
-    const { fields, problems, attempts } = await runLib.runResearch({ row, apiKey: process.env.PERPLEXITY_API_KEY, uploads, anthropicKey: process.env.ANTHROPIC_API_KEY, quotaFn, onDispatch });
+    const { fields, problems, attempts } = await runLib.runResearch({ row, apiKey: process.env.PERPLEXITY_API_KEY, uploads, anthropicKey: process.env.ANTHROPIC_API_KEY, quotaFn, onDispatch, startingRequests: isAL ? (Number.isInteger(Number(row.usage && row.usage.providerRequests)) ? Number(row.usage.providerRequests) : 0) : 0 });
     if (fields.status === "failed") console.error(`[agent-marketing-research] ${id} failed after ${attempts} attempt(s): ${(problems || []).join("; ").slice(0, 400)} ${fields.error || ""}`);
     await writeRow(id, userId, fields);
   } catch (err) {

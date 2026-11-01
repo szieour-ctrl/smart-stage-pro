@@ -298,6 +298,7 @@ test("harness: v2 cells are 20/6,000 with 5,000 output tokens, the output-token 
   assert.deepStrictEqual(baseline.cellsFor("v2").map((c) => c.id), ["v2_r20_c6000_o5000", "v2_r20_c6000_o2200", "v2_default"]);
   assert.strictEqual(baseline.plan(Object.keys(baseline.MARKETS), 2).length, 40, "the default plan is still the v1 baseline, 40 runs");
   assert.strictEqual(baseline.plan(Object.keys(baseline.MARKETS), 2, baseline.cellsFor("v2")).length, 24);
+  assert.deepStrictEqual(baseline.plan(["lincoln"], 1, ["r10_c6000", "v2_default"]).map((j) => j.cell.id), ["r10_c6000", "v2_default"], "cell ids from --cells resolve to cells");
   assert.throws(() => baseline.parseArgs(["--replay", "--prompt", "v3"]), /--prompt must be/);
   assert.throws(() => baseline.parseArgs(["--replay", "--cells", "nope"]), /Unknown cell/);
   const seen = {};
@@ -487,4 +488,31 @@ test("qualification: a structurally complete opportunity is a discovery candidat
   const text = JSON.stringify(r.fields.topics);
   assert.ok(!/"(?:verified|publicationAuthorized)":true|"verification":"verified"/.test(text), "nothing in a card says verified or authorized");
   assert.ok(/not verified by you|source-reported, not verified/.test(al.systemPromptV2()), "the prompt itself says the pipeline treats source reports as unverified");
+});
+
+// ── The v1-versus-v2 benchmark review ──────────────────────────────────────────────────────────
+const bench = require("../scripts/research-benchmark-report");
+
+test("benchmark review: a hook is statistics-led when it pairs a figure with a market measure and names no development", () => {
+  const led = ["Why did Roseville pending sales fall to 130 in September?", "Prices slipped 4.5%, but sales jumped, so what does that mean for your asking price?", "Would you expect 2.8 months of supply to leave sellers in control?", "Sacramento County sales fell 8.8%, so why are prices still holding up?"];
+  const not = ["What could Amoruso Ranch's 312 new lots mean for Crocker Ranch sellers?", "What could Parkwood's 122 planned homes change for nearby sellers?", "Do builders really make Lincoln resales impossible to sell?", "Northlake filed 13 new-home applications, so how much competition is coming?", ""];
+  assert.deepStrictEqual(led.map(bench.statisticsLedHook), [true, true, true, true]);
+  assert.deepStrictEqual(not.map(bench.statisticsLedHook), [false, false, false, false, false]);
+});
+
+test("benchmark review: compares the saved v1 folder with the v2 folder and returns cost, diversity, authority, local relevance, statistics-led, rejections and the review sample", () => {
+  const fs = require("fs"), os = require("os"), path = require("path"), cp = require("child_process");
+  const d1 = fs.mkdtempSync(path.join(os.tmpdir(), "bm1-")), d2 = fs.mkdtempSync(path.join(os.tmpdir(), "bm2-")), out = path.join(d2, "review.md"), js = path.join(d2, "review.json");
+  const node = (args) => cp.execFileSync(process.execPath, args, { encoding: "utf8" });
+  node([path.join(__dirname, "..", "scripts", "research-baseline.js"), "--replay", "--markets", "lincoln,thin", "--repeats", "1", "--cells", "r10_c6000,r20_c6000", "--out", d1]);
+  node([path.join(__dirname, "..", "scripts", "research-baseline.js"), "--replay", "--prompt", "v2", "--markets", "lincoln,thin", "--repeats", "1", "--out", d2]);
+  node([path.join(__dirname, "..", "scripts", "research-benchmark-report.js"), "--v1", d1, "--v2", d2, "--out", out, "--json", js]);
+  const md = fs.readFileSync(out, "utf8"), res = JSON.parse(fs.readFileSync(js, "utf8"));
+  for (const section of ["# Article-Led v2 benchmark review", "## v1 against v2 (all markets)", "## By market", "### lincoln", "### thin", "## By configuration", "## v2 rejected sources", "## v1 rejected sources", "## Source inventory (v2)", "## The actual v2 opportunities, with their evidence"]) assert.ok(md.includes(section), section);
+  assert.ok(/Measured provider cost of the v2 runs: \$0\.0756/.test(md), "three v2 cells per market, two markets, $0.0126 each");
+  assert.deepStrictEqual([res.v1.runs, res.v2.runs, res.v1.opportunities, res.v2.opportunities], [4, 6, 20, 30]);
+  assert.strictEqual(res.v2.mean_distinct_developments_per_run, 5); assert.strictEqual(res.v2.share_exact_or_same_supported_by_sources_pct, 50, "the replay fixture's sources are about Lincoln, so the Colfax runs are correctly counted as unsupported");
+  assert.strictEqual(res.v1.share_exact_or_same_supported_by_sources_pct, null, "v1 labels were never checked");
+  assert.ok(/- Perspective: The development adds competing supply/.test(md));
+  assert.throws(() => bench.parseArgs(["--v1", "x"]), /--v2/);
 });

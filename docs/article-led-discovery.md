@@ -83,11 +83,14 @@ Each opportunity states what MLS evidence it has (`mlsEvidence`) and **never say
 
 ## Benchmarking v1 against v2
 
-Same markets, same controlled configurations, one search, retries off:
+Same markets, same controlled configurations, one search, retries off. The v1 reference is the completed 40-run baseline (its `r10_c6000` and `r20_c6000` cells, plus `as_shipped`).
 
 ```
-PERPLEXITY_API_KEY=placeholder NODE_USE_ENV_PROXY=1 node scripts/research-baseline.js --live --prompt v2          # 3 v2 cells x 4 markets x 2 repeats = 24 searches
-node scripts/research-baseline-inventory.js <folder> --sample-cells v2_r20_c6000_o5000 --out inventory.md
+# 1. the 24 v2 searches (3 cells x 4 markets x 2 repeats); writes runs.jsonl, discovery and cards per run, summary.md
+PERPLEXITY_API_KEY=placeholder NODE_USE_ENV_PROXY=1 node scripts/research-baseline.js --live --prompt v2 --out /tmp/rb-v2
+
+# 2. one review document comparing v2 with the saved v1 baseline folder
+node scripts/research-benchmark-report.js --v1 /tmp/rb-full --v2 /tmp/rb-v2 --out /tmp/benchmark-review.md --json /tmp/benchmark-review.json
 ```
 
-v2 cells: `v2_r20_c6000_o5000` (the approved starting point), `v2_r20_c6000_o2200` (only the output-token allowance differs), `v2_default` (v2 settings with its one retry). The v1 reference is the completed 40-run baseline. Compare, side by side with the review sample of actual opportunities (the folder also holds each run's delivered cards): distinct developments, relationships, primary and local sources, brokerage or agent sourcing, status support, evidence gaps, and cost. Do not rely on the proxy score alone.
+v2 cells: `v2_r20_c6000_o5000` (the approved starting point), `v2_r20_c6000_o2200` (only the output-token allowance differs), `v2_default` (v2 settings with its one retry). The review document holds: measured provider cost (total, per run, per opportunity, per configuration); development diversity; opportunities with an official source or a local news or government source; local relevance (the model's relationship label, and for v2 whether a source names the market); opportunities led by an external housing statistic (a hook that pairs a figure with a market measure and names no development, and opportunities whose sources are only statistics, brokerage or portal material); brokerage or agent reliance; rejected-source diagnostics by stage and code for both versions; the v2 source inventory; and the actual v2 opportunities with their evidence for a human to judge. The proxies are structural; the review sample is the real test of quality.

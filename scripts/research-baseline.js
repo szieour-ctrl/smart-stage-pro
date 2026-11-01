@@ -72,7 +72,7 @@ function parseArgs(argv) {
 /** The plan: every market x cell x repeat, in a fixed order. */
 function plan(markets, repeats, cells) {
   const out = [];
-  const list = cells && cells.length ? cells : CELLS.filter((c) => c.prompt !== "v2");
+  const list = cells && cells.length ? cells.map((c) => (typeof c === "string" ? CELLS.find((x) => x.id === c) : c)).filter(Boolean) : CELLS.filter((c) => c.prompt !== "v2");   // cell ids or cell objects
   markets.forEach((m) => list.forEach((c) => { for (let r = 1; r <= repeats; r++) out.push({ market: m, cell: c, repeat: r }); }));
   return out;
 }

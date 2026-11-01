@@ -224,6 +224,28 @@ function applyFreshness(cands, todayN) {
 }
 
 const escRe = (x) => String(x).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+// ── MLS evidence handoff ───────────────────────────────────────────────────────────────────────────────────────
+/**
+ * What the research can honestly say about the MLS evidence beside an opportunity. Never "complete": the report reader has known gaps and the structured
+ * evidence registry is a future PR, so even a full set of read figures is reported as read figures included, completeness not verified.
+ *   none_attached        no report was attached to this research
+ *   unreadable_or_missing  a report was attached but no usable figures were read from it
+ *   truncated            only some of the figures read from the report were carried to the opportunity
+ *   read_figures_included  every figure the reader produced was carried; whether the reader found every figure in the report is not verified
+ */
+function mlsEvidenceOf({ requested, available, included }) {
+  if (!requested) return { status: "none_attached", figuresAvailable: 0, included: 0, complete: false, note: "No MLS report was attached to this research." };
+  if (!available) return { status: "unreadable_or_missing", figuresAvailable: 0, included: 0, complete: false, note: "A report was attached but no usable figures were read from it." };
+  if (included < available) return { status: "truncated", figuresAvailable: available, included, complete: false, note: `Only ${included} of ${available} figures read from the report were carried to this opportunity.` };
+  return { status: "read_figures_included", figuresAvailable: available, included, complete: false, note: "Every figure the reader produced is included. Whether the reader found every figure in the report is not verified; a structured evidence registry is a later step." };
+}
+function mlsEvidenceNote(statuses) {
+  const bad = statuses.find((e) => e.status === "unreadable_or_missing") || statuses.find((e) => e.status === "truncated");
+  if (!bad) return null;
+  return bad.status === "unreadable_or_missing" ? "Your MLS report was attached, but no usable figures could be read from it for this research, so no MLS figures are available to these opportunities."
+    : `Only ${bad.included} of ${bad.figuresAvailable} figures read from your MLS report were carried into this research; the rest are not available to these opportunities.`;
+}
+
 /**
  * The model's geographic relationship is its own assertion. For exact_market and same_jurisdiction this checks it against the sources' own geography:
  * a kept source must name the selected market (or its ZIP; for same_jurisdiction also its city) in its source_geography, or failing that in its title,
@@ -340,6 +362,9 @@ function validateOpportunities(rawOpps, { today, geography, limits, diag, recomm
     const topic = {
       id: `t${n}`, origin: "web", kind: "market_update", question, whyItMatters: why, trendSignals, localIntent: true,
       scope: selected ? "selected" : "broader_context", scopeNote, sources: sourcesOut, event: null, keywordMatch: x.keyword_match === true, discovery: "v2",
+      // Compatibility with the legacy Planner and gate (PR 2): reportFirst makes the article's market statistics unverified text, so the only numbers a script may
+      // state are the MLS report's figures (none, when no report is attached). The structured evidence registry and Article-Led Planner are future PRs.
+      reportFirst: true, reportFigures: [], externalStatisticsAuthorized: false, mlsEvidence: mlsEvidenceOf({ requested: false }),
       editorial: {
         headline: rl.clean(x.headline, 160) || null, thesis, homeownerDecision: rl.clean(x.homeowner_decision, 240) || null, development, angle,
         geographicRelationship: relationship, routeToMarket: selected ? null : route, geographyCheck: geoCheck,
@@ -404,26 +429,62 @@ function partialNote(validation) {
   return `Only ${n} of ${TOPIC_COUNT} article-led opportunities were supported by the research this time.${why} This did not use a research session. You can run the research again, or create an MLS Market Trend Reel from your report.`;
 }
 
-// ── Rate limit on uncharged partial sessions (Sam, Oct 31, 2026) ───────────────────────────────────────────────
-// A partial Article-Led set costs provider money and uses no allowance, so it is limited server-side: five per user per rolling 24 hours, plus a monthly
-// protection limit (default 30 per rolling 30 days, a starting value to be calibrated from usage). Only partial Article-Led sets count: charged sets,
-// failed runs and legacy research do not.
+// ── Server-side admission: provider requests, uncharged partial results, concurrency (Sam, Oct 31, 2026) ────────────────────
+// Three protections, all decided on the server from the user's saved research rows, none of which charges a session:
+//   1. one Article-Led request in progress per user at a time (a second is refused),
+//   2. a provider-request limit that counts EVERY Article-Led request whatever its outcome (charged, partial, failed or still running):
+//      default 15 per rolling 24 hours and 100 per rolling 30 days. A finished run counts the provider requests it made (one, plus its retry);
+//      a run still in progress counts one. Withdrawn rows (below) do not count,
+//   3. the approved limit on uncharged partial results: 5 per rolling 24 hours and 30 per rolling 30 days.
+// The request limits are starting values to calibrate (AGENT_MARKETING_REQUEST_DAILY_LIMIT, ..._MONTHLY_LIMIT; the partial limits have their own settings).
+// Concurrency: the check before inserting cannot be atomic, so each request is checked again AFTER its row is saved, against the rows ordered before it
+// (created_at, then id). When two requests race, the earlier row stays and the later one is withdrawn (marked failed, uncharged, never dispatched), so
+// simultaneous requests cannot exceed a limit. Nothing here changes legacy research.
 const PARTIAL_DAILY_LIMIT = 5;
 const PARTIAL_MONTHLY_LIMIT = 30;
+const REQUEST_DAILY_LIMIT = 15;
+const REQUEST_MONTHLY_LIMIT = 100;
+const DAY_MS = 24 * 3600 * 1000, MONTH_MS = 30 * DAY_MS;
 function partialLimits(env) {
   return { daily: envInt(env, "AGENT_MARKETING_PARTIAL_DAILY_LIMIT", 1, 100) || PARTIAL_DAILY_LIMIT, monthly: envInt(env, "AGENT_MARKETING_PARTIAL_MONTHLY_LIMIT", 1, 1000) || PARTIAL_MONTHLY_LIMIT };
 }
-/** rows: this user's research rows from the last 30 days ({ created_at, charged_at, status, pathway | usage.pathway }). */
+function requestLimits(env) {
+  return { daily: envInt(env, "AGENT_MARKETING_REQUEST_DAILY_LIMIT", 1, 500) || REQUEST_DAILY_LIMIT, monthly: envInt(env, "AGENT_MARKETING_REQUEST_MONTHLY_LIMIT", 1, 5000) || REQUEST_MONTHLY_LIMIT };
+}
+const rowField = (r, k) => (r && r[k] != null ? r[k] : r && r.usage ? r.usage[k] : undefined);
+const isArticleLedRow = (r) => rowField(r, "pathway") === "article_led" && !(rowField(r, "withdrawn") === true || rowField(r, "withdrawn") === "true");
+const requestsOf = (r) => (r.status === "running" ? 1 : Math.max(1, Number(rowField(r, "attempts")) || 1));
+const ageOf = (r, nowMs) => nowMs - new Date(r.created_at).getTime();
+const orderedBefore = (a, b) => { const x = new Date(a.created_at).getTime(), y = new Date(b.created_at).getTime(); return x !== y ? x < y : String(a.id) < String(b.id); };
+
+/** Partial (uncharged, ready) Article-Led results in the window. */
 function partialLimit(rows, nowMs, env) {
   const lim = partialLimits(env);
-  const isPartial = (r) => r && r.status === "ready" && !r.charged_at && (r.pathway || (r.usage && r.usage.pathway)) === "article_led";
-  const mine = (Array.isArray(rows) ? rows : []).filter(isPartial);
-  const age = (r) => nowMs - new Date(r.created_at).getTime();
-  const day = mine.filter((r) => age(r) <= 24 * 3600 * 1000).length;
-  const month = mine.filter((r) => age(r) <= 30 * 24 * 3600 * 1000).length;
+  const mine = (Array.isArray(rows) ? rows : []).filter((r) => isArticleLedRow(r) && r.status === "ready" && !r.charged_at);
+  const day = mine.filter((r) => ageOf(r, nowMs) <= DAY_MS).length;
+  const month = mine.filter((r) => ageOf(r, nowMs) <= MONTH_MS).length;
   if (day >= lim.daily) return { blocked: true, scope: "daily", used: day, limit: lim.daily, message: `You have reached the limit of ${lim.daily} incomplete research results in 24 hours. Try again later, or create an MLS Market Trend Reel from your report.` };
   if (month >= lim.monthly) return { blocked: true, scope: "monthly", used: month, limit: lim.monthly, message: `You have reached this month's limit of ${lim.monthly} incomplete research results. Try again later, or create an MLS Market Trend Reel from your report.` };
   return { blocked: false, scope: null, used: day, limit: lim.daily, message: null };
+}
+
+/**
+ * admit(rows, me, nowMs, env, staleMs) → { blocked, status, code, scope, message }
+ * rows: this user's research rows from the last 30 days ({ id, created_at, status, charged_at, pathway|usage.pathway, attempts|usage.attempts, withdrawn }).
+ * me: null before the row is saved (every row counts); { id, created_at } after it is saved (only rows ordered before it count, so a race has one winner).
+ */
+function admit(rows, me, nowMs, env, staleMs) {
+  const all = (Array.isArray(rows) ? rows : []).filter(isArticleLedRow);
+  const ahead = me ? all.filter((r) => r.id !== me.id && orderedBefore(r, me)) : all;
+  if (ahead.some((r) => r.status === "running" && ageOf(r, nowMs) <= (staleMs || 6 * 60 * 1000))) return { blocked: true, status: 409, code: "already_running", scope: null, message: "A research request is already running. Please wait for it to finish." };
+  const lim = requestLimits(env);
+  const day = ahead.filter((r) => ageOf(r, nowMs) <= DAY_MS).reduce((n, r) => n + requestsOf(r), 0);
+  const month = ahead.filter((r) => ageOf(r, nowMs) <= MONTH_MS).reduce((n, r) => n + requestsOf(r), 0);
+  if (day + 1 > lim.daily) return { blocked: true, status: 429, code: "provider_request_limit", scope: "daily", message: `You have reached the limit of ${lim.daily} research requests in 24 hours. Please try again later.` };
+  if (month + 1 > lim.monthly) return { blocked: true, status: 429, code: "provider_request_limit", scope: "monthly", message: `You have reached this month's limit of ${lim.monthly} research requests. Please try again later.` };
+  const p = partialLimit(ahead, nowMs, env);
+  if (p.blocked) return { blocked: true, status: 429, code: "partial_limit", scope: p.scope, message: p.message };
+  return { blocked: false, status: 200, code: null, scope: null, message: null };
 }
 
 // ── Research depth for v2 (human-checkable measures; not a substitute for reading the opportunities) ───────────
@@ -461,6 +522,6 @@ function depthV2(topics) {
 module.exports = {
   TOPIC_COUNT, NEWS_DAYS, AUTHORITATIVE_DAYS, STATUS_CHECK_DAYS, RELATIONSHIPS, SELECTED_RELATIONSHIPS, STATUSES, ACCESS, ROLES, KINDS, AUTHORITATIVE_KINDS,
   articleLedEnabled, isArticleLed, systemPromptV2, retryInstructionV2, buildPayloadV2, extractOpportunities, extractLimits,
-  eligibleSource, applyFreshness, validateOpportunities, shouldCharge, partialNote, depthV2,
-  PARTIAL_DAILY_LIMIT, PARTIAL_MONTHLY_LIMIT, partialLimits, partialLimit,
+  eligibleSource, applyFreshness, validateOpportunities, shouldCharge, partialNote, depthV2, mlsEvidenceOf, mlsEvidenceNote,
+  PARTIAL_DAILY_LIMIT, PARTIAL_MONTHLY_LIMIT, REQUEST_DAILY_LIMIT, REQUEST_MONTHLY_LIMIT, partialLimits, requestLimits, partialLimit, admit,
 };

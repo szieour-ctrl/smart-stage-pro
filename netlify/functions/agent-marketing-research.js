@@ -234,12 +234,20 @@ exports.handler = async (event) => {
     if (Array.isArray(mine.data) && mine.data[0]) return reply(409, { error: "A research request is already running. Please wait for it to finish." });
     const session = await sessionFor(pool);
     if (!session.canStart) return reply(429, { error: `${who(session)} used all ${session.allowance} research sessions included this month.`, session });
-    // Article-Led: partial sets are uncharged, so they are rate limited here, on the server (Sam, Oct 31). Legacy research is not affected.
-    if (articleLed.isArticleLed(v.request, process.env)) {
+    // Article-Led (PR 2): server-side admission. Partial and failed runs are uncharged, so provider requests, partial results and concurrency are limited here,
+    // on the server. Legacy research is not affected. The check is repeated after the row is saved (below) so simultaneous requests cannot exceed a limit.
+    const alOn = articleLed.isArticleLed(v.request, process.env);
+    const ADMISSION_SELECT = "id,created_at,charged_at,status,pathway:usage->>pathway,attempts:usage->>attempts,withdrawn:usage->>withdrawn";
+    const loadAdmissionRows = async () => {
       const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-      const pr = await supabase("GET", "agent_marketing_research", null, `?user_id=eq.${userId}&created_at=gte.${encodeURIComponent(since)}&select=created_at,charged_at,status,pathway:usage->>pathway&order=created_at.desc&limit=300`);
-      const lim = articleLed.partialLimit(Array.isArray(pr.data) ? pr.data : [], Date.now(), process.env);
-      if (lim.blocked) return reply(429, { error: lim.message, code: "partial_limit", scope: lim.scope, mlsTrendAvailable: true });
+      const pr = await supabase("GET", "agent_marketing_research", null, `?user_id=eq.${userId}&created_at=gte.${encodeURIComponent(since)}&select=${ADMISSION_SELECT}&order=created_at.asc&limit=500`);
+      return pr.status < 300 && Array.isArray(pr.data) ? pr.data : null;
+    };
+    if (alOn) {
+      const rows = await loadAdmissionRows();
+      if (!rows) return reply(500, { error: "Something went wrong. Please try again." });
+      const adm = articleLed.admit(rows, null, Date.now(), process.env, STALE_RUNNING_MS);
+      if (adm.blocked) return reply(adm.status, { error: adm.message, code: adm.code, scope: adm.scope, mlsTrendAvailable: adm.code === "partial_limit" });
     }
     const needsWeb = v.request.dataSource !== "upload", needsClaude = v.request.dataSource !== "web";
     if ((needsWeb && !process.env.PERPLEXITY_API_KEY) || (needsClaude && !process.env.ANTHROPIC_API_KEY) || !process.env.INTERNAL_API_KEY) return reply(500, { error: "Research is not set up yet." });
@@ -255,10 +263,19 @@ exports.handler = async (event) => {
 
     const ins = await supabase("POST", "agent_marketing_research", {
       project_id: project.id, user_id: userId, pool_user_id: pool.poolUserId, mode: v.request.mode, geography: v.request.geography, audience: v.request.audience, focus: { ...v.request.focus, keywords: v.request.keywords, dataFocus: v.request.dataFocus, period: v.request.period },
-      data_source: v.request.dataSource, upload_refs: refs, status: "running", model: rl.researchModel(),
+      data_source: v.request.dataSource, upload_refs: refs, status: "running", model: rl.researchModel(), ...(alOn ? { usage: { pathway: "article_led" } } : {}),
     });
     const row = Array.isArray(ins.data) ? ins.data[0] : null;
     if (ins.status >= 300 || !row) { console.error("agent-marketing-research insert failed:", ins.status, JSON.stringify(ins.data).slice(0, 200)); return reply(500, { error: "Could not start the research" }); }
+    if (alOn) {
+      // Checked again now that the row exists: only rows ordered before this one count, so of two racing requests the earlier stays and this one is withdrawn.
+      const rows = await loadAdmissionRows();
+      const adm = rows ? articleLed.admit(rows, { id: row.id, created_at: row.created_at }, Date.now(), process.env, STALE_RUNNING_MS) : { blocked: true, status: 500, code: "admission_unavailable", scope: null, message: "Something went wrong. Please try again." };
+      if (adm.blocked) {
+        await supabase("PATCH", "agent_marketing_research", { status: "failed", error: `${adm.message} This did not use a session.`.slice(0, 300), charged_at: null, usage: { pathway: "article_led", withdrawn: true, withdrawnFor: adm.code }, updated_at: new Date().toISOString() }, `?id=eq.${row.id}`);
+        return reply(adm.status, { error: adm.message, code: adm.code, scope: adm.scope, mlsTrendAvailable: adm.code === "partial_limit" });
+      }
+    }
     const siteUrl = process.env.URL || `https://${event.headers && event.headers.host}`;
     try {
       await fetch(`${siteUrl}/.netlify/functions/agent-marketing-research-background`, {

@@ -235,6 +235,7 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
   const baseInput = payload && payload.input;
   let usage = { promptTokens: null, completionTokens: null, citationTokens: null, reasoningTokens: null, searchQueries: null, costUsd: null };
   let modelUsed = payload ? payload.model : null, grounded = null, attempts = 0, problems = [], validation = null, error = null, providerError = null;
+  let mlsNote = null;
   let reportNote = null, reportAttempts = 0, reframeAttempts = 0, reframed = 0, topicAnswer = null;
   // Diagnostics (PR 1): everything below that touches `diag*` only RECORDS. It is wrapped so a diagnostics error can never change the result.
   const safe = (fn) => { try { return fn(); } catch (err) { console.error(`[agent-marketing-research] diagnostics skipped: ${String(err && err.message).slice(0, 160)}`); return undefined; } };
@@ -304,11 +305,18 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
     }
     // Article-Led (v2): the confirmed MLS report is separate numerical evidence. It writes no topics, takes none of the five positions and triggers no
     // reframe. Its figures are attached to each opportunity the same way they are for a web topic in combined mode, so Reel creation keeps working.
-    if (alOn && dataSource === "both" && validation && validation.ok) {
-      try {
-        const ctx = reportTopics.buildContext(uploads, request);
-        if (ctx.reports.length) validation = { ...validation, topics: reportTopics.applyReportPrecedence(validation.topics, ctx) };
-      } catch (err) { console.error(`[agent-marketing-research] report figures not attached: ${String(err && err.message).slice(0, 200)}`); }
+    if (alOn && validation && validation.ok) {
+      // The MLS report is attached for compatibility with the legacy Planner (the existing applyReportPrecedence, which attaches figures and marks the topic reportFirst).
+      // Each opportunity says what MLS evidence it actually has: never "complete", and a missing or truncated report is stated as such.
+      let ctx = null;
+      if (dataSource === "both") {
+        try { ctx = reportTopics.buildContext(uploads, request); if (ctx.figures && ctx.figures.size) validation = { ...validation, topics: reportTopics.applyReportPrecedence(validation.topics, ctx) }; }
+        catch (err) { console.error(`[agent-marketing-research] report figures not attached: ${String(err && err.message).slice(0, 200)}`); }
+      }
+      const available = ctx && ctx.figures ? ctx.figures.size : 0;
+      validation = { ...validation, topics: validation.topics.map((t) => ({ ...t, mlsEvidence: articleLed.mlsEvidenceOf({ requested: dataSource === "both", available, included: Array.isArray(t.reportFigures) ? t.reportFigures.length : 0 }) })) };
+      const evNote = articleLed.mlsEvidenceNote(validation.topics.map((t) => t.mlsEvidence));
+      mlsNote = evNote;
     }
     if (!alOn && dataSource !== "web" && (dataSource === "upload" || (validation && validation.ok))) {
       // Topics from the agent's own report. In "both", a failure here is not fatal: the five web topics are still delivered, and the agent is told.
@@ -353,7 +361,10 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
   const costUsd = usage.costUsd != null ? usage.costUsd : estimated;
   // Article-Led billing and the partial-result note: one session is charged only when five qualifying opportunities are delivered.
   const alCharge = alOn ? articleLed.shouldCharge(validation) : true;
-  if (alOn && validation && validation.ok && !alCharge) reportNote = articleLed.partialNote(validation);
+  if (alOn && validation && validation.ok) {
+    if (!alCharge) reportNote = articleLed.partialNote(validation);
+    if (mlsNote) reportNote = [reportNote, mlsNote].filter(Boolean).join(" ");
+  }
   const discovery = safe(() => {
     const rec = diagLib.buildRecord({ request, dataSource, cfg, firstPayload, attempts: diagAttempts, usedAttempt, finalTopics: webTopics, today, codeVersion: e.COMMIT_REF || e.DEPLOY_ID || null });
     rec.selection = { rule: "strongest_valid_attempt", chosen: usedAttempt, order: "topics, articles, publishers, sources; tie = later answer", attempts: strengthLog };

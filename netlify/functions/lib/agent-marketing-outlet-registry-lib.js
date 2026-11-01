@@ -12,13 +12,15 @@
 
 const authority = require("./agent-marketing-source-authority-lib");
 
-const CLASSES = Object.freeze(["government_record", "official_financing", "original_local_reporting", "trade_aggregation", "brokerage_or_agent_commentary", "syndicated_release", "housing_research", "professional_commentary", "local_business_news", "association", "builder_developer", "portal", "unclassified"]);
+const CLASSES = Object.freeze(["government_record", "official_financing", "original_local_reporting", "trade_aggregation", "trade_publication", "brokerage_or_agent_commentary", "syndicated_release", "housing_research", "professional_commentary", "local_business_news", "association", "builder_developer", "portal", "unclassified"]);
 
 const REGISTRY = Object.freeze({
   original_local_reporting: ["kcra.com", "abc10.com", "fox40.com", "sacbee.com", "capradio.org", "goldcountrymedia.com", "nsarrow.com", "goldmountaincanews.com", "sacramentostandard.com", "mytownview.com", "auburnjournal.com", "rosevillepresstribune.com", "lincolnnews.com"],
   trade_aggregation: ["cahousingmarketnews.com", "news.theregistrysf.com", "theregistrysf.com", "therealdeal.com", "housingwire.com", "bisnow.com", "hoodline.com", "connectcre.com"],
   brokerage_or_agent_commentary: ["thegoolsbygroup.com", "agentkee.com", "nextregroup.com", "richandkatsoldthat.com", "suzannevolkman.com", "sellingplacer.com", "havengroupsf.com", "windermerecalocal.com", "foundspacesrealty.ca"],
   // Added Oct 31 after the compact benchmark. Distinguished carefully: none of these three earns original-reporting credit automatically.
+  // A trade publication reports on its industry (original trade reporting, not an aggregator, not local news): it gets no local-reporting credit automatically.
+  trade_publication: ["californiaconstructionnews.com"],
   professional_commentary: ["sacramentoappraisalblog.com"],          // an appraiser's own market commentary: a professional's view, not reporting
   local_business_news: ["whatnow.com"],                                // business-opening news network (What Now Media Group): local topic, but not established as original reporting
   syndicated_release: ["yahoo.com", "aol.com", "msn.com", "newsbreak.com", "morningstar.com", "finance.yahoo.com", "prnewswire.com", "businesswire.com", "globenewswire.com", "einpresswire.com"],
@@ -40,10 +42,23 @@ function registryClass(host) {
   return null;
 }
 
-/** classifyOutlet(hostOrUrl) -> { class, basis: "official_host"|"registry"|"pattern"|"none", host } */
-function classifyOutlet(hostOrUrl) {
+/**
+ * Legistar is a hosting platform many agencies use (<tenant>.legistar.com), so the HOST does not make a record official. It is official only when the tenant is
+ * established as an agency of the market's own hierarchy (sacramento.legistar.com for the City of Sacramento); otherwise it stays unclassified, never authoritative.
+ */
+function legistarTenant(host) { const m = /^([a-z0-9-]+)\.legistar\.com$/.exec(host); return m ? m[1] : null; }
+function tenantEstablished(tenant, hierarchy) {
+  if (!tenant || !hierarchy || !Array.isArray(hierarchy.levels)) return false;
+  const squash = (x) => String(x).toLowerCase().replace(/^(city|county) of /, "").replace(/ (city|county)$/, "").replace(/[^a-z0-9]/g, "");
+  return hierarchy.levels.some((l) => (l.level === "city" || l.level === "county" || (l.level === "market" && hierarchy.marketIsCity)) && [l.name, ...(l.names || [])].some((n) => squash(n) === tenant.replace(/[^a-z0-9]/g, "")));
+}
+
+/** classifyOutlet(hostOrUrl, { hierarchy }) -> { class, basis: "official_host"|"legistar_tenant"|"registry"|"pattern"|"none", host } */
+function classifyOutlet(hostOrUrl, ctx) {
   const host = hostOf(hostOrUrl);
   if (!host) return { class: "unclassified", basis: "none", host: "" };
+  const tenant = legistarTenant(host);
+  if (tenant) return tenantEstablished(tenant, ctx && ctx.hierarchy) ? { class: "government_record", basis: "legistar_tenant", host, tenant } : { class: "unclassified", basis: "legistar_tenant_not_established", host, tenant };
   const a = authority.publisherAuthority(host);
   if (a.tier === "official_government") return { class: "government_record", basis: "official_host", host };
   if (a.tier === "official_financing") return { class: "official_financing", basis: "official_host", host };
@@ -57,4 +72,4 @@ function classifyOutlet(hostOrUrl) {
 }
 const isOriginalLocalReporting = (c) => c && c.class === "original_local_reporting";
 
-module.exports = { CLASSES, REGISTRY, classifyOutlet, isOriginalLocalReporting };
+module.exports = { CLASSES, REGISTRY, classifyOutlet, isOriginalLocalReporting, legistarTenant, tenantEstablished };

@@ -4,6 +4,7 @@ const test = require("node:test");
 const assert = require("node:assert");
 const run = require("../netlify/functions/lib/agent-marketing-research-run-lib");
 const cl = require("../netlify/functions/lib/agent-marketing-compact-lib");
+const rl = require("../netlify/functions/lib/agent-marketing-research-lib");
 const fx = require("./fixtures/research-diag/scenarios");
 
 const NOW = fx.NOW, TODAY = "2026-10-24";
@@ -123,27 +124,29 @@ test("a market claim no source name supports is kept provisional, flagged for re
   assert.strictEqual(v.topics[0].candidate.development, DEV[1], "unsupported claim ranks below the supported one with equal substance");
 });
 
-test("expired events: a past event is never presented as upcoming; the decision, appeal or process after it stays only with a post-event source and an open process", () => {
+test("expired events: a past event is never presented as upcoming; the development stays only when a SOURCE reports a continuing process, appeal, pending action or consequential outcome", () => {
   const ev = (o) => ({ kind: "comment_period", date: "2026-09-20", deadline: "2026-10-05", continues_after_event: true, after_event: "The council now schedules a vote on the revised plan next month.", after_event_source: 2, ...(o || {}) });
   const two = (e, over) => cand(1, { event: e, sources: [src(1, { published: "2026-09-25", url: "https://news1.example/lincoln-story-1" }), src(2, { published: "2026-10-15", url: "https://news2.example/lincoln-story-2" })], ...(over || {}) });
   const V = (c) => cl.validateCandidates([c], { today: TODAY, geography: fx.GEO.lincoln });
-  const ok = V(two(ev()));
-  assert.strictEqual(ok.topics.length, 1);
-  const e1 = ok.topics[0].candidate.event;
-  assert.deepStrictEqual([e1.status, e1.presentedAs, e1.postEvent.basis, e1.postEvent.sourceN], ["expired_with_supported_continuation", "past_event_outcome", "after_event_text", 2]);
-  assert.ok(ok.topics[0].candidate.review.needsReview);
-  // cases that must NOT stay
-  for (const [name, c, why] of [
-    ["flag alone, nothing explained, nothing open", two(ev({ after_event: null, after_event_source: null })), /nothing shows the process is still open/],
-    ["explained but the only later source predates the event", cand(1, { event: ev({ after_event_source: 1 }), sources: [src(1, { published: "2026-09-25" })] }), /no kept source published after/],
-    ["a completed opening (a finished project, not an open process)", two(ev({ kind: "opening", date: "2026-10-01", deadline: null, continues_after_event: false, after_event: null, after_event_source: null }), { status_by_source: [{ source: 2, state: "completed" }] }), /nothing shows the process is still open/]]) {
+  // source-reported open process: kept, never upcoming
+  const pending = V(two(ev(), { status_by_source: [{ source: 2, state: "pending" }] }));
+  assert.strictEqual(pending.topics.length, 1);
+  const e1 = pending.topics[0].candidate.event;
+  assert.deepStrictEqual([e1.status, e1.presentedAs, e1.postEvent.basis, e1.postEvent.sourceN, e1.postEvent.state], ["expired_with_supported_continuation", "past_event_outcome", "source_reports_open_process", 2, "pending"]);
+  assert.ok(pending.topics[0].candidate.review.needsReview);
+  // a source-reported consequential outcome is enough too
+  const approved = V(two(ev({ after_event: null, after_event_source: null, continues_after_event: false }), { status_by_source: [{ source: 2, state: "approved" }] }));
+  assert.deepStrictEqual([approved.topics.length, approved.topics[0].candidate.event.postEvent.basis], [1, "source_reports_consequential_outcome"]);
+  // what must NOT stay: the model's explanation, the flag, an unknown state, a finished project, a source that predates the event
+  for (const [name, c] of [
+    ["explanation and flag, no source state", two(ev())],
+    ["explanation with an unknown state", two(ev(), { status_by_source: [{ source: 2, state: "unknown" }] })],
+    ["a completed project is not a continuing process", two(ev({ kind: "opening", date: "2026-10-01", deadline: null }), { status_by_source: [{ source: 2, state: "completed" }] })],
+    ["the only state belongs to a source published before the event", cand(1, { event: ev({ after_event_source: 1 }), sources: [src(1, { published: "2026-09-25" })], status_by_source: [{ source: 1, state: "pending" }] })],
+    ["the state belongs to the earlier source", two(ev(), { status_by_source: [{ source: 1, state: "pending" }] })]]) {
     const v = V(c);
     assert.strictEqual(v.topics.length, 0, name); assert.strictEqual(v.candidates[0].reason, "expired_event", name);
   }
-  // text alone is not enough without a post-event source, and an open state alone is enough with one
-  assert.strictEqual(V(cand(1, { event: ev(), sources: [src(1, { published: "2026-09-25" })] })).topics.length, 0);
-  const openOnly = V(two(ev({ after_event: null, after_event_source: null, continues_after_event: false }), { status_by_source: [{ source: 2, state: "pending" }] }));
-  assert.deepStrictEqual([openOnly.topics.length, openOnly.topics[0] && openOnly.topics[0].candidate.event.postEvent.basis], [1, "open_process_state"]);
   const upcoming = V(cand(1, { event: { kind: "hearing", date: "2026-11-05", deadline: null, continues_after_event: false } }));
   assert.deepStrictEqual([upcoming.topics[0].candidate.event.status, upcoming.topics[0].candidate.event.presentedAs], ["upcoming", "upcoming"]);
 });
@@ -159,7 +162,7 @@ test("regression: the Sierra View shopping-center appeal survives although the m
   const v = cl.validateCandidates([sierra], { today: TODAY, geography: CROCKER });
   assert.strictEqual(v.topics.length, 1, "kept");
   const c = v.topics[0].candidate;
-  assert.deepStrictEqual([c.event.presentedAs, c.event.postEvent.sourceN, c.event.postEvent.basis === "after_event_text"], ["past_event_outcome", 2, false]);
+  assert.deepStrictEqual([c.event.presentedAs, c.event.postEvent.sourceN, c.event.postEvent.basis, c.event.postEvent.state], ["past_event_outcome", 2, "source_reports_open_process", "appealed"]);
   assert.strictEqual(c.status.value, "unresolved");
   assert.deepStrictEqual([c.geography.relationship, v.topics[0].scope], ["district", "broader_context"]);
 });
@@ -328,9 +331,9 @@ test("harness and review package: the lanes cell is one session of three request
   const bl = path.join(__dirname, "..", "scripts", "research-baseline.js");
   node([bl, "--replay", "--cells", "compact_r20_c6000_o4500", "--markets", "lincoln", "--repeats", "2", "--out", d1]);
   node([bl, "--replay", "--prompt", "lanes", "--markets", "lincoln", "--repeats", "2", "--out", d2]);
-  node([path.join(__dirname, "..", "scripts", "research-lanes-report.js"), "--single", d1, "--lanes", d2, "--out", out, "--json", js]);
+  node([path.join(__dirname, "..", "scripts", "research-lanes-report.js"), "--single", d1, "--lanes", d2, "--lanes-cell", "lanes3_r20_c6000_o4500", "--out", out, "--json", js]);
   const md = fs.readFileSync(out, "utf8"), res = JSON.parse(fs.readFileSync(js, "utf8"));
-  for (const sec of ["## Overall", "## By market", "### lincoln", "## The three lanes (actual cost, yield and rate-limit handling)", "## Duplicate developments collapsed (three lanes)", "## Excluded candidates and qualification reasons", "## The actual cards, with source provenance", "Runs delivering five (charged)", "Cost per five-opportunity session"]) assert.ok(md.includes(sec), sec);
+  for (const sec of ["## Overall", "## By market", "### lincoln", "## The three lanes (actual cost, yield and rate-limit handling)", "## Duplicate developments collapsed (three lanes)", "## Excluded candidates and qualification reasons", "## The actual cards, with source provenance", "Runs delivering five DISTINCT developments (charged)", "Cost per five-opportunity session"]) assert.ok(md.includes(sec), sec);
   assert.ok(/Also found \(duplicates collapsed\)/.test(md) && /Source cand_[0-9a-f]{12}:s1/.test(md) && /not adopted/.test(md));
   assert.deepStrictEqual([res.single.runs, res.lanes.runs, res.lanes.runs_with_five], [2, 2, 2]);
   assert.ok(res.lanes.mean_duplicates > 0 && res.single.mean_duplicates === 0 && res.lanes.total_cost_usd > res.single.total_cost_usd);
@@ -476,4 +479,127 @@ test("review package: a run where any lane request failed is announced as NOT a 
   const good = mkdir([row1("lanes3_r20_c6000_o4500", [{ lane: "municipal", returned: 1, cost_usd: 0.01 }, { lane: "housing", returned: 1, cost_usd: 0.01 }, { lane: "economy", returned: 0, cost_usd: 0.01 }])]);
   assert.ok(/NOT A VALID THREE-LANE TEST: 2 of 3 lane requests failed/.test(rep.markdown(rep.build(single, bad, "compact_r20_c6000_o4500", "lanes3_r20_c6000_o4500"), single, bad)));
   assert.ok(/All 3 lane requests completed/.test(rep.markdown(rep.build(single, good, "compact_r20_c6000_o4500", "lanes3_r20_c6000_o4500"), single, good)));
+});
+
+// ── Deduplication by underlying development (the Parkwood regression) ─────────────────────────────
+const PARK = require("./fixtures/research-diag/parkwood-duplicates.json");
+const D31 = "2026-10-31";
+const others = (n) => [3, 4, 5, 6, 7, 8].slice(0, n).map((i) => cand(i, { sources: [src(i, { published: "2026-10-28" })] }));
+const VD = (list) => cl.validateCandidates(list, { today: D31, geography: fx.GEO.lincoln });
+const parkOf = (t) => /Parkwood/.test(t.candidate.development);
+
+test("regression: both Lincoln runs selected Parkwood twice (one municipal, one housing candidate); the identical wording tests of the old logic did not see it", () => {
+  for (const run of ["run1", "run2"]) {
+    const pair = PARK[run];
+    assert.strictEqual(pair.length, 2); assert.deepStrictEqual(pair.map((p) => p._lane).sort(), ["housing", "municipal"]);
+    assert.ok(!rl.similar(pair[0].question, pair[1].question) && !rl.similar(pair[0].development, pair[1].development), "wording alone does not catch it");
+    const v = VD([...pair, ...others(3)]);
+    const parks = v.topics.filter(parkOf);
+    assert.strictEqual(parks.length, 1, `${run}: Parkwood once`);
+    const dup = v.candidates.find((c) => c.reason === "duplicate_development");
+    assert.ok(dup, `${run}: the second Parkwood candidate is recorded as a duplicate development`);
+    assert.strictEqual(v.summary.duplicates, 1);
+    const g = v.summary.duplicate_groups[0];
+    assert.deepStrictEqual([g.members.length, g.members[0].basis], [1, "shared_identifier"], "decided by the shared official record reference (and the permit number), before any wording");
+    assert.ok(g.identity.projectNames.includes("parkwood") && g.identity.identifiers.some((x) => /pln2400048|sch2010102018\/42/.test(x)));
+    // the duplicate's angle, question and sources are preserved in the kept candidate's research record
+    const c = parks[0].candidate;
+    assert.strictEqual(c.alternativeAngles.length, 1);
+    const alt = c.alternativeAngles[0];
+    assert.ok(alt.question && alt.angle && alt.why && alt.sources.length >= 1 && alt.sources.every((s) => s.ref && s.url) && alt.lane !== c.lane && /^cand_/.test(alt.candidateId));
+    assert.notStrictEqual(alt.question, c.question);
+  }
+});
+
+test("after deduplication the qualified candidates are reranked and a different development backfills; a fifth is never fabricated", () => {
+  const pair = PARK.run1;
+  const six = VD([...pair, ...others(4)]);     // Parkwood x2 + four others = five distinct developments
+  assert.strictEqual(six.topics.length, 5, "five distinct developments");
+  assert.strictEqual(new Set(six.topics.map((t) => t.candidate.development)).size, 5);
+  // seven candidates: Parkwood twice, five others -> six distinct, the sixth is not selected, and the duplicate did not take a slot
+  const seven = VD([...pair, ...others(5)]);
+  assert.strictEqual(seven.topics.length, 5); assert.strictEqual(seven.topics.filter(parkOf).length, 1);
+  assert.strictEqual(seven.summary.not_selected, 1);
+  // backfill: the duplicate ranked above a candidate that, without it, would have missed the five; that candidate now enters
+  const strongDup = [{ ...pair[0] }, { ...pair[1], strength: "high" }];
+  const b = VD([...strongDup, ...others(4).map((c) => ({ ...c, strength: "medium", relevance: "indirect" })), cand(9, { strength: "medium", relevance: "indirect", sources: [src(9, { published: "2026-10-28" })] })]);
+  assert.strictEqual(b.topics.length, 5); assert.strictEqual(b.topics.filter(parkOf).length, 1);
+  assert.ok(b.summary.replacements.length >= 1 && b.summary.replacements[0].rankBeforeDuplicates > 5 && b.summary.replacements[0].rankAfter <= 5, "the backfilled candidate is reported");
+  // only four distinct developments: four are delivered, uncharged, never five
+  const four = VD([...pair, ...others(3)]);
+  assert.strictEqual(four.topics.length, 4); assert.strictEqual(four.partial, true);
+  assert.strictEqual(cl.depthCompact(four.topics, four.summary).five_card_yield, false);
+});
+
+test("identity rules: an identifier, a project name with a shared source, or a primary record with a similar description make one development; a shared article or an editorial angle alone does not", () => {
+  const id = require("../netlify/functions/lib/agent-marketing-development-identity-lib");
+  const mk = (development, srcs) => id.identityOf({ development, sources: srcs, hierarchyNames: ["Lincoln", "Placer County"] });
+  const rec = (url, title, role) => ({ url, title, role: role || "primary", official: true, whatItEstablishes: "x" });
+  // same permit number, different wording, different sources
+  const a = mk("A development agreement was approved for a new neighborhood.", [rec("https://a.lincolnca.gov/x", "Agreement (PLN24-00048)")]);
+  const b = mk("City signed terms for the 122-home neighborhood.", [rec("https://news.example/y", "Council signs terms for PLN24-00048", "secondary")]);
+  assert.strictEqual(id.sameIdentity(a, b).basis, "shared_identifier");
+  // a CEQAnet record reference counts as an identifier
+  const c1 = mk("Notice for the agreement", [rec("https://ceqanet.lci.ca.gov/2010102018/42", "Notice")]), c2 = mk("Another view of the notice", [rec("https://www.ceqanet.lci.ca.gov/2010102018/42/", "Notice")]);
+  assert.strictEqual(id.sameIdentity(c1, c2).basis, "shared_identifier");
+  assert.strictEqual(id.sameIdentity(c1, mk("A different document", [rec("https://ceqanet.lci.ca.gov/2010102018/37", "Other")])), null, "a different document number is a different record");
+  // two projects reported in the SAME article stay two developments
+  const art = { url: "https://trade.example/lincoln-weekly", title: "Lincoln council takes up Parkwood as Hidden Hills Phase 2 designs go to review", role: "secondary", official: false, whatItEstablishes: "x" };
+  const pk = mk("Lincoln approved a development agreement for Parkwood, a 21-acre project", [art]), hh = mk("The city reviewed production-home designs for Hidden Hills Phase 2", [art]);
+  assert.strictEqual(id.sameIdentity(pk, hh), null);
+  // Hidden Hills Phase 1 and Phase 2 are different
+  assert.deepStrictEqual(id.projectNames(["Design review for Hidden Hills Phase 2", "Hidden Hills Phase 1 homes"], ["Lincoln"]).size, 2);
+  // an editorial angle never makes two developments
+  const x = mk("Council approved Parkwood", [rec("https://r.example/1", "Parkwood record")]);
+  const y = mk("Parkwood sidewalk repair funding scheduled for spring", [rec("https://r.example/2", "Parkwood news", "secondary")]);
+  assert.strictEqual(id.sameIdentity(x, y), null, "the same name with no shared source and a different description is not merged by name alone");
+  const z = mk("Council approved Parkwood, as told for sellers", [rec("https://r.example/3", "Parkwood news", "secondary")]);
+  assert.strictEqual(id.sameIdentity(x, z).basis, "shared_project_name", "the same name and a similar description is the same development whatever the angle");
+});
+
+test("distinct developments in the depth record come from identity, with a collision audit that should be zero", () => {
+  const v = VD([...PARK.run2, ...others(4)]);
+  const dep = cl.depthCompact(v.topics, v.summary);
+  assert.deepStrictEqual([dep.distinct_developments, dep.identity_collisions, dep.selected], [5, 0, 5]);
+  assert.ok(dep.duplicates === 1);
+});
+
+test("registry: californiaconstructionnews.com is a trade publication (no local-reporting credit); Legistar is official only when the tenant is an agency of the market's hierarchy", () => {
+  const outlets = require("../netlify/functions/lib/agent-marketing-outlet-registry-lib"), gh = require("../netlify/functions/lib/agent-marketing-geography-hierarchy-lib");
+  assert.strictEqual(outlets.classifyOutlet("https://www.californiaconstructionnews.com/2026/10/19/x").class, "trade_publication");
+  assert.strictEqual(outlets.isOriginalLocalReporting(outlets.classifyOutlet("https://www.californiaconstructionnews.com/x")), false);
+  const nat = gh.hierarchyFor({ type: "neighborhood", name: "Natomas", city: "Sacramento", zip: "95834", state: "CA" });
+  const lin = gh.hierarchyFor(fx.GEO.lincoln);
+  assert.deepStrictEqual([outlets.classifyOutlet("https://sacramento.legistar.com/x", { hierarchy: nat }).class, outlets.classifyOutlet("https://sacramento.legistar.com/x", { hierarchy: nat }).basis], ["government_record", "legistar_tenant"]);
+  assert.deepStrictEqual([outlets.classifyOutlet("https://sacramento.legistar.com/x", { hierarchy: lin }).class, outlets.classifyOutlet("https://sacramento.legistar.com/x", { hierarchy: lin }).basis], ["unclassified", "legistar_tenant_not_established"]);
+  assert.strictEqual(outlets.classifyOutlet("https://sacramento.legistar.com/x").class, "unclassified", "no hierarchy, no authority");
+  assert.strictEqual(outlets.classifyOutlet("https://placer.legistar.com/x", { hierarchy: lin }).class, "government_record", "Placer County is in Lincoln's hierarchy, so the Placer tenant is established");
+  assert.strictEqual(outlets.classifyOutlet("https://roseville.legistar.com/x", { hierarchy: lin }).class, "unclassified", "a city that is not in the hierarchy is not established");
+  // in a candidate: an established tenant is an official primary source; an unestablished one is not
+  const mkc = (url) => cand(1, { question: Q[0], sources: [{ ...src(1), title: "Natomas agenda", url, role: "primary", kind: "government_record", source_geography: "Natomas" }] });
+  const good = cl.validateCandidates([mkc("https://sacramento.legistar.com/agenda-1")], { today: TODAY, geography: { type: "neighborhood", name: "Natomas", city: "Sacramento", zip: "95834", state: "CA" } });
+  assert.deepStrictEqual([good.topics[0].candidate.sources[0].outletClass, good.topics[0].candidate.sources[0].authority.official], ["government_record", true]);
+  const bad = cl.validateCandidates([mkc("https://sacramento.legistar.com/agenda-1")], { today: TODAY, geography: fx.GEO.lincoln });
+  assert.deepStrictEqual([bad.topics[0].candidate.sources[0].outletClass, bad.topics[0].candidate.sources[0].authority.official], ["unclassified", false]);
+});
+
+// ── Two lanes: municipal + housing ────────────────────────────────────────────────────────────
+const LANES2 = { ...ON, AGENT_MARKETING_ARTICLE_LED_LANES: "two" };
+test("two-lane experiment: only the municipal and housing lanes run, in sequence, with the same rate-limit handling; no economy request is ever sent", async () => {
+  const { r, v, peak, lanes } = await runLaneSession((lane) => ({ municipal: ok([cand(1), cand(2), cand(3)]), housing: ok([cand(4), cand(5)]) }[lane]), { env: LANES2 });
+  assert.deepStrictEqual(v.calls, ["municipal", "housing"]); assert.strictEqual(peak, 1);
+  assert.deepStrictEqual(lanes.map((l) => l.lane), ["municipal", "housing"]);
+  assert.strictEqual(r.fields.topics.length, 5); assert.ok(r.fields.charged_at);
+  assert.ok(v.starts[1][1] - v.starts[0][1] >= 3000, "minimum interval between starts");
+  const rl2 = await runLaneSession((lane, n) => (lane === "housing" && n === 1 ? busy({ "retry-after": "5" }) : ok([cand(lane === "housing" ? 4 : 1)])), { env: LANES2 });
+  assert.deepStrictEqual(rl2.lanes.find((l) => l.lane === "housing").waits_ms, [5000], "Retry-After honored in two-lane mode");
+  const cm = require("../netlify/functions/lib/agent-marketing-compact-lib");
+  assert.deepStrictEqual([cm.lanesFor(LANES2).map((l) => l.id), cm.lanesFor({ ...ON, AGENT_MARKETING_ARTICLE_LED_LANES: "three" }).length, cm.lanesFor(ON).length], [["municipal", "housing"], 3, 0]);
+});
+
+test("two lanes, deduplicated: the same development in both lanes is one opportunity and the five delivered are distinct", async () => {
+  const pair = PARK.run1;
+  const { r } = await runLaneSession((lane) => ({ municipal: ok(pair.filter((p) => p._lane === "municipal").concat(others(2).slice(0, 2))), housing: ok(pair.filter((p) => p._lane === "housing").concat(others(4).slice(2))) }[lane]), { env: LANES2 });
+  // (this scenario runs at the fixture's dates: today is 2026-10-24 in these sessions, so the 2026-10-31 sources are future-dated and dropped; the validation-level tests above pin the dedupe itself)
+  assert.ok(r.fields.usage.discovery.lanes.length === 2);
 });

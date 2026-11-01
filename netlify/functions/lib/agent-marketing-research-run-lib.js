@@ -283,7 +283,7 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
           // background function's limit, and independent per-lane state. A lane that did not succeed is never read as a successful lane with zero candidates.
           const ls = laneRunner.laneSettings(e);
           const call = callFn || module.exports.callPerplexity;
-          const ran = await laneRunner.runLanes({ lanes: compact.LANES, build: (lane) => compact.buildPayloadCompact({ request, today, env: e, lane }), call, apiKey, sleep: sleepFn || defaultSleep, clock: clockFn, rand: randFn, settings: ls });
+          const ran = await laneRunner.runLanes({ lanes: compact.lanesFor(e), build: (lane) => compact.buildPayloadCompact({ request, today, env: e, lane }), call, apiKey, sleep: sleepFn || defaultSleep, clock: clockFn, rand: randFn, settings: ls });
           laneRaw = ran.results.map((x) => {
             const base = { lane: x.lane, run: x, state: x.state, usage: null, topics: [], text: "", resp: x.resp, grounded: null, parseError: null };
             if (x.state !== "success") return base;
@@ -317,7 +317,7 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
           if (lanesMode) {
             const merged = laneRaw.flatMap((l) => l.topics);
             grounded = laneRaw.some((l) => l.grounded);
-            validation = compact.validateCandidates(merged, { today, geography: request.geography, diag: attemptDiag, maxCandidates: compact.MAX_CANDIDATES * compact.LANES.length });
+            validation = compact.validateCandidates(merged, { today, geography: request.geography, diag: attemptDiag, maxCandidates: compact.MAX_CANDIDATES * compact.lanesFor(e).length });
             problems = validation.problems;
           } else {
           const g = groundTopics(cmp ? compact.extractCandidates(text) : alOn ? articleLed.extractOpportunities(text) : rl.extractTopics(text), resp, attemptDiag);

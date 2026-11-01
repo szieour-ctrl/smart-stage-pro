@@ -21,20 +21,22 @@ function load(dir, cell) {
     const base = `${r.market}-${r.cell}-${r.repeat}`;
     const d = readJson(path.join(dir, `${base}.discovery.json`)) || {};
     const a = (d.attempts || [])[0] || {};
-    return { ...r, cards: readJson(path.join(dir, `${base}.cards.json`)) || [], topicsLog: a.topics || [], lanes: d.lanes || null };
+    return { ...r, cards: readJson(path.join(dir, `${base}.cards.json`)) || [], topicsLog: a.topics || [], lanes: d.lanes || null, selection: (d.candidate_selection && d.candidate_selection.summary) || null };
   });
 }
 
 function stats(runs) {
   const v = (r) => r.v2 || {};
   const delivered = runs.map((r) => r.delivered || 0);
+  // five DISTINCT developments (identity-based; older records without it fall back to the delivered count)
+  const distinctN = runs.map((r) => (r.v2 && r.v2.distinct_developments != null ? Math.min(r.v2.distinct_developments, r.delivered || 0) : r.delivered || 0));
   return {
     runs: runs.length, ready: runs.filter((r) => r.status === "ready").length,
     mean_returned: mean(runs.map((r) => v(r).candidates_returned)), mean_qualified: mean(runs.map((r) => v(r).qualified)), mean_delivered: mean(delivered),
-    runs_with_five: delivered.filter((n) => n >= 5).length, charged: runs.filter((r) => r.charged).length, mean_duplicates: mean(runs.map((r) => v(r).duplicates || 0)),
+    runs_with_five: distinctN.filter((n) => n >= 5).length, mean_distinct: mean(distinctN), identity_collisions: sum(runs.map((r) => (r.v2 && r.v2.identity_collisions) || 0)), duplicates_total: sum(runs.map((r) => (r.v2 && r.v2.duplicates) || 0)), charged: runs.filter((r) => r.charged).length, mean_duplicates: mean(runs.map((r) => v(r).duplicates || 0)),
     total_cost_usd: Math.round(sum(runs.map((r) => r.cost_usd)) * 1e4) / 1e4, mean_cost_per_run_usd: mean(runs.map((r) => r.cost_usd)),
     cost_per_delivered_usd: sum(delivered) ? sum(runs.map((r) => r.cost_usd)) / sum(delivered) : null,
-    cost_per_five_yield_usd: delivered.filter((n) => n >= 5).length ? sum(runs.map((r) => r.cost_usd)) / delivered.filter((n) => n >= 5).length : null,
+    cost_per_five_yield_usd: distinctN.filter((n) => n >= 5).length ? sum(runs.map((r) => r.cost_usd)) / distinctN.filter((n) => n >= 5).length : null,
     distinct_developments: mean(runs.map((r) => v(r).distinct_developments)), market_scope: mean(runs.map((r) => v(r).market_scope)),
     name_found: mean(runs.map((r) => v(r).name_found_in_source)), geography_unsupported: mean(runs.map((r) => v(r).geography_unsupported)),
     official_primary: mean(runs.map((r) => v(r).with_official_primary)), original_local: mean(runs.map((r) => v(r).with_original_local_reporting)), trade_only_or_agg: mean(runs.map((r) => v(r).with_trade_aggregation)),
@@ -42,7 +44,7 @@ function stats(runs) {
   };
 }
 const ROWS = [["Runs", "runs", 0], ["Runs ready", "ready", 0], ["Candidates returned (mean/run)", "mean_returned", 1], ["Qualified, after duplicates (mean/run)", "mean_qualified", 1], ["Delivered (mean/run)", "mean_delivered", 1],
-  ["Runs delivering five (charged)", "runs_with_five", 0], ["Duplicates collapsed (mean/run)", "mean_duplicates", 1], ["Distinct developments (mean/run)", "distinct_developments", 1],
+  ["Runs delivering five DISTINCT developments (charged)", "runs_with_five", 0], ["Distinct developments delivered (mean/run)", "mean_distinct", 2], ["Duplicate developments collapsed (total)", "duplicates_total", 0], ["Identity collisions left in the delivered five (audit, should be 0)", "identity_collisions", 0], ["Duplicates collapsed (mean/run)", "mean_duplicates", 1], ["Distinct developments (mean/run)", "distinct_developments", 1],
   ["Market-scope candidates (mean/run)", "market_scope", 1], ["Market name found in a source (mean/run)", "name_found", 1], ["Geography unsupported, provisional (mean/run)", "geography_unsupported", 1],
   ["With an official primary source (mean/run)", "official_primary", 1], ["With original local reporting (mean/run)", "original_local", 1], ["Strong or directly relevant (mean/run)", "strong_or_direct", 1],
   ["Needs review (mean/run)", "needs_review", 1], ["Status unresolved (mean/run)", "unresolved", 1], ["Provider cost, total $", "total_cost_usd", 4], ["Provider cost per run $", "mean_cost_per_run_usd", 4],
@@ -94,6 +96,11 @@ function markdown(b, singleDir, lanesDir) {
   o.push("", "## Duplicate developments collapsed (three lanes)", "");
   const dups = L.flatMap((r) => r.topicsLog.filter((t) => /^duplicate_|^overlaps_/.test(t.code || "")).map((t) => ({ r, t })));
   if (!dups.length) o.push("None."); else dups.forEach(({ r, t }) => o.push(`- ${r.market} #${r.repeat}: "${t.hook}" (lane ${t.lane || "n/a"}) dropped as ${t.code}: ${t.detail}`));
+  o.push("", "## Distinct-development identities (the delivered candidates)", "", "Each delivered candidate's identity: project names and identifiers. Two delivered candidates sharing an identity would be a defect.", "");
+  [["Single pass", S], ["Lanes", L]].forEach(([label, runs]) => runs.forEach((r) => { o.push(`**${label}, ${r.market} #${r.repeat}** (${r.delivered} delivered, ${r.v2 && r.v2.distinct_developments != null ? r.v2.distinct_developments : "n/a"} distinct)`); r.cards.forEach((c) => o.push(`- ${c.candidateId} [${c.lane || "single"}] ${c.development.slice(0, 90)} | names: ${(c.identity && c.identity.projectNames.join(", ")) || "n/a"} | ids: ${(c.identity && c.identity.identifiers.join(", ")) || "none"}`)); o.push(""); }));
+  o.push("## Duplicate groups and replacement candidates", "");
+  L.forEach((r) => { const sel = r.selection || {}; (sel.duplicate_groups || []).forEach((g) => o.push(`- ${r.market} #${r.repeat}: kept ${g.kept} [${g.keptLane}]${g.selected ? "" : " (not selected)"} absorbed ${g.members.map((m) => `${m.lane || "?"} "${m.hook}" (${m.basis})`).join("; ")}`)); (sel.replacements || []).forEach((x) => o.push(`- ${r.market} #${r.repeat}: replacement ${x.candidateId} [${x.lane}] "${x.hook}" moved from rank ${x.rankBeforeDuplicates} to ${x.rankAfter} after duplicates were removed`)); });
+  if (!L.some((r) => r.selection && ((r.selection.duplicate_groups || []).length || (r.selection.replacements || []).length))) o.push("None in these runs.");
   o.push("", "## Excluded candidates and qualification reasons", "", "Every candidate that was not delivered, with the reason code, for both designs.", "");
   [["Single pass", S], ["Three lanes", L]].forEach(([label, runs]) => {
     o.push(`### ${label}`, "");
@@ -111,7 +118,7 @@ function markdown(b, singleDir, lanesDir) {
 }
 
 function parseArgs(argv) {
-  const a = { singleCell: "compact_r20_c6000_o4500", lanesCell: "lanes3_r20_c6000_o4500" };
+  const a = { singleCell: "compact_r20_c6000_o4500", lanesCell: "lanes2_r20_c6000_o4500" };
   for (let i = 0; i < argv.length; i++) { const k = argv[i];
     if (k === "--single") a.single = argv[++i]; else if (k === "--lanes") a.lanes = argv[++i]; else if (k === "--single-cell") a.singleCell = argv[++i]; else if (k === "--lanes-cell") a.lanesCell = argv[++i];
     else if (k === "--out") a.out = argv[++i]; else if (k === "--json") a.json = argv[++i]; }

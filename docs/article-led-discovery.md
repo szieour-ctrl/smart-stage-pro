@@ -124,6 +124,23 @@ PERPLEXITY_API_KEY=placeholder NODE_USE_ENV_PROXY=1 node scripts/research-baseli
 node scripts/research-lanes-report.js --single /tmp/rb-compact --lanes /tmp/rb-lanes --out /tmp/lanes-review.md --json /tmp/lanes-review.json
 ```
 
+## Two-lane confirmation, deduplication by development identity, source-supported events (Oct 31, after the valid three-lane benchmark)
+
+* **Decision.** The economy lane is out of the next experiment (it never created a fifth opportunity and supplied the generic mortgage-rate and affordability topics; genuinely relevant local economic developments found by the two remaining lanes are not excluded). `AGENT_MARKETING_ARTICLE_LED_LANES=two` runs Municipal & Local Developments then Housing & New Construction, sequentially, with the same rate-limit handling; harness cell `lanes2_r20_c6000_o4500` (`--prompt lanes2`). `three` remains available for comparison. Billing and limits are unchanged.
+* **The deduplication defect.** Both Lincoln three-lane runs delivered Parkwood twice (a municipal and a housing candidate about the same 122-home development agreement), and the benchmark reported zero duplicates, because the old test compared wording only. A five-opportunity yield now means five DISTINCT developments.
+* **Identity (`agent-marketing-development-identity-lib.js`).** Two candidates are the same development when they share (1) an identifier: a permit, application, case or ordinance number, or an official record reference such as a CEQAnet record (`<SCH number>/<document number>`); or (2) a distinctive project name (not a place or generic planning word; a "Phase 2" qualifier is part of the name) plus a shared source or a similar description; or (3) a primary or official record plus a similar description. A shared secondary article alone is not enough (one article reports several projects: Parkwood and Hidden Hills stay apart), and an editorial angle never makes two developments. Rules run strongest candidate first, so the best version is kept.
+* **Preserved for Stage B.** The duplicate's question, angle, why, gap, strength, relevance, status, lane and source references stay in the kept candidate's record as `alternativeAngles`; `alsoFoundIn` lists what was absorbed and on what basis.
+* **Rerank and backfill.** Duplicates are removed before the five are chosen, so the next distinct qualified candidate backfills and is reported (`summary.replacements`, with its rank before and after). If fewer than five distinct developments qualify, fewer are delivered (never fabricated), uncharged, with the MLS option. `summary.duplicate_groups` lists every group; `depth_v2.distinct_developments` is computed from identity with an `identity_collisions` audit that must be 0.
+* **Past events (source-supported only).** A past event is never upcoming. Its development stays only when a kept source published on or after the event reports a continuing process, pending action, appeal or consequential outcome as that source's own state in `status_by_source` (proposed, pending, appealed, under construction, approved, denied, withdrawn). The model's `after_event` text and `continues_after_event` never qualify by themselves; `completed` and `unknown` do not qualify. Regressions: Sierra View (kept: approved and appealed sources after the meeting) and Hidden Hills (dropped when no source reports an outcome).
+* **Publisher registry.** `californiaconstructionnews.com` is a `trade_publication` (no local-reporting credit). A `<tenant>.legistar.com` record is official only when the tenant is an agency in the market's own hierarchy (sacramento.legistar.com for Natomas or Sacramento; placer.legistar.com for a Placer County market); otherwise it stays `unclassified`. Uncertain hosts are never granted authority automatically.
+
+Confirmation run and package (provider-access session):
+
+```
+PERPLEXITY_API_KEY=placeholder NODE_USE_ENV_PROXY=1 node scripts/research-baseline.js --live --prompt lanes2 --repeats 2 --out /tmp/rb-lanes2l
+node scripts/research-lanes-report.js --single /tmp/rb-compact --lanes /tmp/rb-lanes2l --out /tmp/lanes2-review.md --json /tmp/lanes2-review.json
+```
+
 ## Benchmarking v1 against v2
 
 Same markets, same controlled configurations, one search, retries off. The v1 reference is the completed 40-run baseline (its `r10_c6000` and `r20_c6000` cells, plus `as_shipped`).

@@ -18,6 +18,7 @@ const auth = require("./agent-marketing-source-authority-lib");
 const al = require("./agent-marketing-article-led-lib");
 const gh = require("./agent-marketing-geography-hierarchy-lib");
 const outlets = require("./agent-marketing-outlet-registry-lib");
+const ident = require("./agent-marketing-development-identity-lib");
 
 const DESIGN = "compact_v1";
 const MAX_CANDIDATES = 8;
@@ -35,7 +36,10 @@ const LANES = Object.freeze([
   { id: "housing", label: "Housing and New Construction", where: "builders and subdivisions, specific plans and development agreements, final maps, housing policy and housing-element actions, and consequential new-versus-resale competition for existing homeowners; builder and development publications and municipal development records" },
   { id: "economy", label: "Financing and Local Economic Forces", where: "mortgage and financing conditions, employment and major employers, commercial and job-center growth, economic and fee policy, and other meaningful developments that affect homeowner decisions; Freddie Mac, the Federal Reserve, Census, California public data, employment reports, and local business reporting" },
 ]);
-const lanesOn = (env) => String((env || process.env).AGENT_MARKETING_ARTICLE_LED_LANES || "").trim().toLowerCase() === "three";
+/** AGENT_MARKETING_ARTICLE_LED_LANES: "two" (municipal + housing: the confirmation experiment), "three" (the earlier experiment), anything else = the single pass. */
+const laneMode = (env) => { const v = String((env || process.env).AGENT_MARKETING_ARTICLE_LED_LANES || "").trim().toLowerCase(); return v === "two" || v === "three" ? v : null; };
+const lanesFor = (env) => (laneMode(env) === "two" ? LANES.filter((l) => l.id === "municipal" || l.id === "housing") : laneMode(env) === "three" ? LANES.slice() : []);
+const lanesOn = (env) => laneMode(env) !== null;
 const designOf = (env) => (String((env || process.env).AGENT_MARKETING_ARTICLE_LED_DESIGN || "").trim().toLowerCase() === "detailed" ? "detailed" : "compact");
 const isCompact = (request, env) => al.isArticleLed(request, env) && designOf(env) === "compact";
 /** Ordinary retry for Article-Led research: off by default (Sam, Oct 31). AGENT_MARKETING_ARTICLE_LED_RETRIES (0 to 2) turns it on for measurement. */
@@ -57,7 +61,7 @@ function systemPromptCompact(lane) {
     "",
     "SOURCES. Use only pages you found, with a real title and URL. Never invent a URL, date, number or event. Each source has role (primary: the original or official record; secondary: reporting or analysis of it; background: older context), kind (government_record, local_news, trade_news, housing_research, financing_economic, builder_developer, association, brokerage_or_agent, syndicated, other), published date, source_geography (the area that page is about) and reporting_period (the period its information or event covers, or \"unknown\"). what_it_establishes: 15 words or fewer, in your words, no quotation. A source must be an article, report, record or announcement. Never use a listing or property page, a community landing page, an agent's, team's or brokerage's home or sales page, an MLS or portal search page, or any page whose main content is homes for sale. A blog is fine wherever it is published when it reports or analyzes something about the market.",
     "",
-    "DATES AND EVENTS. News and commentary must be published within the last 60 days. Government and other authoritative primary records may be up to 12 months old when they establish a relevant development or an ongoing action. An older primary record may appear only as background, and only when a newer official source states explicitly that it confirms that record: on the newer source set confirms to the number of the older source and write confirmation_basis (what shows it is the same item, for example the same project or ordinance number). action_date is when the development happened or was decided. If the candidate concerns a meeting, workshop, hearing, opening or public-comment period, fill event with its kind, date and deadline. Never present a past event or an expired comment deadline as upcoming. A past event is not upcoming, but a consequential decision, appeal, project or unresolved process that followed it can still be a candidate. Whenever event is filled and the date has passed, say what happened or what comes next in after_event (25 words or fewer) and give after_event_source, the number of a source published on or after the event that reports it, and set continues_after_event true when a process is still open. A past event with no reported outcome or next step will not be used.",
+    "DATES AND EVENTS. News and commentary must be published within the last 60 days. Government and other authoritative primary records may be up to 12 months old when they establish a relevant development or an ongoing action. An older primary record may appear only as background, and only when a newer official source states explicitly that it confirms that record: on the newer source set confirms to the number of the older source and write confirmation_basis (what shows it is the same item, for example the same project or ordinance number). action_date is when the development happened or was decided. If the candidate concerns a meeting, workshop, hearing, opening or public-comment period, fill event with its kind, date and deadline. Never present a past event or an expired comment deadline as upcoming. A past event is not upcoming, but a consequential decision, appeal, project or unresolved process that followed it can still be a candidate. Whenever event is filled and the date has passed, say what happened or what comes next in after_event (25 words or fewer) and give after_event_source, the number of a source published on or after the event that reports it, and set continues_after_event true when a process is still open. What qualifies it is a SOURCE published on or after the event that reports a continuing process, pending action, appeal or consequential decision: give that source's own state in status_by_source (proposed, pending, appealed, under_construction, approved, denied or withdrawn). Your explanation alone does not qualify it, and a past event whose sources report no outcome or next step will not be used.",
     "",
     "STATUS. For each source that states an approval, entitlement, construction or completion status, give status_by_source: its number and a state (proposed, pending, approved, appealed, under_construction, completed, withdrawn, denied, unknown). If sources disagree, write conflict (one sentence) and use status unresolved; an official source does not settle a contradiction. Use new, ongoing, completed or superseded only when an official source shows it, giving status_source (its number) and status_checked_date; otherwise unverified. Do not turn an older announcement into ongoing.",
     "",
@@ -120,14 +124,24 @@ const isoOk = (s) => rl.dayNumber(String(s || "").trim()) != null;
 const sha12 = (s) => crypto.createHash("sha256").update(String(s)).digest("hex").slice(0, 12);
 const isAuthPrimary = (c) => c.role === "primary" && auth.isOfficial(c.authority);
 
+// States a SOURCE reports (status_by_source), not the model's own explanation. A past event stays eligible only when a kept source published on or after it reports
+// a continuing process (proposed, pending, appealed, under construction) or a consequential outcome (approved, denied, withdrawn). `completed` is a finished process
+// with nothing continuing, and `unknown` supports nothing.
 const OPEN_STATES = ["proposed", "pending", "appealed", "under_construction"];
+const OUTCOME_STATES = ["approved", "denied", "withdrawn"];
 /**
- * A past event is not an upcoming opportunity, but a consequential decision, appeal, project or unresolved process may stay eligible AFTER the event.
- * An expired event stays only with source-supported continuing relevance: a kept source published on or after the event's end that states what it
- * establishes, AND an open process (explained next steps in after_event, a still-open state such as pending/appealed/proposed/under_construction in
- * status_by_source, or conflicting status evidence). The model's `continues_after_event` flag alone never decides it, and neither does its text alone.
- * A kept candidate is never presented as upcoming (`presentedAs: "past_event_outcome"`).
+ * A past event is not an upcoming opportunity; the development behind it may remain eligible. The model's `after_event` explanation never qualifies by itself,
+ * and neither does `continues_after_event`: a kept source published on or after the event's end must itself report a continuing process, pending action, appeal
+ * or consequential outcome, as a state attached to that source and with its own stated "what it establishes". Conflicting states across sources also qualify
+ * (an approval and an appeal are both source-reported). A kept candidate is never presented as upcoming (`presentedAs: "past_event_outcome"`).
  */
+/** Publisher authority: by host, except that a Legistar tenant is official only when the tenant is an agency of the market's own hierarchy. */
+function authorityFor(domain, hierarchy) {
+  const t = outlets.legistarTenant(domain);
+  if (t) return outlets.tenantEstablished(t, hierarchy) ? { tier: "official_government", basis: "Legistar tenant matches an agency in the market's hierarchy" } : { tier: "uncertain", basis: "Legistar tenant not established as an agency of this market" };
+  return auth.publisherAuthority(domain);
+}
+
 function parseEvent(e, todayN, keptByOrig, ctx) {
   if (!e || typeof e !== "object" || !e.kind) return null;
   const kind = oneOf(e.kind, EVENT_KINDS, null);
@@ -139,17 +153,15 @@ function parseEvent(e, todayN, keptByOrig, ctx) {
   const expired = endN < todayN;
   if (!expired) return { ...out, status: "upcoming", expired: false, supportedContinuation: false, presentedAs: "upcoming", reason: null };
   const c = ctx || {};
+  const sourceStates = c.sourceStates || new Map();            // kept-source number -> state reported for that source
   const post = [...keptByOrig.values()].filter((k) => k.role !== "background" && rl.dayNumber(String(k.published || "").trim()) >= endN && (k.whatItEstablishes || "").length >= 10);
-  const explained = !!out.afterEvent && out.afterEvent.length >= 10;
-  const named = out.afterEventSource != null ? keptByOrig.get(out.afterEventSource) : null;
-  const postSource = (named && post.includes(named) ? named : post[0]) || null;
-  const states = c.states || [];
-  const openState = states.find((x) => OPEN_STATES.includes(x)) || null;
-  const basis = explained ? "after_event_text" : openState ? "open_process_state" : c.unresolved ? "unresolved_status" : null;
-  const supported = !!postSource && !!basis;
-  const reason = supported ? null : !postSource ? "no kept source published after the event states an outcome or next step" : "nothing shows the process is still open (no explained next step, open status or conflict)";
+  const withState = post.map((k) => ({ k, state: sourceStates.get(k.orig) || "unknown" })).filter((x) => OPEN_STATES.includes(x.state) || OUTCOME_STATES.includes(x.state));
+  const named = out.afterEventSource != null ? withState.find((x) => x.k.orig === out.afterEventSource) : null;
+  const pick = named || withState[0] || null;
+  const supported = !!pick;
+  const reason = supported ? null : !post.length ? "no kept source published after the event states what it establishes" : "no source published after the event reports a continuing process, pending action, appeal or consequential outcome (the model's explanation alone does not qualify)";
   return { ...out, status: supported ? "expired_with_supported_continuation" : "expired", expired: true, supportedContinuation: supported, presentedAs: supported ? "past_event_outcome" : "expired_not_presented",
-    ...(supported ? { postEvent: { sourceN: postSource.orig, published: postSource.published, establishes: postSource.whatItEstablishes, basis, state: openState } } : {}), reason };
+    ...(supported ? { postEvent: { sourceN: pick.k.orig, published: pick.k.published, establishes: pick.k.whatItEstablishes, basis: OPEN_STATES.includes(pick.state) ? "source_reports_open_process" : "source_reports_consequential_outcome", state: pick.state } } : {}), reason };
 }
 
 function statusFor({ x, keptSources, byOrig, todayN, action }) {
@@ -221,7 +233,7 @@ function validateCandidates(rawCandidates, { today, geography, limits, diag, max
       if (seen.has(el.url)) return sRec(n, s, "dropped", "duplicate", "duplicate_address_in_topic", null);
       seen.add(el.url);
       const conf = Number(s.confirms);
-      cands.push({ ...el, published: String(s.published || "").trim(), role: oneOf(s.role, al.ROLES, "secondary"), kind: oneOf(s.kind, al.KINDS.concat(["syndicated"]), "other"), orig: si + 1, authority: auth.publisherAuthority(el.domain),
+      cands.push({ ...el, published: String(s.published || "").trim(), role: oneOf(s.role, al.ROLES, "secondary"), kind: oneOf(s.kind, al.KINDS.concat(["syndicated"]), "other"), orig: si + 1, authority: authorityFor(el.domain, hierarchy),
         confirms: Number.isInteger(conf) && conf >= 1 ? conf : null, confirmationBasis: rl.clean(s.confirmation_basis, 240) || null,
         sourceGeography: rl.clean(s.source_geography, 100) || null, reportingPeriod: rl.clean(s.reporting_period, 80) || null, whatItEstablishes: rl.clean(s.what_it_establishes, 200) || null });
     });
@@ -234,8 +246,8 @@ function validateCandidates(rawCandidates, { today, geography, limits, diag, max
     const byOrig = new Map(kept.map((k, idx) => [k.orig, idx + 1]));
 
     // events: an expired event or deadline is not an upcoming opportunity unless its continuing relevance is explained and supported
-    const statesOf = (Array.isArray(x.status_by_source) ? x.status_by_source : []).map((b) => oneOf(b && b.state, STATES, "unknown")).filter((v) => v !== "unknown");
-    const event = parseEvent(x.event, todayN, new Map(kept.map((k) => [k.orig, k])), { states: statesOf, unresolved: !!rl.clean(x.conflict, 20) || oneOf(x.status, STATUS_VALUES, "") === "unresolved" || new Set(statesOf).size >= 2 });
+    const sourceStates = new Map((Array.isArray(x.status_by_source) ? x.status_by_source : []).map((b) => [Number(b && b.source), oneOf(b && b.state, STATES, "unknown")]));
+    const event = parseEvent(x.event, todayN, new Map(kept.map((k) => [k.orig, k])), { sourceStates });
     if (event && event.expired && !event.supportedContinuation) return fail("expired_event", "the event or deadline has passed", event.reason);
 
     const action = isoOk(x.action_date) ? String(x.action_date).trim() : null;
@@ -248,7 +260,7 @@ function validateCandidates(rawCandidates, { today, geography, limits, diag, max
     const geoSupported = checked ? !!named : null;
     const nameEv = named || evid[0] || { level: relationship, found: false, where: null, names: [], boundaryVerified: false, reason: "not_checked" };
 
-    const sourcesOut = kept.map((k, idx) => ({ ref: null, n: idx + 1, title: k.title, url: k.url, domain: k.domain, published: k.published, role: k.role, kind: k.kind, outlet: outlets.classifyOutlet(k.domain), window: k.window, ageDays: k.ageDays,
+    const sourcesOut = kept.map((k, idx) => ({ ref: null, n: idx + 1, title: k.title, url: k.url, domain: k.domain, published: k.published, role: k.role, kind: k.kind, outlet: outlets.classifyOutlet(k.url, { hierarchy }), window: k.window, ageDays: k.ageDays,
       sourceGeography: k.sourceGeography, reportingPeriod: k.reportingPeriod, whatItEstablishes: k.whatItEstablishes,
       authority: { tier: k.authority.tier, official: auth.isOfficial(k.authority), basis: k.authority.basis, modelClaimedAuthoritative: k.role === "primary" && al.AUTHORITATIVE_KINDS.includes(k.kind) },
       ...(k.window === "background_confirmed" ? { confirmedBy: byOrig.get(k.confirmedBy) || null, confirmationBasis: k.confirmationBasis, confirmationSignal: k.confirmationSignal } : {}) }));
@@ -258,11 +270,12 @@ function validateCandidates(rawCandidates, { today, geography, limits, diag, max
     const developmentKey = normKey(development), angleKey = normKey(angle);
     const candidateId = `cand_${sha12(`${normKey(hierarchy.market)}|${developmentKey}|${angleKey}|${firstKey}`)}`;
     sourcesOut.forEach((s) => { s.ref = `${candidateId}:s${s.n}`; });
+    const identity = ident.identityOf({ development, sources: sourcesOut.map((s) => ({ title: s.title, url: s.url, role: s.role, official: s.authority.official, whatItEstablishes: s.whatItEstablishes })), hierarchyNames: hierarchy.levels.map((l) => l.name).concat(hierarchy.subareas || []) });
 
     // qualified. Ranking inputs: editorial substance and homeowner relevance first, then source support, geographic specificity (only when a name was found), corroboration, recency
     const specific = !!(action || (event && event.status !== "unreadable"));
     const editorialScore = (strength === "high" ? 3 : 2) + (relevance === "direct" ? 2 : 1) + (specific ? 1 : 0);
-    const sourceSupport = nonBg.reduce((n2, k) => n2 + (isAuthPrimary(k) ? 2 : auth.isOfficial(k.authority) || outlets.classifyOutlet(k.domain).class === "original_local_reporting" ? 1 : 0), 0);
+    const sourceSupport = nonBg.reduce((n2, k) => n2 + (isAuthPrimary(k) ? 2 : auth.isOfficial(k.authority) || outlets.classifyOutlet(k.url, { hierarchy }).class === "original_local_reporting" ? 1 : 0), 0);
     const geoSpecificity = geoSupported ? gh.SPECIFICITY[relationship] : 0;        // an unsupported claim earns no weight
     const corroboration = new Set(nonBg.map((k) => k.domain)).size;
     const recencyDay = Math.max(...nonBg.map((k) => rl.dayNumber(k.published) || 0));
@@ -284,7 +297,7 @@ function validateCandidates(rawCandidates, { today, geography, limits, diag, max
       // compatibility with the legacy Planner and gate (see docs): external market statistics are not verified text
       reportFirst: true, reportFigures: [], externalStatisticsAuthorized: false, mlsEvidence: al.mlsEvidenceOf({ requested: false }),
       candidate: {
-        design: DESIGN, id: candidateId, development, developmentKey, angle, angleKey, question, why, strength, relevance, gap: rl.clean(x.gap, 240) || null,
+        design: DESIGN, id: candidateId, development, developmentKey, angle, angleKey, identity, question, why, strength, relevance, gap: rl.clean(x.gap, 240) || null,
         geography: {
           relationship, route: relationship === "market" ? null : route, hierarchy: { market: hierarchy.market, levels: hierarchy.levels.map((l) => ({ level: l.level, name: l.name })), derived: hierarchy.derived, note: hierarchy.note },
           nameEvidence: nameEv, nameFoundInSource: geoSupported, provisional: true, boundaryVerified: false,
@@ -305,7 +318,7 @@ function validateCandidates(rawCandidates, { today, geography, limits, diag, max
       },
     };
     topic.candidate.lane = x._lane || null;
-    Object.assign(out, { qualified: true, topic, key: `${developmentKey}|${angleKey}`, development, angle, articleKey: firstKey, articleKeys: nonBg.map((k) => rl.articleKey(k.url)), scores: [editorialScore, sourceSupport, geoSpecificity, corroboration, recencyDay], strength, relevance });
+    Object.assign(out, { qualified: true, topic, identity, key: `${developmentKey}|${angleKey}`, development, angle, articleKey: firstKey, articleKeys: nonBg.map((k) => rl.articleKey(k.url)), scores: [editorialScore, sourceSupport, geoSpecificity, corroboration, recencyDay], strength, relevance });
   });
 
   // Rank the qualified by editorial substance and homeowner relevance, then source support, geographic specificity, corroboration, recency.
@@ -314,18 +327,28 @@ function validateCandidates(rawCandidates, { today, geography, limits, diag, max
   // Deduplicate by UNDERLYING DEVELOPMENT, strongest first, so the best version of a development is the one kept (lanes can find the same development twice):
   // the same development and angle, a near-identical development description or question, or the same article carrying the same angle. Two different
   // angles on one article stay distinct. A duplicate found in another lane is recorded on the kept candidate (alsoFoundIn); it is not a quota and gives no ranking weight.
-  const sameDevelopment = (a, b) => (a.key === b.key ? "duplicate_development_angle"
-    : rl.similar(a.topic.question, b.topic.question) ? "overlaps_earlier_topic"
-    : rl.similar(a.development, b.development) || (a.articleKeys.some((k) => k && b.articleKeys.includes(k)) && (rl.similar(a.angle, b.angle))) ? "duplicate_development" : null);
+  const sameDevelopment = (a, b) => {
+    if (a.key === b.key) return { reason: "duplicate_development_angle", basis: "same_development_and_angle", detail: null };
+    const id = ident.sameIdentity(a.identity, b.identity);                       // identifiers, project names, source identity: the deterministic signals first
+    if (id) return { reason: "duplicate_development", basis: id.basis, detail: id.detail };
+    if (rl.similar(a.topic.question, b.topic.question)) return { reason: "overlaps_earlier_topic", basis: "similar_question", detail: null };
+    if (rl.similar(a.development, b.development) || (a.articleKeys.some((k) => k && b.articleKeys.includes(k)) && rl.similar(a.angle, b.angle))) return { reason: "duplicate_development", basis: "similar_description", detail: null };
+    return null;
+  };
   const kept = [];
+  const preRank = new Map(qualifiedAll.map((r, i) => [r.n, i + 1]));        // rank before duplicates are removed, to show which candidates were backfilled
   qualifiedAll.forEach((r) => {
-    const twin = kept.find((q) => sameDevelopment(q, r));
+    let twin = null, why = null;
+    for (const q of kept) { why = sameDevelopment(q, r); if (why) { twin = q; break; } }
     if (twin) {
-      const why = sameDevelopment(twin, r);
-      r.qualified = false; r.reason = why; r.duplicateOf = twin.n;
-      (twin.topic.candidate.alsoFoundIn = twin.topic.candidate.alsoFoundIn || []).push({ n: r.n, lane: r.lane, hook: r.hook, reason: why });
-      problems.push(`candidates ${twin.n} and ${r.n} ${why === "duplicate_development_angle" ? "repeat the same development and angle" : why === "duplicate_development" ? "describe the same development" : "overlap"}`);
-      return tRec(r.n, "left_out", r.reason, `same as candidate ${twin.n}${twin.lane ? ` (lane ${twin.lane})` : ""}`, { hook: r.hook, lane: r.lane, duplicate_of: `candidate ${twin.n}` });
+      r.qualified = false; r.reason = why.reason; r.duplicateOf = twin.n; r.duplicateBasis = why;
+      const c = r.topic.candidate;
+      // the angle, question and sources of the duplicate stay in the kept candidate's research record: Stage B may want a different angle on the same development
+      (twin.topic.candidate.alternativeAngles = twin.topic.candidate.alternativeAngles || []).push({ candidateId: c.id, lane: r.lane, question: c.question, angle: c.angle, why: c.why, strength: c.strength, relevance: c.relevance, gap: c.gap,
+        duplicateBasis: why.basis, duplicateDetail: why.detail, status: c.status.value, sources: c.sources.map((s) => ({ ref: s.ref, url: s.url, title: s.title, host: s.host, role: s.role, outletClass: s.outletClass, published: s.published, whatItEstablishes: s.whatItEstablishes })) });
+      (twin.topic.candidate.alsoFoundIn = twin.topic.candidate.alsoFoundIn || []).push({ n: r.n, lane: r.lane, hook: r.hook, reason: why.reason, basis: why.basis });
+      problems.push(`candidates ${twin.n} and ${r.n} ${why.reason === "duplicate_development_angle" ? "repeat the same development and angle" : why.reason === "duplicate_development" ? `describe the same development (${why.basis})` : "overlap"}`);
+      return tRec(r.n, "left_out", r.reason, `same development as candidate ${twin.n}${twin.lane ? ` (lane ${twin.lane})` : ""}: ${why.basis}${why.detail ? ` (${why.detail})` : ""}`, { hook: r.hook, lane: r.lane, duplicate_of: `candidate ${twin.n}` });
     }
     kept.push(r);
   });
@@ -336,7 +359,9 @@ function validateCandidates(rawCandidates, { today, geography, limits, diag, max
   ranked.slice(SELECT_COUNT).forEach((r) => tRec(r.n, "left_out", "qualified_not_selected", `rank ${r.rank} of ${ranked.length}; scores ${r.scores.slice(0, 4).join("/")}`, { hook: r.hook, lane: r.lane }));
   const topics = chosen.map((r, i) => { r.topic.id = `t${i + 1}`; r.topic.candidate.selection.selected = true; tRec(r.n, "kept", "selected", `rank ${r.rank}; scores ${r.scores.slice(0, 4).join("/")}${r.topic.candidate.review.needsReview ? "; needs review" : ""}`, { hook: r.hook, final_rank: i + 1, lane: r.lane }); return r.topic; });
 
-  const summary = {
+  const replacements = chosen.filter((r) => preRank.get(r.n) > SELECT_COUNT).map((r) => ({ candidateId: r.topic.candidate.id, n: r.n, lane: r.lane, hook: r.hook, rankBeforeDuplicates: preRank.get(r.n), rankAfter: r.rank }));
+  const duplicateGroups = kept.filter((r) => r.topic.candidate.alsoFoundIn).map((r) => ({ kept: r.topic.candidate.id, keptLane: r.lane, selected: chosen.includes(r), identity: { projectNames: r.identity.projectNames, identifiers: r.identity.identifiers }, members: r.topic.candidate.alsoFoundIn }));
+  const summary = {  replacements, duplicate_groups: duplicateGroups,
     returned: raw.length, duplicates: results.filter((r) => r.duplicateOf).length, by_lane: laneStats(results, chosen), qualified: qualified.length, selected: topics.length, not_selected: ranked.length - topics.length, not_qualified: results.filter((r) => !r.qualified).length,
     reasons: results.filter((r) => !r.qualified).reduce((m, r) => { m[r.reason] = (m[r.reason] || 0) + 1; return m; }, {}),
   };
@@ -356,6 +381,15 @@ function laneStats(results, chosen) {
 }
 
 // ── Depth for the compact design ────────────────────────────────────────────────────────────────────────────────
+/** Distinct underlying developments among the delivered candidates, by the same identity rules the deduplication uses (an audit: collisions should be 0). */
+function distinctOf(list) {
+  const items = list.map((t) => t.candidate && t.candidate.identity).filter(Boolean);
+  const parent = items.map((_, i) => i);
+  const find = (i) => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+  for (let i = 0; i < items.length; i++) for (let j = i + 1; j < items.length; j++) if (ident.sameIdentity(items[i], items[j])) parent[find(j)] = find(i);
+  const groups = new Set(items.map((_, i) => find(i))).size;
+  return { distinct_developments: groups, identity_collisions: items.length - groups, distinct_by_text_key: new Set(list.map((t) => t.candidate && t.candidate.developmentKey).filter(Boolean)).size };
+}
 function depthCompact(topics, summary) {
   const list = Array.isArray(topics) ? topics : [];
   const c = (t) => t.candidate || {};
@@ -367,7 +401,7 @@ function depthCompact(topics, summary) {
   return {
     design: DESIGN, selected: list.length, five_card_yield: list.length === SELECT_COUNT,
     candidates_returned: summary ? summary.returned : null, duplicates: summary ? summary.duplicates : null, by_lane: summary ? summary.by_lane : null, qualified: summary ? summary.qualified : null, not_selected: summary ? summary.not_selected : null, not_qualified_reasons: summary ? summary.reasons : null,
-    distinct_developments: new Set(list.map((t) => c(t).developmentKey).filter(Boolean)).size,
+    ...distinctOf(list),
     relationships: rel, market_scope: count((t) => t.scope === "selected"),
     name_found_in_source: count((t) => c(t).geography && c(t).geography.nameFoundInSource === true), geography_unsupported: count((t) => c(t).geography && c(t).geography.nameFoundInSource === false),
     outlet_uses: outletUses,
@@ -384,5 +418,5 @@ function depthCompact(topics, summary) {
 
 module.exports = {
   DESIGN, MAX_CANDIDATES, SELECT_COUNT, DEFAULT_OUTPUT_TOKENS, STATES, STATUS_VALUES, EVENT_KINDS,
-  LANES, lanesOn, designOf, isCompact, retriesFor, systemPromptCompact, retryInstructionCompact, buildPayloadCompact, extractCandidates, validateCandidates, depthCompact, parseEvent,
+  LANES, lanesOn, lanesFor, laneMode, designOf, isCompact, retriesFor, systemPromptCompact, retryInstructionCompact, buildPayloadCompact, extractCandidates, validateCandidates, depthCompact, parseEvent,
 };

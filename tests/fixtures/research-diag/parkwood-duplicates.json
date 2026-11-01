@@ -1,0 +1,197 @@
+{
+ "_note": "The four Parkwood candidates as the model returned them in the Lincoln three-lane benchmark (valid rerun, Oct 31 2026), rebuilt from the saved cards: runs 1 and 2 each selected Parkwood twice (one municipal, one housing candidate) and the benchmark reported zero duplicates. Fictional-free: real titles and record URLs, no article text.",
+ "run1": [
+  {
+   "_lane": "housing",
+   "question": "What does Parkwood’s approval mean for Lincoln sellers?",
+   "development": "Lincoln approved the Parkwood development agreement for a roughly 21-acre project with 122 single-family homes and 4.2 acres of parks.",
+   "angle": "More planned housing in Village 1 could add future new-home competition for existing sellers.",
+   "why": "The agreement sets terms for a specific Lincoln housing project, but timing and the near-term resale effect remain unclear.",
+   "relationship": "market",
+   "route": null,
+   "strength": "high",
+   "relevance": "direct",
+   "action_date": "2026-10-27",
+   "event": null,
+   "status": "new",
+   "status_source": 1,
+   "status_checked_date": "2026-10-30",
+   "status_by_source": [
+    {
+     "source": 1,
+     "state": "approved"
+    },
+    {
+     "source": 2,
+     "state": "approved"
+    }
+   ],
+   "conflict": null,
+   "gap": "The sources do not establish a construction start, sales schedule, or effect on resale competition.",
+   "access_confidence": "medium",
+   "keyword_match": false,
+   "sources": [
+    {
+     "title": "Parkwood Project Development Agreement (PLN24-00048)",
+     "url": "https://ceqanet.lci.ca.gov/2010102018/42",
+     "published": "2026-10-30",
+     "role": "primary",
+     "kind": "government_record",
+     "source_geography": "Lincoln, California",
+     "reporting_period": "2026-10-27 approval",
+     "what_it_establishes": "City approved an agreement for 122 homes and 4.2 acres of parks on roughly 21 acres."
+    },
+    {
+     "title": "Lincoln council takes up Parkwood development agreement as Hidden Hills Phase 2 home designs go to review",
+     "url": "https://cahousingmarketnews.com/2026/10/…/",
+     "published": "2026-10-31",
+     "role": "secondary",
+     "kind": "local_news",
+     "source_geography": "Lincoln, California",
+     "reporting_period": "Week of 2026-10-28",
+     "what_it_establishes": "Reports council action and locates Parkwood within Village 1."
+    }
+   ]
+  },
+  {
+   "_lane": "municipal",
+   "question": "Will Parkwood’s 122 homes change what nearby sellers need to explain?",
+   "development": "Lincoln approved a development agreement for the Parkwood project, planned for 122 homes and parks in the Village One area.",
+   "angle": "What the agreement means for a planned neighborhood addition and nearby homeowners.",
+   "why": "A city-approved residential project may affect nearby owners’ expectations about future development and neighborhood change.",
+   "relationship": "market",
+   "route": null,
+   "strength": "high",
+   "relevance": "direct",
+   "action_date": "2026-10-27",
+   "event": null,
+   "status": "completed",
+   "status_source": 1,
+   "status_checked_date": "2026-10-30",
+   "status_by_source": [
+    {
+     "source": 1,
+     "state": "approved"
+    }
+   ],
+   "conflict": null,
+   "gap": "Sources establish approval and planned scope, not construction timing or effects on nearby properties.",
+   "access_confidence": "medium",
+   "keyword_match": false,
+   "sources": [
+    {
+     "title": "Parkwood Project Development Agreement (PLN24-00048)",
+     "url": "https://ceqanet.lci.ca.gov/2010102018/42",
+     "published": "2026-10-30",
+     "role": "primary",
+     "kind": "government_record",
+     "source_geography": "Lincoln, California",
+     "reporting_period": "2026-10-27 approval",
+     "what_it_establishes": "City approved the agreement for a 122-home project with parkland."
+    }
+   ]
+  }
+ ],
+ "run2": [
+  {
+   "_lane": "municipal",
+   "question": "What does Lincoln’s Parkwood agreement lock in for nearby homeowners?",
+   "development": "Lincoln approved a development agreement for Parkwood, a 122-home project with 4.2 acres of parks in the Village 1 Specific Plan area.",
+   "angle": "The agreement sets project terms; homeowners can watch for what it means for future development and infrastructure",
+   "why": "The city approval sets terms for a substantial housing project within Lincoln, relevant to sellers following local growth.",
+   "relationship": "market",
+   "route": null,
+   "strength": "high",
+   "relevance": "direct",
+   "action_date": "2026-10-27",
+   "event": null,
+   "status": "completed",
+   "status_source": 1,
+   "status_checked_date": "2026-10-30",
+   "status_by_source": [
+    {
+     "source": 1,
+     "state": "approved"
+    }
+   ],
+   "conflict": null,
+   "gap": "Available sources do not detail the agreement’s fees or infrastructure obligations.",
+   "access_confidence": "medium",
+   "keyword_match": false,
+   "sources": [
+    {
+     "title": "Parkwood Project Development Agreement (PLN24-00048)",
+     "url": "https://ceqanet.lci.ca.gov/2010102018/42",
+     "published": "2026-10-30",
+     "role": "primary",
+     "kind": "government_record",
+     "source_geography": "Lincoln, California",
+     "reporting_period": "2026-10-27 approval",
+     "what_it_establishes": "City approved Parkwood agreement for 122 homes and 4.2 acres of parks."
+    },
+    {
+     "title": "Lincoln council takes up Parkwood development agreement as Hidden Hills Phase 2 home designs go to review",
+     "url": "https://cahousingmarketnews.com/2026/10/…/",
+     "published": "2026-10-31",
+     "role": "secondary",
+     "kind": "housing_research",
+     "source_geography": "Lincoln, California",
+     "reporting_period": "2026-10-27 to 2026-10-28",
+     "what_it_establishes": "Reports council consideration and says a second reading is needed before the agreement is final."
+    }
+   ]
+  },
+  {
+   "_lane": "housing",
+   "question": "Will Parkwood’s 122 homes change the competition for Lincoln sellers?",
+   "development": "Lincoln approved the Parkwood development agreement for about 21 acres, including 122 single-family homes and 4.2 acres of parks.",
+   "angle": "Potential future new-home supply in the Village 1 growth area could become competition for resale homes",
+   "why": "The approval establishes a substantial planned housing project in Lincoln; construction timing and effects on resale competition remain unclear.",
+   "relationship": "market",
+   "route": null,
+   "strength": "high",
+   "relevance": "direct",
+   "action_date": "2026-10-27",
+   "event": null,
+   "status": "completed",
+   "status_source": null,
+   "status_checked_date": null,
+   "status_by_source": [
+    {
+     "source": 1,
+     "state": "approved"
+    },
+    {
+     "source": 2,
+     "state": "approved"
+    }
+   ],
+   "conflict": null,
+   "gap": "The available records do not establish a construction start or delivery schedule.",
+   "access_confidence": "medium",
+   "keyword_match": false,
+   "sources": [
+    {
+     "title": "Parkwood Project Development Agreement (PLN24-00048)",
+     "url": "https://ceqanet.lci.ca.gov/2010102018/42",
+     "published": "2026-10-30",
+     "role": "primary",
+     "kind": "government_record",
+     "source_geography": "Lincoln, California",
+     "reporting_period": "2026-10-27 approval",
+     "what_it_establishes": "City approval of a development agreement for 122 homes and 4.2 park acres."
+    },
+    {
+     "title": "Lincoln council takes up Parkwood development agreement as Hidden Hills Phase 2 home designs go to review",
+     "url": "https://cahousingmarketnews.com/2026/10/…/",
+     "published": "2026-10-31",
+     "role": "secondary",
+     "kind": "local_news",
+     "source_geography": "Lincoln, California",
+     "reporting_period": "Week of 2026-10-28",
+     "what_it_establishes": "Reports council consideration and says a second reading remains before the agreement is final."
+    }
+   ]
+  }
+ ]
+}

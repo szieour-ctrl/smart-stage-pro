@@ -42,9 +42,11 @@ const CELLS = Object.freeze([
   { id: "compact_r20_c6000_o6000", prompt: "compact", results: 20, context: 6000, output: 6000, retries: 0 },
   // Three-lane experiment (Oct 31): three independent compact passes (municipal, housing, economy) over the same market, merged in code. Compared with compact_r20_c6000_o4500.
   { id: "lanes3_r20_c6000_o4500", prompt: "compact", lanes: "three", results: 20, context: 6000, output: 4500, retries: 0 },
+  // Two-lane confirmation (Oct 31): municipal + housing only (the economy lane is out), sequential, same rate-limit handling.
+  { id: "lanes2_r20_c6000_o4500", prompt: "compact", lanes: "two", results: 20, context: 6000, output: 4500, retries: 0 },
   { id: "detailed_r20_c6000_o8000", prompt: "compact", design: "detailed", maxRepeats: 1, results: 20, context: 6000, output: 8000, retries: 0 },
 ]);
-const cellsFor = (prompt) => CELLS.filter((c) => (prompt === "v2" ? c.prompt === "v2" : prompt === "compact" ? c.prompt === "compact" && !c.lanes : prompt === "lanes" ? !!c.lanes : prompt === "both" ? true : c.prompt !== "v2" && c.prompt !== "compact"));
+const cellsFor = (prompt) => CELLS.filter((c) => (prompt === "v2" ? c.prompt === "v2" : prompt === "compact" ? c.prompt === "compact" && !c.lanes : prompt === "lanes" ? c.lanes === "three" : prompt === "lanes2" ? c.lanes === "two" : prompt === "both" ? true : c.prompt !== "v2" && c.prompt !== "compact"));
 const isArticleCell = (c) => c.prompt === "v2" || c.prompt === "compact";
 const designOfCell = (c) => (c.prompt === "compact" ? c.design || "compact" : c.prompt === "v2" ? "detailed" : null);
 const MARKETS = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "tests", "fixtures", "research-diag", "markets.json"), "utf8"));
@@ -71,7 +73,7 @@ function parseArgs(argv) {
     else if (k === "--cells") a.cells = String(argv[++i] || "").split(",").map((x) => x.trim()).filter(Boolean);
   }
   if (a.live === a.replay) throw new Error("Choose exactly one of --live or --replay.");
-  if (!["v1", "v2", "compact", "lanes", "both"].includes(a.prompt)) throw new Error("--prompt must be v1, v2, compact, lanes or both.");
+  if (!["v1", "v2", "compact", "lanes", "lanes2", "both"].includes(a.prompt)) throw new Error("--prompt must be v1, v2, compact, lanes, lanes2 or both.");
   const badCells = (a.cells || []).filter((c) => !CELLS.some((x) => x.id === c));
   if (badCells.length) throw new Error(`Unknown cell(s): ${badCells.join(", ")}. Known: ${CELLS.map((c) => c.id).join(", ")}`);
   const bad = a.markets.filter((m) => !MARKETS[m]);
@@ -102,7 +104,7 @@ function cellEnv(base, cell) {
 function compactCardsOf(topics) {
   return (Array.isArray(topics) ? topics : []).filter((t) => t && t.candidate).map((t, i) => {
     const c = t.candidate;
-    return { n: i + 1, candidateId: c.id, lane: c.lane || null, alsoFoundIn: c.alsoFoundIn || null, question: c.question, development: c.development, angle: c.angle, why: c.why, strength: c.strength, relevance: c.relevance, gap: c.gap,
+    return { n: i + 1, candidateId: c.id, lane: c.lane || null, identity: c.identity || null, alternativeAngles: c.alternativeAngles || null, alsoFoundIn: c.alsoFoundIn || null, question: c.question, development: c.development, angle: c.angle, why: c.why, strength: c.strength, relevance: c.relevance, gap: c.gap,
       relationship: c.geography.relationship, route: c.geography.route, geography: { nameFoundInSource: c.geography.nameFoundInSource, nameEvidence: c.geography.nameEvidence, provisional: true, hierarchy: c.geography.hierarchy, modelSourceGeography: c.geography.modelSourceGeography },
       status: c.status, event: c.event, selection: c.selection, review: c.review, provisionalEvidence: c.provisionalEvidence,
       sources: (c.sources || []).map((s) => ({ ref: s.ref, title: s.title, host: s.host, url: diagLib.safeUrl(s.url), published: s.published, role: s.role, kind: s.kind, outletClass: s.outletClass, window: s.window, sourceGeography: s.sourceGeography, reportingPeriod: s.reportingPeriod, whatItEstablishes: s.whatItEstablishes })) };

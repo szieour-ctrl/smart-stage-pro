@@ -93,4 +93,18 @@ async function runScenario(run, sc, extra) {
 /** One clean answer, for the baseline harness's offline smoke run. */
 const replayReply = (n) => reply(goodUrls("example"), good("example"), n);
 
-module.exports = { NOW, GEO, scenarios, runScenario, reply, usage, replayReply };
+/** One clean Article-Led (v2) answer with five opportunities, for the baseline harness's offline smoke run. Fictional hosts. */
+const replayReplyV2 = (n) => {
+  const q = ["Could the new subdivision change what nearby sellers face?", "Why did the city approve a second apartment site this fall?", "What do higher mortgage rates mean for move-up buyers here?", "Is a new school calendar shifting when families list?", "Which price bands saw pending sales slip last month?"];
+  const opps = q.map((question, i) => ({
+    question, headline: `Headline ${i + 1}`, editorial_thesis: "The development adds competing supply, so pricing around it matters for sellers.", why_it_matters: "It changes what nearby sellers compete with this winter season.",
+    homeowner_decision: "Whether to list now or wait.", development: `Development ${i + 1}`, angle: `Angle ${i + 1}`, geographic_relationship: "exact_market", route_to_market: null, status: "unverified", status_evidence: null,
+    action_date: "2026-10-10", status_checked_date: null, established_facts: ["The council discussed the project."], possible_explanations: ["Added supply could soften asking prices."], project_facts: [],
+    evidence_points: [{ text: "122 homes planned", area: "Lincoln", period: "October 2026", source: 1 }], evidence_gaps: ["Phasing is not stated."], verification_needs: ["Confirm the unit count."], access_confidence: "medium", keyword_match: false,
+    sources: [{ title: `Story ${i + 1}`, url: `https://site${i + 1}.example/news/story-${i + 1}`, published: "2026-10-18", role: "secondary", kind: "local_news", source_geography: "Lincoln, CA", reporting_period: "October 2026", what_it_establishes: "Reports the development." }],
+  }));
+  return { status: 200, json: { output: [{ type: "search_results", results: opps.map((o) => ({ url: o.sources[0].url })) },
+    { type: "message", content: [{ type: "output_text", text: "```json\n" + JSON.stringify({ research_limits: { returned: 5, reason: null }, opportunities: opps }) + "\n```" }] }], usage: usage(n || 0) } };
+};
+
+module.exports = { NOW, GEO, scenarios, runScenario, reply, usage, replayReply, replayReplyV2 };

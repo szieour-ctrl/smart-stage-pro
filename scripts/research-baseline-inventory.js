@@ -48,11 +48,13 @@ function redact(text) {
 function readRuns(dir) {
   const out = [];
   fs.readdirSync(dir).filter((f) => f.endsWith(".discovery.json")).sort().forEach((f) => {
-    const m = /^(.+?)-(as_shipped|r\d+_c\d+)-(\d+)\.discovery\.json$/.exec(f);
+    const m = /^(.+?)-(as_shipped|v2_[a-z0-9_]+|r\d+_c\d+)-(\d+)\.discovery\.json$/.exec(f);
     if (!m) return;
     let d = null;
     try { d = JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")); } catch { return; }
-    if (d && Array.isArray(d.attempts)) out.push({ file: f, market: m[1], cell: m[2], repeat: Number(m[3]), d });
+    let cards = null;   // Article-Led (v2) runs also have the delivered cards, for the human review sample
+    try { cards = JSON.parse(fs.readFileSync(path.join(dir, f.replace(/\.discovery\.json$/, ".cards.json")), "utf8")); } catch { /* v1 runs have none */ }
+    if (d && Array.isArray(d.attempts)) out.push({ file: f, market: m[1], cell: m[2], repeat: Number(m[3]), d, cards });
   });
   return out;
 }
@@ -99,7 +101,7 @@ function inventory(runs) {
 }
 
 function sample(runs, cells, repeat) {
-  return runs.filter((r) => cells.includes(r.cell) && r.repeat === repeat).map((r) => ({ market: r.market, cell: r.cell, repeat: r.repeat, topics: keptOf(r).topics }));
+  return runs.filter((r) => cells.includes(r.cell) && r.repeat === repeat).map((r) => ({ market: r.market, cell: r.cell, repeat: r.repeat, topics: keptOf(r).topics, cards: r.cards }));
 }
 
 function markdown(inv, samples) {
@@ -119,6 +121,18 @@ function markdown(inv, samples) {
     "Each run lists the delivered topics (hook as written), whether the model labelled it exact-market or broader context, and the sources it rests on. Judge whether the hook is a real, distinct development, whether the source supports it, and whether a better source existed.", "");
   samples.forEach((s) => {
     L.push(`### ${s.market} / ${s.cell} / run ${s.repeat}`, "");
+    if (s.cards && s.cards.length) {   // Article-Led (v2): the full card next to its sources
+      s.cards.forEach((c) => {
+        L.push(`${c.n}. **${c.question}** (${c.relationship}${c.routeToMarket ? `; route: ${c.routeToMarket}` : ""}; status ${c.status}${c.statusReason ? ` (${c.statusReason})` : ""}; access ${c.accessConfidence && c.accessConfidence.value} [provisional])`,
+          `   - Development / angle: ${c.development} / ${c.angle}`, `   - Perspective: ${c.thesis}`, `   - Homeowner decision: ${c.homeownerDecision || "n/a"}`,
+          `   - Established: ${(c.establishedFacts || []).join(" | ") || "none"}`, `   - Possible, not proven: ${(c.possibleExplanations || []).join(" | ") || "none"}`,
+          `   - Project facts: ${(c.projectFacts || []).map((f) => `${f.fact} [${f.basis}; ${f.verification}]`).join(" | ") || "none"}`,
+          `   - Evidence gaps: ${(c.evidenceGaps || []).join(" | ") || "none"}; to verify: ${(c.verificationNeeds || []).join(" | ") || "none"}`);
+        (c.sources || []).forEach((src) => L.push(`   - Source: ${src.host} (${src.role}, ${src.kind}; host heuristic ${classify(src.host)}), "${src.title}", published ${src.published}, ${src.window}; about ${src.sourceGeography || "n/a"}, period ${src.reportingPeriod || "n/a"}`));
+      });
+      L.push("");
+      return;
+    }
     s.topics.forEach((t, i) => {
       const dp = t.depth;
       L.push(`${i + 1}. **${t.hook || "(no hook stored)"}**${dp ? ` (${dp.scope === "broader_context" ? "broader context" : "exact market"}; ${dp.trend_signals} signals; newest source ${dp.newest_source_days == null ? "n/a" : dp.newest_source_days + " days"} old)` : ""}`);

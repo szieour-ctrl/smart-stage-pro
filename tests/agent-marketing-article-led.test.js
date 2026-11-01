@@ -285,3 +285,79 @@ test("the recommendation maps to the delivered topic", async () => {
   assert.strictEqual(r.fields.topics.length, 2);
   assert.strictEqual(r.fields.topics[1].recommended.reason, "The strongest local development.");
 });
+
+// ── Benchmark harness: v1 against v2 on the same markets and controlled configurations ─────────
+const baseline = require("../scripts/research-baseline");
+const inv = require("../scripts/research-baseline-inventory");
+
+test("harness: v2 cells are 20/6,000 with 5,000 output tokens, the output-token effect on its own, and the v2 default; v1 cells are unchanged and run the v1 prompt", async () => {
+  const cell = (id) => baseline.CELLS.find((c) => c.id === id);
+  assert.deepStrictEqual(["v2_r20_c6000_o5000", "v2_r20_c6000_o2200", "v2_default"].map((id) => [cell(id).prompt, cell(id).results, cell(id).context, cell(id).output, cell(id).retries]),
+    [["v2", 20, 6000, 5000, 0], ["v2", 20, 6000, 2200, 0], ["v2", null, null, null, null]]);
+  assert.deepStrictEqual(baseline.cellsFor("v1").map((c) => c.id), ["as_shipped", "r10_c6000", "r20_c6000", "r10_c10000", "r20_c10000"]);
+  assert.deepStrictEqual(baseline.cellsFor("v2").map((c) => c.id), ["v2_r20_c6000_o5000", "v2_r20_c6000_o2200", "v2_default"]);
+  assert.strictEqual(baseline.plan(Object.keys(baseline.MARKETS), 2).length, 40, "the default plan is still the v1 baseline, 40 runs");
+  assert.strictEqual(baseline.plan(Object.keys(baseline.MARKETS), 2, baseline.cellsFor("v2")).length, 24);
+  assert.throws(() => baseline.parseArgs(["--replay", "--prompt", "v3"]), /--prompt must be/);
+  assert.throws(() => baseline.parseArgs(["--replay", "--cells", "nope"]), /Unknown cell/);
+  const seen = {};
+  for (const id of ["r10_c6000", "v2_r20_c6000_o5000", "v2_r20_c6000_o2200", "v2_default"]) {
+    const env = baseline.cellEnv({}, cell(id));
+    const { sent } = await go([id.startsWith("v2") ? reply2(five()) : fx.replayReply(1)], { env });
+    seen[id] = { v2: /Article-Led/.test(sent[0].input), results: sent[0].tools[0].max_results, ctx: sent[0].tools[0].max_tokens, out: sent[0].max_output_tokens };
+  }
+  assert.deepStrictEqual(seen, {
+    r10_c6000: { v2: false, results: 10, ctx: 6000, out: 2200 }, v2_r20_c6000_o5000: { v2: true, results: 20, ctx: 6000, out: 5000 },
+    v2_r20_c6000_o2200: { v2: true, results: 20, ctx: 6000, out: 2200 }, v2_default: { v2: true, results: 20, ctx: 6000, out: 5000 } });
+});
+
+test("harness: a v2 replay writes the summary depth table, the delivered cards (sanitized) and an inventory review sample with the perspective and evidence", () => {
+  const fs = require("fs"), os = require("os"), path = require("path"), cp = require("child_process");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rb2-"));
+  cp.execFileSync(process.execPath, [path.join(__dirname, "..", "scripts", "research-baseline.js"), "--replay", "--prompt", "v2", "--markets", "lincoln", "--repeats", "1", "--out", dir], { encoding: "utf8" });
+  assert.ok(fs.readdirSync(dir).filter((f) => f.endsWith(".cards.json")).length === 3);
+  const md = fs.readFileSync(path.join(dir, "summary.md"), "utf8");
+  assert.ok(/## Article-Led \(v2\) depth/.test(md) && /v2_r20_c6000_o5000/.test(md));
+  const cards = JSON.parse(fs.readFileSync(path.join(dir, "lincoln-v2_r20_c6000_o5000-1.cards.json"), "utf8"));
+  assert.strictEqual(cards.length, 5);
+  assert.deepStrictEqual(Object.keys(cards[0].sources[0]).sort(), ["host", "kind", "published", "reportingPeriod", "role", "sourceGeography", "title", "url", "whatItEstablishes", "window"]);
+  const out = cp.execFileSync(process.execPath, [path.join(__dirname, "..", "scripts", "research-baseline-inventory.js"), dir, "--sample-cells", "v2_r20_c6000_o5000"], { encoding: "utf8" });
+  assert.ok(/- Perspective: The development adds competing supply/.test(out) && /- Possible, not proven: Added supply/.test(out) && /Source: site1\.example \(secondary, local_news/.test(out));
+  assert.ok(inv.readRuns(dir).every((r) => r.cell.startsWith("v2_") && r.cards));
+});
+
+test("harness: card sources never keep query strings", () => {
+  const cards = baseline.cardsOf([{ question: "q", scope: "selected", editorial: { geographicRelationship: "exact_market", status: "unverified", accessConfidence: { value: "low", provisional: true } }, sources: [{ title: "t", domain: "a.example", url: "https://a.example/x?token=SECRET&utm=1", published: "2026-10-01", role: "primary", kind: "government_record", window: "timely_60_day" }] }]);
+  assert.strictEqual(cards[0].sources[0].url, "https://a.example/x");
+});
+
+// ── The MLS report beside Article-Led research ─────────────────────────────────────────────────
+test("with a confirmed report attached: five article-led opportunities, report figures attached to each, no report topic, no Claude call", async () => {
+  const reportLib = require("../netlify/functions/lib/agent-marketing-report-lib");
+  const tv = require("./helpers/trend-fixture");
+  const ID = "11111111-1111-4111-8111-111111111111";
+  const GEO_ZIP = { type: "zip", name: "95999", city: "", state: "CA", label: "ZIP 95999, CA" };
+  const facts = reportLib.analyzePages(tv.standard().pages).facts; facts.mlsSource = "MetroList";
+  const bothRow = { id: "r1", mode: "market_update", audience: "sellers", geography: GEO_ZIP, focus: {}, data_source: "both", upload_refs: [{ id: ID, scope_note: "MetroList market-trends report, ZIP 95999, September 2026" }] };
+  let claude = 0; const sent = [];
+  const r = await quiet(() => run.runResearch({ row: bothRow, uploads: [{ id: ID, facts }], apiKey: "k", anthropicKey: "k", now: NOW, env: ON, sleepFn: noSleep,
+    callFn: async (p) => { sent.push(p); return reply2(five()); }, claudeFn: async () => { claude++; throw new Error("must not be called"); } }));
+  assert.strictEqual(claude, 0);
+  assert.strictEqual(r.fields.status, "ready"); assert.strictEqual(r.fields.topics.length, 5); assert.ok(r.fields.charged_at);
+  assert.ok(r.fields.topics.every((t) => t.origin === "web" && t.discovery === "v2" && t.reportFirst === true && Array.isArray(t.reportFigures) && t.reportFigures.length > 0));
+  assert.ok(!/MetroList|report with this scope|95999 market-trends/.test(sent[0].input), "the report's scope note is not sent to the web provider");
+  assert.strictEqual(r.fields.usage.discovery.final.origin.report, 0);
+});
+
+test("v2 retries: strength is valid distinct opportunities, then primary-source quality; extra articles or publishers are not a strength", async () => {
+  const mk = (kinds) => ({ ok: true, topics: kinds.map((k, i) => ({ discovery: "v2", id: `t${i + 1}`, sources: [{ url: `https://a${i}.example/x`, role: k === "none" ? "secondary" : "primary", kind: k === "none" ? "local_news" : k }] })) });
+  assert.deepStrictEqual(run.strengthOf(mk(["government_record", "none"])), [2, 1, 1, 2]);
+  assert.ok(run.compareStrength(mk(["government_record", "none", "none"]), mk(["none", "none"])) > 0, "more valid opportunities wins");
+  assert.ok(run.compareStrength(mk(["government_record", "none"]), mk(["none", "none"])) > 0, "same count: primary and authoritative sources win");
+  const sameArticle = { ok: true, topics: [1, 2].map((i) => ({ discovery: "v2", id: `t${i}`, sources: [{ url: "https://a.example/x", role: "secondary", kind: "local_news" }] })) };
+  assert.strictEqual(run.compareStrength(sameArticle, mk(["none", "none"])), 0, "one article for two opportunities is not weaker than two articles");
+  // and end to end: a weaker v2 retry does not replace a stronger first answer
+  const first = [opp(1), opp(2), opp(3)], second = [opp(1), opp(2)];
+  const { r } = await go([reply2(first), reply2(second)]);
+  assert.strictEqual(r.fields.topics.length, 3); assert.strictEqual(r.fields.usage.discovery.used_attempt, 1);
+});

@@ -189,6 +189,13 @@ function strengthOf(validation) {
   const topics = validation && validation.ok && Array.isArray(validation.topics) ? validation.topics : [];
   const srcs = topics.flatMap((t) => (Array.isArray(t.sources) ? t.sources : []));
   const host = (u) => { try { return new URL(String(u)).hostname.replace(/^www\./i, "").toLowerCase(); } catch { return ""; } };
+  if (topics.length && topics.every((t) => t.discovery === "v2")) {
+    // Article-Led (v2): valid distinct opportunities, then supporting-source quality (primary records, authoritative primary records, then total sources).
+    // Different articles or publishers are not a strength here: several opportunities may rest on one article.
+    const primary = srcs.filter((x) => x.role === "primary").length;
+    const authoritative = srcs.filter((x) => x.role === "primary" && (x.kind === "government_record" || x.kind === "financing_economic")).length;
+    return [topics.length, primary, authoritative, srcs.length];
+  }
   return [
     topics.length,
     new Set(topics.map((t) => rl.articleKey(t.sources && t.sources[0] && t.sources[0].url)).filter(Boolean)).size,

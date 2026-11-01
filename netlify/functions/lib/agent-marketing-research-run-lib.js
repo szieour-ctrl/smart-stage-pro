@@ -268,8 +268,12 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
         let provided, laneRaw = null;
         if (lanesMode) {
           // Each lane is its own provider request; one lane failing does not lose the others. Everything fails only when every lane fails.
-          const settled = await Promise.all(compact.LANES.map((lane) => askProvider({ payload: compact.buildPayloadCompact({ request, today, env: e, lane }), apiKey, callFn, sleepFn, retries: providerRetries })
-            .then((ok) => ({ lane, ok }), (err) => ({ lane, err }))));
+          // The lanes run ONE AT A TIME by default: the live experiment showed the provider rejecting concurrent requests with HTTP 429 (two of three lanes lost in every run).
+          // AGENT_MARKETING_ARTICLE_LED_LANE_MODE=parallel restores concurrent requests for measurement. A lane gets extra provider retries for a 429.
+          const askLane = (lane) => askProvider({ payload: compact.buildPayloadCompact({ request, today, env: e, lane }), apiKey, callFn, sleepFn, retries: providerRetries + 1 }).then((ok) => ({ lane, ok }), (err) => ({ lane, err }));
+          let settled;
+          if (compact.laneModeOf(e) === "parallel") settled = await Promise.all(compact.LANES.map(askLane));
+          else { settled = []; for (const lane of compact.LANES) settled.push(await askLane(lane)); }
           const good = settled.filter((x) => x.ok);
           if (!good.length) { const pe = settled[0].err; safe(() => diagAttempts.push({ n: attempts, config: attemptCfg, ms: Date.now() - t0, retry_reason: retryReason, provider_error: true, diag: attemptDiag })); throw pe; }
           laneRaw = settled.map((x) => {
@@ -418,7 +422,7 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
     rec.final = fin ? { topics: fin.length, origin: { web: fin.filter((t) => t.origin !== "report").length, report: fin.filter((t) => t.origin === "report").length }, scope: { selected: fin.filter((t) => t.scope !== "broader_context").length, broader_context: fin.filter((t) => t.scope === "broader_context").length }, reframed: fin.filter((t) => t.reframed === true).length } : null;
     return diagLib.bound(rec);
   });
-  const finalUsage = { ...usage, ...(discovery ? { discovery } : {}), ...(alOn ? { pathway: "article_led", articleLed: { delivered: validation && validation.ok ? validation.topics.length : 0, charged: !!(validation && validation.ok && alCharge), limits: validation && validation.limits || null, offerMlsTrend: !!(validation && validation.ok && !alCharge) } } : {}), costUsd, costEstimated: usage.costUsd == null && estimated != null, targetUsd: cfg.costTargetUsd, withinTarget: costUsd == null ? null : costUsd <= cfg.costTargetUsd, attempts, grounded, providerError, dataSource, reportAttempts, reframeAttempts, reframed, reportNote, topicDebug: validation && validation.ok ? null : topicAnswer, problems: problems.slice(0, 6).map((x) => String(x).slice(0, 200)) };
+  const finalUsage = { ...usage, ...(discovery ? { discovery } : {}), ...(alOn ? { pathway: "article_led", articleLed: { delivered: validation && validation.ok ? validation.topics.length : 0, charged: !!(validation && validation.ok && alCharge), limits: validation && validation.limits || null, offerMlsTrend: !!(validation && validation.ok && !alCharge), ...(laneLog ? { lanes: laneLog.length, lanesFailed: laneLog.filter((l) => l.error).length } : {}) } } : {}), costUsd, costEstimated: usage.costUsd == null && estimated != null, targetUsd: cfg.costTargetUsd, withinTarget: costUsd == null ? null : costUsd <= cfg.costTargetUsd, attempts, grounded, providerError, dataSource, reportAttempts, reframeAttempts, reframed, reportNote, topicDebug: validation && validation.ok ? null : topicAnswer, problems: problems.slice(0, 6).map((x) => String(x).slice(0, 200)) };
   const fields = rl.outcomeFields({ validation: error ? null : validation, usage: finalUsage, model: modelUsed, today, now, error, charge: alCharge });
   return { fields, problems, attempts };
 }

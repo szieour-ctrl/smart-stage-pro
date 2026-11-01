@@ -78,6 +78,7 @@ function markdown(b, singleDir, lanesDir) {
   const { S, L, markets, out } = b;
   const o = [`# Single pass versus three lanes: review package`, "",
     `Single pass: ${out.single.cell}, ${S.length} runs (${singleDir}). Three lanes: ${out.lanes.cell}, ${L.length} runs (${lanesDir}). Markets: ${markets.join(", ")}.`, "",
+    ...(() => { const bad = Object.values(out.lane_table).reduce((n, x) => n + x.errors, 0), total = Object.values(out.lane_table).reduce((n, x) => n + x.runs, 0); return bad ? [`**NOT A VALID THREE-LANE TEST: ${bad} of ${total} lane requests failed (see the lane table).** Do not read the comparison below as a result for the lanes.`, ""] : [`All ${total} lane requests completed.`, ""]; })(),
     "**Status of everything below: discovery candidates.** Provider-grounded and model-reported; none is checked against article text, records or project facts, and none is publication-authorized. The measures are structural proxies; the cards at the end are for human judgment. The three-lane architecture is an experiment and is not adopted.", "",
     "## Overall", "", "| Measure | Single pass | Three lanes |", "| --- | --- | --- |"];
   ROWS.forEach(([n, k, d]) => o.push(`| ${n} | ${f(out.single[k], d)} | ${f(out.lanes[k], d)} |`));

@@ -336,3 +336,38 @@ test("harness and review package: the lanes cell is one session of three request
   assert.ok(res.lanes.mean_duplicates > 0 && res.single.mean_duplicates === 0 && res.lanes.total_cost_usd > res.single.total_cost_usd);
   assert.deepStrictEqual(Object.keys(res.lane_table).sort(), ["economy", "housing", "municipal"]);
 });
+
+test("lanes run one at a time by default (the provider rejected concurrent requests with 429); a rate-limited lane is retried; parallel is opt-in; failed lanes are counted", async () => {
+  let live = 0, peak = 0; const order = [];
+  const mk = (byLane, opts) => async (p) => {
+    live++; peak = Math.max(peak, live); order.push(laneOf(p));
+    await new Promise((r) => setTimeout(r, 5));
+    live--;
+    return (opts && opts.rateLimitOnce && opts.rateLimitOnce[laneOf(p)] && !opts.hit[laneOf(p)] && (opts.hit[laneOf(p)] = true)) ? { status: 429, json: {} } : byLane[laneOf(p)];
+  };
+  const run3 = async (env, opts) => { live = 0; peak = 0; order.length = 0; const callFn = mk({ municipal: reply([cand(1)]), housing: reply([cand(2)]), economy: reply([cand(3)]) }, opts);
+    const r = await quiet(() => run.runResearch({ row: row(), apiKey: "k", now: NOW, env, sleepFn: async () => {}, callFn })); return r; };
+  const seq = await run3(LANES_ON);
+  assert.deepStrictEqual([peak, order], [1, ["municipal", "housing", "economy"]]);
+  assert.strictEqual(seq.fields.topics.length, 3);
+  const retried = await run3(LANES_ON, { rateLimitOnce: { housing: true }, hit: {} });
+  assert.strictEqual(retried.fields.topics.length, 3, "a 429 on one lane is retried and the lane still contributes");
+  assert.deepStrictEqual(order.filter((x) => x === "housing").length, 2);
+  const par = await run3({ ...LANES_ON, AGENT_MARKETING_ARTICLE_LED_LANE_MODE: "parallel" });
+  assert.ok(peak > 1); assert.strictEqual(par.fields.topics.length, 3);
+  assert.deepStrictEqual([seq.fields.usage.articleLed.lanes, seq.fields.usage.articleLed.lanesFailed], [3, 0]);
+  const failed = await goLanes({ municipal: reply([cand(1)]), housing: new Error("boom"), economy: reply([cand(3)]) });
+  assert.strictEqual(failed.r.fields.usage.articleLed.lanesFailed, 1);
+});
+
+test("review package: a run where any lane request failed is announced as NOT a valid three-lane test", () => {
+  const fs = require("fs"), os = require("os"), path = require("path");
+  const rep = require("../scripts/research-lanes-report");
+  const mkdir = (rows) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), "lv-")); fs.writeFileSync(path.join(d, "runs.jsonl"), rows.map((r) => JSON.stringify(r)).join("\n")); rows.forEach((r) => fs.writeFileSync(path.join(d, `${r.market}-${r.cell}-${r.repeat}.discovery.json`), JSON.stringify({ attempts: [{ topics: [] }], lanes: r.lanes }))); return d; };
+  const row1 = (cell, lanes) => ({ market: "lincoln", cell, repeat: 1, status: "ready", delivered: 2, charged: false, cost_usd: 0.01, v2: { candidates_returned: 2, qualified: 2 }, lanes });
+  const single = mkdir([row1("compact_r20_c6000_o4500", null)]);
+  const bad = mkdir([row1("lanes3_r20_c6000_o4500", [{ lane: "municipal", returned: 2, cost_usd: 0.01 }, { lane: "housing", error: "busy", returned: 0 }, { lane: "economy", error: "busy", returned: 0 }])]);
+  const good = mkdir([row1("lanes3_r20_c6000_o4500", [{ lane: "municipal", returned: 1, cost_usd: 0.01 }, { lane: "housing", returned: 1, cost_usd: 0.01 }, { lane: "economy", returned: 0, cost_usd: 0.01 }])]);
+  assert.ok(/NOT A VALID THREE-LANE TEST: 2 of 3 lane requests failed/.test(rep.markdown(rep.build(single, bad, "compact_r20_c6000_o4500", "lanes3_r20_c6000_o4500"), single, bad)));
+  assert.ok(/All 3 lane requests completed/.test(rep.markdown(rep.build(single, good, "compact_r20_c6000_o4500", "lanes3_r20_c6000_o4500"), single, good)));
+});

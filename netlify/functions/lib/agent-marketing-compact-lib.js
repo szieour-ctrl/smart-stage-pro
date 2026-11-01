@@ -36,6 +36,7 @@ const LANES = Object.freeze([
   { id: "economy", label: "Financing and Local Economic Forces", where: "mortgage and financing conditions, employment and major employers, commercial and job-center growth, economic and fee policy, and other meaningful developments that affect homeowner decisions; Freddie Mac, the Federal Reserve, Census, California public data, employment reports, and local business reporting" },
 ]);
 const lanesOn = (env) => String((env || process.env).AGENT_MARKETING_ARTICLE_LED_LANES || "").trim().toLowerCase() === "three";
+const laneModeOf = (env) => (String((env || process.env).AGENT_MARKETING_ARTICLE_LED_LANE_MODE || "").trim().toLowerCase() === "parallel" ? "parallel" : "sequential");
 const designOf = (env) => (String((env || process.env).AGENT_MARKETING_ARTICLE_LED_DESIGN || "").trim().toLowerCase() === "detailed" ? "detailed" : "compact");
 const isCompact = (request, env) => al.isArticleLed(request, env) && designOf(env) === "compact";
 /** Ordinary retry for Article-Led research: off by default (Sam, Oct 31). AGENT_MARKETING_ARTICLE_LED_RETRIES (0 to 2) turns it on for measurement. */
@@ -384,5 +385,5 @@ function depthCompact(topics, summary) {
 
 module.exports = {
   DESIGN, MAX_CANDIDATES, SELECT_COUNT, DEFAULT_OUTPUT_TOKENS, STATES, STATUS_VALUES, EVENT_KINDS,
-  LANES, lanesOn, designOf, isCompact, retriesFor, systemPromptCompact, retryInstructionCompact, buildPayloadCompact, extractCandidates, validateCandidates, depthCompact, parseEvent,
+  LANES, lanesOn, laneModeOf, designOf, isCompact, retriesFor, systemPromptCompact, retryInstructionCompact, buildPayloadCompact, extractCandidates, validateCandidates, depthCompact, parseEvent,
 };

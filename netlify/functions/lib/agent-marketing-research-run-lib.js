@@ -94,6 +94,7 @@ async function askProvider({ payload, apiKey, callFn, sleepFn, retries }) {
     let res;
     try { res = await call(body, apiKey); }
     catch (e) {
+      if (e && e.quotaBlocked) throw e;   // the request-limit gate refused to dispatch: nothing was sent, nothing to retry
       if (attempt < retries) { await sleep(delays[attempt] || 8000); continue; }
       throw new Error("Research is busy right now or timed out.");
     }
@@ -228,7 +229,7 @@ function compareStrength(a, b) {
  * answer was rejected. All attempts' usage is added together, so the stored cost is the real cost of the session.
  * A session is charged only when FIVE validated topics are delivered, whatever the source.
  */
-async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callFn, sleepFn, now, env, clock: opts_clock, rand: opts_rand }) {
+async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callFn, sleepFn, now, env, clock: opts_clock, rand: opts_rand, quotaFn, onDispatch }) {
   const e = env || process.env;
   const cfg = rl.researchSettings(e);
   const extra = Number(e.AGENT_MARKETING_RESEARCH_RETRIES);
@@ -252,12 +253,25 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
   let reportNote = null, reportAttempts = 0, reframeAttempts = 0, reframed = 0, topicAnswer = null;
   // Diagnostics (PR 1): everything below that touches `diag*` only RECORDS. It is wrapped so a diagnostics error can never change the result.
   const safe = (fn) => { try { return fn(); } catch (err) { console.error(`[agent-marketing-research] diagnostics skipped: ${String(err && err.message).slice(0, 160)}`); return undefined; } };
+  // Provider request accounting: usage.providerRequests is the authoritative count of actual outbound provider requests. EVERY dispatched call goes through this one gate,
+  // so each request (first tries, retries, failed requests, lanes, the gap-fill pass) is counted exactly once and by nothing else. Before each dispatch the request-limit
+  // check (quotaFn, when given) must allow it; a refused request is never sent and is not counted. onDispatch persists the count BEFORE the request is sent.
+  let providerRequests = 0;
+  const countedCall = async (pl, key) => {
+    if (quotaFn) {
+      const q = await quotaFn(providerRequests);
+      if (q && q.allowed === false) { const qe = new Error(`Research request limit reached (${q.scope || "limit"}). This did not use a session.`); qe.quotaBlocked = true; qe.quota = q; throw qe; }
+    }
+    providerRequests++;
+    if (onDispatch) { try { await onDispatch(providerRequests); } catch (_) { /* the counter is best effort; the in-memory count still gates the next request */ } }
+    return (callFn || module.exports.callPerplexity)(pl, key);
+  };
   const diagAttempts = [];
   let usedAttempt = null, lastWhy = null, webTopics = null, webOverlaps = 0;
   let best = null;            // the strongest usable answer so far: { validation, attempt }
   const strengthLog = [];     // diagnostics: how each answer compared
   const firstPayload = payload;
-  let laneLog = null, laneMeta = null;         // three-lane experiment: per-lane cost, yield and errors
+  let laneLog = null, laneMeta = null, gapFill = null;         // three-lane experiment: per-lane cost, yield and errors
 
   // One sanitized record per lane: name, state, attempts, HTTP statuses, waits, durations, actual provider cost, candidates and the candidates selected. No credentials.
   const laneRecord = (l) => ({
@@ -282,7 +296,7 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
           // Sequential, rate-limit-aware dispatch (lane-runner lib): Retry-After or jittered backoff, a minimum interval between lane starts, a time budget inside the
           // background function's limit, and independent per-lane state. A lane that did not succeed is never read as a successful lane with zero candidates.
           const ls = laneRunner.laneSettings(e);
-          const call = callFn || module.exports.callPerplexity;
+          const call = countedCall;
           const ran = await laneRunner.runLanes({ lanes: compact.lanesFor(e), build: (lane) => compact.buildPayloadCompact({ request, today, env: e, lane }), call, apiKey, sleep: sleepFn || defaultSleep, clock: clockFn, rand: randFn, settings: ls });
           laneRaw = ran.results.map((x) => {
             const base = { lane: x.lane, run: x, state: x.state, usage: null, topics: [], text: "", resp: x.resp, grounded: null, parseError: null };
@@ -298,12 +312,12 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
             usage = laneRaw.reduce((tot, l) => (l.usage ? addUsage(tot, l.usage) : tot), usage);   // a billed but unreadable answer still costs money
             laneLog = laneRaw.map(laneRecord);
             const worst = laneRaw.find((l) => l.run.state === "rate_limited") || laneRaw.find((l) => l.run.state === "failed") || laneRaw[0];
-            const pe = new Error(worst.run.state === "rate_limited" ? "Research is busy right now. Please try again." : worst.run.state === "not_attempted" ? "Research ran out of time. Please try again." : "The research could not be completed.");
+            const pe = new Error(worst.run.state === "rate_limited" ? "Research is busy right now. Please try again." : worst.run.reason === "request_limit" ? "Research request limit reached. This did not use a session." : worst.run.state === "not_attempted" ? "Research ran out of time. Please try again." : "The research could not be completed.");
             pe.providerDetail = worst.run.error || null; throw pe;
           }
           provided = { resp: { output: laneRaw.flatMap((l) => (l.resp && Array.isArray(l.resp.output) ? l.resp.output : [])), citations: laneRaw.flatMap((l) => (l.resp && Array.isArray(l.resp.citations) ? l.resp.citations : [])) }, modelUsed: (okLanes[0].resp && okLanes[0].resp.model) || firstPayload.model };
         } else {
-          try { provided = await askProvider({ payload, apiKey, callFn, sleepFn, retries: providerRetries }); }
+          try { provided = await askProvider({ payload, apiKey, callFn: countedCall, sleepFn, retries: providerRetries }); }
           catch (pe) { safe(() => diagAttempts.push({ n: attempts, config: attemptCfg, ms: Date.now() - t0, retry_reason: retryReason, provider_error: true, diag: attemptDiag })); throw pe; }
         }
         const { resp, modelUsed: m } = provided;
@@ -317,8 +331,51 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
           if (lanesMode) {
             const merged = laneRaw.flatMap((l) => l.topics);
             grounded = laneRaw.some((l) => l.grounded);
-            validation = compact.validateCandidates(merged, { today, geography: request.geography, diag: attemptDiag, maxCandidates: compact.MAX_CANDIDATES * compact.lanesFor(e).length });
+            const capAll = compact.MAX_CANDIDATES * (compact.lanesFor(e).length + 1);
+            validation = compact.validateCandidates(merged, { today, geography: request.geography, diag: attemptDiag, maxCandidates: capAll });
             problems = validation.problems;
+            // Gap-fill (diagnostic, off by default): only with exactly 3 or 4 distinct qualified developments after deduplication. It never forces a fifth and never changes billing.
+            if (compact.gapFillMode(e)) {
+              const gf = { enabled: true, triggered: compact.gapFillEligible(validation), executed: false, reason: null, qualifiedBefore: validation.summary ? validation.summary.qualified : null };
+              gapFill = gf;
+              if (!gf.triggered) gf.reason = validation.summary && validation.summary.qualified >= 5 ? "five_or_more_qualified" : validation.ok ? "fewer_than_three_qualified" : "no_qualified_candidates";
+              else {
+                const before = validation;
+                const entryOf = (t) => ({ candidateId: t.candidate.id, lane: t.candidate.lane || null, development: t.candidate.development, question: t.candidate.question, identity: t.candidate.identity, geography: { relationship: t.candidate.geography.relationship, nameFoundInSource: t.candidate.geography.nameFoundInSource }, strength: t.candidate.strength, relevance: t.candidate.relevance, sources: t.candidate.sources });
+                gf.before = { qualified: before.summary.qualified, selected: before.topics.length, candidates: before.topics.map(entryOf), topics: safe(() => attemptDiag.topics.slice()) || [] };
+                gf.exclusions = compact.gapFillExclusions(before);
+                const lastStart = Math.max(0, ...laneRaw.map((l) => (l.run.startedMs == null ? 0 : l.run.startedMs)));
+                const seen429 = laneRaw.reduce((n, l) => n + l.run.statuses.filter((c) => c === 429).length, 0);
+                const lead = Math.max(0, laneMeta.settings.minIntervalMs * (1 + seen429) - (laneMeta.elapsedMs - lastStart));
+                const ranG = await laneRunner.runLanes({ lanes: [compact.GAPFILL_LANE], build: () => compact.buildPayloadGapFill({ request, today, env: e, exclusions: gf.exclusions }), call: countedCall, apiKey, sleep: sleepFn || defaultSleep, clock: clockFn, rand: randFn,
+                  settings: { ...laneMeta.settings, budgetMs: Math.max(0, laneMeta.settings.budgetMs - laneMeta.elapsedMs) }, leadWaitMs: lead });
+                const gr = ranG.results[0];
+                let gTopics = [], gUsage = null, gParseError = null, gGrounded = null;
+                if (gr.state === "success") {
+                  gUsage = rl.usageSummary(gr.resp, cfg.costTargetUsd);
+                  try { const g = groundTopics(compact.extractCandidates(answerText(gr.resp)), gr.resp, null); gGrounded = g.grounded; gTopics = g.topics.map((c) => (c && typeof c === "object" ? { ...c, _lane: "gapfill" } : c)); }
+                  catch (pe) { gParseError = pe.message; gr.state = "failed"; gr.reason = "unreadable_answer"; gr.error = laneRunner.scrub(pe.message, apiKey); }
+                }
+                if (gUsage) usage = addUsage(usage, gUsage);
+                gf.executed = gr.state === "success"; gf.state = gr.state; gf.reason = gr.reason || null;
+                gf.request = { state: gr.state, reason: gr.reason, attempts: gr.attempts, http_statuses: gr.statuses, waits_ms: gr.waitsMs, total_wait_ms: gr.totalWaitMs, retry_after_seen: gr.retryAfterSeen, duration_ms: gr.durationMs, error: gr.error || null,
+                  cost_usd: gUsage ? gUsage.costUsd : null, prompt_tokens: gUsage ? gUsage.promptTokens : null, completion_tokens: gUsage ? gUsage.completionTokens : null, returned: gr.state === "success" ? gTopics.length : null };
+                laneLog = (laneLog || laneRaw.map(laneRecord)).concat([{ lane: "gapfill", state: gr.state, reason: gr.reason || null, attempts: gr.attempts, http_statuses: gr.statuses, waits_ms: gr.waitsMs, total_wait_ms: gr.totalWaitMs, retry_after_seen: gr.retryAfterSeen, started_ms: gr.startedMs, duration_ms: gr.durationMs, error: gr.error || null,
+                  returned: gr.state === "success" ? gTopics.length : null, grounded: gGrounded, cost_usd: gUsage ? gUsage.costUsd : null, prompt_tokens: gUsage ? gUsage.promptTokens : null, completion_tokens: gUsage ? gUsage.completionTokens : null, searches: gUsage ? gUsage.searchQueries : null, selected: null, selected_ids: null }]);
+                if (gf.executed && gTopics.length) {
+                  const sourceTopics = attemptDiag && attemptDiag.topics; if (sourceTopics) sourceTopics.length = 0;   // one coherent record: the after-pool replaces the before-pool in the main record
+                  if (attemptDiag && attemptDiag.sources) attemptDiag.sources.length = 0;
+                  validation = compact.validateCandidates(merged.concat(gTopics), { today, geography: request.geography, diag: attemptDiag, maxCandidates: capAll + compact.MAX_CANDIDATES });
+                  problems = validation.problems;
+                }
+                const after = validation;
+                gf.after = { qualified: after.summary ? after.summary.qualified : 0, selected: after.topics.length, candidates: after.topics.map(entryOf) };
+                gf.newCandidates = after.topics.filter((t) => t.candidate.gapFill).map(entryOf);
+                gf.summary = after.summary && after.summary.gapfill || { returned: gTopics.length, kept: 0, selected: 0, duplicates: 0, ids: [] };
+                gf.addedQualified = Math.max(0, gf.after.qualified - gf.before.qualified);
+                gf.convertedToFive = gf.before.selected < 5 && gf.after.selected >= 5;
+              }
+            }
           } else {
           const g = groundTopics(cmp ? compact.extractCandidates(text) : alOn ? articleLed.extractOpportunities(text) : rl.extractTopics(text), resp, attemptDiag);
           grounded = g.grounded;
@@ -434,7 +491,9 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
     if (laneLog) {
       const byLane = validation && validation.summary && validation.summary.by_lane || {};
       laneLog.forEach((l) => { const sel = (validation && validation.ok ? validation.topics : []).filter((t) => t.candidate && t.candidate.lane === l.lane); l.selected = sel.length; l.selected_ids = sel.map((t) => t.candidate.id); l.duplicates = (byLane[l.lane] || {}).duplicates || 0; });
-      rec.lanes = laneLog; rec.lane_run = laneMeta && { settings: laneMeta.settings, elapsed_ms: laneMeta.elapsedMs, worst_case_ms: laneMeta.worstCaseMs, background_limit_ms: laneMeta.backgroundLimitMs, within_budget: laneMeta.worstCaseMs < laneMeta.backgroundLimitMs };
+      rec.lanes = laneLog; if (gapFill) rec.gap_fill = { enabled: true, triggered: gapFill.triggered, executed: gapFill.executed, state: gapFill.state || null, reason: gapFill.reason, qualifiedBefore: gapFill.qualifiedBefore, addedQualified: gapFill.addedQualified == null ? null : gapFill.addedQualified, convertedToFive: !!gapFill.convertedToFive, request: gapFill.request || null };
+      // the full before/after pools live in usage.gapFill, outside the size-capped discovery record
+      rec.lane_run = laneMeta && { settings: laneMeta.settings, elapsed_ms: laneMeta.elapsedMs, worst_case_ms: laneMeta.worstCaseMs, background_limit_ms: laneMeta.backgroundLimitMs, within_budget: laneMeta.worstCaseMs < laneMeta.backgroundLimitMs };
     }
     if (alOn && webTopics) rec.depth_v2 = cmp ? compact.depthCompact(webTopics, validation && validation.summary) : articleLed.depthV2(webTopics);
     if (cmp && validation && validation.candidates) rec.candidate_selection = { design: compact.DESIGN, summary: validation.summary, candidates: validation.candidates, retries: compact.retriesFor(e), max_output_tokens: firstPayload && firstPayload.max_output_tokens };
@@ -443,7 +502,7 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
     rec.final = fin ? { topics: fin.length, origin: { web: fin.filter((t) => t.origin !== "report").length, report: fin.filter((t) => t.origin === "report").length }, scope: { selected: fin.filter((t) => t.scope !== "broader_context").length, broader_context: fin.filter((t) => t.scope === "broader_context").length }, reframed: fin.filter((t) => t.reframed === true).length } : null;
     return diagLib.bound(rec);
   });
-  const finalUsage = { ...usage, ...(discovery ? { discovery } : {}), ...(alOn ? { pathway: "article_led", articleLed: { delivered: validation && validation.ok ? validation.topics.length : 0, charged: !!(validation && validation.ok && alCharge), limits: validation && validation.limits || null, offerMlsTrend: !!(validation && validation.ok && !alCharge), ...(laneLog ? { lanes: laneLog.length, lanesSucceeded: laneLog.filter((l) => l.state === "success").length, lanesRateLimited: laneLog.filter((l) => l.state === "rate_limited").length, lanesFailed: laneLog.filter((l) => l.state === "failed").length, lanesNotAttempted: laneLog.filter((l) => l.state === "not_attempted").length, lanesIncomplete: laneLog.some((l) => l.state !== "success") } : {}) } } : {}), costUsd, costEstimated: usage.costUsd == null && estimated != null, targetUsd: cfg.costTargetUsd, withinTarget: costUsd == null ? null : costUsd <= cfg.costTargetUsd, attempts, grounded, providerError, dataSource, reportAttempts, reframeAttempts, reframed, reportNote, topicDebug: validation && validation.ok ? null : topicAnswer, problems: problems.slice(0, 6).map((x) => String(x).slice(0, 200)) };
+  const finalUsage = { ...usage, ...(alOn ? { providerRequests } : {}), ...(gapFill ? { gapFill } : {}), ...(discovery ? { discovery } : {}), ...(alOn ? { pathway: "article_led", articleLed: { delivered: validation && validation.ok ? validation.topics.length : 0, charged: !!(validation && validation.ok && alCharge), limits: validation && validation.limits || null, offerMlsTrend: !!(validation && validation.ok && !alCharge), ...(gapFill ? { gapFill: { triggered: gapFill.triggered, executed: gapFill.executed, added: gapFill.addedQualified || 0, converted: !!gapFill.convertedToFive } } : {}), ...(laneLog ? { lanes: laneLog.length, lanesSucceeded: laneLog.filter((l) => l.state === "success").length, lanesRateLimited: laneLog.filter((l) => l.state === "rate_limited").length, lanesFailed: laneLog.filter((l) => l.state === "failed").length, lanesNotAttempted: laneLog.filter((l) => l.state === "not_attempted").length, lanesIncomplete: laneLog.some((l) => l.state !== "success") } : {}) } } : {}), costUsd, costEstimated: usage.costUsd == null && estimated != null, targetUsd: cfg.costTargetUsd, withinTarget: costUsd == null ? null : costUsd <= cfg.costTargetUsd, attempts, grounded, providerError, dataSource, reportAttempts, reframeAttempts, reframed, reportNote, topicDebug: validation && validation.ok ? null : topicAnswer, problems: problems.slice(0, 6).map((x) => String(x).slice(0, 200)) };
   const fields = rl.outcomeFields({ validation: error ? null : validation, usage: finalUsage, model: modelUsed, today, now, error, charge: alCharge });
   return { fields, problems, attempts };
 }

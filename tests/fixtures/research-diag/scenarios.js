@@ -108,7 +108,7 @@ const replayReplyV2 = (n) => {
 };
 
 /** One compact Stage A answer: eight candidates (one low strength, one an expired event), for the harness's offline smoke run. Fictional hosts. */
-const replayReplyCompact = (n, lane) => {
+const replayReplyCompact = (n, lane, mode) => {
   const q = ["Could the new subdivision change what nearby sellers face?", "Why did the city approve a second apartment site this fall?", "What do higher mortgage rates mean for move-up buyers here?", "Is a new school calendar shifting when families list?", "Which price bands saw pending sales slip last month?", "Are builder incentives pulling buyers from resale homes?", "What did the planning workshop leave unresolved?", "Is anything new happening with the county housing plan?"];
   const cands = q.map((question, i) => ({
     question, development: ["Parkwood agreement", "Apartment site approval", "Mortgage rate shift", "School calendar change", "Pending sales slowdown", "Builder incentives", "Planning workshop outcome", "County housing plan"][i], angle: ["Competing supply", "City action", "Financing", "Calendar", "Price bands", "Incentives", "Process", "Plan"][i], why: "It changes what nearby sellers compete with this winter.", relationship: "market", route: null,
@@ -117,8 +117,11 @@ const replayReplyCompact = (n, lane) => {
     sources: [{ title: `Lincoln story ${i + 1}`, url: `https://site${i + 1}.example/news/lincoln-story-${i + 1}`, published: "2026-10-18", role: "secondary", kind: "local_news", source_geography: "Lincoln, CA", reporting_period: "October 2026", what_it_establishes: "Reports the development." }],
   }));
   // lane replays: each lane returns a window of the eight, overlapping the next lane's by two (the duplicates the merge must collapse)
-  const window = { municipal: [0, 4], housing: [2, 6], economy: [4, 8] }[lane];
-  const use = window ? cands.slice(window[0], window[1]).map((c) => ({ ...c, sources: c.sources.map((x, i) => ({ ...x, url: `${x.url}${lane === "housing" ? "-h" : lane === "economy" ? "-e" : ""}` })) })) : cands;
+  // mode "gap": municipal and housing together give four distinct developments (the gap-fill trigger); the gap-fill pass returns one new development and one restatement of an existing one
+  const window = mode === "gap" ? { municipal: [0, 2], housing: [2, 4], gapfill: [4, 6] }[lane] : { municipal: [0, 4], housing: [2, 6], economy: [4, 8] }[lane];
+  const base = window ? cands.slice(window[0], window[1]) : cands;
+  if (mode === "gap" && lane === "gapfill" && base[1]) base[1] = { ...cands[0], question: "Is the same first development worth another look for sellers?", angle: "Another angle", sources: [{ ...cands[0].sources[0], url: cands[0].sources[0].url + "-again" }] };
+  const use = window ? base.map((c) => ({ ...c, sources: c.sources.map((x, i) => ({ ...x, url: `${x.url}${lane === "housing" ? "-h" : lane === "economy" ? "-e" : lane === "gapfill" ? "-g" : ""}` })) })) : cands;
   return { status: 200, json: { output: [{ type: "search_results", results: use.map((o) => ({ url: o.sources[0].url })) },
     { type: "message", content: [{ type: "output_text", text: "```json\n" + JSON.stringify({ research_limits: { returned: use.length, reason: null }, candidates: use }) + "\n```" }] }], usage: usage(n || 0) } };
 };

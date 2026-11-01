@@ -453,9 +453,34 @@ function requestLimits(env) {
 }
 const rowField = (r, k) => (r && r[k] != null ? r[k] : r && r.usage ? r.usage[k] : undefined);
 const isArticleLedRow = (r) => rowField(r, "pathway") === "article_led" && !(rowField(r, "withdrawn") === true || rowField(r, "withdrawn") === "true");
-const requestsOf = (r) => (r.status === "running" ? 1 : Math.max(1, Number(rowField(r, "attempts")) || 1));
+/**
+ * Provider requests a row used. usage.providerRequests is the authoritative count of actual outbound requests (every dispatched call, retries and failures included,
+ * counted once at one gate). Rows written before it existed fall back to the old count (their attempts, at least 1). A running row counts at least 1 and at least what it has
+ * persisted so far (the count is written before each dispatch).
+ */
+const requestsOf = (r) => {
+  const raw = rowField(r, "providerRequests"), pr = Number(raw);
+  const known = raw != null && raw !== "" && Number.isFinite(pr) && pr >= 0;
+  if (r.status === "running") return Math.max(1, known ? pr : 0);
+  return known ? pr : Math.max(1, Number(rowField(r, "attempts")) || 1);
+};
 const ageOf = (r, nowMs) => nowMs - new Date(r.created_at).getTime();
 const orderedBefore = (a, b) => { const x = new Date(a.created_at).getTime(), y = new Date(b.created_at).getTime(); return x !== y ? x < y : String(a.id) < String(b.id); };
+
+/**
+ * requestAllowance(rows, nowMs, env, excludeId, dispatched) -> { allowed, scope, used, limit }
+ * The hard check run BEFORE every provider dispatch. `rows` are this user's recent rows; the running session's own row is excluded (its in-memory count, `dispatched`, is
+ * added instead, because the row's persisted count can lag). Allowed only if one more request fits both the 24-hour and the 30-day limit.
+ */
+function requestAllowance(rows, nowMs, env, excludeId, dispatched) {
+  const lim = requestLimits(env);
+  const others = (Array.isArray(rows) ? rows : []).filter((r) => isArticleLedRow(r) && r.id !== excludeId);
+  const day = others.filter((r) => ageOf(r, nowMs) <= DAY_MS).reduce((n, r) => n + requestsOf(r), 0) + (dispatched || 0);
+  const month = others.filter((r) => ageOf(r, nowMs) <= MONTH_MS).reduce((n, r) => n + requestsOf(r), 0) + (dispatched || 0);
+  if (day + 1 > lim.daily) return { allowed: false, scope: "daily", used: day, limit: lim.daily };
+  if (month + 1 > lim.monthly) return { allowed: false, scope: "monthly", used: month, limit: lim.monthly };
+  return { allowed: true, scope: null, used: day, limit: lim.daily };
+}
 
 /** Partial (uncharged, ready) Article-Led results in the window. */
 function partialLimit(rows, nowMs, env) {
@@ -523,5 +548,5 @@ module.exports = {
   TOPIC_COUNT, NEWS_DAYS, AUTHORITATIVE_DAYS, STATUS_CHECK_DAYS, RELATIONSHIPS, SELECTED_RELATIONSHIPS, STATUSES, ACCESS, ROLES, KINDS, AUTHORITATIVE_KINDS,
   articleLedEnabled, isArticleLed, systemPromptV2, retryInstructionV2, buildPayloadV2, extractOpportunities, extractLimits,
   eligibleSource, applyFreshness, validateOpportunities, shouldCharge, partialNote, depthV2, mlsEvidenceOf, mlsEvidenceNote,
-  PARTIAL_DAILY_LIMIT, PARTIAL_MONTHLY_LIMIT, REQUEST_DAILY_LIMIT, REQUEST_MONTHLY_LIMIT, partialLimits, requestLimits, partialLimit, admit,
+  PARTIAL_DAILY_LIMIT, PARTIAL_MONTHLY_LIMIT, REQUEST_DAILY_LIMIT, REQUEST_MONTHLY_LIMIT, partialLimits, requestLimits, partialLimit, admit, requestAllowance, requestsOf,
 };

@@ -237,7 +237,7 @@ exports.handler = async (event) => {
     // Article-Led (PR 2): server-side admission. Partial and failed runs are uncharged, so provider requests, partial results and concurrency are limited here,
     // on the server. Legacy research is not affected. The check is repeated after the row is saved (below) so simultaneous requests cannot exceed a limit.
     const alOn = articleLed.isArticleLed(v.request, process.env);
-    const ADMISSION_SELECT = "id,created_at,charged_at,status,pathway:usage->>pathway,attempts:usage->>attempts,withdrawn:usage->>withdrawn";
+    const ADMISSION_SELECT = "id,created_at,charged_at,status,pathway:usage->>pathway,attempts:usage->>attempts,providerRequests:usage->>providerRequests,withdrawn:usage->>withdrawn";
     const loadAdmissionRows = async () => {
       const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
       const pr = await supabase("GET", "agent_marketing_research", null, `?user_id=eq.${userId}&created_at=gte.${encodeURIComponent(since)}&select=${ADMISSION_SELECT}&order=created_at.asc&limit=500`);

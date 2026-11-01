@@ -1,0 +1,64 @@
+{
+ "_note": "The Arena Boulevard / Jackrabbit Trail crossing candidate as the model returned it in the valid three-lane benchmark (Natomas run 1), rebuilt from the saved card. The saved card predates the completed_outcome field, so completed_outcome is reconstructed from the card's own development and the KCRA article's stated outcome. Everything else (event, status_by_source, sources, titles, URLs, dates) is the card's own. No article text.",
+ "question": "Will the new Arena Boulevard crossing make Jackrabbit Trail easier to reach?",
+ "development": "The City of Sacramento completed an enhanced Jackrabbit Trail crossing at Arena Boulevard in North Natomas.",
+ "angle": "A completed pedestrian and bicycle connection may improve access to a popular local trail.",
+ "why": "The crossing removes a trail gap and could be a visible neighborhood amenity for nearby homeowners.",
+ "relationship": "market",
+ "route": null,
+ "strength": "high",
+ "relevance": "direct",
+ "action_date": "2026-10-26",
+ "event": {
+  "kind": "opening",
+  "date": "2026-10-26",
+  "deadline": null,
+  "continues_after_event": false,
+  "after_event": "The city completed the crossing; a ribbon-cutting and community bike ride were held.",
+  "after_event_source": 1
+ },
+ "completed_outcome": {
+  "type": "physical",
+  "what": "A signalized, enhanced crossing now connects Jackrabbit Trail across Arena Boulevard.",
+  "source": 1
+ },
+ "status": "unverified",
+ "status_source": null,
+ "status_checked_date": null,
+ "status_by_source": [
+  {
+   "source": 1,
+   "state": "completed"
+  },
+  {
+   "source": 2,
+   "state": "completed"
+  }
+ ],
+ "conflict": null,
+ "gap": "No official project page or detail on how nearby homeowners’ access changes.",
+ "access_confidence": "medium",
+ "keyword_match": false,
+ "sources": [
+  {
+   "title": "Jackrabbit Trail crossing construction in North Natomas now complete",
+   "url": "https://kcra.com/article/…/74251432",
+   "published": "2026-10-26",
+   "role": "secondary",
+   "kind": "local_news",
+   "source_geography": "North Natomas, Sacramento",
+   "reporting_period": "2026-10",
+   "what_it_establishes": "The city completed an enhanced Arena Boulevard crossing linking sections of Jackrabbit Trail."
+  },
+  {
+   "title": "New Arena Boulevard Crossing Improves Access to North Natomas' Jackrabbit Trail",
+   "url": "https://news-press.com/press-release/story/135101/…/",
+   "published": "2026-10-19",
+   "role": "secondary",
+   "kind": "other",
+   "source_geography": "North Natomas, Sacramento",
+   "reporting_period": "2026-10",
+   "what_it_establishes": "The crossing addresses a longstanding gap; organizers announced an October 26 ribbon-cutting."
+  }
+ ]
+}

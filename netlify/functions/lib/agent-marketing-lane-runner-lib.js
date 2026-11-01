@@ -58,18 +58,23 @@ const scrub = (text, secret) => {
  *   lanes: [{ id, ... }];  build(lane) -> provider payload;  call(payload, apiKey) -> Promise<{ status, json, headers? }> (rejects on network error or timeout)
  * results[i]: { lane, state, attempts, statuses:[...], waitsMs:[...], totalWaitMs, retryAfterSeen, startedMs, durationMs, reason, error, resp }
  */
-async function runLanes({ lanes, build, call, apiKey, sleep, clock, rand, settings }) {
+async function runLanes({ lanes, build, call, apiKey, sleep, clock, rand, settings, leadWaitMs }) {
   const s = settings || laneSettings();
   const now = clock || Date.now;
   const t0 = now();
   const elapsed = () => now() - t0;
   const results = [];
   let lastStart = null, rateLimitsSeen = 0, stop = null;
+  let lead = Math.max(0, Number(leadWaitMs) || 0);      // time still owed since the previous request's start (a gap-fill pass follows the lanes)
   for (const lane of lanes) {
     const r = { lane: lane.id, state: "not_attempted", attempts: 0, statuses: [], waitsMs: [], totalWaitMs: 0, retryAfterSeen: false, startedMs: null, durationMs: null, reason: null, error: null, resp: null };
     results.push(r);
     if (stop) { r.reason = stop; continue; }
     // the interval between starts widens after every 429 seen, so a stricter limit than the default is found instead of assumed away
+    if (lead > 0 && lastStart == null) {
+      if (elapsed() + lead + s.expectedCallMs > s.budgetMs) { r.reason = stop = "time_budget"; continue; }
+      await sleep(lead); r.totalWaitMs += lead; lead = 0;
+    }
     if (lastStart != null) {
       const interval = s.minIntervalMs * (1 + rateLimitsSeen);
       const wait = Math.max(0, lastStart + interval - elapsed());
@@ -86,6 +91,13 @@ async function runLanes({ lanes, build, call, apiKey, sleep, clock, rand, settin
       r.attempts = attempt;
       let res = null, threw = null;
       try { res = await call(payload, apiKey); } catch (err) { threw = err; }
+      // The request-limit gate refused to dispatch: nothing was sent, so it is not an attempt and is not retried. Lanes that already succeeded are untouched.
+      if (threw && threw.quotaBlocked) {
+        r.attempts = attempt - 1;
+        if (r.attempts === 0) r.state = "not_attempted";
+        r.reason = "request_limit"; r.error = null; stop = stop || "request_limit";
+        break;
+      }
       const status = threw ? null : (res && res.status) || null;
       r.statuses.push(status);
       if (!threw && status >= 200 && status < 300 && res.json) { r.state = "success"; r.resp = res.json; r.reason = null; r.error = null; break; }

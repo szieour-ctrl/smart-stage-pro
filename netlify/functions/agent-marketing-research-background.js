@@ -43,7 +43,19 @@ exports.handler = async (event) => {
         return { statusCode: 200, body: "" };
       }
     }
-    const { fields, problems, attempts } = await runLib.runResearch({ row, apiKey: process.env.PERPLEXITY_API_KEY, uploads, anthropicKey: process.env.ANTHROPIC_API_KEY });
+    // Article-Led only: every outbound provider request is checked against the 15-per-24-hours and 100-per-30-days limits BEFORE it is sent (fail closed if the rows cannot be
+    // read), and the running row's count is written BEFORE each dispatch, so a crashed function still leaves its true count. Legacy research is not affected.
+    const articleLed = require("./lib/agent-marketing-article-led-lib");
+    const isAL = !!(row.usage && row.usage.pathway === "article_led");
+    const rowsSelect = "id,created_at,charged_at,status,pathway:usage->>pathway,attempts:usage->>attempts,providerRequests:usage->>providerRequests,withdrawn:usage->>withdrawn";
+    const quotaFn = isAL ? async (dispatched) => {
+      const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+      const pr = await supabase("GET", "agent_marketing_research", null, `?user_id=eq.${userId}&created_at=gte.${encodeURIComponent(since)}&select=${rowsSelect}&order=created_at.asc&limit=500`);
+      if (!(pr.status < 300 && Array.isArray(pr.data))) return { allowed: false, scope: "unverifiable", used: null, limit: null };
+      return articleLed.requestAllowance(pr.data, Date.now(), process.env, id, dispatched);
+    } : undefined;
+    const onDispatch = isAL ? async (n) => { await supabase("PATCH", "agent_marketing_research", { usage: { pathway: "article_led", providerRequests: n } }, `?id=eq.${id}&user_id=eq.${userId}&status=eq.running`); } : undefined;
+    const { fields, problems, attempts } = await runLib.runResearch({ row, apiKey: process.env.PERPLEXITY_API_KEY, uploads, anthropicKey: process.env.ANTHROPIC_API_KEY, quotaFn, onDispatch });
     if (fields.status === "failed") console.error(`[agent-marketing-research] ${id} failed after ${attempts} attempt(s): ${(problems || []).join("; ").slice(0, 400)} ${fields.error || ""}`);
     await writeRow(id, userId, fields);
   } catch (err) {

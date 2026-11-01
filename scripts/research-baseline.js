@@ -44,9 +44,11 @@ const CELLS = Object.freeze([
   { id: "lanes3_r20_c6000_o4500", prompt: "compact", lanes: "three", results: 20, context: 6000, output: 4500, retries: 0 },
   // Two-lane confirmation (Oct 31): municipal + housing only (the economy lane is out), sequential, same rate-limit handling.
   { id: "lanes2_r20_c6000_o4500", prompt: "compact", lanes: "two", results: 20, context: 6000, output: 4500, retries: 0 },
+  // Gap-fill diagnostic (Oct 31): the approved two-lane configuration plus the off-by-default gap-fill pass (fires only with exactly 3 or 4 distinct qualified developments).
+  { id: "lanes2gap_r20_c6000_o4500", prompt: "compact", lanes: "two", gapfill: "diagnostic", results: 20, context: 6000, output: 4500, retries: 0 },
   { id: "detailed_r20_c6000_o8000", prompt: "compact", design: "detailed", maxRepeats: 1, results: 20, context: 6000, output: 8000, retries: 0 },
 ]);
-const cellsFor = (prompt) => CELLS.filter((c) => (prompt === "v2" ? c.prompt === "v2" : prompt === "compact" ? c.prompt === "compact" && !c.lanes : prompt === "lanes" ? c.lanes === "three" : prompt === "lanes2" ? c.lanes === "two" : prompt === "both" ? true : c.prompt !== "v2" && c.prompt !== "compact"));
+const cellsFor = (prompt) => CELLS.filter((c) => (prompt === "v2" ? c.prompt === "v2" : prompt === "compact" ? c.prompt === "compact" && !c.lanes : prompt === "lanes" ? c.lanes === "three" : prompt === "lanes2" ? c.lanes === "two" && !c.gapfill : prompt === "gapfill" ? c.gapfill === "diagnostic" : prompt === "both" ? true : c.prompt !== "v2" && c.prompt !== "compact"));
 const isArticleCell = (c) => c.prompt === "v2" || c.prompt === "compact";
 const designOfCell = (c) => (c.prompt === "compact" ? c.design || "compact" : c.prompt === "v2" ? "detailed" : null);
 const MARKETS = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "tests", "fixtures", "research-diag", "markets.json"), "utf8"));
@@ -73,7 +75,7 @@ function parseArgs(argv) {
     else if (k === "--cells") a.cells = String(argv[++i] || "").split(",").map((x) => x.trim()).filter(Boolean);
   }
   if (a.live === a.replay) throw new Error("Choose exactly one of --live or --replay.");
-  if (!["v1", "v2", "compact", "lanes", "lanes2", "both"].includes(a.prompt)) throw new Error("--prompt must be v1, v2, compact, lanes, lanes2 or both.");
+  if (!["v1", "v2", "compact", "lanes", "lanes2", "gapfill", "both"].includes(a.prompt)) throw new Error("--prompt must be v1, v2, compact, lanes, lanes2, gapfill or both.");
   const badCells = (a.cells || []).filter((c) => !CELLS.some((x) => x.id === c));
   if (badCells.length) throw new Error(`Unknown cell(s): ${badCells.join(", ")}. Known: ${CELLS.map((c) => c.id).join(", ")}`);
   const bad = a.markets.filter((m) => !MARKETS[m]);
@@ -96,7 +98,7 @@ function cellEnv(base, cell) {
     ...(cell.retries != null ? { AGENT_MARKETING_RESEARCH_RETRIES: String(cell.retries) } : {}),
     ...(cell.results != null ? { AGENT_MARKETING_RESEARCH_MAX_RESULTS: String(cell.results), AGENT_MARKETING_RESEARCH_SEARCH_TOKENS: String(cell.context) } : {}),
     ...(cell.output != null ? { AGENT_MARKETING_RESEARCH_MAX_TOKENS: String(cell.output) } : {}),
-    ...(isArticleCell(cell) ? { AGENT_MARKETING_ARTICLE_LED_ENABLED: "true", AGENT_MARKETING_ARTICLE_LED_DESIGN: designOfCell(cell), AGENT_MARKETING_ARTICLE_LED_RETRIES: String(cell.retries == null ? 0 : cell.retries), AGENT_MARKETING_ARTICLE_LED_LANES: cell.lanes || "" } : { AGENT_MARKETING_ARTICLE_LED_ENABLED: "" }),   // v1 cells always run the v1 prompt
+    ...(isArticleCell(cell) ? { AGENT_MARKETING_ARTICLE_LED_ENABLED: "true", AGENT_MARKETING_ARTICLE_LED_DESIGN: designOfCell(cell), AGENT_MARKETING_ARTICLE_LED_RETRIES: String(cell.retries == null ? 0 : cell.retries), AGENT_MARKETING_ARTICLE_LED_LANES: cell.lanes || "", AGENT_MARKETING_ARTICLE_LED_GAPFILL: cell.gapfill || "" } : { AGENT_MARKETING_ARTICLE_LED_ENABLED: "" }),   // v1 cells always run the v1 prompt
   };
 }
 
@@ -139,6 +141,7 @@ function summarizeRun(job, result, ms, replay) {
     substantive_topics: set ? set.substantive_topics : null, distinct_articles: set ? set.distinct_articles : null, distinct_publishers: set ? set.distinct_publishers : null,
     distinct_developments_proxy: set ? set.distinct_developments_proxy : null, exact_market: set ? set.exact_market : null, broader_context: set ? set.broader_context : null,
     multi_publisher_topics: set ? set.multi_publisher_topics : null, median_newest_source_days: set ? set.median_newest_source_days : null,
+    provider_requests: u.providerRequests == null ? null : u.providerRequests, gap: u.articleLed && u.articleLed.gapFill ? u.articleLed.gapFill : null,
     pathway: u.pathway || "legacy", charged: !!f.charged_at, v2: d && d.depth_v2 ? d.depth_v2 : null, delivered: u.articleLed ? u.articleLed.delivered : null, research_limit: u.articleLed && u.articleLed.limits ? u.articleLed.limits.reason : null,
     cost_per_kept_topic: cost != null && kept ? Math.round((cost / kept) * 1e6) / 1e6 : null,
     cost_per_substantive_topic: cost != null && set && set.substantive_topics ? Math.round((cost / set.substantive_topics) * 1e6) / 1e6 : null,
@@ -197,8 +200,8 @@ async function main() {
   for (const job of jobs) {
     const row = { id: `baseline-${job.market}-${job.cell.id}-${job.repeat}`, mode: "market_update", audience: "sellers", geography: MARKETS[job.market], focus: {}, upload_refs: [], data_source: "web" };
     const env = cellEnv(process.env, job.cell);
-    const laneOfPayload = (pl) => (/Lane: Municipal/.test(pl.input) ? "municipal" : /Lane: Housing/.test(pl.input) ? "housing" : /Lane: Financing/.test(pl.input) ? "economy" : null);
-    const inner = args.replay ? (async (pl) => (job.cell.prompt === "v2" || designOfCell(job.cell) === "detailed" ? fx.replayReplyV2(job.repeat) : job.cell.prompt === "compact" ? fx.replayReplyCompact(job.repeat, laneOfPayload(pl || {})) : fx.replayReply(job.repeat))) : null;
+    const laneOfPayload = (pl) => (/Lane: Municipal/.test(pl.input) ? "municipal" : /Lane: Housing/.test(pl.input) ? "housing" : /Lane: Gap-fill/.test(pl.input) ? "gapfill" : /Lane: Financing/.test(pl.input) ? "economy" : null);
+    const inner = args.replay ? (async (pl) => (job.cell.prompt === "v2" || designOfCell(job.cell) === "detailed" ? fx.replayReplyV2(job.repeat) : job.cell.prompt === "compact" ? fx.replayReplyCompact(job.repeat, laneOfPayload(pl || {}), job.cell.gapfill ? "gap" : undefined) : fx.replayReply(job.repeat))) : null;
     const callFn = inner || ((payload, k) => run.callPerplexity(payload, k));
     const t0 = Date.now();
     const origErr = console.error; console.error = quiet;
@@ -209,6 +212,7 @@ async function main() {
     rows.push(sum);
     fs.appendFileSync(path.join(dir, "runs.jsonl"), redact(JSON.stringify(sum), key) + "\n");
     if (isArticleCell(job.cell)) fs.writeFileSync(path.join(dir, `${job.market}-${job.cell.id}-${job.repeat}.cards.json`), redact(JSON.stringify(cardsOf(result.fields.topics), null, 1), key));
+    if (result.fields.usage && result.fields.usage.gapFill) fs.writeFileSync(path.join(dir, `${job.market}-${job.cell.id}-${job.repeat}.gapfill.json`), redact(JSON.stringify(result.fields.usage.gapFill, null, 1), key));
     // The full diagnostics record of the run, for investigating a weak result.
     fs.writeFileSync(path.join(dir, `${job.market}-${job.cell.id}-${job.repeat}.discovery.json`), redact(JSON.stringify(result.fields.usage && result.fields.usage.discovery || null, null, 1), key));
     process.stdout.write(redact(`${job.market} ${job.cell.id} #${job.repeat}: ${sum.status} topics=${sum.topics_kept} cost=${sum.cost_usd == null ? "n/a" : "$" + sum.cost_usd}${sum.error ? " error=" + sum.error : ""}`, key) + "\n");

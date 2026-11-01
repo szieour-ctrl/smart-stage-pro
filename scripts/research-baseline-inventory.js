@@ -48,7 +48,7 @@ function redact(text) {
 function readRuns(dir) {
   const out = [];
   fs.readdirSync(dir).filter((f) => f.endsWith(".discovery.json")).sort().forEach((f) => {
-    const m = /^(.+?)-(as_shipped|v2_[a-z0-9_]+|compact_[a-z0-9_]+|detailed_[a-z0-9_]+|r\d+_c\d+)-(\d+)\.discovery\.json$/.exec(f);
+    const m = /^(.+?)-(as_shipped|v2_[a-z0-9_]+|compact_[a-z0-9_]+|lanes\d[a-z0-9_]*|detailed_[a-z0-9_]+|r\d+_c\d+)-(\d+)\.discovery\.json$/.exec(f);
     if (!m) return;
     let d = null;
     try { d = JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")); } catch { return; }

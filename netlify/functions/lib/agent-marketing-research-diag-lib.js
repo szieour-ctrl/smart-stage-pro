@@ -76,6 +76,7 @@ function pushSource(diag, rec) {
       topic: rec.topic, url: safeUrl(rec.url), host: hostOf(rec.url), title: safeText(rec.title, TITLE_CHARS),
       model_date: day(rec.model_date), provider_date: day(rec.provider_date), date_from: rec.date_from || null,
       outcome: rec.outcome, stage: rec.stage, code: rec.code, detail: rec.detail ? safeText(rec.detail, DETAIL_CHARS) : null,
+      ...(rec.role ? { role: safeText(rec.role, 24) } : {}), ...(rec.kind ? { kind: safeText(rec.kind, 32) } : {}), ...(rec.window ? { window: safeText(rec.window, 32) } : {}),
     });
   } catch { /* diagnostics never break research */ }
 }

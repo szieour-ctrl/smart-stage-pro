@@ -14,6 +14,7 @@ const reportTopics = require("./agent-marketing-research-report-lib");
 const planLib = require("./agent-marketing-plan-lib");
 const reframeLib = require("./agent-marketing-reframe-lib");
 const diagLib = require("./agent-marketing-research-diag-lib");
+const articleLed = require("./agent-marketing-article-led-lib");
 
 const API_HOST = "api.perplexity.ai";
 const API_PATH = "/v1/agent";
@@ -221,7 +222,9 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
   const today = todayPT(now);
   const { request, uploadContext } = requestFromRow(row);
   const dataSource = request.dataSource;
-  let payload = dataSource === "upload" ? null : rl.buildResearchPayload({ request, today, uploadContext, env: e });
+  // Article-Led pathway (PR 2): only with AGENT_MARKETING_ARTICLE_LED_ENABLED, a Market Update that is not report-only. Flag off: everything below is v1.
+  const alOn = articleLed.isArticleLed(request, e);
+  let payload = dataSource === "upload" ? null : (alOn ? articleLed.buildPayloadV2({ request, today, env: e }) : rl.buildResearchPayload({ request, today, uploadContext, env: e }));
   const baseInput = payload && payload.input;
   let usage = { promptTokens: null, completionTokens: null, citationTokens: null, reasoningTokens: null, searchQueries: null, costUsd: null };
   let modelUsed = payload ? payload.model : null, grounded = null, attempts = 0, problems = [], validation = null, error = null, providerError = null;
@@ -251,9 +254,11 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
         const text = answerText(resp);
         topicAnswer = { answer: text.slice(0, 1500), citations: citationUrls(resp).slice(0, 8).map((u) => String(u).slice(0, 200)), attempt: attempts };
         try {
-          const g = groundTopics(rl.extractTopics(text), resp, attemptDiag);
+          const g = groundTopics(alOn ? articleLed.extractOpportunities(text) : rl.extractTopics(text), resp, attemptDiag);
           grounded = g.grounded;
-          validation = rl.validateTopics(g.topics, { mode: request.mode, today, recommendation: rl.extractRecommendation(text), need: dataSource === "both" ? rl.TOPIC_COUNT - reportTopics.REPORT_TOPICS_WHEN_BOTH : rl.TOPIC_COUNT, diag: attemptDiag });
+          validation = alOn
+            ? articleLed.validateOpportunities(g.topics, { today, geography: request.geography, limits: articleLed.extractLimits(text), recommendation: rl.extractRecommendation(text), diag: attemptDiag })
+            : rl.validateTopics(g.topics, { mode: request.mode, today, recommendation: rl.extractRecommendation(text), need: dataSource === "both" ? rl.TOPIC_COUNT - reportTopics.REPORT_TOPICS_WHEN_BOTH : rl.TOPIC_COUNT, diag: attemptDiag });
           problems = validation.problems;
         } catch (parseErr) {
           validation = { ok: false, topics: [], problems: [parseErr.message] };
@@ -273,8 +278,10 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
           lastWhy = why;
           const tool = payload.tools && payload.tools[0];
           // A retry also looks wider (more results, more search context) so there is more to choose publishers from.
-          const tools = tool ? [{ ...tool, max_results: Math.max(tool.max_results || 0, 20), max_tokens: Math.max(tool.max_tokens || 0, 10000) }] : payload.tools;
-          payload = { ...payload, tools, input: `${baseInput}\n\nYour previous answer was ${validation.ok ? "usable but needs work" : "rejected"}: ${why.slice(0, 6).join("; ").slice(0, 600)}. Return the JSON again with exactly 5 topics that fix this. Do not invent sources, dates or events.` };
+          // Article-Led (v2) does not widen the search on a retry: search-context limits are not raised without evidence that they help (Sam, Oct 31).
+          const tools = alOn ? payload.tools : (tool ? [{ ...tool, max_results: Math.max(tool.max_results || 0, 20), max_tokens: Math.max(tool.max_tokens || 0, 10000) }] : payload.tools);
+          if (alOn) payload = { ...payload, tools, input: articleLed.retryInstructionV2(why, baseInput) };
+          else payload = { ...payload, tools, input: `${baseInput}\n\nYour previous answer was ${validation.ok ? "usable but needs work" : "rejected"}: ${why.slice(0, 6).join("; ").slice(0, 600)}. Return the JSON again with exactly 5 topics that fix this. Do not invent sources, dates or events.` };
         }
       }
       // Keep the strongest usable answer: an earlier one when a later answer is weaker or unusable (never the reverse).
@@ -288,7 +295,15 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
       if (validation && validation.ok && validation.partial && !reportNote) reportNote = `Only ${validation.topics.length} of 5 topics came back with a usable article this time, because few local news stories matched. Your own MLS report is the best way to add more.`;
       else if (validation && validation.ok && validation.soft && validation.soft.length && !reportNote) reportNote = "Most of these topics rest on one or two websites, because few independent sources were found for this market this month. Your own MLS report is the best way to add a second source.";
     }
-    if (dataSource !== "web" && (dataSource === "upload" || (validation && validation.ok))) {
+    // Article-Led (v2): the confirmed MLS report is separate numerical evidence. It writes no topics, takes none of the five positions and triggers no
+    // reframe. Its figures are attached to each opportunity the same way they are for a web topic in combined mode, so Reel creation keeps working.
+    if (alOn && dataSource === "both" && validation && validation.ok) {
+      try {
+        const ctx = reportTopics.buildContext(uploads, request);
+        if (ctx.reports.length) validation = { ...validation, topics: reportTopics.applyReportPrecedence(validation.topics, ctx) };
+      } catch (err) { console.error(`[agent-marketing-research] report figures not attached: ${String(err && err.message).slice(0, 200)}`); }
+    }
+    if (!alOn && dataSource !== "web" && (dataSource === "upload" || (validation && validation.ok))) {
       // Topics from the agent's own report. In "both", a failure here is not fatal: the five web topics are still delivered, and the agent is told.
       const ctx = reportTopics.buildContext(uploads, request);
       const want = dataSource === "both" ? reportTopics.REPORT_TOPICS_WHEN_BOTH : rl.TOPIC_COUNT;
@@ -329,16 +344,21 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
   // Cost: the provider's own figure when it sent one, otherwise an estimate from tokens (flagged as an estimate).
   const estimated = usage.costUsd == null ? estimateCostUsd(modelUsed, usage) : null;
   const costUsd = usage.costUsd != null ? usage.costUsd : estimated;
+  // Article-Led billing and the partial-result note: one session is charged only when five qualifying opportunities are delivered.
+  const alCharge = alOn ? articleLed.shouldCharge(validation) : true;
+  if (alOn && validation && validation.ok && !alCharge) reportNote = articleLed.partialNote(validation);
   const discovery = safe(() => {
     const rec = diagLib.buildRecord({ request, dataSource, cfg, firstPayload, attempts: diagAttempts, usedAttempt, finalTopics: webTopics, today, codeVersion: e.COMMIT_REF || e.DEPLOY_ID || null });
     rec.selection = { rule: "strongest_valid_attempt", chosen: usedAttempt, order: "topics, articles, publishers, sources; tie = later answer", attempts: strengthLog };
+    rec.pathway = alOn ? "article_led" : "legacy";
+    if (alOn && webTopics) rec.depth_v2 = articleLed.depthV2(webTopics);
     rec.depth = webTopics ? diagLib.depthOf({ topics: webTopics, geography: request.geography, today, overlaps: webOverlaps }) : null;
     const fin = validation && validation.ok ? validation.topics : null;
     rec.final = fin ? { topics: fin.length, origin: { web: fin.filter((t) => t.origin !== "report").length, report: fin.filter((t) => t.origin === "report").length }, scope: { selected: fin.filter((t) => t.scope !== "broader_context").length, broader_context: fin.filter((t) => t.scope === "broader_context").length }, reframed: fin.filter((t) => t.reframed === true).length } : null;
     return diagLib.bound(rec);
   });
-  const finalUsage = { ...usage, ...(discovery ? { discovery } : {}), costUsd, costEstimated: usage.costUsd == null && estimated != null, targetUsd: cfg.costTargetUsd, withinTarget: costUsd == null ? null : costUsd <= cfg.costTargetUsd, attempts, grounded, providerError, dataSource, reportAttempts, reframeAttempts, reframed, reportNote, topicDebug: validation && validation.ok ? null : topicAnswer, problems: problems.slice(0, 6).map((x) => String(x).slice(0, 200)) };
-  const fields = rl.outcomeFields({ validation: error ? null : validation, usage: finalUsage, model: modelUsed, today, now, error });
+  const finalUsage = { ...usage, ...(discovery ? { discovery } : {}), ...(alOn ? { pathway: "article_led", articleLed: { delivered: validation && validation.ok ? validation.topics.length : 0, charged: !!(validation && validation.ok && alCharge), limits: validation && validation.limits || null, offerMlsTrend: !!(validation && validation.ok && !alCharge) } } : {}), costUsd, costEstimated: usage.costUsd == null && estimated != null, targetUsd: cfg.costTargetUsd, withinTarget: costUsd == null ? null : costUsd <= cfg.costTargetUsd, attempts, grounded, providerError, dataSource, reportAttempts, reframeAttempts, reframed, reportNote, topicDebug: validation && validation.ok ? null : topicAnswer, problems: problems.slice(0, 6).map((x) => String(x).slice(0, 200)) };
+  const fields = rl.outcomeFields({ validation: error ? null : validation, usage: finalUsage, model: modelUsed, today, now, error, charge: alCharge });
   return { fields, problems, attempts };
 }
 

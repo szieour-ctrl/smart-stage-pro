@@ -17,6 +17,7 @@ const TOPIC = { id: "t2", researchId: "bbbbbbbb-bbbb-4bbb-8bbb-000000000001", qu
   geography: { zip: "95678", type: "city", name: "Roseville", state: "CA", label: "Roseville, CA" }, sources: [{ type: "web", url: "https://example.com/a", title: "A", domain: "example.com" }] };
 const uuid = (n) => `aaaaaaaa-aaaa-4aaa-8aaa-${String(n).padStart(12, "0")}`;
 function fakeSupabase(method, table, body, qs = "") {
+  if (table === "agent_marketing_jobs" && method === "GET") return Promise.resolve({ status: 200, data: [] });   // the project list also asks for each project's newest Reel job
   assert.strictEqual(table, "agent_marketing_projects");
   const q = new URLSearchParams(qs.replace(/^\?/, ""));
   const idEq = (q.get("id") || "").replace("eq.", "");
@@ -277,4 +278,49 @@ test("pronunciations are saved with the script and kept through approval", async
   assert.strictEqual(r.status, 200);
   assert.deepStrictEqual(row.narrative.pronunciations, [{ written: "Denio's", say: "Danaio’s" }]);
   assert.deepStrictEqual(r.json.project.narrative.pronunciations, [{ written: "Denio's", say: "Danaio’s" }]);
+});
+
+// ── Article-Led topics on the project endpoint (PR #217 final review): internals never reach the browser; the Plan stage still gets the full stored topic ──
+test("article-led topic: no endpoint response carries the candidate record or discovery trace, and the Plan stage still works from the stored topic", async () => {
+  process.env.AGENT_MARKETING_ENABLED = "true"; process.env.ANTHROPIC_API_KEY = "test"; process.env.INTERNAL_API_KEY = "secret"; process.env.URL = "https://example.test";
+  currentUser = U1;
+  // A real Article-Led topic, produced by the real pipeline and frozen the way the research "select" action freezes it.
+  const run = require("../netlify/functions/lib/agent-marketing-research-run-lib"), fx = require("./fixtures/research-diag/scenarios"), ARENA = require("./fixtures/research-diag/arena-crossing.json");
+  const c = JSON.parse(JSON.stringify(ARENA));
+  const provider = { status: 200, json: { output: [{ type: "search_results", results: c.sources.map((s) => ({ url: s.url })) }, { type: "message", content: [{ type: "output_text", text: "```json\n" + JSON.stringify({ research_lane: "x", candidates: [c] }) + "\n```" }] }] } };
+  const quietErr = console.error; console.error = () => {};
+  let out; try { out = await run.runResearch({ row: { id: "r", mode: "market_update", audience: "sellers", geography: fx.GEO.lincoln, focus: {}, upload_refs: [], data_source: "web" }, apiKey: "SECRET-KEY-VALUE", now: "2026-10-31T20:00:00Z", env: { AGENT_MARKETING_ARTICLE_LED_ENABLED: "true" }, sleepFn: async () => {}, clock: () => 0, rand: () => 0.5, callFn: async () => provider }); } finally { console.error = quietErr; }
+  const topic = out.fields.topics[0];
+  assert.ok(topic.candidate && topic.discovery, "the stored topic carries the internals the Plan stage may read");
+  const frozen = { ...topic, researchId: "bbbbbbbb-bbbb-4bbb-8bbb-000000000009", researchDate: "2026-10-31", mode: "market_update", audience: "sellers", focus: {}, geography: fx.GEO.lincoln };
+
+  const id = (await call("POST", { action: "create" })).json.project.id;
+  const row = rows.find((r) => r.id === id); row.selected_topic = frozen;
+  const FORBIDDEN = ["candidate", "discovery", "developmentKey", "angleKey", "modelRelevance", "relevanceCapReason", "provisionalEvidence", "providerRequests", "providerError", "topicDebug", "costUsd", "SECRET-KEY-VALUE"];
+  const clean = (label, json) => { const s = JSON.stringify(json); for (const k of FORBIDDEN) assert.ok(!s.includes(k), `${label} exposes ${k}`); };
+  const usable = (label, t) => { assert.ok(t && t.id === frozen.id && t.question === frozen.question && t.whyItMatters === frozen.whyItMatters && Array.isArray(t.sources) && t.sources.length > 0 && t.researchId === frozen.researchId, `${label}: the fields the page uses are still sent`); };
+
+  const one = await call("GET", null, { id }); assert.strictEqual(one.status, 200); clean("GET project", one.json); usable("GET project", one.json.project.selectedTopic);
+  const list = await call("GET", null, {}); assert.strictEqual(list.status, 200); clean("GET list", list.json); usable("GET list", list.json.projects.find((p) => p.id === id).selectedTopic);
+  const saved = await call("POST", { action: "save_intake", id, intake: { ...intake, market: "Lincoln, CA" } });
+  assert.strictEqual(saved.status, 200, JSON.stringify(saved.json).slice(0, 200)); clean("save_intake", saved.json); usable("save_intake", saved.json.project.selectedTopic);
+
+  // Storage is untouched, and the Plan stage still runs from it.
+  assert.ok(row.selected_topic.candidate && row.selected_topic.discovery && row.selected_topic.candidate.identity, "the stored topic keeps the full record");
+  const calls = []; const realFetch = global.fetch; global.fetch = async (url, opts) => { calls.push({ url, opts }); return { ok: true, status: 202 }; };
+  try {
+    const p = await call("POST", { action: "plan", id });
+    assert.strictEqual(p.status, 202, JSON.stringify(p.json).slice(0, 200)); clean("plan", p.json); usable("plan", p.json.project.selectedTopic);
+    assert.strictEqual(calls.length, 1); assert.match(calls[0].url, /agent-marketing-plan-background$/);
+    let prompt = null; const realCall = planLib.callClaudeText;
+    planLib.callClaudeText = async (...args) => { prompt = JSON.stringify(args); return planJson; };
+    try { await bg.handler({ headers: { "x-internal-key": "secret" }, body: JSON.stringify({ projectId: id, owner: U1 }) }); } finally { planLib.callClaudeText = realCall; }
+    assert.ok(prompt, "the planner was called from the stored topic"); assert.strictEqual(row.narrative.status, "ready"); assert.strictEqual(row.status, "narrative_ready");
+    const after = await call("GET", null, { id }); assert.strictEqual(after.status, 200); clean("GET after plan", after.json); assert.strictEqual(after.json.project.narrative.status, "ready");
+  } finally { global.fetch = realFetch; }
+  assert.ok(row.selected_topic.candidate && row.selected_topic.discovery, "still stored after the Plan stage");
+
+  // A legacy topic (no candidate record) is returned exactly as before.
+  const lid = (await call("POST", { action: "create" })).json.project.id;
+  assert.deepStrictEqual((await call("GET", null, { id: lid })).json.project.selectedTopic, TOPIC);
 });

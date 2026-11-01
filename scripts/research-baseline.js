@@ -94,7 +94,7 @@ function cardsOf(topics) {
     n: i + 1, question: t.question, scope: t.scope, scopeNote: t.scopeNote || null, relationship: t.editorial.geographicRelationship, routeToMarket: t.editorial.routeToMarket,
     status: t.editorial.status, claimedStatus: t.editorial.claimedStatus, statusReason: t.editorial.statusReason, actionDate: t.editorial.actionDate, statusCheckedDate: t.editorial.statusCheckedDate,
     development: t.editorial.development, angle: t.editorial.angle, thesis: t.editorial.thesis, homeownerDecision: t.editorial.homeownerDecision,
-    establishedFacts: t.editorial.establishedFacts, possibleExplanations: t.editorial.possibleExplanations, projectFacts: t.editorial.projectFacts, evidencePoints: t.editorial.evidencePoints,
+    sourceReportedFacts: t.editorial.sourceReportedFacts, geographyCheck: t.editorial.geographyCheck, qualification: t.editorial.qualification, review: t.editorial.review, possibleExplanations: t.editorial.possibleExplanations, projectFacts: t.editorial.projectFacts, evidencePoints: t.editorial.evidencePoints,
     evidenceGaps: t.editorial.evidenceGaps, verificationNeeds: t.editorial.verificationNeeds, accessConfidence: t.editorial.accessConfidence,
     sources: (t.sources || []).map((s) => ({ title: s.title, host: s.domain, url: diagLib.safeUrl(s.url), published: s.published, role: s.role, kind: s.kind, window: s.window, sourceGeography: s.sourceGeography, reportingPeriod: s.reportingPeriod, whatItEstablishes: s.whatItEstablishes })),
   }));

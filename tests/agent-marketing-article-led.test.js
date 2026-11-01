@@ -435,3 +435,56 @@ test("v2 prompt: confirmation must be explicit, and the schema carries confirms 
   const ins = al.systemPromptV2();
   assert.ok(/Appearing in the same opportunity is not confirmation/.test(ins) && /"confirms": number \| null/.test(ins) && /confirmation_basis/.test(ins));
 });
+
+test("geography: exact_market and same_jurisdiction are checked against the sources' own geography; unsupported claims are flagged, not trusted", async () => {
+  const mk = (rel, sg, title) => opp(1, { geographic_relationship: rel, sources: [src(1, { source_geography: sg, title: title || "A story", url: "https://news1.example/story-1" })] });
+  const run1 = async (o, rowOver) => { const { r } = await go([reply2([o])], { env: { ...ON, AGENT_MARKETING_RESEARCH_RETRIES: "0" }, row: rowOver }); return r; };
+  // supported by the source's stated geography
+  let r = await run1(mk("exact_market", "City of Lincoln, CA"));
+  let e = r.fields.topics[0].editorial;
+  assert.deepStrictEqual([e.geographyCheck.supported, e.geographyCheck.evidence, e.review.geographyUnsupported, e.qualification.geography], [true, "source_geography", false, "source_corroborated_not_verified"]);
+  // the model's word alone: no source names Lincoln. Kept and flagged; scope is still the model's, but marked unestablished
+  r = await run1(mk("exact_market", "Placer County", "County permits rose"));
+  e = r.fields.topics[0].editorial;
+  assert.deepStrictEqual([e.geographyCheck.supported, e.geographyCheck.evidence, e.review.geographyUnsupported, e.review.needsReview, e.qualification.geography], [false, "none", true, true, "model_asserted_unsupported"]);
+  assert.ok(/model's assertion only/.test(e.geographyCheck.reason));
+  assert.ok(attempt(r).topics.some((t) => t.outcome === "kept" && /geography unsupported/.test(t.detail) && /needs review/.test(t.detail)));
+  assert.strictEqual(r.fields.usage.discovery.depth_v2.geography_unsupported, 1); assert.strictEqual(r.fields.usage.discovery.depth_v2.needs_review, 1);
+  // weaker support: only a title names the market
+  r = await run1(mk("exact_market", "", "Lincoln council approves a project"));
+  assert.deepStrictEqual([r.fields.topics[0].editorial.geographyCheck.supported, r.fields.topics[0].editorial.geographyCheck.evidence], [true, "title_or_address"]);
+  // a ZIP code names the market too
+  r = await run1(mk("exact_market", "ZIP 95648 homes"));
+  assert.strictEqual(r.fields.topics[0].editorial.geographyCheck.supported, true);
+  // the source-specific geography is preserved whatever the check says
+  assert.strictEqual(r.fields.topics[0].sources[0].sourceGeography, "ZIP 95648 homes");
+  // same_jurisdiction needs the market's city; a neighborhood is not the city
+  const nat = { ...row, geography: fx.GEO.natomas };
+  r = await run1(mk("same_jurisdiction", "City of Sacramento"), nat);
+  assert.strictEqual(r.fields.topics[0].editorial.geographyCheck.supported, true);
+  r = await run1(mk("exact_market", "City of Sacramento"), nat);
+  assert.strictEqual(r.fields.topics[0].editorial.geographyCheck.supported, false, "the city is not the neighborhood");
+  r = await run1(mk("exact_market", "South Natomas"), nat);
+  assert.strictEqual(r.fields.topics[0].editorial.geographyCheck.supported, true);
+  // a wider-area relationship is not checked this way
+  r = await run1(opp(1, { geographic_relationship: "county", route_to_market: "County supply reaches Lincoln sellers.", sources: [src(1, { source_geography: "Placer County" })] }));
+  assert.deepStrictEqual([r.fields.topics[0].editorial.geographyCheck.supported, r.fields.topics[0].editorial.qualification.geography], [null, "wider_area_with_stated_route"]);
+});
+
+test("qualification: a structurally complete opportunity is a discovery candidate, never publication-authorized or independently verified", async () => {
+  const o = opp(1, { sources: [gov(1, ageIso(40))], status: "ongoing", status_checked_date: ageIso(3), status_evidence: { source: 1, shows: "On the agenda", as_of: ageIso(3) }, project_facts: [{ fact: "122 homes", source: 1, basis: "primary_record_cited" }] });
+  const { r } = await go([reply2([o, ...[2, 3, 4, 5].map((i) => opp(i))])]);
+  assert.strictEqual(r.fields.topics.length, 5);
+  for (const t of r.fields.topics) {
+    const q = t.editorial.qualification;
+    assert.deepStrictEqual([q.stage, q.publicationAuthorized, q.claims, q.projectFacts, q.access, q.externalMarketStatistics], ["discovery_candidate", false, "source_reported_not_verified", "pending_primary_record_check", "provisional_estimate", "not_authorized_for_publication"]);
+    assert.ok(/Not independently verified, and not authorized for publication/.test(q.note));
+    assert.ok(!("establishedFacts" in t.editorial) && Array.isArray(t.editorial.sourceReportedFacts), "source reports are labelled as such");
+  }
+  assert.strictEqual(r.fields.topics[0].editorial.qualification.status, "authoritative_source_cited_not_independently_verified");
+  assert.strictEqual(r.fields.topics[1].editorial.qualification.status, "unverified");
+  assert.strictEqual(r.fields.usage.discovery.depth_v2.publication_authorized, 0);
+  const text = JSON.stringify(r.fields.topics);
+  assert.ok(!/"(?:verified|publicationAuthorized)":true|"verification":"verified"/.test(text), "nothing in a card says verified or authorized");
+  assert.ok(/not verified by you|source-reported, not verified/.test(al.systemPromptV2()), "the prompt itself says the pipeline treats source reports as unverified");
+});

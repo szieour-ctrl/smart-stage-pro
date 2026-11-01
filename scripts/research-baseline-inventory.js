@@ -124,8 +124,8 @@ function markdown(inv, samples) {
     if (s.cards && s.cards.length) {   // Article-Led (v2): the full card next to its sources
       s.cards.forEach((c) => {
         L.push(`${c.n}. **${c.question}** (${c.relationship}${c.routeToMarket ? `; route: ${c.routeToMarket}` : ""}; status ${c.status}${c.statusReason ? ` (${c.statusReason})` : ""}; access ${c.accessConfidence && c.accessConfidence.value} [provisional])`,
-          `   - Development / angle: ${c.development} / ${c.angle}`, `   - Perspective: ${c.thesis}`, `   - Homeowner decision: ${c.homeownerDecision || "n/a"}`,
-          `   - Established: ${(c.establishedFacts || []).join(" | ") || "none"}`, `   - Possible, not proven: ${(c.possibleExplanations || []).join(" | ") || "none"}`,
+          `   - Development / angle: ${c.development} / ${c.angle}`, `   - Geography check: ${c.geographyCheck ? (c.geographyCheck.supported === false ? "UNSUPPORTED (model assertion only)" : c.geographyCheck.supported === true ? "named by " + c.geographyCheck.evidence : "wider area") : "n/a"}; qualification: ${c.qualification ? c.qualification.stage + ", publication authorized: " + c.qualification.publicationAuthorized : "n/a"}${c.review && c.review.needsReview ? "; NEEDS REVIEW" : ""}`, `   - Perspective: ${c.thesis}`, `   - Homeowner decision: ${c.homeownerDecision || "n/a"}`,
+          `   - Source-reported (not verified): ${(c.sourceReportedFacts || []).join(" | ") || "none"}`, `   - Possible, not proven: ${(c.possibleExplanations || []).join(" | ") || "none"}`,
           `   - Project facts: ${(c.projectFacts || []).map((f) => `${f.fact} [${f.basis}; ${f.verification}]`).join(" | ") || "none"}`,
           `   - Evidence gaps: ${(c.evidenceGaps || []).join(" | ") || "none"}; to verify: ${(c.verificationNeeds || []).join(" | ") || "none"}`);
         (c.sources || []).forEach((src) => L.push(`   - Source: ${src.host} (${src.role}, ${src.kind}; host heuristic ${classify(src.host)}), "${src.title}", published ${src.published}, ${src.window}; about ${src.sourceGeography || "n/a"}, period ${src.reportingPeriod || "n/a"}`));

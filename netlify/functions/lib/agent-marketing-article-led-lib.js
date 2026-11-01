@@ -63,7 +63,7 @@ function systemPromptV2() {
     "",
     "GEOGRAPHY. For each opportunity give geographic_relationship to the selected market: exact_market, same_jurisdiction, county, region, state or national. Decide it from the places the sources name, the jurisdiction of any project, and any ZIP codes, evaluated independently: a project or decision in the selected city is exact_market even if the source uses ZIP-level data. For anything other than exact_market or same_jurisdiction, write route_to_market: one sentence on how it reaches homeowners in the selected market.",
     "",
-    "KNOWN VERSUS POSSIBLE. established_facts are what the sources state. possible_explanations are plausible forces the sources suggest but do not prove; label them as possible and never claim causation. evidence_gaps are what you could not confirm. verification_needs are what must be checked against a primary record before anything is published.",
+    "KNOWN VERSUS POSSIBLE. established_facts are what the sources report (the pipeline treats them as source-reported, not verified). possible_explanations are plausible forces the sources suggest but do not prove; label them as possible and never claim causation. evidence_gaps are what you could not confirm. verification_needs are what must be checked against a primary record before anything is published.",
     "FACTS ABOUT A PROJECT, PLAN OR DECISION (unit counts, location, approval status, dates) go in project_facts, each with the number of its source and a basis: source_stated when a page says it, or primary_record_cited when the page you cite is itself the official record (an agenda, resolution, permit, filing or agency release). Never write that a fact is verified: your reading of a page is not verification and will be checked later against the record. When two sources disagree, record both and say so in evidence_gaps.",
     "Figures from an article go in evidence_points with the area and period they describe, never as the selected market's statistics.",
     "",
@@ -223,6 +223,24 @@ function applyFreshness(cands, todayN) {
   return { kept, dropped };
 }
 
+const escRe = (x) => String(x).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+/**
+ * The model's geographic relationship is its own assertion. For exact_market and same_jurisdiction this checks it against the sources' own geography:
+ * a kept source must name the selected market (or its ZIP; for same_jurisdiction also its city) in its source_geography, or failing that in its title,
+ * address or summary. Unsupported claims are FLAGGED, never silently trusted and never silently rewritten. A wider-area relationship needs no such
+ * support: it is supported by its stated route to the market.
+ */
+function geographyCheck(relationship, geography, sources) {
+  if (!SELECTED_RELATIONSHIPS.includes(relationship)) return { claimed: relationship, supported: null, evidence: "not_applicable", reason: "a wider-area relationship rests on its stated route to the market" };
+  const g = geography || {};
+  const names = [g.name, relationship === "same_jurisdiction" ? g.city : null].map((x) => String(x || "").trim()).filter((x) => x && !/^\d{5}$/.test(x));
+  const zip = /^\d{5}$/.test(String(g.zip || "")) ? String(g.zip) : /^\d{5}$/.test(String(g.name || "")) ? String(g.name) : null;
+  const matcher = (text) => { const t = String(text || ""); return names.some((n) => new RegExp(`\\b${escRe(n)}\\b`, "i").test(t)) || (!!zip && t.includes(zip)); };
+  if (sources.some((k) => matcher(k.sourceGeography))) return { claimed: relationship, supported: true, evidence: "source_geography", reason: null };
+  if (sources.some((k) => matcher(`${k.title} ${k.url} ${k.whatItEstablishes || ""}`))) return { claimed: relationship, supported: true, evidence: "title_or_address", reason: "no source states its geography as the market; only a title, address or summary names it" };
+  return { claimed: relationship, supported: false, evidence: "none", reason: "no source's geography, title, address or summary names the selected market, so the relationship is the model's assertion only" };
+}
+
 /**
  * validateOpportunities(rawOpportunities, { today, geography, limits, diag }) → { ok, topics, problems, soft, partial, limits }
  * Same shape the run loop already uses for validateTopics, so retries, grounding and diagnostics work unchanged. A topic is a v1-compatible record
@@ -315,6 +333,7 @@ function validateOpportunities(rawOpps, { today, geography, limits, diag, recomm
     const sourcesOut = keptSources.map((k) => ({ title: k.title, url: k.url, domain: k.domain, published: k.published, role: k.role, kind: k.kind, sourceGeography: k.sourceGeography, reportingPeriod: k.reportingPeriod, whatItEstablishes: k.whatItEstablishes, window: k.window, ageDays: k.ageDays,
       authority: { tier: k.authority.tier, official: auth.isOfficial(k.authority), basis: k.authority.basis, modelClaimedAuthoritative: modelClaimsAuthority(k), agreesWithModel: modelClaimsAuthority(k) === isAuthPrimary(k) || !modelClaimsAuthority(k) },
       ...(k.window === "background_confirmed" ? { confirmedBy: byOrig.get(k.confirmedBy) || null, confirmationBasis: k.confirmationBasis, confirmationSignal: k.confirmationSignal } : {}) }));
+    const geoCheck = geographyCheck(relationship, geography, sourcesOut);
     const scopeNote = selected ? "" : rl.clean(`${(keptSources[0] && keptSources[0].sourceGeography) || relationship}: ${route}`, rl.LIMITS.scopeNote);
     const trendSignals = evidence.map((p) => rl.clean(`${p.text}${p.area ? ` (${p.area}${p.period ? `, ${p.period}` : ""})` : ""}`, rl.LIMITS.signal)).filter(Boolean).slice(0, 4);
 
@@ -323,12 +342,28 @@ function validateOpportunities(rawOpps, { today, geography, limits, diag, recomm
       scope: selected ? "selected" : "broader_context", scopeNote, sources: sourcesOut, event: null, keywordMatch: x.keyword_match === true, discovery: "v2",
       editorial: {
         headline: rl.clean(x.headline, 160) || null, thesis, homeownerDecision: rl.clean(x.homeowner_decision, 240) || null, development, angle,
-        geographicRelationship: relationship, routeToMarket: selected ? null : route,
+        geographicRelationship: relationship, routeToMarket: selected ? null : route, geographyCheck: geoCheck,
         status, claimedStatus: claimed, statusReason, statusEvidence, actionDate: action, statusCheckedDate: checked,
-        establishedFacts: strList(x.established_facts, 6, 240), possibleExplanations: strList(x.possible_explanations, 6, 240),
+        sourceReportedFacts: strList(x.established_facts, 6, 240), possibleExplanations: strList(x.possible_explanations, 6, 240),
         projectFacts, evidencePoints: evidence, evidenceGaps: strList(x.evidence_gaps, 6, 240), verificationNeeds: strList(x.verification_needs, 6, 240),
         accessConfidence: { value: access, provisional: true, basis: "model estimate before any retrieval test" },
         namesMarketInHook: !!place && lower(question).includes(place),
+        // Qualified discovery candidate, not publication-authorized evidence: structural completeness and provider grounding say nothing about whether
+        // the article's claims, the project facts or the geographic assertions are true. Later stages (retrieval, evidence registry, gate) decide that.
+        qualification: {
+          stage: "discovery_candidate", publicationAuthorized: false,
+          claims: "source_reported_not_verified", projectFacts: "pending_primary_record_check",
+          geography: geoCheck.supported === false ? "model_asserted_unsupported" : geoCheck.supported === true ? "source_corroborated_not_verified" : "wider_area_with_stated_route",
+          status: status === "unverified" ? "unverified" : "authoritative_source_cited_not_independently_verified", access: "provisional_estimate",
+          externalMarketStatistics: "not_authorized_for_publication",
+          note: "Structurally complete and grounded in provider-found sources. Not independently verified, and not authorized for publication.",
+        },
+        review: {
+          needsReview: geoCheck.supported === false || sourcesOut.some((k) => k.authority.modelClaimedAuthoritative && !k.authority.official) || sourcesOut.some((k) => k.confirmationSignal === "model_asserted"),
+          geographyUnsupported: geoCheck.supported === false,
+          authorityUnconfirmed: sourcesOut.filter((k) => k.authority.modelClaimedAuthoritative && !k.authority.official).map((k) => k.domain),
+          confirmationModelAssertedOnly: sourcesOut.filter((k) => k.confirmationSignal === "model_asserted").map((k) => k.domain),
+        },
       },
     };
     out.push({ topic, n });
@@ -347,7 +382,7 @@ function validateOpportunities(rawOpps, { today, geography, limits, diag, recomm
   const finalList = kept.map((k) => k.o);
   finalList.slice(TOPIC_COUNT).forEach((o) => tRec(o.n, "left_out", "ranked_beyond_five", null, { hook: o.topic.question }));
   const top = finalList.slice(0, TOPIC_COUNT);
-  const topics = top.map((o, i) => { o.topic.id = `t${i + 1}`; tRec(o.n, "kept", "kept", o.topic.editorial.statusReason ? `status unverified: ${o.topic.editorial.statusReason}` : null, { hook: o.topic.question, final_rank: i + 1 }); return o.topic; });
+  const topics = top.map((o, i) => { o.topic.id = `t${i + 1}`; tRec(o.n, "kept", "kept", [o.topic.editorial.statusReason ? `status unverified: ${o.topic.editorial.statusReason}` : null, o.topic.editorial.geographyCheck.supported === false ? "geography unsupported" : null, o.topic.editorial.review.needsReview ? "needs review" : null].filter(Boolean).join("; ") || null, { hook: o.topic.question, final_rank: i + 1 }); return o.topic; });
 
   const ok = topics.length > 0;
   const partial = topics.length < TOPIC_COUNT;
@@ -414,6 +449,9 @@ function depthV2(topics) {
     only_brokerage_or_agent_sources: count((t) => (t.sources || []).length > 0 && (t.sources || []).every((s) => s.kind === "brokerage_or_agent")),
     source_kinds: kinds, source_roles: roles,
     status_supported: count((t) => STATUSES.includes(ed(t).status)), status_unverified: count((t) => ed(t).status === "unverified"),
+    geography_unsupported: count((t) => ed(t).geographyCheck && ed(t).geographyCheck.supported === false),
+    needs_review: count((t) => ed(t).review && ed(t).review.needsReview),
+    publication_authorized: count((t) => ed(t).qualification && ed(t).qualification.publicationAuthorized === true),
     with_evidence_gaps: count((t) => (ed(t).evidenceGaps || []).length > 0), with_possible_explanations: count((t) => (ed(t).possibleExplanations || []).length > 0),
     with_project_facts: count((t) => (ed(t).projectFacts || []).length > 0), project_facts_primary_record_cited: list.reduce((n, t) => n + (ed(t).projectFacts || []).filter((f) => f.basis === "primary_record_cited").length, 0),
     older_than_60_days_sources: list.reduce((n, t) => n + (t.sources || []).filter((s) => s.window !== "timely_60_day").length, 0),

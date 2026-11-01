@@ -330,34 +330,140 @@ test("harness and review package: the lanes cell is one session of three request
   node([bl, "--replay", "--prompt", "lanes", "--markets", "lincoln", "--repeats", "2", "--out", d2]);
   node([path.join(__dirname, "..", "scripts", "research-lanes-report.js"), "--single", d1, "--lanes", d2, "--out", out, "--json", js]);
   const md = fs.readFileSync(out, "utf8"), res = JSON.parse(fs.readFileSync(js, "utf8"));
-  for (const sec of ["## Overall", "## By market", "### lincoln", "## The three lanes (actual cost and yield)", "## Duplicate developments collapsed (three lanes)", "## Excluded candidates and qualification reasons", "## The actual cards, with source provenance", "Runs delivering five (charged)", "Cost per five-opportunity session"]) assert.ok(md.includes(sec), sec);
+  for (const sec of ["## Overall", "## By market", "### lincoln", "## The three lanes (actual cost, yield and rate-limit handling)", "## Duplicate developments collapsed (three lanes)", "## Excluded candidates and qualification reasons", "## The actual cards, with source provenance", "Runs delivering five (charged)", "Cost per five-opportunity session"]) assert.ok(md.includes(sec), sec);
   assert.ok(/Also found \(duplicates collapsed\)/.test(md) && /Source cand_[0-9a-f]{12}:s1/.test(md) && /not adopted/.test(md));
   assert.deepStrictEqual([res.single.runs, res.lanes.runs, res.lanes.runs_with_five], [2, 2, 2]);
   assert.ok(res.lanes.mean_duplicates > 0 && res.single.mean_duplicates === 0 && res.lanes.total_cost_usd > res.single.total_cost_usd);
   assert.deepStrictEqual(Object.keys(res.lane_table).sort(), ["economy", "housing", "municipal"]);
 });
 
-test("lanes run one at a time by default (the provider rejected concurrent requests with 429); a rate-limited lane is retried; parallel is opt-in; failed lanes are counted", async () => {
-  let live = 0, peak = 0; const order = [];
-  const mk = (byLane, opts) => async (p) => {
-    live++; peak = Math.max(peak, live); order.push(laneOf(p));
-    await new Promise((r) => setTimeout(r, 5));
-    live--;
-    return (opts && opts.rateLimitOnce && opts.rateLimitOnce[laneOf(p)] && !opts.hit[laneOf(p)] && (opts.hit[laneOf(p)] = true)) ? { status: 429, json: {} } : byLane[laneOf(p)];
-  };
-  const run3 = async (env, opts) => { live = 0; peak = 0; order.length = 0; const callFn = mk({ municipal: reply([cand(1)]), housing: reply([cand(2)]), economy: reply([cand(3)]) }, opts);
-    const r = await quiet(() => run.runResearch({ row: row(), apiKey: "k", now: NOW, env, sleepFn: async () => {}, callFn })); return r; };
-  const seq = await run3(LANES_ON);
-  assert.deepStrictEqual([peak, order], [1, ["municipal", "housing", "economy"]]);
-  assert.strictEqual(seq.fields.topics.length, 3);
-  const retried = await run3(LANES_ON, { rateLimitOnce: { housing: true }, hit: {} });
-  assert.strictEqual(retried.fields.topics.length, 3, "a 429 on one lane is retried and the lane still contributes");
-  assert.deepStrictEqual(order.filter((x) => x === "housing").length, 2);
-  const par = await run3({ ...LANES_ON, AGENT_MARKETING_ARTICLE_LED_LANE_MODE: "parallel" });
-  assert.ok(peak > 1); assert.strictEqual(par.fields.topics.length, 3);
-  assert.deepStrictEqual([seq.fields.usage.articleLed.lanes, seq.fields.usage.articleLed.lanesFailed], [3, 0]);
-  const failed = await goLanes({ municipal: reply([cand(1)]), housing: new Error("boom"), economy: reply([cand(3)]) });
-  assert.strictEqual(failed.r.fields.usage.articleLed.lanesFailed, 1);
+// Lane dispatch with a virtual clock: every call takes 10 seconds, every sleep advances time, so waits, intervals and the budget are exact and instant.
+function vclock() { const c = { t: 0, sleeps: [], calls: [], starts: [] }; c.clock = () => c.t; c.sleepFn = async (ms) => { c.sleeps.push(ms); c.t += ms; }; return c; }
+async function runLaneSession(script, over) {
+  // script(lane, n) -> response object for the nth request of that lane; an Error rejects
+  const v = vclock(); const n = {}; let live = 0, peak = 0;
+  const callFn = async (p) => { const lane = laneOf(p); n[lane] = (n[lane] || 0) + 1; v.starts.push([lane, v.t]); live++; peak = Math.max(peak, live); v.calls.push(lane); v.t += 10000; live--; const a = script(lane, n[lane]); if (a instanceof Error) throw a; return a; };
+  const r = await quiet(() => run.runResearch({ row: row(), apiKey: (over && over.apiKey) || "k", now: NOW, env: (over && over.env) || LANES_ON, sleepFn: v.sleepFn, clock: v.clock, rand: () => 0.5, callFn }));
+  return { r, v, peak, lanes: r.fields.usage.discovery && r.fields.usage.discovery.lanes };
+}
+const ok = (c) => reply(c), busy = (headers) => ({ status: 429, json: { error: { message: "rate limited" } }, headers: headers || {} });
+const OK3 = { municipal: ok([cand(1)]), housing: ok([cand(2)]), economy: ok([cand(3)]) };
+const stateOf = (lanes) => Object.fromEntries(lanes.map((l) => [l.lane, l.state]));
+
+test("lanes: sequential, one request at a time, in order, with the minimum interval between starts; each lane succeeds independently", async () => {
+  const { r, v, peak, lanes } = await runLaneSession((lane) => OK3[lane]);
+  assert.strictEqual(peak, 1); assert.deepStrictEqual(v.calls, ["municipal", "housing", "economy"]);
+  assert.deepStrictEqual(stateOf(lanes), { municipal: "success", housing: "success", economy: "success" });
+  const starts = v.starts.map((x) => x[1]);
+  assert.ok(starts[1] - starts[0] >= 3000 && starts[2] - starts[1] >= 3000, "at least the configured interval between starts");
+  assert.strictEqual(r.fields.topics.length, 3);
+  assert.deepStrictEqual([r.fields.usage.articleLed.lanesSucceeded, r.fields.usage.articleLed.lanesIncomplete], [3, false]);
+  // the interval is configurable, not assumed
+  const slow = await runLaneSession((lane) => OK3[lane], { env: { ...LANES_ON, AGENT_MARKETING_LANE_MIN_INTERVAL_MS: "20000" } });
+  const st = slow.v.starts.map((x) => x[1]);
+  assert.ok(st[1] - st[0] >= 20000 && st[2] - st[1] >= 20000);
+});
+
+test("lanes: a 429 is retried after bounded, jittered backoff and the lane recovers; its record shows attempts, statuses and the wait", async () => {
+  const { lanes, r } = await runLaneSession((lane, n) => (lane === "housing" && n === 1 ? busy() : OK3[lane]));
+  const h = lanes.find((l) => l.lane === "housing");
+  assert.deepStrictEqual([h.state, h.attempts, h.http_statuses, h.retry_after_seen], ["success", 2, [429, 200], false]);
+  assert.deepStrictEqual(h.waits_ms, [1500], "base 2000 ms, jitter 0.5..1.0 (rand fixed at 0.5 -> 75%)");
+  assert.strictEqual(r.fields.topics.length, 3);
+  // backoff grows exponentially and is capped
+  const lib = require("../netlify/functions/lib/agent-marketing-lane-runner-lib"); const s = lib.laneSettings({});
+  assert.deepStrictEqual([1, 2, 3, 4, 5, 6].map((a) => lib.backoffMs(a, s, () => 1)), [2000, 4000, 8000, 16000, 30000, 30000]);
+  assert.deepStrictEqual([lib.backoffMs(1, s, () => 0), lib.backoffMs(3, s, () => 0)], [1000, 4000]);
+  assert.ok([lib.backoffMs(2, s)].every((x) => x >= 2000 && x <= 4000));
+});
+
+test("lanes: Retry-After is honored exactly (seconds or an HTTP date); a Retry-After beyond the maximum wait is not waited out", async () => {
+  const a = await runLaneSession((lane, n) => (lane === "municipal" && n === 1 ? busy({ "Retry-After": "7" }) : OK3[lane]));
+  const m = a.lanes.find((l) => l.lane === "municipal");
+  assert.deepStrictEqual([m.state, m.waits_ms, m.retry_after_seen], ["success", [7000], true]);
+  const date = new Date(Date.now() + 12000).toUTCString();
+  const lib = require("../netlify/functions/lib/agent-marketing-lane-runner-lib");
+  const ms = lib.retryAfterMs({ "retry-after": date }, Date.now());
+  assert.ok(ms > 9000 && ms <= 12000, "an HTTP date becomes the remaining milliseconds");
+  assert.deepStrictEqual([lib.retryAfterMs({}, 0), lib.retryAfterMs({ "retry-after": "soon" }, 0), lib.retryAfterMs({ "Retry-After": ["3"] }, 0)], [null, null, 3000]);
+  const far = await runLaneSession((lane) => (lane === "housing" ? busy({ "retry-after": "600" }) : OK3[lane]));
+  const h = far.lanes.find((l) => l.lane === "housing");
+  assert.deepStrictEqual([h.state, h.reason, h.attempts, h.waits_ms], ["rate_limited", "retry_after_exceeds_max_wait", 1, []]);
+});
+
+test("lanes: exhausted retries leave the lane rate_limited (attempts = the maximum); the other lanes' answers are kept; a failed lane is null, never zero candidates", async () => {
+  const { r, lanes } = await runLaneSession((lane) => (lane === "housing" ? busy() : OK3[lane]));
+  const h = lanes.find((l) => l.lane === "housing");
+  assert.deepStrictEqual([h.state, h.reason, h.attempts, h.http_statuses], ["rate_limited", "retries_exhausted", 4, [429, 429, 429, 429]]);
+  assert.strictEqual(h.returned, null, "not 0: the lane did not answer");
+  assert.strictEqual(h.cost_usd, null);
+  assert.deepStrictEqual(stateOf(lanes), { municipal: "success", housing: "rate_limited", economy: "success" });
+  assert.strictEqual(r.fields.topics.length, 2, "successful lanes are preserved");
+  assert.deepStrictEqual([r.fields.usage.articleLed.lanesRateLimited, r.fields.usage.articleLed.lanesSucceeded, r.fields.usage.articleLed.lanesIncomplete], [1, 2, true]);
+  // a lane that really answered with zero candidates IS a success with returned 0
+  const zero = await runLaneSession((lane) => (lane === "economy" ? ok([]) : OK3[lane]));
+  const e = zero.lanes.find((l) => l.lane === "economy");
+  assert.deepStrictEqual([e.state, e.returned], ["success", 0]);
+});
+
+test("lanes: other failures and unreadable answers are 'failed', not zero-candidate successes; a 4xx is not retried; a thrown network error is retried", async () => {
+  const bad = { status: 200, json: { output: [{ type: "message", content: [{ type: "output_text", text: "I could not find anything." }] }], usage: fx.usage(1) } };
+  const { lanes } = await runLaneSession((lane, n) => lane === "municipal" ? { status: 403, json: { error: { message: "forbidden" } } } : lane === "housing" ? bad : (n === 1 ? new Error("socket hang up") : OK3[lane]));
+  const by = Object.fromEntries(lanes.map((l) => [l.lane, l]));
+  assert.deepStrictEqual([by.municipal.state, by.municipal.reason, by.municipal.attempts], ["failed", "not_retryable", 1]);
+  assert.deepStrictEqual([by.housing.state, by.housing.reason, by.housing.returned], ["failed", "unreadable_answer", null]);
+  assert.ok(by.housing.cost_usd != null, "the unreadable answer was billed, and its cost is recorded");
+  assert.deepStrictEqual([by.economy.state, by.economy.attempts, by.economy.http_statuses], ["success", 2, [null, 200]]);
+});
+
+test("lanes: every lane failing is a failed run, not a partial one; nothing is charged; the diagnostics still list each lane", async () => {
+  const { r, lanes } = await runLaneSession(() => busy(), { env: { ...LANES_ON, AGENT_MARKETING_LANE_MAX_ATTEMPTS: "2" } });
+  assert.notStrictEqual(r.fields.status, "ready"); assert.strictEqual(r.fields.charged_at || null, null);
+  assert.deepStrictEqual(stateOf(lanes), { municipal: "rate_limited", housing: "rate_limited", economy: "rate_limited" });
+  assert.ok(lanes.every((l) => l.returned === null && l.attempts === 2));
+  assert.ok(/busy/i.test(r.fields.error || ""), "the user is told the provider was busy");
+});
+
+test("lanes: the time budget is enforced; lanes that cannot start are not_attempted (not zero results) and the worst case stays inside the background-function limit", async () => {
+  const lib = require("../netlify/functions/lib/agent-marketing-lane-runner-lib");
+  assert.ok(lib.worstCaseMs(lib.laneSettings({})) < lib.BACKGROUND_LIMIT_MS, "default worst case is within 900 s");
+  const { r, lanes, v } = await runLaneSession((lane) => OK3[lane], { env: { ...LANES_ON, AGENT_MARKETING_LANE_BUDGET_MS: "30000", AGENT_MARKETING_LANE_EXPECTED_CALL_MS: "15000" } });
+  assert.ok(lanes.length === 3 && lanes[0].state === "success");
+  const skipped = lanes.filter((l) => l.state === "not_attempted");
+  assert.ok(skipped.length >= 1 && skipped.every((l) => l.reason === "time_budget" && l.returned === null && l.attempts === 0));
+  assert.ok(v.t <= lib.worstCaseMs({ ...lib.laneSettings({}), budgetMs: 30000, expectedCallMs: 15000 }), "never beyond the stated worst case");
+  assert.strictEqual(r.fields.usage.articleLed.lanesNotAttempted, skipped.length);
+  // a retry whose wait would not fit is not started
+  const w = await runLaneSession((lane) => (lane === "municipal" ? busy() : OK3[lane]), { env: { ...LANES_ON, AGENT_MARKETING_LANE_BUDGET_MS: "40000", AGENT_MARKETING_LANE_EXPECTED_CALL_MS: "15000" } });
+  const m = w.lanes.find((l) => l.lane === "municipal");
+  assert.ok(m.state === "rate_limited" && m.reason === "time_budget");
+});
+
+test("lanes: an adaptive interval after a 429, cost accounting per lane and in total, and no credential in any diagnostic", async () => {
+  const SECRET = "pplx-SECRETKEY1234567890";
+  const withCost2 = (rp, cost) => ({ ...rp, json: { ...rp.json, usage: { ...rp.json.usage, cost: { total_cost: cost } } } });
+  const { r, v, lanes } = await runLaneSession((lane, n) => (lane === "municipal" && n === 1 ? { status: 429, json: { error: { message: `bad key ${SECRET} Bearer ${SECRET}` } }, headers: {} }
+    : withCost2(OK3[lane], { municipal: 0.01, housing: 0.02, economy: 0.03 }[lane])), { apiKey: SECRET });
+  assert.deepStrictEqual(lanes.map((l) => [l.lane, l.cost_usd]), [["municipal", 0.01], ["housing", 0.02], ["economy", 0.03]]);
+  assert.ok(Math.abs(r.fields.usage.costUsd - 0.06) < 1e-9, "the 429 cost nothing; the stored cost is the three lanes' actual costs");
+  const starts = Object.fromEntries(v.starts.filter(([l], i, a) => a.findIndex(([x]) => x === l) === i));
+  assert.ok(starts.housing - starts.municipal >= 6000, "after one 429 the interval between lane starts doubles");
+  const dump = JSON.stringify(r.fields);
+  assert.ok(!dump.includes(SECRET) && !/Bearer pplx/.test(dump), "no credential is stored anywhere in the record");
+  assert.ok(lanes.every((l) => !("apiKey" in l)) && lanes[0].error === null);
+});
+
+test("lanes: selected candidates per lane and the combined result are recorded; duplicates across lanes collapse", async () => {
+  const dupe = cand(1, { sources: [src(5, { url: "https://news5.example/lincoln-parkwood-b" })] });
+  const { r, lanes } = await runLaneSession((lane) => ({ municipal: ok([cand(1), cand(2)]), housing: ok([dupe, cand(3)]), economy: ok([cand(4), cand(5)]) }[lane]));
+  assert.strictEqual(r.fields.topics.length, 5);
+  assert.deepStrictEqual(lanes.map((l) => [l.lane, l.returned]), [["municipal", 2], ["housing", 2], ["economy", 2]]);
+  assert.strictEqual(lanes.reduce((n, l) => n + l.selected, 0), 5);
+  assert.ok(lanes.every((l) => Array.isArray(l.selected_ids) && l.selected_ids.every((id) => /^cand_/.test(id))));
+  assert.strictEqual(lanes.reduce((n, l) => n + l.duplicates, 0), 1);
+  assert.strictEqual(r.fields.usage.discovery.depth_v2.duplicates, 1);
+  assert.ok(r.fields.charged_at, "five qualified: the billing rule is unchanged");
+  assert.ok(r.fields.usage.discovery.lane_run.within_budget && r.fields.usage.discovery.lane_run.settings.minIntervalMs === 3000);
 });
 
 test("review package: a run where any lane request failed is announced as NOT a valid three-lane test", () => {

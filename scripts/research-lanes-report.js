@@ -50,8 +50,13 @@ const ROWS = [["Runs", "runs", 0], ["Runs ready", "ready", 0], ["Candidates retu
 
 function laneTable(runs) {
   const by = {};
-  runs.forEach((r) => (r.lanes || []).forEach((l) => { const x = by[l.lane] = by[l.lane] || { runs: 0, returned: 0, cost: 0, completion: 0, errors: 0, selected: 0, duplicates: 0 }; x.runs++; x.returned += l.returned || 0; x.cost += l.cost_usd || 0; x.completion += l.completion_tokens || 0; x.errors += l.error ? 1 : 0; }));
-  runs.forEach((r) => Object.entries((r.v2 || {}).by_lane || {}).forEach(([lane, s]) => { if (by[lane]) { by[lane].selected += s.selected || 0; by[lane].duplicates += s.duplicates || 0; } }));
+  runs.forEach((r) => (r.lanes || []).forEach((l) => {
+    const x = by[l.lane] = by[l.lane] || { runs: 0, returned: 0, cost: 0, completion: 0, errors: 0, selected: 0, duplicates: 0, success: 0, rate_limited: 0, failed: 0, not_attempted: 0, attempts: 0, wait_ms: 0, http_429: 0 };
+    const state = l.state || (l.error ? "failed" : "success");   // older records had no state
+    x.runs++; x[state] = (x[state] || 0) + 1; x.returned += l.returned || 0; x.cost += l.cost_usd || 0; x.completion += l.completion_tokens || 0; x.errors += state === "success" ? 0 : 1;
+    x.attempts += l.attempts || 0; x.wait_ms += l.total_wait_ms || 0; x.http_429 += (l.http_statuses || []).filter((c) => c === 429).length; x.selected += l.selected || 0; x.duplicates += l.duplicates || 0;
+  }));
+  runs.forEach((r) => Object.entries((r.v2 || {}).by_lane || {}).forEach(([lane, s]) => { if (by[lane] && !by[lane].selected) { by[lane].selected += s.selected || 0; by[lane].duplicates += s.duplicates || 0; } }));
   return by;
 }
 
@@ -84,8 +89,8 @@ function markdown(b, singleDir, lanesDir) {
   ROWS.forEach(([n, k, d]) => o.push(`| ${n} | ${f(out.single[k], d)} | ${f(out.lanes[k], d)} |`));
   o.push("", "## By market", "");
   markets.forEach((m) => { const x = out.by_market[m]; o.push(`### ${m}`, "", "| Measure | Single pass | Three lanes |", "| --- | --- | --- |"); ROWS.filter(([, k]) => ["runs", "mean_returned", "mean_qualified", "mean_delivered", "runs_with_five", "mean_duplicates", "market_scope", "official_primary", "original_local", "needs_review", "mean_cost_per_run_usd", "cost_per_delivered_usd"].includes(k)).forEach(([n, k, d]) => o.push(`| ${n} | ${f(x.single[k], d)} | ${f(x.lanes[k], d)} |`)); o.push(""); });
-  o.push("## The three lanes (actual cost and yield)", "", "| Lane | Runs | Candidates returned | Selected in the final five | Duplicates collapsed | Provider cost $ | Mean cost/run $ | Lane errors |", "| --- | --- | --- | --- | --- | --- | --- | --- |");
-  Object.entries(out.lane_table).forEach(([lane, x]) => o.push(`| ${lane} | ${x.runs} | ${x.returned} | ${x.selected} | ${x.duplicates} | ${f(x.cost, 4)} | ${f(x.runs ? x.cost / x.runs : null, 4)} | ${x.errors} |`));
+  o.push("## The three lanes (actual cost, yield and rate-limit handling)", "", "| Lane | Runs | Success | Rate limited | Failed | Not attempted | Provider requests | HTTP 429s | Wait total s | Candidates returned | Selected in the final five | Duplicates collapsed | Provider cost $ | Mean cost/run $ |", "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
+  Object.entries(out.lane_table).forEach(([lane, x]) => o.push(`| ${lane} | ${x.runs} | ${x.success} | ${x.rate_limited} | ${x.failed} | ${x.not_attempted} | ${x.attempts} | ${x.http_429} | ${f(x.wait_ms / 1000, 1)} | ${x.returned} | ${x.selected} | ${x.duplicates} | ${f(x.cost, 4)} | ${f(x.runs ? x.cost / x.runs : null, 4)} |`));
   o.push("", "## Duplicate developments collapsed (three lanes)", "");
   const dups = L.flatMap((r) => r.topicsLog.filter((t) => /^duplicate_|^overlaps_/.test(t.code || "")).map((t) => ({ r, t })));
   if (!dups.length) o.push("None."); else dups.forEach(({ r, t }) => o.push(`- ${r.market} #${r.repeat}: "${t.hook}" (lane ${t.lane || "n/a"}) dropped as ${t.code}: ${t.detail}`));

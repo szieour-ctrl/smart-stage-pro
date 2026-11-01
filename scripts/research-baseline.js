@@ -201,7 +201,7 @@ async function main() {
     const t0 = Date.now();
     const origErr = console.error; console.error = quiet;
     let result;
-    try { result = await run.runResearch({ row, apiKey: key || "replay", now: args.replay ? fx.NOW : (args.today || undefined), env, callFn, sleepFn: async () => {} }); }
+    try { result = await run.runResearch({ row, apiKey: key || "replay", now: args.replay ? fx.NOW : (args.today || undefined), env, callFn, sleepFn: args.replay ? async () => {} : undefined }); }
     finally { console.error = origErr; }
     const sum = summarizeRun(job, result, Date.now() - t0, args.replay);
     rows.push(sum);

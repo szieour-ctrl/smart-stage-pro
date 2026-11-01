@@ -8,7 +8,8 @@ const rl = require("../netlify/functions/lib/agent-marketing-research-lib");
 const fx = require("./fixtures/research-diag/scenarios");
 
 const NOW = fx.NOW, TODAY = "2026-10-24";
-const ON = { AGENT_MARKETING_ARTICLE_LED_ENABLED: "true" };   // the compact design is the default
+const ON = { AGENT_MARKETING_ARTICLE_LED_ENABLED: "true", AGENT_MARKETING_ARTICLE_LED_LANES: "single" };   // single compact pass (the lane default is tested separately)
+const DIAG = { AGENT_MARKETING_ARTICLE_LED_DIAGNOSTICS: "true" };
 const quiet = async (fn) => { const e = console.error; console.error = () => {}; try { return await fn(); } finally { console.error = e; } };
 const row = (geo) => ({ id: "r1", mode: "market_update", audience: "sellers", geography: geo || fx.GEO.lincoln, focus: {}, upload_refs: [], data_source: "web" });
 const CROCKER = { type: "neighborhood", name: "Crocker Ranch", city: "Roseville", zip: "95747", state: "CA", label: "Crocker Ranch, Roseville, CA" };
@@ -248,7 +249,7 @@ test("harness: the 20-run plan, a compact replay writes candidate cards (no quer
 });
 
 // ── Three-lane experiment ─────────────────────────────────────────────────────────────────────
-const LANES_ON = { ...ON, AGENT_MARKETING_ARTICLE_LED_LANES: "three" };
+const LANES_ON = { ...ON, ...DIAG, AGENT_MARKETING_ARTICLE_LED_LANES: "three" };
 const laneOf = (p) => (/Lane: Municipal/.test(p.input) ? "municipal" : /Lane: Housing/.test(p.input) ? "housing" : /Lane: Financing/.test(p.input) ? "economy" : null);
 async function goLanes(byLane, over) {
   const sent = [];
@@ -594,7 +595,7 @@ test("two-lane experiment: only the municipal and housing lanes run, in sequence
   const rl2 = await runLaneSession((lane, n) => (lane === "housing" && n === 1 ? busy({ "retry-after": "5" }) : ok([cand(lane === "housing" ? 4 : 1)])), { env: LANES2 });
   assert.deepStrictEqual(rl2.lanes.find((l) => l.lane === "housing").waits_ms, [5000], "Retry-After honored in two-lane mode");
   const cm = require("../netlify/functions/lib/agent-marketing-compact-lib");
-  assert.deepStrictEqual([cm.lanesFor(LANES2).map((l) => l.id), cm.lanesFor({ ...ON, AGENT_MARKETING_ARTICLE_LED_LANES: "three" }).length, cm.lanesFor(ON).length], [["municipal", "housing"], 3, 0]);
+  assert.deepStrictEqual([cm.lanesFor(LANES2).map((l) => l.id), cm.lanesFor({ ...ON, ...DIAG, AGENT_MARKETING_ARTICLE_LED_LANES: "three" }).length, cm.lanesFor(ON).length], [["municipal", "housing"], 3, 0]);
 });
 
 test("two lanes, deduplicated: the same development in both lanes is one opportunity and the five delivered are distinct", async () => {
@@ -625,4 +626,40 @@ test("two-lane review package: headings say Two lanes (never Three), the four ti
   fs.writeFileSync(path.join(dir, "thin-lanes2_r20_c6000_o4500-1.discovery.json"), JSON.stringify({ attempts: [{ topics: [] }], lanes: row.lanes }));
   const stats = rep.stats(rep.load(dir, "lanes2_r20_c6000_o4500"));
   assert.strictEqual(stats.tier_direct_supported, 2, "market and district with a found name count; a county relationship and an unsupported market claim do not");
+});
+
+const cmIso = require("../netlify/functions/lib/agent-marketing-compact-lib");
+// ---- production isolation: the approved architecture is Municipal + Housing; experiments need a server-controlled diagnostics switch ----
+test("isolation: the flag alone runs the approved two lanes; the economy lane and gap-fill are ignored without the diagnostics switch", () => {
+  const base = { AGENT_MARKETING_ARTICLE_LED_ENABLED: "true" };
+  assert.deepStrictEqual(cmIso.lanesFor(base).map((l) => l.id), ["municipal", "housing"]);
+  assert.strictEqual(cmIso.gapFillMode(base), false);
+  const asked = { ...base, AGENT_MARKETING_ARTICLE_LED_LANES: "three", AGENT_MARKETING_ARTICLE_LED_GAPFILL: "diagnostic" };
+  assert.deepStrictEqual(cmIso.lanesFor(asked).map((l) => l.id), ["municipal", "housing"], "three lanes need diagnostics");
+  assert.strictEqual(cmIso.gapFillMode(asked), false, "gap-fill needs diagnostics");
+  const diag = { ...asked, AGENT_MARKETING_ARTICLE_LED_DIAGNOSTICS: "true" };
+  assert.strictEqual(cmIso.lanesFor(diag).length, 3); assert.strictEqual(cmIso.gapFillMode(diag), true);
+  assert.strictEqual(cmIso.gapFillMode({ ...base, AGENT_MARKETING_ARTICLE_LED_DIAGNOSTICS: "true" }), false, "diagnostics alone does not turn gap-fill on");
+  assert.strictEqual(cmIso.lanesOn({ ...base, AGENT_MARKETING_ARTICLE_LED_LANES: "single" }), false);
+});
+
+test("isolation: no request payload field reaches the experiment settings, and nothing in production code or config enables them", () => {
+  const fs = require("fs"), path = require("path");
+  const root = path.join(__dirname, "..");
+  const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : [path.join(d, e.name)]));
+  const files = walk(path.join(root, "netlify")).filter((f) => f.endsWith(".js"));
+  const envRead = /AGENT_MARKETING_ARTICLE_LED_(LANES|GAPFILL|DIAGNOSTICS)/;
+  for (const f of files) {
+    const src = fs.readFileSync(f, "utf8");
+    if (!envRead.test(src)) continue;
+    assert.ok(!/(body|payload|event\.queryStringParameters|params)\s*[.\[][^;\n]*(LANES|GAPFILL|DIAGNOSTICS)/i.test(src), f + " reads an experiment setting from a request");
+  }
+  const endpoint = fs.readFileSync(path.join(root, "netlify/functions/agent-marketing-research.js"), "utf8");
+  assert.ok(!/gapfill|diagnostics|ARTICLE_LED_LANES/i.test(endpoint), "the endpoint never handles experiment settings");
+  for (const cfg of ["netlify.toml", ".env", ".env.example"]) {
+    const p = path.join(root, cfg);
+    if (fs.existsSync(p)) assert.ok(!/ARTICLE_LED_(LANES|GAPFILL|DIAGNOSTICS|ENABLED)/.test(fs.readFileSync(p, "utf8")), cfg + " must not enable Article-Led or its experiments");
+  }
+  const prod = files.filter((f) => !/scripts/.test(f));
+  for (const f of prod) assert.ok(!/research-billing-shadow/.test(fs.readFileSync(f, "utf8")), f + " must not use the shadow billing script");
 });

@@ -175,3 +175,10 @@ node scripts/research-benchmark-report.js --v1 /tmp/rb-full --v2 /tmp/rb-v2 --ou
 ```
 
 v2 cells: `v2_r20_c6000_o5000` (the approved starting point), `v2_r20_c6000_o2200` (only the output-token allowance differs), `v2_default` (v2 settings with its one retry). The review document holds: measured provider cost (total, per run, per opportunity, per configuration); development diversity; opportunities with an official source or a local news or government source; local relevance (the model's relationship label, and for v2 whether a source names the market); opportunities led by an external housing statistic (a hook that pairs a figure with a market measure and names no development, and opportunities whose sources are only statistics, brokerage or portal material); brokerage or agent reliance; rejected-source diagnostics by stage and code for both versions; the v2 source inventory; and the actual v2 opportunities with their evidence for a human to judge. The proxies are structural; the review sample is the real test of quality.
+
+## Production isolation (PR #217)
+
+- Approved architecture: **Municipal + Housing**, sequential, with rate-limit recovery. It is the default whenever `AGENT_MARKETING_ARTICLE_LED_ENABLED` is on; `AGENT_MARKETING_ARTICLE_LED_LANES=single` runs one pass (comparison only).
+- The economy lane (`LANES=three`) and gap-fill (`GAPFILL=diagnostic`) are retained for diagnostics and run **only** when the server-side `AGENT_MARKETING_ARTICLE_LED_DIAGNOSTICS` switch is on. Without it those settings are ignored.
+- All settings are server environment values. No request payload field reaches them (tests: `isolation:` in agent-marketing-compact.test.js). No env or config in `netlify.toml`.
+- The two-of-five relevance floor exists only in `scripts/research-billing-shadow.js` (report-only); no production code imports it.

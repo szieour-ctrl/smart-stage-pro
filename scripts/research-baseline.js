@@ -98,7 +98,7 @@ function cellEnv(base, cell) {
     ...(cell.retries != null ? { AGENT_MARKETING_RESEARCH_RETRIES: String(cell.retries) } : {}),
     ...(cell.results != null ? { AGENT_MARKETING_RESEARCH_MAX_RESULTS: String(cell.results), AGENT_MARKETING_RESEARCH_SEARCH_TOKENS: String(cell.context) } : {}),
     ...(cell.output != null ? { AGENT_MARKETING_RESEARCH_MAX_TOKENS: String(cell.output) } : {}),
-    ...(isArticleCell(cell) ? { AGENT_MARKETING_ARTICLE_LED_ENABLED: "true", AGENT_MARKETING_ARTICLE_LED_DESIGN: designOfCell(cell), AGENT_MARKETING_ARTICLE_LED_RETRIES: String(cell.retries == null ? 0 : cell.retries), AGENT_MARKETING_ARTICLE_LED_LANES: cell.lanes || "", AGENT_MARKETING_ARTICLE_LED_GAPFILL: cell.gapfill || "" } : { AGENT_MARKETING_ARTICLE_LED_ENABLED: "" }),   // v1 cells always run the v1 prompt
+    ...(isArticleCell(cell) ? { AGENT_MARKETING_ARTICLE_LED_ENABLED: "true", AGENT_MARKETING_ARTICLE_LED_DESIGN: designOfCell(cell), AGENT_MARKETING_ARTICLE_LED_RETRIES: String(cell.retries == null ? 0 : cell.retries), AGENT_MARKETING_ARTICLE_LED_LANES: cell.lanes || "single", AGENT_MARKETING_ARTICLE_LED_GAPFILL: cell.gapfill || "", AGENT_MARKETING_ARTICLE_LED_DIAGNOSTICS: cell.lanes === "three" || cell.gapfill ? "true" : "" } : { AGENT_MARKETING_ARTICLE_LED_ENABLED: "" }),   // v1 cells always run the v1 prompt
   };
 }
 

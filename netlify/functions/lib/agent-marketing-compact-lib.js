@@ -37,8 +37,18 @@ const LANES = Object.freeze([
   { id: "housing", label: "Housing and New Construction", where: "builders and subdivisions, specific plans and development agreements, final maps, housing policy and housing-element actions, and consequential new-versus-resale competition for existing homeowners; builder and development publications and municipal development records" },
   { id: "economy", label: "Financing and Local Economic Forces", where: "mortgage and financing conditions, employment and major employers, commercial and job-center growth, economic and fee policy, and other meaningful developments that affect homeowner decisions; Freddie Mac, the Federal Reserve, Census, California public data, employment reports, and local business reporting" },
 ]);
-/** AGENT_MARKETING_ARTICLE_LED_LANES: "two" (municipal + housing: the confirmation experiment), "three" (the earlier experiment), anything else = the single pass. */
-const laneMode = (env) => { const v = String((env || process.env).AGENT_MARKETING_ARTICLE_LED_LANES || "").trim().toLowerCase(); return v === "two" || v === "three" ? v : null; };
+/**
+ * The approved production architecture is Municipal + Housing ("two"), which is the default for the compact Article-Led design. Experimental pathways (the economy lane, "three",
+ * and the gap-fill pass) run ONLY when the server-controlled diagnostics switch AGENT_MARKETING_ARTICLE_LED_DIAGNOSTICS is on; without it their settings are ignored. None of
+ * this is readable from a request payload: every value comes from the server's environment. AGENT_MARKETING_ARTICLE_LED_LANES=single runs one pass (comparison only).
+ */
+const diagnosticsOn = (env) => ["1", "true", "yes", "on"].includes(String((env || process.env).AGENT_MARKETING_ARTICLE_LED_DIAGNOSTICS || "").trim().toLowerCase());
+const laneMode = (env) => {
+  const v = String((env || process.env).AGENT_MARKETING_ARTICLE_LED_LANES || "").trim().toLowerCase();
+  if (v === "single") return null;
+  if (v === "three" && diagnosticsOn(env)) return "three";
+  return "two";
+};
 const lanesFor = (env) => (laneMode(env) === "two" ? LANES.filter((l) => l.id === "municipal" || l.id === "housing") : laneMode(env) === "three" ? LANES.slice() : []);
 const lanesOn = (env) => laneMode(env) !== null;
 // ── Gap-fill pass (diagnostic, off by default) ──────────────────────────────────────────────────────────────────────────────────────
@@ -46,7 +56,7 @@ const lanesOn = (env) => laneMode(env) !== null;
 // already found (identities and source references, up to six, built by code). Code then checks every new candidate against ALL existing qualified identities.
 const GAPFILL_LANE = Object.freeze({ id: "gapfill", label: "Gap-fill: Other Local Developments", where: "municipal, housing and new-construction developments, and consequential local commercial or economic developments (a local employer, a commercial project, a fee or policy change) in the selected market, that are DIFFERENT from the developments already found" });
 const GAPFILL_MAX_EXCLUSIONS = 6;
-const gapFillMode = (env) => String((env || process.env).AGENT_MARKETING_ARTICLE_LED_GAPFILL || "").trim().toLowerCase() === "diagnostic";
+const gapFillMode = (env) => diagnosticsOn(env) && String((env || process.env).AGENT_MARKETING_ARTICLE_LED_GAPFILL || "").trim().toLowerCase() === "diagnostic";
 /** Eligible only with exactly 3 or 4 distinct qualified developments (zero to two is a thin market, five or more has nothing to fill). */
 const gapFillEligible = (validation) => !!validation && validation.ok === true && !!validation.summary && [3, 4].includes(validation.summary.qualified);
 /** The exclusion list: one entry per existing qualified development, from the validated records (never from the model's words). At most six, strongest first. */
@@ -500,5 +510,5 @@ function depthCompact(topics, summary) {
 
 module.exports = {
   DESIGN, MAX_CANDIDATES, SELECT_COUNT, DEFAULT_OUTPUT_TOKENS, STATES, STATUS_VALUES, EVENT_KINDS,
-  LANES, GAPFILL_LANE, gapFillMode, gapFillEligible, gapFillExclusions, buildPayloadGapFill, exclusionBlock, lanesOn, lanesFor, laneMode, designOf, isCompact, retriesFor, systemPromptCompact, retryInstructionCompact, buildPayloadCompact, extractCandidates, validateCandidates, depthCompact, parseEvent,
+  LANES, GAPFILL_LANE, diagnosticsOn, gapFillMode, gapFillEligible, gapFillExclusions, buildPayloadGapFill, exclusionBlock, lanesOn, lanesFor, laneMode, designOf, isCompact, retriesFor, systemPromptCompact, retryInstructionCompact, buildPayloadCompact, extractCandidates, validateCandidates, depthCompact, parseEvent,
 };

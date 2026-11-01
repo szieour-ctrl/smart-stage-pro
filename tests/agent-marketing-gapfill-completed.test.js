@@ -139,7 +139,7 @@ test("relevance cap: a county, region, state or national relationship is capped 
 });
 
 // ══ Gap-fill ═════════════════════════════════════════════════════════════════════════════════════════════════════════
-const GAP = { AGENT_MARKETING_ARTICLE_LED_ENABLED: "true", AGENT_MARKETING_ARTICLE_LED_LANES: "two", AGENT_MARKETING_ARTICLE_LED_GAPFILL: "diagnostic" };
+const GAP = { AGENT_MARKETING_ARTICLE_LED_DIAGNOSTICS: "true", AGENT_MARKETING_ARTICLE_LED_ENABLED: "true", AGENT_MARKETING_ARTICLE_LED_LANES: "two", AGENT_MARKETING_ARTICLE_LED_GAPFILL: "diagnostic" };
 const TWO = { AGENT_MARKETING_ARTICLE_LED_ENABLED: "true", AGENT_MARKETING_ARTICLE_LED_LANES: "two" };
 const fresh = (i, over) => cand(i, { sources: [src(i)], ...(over || {}) });
 async function session(script, env, over) {
@@ -244,7 +244,7 @@ test("usage.providerRequests counts every dispatched request exactly once: lanes
   assert.ok(fail.r.fields.usage.providerRequests >= 2);
   // the single pass counts the provider's own retries once
   const one = []; const callFn = async (p) => { one.push(p); return one.length === 1 ? { status: 500, json: {} } : reply([fresh(1)]); };
-  const sp = await quiet(() => run.runResearch({ row: row(), apiKey: "k", now: NOW, env: { AGENT_MARKETING_ARTICLE_LED_ENABLED: "true" }, sleepFn: async () => {}, callFn }));
+  const sp = await quiet(() => run.runResearch({ row: row(), apiKey: "k", now: NOW, env: { AGENT_MARKETING_ARTICLE_LED_ENABLED: "true", AGENT_MARKETING_ARTICLE_LED_LANES: "single" }, sleepFn: async () => {}, callFn }));
   assert.strictEqual(sp.fields.usage.providerRequests, 2);
   // legacy research does not get the field (its stored shape is unchanged)
   const leg = await quiet(() => run.runResearch({ row: row(), apiKey: "k", now: NOW, env: {}, sleepFn: async () => {}, callFn: async () => fx.replayReply(1) }));

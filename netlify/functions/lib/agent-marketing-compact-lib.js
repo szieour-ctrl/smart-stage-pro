@@ -321,14 +321,20 @@ function validateCandidates(rawCandidates, { today, geography, limits, diag, max
     const status = statusFor({ x, keptSources: kept, byOrig, todayN, action });
 
     // geography: the model's source_geography is provisional; only a name in the title, address or host counts, and that is not boundary verification
-    const evid = kept.map((k) => gh.nameEvidence(hierarchy, relationship, { title: k.title, url: k.url, host: k.domain }));
+    // Three things kept apart: (1) COVERAGE evidence: a name in the title or address path; (2) the PUBLISHER's jurisdiction: an official municipal domain of an agency in the
+    // market's hierarchy, which says who published, not where the project is; (3) relevance to this audience (the model's label, capped for broad relationships).
+    // Neither (1) nor (2) verifies a boundary, and (2) alone neither verifies location nor establishes direct relevance.
+    const evid = kept.map((k) => gh.nameEvidence(hierarchy, relationship, { title: k.title, url: k.url }));
     const named = evid.find((e) => e.found) || null;
     const checked = !["region", "state", "national"].includes(relationship);
-    const geoSupported = checked ? !!named : null;
+    const pjList = kept.map((k) => gh.publisherJurisdiction(k.domain, hierarchy));
+    const pj = pjList.find(Boolean) || null;
+    const geoSupported = checked ? !!named : null;                         // coverage evidence only: this alone earns ranking weight
+    const geoSupport = !checked ? "not_checked" : named ? "name_in_source" : pj ? "publisher_jurisdiction_only" : "unsupported";
     const nameEv = named || evid[0] || { level: relationship, found: false, where: null, names: [], boundaryVerified: false, reason: "not_checked" };
 
     const sourcesOut = kept.map((k, idx) => ({ ref: null, n: idx + 1, title: k.title, url: k.url, domain: k.domain, published: k.published, role: k.role, kind: k.kind, outlet: outlets.classifyOutlet(k.url, { hierarchy }), window: k.window, ageDays: k.ageDays,
-      sourceGeography: k.sourceGeography, reportingPeriod: k.reportingPeriod, whatItEstablishes: k.whatItEstablishes,
+      sourceGeography: k.sourceGeography, reportingPeriod: k.reportingPeriod, whatItEstablishes: k.whatItEstablishes, publisherJurisdiction: gh.publisherJurisdiction(k.domain, hierarchy),
       authority: { tier: k.authority.tier, official: auth.isOfficial(k.authority), basis: k.authority.basis, modelClaimedAuthoritative: k.role === "primary" && al.AUTHORITATIVE_KINDS.includes(k.kind) },
       ...(k.window === "background_confirmed" ? { confirmedBy: byOrig.get(k.confirmedBy) || null, confirmationBasis: k.confirmationBasis, confirmationSignal: k.confirmationSignal } : {}) }));
 
@@ -337,7 +343,7 @@ function validateCandidates(rawCandidates, { today, geography, limits, diag, max
     const developmentKey = normKey(development), angleKey = normKey(angle);
     const candidateId = `cand_${sha12(`${normKey(hierarchy.market)}|${developmentKey}|${angleKey}|${firstKey}`)}`;
     sourcesOut.forEach((s) => { s.ref = `${candidateId}:s${s.n}`; });
-    const identity = ident.identityOf({ development, sources: sourcesOut.map((s) => ({ title: s.title, url: s.url, role: s.role, official: s.authority.official, whatItEstablishes: s.whatItEstablishes })), hierarchyNames: hierarchy.levels.map((l) => l.name).concat(hierarchy.subareas || []) });
+    const identity = ident.identityOf({ development, angle, sources: sourcesOut.map((s) => ({ title: s.title, url: s.url, role: s.role, official: s.authority.official, whatItEstablishes: s.whatItEstablishes })), hierarchyNames: hierarchy.levels.map((l) => l.name).concat(hierarchy.subareas || []) });
 
     // qualified. Ranking inputs: editorial substance and homeowner relevance first, then source support, geographic specificity (only when a name was found), corroboration, recency
     const specific = !!(action || (event && event.status !== "unreadable"));
@@ -347,7 +353,8 @@ function validateCandidates(rawCandidates, { today, geography, limits, diag, max
     const corroboration = new Set(nonBg.map((k) => k.domain)).size;
     const recencyDay = Math.max(...nonBg.map((k) => rl.dayNumber(k.published) || 0));
     const reviewReasons = [];
-    if (geoSupported === false) reviewReasons.push("geographic relationship unsupported by any source name (provisional)");
+    if (geoSupport === "unsupported") reviewReasons.push("geographic relationship unsupported by any source name (provisional)");
+    if (geoSupport === "publisher_jurisdiction_only") reviewReasons.push(`the publisher is an official ${pj.name} site, but no source names the location: the development's location is not verified`);
     if (sourcesOut.some((s) => s.authority.modelClaimedAuthoritative && !s.authority.official)) reviewReasons.push("a source the model called authoritative is not a recognized official publisher");
     if (sourcesOut.some((s) => s.confirmationSignal === "model_asserted")) reviewReasons.push("confirmation of an older record is the model's word alone");
     if (status.value === "unresolved") reviewReasons.push("status evidence conflicts");
@@ -369,15 +376,15 @@ function validateCandidates(rawCandidates, { today, geography, limits, diag, max
         design: DESIGN, id: candidateId, development, developmentKey, angle, angleKey, identity, question, why, strength, relevance, modelRelevance, relevanceCapped, relevanceCapReason: relevanceCapped ? `a ${relationship}-level relationship is context; promotion to direct needs independently supported applicability (deferred past Stage A)` : null, gap: rl.clean(x.gap, 240) || null,
         geography: {
           relationship, route: relationship === "market" ? null : route, hierarchy: { market: hierarchy.market, levels: hierarchy.levels.map((l) => ({ level: l.level, name: l.name })), derived: hierarchy.derived, note: hierarchy.note },
-          nameEvidence: nameEv, nameFoundInSource: geoSupported, provisional: true, boundaryVerified: false,
+          nameEvidence: nameEv, nameFoundInSource: geoSupported, support: geoSupport, publisherJurisdiction: pj, provisional: true, boundaryVerified: false,
           modelSourceGeography: kept.map((k) => k.sourceGeography),   // the model's own words: provisional, not corroboration
         },
-        sources: sourcesOut.map((s) => ({ ref: s.ref, n: s.n, url: s.url, title: s.title, host: s.domain, role: s.role, kind: s.kind, outletClass: s.outlet.class, outletBasis: s.outlet.basis, published: s.published, window: s.window, sourceGeography: s.sourceGeography, reportingPeriod: s.reportingPeriod, whatItEstablishes: s.whatItEstablishes, authority: s.authority, ...(s.confirmedBy ? { confirmedBy: s.confirmedBy, confirmationBasis: s.confirmationBasis, confirmationSignal: s.confirmationSignal } : {}) })),
+        sources: sourcesOut.map((s) => ({ ref: s.ref, n: s.n, publisherJurisdiction: s.publisherJurisdiction, url: s.url, title: s.title, host: s.domain, role: s.role, kind: s.kind, outletClass: s.outlet.class, outletBasis: s.outlet.basis, published: s.published, window: s.window, sourceGeography: s.sourceGeography, reportingPeriod: s.reportingPeriod, whatItEstablishes: s.whatItEstablishes, authority: s.authority, ...(s.confirmedBy ? { confirmedBy: s.confirmedBy, confirmationBasis: s.confirmationBasis, confirmationSignal: s.confirmationSignal } : {}) })),
         status: { value: status.value, claimed: status.claimed, reason: status.reason, evidence: status.evidence, checkedDate: status.checkedDate, actionDate: action, bySource: status.bySource, conflict: status.conflict },
         event, accessConfidence: { value: oneOf(x.access_confidence, al.ACCESS, "unknown"), provisional: true, basis: "model estimate before any retrieval test" },
         provisionalEvidence: {
           stage: "stage_a_candidate", publicationAuthorized: false, claims: "source_reported_not_verified", projectFacts: "not_investigated_until_stage_b",
-          geography: geoSupported === false ? "unsupported_provisional" : geoSupported === true ? "name_found_not_boundary_verified" : "wider_level_with_stated_route",
+          geography: geoSupport === "unsupported" ? "unsupported_provisional" : geoSupport === "publisher_jurisdiction_only" ? "publisher_jurisdiction_only_location_unverified" : geoSupport === "name_in_source" ? "name_found_not_boundary_verified" : "wider_level_with_stated_route",
           status: status.value === "unresolved" ? "unresolved_conflicting_evidence" : status.value === "unverified" ? "unverified" : "official_source_cited_not_independently_verified",
           access: "provisional_estimate", externalMarketStatistics: "not_authorized_for_publication",
           ...(improvement ? { completion: "source_reported_not_verified" } : {}),
@@ -478,7 +485,7 @@ function depthCompact(topics, summary) {
     candidates_returned: summary ? summary.returned : null, duplicates: summary ? summary.duplicates : null, by_lane: summary ? summary.by_lane : null, qualified: summary ? summary.qualified : null, not_selected: summary ? summary.not_selected : null, not_qualified_reasons: summary ? summary.reasons : null,
     ...distinctOf(list),
     relationships: rel, market_scope: count((t) => t.scope === "selected"),
-    name_found_in_source: count((t) => c(t).geography && c(t).geography.nameFoundInSource === true), geography_unsupported: count((t) => c(t).geography && c(t).geography.nameFoundInSource === false),
+    name_found_in_source: count((t) => c(t).geography && c(t).geography.nameFoundInSource === true), publisher_jurisdiction_only: count((t) => c(t).geography && c(t).geography.support === "publisher_jurisdiction_only"), geography_unsupported: count((t) => c(t).geography && c(t).geography.support === "unsupported"),
     outlet_uses: outletUses,
     with_official_primary: count((t) => (c(t).sources || []).some((s) => s.role === "primary" && s.authority && s.authority.official)),
     with_government_record: count((t) => hasOutlet(t, "government_record")), with_original_local_reporting: count((t) => hasOutlet(t, "original_local_reporting")),

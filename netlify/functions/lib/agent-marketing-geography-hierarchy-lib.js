@@ -79,6 +79,7 @@ function hierarchyLine(h) {
   return `Where the market sits: ${chain}. ${h.note}${sub} Treat each level as its own area; do not assume two levels share boundaries.`;
 }
 
+const pathOf = (u) => { try { const x = new URL(/^[a-z]+:\/\//i.test(String(u)) ? String(u) : `https://${u}`); return `${x.pathname}${x.search}`; } catch { return String(u || ""); } };
 const esc = (x) => String(x).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 /**
  * Names of the claimed level found in a source's title, address or host. This shows a NAME appears, not that the project or boundary is in the market
@@ -94,16 +95,41 @@ function nameEvidence(hierarchy, level, source) {
   const sets = lv && level !== "market" ? [{ via: "level", names: lv.names }]
     : [{ via: fallback || level === "market" ? "market_name" : "level", names: (lv || marketLv || { names: [] }).names }, { via: "subarea", names: subareas }];
   if (!lv && !fallback) return { level, found: false, where: null, names: [], boundaryVerified: false, reason: level === "region" || level === "state" || level === "national" ? "not_checked" : "level_not_in_hierarchy" };
-  const places = { title: String(source && source.title || ""), url: String(source && source.url || ""), host: String(source && source.host || source && source.domain || "") };
+  // COVERAGE evidence is a name in the title or in the address PATH. The publisher's host is deliberately not coverage evidence: an official municipal domain says who
+  // published the page (see publisherJurisdiction), not where the development is or whether it matters to this audience.
+  const places = { title: String(source && source.title || ""), url: pathOf(source && source.url) };
   const slug = (x) => x.toLowerCase().replace(/[-_/.+%20]+/g, " ");
-  for (const set of sets) for (const where of ["title", "url", "host"]) {
+  for (const set of sets) for (const where of ["title", "url"]) {
     const text = where === "title" ? places.title : slug(places[where]);
     const hit = set.names.filter((n) => new RegExp(`(^|[^a-z0-9])${esc(n.toLowerCase().replace(/[-_]+/g, " "))}($|[^a-z0-9])`, "i").test(text.toLowerCase()));
     if (hit.length) return { level, found: true, where, names: hit, via: set.via, provisional: set.via !== "level" || undefined, boundaryVerified: false, reason: null };
   }
   return { level, found: false, where: null, names: [], boundaryVerified: false, reason: "name_not_found" };
 }
+/**
+ * The JURISDICTION OF THE PUBLISHER: a recognized official municipal or county domain whose agency is in the market's own hierarchy (lincolnca.gov, roseville.ca.gov,
+ * cityofsacramento.gov, colfax-ca.gov, placer.ca.gov). It corroborates who published a page. It does NOT verify a project's boundaries, its location, or its relevance to the
+ * audience, and a same-named agency elsewhere (lincoln.ne.gov) never matches. Returns { level, name, host, basis } or null.
+ */
+function publisherJurisdiction(host, hierarchy) {
+  const h = String(host || "").toLowerCase().replace(/^www\./, "");
+  const m = /^(.+?)\.(ca\.gov|ca\.us|gov)$/.exec(h);
+  if (!m || !hierarchy || !Array.isArray(hierarchy.levels)) return null;
+  // a bare ".gov" host is only a California agency when its label says so (lincolnca, colfax-ca, cityofsacramento); lincoln.ne.gov has label "lincoln.ne" and never matches
+  const label = m[1], suffix = m[2], squash = (x) => String(x).toLowerCase().replace(/^(city|county) of /, "").replace(/ (city|county)$/, "").replace(/[^a-z0-9]/g, "");
+  for (const l of hierarchy.levels) {
+    if (!["market", "city", "county"].includes(l.level)) continue;
+    if (l.level === "market" && !hierarchy.marketIsCity) continue;       // a subdivision's own name is not an agency
+    for (const nm of [l.name, ...(l.names || [])]) {
+      const n = squash(nm); if (!n) continue;
+      const forms = suffix === "gov" ? [`${n}ca`, `${n}-ca`, `cityof${n}`, `countyof${n}`, `${n}countyca`, `${n}-county-ca`] : [n, `ci.${n}`, `cityof${n}`, `co.${n}`, `${n}city`];
+      if (forms.includes(label.replace(/-/g, "-"))) return { level: l.level, name: l.name, host: h, basis: "official_municipal_domain" };
+      if (suffix === "gov" && label === `${n}.ca`) return { level: l.level, name: l.name, host: h, basis: "official_municipal_domain" };
+    }
+  }
+  return null;
+}
 // the market's own name in a source also covers a claim of any wider level only when the wider level's name is present; never the reverse
 const SPECIFICITY = Object.freeze({ market: 3, district: 2, zip: 2, city: 1, county: 0, region: 0, state: 0, national: 0 });
 
-module.exports = { LEVELS, REGISTRY, CITY_COUNTY, hierarchyFor, normalizeRelationship, hierarchyLine, nameEvidence, SPECIFICITY };
+module.exports = { LEVELS, REGISTRY, CITY_COUNTY, hierarchyFor, normalizeRelationship, hierarchyLine, nameEvidence, publisherJurisdiction, SPECIFICITY };

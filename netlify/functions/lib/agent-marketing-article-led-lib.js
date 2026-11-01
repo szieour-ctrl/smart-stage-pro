@@ -16,6 +16,7 @@
 const rl = require("./agent-marketing-research-lib");
 const planLib = require("./agent-marketing-plan-lib");
 const dg = require("./agent-marketing-research-diag-lib");
+const auth = require("./agent-marketing-source-authority-lib");
 
 const TOPIC_COUNT = 5;
 const NEWS_DAYS = 60;          // timely news and market commentary
@@ -56,7 +57,7 @@ function systemPromptV2() {
     "SOURCES. Use only pages you found, with a real title and URL. Never invent a URL, date, number or event. Each source has a role (primary: the original or official record; secondary: reporting or analysis of it; background: older context) and a kind (government_record, local_news, trade_news, housing_research, financing_economic, builder_developer, association, brokerage_or_agent, other). what_it_establishes says, in your own words and without quotation, what that page shows. A source must be an article, report, record or announcement. Never use a listing or property page, a community landing page, an agent's, team's or brokerage's home or sales page, an MLS or portal search page, or any page whose main content is homes for sale. A blog is fine wherever it is published when it reports or analyzes something about the market.",
     "Each source also carries its own source_geography (the area that page is about) and reporting_period (the period its information or event covers, for example \"September 2026\", \"FY 2026-27\" or \"council meeting of Oct 14, 2026\"; \"unknown\" when the page does not say). These belong to the source, not to the opportunity as a whole.",
     "",
-    "DATES. Report three dates separately for each opportunity: action_date (when the development itself happened, was decided or was announced), status_checked_date (the day you confirmed from a page that its status is current; null if you did not) and, on each source, published (when that page was published). Never describe an older development as new. Timely news and market commentary must be published within the last 60 days. Government and other authoritative primary records may be up to 12 months old when they establish a relevant development or an ongoing action. An older primary record may appear only as background, alongside a current authoritative page that confirms it still matters.",
+    "DATES. Report three dates separately for each opportunity: action_date (when the development itself happened, was decided or was announced), status_checked_date (the day you confirmed from a page that its status is current; null if you did not) and, on each source, published (when that page was published). Never describe an older development as new. Timely news and market commentary must be published within the last 60 days. Government and other authoritative primary records may be up to 12 months old when they establish a relevant development or an ongoing action. An older primary record may appear only as background, and only when a newer authoritative source says explicitly that it confirms it: on the newer source set confirms to the number of the older source and write confirmation_basis (what in the newer source shows it is the same development or ongoing action, for example the same project or ordinance number). Appearing in the same opportunity is not confirmation.",
     "",
     "STATUS. status is new, ongoing, completed, superseded or unverified. Use new, ongoing, completed or superseded only when an identifiable authoritative source shows it; then give status_evidence: the number of that source (counting from 1 in this opportunity's sources), what it shows, and as_of (the date it showed that). Otherwise use unverified. Do not turn an older announcement into ongoing because you assume it continues.",
     "",
@@ -88,7 +89,8 @@ function systemPromptV2() {
     "    \"evidence_gaps\": [string], \"verification_needs\": [string],",
     "    \"access_confidence\": \"high\"|\"medium\"|\"low\"|\"unknown\", \"keyword_match\": boolean,",
     "    \"sources\": [ { \"title\": string, \"url\": string, \"published\": \"YYYY-MM-DD\", \"role\": \"primary\"|\"secondary\"|\"background\", \"kind\": string,",
-    "                    \"source_geography\": string, \"reporting_period\": string, \"what_it_establishes\": string } ]",
+    "                    \"source_geography\": string, \"reporting_period\": string, \"what_it_establishes\": string,",
+    "                    \"confirms\": number | null, \"confirmation_basis\": string | null } ]",
     "  } ],",
     "  \"recommendation\": { \"topic\": number 1-5, \"reason\": string, \"evidence\": [string] } }",
     "Each opportunity has 1 to 4 sources. Do not repeat an opportunity.",
@@ -180,34 +182,43 @@ function eligibleSource(s, info) {
   return { title, url: href, domain: host };
 }
 
+const modelClaimsAuthority = (c) => c.role === "primary" && AUTHORITATIVE_KINDS.includes(c.kind);
+/** An authoritative primary record: the model says primary AND the publisher is a recognized official source, decided in code from the host. */
+const isAuthPrimary = (c) => c.role === "primary" && auth.isOfficial(c.authority);
+
 /**
- * Applies the freshness rules to one opportunity's eligible sources. Returns { kept: [source...], dropped: [{ index, code, detail }] }.
+ * Applies the freshness rules to one opportunity's eligible sources. Returns { kept: [source...], dropped: [{ c, code, detail, stage }] }.
  *   timely (any source): published within 60 days.
- *   authoritative primary (role primary, kind government_record or financing_economic): within 12 months.
- *   older than 12 months: only a background record, and only while a current authoritative source in the same opportunity confirms it still matters
- *   (an authoritative primary record within 12 months, or a government or financing record within 60 days).
+ *   authoritative primary (role primary AND an official publisher, decided from the host): within 12 months.
+ *   older than 12 months: only a background record, and only when a newer OFFICIAL source in the same opportunity that is current (an authoritative
+ *   primary record within 12 months, or an official source within 60 days) says explicitly that it confirms this record (`confirms` = this source's
+ *   number, with a `confirmation_basis`). Being in the same opportunity is not confirmation. The model's role and kind alone never open the exception:
+ *   a source the model calls authoritative but whose publisher is not a recognized official source follows the 60-day rule and is flagged for review.
  */
 function applyFreshness(cands, todayN) {
   const kept = [], dropped = [], maybeBackground = [];
+  const noAuthority = (c) => (modelClaimsAuthority(c) && !auth.isOfficial(c.authority) ? "authority_unconfirmed" : null);
   cands.forEach((c) => {
     const pn = rl.dayNumber(String(c.published || "").trim());
-    const authoritative = c.role === "primary" && AUTHORITATIVE_KINDS.includes(c.kind);
     if (pn == null) return dropped.push({ c, code: "no_publication_date", detail: `${c.domain}: no publication date`, stage: "publication_date" });
     const age = todayN - pn;
     if (pn > todayN + 1) return dropped.push({ c, code: "future_dated", detail: `${c.domain}: dated in the future`, stage: "publication_date" });
     c.ageDays = Math.max(age, 0);
     if (age <= NEWS_DAYS) return kept.push({ ...c, window: "timely_60_day" });
     if (age <= AUTHORITATIVE_DAYS) {
-      if (authoritative) return kept.push({ ...c, window: "authoritative_12_month" });
-      return dropped.push({ c, code: "stale", detail: `${c.domain}: ${age} days old`, stage: "publication_date" });
+      if (isAuthPrimary(c)) return kept.push({ ...c, window: "authoritative_12_month" });
+      const why = noAuthority(c);
+      return dropped.push({ c, code: why || "stale", detail: why ? `${c.domain}: ${age} days old; the model called it an authoritative record but the publisher is not a recognized official source (${c.authority.basis})` : `${c.domain}: ${age} days old`, stage: "publication_date" });
     }
-    if (c.role === "background" || AUTHORITATIVE_KINDS.includes(c.kind)) return maybeBackground.push(c);
-    return dropped.push({ c, code: "stale", detail: `${c.domain}: ${age} days old`, stage: "publication_date" });
+    if (c.role === "background" || auth.isOfficial(c.authority)) return maybeBackground.push(c);
+    const why = noAuthority(c);
+    return dropped.push({ c, code: why || "stale", detail: why ? `${c.domain}: ${age} days old; not a recognized official publisher` : `${c.domain}: ${age} days old`, stage: "publication_date" });
   });
-  const confirmed = kept.some((k) => (k.window === "authoritative_12_month") || (AUTHORITATIVE_KINDS.includes(k.kind) && k.ageDays <= NEWS_DAYS));
   maybeBackground.forEach((c) => {
-    if (confirmed) kept.push({ ...c, role: "background", window: "background_confirmed" });
-    else dropped.push({ c, code: "stale_primary_unconfirmed", detail: `${c.domain}: ${c.ageDays} days old and no current authoritative source confirms it`, stage: "publication_date" });
+    const confirmer = kept.find((k) => k.confirms === c.orig && k.confirmationBasis && auth.isOfficial(k.authority) && (k.window === "authoritative_12_month" || k.ageDays <= NEWS_DAYS));
+    if (confirmer) return kept.push({ ...c, role: "background", window: "background_confirmed", confirmedBy: confirmer.orig, confirmationBasis: confirmer.confirmationBasis, confirmationSignal: auth.relationSignal(c, confirmer) });
+    const anyCurrent = kept.some((k) => auth.isOfficial(k.authority));
+    dropped.push({ c, code: "stale_primary_unconfirmed", detail: `${c.domain}: ${c.ageDays} days old; ${anyCurrent ? "a current official source is present but does not state that it confirms this record" : "no current official source confirms it"}`, stage: "publication_date" });
   });
   return { kept, dropped };
 }
@@ -263,7 +274,9 @@ function validateOpportunities(rawOpps, { today, geography, limits, diag, recomm
       if (seen.has(el.url)) return sRec(n, s, "dropped", "duplicate", "duplicate_address_in_topic", null);
       seen.add(el.url);
       const role = oneOf(s.role, ROLES, "secondary"), kind = oneOf(s.kind, KINDS, "other");
-      cands.push({ ...el, published: String(s.published || "").trim(), role, kind, orig: si + 1,
+      const conf = Number(s.confirms);
+      cands.push({ ...el, published: String(s.published || "").trim(), role, kind, orig: si + 1, authority: auth.publisherAuthority(el.domain),
+        confirms: Number.isInteger(conf) && conf >= 1 ? conf : null, confirmationBasis: rl.clean(s.confirmation_basis, 240) || null,
         sourceGeography: rl.clean(s.source_geography, 100) || null, reportingPeriod: rl.clean(s.reporting_period, 80) || null, whatItEstablishes: rl.clean(s.what_it_establishes, 300) || null });
     });
     const fr = applyFreshness(cands, todayN);
@@ -273,7 +286,7 @@ function validateOpportunities(rawOpps, { today, geography, limits, diag, recomm
     if (!keptSources.some((k) => k.role !== "background")) { tRec(n, "left_out", "only_background_sources", null, { hook: question }); return problems.push(`opportunity ${n}: only background sources`); }
     keptSources.forEach((k) => sRec(n, k, "kept", "accepted", "accepted", null, { window: k.window }));
     const byOrig = new Map(keptSources.map((k, idx) => [k.orig, idx + 1]));   // the model's source number -> the kept source's number
-    const authoritativeKept = (origNo) => { const k = keptSources.find((s) => s.orig === Number(origNo)); return !!k && k.role === "primary" && AUTHORITATIVE_KINDS.includes(k.kind); };
+    const authoritativeKept = (origNo) => { const k = keptSources.find((s) => s.orig === Number(origNo)); return !!k && isAuthPrimary(k); };   // decided from the publisher, not from the model's kind
 
     // status: only with identifiable authoritative evidence
     const claimed = oneOf(x.status, STATUSES.concat(["unverified"]), "unverified");
@@ -299,7 +312,9 @@ function validateOpportunities(rawOpps, { today, geography, limits, diag, recomm
     }).filter((f) => f.fact && f.source).slice(0, 6);
 
     const access = oneOf(x.access_confidence, ACCESS, "unknown");
-    const sourcesOut = keptSources.map((k) => ({ title: k.title, url: k.url, domain: k.domain, published: k.published, role: k.role, kind: k.kind, sourceGeography: k.sourceGeography, reportingPeriod: k.reportingPeriod, whatItEstablishes: k.whatItEstablishes, window: k.window, ageDays: k.ageDays }));
+    const sourcesOut = keptSources.map((k) => ({ title: k.title, url: k.url, domain: k.domain, published: k.published, role: k.role, kind: k.kind, sourceGeography: k.sourceGeography, reportingPeriod: k.reportingPeriod, whatItEstablishes: k.whatItEstablishes, window: k.window, ageDays: k.ageDays,
+      authority: { tier: k.authority.tier, official: auth.isOfficial(k.authority), basis: k.authority.basis, modelClaimedAuthoritative: modelClaimsAuthority(k), agreesWithModel: modelClaimsAuthority(k) === isAuthPrimary(k) || !modelClaimsAuthority(k) },
+      ...(k.window === "background_confirmed" ? { confirmedBy: byOrig.get(k.confirmedBy) || null, confirmationBasis: k.confirmationBasis, confirmationSignal: k.confirmationSignal } : {}) }));
     const scopeNote = selected ? "" : rl.clean(`${(keptSources[0] && keptSources[0].sourceGeography) || relationship}: ${route}`, rl.LIMITS.scopeNote);
     const trendSignals = evidence.map((p) => rl.clean(`${p.text}${p.area ? ` (${p.area}${p.period ? `, ${p.period}` : ""})` : ""}`, rl.LIMITS.signal)).filter(Boolean).slice(0, 4);
 
@@ -391,7 +406,9 @@ function depthV2(topics) {
     geographic_relationships: rel,
     exact_or_same_jurisdiction: count((t) => SELECTED_RELATIONSHIPS.includes(ed(t).geographicRelationship)),
     with_primary_source: count((t) => (t.sources || []).some((s) => s.role === "primary")),
-    with_authoritative_primary: count((t) => (t.sources || []).some((s) => s.role === "primary" && AUTHORITATIVE_KINDS.includes(s.kind))),
+    with_authoritative_primary: count((t) => (t.sources || []).some((s) => s.role === "primary" && s.authority && s.authority.official)),
+    sources_authority_unconfirmed: list.reduce((n, t) => n + (t.sources || []).filter((s) => s.authority && s.authority.modelClaimedAuthoritative && !s.authority.official).length, 0),
+    background_confirmations_model_asserted_only: list.reduce((n, t) => n + (t.sources || []).filter((s) => s.confirmationSignal === "model_asserted").length, 0),
     with_local_news_or_government: count((t) => (t.sources || []).some((s) => s.kind === "local_news" || s.kind === "government_record")),
     with_brokerage_or_agent_source: count((t) => (t.sources || []).some((s) => s.kind === "brokerage_or_agent")),
     only_brokerage_or_agent_sources: count((t) => (t.sources || []).length > 0 && (t.sources || []).every((s) => s.kind === "brokerage_or_agent")),

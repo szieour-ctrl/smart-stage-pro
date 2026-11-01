@@ -160,16 +160,16 @@ test("freshness: a government record up to 12 months old is accepted as primary 
   assert.strictEqual(x.kept[0].window, "authoritative_12_month"); assert.strictEqual(x.kept[0].ageDays, 300);
   x = await sourcesOf([src(1, { published: ageIso(300), role: "primary", kind: "builder_developer" }), src(2)]);
   assert.deepStrictEqual(x.dropped, ["stale"]); assert.strictEqual(x.kept.length, 1);
-  x = await sourcesOf([gov(1, ageIso(365)), gov(2, ageIso(366), { role: "background" })]);   // day 365 is the last day of the 12-month window
+  x = await sourcesOf([gov(1, ageIso(365), { confirms: 2, confirmation_basis: "The same agreement number appears in both records." }), gov(2, ageIso(366), { role: "background" })]);   // day 365 is the last day of the 12-month window
   assert.deepStrictEqual(x.kept.map((k) => [k.ageDays, k.window]), [[365, "authoritative_12_month"], [366, "background_confirmed"]]);
 });
-test("freshness: an older primary record is background only, and only while a current authoritative source confirms it; never the only source", async () => {
-  let x = await sourcesOf([gov(1, ageIso(500)), gov(2, ageIso(40))]);
+test("freshness: an older primary record is background only, and only when a newer official source explicitly confirms it; never the only source", async () => {
+  const confirm = { confirms: 1, confirmation_basis: "The same agreement number appears in both records." };
+  let x = await sourcesOf([gov(1, ageIso(500)), gov(2, ageIso(40), confirm)]);
   assert.deepStrictEqual(x.kept.map((s) => [s.window, s.role]).sort(), [["background_confirmed", "background"], ["timely_60_day", "primary"]]);
-  assert.ok(x.kept.some((s) => s.window === "background_confirmed" && s.role === "background"));
   x = await sourcesOf([gov(1, ageIso(500)), src(2)]);   // a news story is not authoritative confirmation
   assert.ok(x.dropped.includes("stale_primary_unconfirmed")); assert.strictEqual(x.kept.length, 1);
-  x = await sourcesOf([gov(1, ageIso(500)), gov(2, ageIso(30), { role: "background" })]);   // confirmed, but only background sources remain
+  x = await sourcesOf([gov(1, ageIso(500)), gov(2, ageIso(30), { role: "background", ...confirm })]);   // confirmed, but only background sources remain
   assert.strictEqual(x.kept, undefined, "the opportunity needs at least one non-background source");
   assert.ok(attempt(x.r).topics.some((t) => t.code === "only_background_sources"));
 });
@@ -360,4 +360,78 @@ test("v2 retries: strength is valid distinct opportunities, then primary-source 
   const first = [opp(1), opp(2), opp(3)], second = [opp(1), opp(2)];
   const { r } = await go([reply2(first), reply2(second)]);
   assert.strictEqual(r.fields.topics.length, 3); assert.strictEqual(r.fields.usage.discovery.used_attempt, 1);
+});
+
+// ── Review corrections (Oct 31, PR 2 review) ───────────────────────────────────────────────────
+const authLib = require("../netlify/functions/lib/agent-marketing-source-authority-lib");
+const oneDropped = async (sources, over) => { const x = await sourcesOf(sources, over); return x; };
+
+test("older record: another authoritative source in the same opportunity is NOT confirmation; an explicit relationship is required", async () => {
+  const basis = "The same agreement number appears in both records.";
+  // same opportunity, no statement of confirmation
+  let x = await sourcesOf([gov(1, ageIso(500)), gov(2, ageIso(40))]);
+  assert.deepStrictEqual(x.dropped, ["stale_primary_unconfirmed"]);
+  assert.ok(/present but does not state that it confirms/.test(attempt(x.r).sources.find((s) => s.code === "stale_primary_unconfirmed").detail));
+  // confirms points at the wrong source, or there is no basis, or the confirming source is not an official publisher
+  for (const bad of [{ confirms: 2, confirmation_basis: basis }, { confirms: 1 }, { confirms: 1, confirmation_basis: "  " }]) {
+    x = await sourcesOf([gov(1, ageIso(500)), gov(2, ageIso(40), bad)]);
+    assert.deepStrictEqual(x.dropped, ["stale_primary_unconfirmed"], JSON.stringify(bad));
+  }
+  x = await sourcesOf([gov(1, ageIso(500)), src(2, { role: "primary", kind: "government_record", confirms: 1, confirmation_basis: basis })]);
+  assert.ok(x.dropped.includes("stale_primary_unconfirmed"), "a news-site source the model calls a government record cannot confirm");
+  // an explicit, basis-bearing statement from a current official source is accepted, and its signal is recorded
+  x = await sourcesOf([gov(1, ageIso(500), { title: "Agreement PLN24-00048" }), gov(2, ageIso(40), { title: "Council approves PLN24-00048", confirms: 1, confirmation_basis: basis })]);
+  const bg = x.kept.find((s) => s.window === "background_confirmed");
+  assert.deepStrictEqual([bg.role, bg.confirmedBy, bg.confirmationSignal, bg.confirmationBasis], ["background", 1, "shared_identifier", basis]);   // confirmedBy numbers the kept list (the confirming record is kept source 1)
+  assert.deepStrictEqual([bg.role, bg.confirmedBy], ["background", 1]);
+  x = await sourcesOf([gov(1, ageIso(500), { title: "An old agenda" }), gov(2, ageIso(40), { title: "A new agenda", confirms: 1, confirmation_basis: basis })]);
+  assert.strictEqual(x.kept.find((s) => s.window === "background_confirmed").confirmationSignal, "model_asserted", "kept, but marked as the model's word alone");
+  assert.strictEqual(x.r.fields.usage.discovery.depth_v2.background_confirmations_model_asserted_only, 1);
+});
+
+test("authority: the extended freshness exception depends on the publisher, decided in code, not on the model's role and kind alone", async () => {
+  const claimed = (i, host, days, over) => src(i, { url: `https://${host}/record-${i}`, title: `Record ${i}`, published: ageIso(days), role: "primary", kind: "government_record", ...(over || {}) });
+  // the model says government record, but the publisher is not a recognized official source: the 12-month window does not open
+  for (const host of ["cityoflincoln.org", "thegoolsbygroup.com", "sacbee.com"]) {
+    const x = await sourcesOf([claimed(1, host, 200), src(2)]);
+    assert.deepStrictEqual(x.dropped, ["authority_unconfirmed"], host);
+    assert.ok(/not a recognized official source|not a recognized official publisher/.test(attempt(x.r).sources.find((s) => s.code === "authority_unconfirmed").detail));
+  }
+  // within 60 days it is kept like any timely source, and the unconfirmed claim is preserved for review
+  const y = await sourcesOf([claimed(1, "cityoflincoln.org", 20)]);
+  assert.strictEqual(y.kept[0].window, "timely_60_day");
+  assert.deepStrictEqual([y.kept[0].authority.tier, y.kept[0].authority.official, y.kept[0].authority.modelClaimedAuthoritative, y.kept[0].authority.agreesWithModel], ["uncertain", false, true, false]);
+  assert.strictEqual(y.r.fields.usage.discovery.depth_v2.sources_authority_unconfirmed, 1);
+  assert.strictEqual(y.r.fields.usage.discovery.depth_v2.with_authoritative_primary, 0);
+  // an official .gov or .ca.us publisher opens the window even when the model labels it differently
+  for (const host of ["city1.example.gov", "ci.lincoln.ca.us"]) {
+    const z = await sourcesOf([claimed(1, host, 200, { kind: "local_news" })]);
+    assert.strictEqual(z.kept[0].window, "authoritative_12_month", host); assert.strictEqual(z.kept[0].authority.official, true);
+  }
+});
+
+test("authority: status evidence and primary_record_cited also depend on the publisher, not on the model's kind", async () => {
+  const fake = src(1, { url: "https://cityoflincoln.org/agenda-1", published: ageIso(20), role: "primary", kind: "government_record" });
+  const o = opp(1, { sources: [fake], status: "ongoing", status_checked_date: ageIso(3), status_evidence: { source: 1, shows: "On the agenda", as_of: ageIso(3) }, project_facts: [{ fact: "122 homes", source: 1, basis: "primary_record_cited" }] });
+  const { r } = await go([reply2([o])], { env: { ...ON, AGENT_MARKETING_RESEARCH_RETRIES: "0" } });
+  const e = r.fields.topics[0].editorial;
+  assert.strictEqual(e.status, "unverified"); assert.ok(/no authoritative source/.test(e.statusReason));
+  assert.strictEqual(e.projectFacts[0].basis, "source_stated");
+});
+
+test("publisher authority table, identifiers and relation signals", () => {
+  const tier = (h) => authLib.publisherAuthority(h).tier;
+  assert.deepStrictEqual(["www.lincolnca.gov", "ceqanet.lci.ca.gov", "ci.lincoln.ca.us", "lusd.k12.ca.us"].map(tier), Array(4).fill("official_government"));
+  assert.deepStrictEqual(["freddiemac.com", "www.frbsf.org"].map(tier), Array(2).fill("official_financing"));
+  assert.deepStrictEqual(["cityoflincoln.org", "placercounty.com", "countyofplacer.com"].map(tier), Array(3).fill("uncertain"));
+  assert.deepStrictEqual(["sacbee.com", "car.org", "zillow.com", "thegoolsbygroup.com", "sacrealtor.org", "lennar.com", ""].map(tier), Array(7).fill("not_official"));
+  assert.ok(authLib.identifiersIn("Parkwood Project Development Agreement (PLN24-00048)").has("pln2400048"));
+  assert.strictEqual(authLib.relationSignal({ title: "Ordinance No. 2024-17 adopted", url: "https://a.gov/1" }, { title: "Update on Ordinance 2024-17", url: "https://b.gov/2" }), "shared_identifier");
+  assert.strictEqual(authLib.relationSignal({ title: "x", url: "https://a.gov/1" }, { title: "y", url: "https://a.gov/2" }), "same_publisher");
+  assert.strictEqual(authLib.relationSignal({ title: "x", url: "https://a.gov/1" }, { title: "y", url: "https://b.gov/2" }), "model_asserted");
+});
+
+test("v2 prompt: confirmation must be explicit, and the schema carries confirms and confirmation_basis", () => {
+  const ins = al.systemPromptV2();
+  assert.ok(/Appearing in the same opportunity is not confirmation/.test(ins) && /"confirms": number \| null/.test(ins) && /confirmation_basis/.test(ins));
 });

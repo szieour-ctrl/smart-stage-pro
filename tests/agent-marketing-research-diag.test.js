@@ -15,7 +15,10 @@ const strip = (fields) => { const f = JSON.parse(JSON.stringify(fields)); if (f.
 const byName = (n) => fx.scenarios().find((s) => s.name === n);
 
 // ── Nothing else changed ───────────────────────────────────────────────────────────────────────
-for (const sc of fx.scenarios()) {
+// One scenario changes ON PURPOSE in PR 2: a weaker retry no longer replaces a stronger earlier answer (tests/agent-marketing-research-retry.test.js).
+// Its golden entry still holds the pre-PR-1 behavior, so it is compared in the retry tests, not here.
+const CHANGED_ON_PURPOSE = new Set(["partial_then_worse_retry"]);
+for (const sc of fx.scenarios().filter((x) => !CHANGED_ON_PURPOSE.has(x.name))) {
   test(`unchanged: ${sc.name} gives the same fields, problems, attempts and provider requests as before PR 1`, async () => {
     const { result, sent } = await quiet(() => fx.runScenario(run, sc));
     const g = golden[sc.name];
@@ -28,7 +31,7 @@ for (const sc of fx.scenarios()) {
 
 test("unchanged: a diagnostics failure anywhere cannot change the research result (every scenario, every diagnostics function)", async () => {
   const names = ["buildRecord", "attemptConfig", "candidatesOf", "newAttemptDiag", "depthOf", "bound", "pushSource", "pushTopic", "mergeSources", "funnelOf", "safeUrl", "safeText", "sourceKind"];
-  for (const sc of fx.scenarios()) {
+  for (const sc of fx.scenarios().filter((x) => !CHANGED_ON_PURPOSE.has(x.name))) {
     for (const name of names) {
       const orig = dg[name];
       dg[name] = () => { throw new Error(`boom ${name}`); };
@@ -276,7 +279,7 @@ test("baseline: four markets by five cells; the 10/20 comparison separates resul
 });
 
 test("baseline: a fixed cell sends exactly one search with the stated limits, and records them", async () => {
-  for (const cell of baseline.CELLS.filter((c) => c.results != null)) {
+  for (const cell of baseline.CELLS.filter((c) => c.results != null && !c.lanes)) {
     const sc = byName("five_clean");
     const { result, sent } = await quiet(() => fx.runScenario(run, { ...sc, env: baseline.cellEnv({}, cell) }));
     assert.strictEqual(sent.length, 1);

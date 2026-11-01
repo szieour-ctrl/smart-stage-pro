@@ -1,0 +1,152 @@
+#!/usr/bin/env node
+// scripts/research-lanes-report.js — single-pass versus multi-lane review package (PR 2 experiment, Oct 31, 2026).
+//
+//   node scripts/research-lanes-report.js --single <folder> --lanes <folder> [--single-cell compact_r20_c6000_o4500] [--lanes-cell lanes3_r20_c6000_o4500] --out review.md [--json review.json]
+//
+// Both folders are research-baseline.js output (runs.jsonl, *.cards.json, *.discovery.json). The report states measured provider cost, candidate yield, qualified yield,
+// five-opportunity yield, duplicates, excluded candidates with their reasons, and the actual cards with source provenance, by market. It reads sanitized diagnostics
+// and delivered cards only (no article text, no credentials). Structure counts are proxies; the cards are for a human to judge.
+"use strict";
+const fs = require("fs");
+const path = require("path");
+
+const readJsonl = (f) => { try { return fs.readFileSync(f, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, "utf8")); } catch { return null; } };
+const mean = (a) => { const v = a.filter((x) => x != null && Number.isFinite(x)); return v.length ? v.reduce((s, x) => s + x, 0) / v.length : null; };
+const f = (x, d = 2) => (x == null ? "n/a" : Number(x).toFixed(d));
+const sum = (a) => a.reduce((s, x) => s + (x || 0), 0);
+
+function load(dir, cell) {
+  return readJsonl(path.join(dir, "runs.jsonl")).filter((r) => r.cell === cell).map((r) => {
+    const base = `${r.market}-${r.cell}-${r.repeat}`;
+    const d = readJson(path.join(dir, `${base}.discovery.json`)) || {};
+    const a = (d.attempts || [])[0] || {};
+    return { ...r, cards: readJson(path.join(dir, `${base}.cards.json`)) || [], topicsLog: a.topics || [], lanes: d.lanes || null, selection: (d.candidate_selection && d.candidate_selection.summary) || null };
+  });
+}
+
+function stats(runs) {
+  const v = (r) => r.v2 || {};
+  const delivered = runs.map((r) => r.delivered || 0);
+  // The four tiers, kept apart: (1) qualified by deterministic validation, (2) a unique underlying development, (3) directly relevant with a source-supported geographic
+  // relationship, (4) provisional discovery (every delivered candidate: none is publication-authorized).
+  const cardsOf = (r) => r.cards || [];
+  const directSupported = (c) => c.relevance === "direct" && ["market", "district", "zip"].includes(c.relationship) && c.geography && c.geography.nameFoundInSource === true;
+  const tier = {
+    returned: runs.map((r) => (r.v2 && r.v2.candidates_returned) || 0),
+    qualified_validation: runs.map((r) => ((r.v2 && r.v2.qualified) || 0) + ((r.v2 && r.v2.duplicates) || 0)),   // before duplicates are removed
+    unique_development: runs.map((r) => (r.v2 && r.v2.qualified) || 0),                                       // after duplicates are removed
+    direct_supported: runs.map((r) => cardsOf(r).filter(directSupported).length),                             // among the delivered
+    provisional: runs.map((r) => cardsOf(r).filter((c) => c.provisionalEvidence && c.provisionalEvidence.publicationAuthorized === false).length),
+  };
+  // five DISTINCT developments (identity-based; older records without it fall back to the delivered count)
+  const distinctN = runs.map((r) => (r.v2 && r.v2.distinct_developments != null ? Math.min(r.v2.distinct_developments, r.delivered || 0) : r.delivered || 0));
+  return {
+    tier_returned: mean(tier.returned), tier_qualified_validation: mean(tier.qualified_validation), tier_unique_development: mean(tier.unique_development), tier_direct_supported: mean(tier.direct_supported), tier_provisional: mean(tier.provisional),
+    runs: runs.length, ready: runs.filter((r) => r.status === "ready").length,
+    mean_returned: mean(runs.map((r) => v(r).candidates_returned)), mean_qualified: mean(runs.map((r) => v(r).qualified)), mean_delivered: mean(delivered),
+    runs_with_five: distinctN.filter((n) => n >= 5).length, mean_distinct: mean(distinctN), identity_collisions: sum(runs.map((r) => (r.v2 && r.v2.identity_collisions) || 0)), duplicates_total: sum(runs.map((r) => (r.v2 && r.v2.duplicates) || 0)), charged: runs.filter((r) => r.charged).length, mean_duplicates: mean(runs.map((r) => v(r).duplicates || 0)),
+    total_cost_usd: Math.round(sum(runs.map((r) => r.cost_usd)) * 1e4) / 1e4, mean_cost_per_run_usd: mean(runs.map((r) => r.cost_usd)),
+    cost_per_delivered_usd: sum(delivered) ? sum(runs.map((r) => r.cost_usd)) / sum(delivered) : null,
+    cost_per_five_yield_usd: distinctN.filter((n) => n >= 5).length ? sum(runs.map((r) => r.cost_usd)) / distinctN.filter((n) => n >= 5).length : null,
+    distinct_developments: mean(runs.map((r) => v(r).distinct_developments)), market_scope: mean(runs.map((r) => v(r).market_scope)),
+    name_found: mean(runs.map((r) => v(r).name_found_in_source)), geography_unsupported: mean(runs.map((r) => v(r).geography_unsupported)),
+    official_primary: mean(runs.map((r) => v(r).with_official_primary)), original_local: mean(runs.map((r) => v(r).with_original_local_reporting)), trade_only_or_agg: mean(runs.map((r) => v(r).with_trade_aggregation)),
+    strong_or_direct: mean(runs.map((r) => v(r).strong_or_direct)), needs_review: mean(runs.map((r) => v(r).needs_review)), unresolved: mean(runs.map((r) => v(r).status_unresolved)),
+  };
+}
+const ROWS = [["Runs", "runs", 0], ["Tier 0: candidates returned (mean/run)", "tier_returned", 1], ["Tier 1: qualified by deterministic validation, before duplicates (mean/run)", "tier_qualified_validation", 1], ["Tier 2: unique underlying developments (mean/run)", "tier_unique_development", 1], ["Tier 3: delivered, directly relevant with a source-supported market, district or ZIP relationship (mean/run)", "tier_direct_supported", 1], ["Tier 4: provisional discovery, none publication-authorized (mean/run)", "tier_provisional", 1], ["Runs ready", "ready", 0], ["Candidates returned (mean/run)", "mean_returned", 1], ["Qualified, after duplicates (mean/run)", "mean_qualified", 1], ["Delivered (mean/run)", "mean_delivered", 1],
+  ["Runs delivering five DISTINCT developments (charged)", "runs_with_five", 0], ["Distinct developments delivered (mean/run)", "mean_distinct", 2], ["Duplicate developments collapsed (total)", "duplicates_total", 0], ["Identity collisions left in the delivered five (audit, should be 0)", "identity_collisions", 0], ["Duplicates collapsed (mean/run)", "mean_duplicates", 1], ["Distinct developments (mean/run)", "distinct_developments", 1],
+  ["Market-scope candidates (mean/run)", "market_scope", 1], ["Market name found in a source (mean/run)", "name_found", 1], ["Geography unsupported, provisional (mean/run)", "geography_unsupported", 1],
+  ["With an official primary source (mean/run)", "official_primary", 1], ["With original local reporting (mean/run)", "original_local", 1], ["Strong or directly relevant (mean/run)", "strong_or_direct", 1],
+  ["Needs review (mean/run)", "needs_review", 1], ["Status unresolved (mean/run)", "unresolved", 1], ["Provider cost, total $", "total_cost_usd", 4], ["Provider cost per run $", "mean_cost_per_run_usd", 4],
+  ["Cost per delivered opportunity $", "cost_per_delivered_usd", 4], ["Cost per five-opportunity session $", "cost_per_five_yield_usd", 4]];
+
+function laneTable(runs) {
+  const by = {};
+  runs.forEach((r) => (r.lanes || []).forEach((l) => {
+    const x = by[l.lane] = by[l.lane] || { runs: 0, returned: 0, cost: 0, completion: 0, errors: 0, selected: 0, duplicates: 0, success: 0, rate_limited: 0, failed: 0, not_attempted: 0, attempts: 0, wait_ms: 0, http_429: 0 };
+    const state = l.state || (l.error ? "failed" : "success");   // older records had no state
+    x.runs++; x[state] = (x[state] || 0) + 1; x.returned += l.returned || 0; x.cost += l.cost_usd || 0; x.completion += l.completion_tokens || 0; x.errors += state === "success" ? 0 : 1;
+    x.attempts += l.attempts || 0; x.wait_ms += l.total_wait_ms || 0; x.http_429 += (l.http_statuses || []).filter((c) => c === 429).length; x.selected += l.selected || 0; x.duplicates += l.duplicates || 0;
+  }));
+  runs.forEach((r) => Object.entries((r.v2 || {}).by_lane || {}).forEach(([lane, s]) => { if (by[lane] && !by[lane].selected) { by[lane].selected += s.selected || 0; by[lane].duplicates += s.duplicates || 0; } }));
+  return by;
+}
+
+function cardLines(c) {
+  const g = c.geography || {}, st = c.status || {};
+  const out = [`${c.n}. **${c.question}** (${c.relationship}${c.route ? `; route: ${c.route}` : ""}${c.lane ? `; lane ${c.lane}` : ""}; strength ${c.strength}, relevance ${c.relevance}; status ${st.value}${st.conflict ? " (CONFLICT)" : ""}; id ${c.candidateId})`,
+    `   - ${c.development} / ${c.angle}`,
+    `   - Geography: ${g.nameFoundInSource === true ? `name found in ${g.nameEvidence && g.nameEvidence.where}${g.nameEvidence && g.nameEvidence.via && g.nameEvidence.via !== "level" ? ` (via ${g.nameEvidence.via}; ${(g.nameEvidence.names || []).join(", ")})` : ""}, boundary NOT verified` : g.nameFoundInSource === false ? "UNSUPPORTED name (provisional, no ranking weight)" : "wider level, route stated"}`,
+    `   - Event: ${c.event ? `${c.event.kind} ${c.event.date || ""} (${c.event.presentedAs || c.event.status}${c.event.postEvent ? `; post-event source s${c.event.postEvent.sourceN}, basis ${c.event.postEvent.basis}` : ""})` : "none"}${c.review && c.review.needsReview ? `; NEEDS REVIEW: ${c.review.reasons.join("; ")}` : ""}`];
+  if (c.alsoFoundIn && c.alsoFoundIn.length) out.push(`   - Also found (duplicates collapsed): ${c.alsoFoundIn.map((d) => `${d.lane || "single"} "${d.hook}" [${d.reason}]`).join(" | ")}`);
+  (c.sources || []).forEach((s) => out.push(`   - Source ${s.ref}: ${s.host} (${s.outletClass}; ${s.role}, ${s.kind}), "${s.title}", published ${s.published}, ${s.window}; about ${s.sourceGeography || "n/a"}; establishes: ${s.whatItEstablishes || "n/a"}`));
+  return out;
+}
+
+function build(singleDir, lanesDir, singleCell, lanesCell) {
+  const S = load(singleDir, singleCell), L = load(lanesDir, lanesCell);
+  const markets = [...new Set([...S, ...L].map((r) => r.market))];
+  const out = { single: { cell: singleCell, ...stats(S) }, lanes: { cell: lanesCell, ...stats(L) }, by_market: {}, lane_table: laneTable(L) };
+  markets.forEach((m) => { out.by_market[m] = { single: stats(S.filter((r) => r.market === m)), lanes: stats(L.filter((r) => r.market === m)) }; });
+  return { S, L, markets, out };
+}
+
+function markdown(b, singleDir, lanesDir) {
+  const { S, L, markets, out } = b;
+  const nLanes = Object.keys(out.lane_table).length;
+  const LBL = nLanes === 2 ? "Two lanes" : nLanes === 3 ? "Three lanes" : `${nLanes || "Multi"} lanes`, lbl = LBL.toLowerCase();
+  const laneNames = Object.keys(out.lane_table).join(" + ") || "none";
+  const o = [`# Single pass versus ${lbl}: review package`, "",
+    `Single pass: ${out.single.cell}, ${S.length} runs (${singleDir}). ${LBL} (${laneNames}): ${out.lanes.cell}, ${L.length} runs (${lanesDir}). Markets: ${markets.join(", ")}.`, "",
+    ...(() => { const bad = Object.values(out.lane_table).reduce((n, x) => n + x.errors, 0), total = Object.values(out.lane_table).reduce((n, x) => n + x.runs, 0); return bad ? [`**NOT A VALID ${LBL.toUpperCase().replace(/ /g, "-").replace("LANES", "LANE")} TEST: ${bad} of ${total} lane requests failed (see the lane table).** Do not read the comparison below as a result for the lane configuration.`, ""] : [`All ${total} lane requests completed.`, ""]; })(),
+    "**Status of everything below: discovery candidates.** Provider-grounded and model-reported; none is checked against article text, records or project facts, and none is publication-authorized. The measures are structural proxies; the cards at the end are for human judgment. Lane configuration is an experiment until approved.", "",
+    "## Overall", "", `| Measure | Single pass | ${LBL} |`, "| --- | --- | --- |"];
+  ROWS.forEach(([n, k, d]) => o.push(`| ${n} | ${f(out.single[k], d)} | ${f(out.lanes[k], d)} |`));
+  o.push("", "## By market", "");
+  markets.forEach((m) => { const x = out.by_market[m]; o.push(`### ${m}`, "", `| Measure | Single pass | ${LBL} |`, "| --- | --- | --- |"); ROWS.filter(([, k]) => ["runs", "mean_returned", "mean_qualified", "mean_delivered", "runs_with_five", "mean_duplicates", "market_scope", "official_primary", "original_local", "needs_review", "mean_cost_per_run_usd", "cost_per_delivered_usd"].includes(k)).forEach(([n, k, d]) => o.push(`| ${n} | ${f(x.single[k], d)} | ${f(x.lanes[k], d)} |`)); o.push(""); });
+  o.push(`## The lanes: ${laneNames} (actual cost, yield and rate-limit handling)`, "", "| Lane | Runs | Success | Rate limited | Failed | Not attempted | Provider requests | HTTP 429s | Wait total s | Candidates returned | Selected in the final five | Duplicates collapsed | Provider cost $ | Mean cost/run $ |", "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
+  Object.entries(out.lane_table).forEach(([lane, x]) => o.push(`| ${lane} | ${x.runs} | ${x.success} | ${x.rate_limited} | ${x.failed} | ${x.not_attempted} | ${x.attempts} | ${x.http_429} | ${f(x.wait_ms / 1000, 1)} | ${x.returned} | ${x.selected} | ${x.duplicates} | ${f(x.cost, 4)} | ${f(x.runs ? x.cost / x.runs : null, 4)} |`));
+  o.push("", `## Duplicate developments collapsed (${lbl})`, "");
+  const dups = L.flatMap((r) => r.topicsLog.filter((t) => /^duplicate_|^overlaps_/.test(t.code || "")).map((t) => ({ r, t })));
+  if (!dups.length) o.push("None."); else dups.forEach(({ r, t }) => o.push(`- ${r.market} #${r.repeat}: "${t.hook}" (lane ${t.lane || "n/a"}) dropped as ${t.code}: ${t.detail}`));
+  o.push("", "## Distinct-development identities (the delivered candidates)", "", "Each delivered candidate's identity: project names and identifiers. Two delivered candidates sharing an identity would be a defect.", "");
+  [["Single pass", S], ["Lanes", L]].forEach(([label, runs]) => runs.forEach((r) => { o.push(`**${label}, ${r.market} #${r.repeat}** (${r.delivered} delivered, ${r.v2 && r.v2.distinct_developments != null ? r.v2.distinct_developments : "n/a"} distinct)`); r.cards.forEach((c) => o.push(`- ${c.candidateId} [${c.lane || "single"}] ${c.development.slice(0, 90)} | names: ${(c.identity && c.identity.projectNames.join(", ")) || "n/a"} | ids: ${(c.identity && c.identity.identifiers.join(", ")) || "none"}`)); o.push(""); }));
+  o.push("## Duplicate groups and replacement candidates", "");
+  L.forEach((r) => { const sel = r.selection || {}; (sel.duplicate_groups || []).forEach((g) => o.push(`- ${r.market} #${r.repeat}: kept ${g.kept} [${g.keptLane}]${g.selected ? "" : " (not selected)"} absorbed ${g.members.map((m) => `${m.lane || "?"} "${m.hook}" (${m.basis})`).join("; ")}`)); (sel.replacements || []).forEach((x) => o.push(`- ${r.market} #${r.repeat}: replacement ${x.candidateId} [${x.lane}] "${x.hook}" moved from rank ${x.rankBeforeDuplicates} to ${x.rankAfter} after duplicates were removed`)); });
+  if (!L.some((r) => r.selection && ((r.selection.duplicate_groups || []).length || (r.selection.replacements || []).length))) o.push("None in these runs.");
+  o.push("", "## Excluded candidates and qualification reasons", "", "Every candidate that was not delivered, with the reason code, for both designs.", "");
+  [["Single pass", S], [LBL, L]].forEach(([label, runs]) => {
+    o.push(`### ${label}`, "");
+    const tally = {}; runs.forEach((r) => r.topicsLog.filter((t) => t.outcome === "left_out").forEach((t) => { tally[t.code] = (tally[t.code] || 0) + 1; }));
+    o.push(`Reasons: ${Object.entries(tally).map(([k, n]) => `${k} ${n}`).join(", ") || "none"}`, "");
+    runs.forEach((r) => r.topicsLog.filter((t) => t.outcome === "left_out").forEach((t) => o.push(`- ${r.market} #${r.repeat}${t.lane ? ` [${t.lane}]` : ""}: "${t.hook}": ${t.code}${t.detail ? ` (${t.detail})` : ""}`)));
+    o.push("");
+  });
+  o.push("## The actual cards, with source provenance", "");
+  markets.forEach((m) => { o.push(`### ${m}`, ""); [["Single pass", S], [LBL, L]].forEach(([label, runs]) => runs.filter((r) => r.market === m).forEach((r) => {
+    o.push(`#### ${label}, run ${r.repeat}: delivered ${r.delivered}${r.charged ? " (five, charged)" : " (uncharged partial)"}, cost $${r.cost_usd}`, "");
+    if (!r.cards.length) o.push("(no cards)", ""); else { r.cards.forEach((c) => o.push(...cardLines(c))); o.push(""); }
+  })); });
+  return o.join("\n") + "\n";
+}
+
+function parseArgs(argv) {
+  const a = { singleCell: "compact_r20_c6000_o4500", lanesCell: "lanes2_r20_c6000_o4500" };
+  for (let i = 0; i < argv.length; i++) { const k = argv[i];
+    if (k === "--single") a.single = argv[++i]; else if (k === "--lanes") a.lanes = argv[++i]; else if (k === "--single-cell") a.singleCell = argv[++i]; else if (k === "--lanes-cell") a.lanesCell = argv[++i];
+    else if (k === "--out") a.out = argv[++i]; else if (k === "--json") a.json = argv[++i]; }
+  if (!a.single || !a.lanes) throw new Error("Give --single <folder> and --lanes <folder>.");
+  return a;
+}
+function main() {
+  const a = parseArgs(process.argv.slice(2));
+  const b = build(a.single, a.lanes, a.singleCell, a.lanesCell);
+  if (!b.L.length) throw new Error(`No ${a.lanesCell} runs found in ${a.lanes}.`);
+  const md = markdown(b, a.single, a.lanes);
+  if (a.out) fs.writeFileSync(a.out, md); else process.stdout.write(md);
+  if (a.json) fs.writeFileSync(a.json, JSON.stringify(b.out, null, 1));
+}
+if (require.main === module) main();
+module.exports = { build, markdown, parseArgs, stats, load };

@@ -1,0 +1,95 @@
+{
+ "_note": "The two Colfax skatepark candidates from the gap-fill benchmark (Colfax run 1): the skatepark opening (municipal lane) and the skatepark's described next phase (gap-fill pass), as the model returned them, rebuilt from the saved cards. Real titles, URLs and dates; no article text.",
+ "opening": {
+  "_lane": "municipal",
+  "question": "What will Colfax’s new skatepark change for neighbors?",
+  "development": "The Colfax skatepark opened at the Parkhill Drive site after years of planning and funding.",
+  "angle": "A completed public recreation project and its lasting neighborhood effects.",
+  "why": "The new city facility is open; the source describes its uses and a mix of public and community funding.",
+  "relationship": "market",
+  "route": null,
+  "strength": "high",
+  "relevance": "direct",
+  "action_date": "2026-10-03",
+  "event": {
+   "kind": "opening",
+   "date": "2026-10-03",
+   "deadline": null,
+   "continues_after_event": false,
+   "after_event": "The skatepark opened for skateboards, scooters and BMX riding.",
+   "after_event_source": 1
+  },
+  "completed_outcome": null,
+  "status": "unverified",
+  "status_source": null,
+  "status_checked_date": null,
+  "status_by_source": [
+   {
+    "source": 1,
+    "state": "completed"
+   }
+  ],
+  "conflict": null,
+  "gap": "The reporting does not establish expected operating hours, ongoing costs, or measured effects on nearby homes.",
+  "access_confidence": "medium",
+  "keyword_match": false,
+  "sources": [
+   {
+    "title": "11-year dream becomes reality as Colfax opens new skate park",
+    "url": "https://kcra.com/article/…/74009860",
+    "published": "2026-10-03",
+    "role": "secondary",
+    "kind": "local_news",
+    "source_geography": "Colfax, California",
+    "reporting_period": "Skatepark opening, October 2026",
+    "what_it_establishes": "Colfax opened a skatepark; funding included a city grant, county allocation and community contributions."
+   }
+  ]
+ },
+ "nextPhase": {
+  "_lane": "gapfill",
+  "question": "Could Colfax’s new viewing area add another gathering spot near the skatepark?",
+  "development": "After the skatepark opening, organizers described a separate next phase: a viewing area with picnic tables, shade and donor bricks",
+  "angle": "Whether the planned viewing area advances after the park itself opened.",
+  "why": "The reported follow-on phase could add public amenities, but its funding and completion remain uncertain.",
+  "relationship": "market",
+  "route": null,
+  "strength": "medium",
+  "relevance": "direct",
+  "action_date": "2026-10-03",
+  "event": {
+   "kind": "opening",
+   "date": "2026-10-03",
+   "deadline": null,
+   "continues_after_event": true,
+   "after_event": "The park opened; organizers said grant funding for a viewing-area phase was still being pursued.",
+   "after_event_source": 1
+  },
+  "completed_outcome": null,
+  "status": "unverified",
+  "status_source": null,
+  "status_checked_date": null,
+  "status_by_source": [
+   {
+    "source": 1,
+    "state": "completed"
+   }
+  ],
+  "conflict": null,
+  "gap": "The candidate is the distinct, unfinished viewing-area phase, not the already-covered skatepark opening.",
+  "access_confidence": "medium",
+  "keyword_match": false,
+  "sources": [
+   {
+    "title": "Colfax Skatepark opens with lots of fanfare",
+    "url": "https://goldmountaincanews.com/news/373091/…/",
+    "published": "2026-10-05",
+    "role": "secondary",
+    "kind": "local_news",
+    "source_geography": "Colfax, California",
+    "reporting_period": "Opening and project status reported October 3, 2026",
+    "what_it_establishes": "Park opened; a viewing-area phase remained, with grant funding efforts ongoing."
+   }
+  ]
+ }
+}

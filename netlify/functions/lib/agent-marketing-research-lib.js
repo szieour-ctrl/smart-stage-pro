@@ -594,10 +594,10 @@ function sessionStatus({ rows, planKey, now, env } = {}) {
 }
 
 // What to store when a run ends. A session is charged only for a validated five-topic set.
-function outcomeFields({ validation, usage, model, today, now, error }) {
+function outcomeFields({ validation, usage, model, today, now, error, charge }) {
   const stamp = (now ? new Date(now) : new Date()).toISOString();
   if (validation && validation.ok) {
-    return { status: "ready", topics: validation.topics, research_date: today, model: model || null, usage: usage || null, error: null, charged_at: stamp, updated_at: stamp };
+    return { status: "ready", topics: validation.topics, research_date: today, model: model || null, usage: usage || null, error: null, charged_at: charge === false ? null : stamp, updated_at: stamp };   // charge === false only for a partial Article-Led set; everything else is charged as before
   }
   const msg = error || (validation && validation.problems && validation.problems.length ? "The research did not return five well-sourced topics." : "The research could not be completed.");
   return { status: "failed", topics: null, model: model || null, usage: usage || null, error: clean(msg, 300), charged_at: null, updated_at: stamp };
@@ -607,4 +607,6 @@ module.exports = {
   cleanVisualCues, MODES, MODE_LABELS, DATA_SOURCES, GEO_TYPES, AUDIENCES, AUDIENCE_KEYS, TOPIC_COUNT, MAX_UPLOADS, FRESH_DAYS, ALLOWANCE_BY_PLAN, PAYWALLED_DOMAINS, DEFAULT_MODEL, DEFAULT_COST_TARGET_USD,
   DATA_FOCUS, DATA_FOCUS_KEYS, validatePeriod, periodDates, validateGeography, geoLabel, validateResearchRequest, requestKey, researchModel, researchSettings, systemPrompt, buildResearchPayload,
   extractTopics, extractRecommendation, validateTopics, similar, articleKey, usageSummary, monthKeyPT, allowanceFor, sessionStatus, outcomeFields,
+  // helpers shared with the Article-Led discovery lib (PR 2); exporting them changes nothing here
+  AUDIENCES, LIMITS, MAX_KEYWORDS_CHARS, TREND_WORDS, clean, dayNumber, hostOf, isNotArticle, isPaywalled, cleanRecommendation,
 };

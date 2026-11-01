@@ -21,14 +21,36 @@
 const fs = require("fs");
 const path = require("path");
 const run = require("../netlify/functions/lib/agent-marketing-research-run-lib");
+const diagLib = require("../netlify/functions/lib/agent-marketing-research-diag-lib");
 
+// v1 cells: today's prompt. v2 cells (PR 2): the Article-Led prompt with AGENT_MARKETING_ARTICLE_LED_ENABLED on, one search, retries off, so they compare with
+// the v1 fixed cells. The first v2 cell is the approved starting point (20 results, 6,000 context tokens, 5,000 output tokens); the second changes only the
+// output-token allowance (2,200, as in v1) so its effect is measured separately; the third is the v2 default settings with its one retry.
 const CELLS = Object.freeze([
   { id: "as_shipped", results: null, context: null, retries: null },
   { id: "r10_c6000", results: 10, context: 6000, retries: 0 },
   { id: "r20_c6000", results: 20, context: 6000, retries: 0 },
   { id: "r10_c10000", results: 10, context: 10000, retries: 0 },
   { id: "r20_c10000", results: 20, context: 10000, retries: 0 },
+  { id: "v2_r20_c6000_o5000", prompt: "v2", results: 20, context: 6000, output: 5000, retries: 0 },
+  { id: "v2_r20_c6000_o2200", prompt: "v2", results: 20, context: 6000, output: 2200, retries: 0 },
+  { id: "v2_default", prompt: "v2", results: null, context: null, output: null, retries: null },
+  // Compact Stage A (PR 2, Oct 31): up to eight short candidates, code selects up to five. The two compact cells differ only in the output allowance (4,500 and 6,000).
+  // The detailed-prompt diagnostic cell runs the existing detailed prompt at 8,000 output tokens, one run per market (maxRepeats), to show what the compact design
+  // gives up or gains. Search limits are the same everywhere (20 results, 6,000 context tokens); the ordinary retry is off.
+  { id: "compact_r20_c6000_o4500", prompt: "compact", results: 20, context: 6000, output: 4500, retries: 0 },
+  { id: "compact_r20_c6000_o6000", prompt: "compact", results: 20, context: 6000, output: 6000, retries: 0 },
+  // Three-lane experiment (Oct 31): three independent compact passes (municipal, housing, economy) over the same market, merged in code. Compared with compact_r20_c6000_o4500.
+  { id: "lanes3_r20_c6000_o4500", prompt: "compact", lanes: "three", results: 20, context: 6000, output: 4500, retries: 0 },
+  // Two-lane confirmation (Oct 31): municipal + housing only (the economy lane is out), sequential, same rate-limit handling.
+  { id: "lanes2_r20_c6000_o4500", prompt: "compact", lanes: "two", results: 20, context: 6000, output: 4500, retries: 0 },
+  // Gap-fill diagnostic (Oct 31): the approved two-lane configuration plus the off-by-default gap-fill pass (fires only with exactly 3 or 4 distinct qualified developments).
+  { id: "lanes2gap_r20_c6000_o4500", prompt: "compact", lanes: "two", gapfill: "diagnostic", results: 20, context: 6000, output: 4500, retries: 0 },
+  { id: "detailed_r20_c6000_o8000", prompt: "compact", design: "detailed", maxRepeats: 1, results: 20, context: 6000, output: 8000, retries: 0 },
 ]);
+const cellsFor = (prompt) => CELLS.filter((c) => (prompt === "v2" ? c.prompt === "v2" : prompt === "compact" ? c.prompt === "compact" && !c.lanes : prompt === "lanes" ? c.lanes === "three" : prompt === "lanes2" ? c.lanes === "two" && !c.gapfill : prompt === "gapfill" ? c.gapfill === "diagnostic" : prompt === "both" ? true : c.prompt !== "v2" && c.prompt !== "compact"));
+const isArticleCell = (c) => c.prompt === "v2" || c.prompt === "compact";
+const designOfCell = (c) => (c.prompt === "compact" ? c.design || "compact" : c.prompt === "v2" ? "detailed" : null);
 const MARKETS = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "tests", "fixtures", "research-diag", "markets.json"), "utf8"));
 delete MARKETS._note;
 
@@ -40,7 +62,7 @@ function redact(text, key) {
 }
 
 function parseArgs(argv) {
-  const a = { live: false, replay: false, markets: Object.keys(MARKETS), repeats: 2, out: null, today: null };
+  const a = { live: false, replay: false, markets: Object.keys(MARKETS), repeats: 2, out: null, today: null, prompt: "v1", cells: null };
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i];
     if (k === "--live") a.live = true;
@@ -49,17 +71,23 @@ function parseArgs(argv) {
     else if (k === "--repeats") a.repeats = Math.max(1, Math.min(5, Number(argv[++i]) || 2));
     else if (k === "--out") a.out = argv[++i];
     else if (k === "--today") a.today = argv[++i];
+    else if (k === "--prompt") a.prompt = String(argv[++i] || "");
+    else if (k === "--cells") a.cells = String(argv[++i] || "").split(",").map((x) => x.trim()).filter(Boolean);
   }
   if (a.live === a.replay) throw new Error("Choose exactly one of --live or --replay.");
+  if (!["v1", "v2", "compact", "lanes", "lanes2", "gapfill", "both"].includes(a.prompt)) throw new Error("--prompt must be v1, v2, compact, lanes, lanes2, gapfill or both.");
+  const badCells = (a.cells || []).filter((c) => !CELLS.some((x) => x.id === c));
+  if (badCells.length) throw new Error(`Unknown cell(s): ${badCells.join(", ")}. Known: ${CELLS.map((c) => c.id).join(", ")}`);
   const bad = a.markets.filter((m) => !MARKETS[m]);
   if (bad.length) throw new Error(`Unknown market(s): ${bad.join(", ")}. Known: ${Object.keys(MARKETS).join(", ")}`);
   return a;
 }
 
 /** The plan: every market x cell x repeat, in a fixed order. */
-function plan(markets, repeats) {
+function plan(markets, repeats, cells) {
   const out = [];
-  markets.forEach((m) => CELLS.forEach((c) => { for (let r = 1; r <= repeats; r++) out.push({ market: m, cell: c, repeat: r }); }));
+  const list = cells && cells.length ? cells.map((c) => (typeof c === "string" ? CELLS.find((x) => x.id === c) : c)).filter(Boolean) : CELLS.filter((c) => !isArticleCell(c));   // cell ids or cell objects
+  markets.forEach((m) => list.forEach((c) => { for (let r = 1; r <= Math.min(repeats, c.maxRepeats || repeats); r++) out.push({ market: m, cell: c, repeat: r }); }));
   return out;
 }
 
@@ -69,7 +97,31 @@ function cellEnv(base, cell) {
     ...base,
     ...(cell.retries != null ? { AGENT_MARKETING_RESEARCH_RETRIES: String(cell.retries) } : {}),
     ...(cell.results != null ? { AGENT_MARKETING_RESEARCH_MAX_RESULTS: String(cell.results), AGENT_MARKETING_RESEARCH_SEARCH_TOKENS: String(cell.context) } : {}),
+    ...(cell.output != null ? { AGENT_MARKETING_RESEARCH_MAX_TOKENS: String(cell.output) } : {}),
+    ...(isArticleCell(cell) ? { AGENT_MARKETING_ARTICLE_LED_ENABLED: "true", AGENT_MARKETING_ARTICLE_LED_DESIGN: designOfCell(cell), AGENT_MARKETING_ARTICLE_LED_RETRIES: String(cell.retries == null ? 0 : cell.retries), AGENT_MARKETING_ARTICLE_LED_LANES: cell.lanes || "single", AGENT_MARKETING_ARTICLE_LED_GAPFILL: cell.gapfill || "", AGENT_MARKETING_ARTICLE_LED_DIAGNOSTICS: cell.lanes === "three" || cell.gapfill ? "true" : "" } : { AGENT_MARKETING_ARTICLE_LED_ENABLED: "" }),   // v1 cells always run the v1 prompt
   };
+}
+
+/** The delivered Article-Led cards, for a human to read next to the diagnostics (model-written summaries and source references; no article text, no credentials). */
+function compactCardsOf(topics) {
+  return (Array.isArray(topics) ? topics : []).filter((t) => t && t.candidate).map((t, i) => {
+    const c = t.candidate;
+    return { n: i + 1, candidateId: c.id, lane: c.lane || null, identity: c.identity || null, alternativeAngles: c.alternativeAngles || null, alsoFoundIn: c.alsoFoundIn || null, question: c.question, development: c.development, angle: c.angle, why: c.why, strength: c.strength, relevance: c.relevance, gap: c.gap,
+      relationship: c.geography.relationship, route: c.geography.route, geography: { nameFoundInSource: c.geography.nameFoundInSource, nameEvidence: c.geography.nameEvidence, provisional: true, hierarchy: c.geography.hierarchy, modelSourceGeography: c.geography.modelSourceGeography },
+      status: c.status, event: c.event, selection: c.selection, review: c.review, provisionalEvidence: c.provisionalEvidence,
+      sources: (c.sources || []).map((s) => ({ ref: s.ref, title: s.title, host: s.host, url: diagLib.safeUrl(s.url), published: s.published, role: s.role, kind: s.kind, outletClass: s.outletClass, window: s.window, sourceGeography: s.sourceGeography, reportingPeriod: s.reportingPeriod, whatItEstablishes: s.whatItEstablishes })) };
+  });
+}
+function cardsOf(topics) {
+  if ((Array.isArray(topics) ? topics : []).some((t) => t && t.candidate)) return compactCardsOf(topics);
+  return (Array.isArray(topics) ? topics : []).filter((t) => t && t.editorial).map((t, i) => ({
+    n: i + 1, question: t.question, scope: t.scope, scopeNote: t.scopeNote || null, relationship: t.editorial.geographicRelationship, routeToMarket: t.editorial.routeToMarket,
+    status: t.editorial.status, claimedStatus: t.editorial.claimedStatus, statusReason: t.editorial.statusReason, actionDate: t.editorial.actionDate, statusCheckedDate: t.editorial.statusCheckedDate,
+    development: t.editorial.development, angle: t.editorial.angle, thesis: t.editorial.thesis, homeownerDecision: t.editorial.homeownerDecision,
+    sourceReportedFacts: t.editorial.sourceReportedFacts, geographyCheck: t.editorial.geographyCheck, qualification: t.editorial.qualification, review: t.editorial.review, possibleExplanations: t.editorial.possibleExplanations, projectFacts: t.editorial.projectFacts, evidencePoints: t.editorial.evidencePoints,
+    evidenceGaps: t.editorial.evidenceGaps, verificationNeeds: t.editorial.verificationNeeds, accessConfidence: t.editorial.accessConfidence,
+    sources: (t.sources || []).map((s) => ({ title: s.title, host: s.domain, url: diagLib.safeUrl(s.url), published: s.published, role: s.role, kind: s.kind, window: s.window, sourceGeography: s.sourceGeography, reportingPeriod: s.reportingPeriod, whatItEstablishes: s.whatItEstablishes })),
+  }));
 }
 
 function summarizeRun(job, result, ms, replay) {
@@ -89,6 +141,8 @@ function summarizeRun(job, result, ms, replay) {
     substantive_topics: set ? set.substantive_topics : null, distinct_articles: set ? set.distinct_articles : null, distinct_publishers: set ? set.distinct_publishers : null,
     distinct_developments_proxy: set ? set.distinct_developments_proxy : null, exact_market: set ? set.exact_market : null, broader_context: set ? set.broader_context : null,
     multi_publisher_topics: set ? set.multi_publisher_topics : null, median_newest_source_days: set ? set.median_newest_source_days : null,
+    provider_requests: u.providerRequests == null ? null : u.providerRequests, gap: u.articleLed && u.articleLed.gapFill ? u.articleLed.gapFill : null,
+    pathway: u.pathway || "legacy", charged: !!f.charged_at, v2: d && d.depth_v2 ? d.depth_v2 : null, delivered: u.articleLed ? u.articleLed.delivered : null, research_limit: u.articleLed && u.articleLed.limits ? u.articleLed.limits.reason : null,
     cost_per_kept_topic: cost != null && kept ? Math.round((cost / kept) * 1e6) / 1e6 : null,
     cost_per_substantive_topic: cost != null && set && set.substantive_topics ? Math.round((cost / set.substantive_topics) * 1e6) / 1e6 : null,
   };
@@ -106,6 +160,26 @@ function summaryMarkdown(rows) {
     const [m, c] = k.split("|");
     out.push(`| ${m} | ${c} | ${g.length} | ${g.filter((r) => r.status === "ready").length} | ${fmt(mean(g.map((r) => r.funnel && r.funnel.provider_candidates)), 1)} | ${fmt(mean(g.map((r) => r.funnel && r.funnel.grounded_by_provider)), 1)} | ${fmt(mean(g.map((r) => r.topics_kept)), 1)} | ${fmt(mean(g.map((r) => r.substantive_topics)), 1)} | ${fmt(mean(g.map((r) => r.distinct_publishers)), 1)} | ${fmt(mean(g.map((r) => r.cost_usd)), 4)} | ${fmt(mean(g.map((r) => r.cost_per_kept_topic)), 4)} |`);
   });
+  const cp = rows.filter((r) => r.v2 && r.v2.design === "compact_v1");
+  if (cp.length) {
+    out.push("", "## Compact Stage A depth", "", "| Market | Cell | Runs | Returned | Qualified | Selected | Charged | Distinct developments | Market scope | Name in source | Geography unsupported | Official primary | Government record | Original local reporting | Trade aggregation | Only brokerage | Unresolved | Needs review | $/run |", "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
+    [...new Set(cp.map((r) => `${r.market}|${r.cell}`))].forEach((k) => {
+      const g = cp.filter((r) => `${r.market}|${r.cell}` === k); const [m, c] = k.split("|");
+      const mv = (f) => fmt(mean(g.map((r) => r.v2[f])), 1);
+      out.push(`| ${m} | ${c} | ${g.length} | ${mv("candidates_returned")} | ${mv("qualified")} | ${fmt(mean(g.map((r) => r.delivered)), 1)} | ${g.filter((r) => r.charged).length}/${g.length} | ${mv("distinct_developments")} | ${mv("market_scope")} | ${mv("name_found_in_source")} | ${mv("geography_unsupported")} | ${mv("with_official_primary")} | ${mv("with_government_record")} | ${mv("with_original_local_reporting")} | ${mv("with_trade_aggregation")} | ${mv("only_brokerage_or_agent")} | ${mv("status_unresolved")} | ${mv("needs_review")} | ${fmt(mean(g.map((r) => r.cost_usd)), 4)} |`);
+    });
+    out.push("", "Candidates are compact and provisional: structure measures only. Read the cards (*.cards.json) to judge them.");
+  }
+  const v2 = rows.filter((r) => r.v2 && r.v2.design !== "compact_v1");
+  if (v2.length) {
+    out.push("", "## Article-Led (v2) depth", "", "| Market | Cell | Runs | Delivered | Charged | Distinct developments | Exact or same jurisdiction | With authoritative primary | With local news or government | Only brokerage or agent sources | Status supported | With evidence gaps | $/run |", "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
+    [...new Set(v2.map((r) => `${r.market}|${r.cell}`))].forEach((k) => {
+      const g = v2.filter((r) => `${r.market}|${r.cell}` === k); const [m, c] = k.split("|");
+      const mv = (f) => fmt(mean(g.map((r) => r.v2[f])), 1);
+      out.push(`| ${m} | ${c} | ${g.length} | ${fmt(mean(g.map((r) => r.delivered)), 1)} | ${g.filter((r) => r.charged).length}/${g.length} | ${mv("distinct_developments")} | ${mv("exact_or_same_jurisdiction")} | ${mv("with_authoritative_primary")} | ${mv("with_local_news_or_government")} | ${mv("only_brokerage_or_agent_sources")} | ${mv("status_supported")} | ${mv("with_evidence_gaps")} | ${fmt(mean(g.map((r) => r.cost_usd)), 4)} |`);
+    });
+    out.push("", "These are measures of structure, not of quality. Judge the opportunities themselves with the review sample (scripts/research-baseline-inventory.js).");
+  }
   out.push("", "Substantive = at least 3 of 4 depth checks (two publishers, two signals, a figure with a period, an explanation of 120+ characters); see depth rubric v1. These are proxies, not a reading of the articles.");
   const total = rows.reduce((s, r) => s + (r.cost_usd || 0), 0);
   out.push("", `Total provider cost of these runs: $${total.toFixed(4)}${rows.some((r) => r.cost_estimated) ? " (some estimated from tokens)" : ""}.`);
@@ -117,7 +191,7 @@ async function main() {
   const fx = require("../tests/fixtures/research-diag/scenarios");
   const key = process.env.PERPLEXITY_API_KEY;
   if (args.live && !key) throw new Error("--live needs PERPLEXITY_API_KEY in the environment.");
-  const jobs = plan(args.markets, args.repeats);
+  const jobs = plan(args.markets, args.repeats, args.cells || cellsFor(args.prompt));
   const stamp = new Date().toISOString().slice(0, 10);
   const dir = args.out || path.join(process.cwd(), `research-baseline-${stamp}${args.replay ? "-replay" : ""}`);
   fs.mkdirSync(dir, { recursive: true });
@@ -126,16 +200,19 @@ async function main() {
   for (const job of jobs) {
     const row = { id: `baseline-${job.market}-${job.cell.id}-${job.repeat}`, mode: "market_update", audience: "sellers", geography: MARKETS[job.market], focus: {}, upload_refs: [], data_source: "web" };
     const env = cellEnv(process.env, job.cell);
-    const inner = args.replay ? (async () => fx.replayReply(job.repeat)) : null;
+    const laneOfPayload = (pl) => (/Lane: Municipal/.test(pl.input) ? "municipal" : /Lane: Housing/.test(pl.input) ? "housing" : /Lane: Gap-fill/.test(pl.input) ? "gapfill" : /Lane: Financing/.test(pl.input) ? "economy" : null);
+    const inner = args.replay ? (async (pl) => (job.cell.prompt === "v2" || designOfCell(job.cell) === "detailed" ? fx.replayReplyV2(job.repeat) : job.cell.prompt === "compact" ? fx.replayReplyCompact(job.repeat, laneOfPayload(pl || {}), job.cell.gapfill ? "gap" : undefined) : fx.replayReply(job.repeat))) : null;
     const callFn = inner || ((payload, k) => run.callPerplexity(payload, k));
     const t0 = Date.now();
     const origErr = console.error; console.error = quiet;
     let result;
-    try { result = await run.runResearch({ row, apiKey: key || "replay", now: args.replay ? fx.NOW : (args.today || undefined), env, callFn, sleepFn: async () => {} }); }
+    try { result = await run.runResearch({ row, apiKey: key || "replay", now: args.replay ? fx.NOW : (args.today || undefined), env, callFn, sleepFn: args.replay ? async () => {} : undefined }); }
     finally { console.error = origErr; }
     const sum = summarizeRun(job, result, Date.now() - t0, args.replay);
     rows.push(sum);
     fs.appendFileSync(path.join(dir, "runs.jsonl"), redact(JSON.stringify(sum), key) + "\n");
+    if (isArticleCell(job.cell)) fs.writeFileSync(path.join(dir, `${job.market}-${job.cell.id}-${job.repeat}.cards.json`), redact(JSON.stringify(cardsOf(result.fields.topics), null, 1), key));
+    if (result.fields.usage && result.fields.usage.gapFill) fs.writeFileSync(path.join(dir, `${job.market}-${job.cell.id}-${job.repeat}.gapfill.json`), redact(JSON.stringify(result.fields.usage.gapFill, null, 1), key));
     // The full diagnostics record of the run, for investigating a weak result.
     fs.writeFileSync(path.join(dir, `${job.market}-${job.cell.id}-${job.repeat}.discovery.json`), redact(JSON.stringify(result.fields.usage && result.fields.usage.discovery || null, null, 1), key));
     process.stdout.write(redact(`${job.market} ${job.cell.id} #${job.repeat}: ${sum.status} topics=${sum.topics_kept} cost=${sum.cost_usd == null ? "n/a" : "$" + sum.cost_usd}${sum.error ? " error=" + sum.error : ""}`, key) + "\n");
@@ -144,5 +221,5 @@ async function main() {
   process.stdout.write(`\nWrote ${rows.length} runs to ${dir}\n`);
 }
 
-module.exports = { CELLS, MARKETS, parseArgs, plan, cellEnv, summarizeRun, summaryMarkdown, redact };
+module.exports = { cardsOf, CELLS, cellsFor, MARKETS, parseArgs, plan, cellEnv, summarizeRun, summaryMarkdown, redact };
 if (require.main === module) main().catch((e) => { console.error(redact(e.message, process.env.PERPLEXITY_API_KEY)); process.exit(1); });

@@ -76,6 +76,7 @@ function pushSource(diag, rec) {
       topic: rec.topic, url: safeUrl(rec.url), host: hostOf(rec.url), title: safeText(rec.title, TITLE_CHARS),
       model_date: day(rec.model_date), provider_date: day(rec.provider_date), date_from: rec.date_from || null,
       outcome: rec.outcome, stage: rec.stage, code: rec.code, detail: rec.detail ? safeText(rec.detail, DETAIL_CHARS) : null,
+      ...(rec.role ? { role: safeText(rec.role, 24) } : {}), ...(rec.kind ? { kind: safeText(rec.kind, 32) } : {}), ...(rec.window ? { window: safeText(rec.window, 32) } : {}),
     });
   } catch { /* diagnostics never break research */ }
 }
@@ -85,6 +86,7 @@ function pushTopic(diag, rec) {
     diag.topics.push({
       topic: rec.topic, outcome: rec.outcome, stage: rec.stage, code: rec.code, detail: rec.detail ? safeText(rec.detail, DETAIL_CHARS) : null,
       hook: rec.hook ? safeText(rec.hook, HOOK_CHARS) : null, final_rank: rec.final_rank == null ? null : rec.final_rank,
+      ...(rec.lane ? { lane: safeText(rec.lane, 24) } : {}), ...(rec.duplicate_of ? { duplicate_of: safeText(rec.duplicate_of, 80) } : {}),
     });
   } catch { /* ignore */ }
 }

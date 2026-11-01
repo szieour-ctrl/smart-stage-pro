@@ -354,6 +354,28 @@ function partialNote(validation) {
   return `Only ${n} of ${TOPIC_COUNT} article-led opportunities were supported by the research this time.${why} This did not use a research session. You can run the research again, or create an MLS Market Trend Reel from your report.`;
 }
 
+// ── Rate limit on uncharged partial sessions (Sam, Oct 31, 2026) ───────────────────────────────────────────────
+// A partial Article-Led set costs provider money and uses no allowance, so it is limited server-side: five per user per rolling 24 hours, plus a monthly
+// protection limit (default 30 per rolling 30 days, a starting value to be calibrated from usage). Only partial Article-Led sets count: charged sets,
+// failed runs and legacy research do not.
+const PARTIAL_DAILY_LIMIT = 5;
+const PARTIAL_MONTHLY_LIMIT = 30;
+function partialLimits(env) {
+  return { daily: envInt(env, "AGENT_MARKETING_PARTIAL_DAILY_LIMIT", 1, 100) || PARTIAL_DAILY_LIMIT, monthly: envInt(env, "AGENT_MARKETING_PARTIAL_MONTHLY_LIMIT", 1, 1000) || PARTIAL_MONTHLY_LIMIT };
+}
+/** rows: this user's research rows from the last 30 days ({ created_at, charged_at, status, pathway | usage.pathway }). */
+function partialLimit(rows, nowMs, env) {
+  const lim = partialLimits(env);
+  const isPartial = (r) => r && r.status === "ready" && !r.charged_at && (r.pathway || (r.usage && r.usage.pathway)) === "article_led";
+  const mine = (Array.isArray(rows) ? rows : []).filter(isPartial);
+  const age = (r) => nowMs - new Date(r.created_at).getTime();
+  const day = mine.filter((r) => age(r) <= 24 * 3600 * 1000).length;
+  const month = mine.filter((r) => age(r) <= 30 * 24 * 3600 * 1000).length;
+  if (day >= lim.daily) return { blocked: true, scope: "daily", used: day, limit: lim.daily, message: `You have reached the limit of ${lim.daily} incomplete research results in 24 hours. Try again later, or create an MLS Market Trend Reel from your report.` };
+  if (month >= lim.monthly) return { blocked: true, scope: "monthly", used: month, limit: lim.monthly, message: `You have reached this month's limit of ${lim.monthly} incomplete research results. Try again later, or create an MLS Market Trend Reel from your report.` };
+  return { blocked: false, scope: null, used: day, limit: lim.daily, message: null };
+}
+
 // ── Research depth for v2 (human-checkable measures; not a substitute for reading the opportunities) ───────────
 function depthV2(topics) {
   const list = Array.isArray(topics) ? topics : [];
@@ -385,4 +407,5 @@ module.exports = {
   TOPIC_COUNT, NEWS_DAYS, AUTHORITATIVE_DAYS, STATUS_CHECK_DAYS, RELATIONSHIPS, SELECTED_RELATIONSHIPS, STATUSES, ACCESS, ROLES, KINDS, AUTHORITATIVE_KINDS,
   articleLedEnabled, isArticleLed, systemPromptV2, retryInstructionV2, buildPayloadV2, extractOpportunities, extractLimits,
   eligibleSource, applyFreshness, validateOpportunities, shouldCharge, partialNote, depthV2,
+  PARTIAL_DAILY_LIMIT, PARTIAL_MONTHLY_LIMIT, partialLimits, partialLimit,
 };

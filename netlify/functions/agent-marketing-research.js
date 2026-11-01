@@ -20,6 +20,7 @@ const { requireUser } = require("./lib/reel-auth-lib");
 const am = require("./lib/agent-marketing-lib");
 const rl = require("./lib/agent-marketing-research-lib");
 const runLib = require("./lib/agent-marketing-research-run-lib");
+const articleLed = require("./lib/agent-marketing-article-led-lib");
 const quota = require("./lib/reel-quota-lib");
 
 const headers = { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json", "Cache-Control": "no-store" };
@@ -78,6 +79,9 @@ function forClient(row) {
     error: row.status === "failed" ? (row.error || "The research could not be completed.") : null,
     charged: !!row.charged_at, createdAt: row.created_at,
   };
+  // Article-Led (PR 2): how many opportunities were delivered, why fewer than five, and whether the MLS Market Trend option is offered.
+  const al = row.usage && row.usage.pathway === "article_led" ? row.usage.articleLed || {} : null;
+  if (al) Object.assign(out, { pathway: "article_led", delivered: Number.isInteger(al.delivered) ? al.delivered : (row.topics || []).length, limitation: (al.limits && al.limits.reason) || null, offerMlsTrend: !!al.offerMlsTrend });
   // Measured cost is for tuning during the beta only: AGENT_MARKETING_RESEARCH_DEBUG=true shows it, otherwise subscribers never see it.
   if (String(process.env.AGENT_MARKETING_RESEARCH_DEBUG || "").toLowerCase() === "true") out.usage = row.usage || null;
   return out;
@@ -146,6 +150,7 @@ exports.handler = async (event) => {
         return reply(200, {
           dataFocus: rl.DATA_FOCUS, modes: rl.MODES.map((k) => ({ key: k, label: rl.MODE_LABELS[k] })), audiences: rl.AUDIENCES,
           geoTypes: rl.GEO_TYPES.map((k) => ({ key: k, label: GEO[k] })), topicCount: rl.TOPIC_COUNT, maxUploads: rl.MAX_UPLOADS,
+          articleLed: articleLed.articleLedEnabled(process.env),
         });
       }
       if (qs.id) {
@@ -229,6 +234,13 @@ exports.handler = async (event) => {
     if (Array.isArray(mine.data) && mine.data[0]) return reply(409, { error: "A research request is already running. Please wait for it to finish." });
     const session = await sessionFor(pool);
     if (!session.canStart) return reply(429, { error: `${who(session)} used all ${session.allowance} research sessions included this month.`, session });
+    // Article-Led: partial sets are uncharged, so they are rate limited here, on the server (Sam, Oct 31). Legacy research is not affected.
+    if (articleLed.isArticleLed(v.request, process.env)) {
+      const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+      const pr = await supabase("GET", "agent_marketing_research", null, `?user_id=eq.${userId}&created_at=gte.${encodeURIComponent(since)}&select=created_at,charged_at,status,pathway:usage->>pathway&order=created_at.desc&limit=300`);
+      const lim = articleLed.partialLimit(Array.isArray(pr.data) ? pr.data : [], Date.now(), process.env);
+      if (lim.blocked) return reply(429, { error: lim.message, code: "partial_limit", scope: lim.scope, mlsTrendAvailable: true });
+    }
     const needsWeb = v.request.dataSource !== "upload", needsClaude = v.request.dataSource !== "web";
     if ((needsWeb && !process.env.PERPLEXITY_API_KEY) || (needsClaude && !process.env.ANTHROPIC_API_KEY) || !process.env.INTERNAL_API_KEY) return reply(500, { error: "Research is not set up yet." });
     // A report is used only when it is the agent's own, belongs to this project, and the agent confirmed "This report covers… Correct?".

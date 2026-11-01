@@ -61,7 +61,7 @@
       mode: picked("mode"), audience: $("audience").value,
       geography: { type: type, name: $("geoName").value, city: type === "neighborhood" ? $("geoCity").value : "", zip: type === "zip" ? "" : $("geoZip").value },
       focus: { active_adult_55: $("f55").checked, new_construction: $("fNew").checked }, keywords: $("keywords").value, dataFocus: $("dataFocus").value, period: collectPeriod(),
-      dataSource: reportSource().dataSource, uploadIds: reportSource().uploadIds,
+      dataSource: state.mlsTrend ? "upload" : reportSource().dataSource, uploadIds: reportSource().uploadIds,
     };
   }
   // A report is used only once the agent has confirmed "This report covers\u2026 Correct?". Attached and confirmed = both (report figures win); otherwise web only.
@@ -143,12 +143,13 @@
     $("resultPanel").classList.remove("hidden");
     state.current = r;
     $("resEyebrow").textContent = (r.mode === "local_events" ? "Local Events" : "Local Market Update") + " · " + (r.geography && r.geography.label || "");
-    $("resTitle").textContent = r.status === "ready" ? "Five topics" + (r.researchDate ? " from " + r.researchDate : "") : r.status === "failed" ? "No topics this time" : "Researching…";
+    $("resTitle").textContent = r.status === "ready" ? (r.pathway === "article_led" && r.delivered < 5 ? r.delivered + " of 5 opportunities" : "Five topics") + (r.researchDate ? " from " + r.researchDate : "") : r.status === "failed" ? "No topics this time" : "Researching…";
     $("resWait").classList.toggle("hidden", r.status !== "running");
     $("resError").classList.toggle("hidden", r.status !== "failed");
     if (r.status === "failed") $("resError").textContent = (r.error || "The research could not be completed.") + (/did not use a session/.test(r.error || "") ? "" : " This did not use a session.");
     renderFailOptions(r);
     say("resNote", r.status === "ready" ? (r.note || (r.dataSource !== "report" && r.mode !== "local_events" ? "Figures from web research come from public pages. They can differ from your MLS numbers or be preliminary. Upload your MLS report to base your topics on your own data." : "")) : "");
+    renderMlsOption(r);
     var pickedId = state.selected && state.selected.researchId === r.id ? state.selected.id : null;
     var chosen = pickedId && r.status === "ready" ? r.topics.filter(function (t) { return t.id === pickedId; })[0] : null;
     var bar = chosen ? '<div id="selBar" style="border:1px solid var(--gold);background:#fdf9f0;border-radius:6px;padding:12px 14px;margin-top:12px;display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap"><div style="font-size:0.88rem"><b style="color:var(--success)">\u2713 Topic selected</b><div>' + esc(chosen.question) + "</div></div>" +
@@ -175,6 +176,20 @@
     var p = f.period || { days: 30 };
     if (p.start) { $("period").value = "custom"; $("periodFrom").value = p.start; $("periodTo").value = p.end; } else { $("period").value = String(p.days || 30); $("periodFrom").value = ""; $("periodTo").value = ""; }
     applyFocus();
+  }
+  // Article-Led research can come back with fewer than five opportunities. The MLS Market Trend Reel is a separate, deliberate workflow: it builds the topics
+  // from the agent's confirmed report only. It never replaces or fills the Article-Led topics automatically; the agent chooses it and confirms it.
+  function renderMlsOption(r) {
+    var box = $("resMlsOption"); if (!box) return;
+    if (!(state.schema && state.schema.articleLed) || r.pathway !== "article_led" || (r.status !== "ready" && r.status !== "failed")) { box.classList.add("hidden"); box.innerHTML = ""; return; }
+    box.innerHTML = '<div class="hint" style="margin:10px 0 8px">Separate option: build Reel topics from your confirmed MLS report only, with no web research.</div>' +
+      '<div class="actions"><button type="button" class="btn ghost small" id="mlsTrendBtn">Create an MLS Market Trend Reel</button></div><div class="msg" id="mlsTrendMsg"></div>';
+    box.classList.remove("hidden");
+    $("mlsTrendBtn").addEventListener("click", function () {
+      var u = state.upload;
+      if (!u || u.status !== "confirmed" || !u.id) { say("mlsTrendMsg", "Attach your MLS report above and confirm it, then choose this again.", "err"); return; }
+      say("mlsTrendMsg", ""); setForm(r); state.mlsTrend = true; $("resultPanel").classList.add("hidden"); review();
+    });
   }
   function renderFailOptions(r) {
     var box = $("resFailOptions"); if (!box) return;
@@ -430,7 +445,7 @@
     var mode = (s.modes.filter(function (m) { return m.key === q.mode; })[0] || {}).label || "";
     var focus = [q.focus.active_adult_55 ? "55+ Active Adult" : "", q.focus.new_construction ? "New Construction" : ""].filter(Boolean).join(", ");
     var win = state.upload && state.upload.summary && state.upload.summary.window;
-    var data = q.dataSource === "both" ? "Your confirmed report (its figures are the source of truth" + (win ? "; closed sales limited to " + win.label : "") + ") plus web research for the story" : "Web research. Each figure names its source, and preliminary figures are flagged";
+    var data = q.dataSource === "upload" ? "Your confirmed MLS report only (no web research): five MLS Market Trend topics built from its figures" : q.dataSource === "both" ? "Your confirmed report (its figures are the source of truth" + (win ? "; closed sales limited to " + win.label : "") + ") plus web research for the story" : "Web research. Each figure names its source, and preliminary figures are flagged";
     var rows = [["Content", mode], ["Area", area], ["Audience", aud], ["Focus", focus || "None"], ["Keywords", (q.keywords || "").trim() || "None"], ["Data", data]];
     if (q.mode !== "local_events") rows.splice(5, 0, ["Optional data", focusLabel(q)]);
     return rows.map(function (r) { return "<div><b>" + esc(r[0]) + ":</b> " + esc(r[1]) + "</div>"; }).join("");
@@ -440,7 +455,7 @@
     if (q.dataFocus === "none" || !q.period) return d.label;
     return d.label + ", " + (q.period.days ? "last " + q.period.days + " days" : q.period.start + " to " + q.period.end);
   }
-  function hideConfirm() { $("confirmBox").classList.add("hidden"); $("startBtn").classList.remove("hidden"); }
+  function hideConfirm(keepMls) { if (keepMls !== true) state.mlsTrend = false; $("confirmBox").classList.add("hidden"); $("startBtn").classList.remove("hidden"); }
   function review() {
     if (state.uploadReady && !state.uploadReady()) return;
     var q = collect(); say("startMsg", "");
@@ -449,16 +464,17 @@
     if (!q.mode || !q.geography.name.trim() || !q.audience) { say("startMsg", !q.audience ? "Choose who this is for." : "Enter the place to research.", "err"); return; }
     $("confirmList").innerHTML = confirmLines(q);
     var x = state.session;
-    $("confirmCost").textContent = "Running this uses one research session" + (x ? " (" + x.remaining + " of " + x.allowance + " left this month)" : "") + ", unless you already have this exact set saved, which is simply reopened.";
+    $("confirmCost").textContent = state.schema.articleLed && q.mode === "market_update" && q.dataSource !== "upload" ? "A research session is used only when five opportunities are delivered. A result with fewer is kept and does not use a session." : "Running this uses one research session" + (x ? " (" + x.remaining + " of " + x.allowance + " left this month)" : "") + ", unless you already have this exact set saved, which is simply reopened.";
     $("confirmBox").classList.remove("hidden"); $("startBtn").classList.add("hidden");
     $("confirmBox").scrollIntoView({ behavior: "smooth", block: "nearest" });
   }
   async function start() {
     if (state.uploadReady && !state.uploadReady()) return;
-    hideConfirm();
+    hideConfirm(true);
     $("startBtn").disabled = true; say("startMsg", "");
     try {
       var body = { action: "start", projectId: state.projectId, request: collect(), newTopics: $("newTopics").checked };
+      state.mlsTrend = false;
       var r = await api(API, "POST", "", body);
       if (r.json && r.json.session) renderSession(r.json.session);
       if (r.status === 202) { showResult(r.json.research); startPoll(r.json.research.id); return; }

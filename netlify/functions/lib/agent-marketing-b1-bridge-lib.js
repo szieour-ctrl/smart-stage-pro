@@ -190,7 +190,7 @@ async function prepare({ project, userId, store, fetchFn, env, now }) {
     snapshot_retrieved_at: page.retrievedAt, raw_html_sha256: snap.raw_html_sha256, extractor_sha256: snap.extractor_sha256, bridge_version: snap.bridge, capture_flags: snap.flags };
   if (live && live.status !== "ready") fail("in_progress", "a B1 run for this exact article and settings is already in progress; try again when it finishes");
   if (live) {   // no new B1 call: copy the completed result (its own snapshot, request, raw response and bundle) to this project
-    const { id, created_at, reserved_at, finished_at, cost_usd, error, ...copy } = live;
+    const { id, created_at, reserved_at, finished_at, cost_usd, error, provider_seq, provider_reservation_id, ...copy } = live;   // a copy makes no call: no ledger link
     return { record: await store.insert({ ...copy, ...base, status: "ready", reused_from: id }), reused: true };
   }
   const row = { ...base, ...sb.APPROVED_B1, snapshot_text: snap.snapshot_text, snapshot_sha256: snap.snapshot_sha256, input_sha256: snap.input_sha256,
@@ -198,14 +198,19 @@ async function prepare({ project, userId, store, fetchFn, env, now }) {
   return { record: await store.insert(row), reused: false };
 }
 
-/** Step 3 (after the provider call, or a saved response offline): gate the raw response through the Python bridge and complete the record. */
+/** Step 3 (after the provider call, or a saved response offline): gate the raw response through the Python bridge and complete the record.
+ *  The record must still be in the state it was claimed in (Stage B claims it as "running" after its ledger reservation; offline tools may
+ *  complete a "reserved" row directly), and the update is conditional on that state, so two workers can never both complete one run.
+ *  A BLOCKED gate result is stored for audit and finishes the row as "failed" (evidence_blocked): it is never "ready". */
 async function complete({ record, responseText, store, env }) {
-  if (!record || record.status !== "reserved") fail("not_reserved", "only a reserved record can be completed");
+  if (!record || !["reserved", "running"].includes(record.status)) fail("not_reserved", "only a reserved or running record can be completed");
   const withRaw = { ...record, raw_response_text: responseText, raw_response_sha256: sb.sha(responseText) };
   const g = await callBridge("gate", { request_text: record.request_text, response_text: responseText }, env);
   const bundle = checkGate(g, withRaw, responseText);
+  const blocked = g.completeness_status === b1.BLOCKED;
   return store.update(record.id, { raw_response_text: responseText, raw_response_sha256: withRaw.raw_response_sha256, gate_version: g.gate_version,
-    bundle, completeness_status: g.completeness_status, status: "ready", finished_at: new Date().toISOString() }, "reserved");
+    bundle, completeness_status: g.completeness_status, status: blocked ? "failed" : "ready", ...(blocked ? { error: "evidence_blocked" } : {}),
+    finished_at: new Date().toISOString() }, record.status);
 }
 
 module.exports = { StageBError, callBridge, callWorker, signRequest, replySignature, articleOf, fetchArticle, checkSnapshot, checkGate, prepare, complete, config };

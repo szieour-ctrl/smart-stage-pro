@@ -1,5 +1,6 @@
 -- PROPOSED, NOT APPLIED. Stage B: B1 article evidence for a selected Article-Led project (development only; design: docs/b1-stage-b-design.md;
--- review: docs/b1-stage-b-migration-review.md). Revision 2 (Nov 5, 2026): the review fixes R1-R10 below.
+-- review: docs/b1-stage-b-migration-review.md). Revision 2 (Nov 5, 2026): the review fixes R1-R10 below. Revision 3 (Nov 5, 2026): R11, the link to
+-- the provider-request ledger. REQUIRES 20261101_agent_marketing_provider_request_reservation.up.sql to be applied FIRST (foreign key below).
 -- ADDITIVE ONLY: one new table, one nullable column and two triggers on agent_marketing_projects. No existing row, column or policy changes. The
 -- only code that reads these objects (lib/agent-marketing-b1-stageb-lib.js, lib/agent-marketing-b1-store-lib.js) is inert unless
 -- AGENT_MARKETING_B1_EVIDENCE=dev. Idempotent. Rollback: 20261105_agent_marketing_article_evidence.down.sql.
@@ -58,6 +59,13 @@ drop index if exists public.uq_amae_project_cache_key;
 create unique index if not exists uq_amae_project_ready on public.agent_marketing_article_evidence (project_id, cache_key, gate_version) where status = 'ready';
 create index if not exists idx_amae_project on public.agent_marketing_article_evidence (project_id, created_at desc);
 create index if not exists idx_amae_cache_key on public.agent_marketing_article_evidence (cache_key, status);
+-- R11: the provider-request ledger reservation that pays for this row's single B1 call. Stage B reserves ledger sequence numbers 1001 and up on the
+-- project's research run (research itself uses 1, 2, ...), one per attempt, so a re-dispatched job replays its own reservation instead of taking a
+-- second one. Set once while the row is reserved; immutable afterwards (trigger below). A reused copy makes no call and carries none.
+alter table public.agent_marketing_article_evidence add column if not exists provider_seq integer check (provider_seq >= 1001);
+alter table public.agent_marketing_article_evidence add column if not exists provider_reservation_id uuid
+  references public.agent_marketing_provider_requests(id) on delete set null;   -- set null: ledger housekeeping never touches the audit row
+create unique index if not exists uq_amae_research_provider_seq on public.agent_marketing_article_evidence (research_id, provider_seq) where provider_seq is not null;
 alter table public.agent_marketing_article_evidence enable row level security;
 -- R9: raw provider responses and audit records: no client role may touch the table even if a policy were added by mistake later.
 revoke all on table public.agent_marketing_article_evidence from anon, authenticated, public;
@@ -104,6 +112,16 @@ begin
       old.model, old.max_output_tokens, old.reasoning_effort, old.cache_key, old.request_text, old.request_sha256, old.input_sha256, old.created_at,
       old.reserved_at) then
     raise exception 'agent_marketing_article_evidence: the snapshot, request and B1 settings are immutable';
+  end if;
+  -- R11: the ledger link is set once (null -> value, only while reserved) and never changed; housekeeping may null the reservation id.
+  if (old.provider_seq is not null and new.provider_seq is distinct from old.provider_seq)
+     or (old.provider_reservation_id is not null and new.provider_reservation_id is distinct from old.provider_reservation_id and new.provider_reservation_id is not null)
+     or (old.status <> 'reserved' and ((old.provider_seq is null and new.provider_seq is not null) or (old.provider_reservation_id is null and new.provider_reservation_id is not null))) then
+    raise exception 'agent_marketing_article_evidence: the provider reservation is set once, while reserved';
+  end if;
+  -- R11: no provider call without a ledger reservation: a row may start running, or become ready from a call, only with one.
+  if new.status in ('running','ready') and new.status is distinct from old.status and (new.provider_seq is null or new.provider_reservation_id is null) then
+    raise exception 'agent_marketing_article_evidence: % requires a provider-request reservation', new.status;
   end if;
   if old.status in ('ready','failed') then
     if new.status is distinct from old.status or (new.raw_response_text, new.raw_response_sha256, new.gate_version, new.bundle, new.completeness_status,

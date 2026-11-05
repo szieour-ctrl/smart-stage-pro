@@ -496,6 +496,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
   </div>
 </main>
 
+<script src="/ssp-public-config.js"></script>
 <script src="agent-marketing-research-ui.js"></script>
 <script>
 (function () {
@@ -519,12 +520,12 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
   // Same login the rest of the site uses (the live Supabase session in localStorage).
   // Oct 28, 2026: the access token lasts about an hour and this page only ever READ it, so working here (the main tab sleeps in the background)
   // signed the agent out at 45-60 minutes. The page now renews it itself, from the same stored session, so both tabs keep sharing one login.
-  var SB_URL = "https://dnpaenpwdhjmslymgkse.supabase.co", SB_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRucGFlbnB3ZGhqbXNseW1na3NlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA4NjczNTIsImV4cCI6MjA5NjQ0MzM1Mn0.pEdH1YgINYjj8sAutsJJoO8x4VUxTCfIzVbjSu_yBTY";
+  var SSP_CFG = window.sspPublicConfig(), SB_URL = SSP_CFG.supabaseUrl, SB_ANON = SSP_CFG.supabaseAnonKey;   // Nov 5, 2026: per-deployment config (ssp-public-config.js)
   function liveSession() {
     try {
       for (var i = 0; i < localStorage.length; i++) {
         var k = localStorage.key(i);
-        if (!/^sb-.+-auth-token/.test(k)) continue;
+        if (k !== "sb-" + SSP_CFG.projectRef + "-auth-token" && (SSP_CFG.env !== "production" || !/^sb-.+-auth-token/.test(k))) continue;   // outside production: only this project's session
         var p = JSON.parse(localStorage.getItem(k) || "null");
         if (p && p.access_token) return { key: k, p: p };
       }

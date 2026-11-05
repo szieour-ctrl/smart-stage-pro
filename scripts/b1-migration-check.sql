@@ -58,6 +58,15 @@ select pg_temp.expect_error($$delete from public.agent_marketing_article_evidenc
 select pg_temp.expect_error($$update public.agent_marketing_article_evidence set snapshot_text = 'later version' where id = '30000000-0000-0000-0000-000000000003'$$, 'immutable', 'R3 a reserved snapshot cannot be replaced by a later webpage version');
 select pg_temp.expect_error($$update public.agent_marketing_article_evidence set request_text = 'other' where id = '30000000-0000-0000-0000-000000000003'$$, 'immutable', 'R3 the exact B1 request cannot change after reservation');
 select pg_temp.expect_error($$update public.agent_marketing_article_evidence set cache_key = repeat('9',64) where id = '30000000-0000-0000-0000-000000000003'$$, 'immutable', 'R3 the cache key cannot change');
+-- R11 no provider call without a ledger reservation
+select pg_temp.expect_error($$update public.agent_marketing_article_evidence set status = 'running' where id = '30000000-0000-0000-0000-000000000003'$$, 'requires a provider-request reservation', 'R11 a row cannot start running without a ledger reservation');
+select pg_temp.ok((public.agent_marketing_reserve_provider_request('00000000-0000-0000-0000-00000000000a', '20000000-0000-0000-0000-00000000000a', 1001, 15, 100)->>'allowed')::boolean, 'R11 the ledger reserves a Stage B request (seq 1001)');
+select pg_temp.ok((public.agent_marketing_reserve_provider_request('00000000-0000-0000-0000-00000000000a', '20000000-0000-0000-0000-00000000000a', 1001, 15, 100)->>'replayed')::boolean, 'R11 the same research and seq replays the reservation (idempotent)');
+update public.agent_marketing_article_evidence set provider_seq = 1001, provider_reservation_id = (select id from public.agent_marketing_provider_requests where seq = 1001), status = 'running'
+  where id = '30000000-0000-0000-0000-000000000003';
+select pg_temp.ok(true, 'R11 reserved -> running with its reservation');
+select pg_temp.expect_error($$update public.agent_marketing_article_evidence set provider_seq = 1002 where id = '30000000-0000-0000-0000-000000000003'$$, 'set once', 'R11 the reservation cannot be changed');
+select pg_temp.expect_error($$update public.agent_marketing_article_evidence set provider_seq = 1001 where id = '30000000-0000-0000-0000-000000000001'$$, 'set once', 'R11 a reservation cannot be attached to a failed row');
 -- R7 ready needs its evidence
 select pg_temp.expect_error($$update public.agent_marketing_article_evidence set status = 'ready' where id = '30000000-0000-0000-0000-000000000003'$$, 'amae_ready_complete', 'R7 a row cannot become ready without raw response, gate version, bundle and status');
 update public.agent_marketing_article_evidence set raw_response_text = 'resp', raw_response_sha256 = repeat('e',64), gate_version = 'g1',
@@ -95,6 +104,10 @@ set role authenticated;
 select pg_temp.expect_error($$select raw_response_text from public.agent_marketing_article_evidence$$, 'permission denied', 'R9 a signed-in client cannot read raw provider responses');
 reset role;
 
+-- R11: ledger housekeeping may drop the reservation; the ready audit row keeps its seq and stays intact
+update public.agent_marketing_provider_requests set reserved_at = now() - interval '50 days';
+select pg_temp.ok(public.agent_marketing_prune_provider_requests() >= 1, 'R11 ledger housekeeping prunes old reservations');
+select pg_temp.ok((select provider_reservation_id is null and provider_seq = 1001 and status = 'ready' from public.agent_marketing_article_evidence where id = '30000000-0000-0000-0000-000000000003'), 'R11 a pruned reservation leaves the ready row intact (seq kept)');
 -- deletes: project deletion detaches (set null) without touching the audit row; user deletion cascades
 delete from public.agent_marketing_research where project_id = :'PB';
 delete from public.agent_marketing_projects where id = :'PB';
@@ -104,4 +117,5 @@ delete from public.agent_marketing_projects where id = :'PA';
 delete from public.users where id = :'UA';
 select pg_temp.ok((select count(*) = 0 from public.agent_marketing_article_evidence where user_id = :'UA'), 'deleting a user cascades through the audit guard');
 select pg_temp.ok((select reused_from is null and status = 'ready' from public.agent_marketing_article_evidence where id = '30000000-0000-0000-0000-000000000004'), 'another user''s copy survives (reused_from set null), still self-contained');
+select pg_temp.ok(not exists (select 1 from public.agent_marketing_provider_requests where user_id = '00000000-0000-0000-0000-00000000000a'), 'R11 the user''s ledger rows go with the user');
 \echo ALL MIGRATION CHECKS PASSED

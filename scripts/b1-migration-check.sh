@@ -15,6 +15,8 @@ P=("${AS[@]}" "$BIN/psql" -h "$DIR" -p "$PORT" -U postgres -d postgres -v ON_ERR
 "${P[@]}" -c "create role anon nologin; create role authenticated nologin; create role service_role nologin bypassrls;
   create table public.users (id uuid primary key); create table public.marketing_profiles (user_id uuid primary key); create table public.reel_jobs (id uuid primary key);"
 for m in 20261022_agent_marketing_foundation 20261024_agent_marketing_research; do "${P[@]}" -f "$ROOT/supabase/migrations/$m.sql"; done
+LEDGER="$ROOT/docs/proposed-migrations/20261101_agent_marketing_provider_request_reservation.up.sql"   # R11 dependency, applied first
+"${P[@]}" -c "set client_min_messages=warning" -f "$LEDGER"
 UP="$ROOT/docs/proposed-migrations/20261105_agent_marketing_article_evidence.up.sql"
 DOWN="$ROOT/docs/proposed-migrations/20261105_agent_marketing_article_evidence.down.sql"
 "${P[@]}" -c "set client_min_messages=warning" -f "$UP" -f "$UP"; echo "PASS migration applies twice (idempotent)"

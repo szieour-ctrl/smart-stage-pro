@@ -140,3 +140,14 @@ test("bridge: Node rejects a stub bridge reply that is inconsistent, so nothing 
     assert.strictEqual(f.t.agent_marketing_article_evidence[0].status, "reserved", "an inconsistent gate reply never makes a ready row");
   } finally { fs.rmSync(ws, { recursive: true, force: true }); }
 });
+
+test("bridge: a BLOCKED gate result finishes the row as failed (evidence_blocked), never ready", { skip: PRIV.skip || (!HAVE_PY && "python3 not available") }, async () => {
+  const ws = stubWorkspace({ gate: { bundle: PRIV.bundle("BLOCKED"), completeness_status: "BLOCKED" } }); const ENV = { AGENT_MARKETING_B1_EVIDENCE: "dev", B1_WORKSPACE: ws };
+  const f = fakeRest(); const store = st.createStore({ env: ENV, request: f.rq });
+  try {
+    const a = await br.prepare({ project: project("pA", "uA"), userId: "uA", store, fetchFn: page, env: ENV });
+    const done = await br.complete({ record: a.record, responseText: fx().RESP, store, env: ENV });
+    assert.deepStrictEqual([done.status, done.error, done.completeness_status], ["failed", "evidence_blocked", "BLOCKED"]);
+    assert.strictEqual(b1.readBundle(done.bundle).status, "BLOCKED");
+  } finally { fs.rmSync(ws, { recursive: true, force: true }); }
+});

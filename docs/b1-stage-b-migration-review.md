@@ -1,6 +1,7 @@
 # Stage B migration review (Nov 5, 2026, development only)
 
-Migration: `docs/proposed-migrations/20261105_agent_marketing_article_evidence.up.sql` (revision 2) and its `.down.sql`.
+Migration: `docs/proposed-migrations/20261105_agent_marketing_article_evidence.up.sql` (revision 3) and its `.down.sql`.
+Revision 3 adds R11, the link to the provider-request ledger (see `docs/b1-stage-b-step1.md`). It requires `20261101_agent_marketing_provider_request_reservation` to be applied first.
 **Status: reviewed, verified on a throwaway local PostgreSQL 16 cluster, NOT applied to any hosted database.**
 
 ## Development application status

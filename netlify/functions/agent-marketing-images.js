@@ -19,6 +19,7 @@
 // photo in the user's Marketing Profile; the 16:9 version of a scene is built from the approved 9:16 image when there is one;
 // a hard cap on generations per project; charges are made before the call and refunded if it fails.
 const { S3Client, GetObjectCommand } = require("@aws-sdk/client-s3");
+const { selfBase } = require("./lib/self-dispatch-lib");   // Nov 5, 2026: background jobs stay on the deploy that received the request
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 const { supabase } = require("./lib/marketing-profile-lib");
 const { requireUser } = require("./lib/reel-auth-lib");
@@ -228,7 +229,7 @@ exports.handler = async (event) => {
       if (charged) { try { await quota.callDebitCredit(userId, charged.credits, "agent_marketing_image_refund_dispatch_failed", true); } catch (e) { console.error("refund failed:", e.message); } }
       return reply(500, { error: "Could not start the image." });
     }
-    const siteUrl = process.env.URL || `https://${event.headers && event.headers.host}`;
+    const siteUrl = selfBase(event, process.env.URL || `https://${event.headers && event.headers.host}`);
     try {
       await fetch(`${siteUrl}/.netlify/functions/agent-marketing-image-background`, { method: "POST", headers: { "Content-Type": "application/json", "x-internal-key": process.env.INTERNAL_API_KEY }, body: JSON.stringify({ assetId: row.id, owner: userId }) });
     } catch (e) {

@@ -37,9 +37,11 @@ exports.handler = async (event, context, deps) => {
     let body = {}; try { body = JSON.parse(event.body || "{}"); } catch (e) { return reply(400, { error: "Invalid JSON" }); }
     if (body.action !== "start") return reply(400, { error: "Unknown action", code: "bad_request" });
     const dispatch = d.dispatch || (async (job) => {
-      // The SAME deploy's background function (DEPLOY_URL), never the production site URL (URL): a development deploy must not run its job
-      // on production's functions.
-      const base = env.DEPLOY_URL || `https://${event.headers && event.headers.host}`;
+      // The SAME deploy's background function, never the production site (URL / SITE_URL / NETLIFY_URL): a development deploy must not run
+      // its job on production's functions. Stage B never runs on a production host at all.
+      const { selfBase, requestHost } = require("./lib/self-dispatch-lib");
+      if (require("./lib/public-config-lib").isProductionHost(requestHost(event), env)) { const e = new Error("production_dispatch_refused"); e.code = "production_dispatch_refused"; throw e; }
+      const base = selfBase(event, env.DEPLOY_URL || `https://${event.headers && event.headers.host}`, env);
       const r = await fetch(`${base}/.netlify/functions/agent-marketing-stageb-background`, { method: "POST",
         headers: { "Content-Type": "application/json", "x-internal-key": env.INTERNAL_API_KEY || "" }, body: JSON.stringify(job) });
       if (!r.ok && r.status !== 202) throw new Error(`dispatch answered ${r.status}`);
@@ -49,6 +51,7 @@ exports.handler = async (event, context, deps) => {
     return reply(r.status, r.body);
   } catch (e) {
     console.error("agent-marketing-stageb error:", e.code || e.message);
+    if (e.code === "production_dispatch_refused" || e.code === "dispatch_host_invalid") return reply(503, { error: "Stage B runs only on a development deploy.", code: e.code });
     return reply(e.code === "in_progress" ? 202 : 500, e.code === "in_progress" ? { state: "in_progress", code: "in_progress" } : { error: "Stage B is unavailable right now.", code: "error" });
   }
 };

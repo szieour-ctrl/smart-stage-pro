@@ -5,6 +5,7 @@
 // AB 723 compliant throughout
 
 const https = require("https");
+const { selfBase } = require("./lib/self-dispatch-lib");   // Nov 5, 2026: background jobs stay on the deploy that received the request
 const sharp = require("sharp");
 
 function httpsRequest(options, body) {
@@ -109,7 +110,7 @@ exports.handler = async (event) => {
     if (!roomType) return { statusCode: 400, headers, body: JSON.stringify({ error: "Missing roomType" }) };
     if (!claudeKey) return { statusCode: 500, headers, body: JSON.stringify({ error: "ANTHROPIC_API_KEY not configured" }) };
 
-    const siteUrl = process.env.NETLIFY_URL || process.env.DEPLOY_URL || "https://smart-stage-pro.netlify.app";
+    const siteUrl = selfBase(event, process.env.NETLIFY_URL || process.env.DEPLOY_URL || "https://smart-stage-pro.netlify.app");
     if (!siteUrl) return { statusCode: 500, headers, body: JSON.stringify({ error: "Site URL not configured" }) };
 
     // Compress image if needed

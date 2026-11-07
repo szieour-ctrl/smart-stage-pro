@@ -145,7 +145,7 @@ const VERIFIED_TEMPLATE = "local_market_insider";
  * `topic` is the frozen selected_topic saved by agent-marketing-research.js (question, whyItMatters, trendSignals,
  * scopeNote, sources, event). Only fields the research validator already checked are used.
  */
-function verifiedFromTopic(topic) {
+function verifiedFromTopic(topic, env) {
   const t = topic && typeof topic === "object" ? topic : null;
   if (!t || !Array.isArray(t.sources) || t.sources.length === 0) return null; // no validated source, nothing is verified
   // reportFirst (a web topic when the agent chose "Both"): the agent's uploaded report is the only source of numbers. The web topic's own
@@ -170,6 +170,14 @@ function verifiedFromTopic(topic) {
     supersededNumbers: (Array.isArray(p && p.supersededNumbers) ? p.supersededNumbers : []).map(String).filter(Boolean),
   })).filter((p) => p.reportText);
   precedence.forEach((p) => texts.push(p.reportText));
+  // B1 article evidence (development only, AGENT_MARKETING_B1_EVIDENCE=dev): the exact source quotations of VALIDATED B1 findings are verified text.
+  // Held and excluded findings never are, and a BLOCKED bundle contributes nothing. On a "Both" topic the article's market statistics stay out.
+  const b1v = require("./agent-marketing-b1-evidence-lib").viewForTopic(t, env);
+  if (b1v) require("./agent-marketing-b1-evidence-lib").verifiedQuotes(b1v).forEach((q) => texts.push(reportFirst ? require("./agent-marketing-article-lib").withoutMarketStats(q) : q));
+  // D1 (development only): with B1 evidence present, article figures must be authorized by an applicable validated finding, and held quotations
+  // may not be restored (lib/agent-marketing-b1-claims-lib.js). The agent's own report figures stay with rule 2f and are not checked there.
+  const b1Claims = b1v ? require("./agent-marketing-b1-claims-lib").contextFromView(b1v) : null;
+  if (b1Claims) b1Claims.reportNumbers = numberTokens([...(Array.isArray(t.reportFigures) ? t.reportFigures.map((f) => f && f.text) : []), ...precedence.map((p) => p.reportText)].filter(Boolean).join(" \n "));
   const addresses = [];
   const e = t.event && typeof t.event === "object" ? t.event : null;
   if (e) {
@@ -178,7 +186,7 @@ function verifiedFromTopic(topic) {
     if (e.location) addresses.push(e.location);
   }
   const clean = texts.filter((x) => typeof x === "string" && x.trim()).map(norm);
-  return clean.length ? { texts: clean, addresses: addresses.map(norm), reportNotice, precedence, reportFirst } : null;
+  return clean.length ? { texts: clean, addresses: addresses.map(norm), reportNotice, precedence, reportFirst, ...(b1Claims ? { b1: b1Claims } : {}) } : null;
 }
 
 /** verifiedFromProject(project) → verified facts for a stored project row, or null (any other template, no topic). */
@@ -378,6 +386,11 @@ function evaluate(input) {
   // are as good as a figure written in the research. Callers pass the results as input.derivedNumbers; nothing is accepted without them.
   if (market && Array.isArray(i.derivedNumbers)) i.derivedNumbers.forEach((n) => { if (n !== null && n !== undefined && n !== "") verifiedNumbers.add(String(n).replace(/,/g, "").replace(/\.0+$/, "")); });
   const ctx = { intakeLower, verifiedLower, verifiedNumbers };
+  // D1, B1 evidence only (absent on the legacy path): the figures the agent supplied are exempt from the B1 claim checks.
+  const b1Ctx = market && vIn && vIn.b1 && typeof vIn.b1 === "object" ? vIn.b1 : null;
+  const b1Opts = b1Ctx ? { figureTokens: marketFigureTokens, agentNumbers: new Set([...intakeNumbers, ...(b1Ctx.reportNumbers || []),
+    ...(Array.isArray(i.derivedNumbers) ? i.derivedNumbers.filter((n) => n !== null && n !== undefined && n !== "").map((n) => String(n).replace(/,/g, "").replace(/\.0+$/, "")) : [])]) } : null;
+  const b1Scan = (text, field) => { if (b1Ctx) require("./agent-marketing-b1-claims-lib").scan(text, field, b1Ctx, b1Opts, blocks, sourcedFacts); };
 
   // Everything the AGENT typed: property-sale rules block; Fair Housing only warns; claims pass through.
   const userFields = { ...(i.userText || {}) };
@@ -398,6 +411,7 @@ function evaluate(input) {
     if (market && !field.startsWith("intake.") && field !== "cta") {
       scanMarketClaims(text, field, ctx, blocks, sourcedFacts, agentSuppliedClaims, warnings);
       scanReportPriority(text, field, precedence, blocks);
+      b1Scan(text, field);
     }
   }
 
@@ -420,6 +434,7 @@ function evaluate(input) {
     if (market) {
       scanMarketClaims(text, field, ctx, blocks, sourcedFacts, agentSuppliedClaims, warnings);
       scanReportPriority(text, field, precedence, blocks);
+      b1Scan(text, field);
     } else {
       for (const r of CLAIM_RULES) {
         const t = norm(text);

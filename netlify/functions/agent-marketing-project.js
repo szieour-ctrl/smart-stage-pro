@@ -15,6 +15,7 @@
 // The user always comes from the login token. A project is only visible to its owner. No listing, address, price or MLS
 // field is accepted anywhere (the gate rejects them structurally).
 const { supabase } = require("./lib/marketing-profile-lib");
+const { selfBase } = require("./lib/self-dispatch-lib");   // Nov 5, 2026: background jobs stay on the deploy that received the request
 const { requireUser } = require("./lib/reel-auth-lib");
 const gate = require("./lib/agent-marketing-gate");
 const intakeLib = require("./lib/agent-marketing-intake");
@@ -194,7 +195,7 @@ exports.handler = async (event) => {
       const stub = { status: "planning", startedAt: Date.now(), attempts: attempts + 1, intakeHash: hash };
       const saved = await patch(project.id, userId, { narrative: stub });
       if (!saved) return reply(500, { error: "Could not start planning" });
-      const siteUrl = process.env.URL || `https://${event.headers && event.headers.host}`;
+      const siteUrl = selfBase(event, process.env.URL || `https://${event.headers && event.headers.host}`);
       try {
         await fetch(`${siteUrl}/.netlify/functions/agent-marketing-plan-background`, {
           method: "POST", headers: { "Content-Type": "application/json", "x-internal-key": process.env.INTERNAL_API_KEY },

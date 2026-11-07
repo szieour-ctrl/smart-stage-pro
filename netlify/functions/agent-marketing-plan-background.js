@@ -38,7 +38,10 @@ exports.handler = async (event) => {
       const prior = await supabase("GET", "agent_marketing_projects", null, `?user_id=eq.${userId}&created_at=lt.${encodeURIComponent(project.created_at)}&select=id&limit=1000`);
       if (Array.isArray(prior.data)) ctaAngleCount = prior.data.length;
     } catch (e) { /* the hash-based pick is used instead */ }
-    const { narrative, warnings, gate, usage: planUsage } = await planLib.generatePlan({ project: ctaAngleCount == null ? project : { ...project, cta_angle_index: ctaAngleCount }, anthropicKey: process.env.ANTHROPIC_API_KEY });
+    // B1 Stage B (development only, AGENT_MARKETING_B1_EVIDENCE=dev): an Article-Led topic is planned only with its checked evidence row; a missing or
+    // invalid row is BLOCKED and generatePlan stops before any model call. With the switch off the project is unchanged.
+    const planProject = await require("./lib/agent-marketing-b1-stageb-run-lib").withPlanEvidence(project);
+    const { narrative, warnings, gate, usage: planUsage } = await planLib.generatePlan({ project: ctaAngleCount == null ? planProject : { ...planProject, cta_angle_index: ctaAngleCount }, anthropicKey: process.env.ANTHROPIC_API_KEY });
     const gateSummary = { ok: gate.ok, version: gate.version, blocks: gate.blocks, warnings: gate.warnings, agentSuppliedClaims: gate.agentSuppliedClaims, sourcedFacts: gate.sourcedFacts || [] };
     await writeNarrative(id, userId, { ...narrative, warnings, plan_usage: planUsage, attempts: stub.attempts, intakeHash: stub.intakeHash },
       { status: "narrative_ready", gate_version: gate.version, gate_result: gateSummary });

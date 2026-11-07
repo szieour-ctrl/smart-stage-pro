@@ -174,3 +174,15 @@ Both tests need the Railway worker: the article snapshot and the evidence gate r
 
 Only after test 2 passes: the paid provider call, under separate approval.
 
+## Nov 7 final isolation review (Netlify refuses empty values)
+- **Placeholders:** cut-off variables use `b1-dev-disabled`, or `https://b1-dev-disabled.invalid` for URLs. `b1-env-check` reports them as `disabled`.
+- **Secrets that verify inbound requests or sign links must be private random values, never the placeholder.** With a published placeholder, anyone could forge requests on the branch.
+  - `WEBHOOK_SECRET`: render callbacks to `video-notify`, `reel-notify` and `smart-correct-notify`.
+  - `STRIPE_WEBHOOK_SECRET`: `stripe-webhook`.
+  - `REEL_SHARE_SECRET`: reel share links.
+  - `PROMO_LINK_SECRET`: `create-promo-link`.
+  - `INTERNAL_API_KEY`: server-to-server calls.
+- **Legacy credentials:** `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`, `MIGRATION_SECRET`, `DECOR8_API_KEY` and `IMGBB_API_KEY` are no longer read by this code. If they exist on the site, Netlify still injects them into every function, so they get the placeholder (or stay absent).
+- **Supabase:** `SUPABASE_URL` and `SSP_PUBLIC_SUPABASE_URL` must be the development project. If the keys are JWTs, the check reads their project and role, and nothing else.
+- **No SDK picks up credentials on its own:** all S3 clients pass explicit credentials, the Cloudinary SDK is no longer loaded, and Blobs uses the explicit token.
+

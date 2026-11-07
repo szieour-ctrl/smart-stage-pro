@@ -241,3 +241,7 @@ functions → private fixture worker on Railway → development Supabase), with 
 - `b1-env-check` reports `AGENT_MARKETING_B1_EVIDENCE: set` as its one failing check while Stage B is on (expected).
 - `b1-stageb-dev` carries commits PR #219's branch does not (evidence panel polling fix, this log). PR #219 remains draft and unmerged.
 - The seed correction is not on `ssp-b1-evidence` `dev/stageb-worker` (both Railway workers build from it; merging rebuilds them).
+- Nov 7 (after the hosted validation): Stage B switched OFF between test sessions. The owner removed the `b1-stageb-dev` branch value of
+  `AGENT_MARKETING_B1_EVIDENCE` (no context has a value now); every Stage B endpoint answers 404 and the panel stays hidden. All other branch
+  values (worker URL/secret, fixture provider and snapshot source, allowlists) are kept for the next session. Re-enable: add the branch value
+  `dev` again and redeploy. `b1-env-check` should now report `ok: true` with `AGENT_MARKETING_B1_EVIDENCE: unset`.

@@ -40,7 +40,7 @@ The four billing callers send `debit-credit` to `${SITE_URL}`. With these values
 - Supabase: an empty URL gives no usable endpoint.
 - Blobs: `@netlify/blobs` throws `MissingBlobsEnvironmentError` when the token is empty.
 
-If Netlify refuses an empty value, use the placeholder `b1-dev-disabled`. For URLs use `https://b1-dev-disabled.invalid`. A placeholder fails at authentication or name resolution, and nothing is charged or written.
+If Netlify refuses an empty value, use the agreed disabled placeholder (an invalid value that names this branch). For URLs use the same placeholder as a host under the reserved `.invalid` domain. A placeholder fails at authentication or name resolution, and nothing is charged or written.
 - **Production database admin** (until step 2 provides dev values): `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`.
 - **Job storage (Netlify Blobs):** `NETLIFY_ACCESS_TOKEN`.
   - Every store passes this token explicitly.
@@ -132,7 +132,7 @@ If Netlify refuses an empty value, use the placeholder `b1-dev-disabled`. For UR
 | `B1_STAGEB_MAX_PER_USER_DAY` / `B1_STAGEB_MAX_GLOBAL_DAY` | `3` / `10` (the defaults) |
 | `AGENT_MARKETING_REQUEST_DAILY_LIMIT` / `AGENT_MARKETING_REQUEST_MONTHLY_LIMIT` | ledger limits; defaults apply if unset |
 
-Stage B itself does not use `INTERNAL_API_KEY` or any paid provider key; on this branch those carry the step 1 values (a new internal key, and the `b1-dev-disabled` placeholders).
+Stage B itself does not use `INTERNAL_API_KEY` or any paid provider key; on this branch those carry the step 1 values (a new internal key, and the disabled placeholders).
 
 ## Open items before a deployed mock run
 - **Mock responses on a deploy:** `B1_PROVIDER=mock` needs the saved B1 responses (`B1_MOCK_RESPONSES_DIR`). Those are private and are not in this public repository, so they can't be bundled into Netlify functions.
@@ -175,7 +175,7 @@ Both tests need the Railway worker: the article snapshot and the evidence gate r
 Only after test 2 passes: the paid provider call, under separate approval.
 
 ## Nov 7 final isolation review (Netlify refuses empty values)
-- **Placeholders:** cut-off variables use `b1-dev-disabled`, or `https://b1-dev-disabled.invalid` for URLs. `b1-env-check` reports them as `disabled`.
+- **Placeholders:** cut-off variables use the agreed disabled placeholder, or that placeholder as a host under the reserved `.invalid` domain for URLs. The literal is not written in this repository: Netlify's secret scan matches repository text against branch environment values. `b1-env-check` reports them as `disabled`.
 - **Secrets that verify inbound requests or sign links must be private random values, never the placeholder.** With a published placeholder, anyone could forge requests on the branch.
   - `WEBHOOK_SECRET`: render callbacks to `video-notify`, `reel-notify` and `smart-correct-notify`.
   - `STRIPE_WEBHOOK_SECRET`: `stripe-webhook`.

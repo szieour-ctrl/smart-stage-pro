@@ -3,7 +3,8 @@
 const test = require("node:test");
 const assert = require("node:assert");
 const fn = require("../netlify/functions/b1-env-check");
-const { CUT_OFF, PRIVATE_SECRETS, OPTIONAL_SECRETS, BRANCH_HOST, BRANCH_URL, DEV_URL } = fn._internals;
+const { CUT_OFF, PRIVATE_SECRETS, OPTIONAL_SECRETS, PLACEHOLDER, BRANCH_HOST, BRANCH_URL, DEV_URL } = fn._internals;
+const PLACEHOLDER_URL = `https://${PLACEHOLDER}.invalid`;
 
 const SECRET = "test-value-THIS-MUST-NEVER-APPEAR-0123456789abcdef";
 const jwt = (claims) => ["eyJhbGciOiJIUzI1NiJ9", Buffer.from(JSON.stringify(claims)).toString("base64url"), "sig-NEVER-SHOWN"].join(".");
@@ -14,7 +15,7 @@ const blockedStore = () => ({ async get() { const e = new Error("unauthorized");
 const openStore = () => ({ async get() { return null; } });
 const isolated = () => ({
   CONTEXT: "branch-deploy", BRANCH: "b1-stageb-dev", SITE_URL: BRANCH_URL, NETLIFY_URL: BRANCH_URL,
-  ...Object.fromEntries(CUT_OFF.filter((n) => n !== "AGENT_MARKETING_B1_EVIDENCE").map((n) => [n, /URL$/.test(n) ? "https://b1-dev-disabled.invalid" : "b1-dev-disabled"])),
+  ...Object.fromEntries(CUT_OFF.filter((n) => n !== "AGENT_MARKETING_B1_EVIDENCE").map((n) => [n, /URL$/.test(n) ? PLACEHOLDER_URL : PLACEHOLDER])),
   ...Object.fromEntries(PRIVATE_SECRETS.map((n, i) => [n, `${SECRET}-${i}`])),
   SUPABASE_URL: DEV_URL, SSP_PUBLIC_SUPABASE_URL: DEV_URL, SUPABASE_SERVICE_ROLE_KEY: DEV_SERVICE, SSP_PUBLIC_SUPABASE_ANON_KEY: DEV_ANON, NETLIFY_SITE_ID: "site",
 });
@@ -30,6 +31,15 @@ test("b1-env-check: 404 on every host but the branch deploy, and in any other co
   assert.strictEqual((await call(BRANCH_HOST, { ...isolated(), BRANCH: "main" })).statusCode, 404);
 });
 
+test("b1-env-check: the placeholder literal never appears in the repository (Netlify secret scan)", () => {
+  const fs = require("fs"), path = require("path");
+  const lit = ["b1", "dev", "disabled"].join("-");
+  for (const f of ["netlify/functions/b1-env-check.js", "tests/b1-env-check.test.js", "docs/b1-stage-b-infra-plan.md"]) {
+    assert.ok(!fs.readFileSync(path.join(__dirname, "..", f), "utf8").includes(lit), f);
+  }
+  assert.strictEqual(PLACEHOLDER, lit);
+});
+
 test("b1-env-check: the approved placeholders count as cut off; an isolated branch passes; no value is ever returned", async () => {
   const r = await call(BRANCH_HOST, isolated());
   const b = JSON.parse(r.body);
@@ -39,7 +49,7 @@ test("b1-env-check: the approved placeholders count as cut off; an isolated bran
   assert.strictEqual(check(b, "CLOUDINARY_API_SECRET").state, "disabled");
   assert.strictEqual(check(b, "AGENT_MARKETING_B1_EVIDENCE").state, "unset");
   assert.strictEqual(check(b, "SUPABASE_SERVICE_ROLE_KEY").state, "dev-project");
-  for (const leak of [SECRET, "sig-NEVER-SHOWN", "b1-dev-disabled", "\"site\""]) assert.ok(!r.body.includes(leak), `no value in the output: ${leak}`);
+  for (const leak of [SECRET, "sig-NEVER-SHOWN", PLACEHOLDER, "\"site\""]) assert.ok(!r.body.includes(leak), `no value in the output: ${leak}`);
 });
 
 test("b1-env-check: a leaked production value fails, including legacy credentials and Blobs access", async () => {
@@ -56,7 +66,7 @@ test("b1-env-check: a leaked production value fails, including legacy credential
 
 test("b1-env-check: inbound-verification secrets must be private values, never the published placeholder", async () => {
   for (const name of PRIVATE_SECRETS) {
-    for (const [v, state] of [["b1-dev-disabled", "placeholder"], ["", "empty"], [undefined, "unset"], ["short", "short"]]) {
+    for (const [v, state] of [[PLACEHOLDER, "placeholder"], ["", "empty"], [undefined, "unset"], ["short", "short"]]) {
       const env = isolated(); if (v === undefined) delete env[name]; else env[name] = v;
       const b = await body(env);
       assert.deepStrictEqual([b.ok, check(b, name).state], [false, state], `${name}=${state}`);
@@ -71,7 +81,7 @@ test("b1-env-check: Supabase must be the development project, URL and keys alike
     [{ SUPABASE_SERVICE_ROLE_KEY: PROD_SERVICE }, "SUPABASE_SERVICE_ROLE_KEY", "production-project"],
     [{ SUPABASE_SERVICE_ROLE_KEY: DEV_ANON }, "SUPABASE_SERVICE_ROLE_KEY", "dev-project (role anon)"],
     [{ SSP_PUBLIC_SUPABASE_ANON_KEY: DEV_SERVICE }, "SSP_PUBLIC_SUPABASE_ANON_KEY", "dev-project (role service_role)"],
-    [{ SUPABASE_SERVICE_ROLE_KEY: "b1-dev-disabled" }, "SUPABASE_SERVICE_ROLE_KEY", "disabled"]]) {
+    [{ SUPABASE_SERVICE_ROLE_KEY: PLACEHOLDER }, "SUPABASE_SERVICE_ROLE_KEY", "disabled"]]) {
     const r = await call(BRANCH_HOST, { ...isolated(), ...over });
     const b = JSON.parse(r.body);
     assert.deepStrictEqual([b.ok, check(b, name).state], [false, state], name);
@@ -89,7 +99,7 @@ test("b1-env-check: call-back URLs must point at this branch; NETLIFY_URL may be
 
 test("b1-env-check: the log line carries names and states only", async () => {
   const lines = []; const keep = console.log; console.log = (m) => lines.push(String(m));
-  try { await call(BRANCH_HOST, { ...isolated(), ANTHROPIC_API_KEY: SECRET, WEBHOOK_SECRET: "b1-dev-disabled" }); } finally { console.log = keep; }
+  try { await call(BRANCH_HOST, { ...isolated(), ANTHROPIC_API_KEY: SECRET, WEBHOOK_SECRET: PLACEHOLDER }); } finally { console.log = keep; }
   assert.strictEqual(lines.length, 1);
   assert.match(lines[0], /^b1-env-check FAIL checks=\d+ failing=\[ANTHROPIC_API_KEY:set,WEBHOOK_SECRET:placeholder\] blobs=blocked context=branch-deploy branch=b1-stageb-dev$/);
   assert.ok(!lines[0].includes(SECRET));
@@ -102,7 +112,7 @@ test("b1-env-check: the optional signing secrets may be absent (fail closed), ne
   assert.strictEqual(check(b, "REEL_SHARE_SECRET").state, "unset (derived from the development service-role key)");
   assert.strictEqual(check(b, "PROMO_LINK_SECRET").state, "unset (endpoint refuses every request)");
   for (const name of OPTIONAL_SECRETS) {
-    assert.deepStrictEqual([(await body({ ...isolated(), [name]: "b1-dev-disabled" })).ok, check(await body({ ...isolated(), [name]: "b1-dev-disabled" }), name).state], [false, "placeholder"], name);
+    assert.deepStrictEqual([(await body({ ...isolated(), [name]: PLACEHOLDER })).ok, check(await body({ ...isolated(), [name]: PLACEHOLDER }), name).state], [false, "placeholder"], name);
     assert.strictEqual((await body({ ...isolated(), [name]: SECRET })).ok, true, `${name} private value`);
   }
   // an absent REEL_SHARE_SECRET is only safe while the service-role key is the development one

@@ -3,7 +3,7 @@
 const test = require("node:test");
 const assert = require("node:assert");
 const fn = require("../netlify/functions/b1-env-check");
-const { CUT_OFF, PRIVATE_SECRETS, BRANCH_HOST, BRANCH_URL, DEV_URL } = fn._internals;
+const { CUT_OFF, PRIVATE_SECRETS, OPTIONAL_SECRETS, BRANCH_HOST, BRANCH_URL, DEV_URL } = fn._internals;
 
 const SECRET = "sk-THIS-MUST-NEVER-APPEAR-0123456789abcdef";
 const jwt = (claims) => ["eyJhbGciOiJIUzI1NiJ9", Buffer.from(JSON.stringify(claims)).toString("base64url"), "sig-NEVER-SHOWN"].join(".");
@@ -94,3 +94,19 @@ test("b1-env-check: the log line carries names and states only", async () => {
   assert.match(lines[0], /^b1-env-check FAIL checks=\d+ failing=\[ANTHROPIC_API_KEY:set,WEBHOOK_SECRET:placeholder\] blobs=blocked context=branch-deploy branch=b1-stageb-dev$/);
   assert.ok(!lines[0].includes(SECRET));
 });
+
+test("b1-env-check: the optional signing secrets may be absent (fail closed), never the placeholder", async () => {
+  assert.deepStrictEqual(OPTIONAL_SECRETS, ["REEL_SHARE_SECRET", "PROMO_LINK_SECRET"]);
+  const b = await body(isolated());   // isolated() leaves both absent, as on the site
+  assert.strictEqual(b.ok, true, JSON.stringify(b.checks.filter((c) => !c.ok)));
+  assert.strictEqual(check(b, "REEL_SHARE_SECRET").state, "unset (derived from the development service-role key)");
+  assert.strictEqual(check(b, "PROMO_LINK_SECRET").state, "unset (endpoint refuses every request)");
+  for (const name of OPTIONAL_SECRETS) {
+    assert.deepStrictEqual([(await body({ ...isolated(), [name]: "b1-dev-disabled" })).ok, check(await body({ ...isolated(), [name]: "b1-dev-disabled" }), name).state], [false, "placeholder"], name);
+    assert.strictEqual((await body({ ...isolated(), [name]: SECRET })).ok, true, `${name} private value`);
+  }
+  // an absent REEL_SHARE_SECRET is only safe while the service-role key is the development one
+  const r = await body({ ...isolated(), SUPABASE_SERVICE_ROLE_KEY: PROD_SERVICE });
+  assert.strictEqual(check(r, "REEL_SHARE_SECRET").ok, false);
+});
+

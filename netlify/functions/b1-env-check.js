@@ -37,7 +37,12 @@ const CUT_OFF = [
 ];
 
 // Secrets that verify inbound requests or sign links: a published placeholder would let anyone forge them, so these must be private random values.
-const PRIVATE_SECRETS = ["INTERNAL_API_KEY", "WEBHOOK_SECRET", "STRIPE_WEBHOOK_SECRET", "REEL_SHARE_SECRET", "PROMO_LINK_SECRET"];
+const PRIVATE_SECRETS = ["INTERNAL_API_KEY", "WEBHOOK_SECRET", "STRIPE_WEBHOOK_SECRET"];
+// Optional signing secrets that may be absent (Nov 7: they do not exist on the site), because the code then fails closed or stays private:
+//   REEL_SHARE_SECRET absent -> lib/reel-share-lib.js signs with a key derived from SUPABASE_SERVICE_ROLE_KEY, which must then be the development key.
+//   PROMO_LINK_SECRET absent -> create-promo-link.js answers 401 to every request.
+// If present they must be private values; the published placeholder always fails.
+const OPTIONAL_SECRETS = ["REEL_SHARE_SECRET", "PROMO_LINK_SECRET"];
 
 const isPlaceholder = (v) => PLACEHOLDERS.includes(String(v));
 const stateOf = (v) => (v === undefined ? "unset" : v === "" ? "empty" : isPlaceholder(v) ? "disabled" : "set");
@@ -65,6 +70,15 @@ function report(env) {
     const v = env[name];
     const state = v === undefined || v === "" ? stateOf(v) : isPlaceholder(v) ? "placeholder" : String(v).length < 32 ? "short" : "set";
     checks.push({ name, want: "a private development value (32+ characters, not the placeholder)", state, ok: state === "set" });
+  }
+  const sr0 = keyState(env.SUPABASE_SERVICE_ROLE_KEY, "service_role");
+  for (const name of OPTIONAL_SECRETS) {
+    const v = env[name];
+    const absent = v === undefined || v === "";
+    const state = absent ? `${stateOf(v)} (${name === "REEL_SHARE_SECRET" ? "derived from the development service-role key" : "endpoint refuses every request"})`
+      : isPlaceholder(v) ? "placeholder" : String(v).length < 32 ? "short" : "set";
+    const ok = absent ? (name === "REEL_SHARE_SECRET" ? sr0.ok && env.SUPABASE_URL === DEV_URL : true) : state === "set";
+    checks.push({ name, want: "absent (fails closed) or a private development value", state, ok });
   }
   for (const name of ["SUPABASE_URL", "SSP_PUBLIC_SUPABASE_URL"]) {
     const v = String(env[name] || "");
@@ -108,4 +122,4 @@ exports.handler = async (event, context, deps) => {
     body: JSON.stringify({ ok, host: BRANCH_HOST, context: env.CONTEXT || null, branch: env.BRANCH || null, checks, blobs }) };
 };
 
-exports._internals = { CUT_OFF, PRIVATE_SECRETS, PLACEHOLDERS, BRANCH_HOST, BRANCH_URL, DEV_URL, report };
+exports._internals = { CUT_OFF, PRIVATE_SECRETS, OPTIONAL_SECRETS, PLACEHOLDERS, BRANCH_HOST, BRANCH_URL, DEV_URL, report };

@@ -213,3 +213,31 @@ Only after test 2 passes: the paid provider call, under separate approval.
 - The Article Evidence panel stops polling when the status is still `none` 150 s after a start (longer than a healthy job's two 60 s worker calls before its first record) and says the check could not start. It never retries by itself.
 - Nov 7 (19:00 UTC): owner replaced the branch `B1_WORKER_SECRET` with the fixture service's value (Netlify: secret, scopes builds/functions/runtime, branch value only; other contexts empty). The diagnostic still reported `rejected_401_unsigned`. The only branch deploy visible through the API was built at 18:55, before that change, and no commit followed it. `b1-flag-check` now also reports the answering deploy id, the runtime secret's length and character class (never the value), the worker's refusal code and the clock difference; this commit also gives the branch a fresh build carrying the current value.
 - Nov 7 (19:38 UTC): owner set `B1_STAGEB_MAX_PER_USER_DAY=4` as a `b1-stageb-dev` branch value only (every other context empty) so FC retry, FA and FB fit in one day after the failed FC attempt. To be removed (default 3) after the run. `b1-flag-check` reports the effective `stagebCaps`. FC's seeded topic title was corrected to the frozen `page_title`; the corrected request hashes to the approved frozen FC request.
+
+## Nov 7: hosted frozen-evidence validation, final result (development only)
+All three frozen Article-Led cases ran end to end through the hosted development pipeline (browser on `b1-stageb-dev` → start and background
+functions → private fixture worker on Railway → development Supabase), with no live article fetch and no paid provider call (`cost_usd` null).
+
+| Case | Outcome | provider_seq | Request sha256 | Response sha256 | Bundle payload sha256 (= reviewed `ssp_fixtures/bundles/<case>.json`) |
+|---|---|---|---|---|---|
+| FA | ready, PASSED_WITH_HOLDS (21 validated, 2 held) | 1001 | `5b226dc7…6056` | `9a8bf66e…207c` | `17978cb5…f07a` |
+| FB | ready, COMPLETE (14 validated, 0 held) | 1001 | `50f2e09c…bc8c` | `cb35123e…1e49` | `764d1ef4…0e9d` |
+| FC | ready, PASSED_WITH_HOLDS (10 validated, 4 held) | 1002 | `106a0007…80a3` | `e113061b…8d31` | `63b948c9…d988` |
+
+- Each project's `article_evidence_id` points to its ready row; each row is linked to its own ledger reservation. Worker log per run:
+  `fixture article 200 → snapshot 200 → fixture provider 200 → gate 200`.
+- History kept: FC's first attempt (`failed`, `mock_no_response`, seq 1001, reservation kept). Four reservations in total.
+- Issues found and fixed on the way: wrong branch `B1_WORKER_SECRET` (worker 401, nothing persisted); the evidence panel polled forever when
+  no record was created (now stops after 150 s with a clear message); the stale branch build after a variable change (Netlify applies
+  variables only to new builds); FC's seeded title missing " – Citrus Heights Sentinel" (request hash mismatch → `mock_no_response`; fixed in
+  the dev database and on `ssp-b1-evidence` branch `dev/hosted-seed-fc-title`).
+- Cleanup: temporary `b1-flag-check` removed; the temporary branch value `B1_STAGEB_MAX_PER_USER_DAY=4` removed (default 3 again).
+  The evidence panel's polling fix stays.
+
+### Remaining limitations
+- Proven only for the three frozen articles via fixture mode: no live article fetch, no live B1 provider call (not implemented; paid).
+- No reviewer authorized: held findings stay held (FA A1, FC headline).
+- Stage B is still switched on for `b1-stageb-dev` (`AGENT_MARKETING_B1_EVIDENCE=dev`), behind the user allowlist and the 3/day cap.
+- `b1-env-check` reports `AGENT_MARKETING_B1_EVIDENCE: set` as its one failing check while Stage B is on (expected).
+- `b1-stageb-dev` carries commits PR #219's branch does not (evidence panel polling fix, this log). PR #219 remains draft and unmerged.
+- The seed correction is not on `ssp-b1-evidence` `dev/stageb-worker` (both Railway workers build from it; merging rebuilds them).

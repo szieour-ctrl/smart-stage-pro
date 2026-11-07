@@ -35,14 +35,27 @@ Decision (Nov 7, 2026): use the existing site with deploy-context isolation. No 
 
 The four billing callers send `debit-credit` to `${SITE_URL}`. With these values they reach the branch deploy, never production. If any call does reach production, production refuses it because the internal key differs.
 
-**c. Neutralised** with the placeholder `b1-dev-disabled` (any call fails authentication; nothing is charged or written):
-- **Job storage (Netlify Blobs):** `NETLIFY_ACCESS_TOKEN`. Blobs are shared site-wide, and every store in the code passes this token explicitly. Stage B keeps its jobs in the dev database only.
-- **Media storage:** `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`. Also set `S3_BUCKET_NAME` to `b1-dev-disabled`.
+**c. Neutralised** (Nov 7 review). Prefer an **empty** branch value: the code then fails before any network call.
+- Paid providers, Stripe and Pabbly: each has a "not configured" check or no usable URL.
+- Supabase: an empty URL gives no usable endpoint.
+- Blobs: `@netlify/blobs` throws `MissingBlobsEnvironmentError` when the token is empty.
+
+If Netlify refuses an empty value, use the placeholder `b1-dev-disabled`. For URLs use `https://b1-dev-disabled.invalid`. A placeholder fails at authentication or name resolution, and nothing is charged or written.
+- **Production database admin** (until step 2 provides dev values): `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`.
+- **Job storage (Netlify Blobs):** `NETLIFY_ACCESS_TOKEN`.
+  - Every store passes this token explicitly.
+  - The library would prefer a runtime Blobs context, but no function connects one (`connectLambda` is not used; all are `exports.handler`).
+  - Verify on the first branch deploy that a Blobs call fails there.
+- **Media storage:** `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_BUCKET_NAME`.
 - **Paid AI and data providers:** `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `PERPLEXITY_API_KEY`, `ELEVENLABS_API_KEY`, `REPLICATE_API_KEY`, `BRIGHTDATA_API_KEY`, `RENTCAST_API_KEY`, `GOOGLE_MAPS_API_KEY`.
 - **Payments:** `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`.
-- **Render service:** `RAILWAY_SECRET`, `WEBHOOK_SECRET`, `RAILWAY_RENDER_URL`, `RAILWAY_SMART_CORRECT_URL`, `RAILWAY_SMART_CORRECT_UPLOAD_URL`. Set the URLs to `https://b1-dev-disabled.invalid`.
-- **Customer email and webhooks:** `PABBLY_COMPLIANCE_REPORT_WEBHOOK_URL`, `PABBLY_VIDEO_DELIVERY_WEBHOOK_URL`, `PABBLY_TRANSACTIONAL_EMAIL_WEBHOOK_URL`, `PABBLY_IMAGE_PACK_WEBHOOK_URL`. Set them to `https://b1-dev-disabled.invalid`.
+- **Render service:** `RAILWAY_SECRET`, `WEBHOOK_SECRET`, `RAILWAY_RENDER_URL`, `RAILWAY_SMART_CORRECT_URL`, `RAILWAY_SMART_CORRECT_UPLOAD_URL`.
+- **Customer email and webhooks:** `PABBLY_COMPLIANCE_REPORT_WEBHOOK_URL`, `PABBLY_VIDEO_DELIVERY_WEBHOOK_URL`, `PABBLY_TRANSACTIONAL_EMAIL_WEBHOOK_URL`, `PABBLY_IMAGE_PACK_WEBHOOK_URL`.
 - **Signing secrets:** `REEL_SHARE_SECRET`, `PROMO_LINK_SECRET`.
+
+**Billing check.** `video-job`, `smart-correct-usage`, `reel-quota-lib` and `video-notify` all send `debit-credit` to `${SITE_URL}` with `x-internal-key`. On this branch:
+1. `SITE_URL` is the branch deploy, whose own `debit-credit` has no production database credentials.
+2. A request that reached production would carry the development key. Production's `debit-credit` answers 401 before any database access (simulated Nov 7: wrong key, no key, and an unverifiable token all return 401).
 
 **d. Stage B's own variables:** the table in step 5, on the same branch context.
 

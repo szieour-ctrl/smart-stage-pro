@@ -11,7 +11,7 @@
 //      So a 404 alone proves nothing. workerAuth is true only when the reply signature verifies with our secret and our nonce, which a worker
 //      holding a different secret cannot produce.
 //   GET → 200 { agentMarketingEnabled, runtime: { context, branch }, workerAuth: true|false|null, workerAuthCode, workerStatus, workerRefusal,
-//              clockSkewSec, deploy: { deployId, source }, secret: { present, length, hex64, ... } }
+//              clockSkewSec, deploy: { deployId, source }, secret: { present, length, hex64, ... }, stagebCaps: { perUserDay, globalDay } }
 //        workerRefusal: the worker's own (unsigned, informational) refusal code; secret: the runtime value's length and character class only.
 //        on the b1-stageb-dev branch deploy only; 404 everywhere else. workerAuth null = could not be checked (see workerAuthCode).
 // Isolation: the request host must be the branch deploy host AND the functions must point at the development database. Netlify's CONTEXT and
@@ -109,8 +109,9 @@ exports.handler = async (event, context, deps) => {
   const runtime = { context: env.CONTEXT ? CONTEXT : "unset", branch: env.BRANCH ? BRANCH : "unset" };
   const w = await probeWorker(env, d.post);
   const deploy = deployOf(event, env), secret = secretShape(env);
+  const stagebCaps = require("./lib/agent-marketing-b1-stageb-run-lib").caps(env);   // the limits the Stage B job applies: { perUserDay, globalDay }
   console.log(`b1-flag-check agentMarketingEnabled=${agentMarketingEnabled} workerAuth=${w.workerAuth} code=${w.workerAuthCode} status=${w.workerStatus} refusal=${w.workerRefusal} skew=${w.clockSkewSec} deploy=${deploy.deployId} secretLen=${secret.length} hex64=${secret.hex64}`);
-  return { statusCode: 200, headers, body: JSON.stringify({ agentMarketingEnabled, runtime, ...w, deploy, secret }) };
+  return { statusCode: 200, headers, body: JSON.stringify({ agentMarketingEnabled, runtime, ...w, deploy, secret, stagebCaps }) };
 };
 
 exports._internals = { BRANCH_HOST, DEV_URL, PROBE_URL, PROBE_PATH, WORKER_REFUSALS, switchOn, probeWorker, secretShape, deployOf };

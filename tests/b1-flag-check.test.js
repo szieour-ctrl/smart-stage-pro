@@ -62,7 +62,7 @@ test("b1-flag-check: agentMarketingEnabled is one boolean by the feature's own r
     const r = await call(BRANCH_HOST, { ...base, AGENT_MARKETING_ENABLED: v });
     assert.strictEqual(r.statusCode, 200);
     const b = JSON.parse(r.body);
-    assert.deepStrictEqual(Object.keys(b), ["agentMarketingEnabled", "runtime", "workerAuth", "workerAuthCode", "workerStatus", "workerRefusal", "clockSkewSec", "deploy", "secret"]);
+    assert.deepStrictEqual(Object.keys(b), ["agentMarketingEnabled", "runtime", "workerAuth", "workerAuthCode", "workerStatus", "workerRefusal", "clockSkewSec", "deploy", "secret", "stagebCaps"]);
     assert.strictEqual(typeof b.agentMarketingEnabled, "boolean");
     assert.strictEqual(b.agentMarketingEnabled, am.isEnabledFor(uid, { AGENT_MARKETING_ENABLED: v }), String(v));
     assert.ok(!r.body.includes("SECRET-NEVER-SHOWN") && !r.body.includes(DEV_URL));
@@ -170,4 +170,11 @@ test("b1-flag-check: reports which deploy answered (x-nf-deploy-id header, else 
   assert.deepStrictEqual(JSON.parse(r.body).deploy, { deployId: id, source: "DEPLOY_URL" });
   r = await fn.handler({ headers: { host: BRANCH_HOST, "x-nf-deploy-id": "not-an-id" } }, {}, { env: { ...base } });
   assert.deepStrictEqual(JSON.parse(r.body).deploy, { deployId: null, source: "unavailable" });
+});
+
+test("b1-flag-check: reports the Stage B daily limits exactly as the job reads them (default 3/10, branch override honoured)", async () => {
+  const caps = async (over) => JSON.parse((await call(BRANCH_HOST, { ...base, ...over })).body).stagebCaps;
+  assert.deepStrictEqual(await caps({}), { perUserDay: 3, globalDay: 10 });
+  assert.deepStrictEqual(await caps({ B1_STAGEB_MAX_PER_USER_DAY: "4" }), { perUserDay: 4, globalDay: 10 });
+  assert.deepStrictEqual(await caps({ B1_STAGEB_MAX_PER_USER_DAY: "4" }), require("../netlify/functions/lib/agent-marketing-b1-stageb-run-lib").caps({ B1_STAGEB_MAX_PER_USER_DAY: "4" }));
 });

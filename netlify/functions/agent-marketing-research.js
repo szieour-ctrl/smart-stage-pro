@@ -16,6 +16,7 @@
 // A session is charged only when five validated topics are delivered (see agent-marketing-research-lib.js outcomeFields).
 // Failures, timeouts and unusable results are never charged. The Perplexity key stays on the server.
 const { supabase } = require("./lib/marketing-profile-lib");
+const { selfBase } = require("./lib/self-dispatch-lib");   // Nov 5, 2026: background jobs stay on the deploy that received the request
 const { requireUser } = require("./lib/reel-auth-lib");
 const am = require("./lib/agent-marketing-lib");
 const rl = require("./lib/agent-marketing-research-lib");
@@ -276,7 +277,7 @@ exports.handler = async (event) => {
         return reply(adm.status, { error: adm.message, code: adm.code, scope: adm.scope, mlsTrendAvailable: adm.code === "partial_limit" });
       }
     }
-    const siteUrl = process.env.URL || `https://${event.headers && event.headers.host}`;
+    const siteUrl = selfBase(event, process.env.URL || `https://${event.headers && event.headers.host}`);
     try {
       await fetch(`${siteUrl}/.netlify/functions/agent-marketing-research-background`, {
         method: "POST", headers: { "Content-Type": "application/json", "x-internal-key": process.env.INTERNAL_API_KEY },

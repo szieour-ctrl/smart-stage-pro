@@ -16,6 +16,7 @@
 // the import, since removing it would look like an accidental deletion to
 // anyone reading this file next.
 const { applyAutoSelectionPlan } = require("./autoSelect");
+const { selfBase } = require("./lib/self-dispatch-lib");   // Nov 5, 2026: background jobs stay on the deploy that received the request
 //
 // ── Sep 24, 2026 — Trial + Listing Package ──────────────────────────────
 //   - Trial is Ken Burns only: TRIAL_KLING_ALLOTMENT is 0 AND create/
@@ -2621,7 +2622,7 @@ exports.handler = async (event) => {
       }
 
       const jobId = `as-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const siteUrl = process.env.URL || `https://${event.headers.host}`;
+      const siteUrl = selfBase(event, process.env.URL || `https://${event.headers.host}`);
 
       try {
         // Fire-and-forget by convention, not by skipping the await: a

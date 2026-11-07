@@ -23,6 +23,7 @@
 //    can refuse direct calls once STAGE_BG_REQUIRE_KEY=true is set there.
 
 const https = require("https");
+const { selfBase } = require("./lib/self-dispatch-lib");   // Nov 5, 2026: background jobs stay on the deploy that received the request
 const sharp = require("sharp");
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -211,7 +212,7 @@ exports.handler = async (event) => {
 
     // Always use Netlify subdomain for function-to-function calls —
     // custom domain redirects break background function 202 handshake
-    const siteUrl = process.env.NETLIFY_URL || "https://smart-stage-pro.netlify.app";
+    const siteUrl = selfBase(event, process.env.NETLIFY_URL || "https://smart-stage-pro.netlify.app");
     console.log(`Using trigger URL base: ${siteUrl}`);
 
     // Compress if large — protects against subscriber uploading 10MB photos

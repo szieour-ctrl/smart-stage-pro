@@ -5,7 +5,7 @@ const assert = require("node:assert");
 const fn = require("../netlify/functions/b1-env-check");
 const { CUT_OFF, PRIVATE_SECRETS, OPTIONAL_SECRETS, BRANCH_HOST, BRANCH_URL, DEV_URL } = fn._internals;
 
-const SECRET = "sk-THIS-MUST-NEVER-APPEAR-0123456789abcdef";
+const SECRET = "test-value-THIS-MUST-NEVER-APPEAR-0123456789abcdef";
 const jwt = (claims) => ["eyJhbGciOiJIUzI1NiJ9", Buffer.from(JSON.stringify(claims)).toString("base64url"), "sig-NEVER-SHOWN"].join(".");
 const DEV_SERVICE = jwt({ ref: "ooxigbxthabstahrexia", role: "service_role" });
 const DEV_ANON = jwt({ ref: "ooxigbxthabstahrexia", role: "anon" });

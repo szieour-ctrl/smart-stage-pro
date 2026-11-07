@@ -46,3 +46,11 @@ test("b1-env-check: NETLIFY_URL may be absent (it is not a Netlify built-in, so 
   const env = isolated(); delete env.NETLIFY_URL;
   assert.strictEqual(JSON.parse((await call(BRANCH_HOST, env)).body).ok, true);
 });
+
+test("b1-env-check: the log line carries names and states only", async () => {
+  const lines = []; const keep = console.log; console.log = (m) => lines.push(String(m));
+  try { await call(BRANCH_HOST, { ...isolated(), ANTHROPIC_API_KEY: SECRET }); } finally { console.log = keep; }
+  assert.strictEqual(lines.length, 1);
+  assert.match(lines[0], /^b1-env-check FAIL checks=\d+ failing=\[ANTHROPIC_API_KEY:set\] blobs=blocked context=branch-deploy branch=b1-stageb-dev$/);
+  assert.ok(!lines[0].includes(SECRET));
+});

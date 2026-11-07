@@ -59,6 +59,8 @@ exports.handler = async (event, context, deps) => {
   const checks = report(env);
   const blobs = await probeBlobs(env, d.getStore || require("@netlify/blobs").getStore);
   const ok = checks.every((c) => c.ok) && blobs.ok;
+  // One line for the function log (read through Netlify observability): names and states only, never a value.
+  console.log(`b1-env-check ${ok ? "PASS" : "FAIL"} checks=${checks.length} failing=[${checks.filter((c) => !c.ok).map((c) => `${c.name}:${c.state}`).join(",")}] blobs=${blobs.result} context=${env.CONTEXT || "-"} branch=${env.BRANCH || "-"}`);
   return { statusCode: 200, headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
     body: JSON.stringify({ ok, host: BRANCH_HOST, context: env.CONTEXT || null, branch: env.BRANCH || null, checks, blobs }) };
 };

@@ -193,3 +193,4 @@ Only after test 2 passes: the paid provider call, under separate approval.
 - `REEL_SHARE_SECRET` and `PROMO_LINK_SECRET` do not exist on the site: share links are then signed with a key derived from the development service-role key, and promo-link creation refuses every request.
 - Verification: `/.netlify/functions/b1-env-check` on `b1-stageb-dev--smart-stage-pro.netlify.app` (states only, never values).
 - Nov 7: branch-only redeploy of `b1-stageb-dev` requested by the owner so the deploy picks up the updated branch environment values (Netlify applies environment changes only to new builds). Verified with `b1-env-check`.
+- Nov 7: second branch-only redeploy of `b1-stageb-dev` after the owner saved a new 64-character branch `INTERNAL_API_KEY` (Netlify shows only the last characters of a masked value; the length is confirmed by `b1-env-check`, never by displaying it).

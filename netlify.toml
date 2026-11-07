@@ -23,9 +23,6 @@
 # Cloudinary) inline anyway now that narration moved to
 # generate-narration-background.js. Back to the platform default.
 
-[functions."generate-narration-background"]
-  timeout = 900
-
 [functions."reel-plan-background"]
   timeout = 900
 
@@ -67,9 +64,6 @@
 
 [functions."reel-view"]
   timeout = 15
-
-[functions."check-narration"]
-  timeout = 10
 
 # NEW (this session) — same fix, same reason, same shape as the narration
 # pair directly above: action=autoSelect (video-job.js) was blowing past
@@ -114,9 +108,6 @@
 [functions."generate-staging-prompt"]
   timeout = 20
 
-[functions."stage-decor8"]
-  timeout = 90
-
 [functions."stage-openai"]
   timeout = 30
 
@@ -155,12 +146,6 @@
 [functions."serve-image"]
   timeout = 10
 
-
-[functions."stage-decor8-background"]
-  timeout = 90
-
-[functions."check-decor8"]
-  timeout = 15
 
 [functions."test-remove-objects"]
   timeout = 26

@@ -7,7 +7,7 @@
 
 Used by every background dispatcher:
 - `agent-marketing-images`, `agent-marketing-project`, `agent-marketing-render`, `agent-marketing-research`
-- `group-spatial-read`, `reel-plan`, `stage-openai`, `clean-and-stage-prompt`, `video-job` (auto-select)
+- `group-spatial-read`, `reel-plan`, `stage-openai`, `video-job` (auto-select)
 - `agent-marketing-stageb`
 
 `declutter-prompt` already used the request host. Stage B additionally refuses to dispatch from a production host at all

@@ -63,17 +63,35 @@ If Netlify refuses an empty value, use the placeholder `b1-dev-disabled`. For UR
 
 **Already in place:** team-login protection covers branch deploys. The browser config on a non-production host comes from the server and refuses the production project (`ssp-public-config.js`).
 
-## 2. Development Supabase project (new hosted project)
-- **What it contains:** a schema-only copy of production `public`, plus the two `auth.users` triggers (user row and trial-credit seed). No rows are copied.
-  - Then apply migration `20261101` (provider-request ledger), then `20261105` rev 3 (`docs/proposed-migrations/`, verified locally by `scripts/b1-migration-check.sh`).
-  - It is not a Supabase branch: production's tracked migration history starts in July 2026 and lacks the base tables.
-- **Cost:**
-  - **$0** in a Free organization (2 free projects per org; pauses after a week idle).
-  - About **$10/month** as a new project in the existing Pro organization (Micro compute, $0.01344/hour). That org's included $10 compute credit is already used by production.
-  - These are prices recorded Nov 5, 2026; confirm in the Supabase dashboard when creating.
-- **Seed data, created there, never copied:**
-  - 1–2 dev users (sign-up on the dev deploy).
-  - One Local Market Insider project per frozen case (FA, FB, FC), with its Article-Led topic inserted by SQL. This avoids a paid Stage A research call.
+## 2. Development Supabase project (Nov 7 review)
+**Organizations:**
+- The account has one Supabase organization, "SZ Real Estate Group", on the **Pro** plan. It holds production (`us-west-2`) and two other projects.
+- **Free option:** create a new organization on the Free plan in the dashboard (Supabase allows 2 free projects per user across Free organizations; none are used today), then the project inside it. **$0**. It pauses after a week without activity.
+- **Pro option:** a new project in the existing organization: Micro compute, about **$10/month**. The creation tool quotes the exact cost before anything is created.
+
+**Project:** name `ssp-b1-stageb-dev`, region `us-west-2` (same as production).
+- The connector's create tool doesn't offer `us-west-2`. Create it in the dashboard, or accept `us-west-1` through the connector.
+
+**Schema import:** schema only, generated read-only from production's catalog. No rows are copied.
+- Contents: extensions, the sequence, 31 tables, constraints, indexes, 16 functions, RLS on all tables, 22 policies, triggers including the two `auth.users` sign-up triggers, the trial-credit seed and the `ensure_rls` event trigger, and table/function privileges.
+- The export is kept outside this public repository.
+
+**Order:**
+1. Schema export.
+2. `20261101` (provider-request ledger).
+3. `20261105` rev 3 (article evidence; needs `20261101`).
+
+**Verified on a throwaway local PostgreSQL with Supabase-style roles and an `auth.users` stub:**
+- All three apply cleanly, in that order.
+- A new `auth.users` row creates its `public.users` row and one trial-credit ledger row.
+- 34 tables, all with RLS. 22 policies.
+- `anon` and `authenticated` cannot execute the reservation function.
+- A newly created table gets RLS automatically.
+- The production `MAINTAIN` privilege was stripped for the local PostgreSQL 16 check only.
+
+**Seed after import:**
+- 1–2 development users (sign up on the branch deploy).
+- Then the Article-Led test projects (FA, FB, FC), inserted by SQL. No paid research call.
 
 ## 3. Railway worker (new project, 1 replica)
 - **Image:** the `Dockerfile` in the private `ssp-b1-evidence` repo (branch `dev/stageb-worker`).
@@ -125,3 +143,34 @@ Stage B itself does not use `INTERNAL_API_KEY` or any paid provider key; on this
 
 ## Total recurring cost of steps 1–5
 **$1–3/month** with a Free-org Supabase project, or **$11–13/month** with a Pro-org project. There are no paid AI calls.
+
+## Verifying isolation on the real branch deploy
+`/.netlify/functions/b1-env-check`:
+- Answers only on `b1-stageb-dev--smart-stage-pro.netlify.app`; 404 on every other host and context. The branch deploy is behind team login.
+- Reports each variable as `unset`, `empty` or `set`, never a value. A production value that leaked through shows as `set` and fails the check.
+- Checks that `SITE_URL`/`NETLIFY_URL` point at the branch, that `INTERNAL_API_KEY` has its own value and that Stage B is off.
+- Probes Blobs with a read of a key that does not exist; the expected result is `blocked`.
+
+## Hosted mock tests
+Both tests need the Railway worker: the article snapshot and the evidence gate run there.
+
+**Test 1: authentication, ownership, reservation, idempotency, failure.**
+- Setup: `B1_PROVIDER=mock` with no saved responses, so every run fails at the provider step after its reservation (`mock_no_response`).
+- Prove:
+  - no token → 401; a user outside the allowlist → 404; another user's project → 404;
+  - start → dispatch → background → the snapshot is stored and one ledger reservation is made;
+  - a second start while the job is live → `in_progress`, with no second reservation;
+  - after the failure, a retry makes a new reservation;
+  - the daily caps refuse further runs before any reservation;
+  - the status response never contains evidence text.
+
+**Test 2: full mocked evidence.**
+- The private worker serves the saved B1 responses by request hash. This needs a small offline change in the private repo.
+- Prove:
+  - FA, FB and FC reach `ready`, with the approved held/validated counts;
+  - an unchanged article reuses its result without a provider call;
+  - the Planner refuses a BLOCKED, stale or tampered bundle;
+  - held quotations never become verified script text.
+
+Only after test 2 passes: the paid provider call, under separate approval.
+

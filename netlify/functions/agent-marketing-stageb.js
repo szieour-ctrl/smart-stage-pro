@@ -1,6 +1,7 @@
 // agent-marketing-stageb.js — Netlify Function. DEVELOPMENT ONLY (Nov 5, 2026): the owner-only Stage B action (B1 article evidence).
-//   POST { action: "start", projectId } → 202 { state: "queued" | "reserved" | "running" } | 200 { state: "ready" } and the work continues in
-//        agent-marketing-stageb-background; poll GET until the state is "ready" or "failed".
+//   POST { action: "start", projectId } → 202 { state: "dispatch" }: the page then POSTs { projectId } to agent-marketing-stageb-background with
+//        its own Bearer token (Nov 7, 2026: no server-to-server dispatch) | 202 { state: "reserved" | "running", code: "in_progress" } | 200 { state: "ready" }.
+//        Poll GET until the state is "ready" or "failed".
 //   GET  ?projectId=                    → { state, completeness, counts, error, reused, attached, createdAt, finishedAt } (no evidence text)
 // Off (404 for everyone) unless AGENT_MARKETING_B1_EVIDENCE=dev, Agent Marketing is enabled for the user and the user is listed in
 // B1_STAGEB_USER_IDS; refused (503) when the server's database is the production project. See lib/agent-marketing-b1-stageb-run-lib.js.
@@ -18,7 +19,7 @@ async function loadProject(id, userId) {
 }
 
 exports.handler = async (event, context, deps) => {
-  const d = deps || {};   // tests inject requireUser, store, loadProject, dispatch, env
+  const d = deps || {};   // tests inject requireUser, store, loadProject, env
   if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: { ...headers, "Access-Control-Allow-Headers": "Content-Type, Authorization", "Access-Control-Allow-Methods": "GET, POST, OPTIONS" }, body: "" };
   const env = d.env || process.env;
   const auth = await (d.requireUser || requireUser)(event);
@@ -36,22 +37,13 @@ exports.handler = async (event, context, deps) => {
     if (event.httpMethod !== "POST") return reply(405, { error: "Method not allowed" });
     let body = {}; try { body = JSON.parse(event.body || "{}"); } catch (e) { return reply(400, { error: "Invalid JSON" }); }
     if (body.action !== "start") return reply(400, { error: "Unknown action", code: "bad_request" });
-    const dispatch = d.dispatch || (async (job) => {
-      // The SAME deploy's background function, never the production site (URL / SITE_URL / NETLIFY_URL): a development deploy must not run
-      // its job on production's functions. Stage B never runs on a production host at all.
-      const { selfBase, requestHost } = require("./lib/self-dispatch-lib");
-      if (require("./lib/public-config-lib").isProductionHost(requestHost(event), env)) { const e = new Error("production_dispatch_refused"); e.code = "production_dispatch_refused"; throw e; }
-      const base = selfBase(event, env.DEPLOY_URL || `https://${event.headers && event.headers.host}`, env);
-      const r = await fetch(`${base}/.netlify/functions/agent-marketing-stageb-background`, { method: "POST",
-        headers: { "Content-Type": "application/json", "x-internal-key": env.INTERNAL_API_KEY || "" }, body: JSON.stringify(job) });
-      if (!r.ok && r.status !== 202) throw new Error(`dispatch answered ${r.status}`);
-    });
-    if (!env.INTERNAL_API_KEY && !d.dispatch) return reply(503, { error: "Stage B is not set up.", code: "not_configured" });
-    const r = await run.startRequest({ userId, projectId: body.projectId, store, loadProject: load, dispatch, env });
+    // Stage B never runs on a production host (the background function refuses it too).
+    const { requestHost } = require("./lib/self-dispatch-lib");
+    if (require("./lib/public-config-lib").isProductionHost(requestHost(event), env)) return reply(503, { error: "Stage B runs only on a development deploy.", code: "production_dispatch_refused" });
+    const r = await run.startRequest({ userId, projectId: body.projectId, store, loadProject: load, env });
     return reply(r.status, r.body);
   } catch (e) {
     console.error("agent-marketing-stageb error:", e.code || e.message);
-    if (e.code === "production_dispatch_refused" || e.code === "dispatch_host_invalid") return reply(503, { error: "Stage B runs only on a development deploy.", code: e.code });
     return reply(e.code === "in_progress" ? 202 : 500, e.code === "in_progress" ? { state: "in_progress", code: "in_progress" } : { error: "Stage B is unavailable right now.", code: "error" });
   }
 };

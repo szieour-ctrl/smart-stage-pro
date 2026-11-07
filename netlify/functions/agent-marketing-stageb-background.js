@@ -1,7 +1,14 @@
-// agent-marketing-stageb-background.js — Netlify Background Function (15 min). DEVELOPMENT ONLY (Nov 5, 2026). The Stage B job:
+// agent-marketing-stageb-background.js — Netlify Background Function (15 min). DEVELOPMENT ONLY. The Stage B job:
 // snapshot → atomic ledger reservation → provider (MOCK ONLY: the paid call is not implemented) → Python evidence gate via the worker → attach.
-// Internal only: x-internal-key must equal INTERNAL_API_KEY. Same admission as the start (lib/agent-marketing-b1-stageb-run-lib.js).
+//
+// Nov 7, 2026: started BY THE PAGE, not by another function. POST { projectId } with the user's own Supabase login token (Authorization: Bearer).
+//   - The user is the token's user (verified against Supabase on every call). A userId in the body is ignored; there is no internal key.
+//   - Same admission as the start request (lib/agent-marketing-b1-stageb-run-lib.js): AGENT_MARKETING_B1_EVIDENCE=dev, Agent Marketing enabled,
+//     the explicit B1_STAGEB_USER_IDS allowlist, a non-production database, the project owned by this user, an Article-Led topic.
+//   - Refused outright on a production host.
+// A background function answers 202 to the page before this runs; the page learns the outcome from GET agent-marketing-stageb?projectId=.
 const { supabase } = require("./lib/marketing-profile-lib");
+const { requireUser } = require("./lib/reel-auth-lib");
 const run = require("./lib/agent-marketing-b1-stageb-run-lib");
 const st = require("./lib/agent-marketing-b1-store-lib");
 const pv = require("./lib/agent-marketing-b1-provider-lib");
@@ -13,17 +20,21 @@ async function loadProject(id, userId) {
 }
 
 exports.handler = async (event, context, deps) => {
-  const d = deps || {};
+  const d = deps || {};   // tests inject requireUser, store, loadProject, fetchFn, provider, env, now
   const env = d.env || process.env;
-  const h = event.headers || {};
-  const key = String(env.INTERNAL_API_KEY || "");
-  if (!key || h["x-internal-key"] !== key) return { statusCode: 401, body: "" };
+  if (event.httpMethod && event.httpMethod !== "POST") return { statusCode: 405, body: "" };
+  const { requestHost } = require("./lib/self-dispatch-lib");
+  if (require("./lib/public-config-lib").isProductionHost(requestHost(event), env)) return { statusCode: 503, body: "" };
+  const auth = await (d.requireUser || requireUser)(event);
+  if (auth.error) return { statusCode: auth.error.status, body: "" };
+  const userId = auth.user.id;
+  if (run.admit(userId, env)) return { statusCode: 404, body: "" };   // checked before reading the body: refused users learn nothing more
   let body = {}; try { body = JSON.parse(event.body || "{}"); } catch (e) { return { statusCode: 400, body: "" }; }
-  if (!am.UUID_RE.test(String(body.projectId || "")) || !am.UUID_RE.test(String(body.userId || ""))) return { statusCode: 400, body: "" };
+  if (!am.UUID_RE.test(String(body.projectId || ""))) return { statusCode: 400, body: "" };
   let provider = null;
   try { provider = d.provider || pv.createProvider({ env }); } catch (e) { provider = null; }   // no provider: the run is marked failed, nothing is sent
   try {
-    const result = await run.runJob({ userId: body.userId, projectId: body.projectId, store: d.store || st.createStore({ env }), loadProject: d.loadProject || loadProject,
+    const result = await run.startJob({ userId, projectId: body.projectId, store: d.store || st.createStore({ env }), loadProject: d.loadProject || loadProject,
       fetchFn: d.fetchFn, provider, env, now: d.now });
     console.log(`agent-marketing-stageb-background ${body.projectId.slice(0, 8)} ${result.state}${result.code ? ` ${result.code}` : ""}`);
     return { statusCode: 200, body: JSON.stringify(result) };

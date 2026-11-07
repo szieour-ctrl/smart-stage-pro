@@ -52,7 +52,7 @@ test.before(async () => {
 test.after(() => { if (W) { W.proc.kill("SIGKILL"); fs.rmSync(W.dir, { recursive: true, force: true }); } });
 
 const baseEnv = (over) => ({ AGENT_MARKETING_B1_EVIDENCE: "dev", AGENT_MARKETING_ENABLED: "true", AGENT_MARKETING_USER_IDS: "", B1_STAGEB_USER_IDS: `${U.A},${U.B}`,
-  SUPABASE_URL: DEV_DB, INTERNAL_API_KEY: "internal-test-key", B1_PROVIDER: "mock",
+  SUPABASE_URL: DEV_DB, B1_PROVIDER: "mock",
   B1_WORKER_URL: W ? `https://127.0.0.1:${W.port}` : "", B1_WORKER_SECRET: SECRET, B1_WORKER_CA_FILE: W ? W.cert : "", ...(over || {}) });
 
 // ── a fake PostgREST that enforces the proposed migrations ─────────────────────────────────────────────────────────────────────────────────
@@ -136,11 +136,19 @@ function world(over) {
   const dispatched = [];
   const tokens = { "token-a": U.A, "token-b": U.B, "token-out": U.OUT };
   const requireUser = async (event) => { const t = String((event.headers || {}).authorization || "").replace(/^Bearer /, ""); return tokens[t] ? { user: { id: tokens[t] } } : { error: { status: 401, body: { error: "Please log in again.", code: "unauthorized" } } }; };
-  const deps = { env, store, loadProject, requireUser, dispatch: async (job) => { dispatched.push(job); } };
-  const start = (token, projectId, d) => startFn.handler({ httpMethod: "POST", headers: { authorization: `Bearer ${token}` }, body: JSON.stringify({ action: "start", projectId }) }, {}, { ...deps, ...(d || {}) });
+  const deps = { env, store, loadProject, requireUser };
+  // The start answers { state: "dispatch" } when the page should start the job; `dispatched` records what the page would then send.
+  const start = async (token, projectId, d) => {
+    const r = await startFn.handler({ httpMethod: "POST", headers: { authorization: `Bearer ${token}` }, body: JSON.stringify({ action: "start", projectId }) }, {}, { ...deps, ...(d || {}) });
+    if (r.statusCode === 202 && JSON.parse(r.body).state === "dispatch") dispatched.push({ projectId, userId: tokens[token] });
+    return r;
+  };
   const get = (token, projectId, d) => startFn.handler({ httpMethod: "GET", headers: { authorization: `Bearer ${token}` }, queryStringParameters: { projectId } }, {}, { ...deps, ...(d || {}) });
-  const background = (job, d) => bgFn.handler({ headers: { "x-internal-key": env.INTERNAL_API_KEY }, body: JSON.stringify(job) }, {}, { env, store, loadProject, fetchFn, provider, ...(d || {}) });
-  return { db, env, store, P, provider, dispatched, start, get, background, loadProject, fetchFn };
+  // The page's call to the background function: its own Bearer token, only { projectId } in the body.
+  const tokenOf = (uid) => Object.keys(tokens).find((t) => tokens[t] === uid);
+  const background = (job, d) => bgFn.handler({ httpMethod: "POST", headers: { authorization: `Bearer ${tokenOf(job.userId) || "none"}` }, body: JSON.stringify({ projectId: job.projectId }) }, {},
+    { env, store, loadProject, requireUser, fetchFn, provider, ...(d || {}) });
+  return { db, env, store, P, provider, dispatched, start, get, background, loadProject, fetchFn, requireUser };
 }
 const json = (r) => JSON.parse(r.body);
 
@@ -156,10 +164,16 @@ test("stageb: admission: flag, explicit allowlist (empty denies), Agent Marketin
   }
   assert.strictEqual((await w.start("token-out", pid)).statusCode, 404, "a signed-in user outside the allowlist");
   assert.deepStrictEqual(w.dispatched, [], "nothing was dispatched");
-  // the background job applies the same admission
-  const r = await w.background({ projectId: pid, userId: U.OUT });
-  assert.strictEqual(json(r).state, "refused");
-  assert.strictEqual((await bgFn.handler({ headers: { "x-internal-key": "wrong" }, body: "{}" }, {}, { env: w.env })).statusCode, 401);
+  // the background job applies the same admission to the token's user
+  assert.strictEqual((await w.background({ projectId: pid, userId: U.OUT })).statusCode, 404, "outside the allowlist");
+  const bg = (headers, body, env) => bgFn.handler({ httpMethod: "POST", headers, body: JSON.stringify(body) }, {}, { env: env || w.env, store: w.store, loadProject: w.loadProject, requireUser: w.requireUser, fetchFn: w.fetchFn, provider: w.provider });
+  assert.strictEqual((await bg({}, { projectId: pid })).statusCode, 401, "no token");
+  assert.strictEqual((await bg({ authorization: "Bearer forged" }, { projectId: pid, userId: U.A })).statusCode, 401, "an unverified token, whatever userId the body names");
+  assert.strictEqual((await bg({ "x-internal-key": "anything" }, { projectId: pid, userId: U.A })).statusCode, 401, "no internal-key path");
+  assert.strictEqual((await bg({ authorization: "Bearer token-a" }, { projectId: pid }, baseEnv({ AGENT_MARKETING_B1_EVIDENCE: "" }))).statusCode, 404, "flag off");
+  assert.strictEqual((await bg({ authorization: "Bearer token-a" }, { projectId: pid }, baseEnv({ SUPABASE_URL: `https://${PRODUCTION_REF}.supabase.co` }))).statusCode, 404, "production database");
+  assert.strictEqual((await bg({ authorization: "Bearer token-a", host: "smartstagepro.com" }, { projectId: pid })).statusCode, 503, "production host");
+  assert.strictEqual((await bgFn.handler({ httpMethod: "GET", headers: { authorization: "Bearer token-a" } }, {}, { env: w.env, requireUser: w.requireUser })).statusCode, 405);
   assert.strictEqual(w.db.T.agent_marketing_article_evidence.length, 0); assert.strictEqual(w.provider.calls, 0); assert.strictEqual(w.db.T.ledger.length, 0);
 });
 
@@ -172,6 +186,24 @@ test("stageb: ownership: another user's project reads as missing, start and stat
   w.db.T.agent_marketing_projects.push({ ...w.P.FA, id: "22222222-0000-4000-8000-0000000000d1", selected_topic: { ...w.P.FA.selected_topic, candidate: undefined } });
   assert.strictEqual((await w.start("token-a", "22222222-0000-4000-8000-0000000000d1")).statusCode, 409, "a legacy (non Article-Led) topic");
   assert.deepStrictEqual(w.dispatched, []);
+  // the body cannot name a user: B's token with A's userId still acts as B (A's project reads as missing)
+  const forged = await bgFn.handler({ httpMethod: "POST", headers: { authorization: "Bearer token-b" }, body: JSON.stringify({ projectId: w.P.FA.id, userId: U.A }) }, {},
+    { env: w.env, store: w.store, loadProject: w.loadProject, requireUser: w.requireUser, fetchFn: w.fetchFn, provider: w.provider });
+  assert.deepStrictEqual(json(forged), { state: "refused", code: "not_found" });
+  assert.strictEqual(w.db.T.agent_marketing_article_evidence.length, 0); assert.strictEqual(w.provider.calls, 0); assert.strictEqual(w.db.T.ledger.length, 0);
+});
+
+test("stageb: the page may skip the start or send the job twice: the background job repeats every check and runs once", { skip: SKIP }, async () => {
+  const w = world();
+  const job = { projectId: w.P.FA.id, userId: U.A };
+  assert.strictEqual(json(await w.background(job)).state, "ready", "straight to the background job, no start request");
+  assert.deepStrictEqual(json(await w.background(job)), { state: "ready", reused: true }, "a repeat after ready");
+  const [x, y] = await Promise.all([w.background({ projectId: w.P.FB.id, userId: U.A }), w.background({ projectId: w.P.FB.id, userId: U.A })]);
+  assert.deepStrictEqual([json(x).state, json(y).state].sort(), ["in_progress", "ready"], "two at once: one runs, one stands aside");
+  assert.strictEqual(w.provider.calls, 2, "one provider call per project");
+  assert.strictEqual(w.db.T.ledger.length, 2, "one reservation per project");
+  assert.strictEqual((await w.get("token-a", w.P.FB.id)).statusCode, 200);
+  assert.strictEqual(json(await w.get("token-a", w.P.FB.id)).state, "ready");
 });
 
 test("stageb: FA, FB and FC end to end: one reservation and one provider call each, approved statuses, attached, status without evidence text", { skip: SKIP }, async () => {
@@ -179,7 +211,7 @@ test("stageb: FA, FB and FC end to end: one reservation and one provider call ea
   const want = { FA: "PASSED_WITH_HOLDS", FB: "COMPLETE", FC: "PASSED_WITH_HOLDS" };
   for (const c of ["FA", "FB", "FC"]) {
     const s = await w.start("token-a", w.P[c].id);
-    assert.deepStrictEqual([s.statusCode, json(s).state], [202, "queued"], c);
+    assert.deepStrictEqual([s.statusCode, json(s).state], [202, "dispatch"], c);
     const job = w.dispatched.pop(); assert.deepStrictEqual(job, { projectId: w.P[c].id, userId: U.A });
     const r = json(await w.background(job));
     assert.deepStrictEqual([r.state, r.completeness], ["ready", want[c]], c);
@@ -241,7 +273,7 @@ test("stageb: failures: a failed run can be retried with a new reservation; stal
   await new Promise((res) => setTimeout(res, 800));
   const row = w2.db.T.agent_marketing_article_evidence[0]; row.reserved_at = new Date(Date.now() - run.STALE_MS - 1000).toISOString();
   const s = await w2.start("token-a", w2.P.FA.id);
-  assert.deepStrictEqual([s.statusCode, json(s).state], [202, "queued"]); assert.strictEqual(row.status, "failed"); assert.strictEqual(row.error, "stale");
+  assert.deepStrictEqual([s.statusCode, json(s).state], [202, "dispatch"]); assert.strictEqual(row.status, "failed"); assert.strictEqual(row.error, "stale");
   // limits: the B1 per-user cap and the ledger's own daily limit refuse BEFORE any provider call
   const w3 = world({ env: { B1_STAGEB_MAX_PER_USER_DAY: "1" } });
   await w3.start("token-a", w3.P.FA.id); assert.strictEqual(json(await w3.background(w3.dispatched.pop())).state, "ready");
@@ -259,7 +291,7 @@ test("stageb: the live provider is absent: without B1_PROVIDER=mock the run fail
   assert.throws(() => pv.createProvider({ env: { ...w.env, B1_PROVIDER: "perplexity" } }), (e) => e.code === "provider_not_implemented");
   assert.throws(() => pv.createProvider({ env: { B1_PROVIDER: "mock", B1_MOCK_RESPONSES_DIR: "/x" } }), (e) => e.code === "disabled");
   await w.start("token-a", w.P.FA.id);
-  const r = json(await bgFn.handler({ headers: { "x-internal-key": w.env.INTERNAL_API_KEY }, body: JSON.stringify(w.dispatched.pop()) }, {}, { env: w.env, store: w.store, loadProject: w.loadProject, fetchFn: w.fetchFn }));
+  const r = json(await w.background(w.dispatched.pop(), { provider: undefined }));
   assert.deepStrictEqual(r, { state: "failed", code: "provider_not_implemented" });
   assert.strictEqual(w.db.T.ledger.length, 0, "no reservation was spent");
 });

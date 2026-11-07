@@ -398,6 +398,11 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
       <div id="scriptEmpty">
         <div class="panel-sub">We'll write a short, first-person script from your answers. You can edit every word before approving.</div>
         <div class="actions"><button class="btn gold" type="button" id="planBtn">Write my script</button></div>
+        <!-- Article evidence (Stage B). Development only: shown only when the server answers for this user and project (404 everywhere else). -->
+        <div id="stagebBox" class="hidden" style="margin-top:14px">
+          <div class="panel-sub" id="stagebLine"></div>
+          <div class="actions"><button class="btn ghost small" type="button" id="stagebBtn">Check the article's evidence</button></div>
+        </div>
       </div>
       <div id="scriptWait" class="hidden"><span class="spinner"></span>Writing your script… this usually takes under a minute.</div>
       <div id="scriptReady" class="hidden">
@@ -681,6 +686,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     say("scriptMsg", "");
     if (n && n.status === "error") { say("scriptMsg", n.error || "The script could not be written.", "err"); $("planBtn").textContent = "Try again"; }
     if (planning) startPoll();
+    if (!planning && !ready) refreshStageB(); else paintStageB(null);
     if (ready && !planning) {
       $("narration").value = n.narrationTagged;
       loadSavedPron().then(function () { paintPron(n.pronunciations); });
@@ -695,6 +701,49 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
       $("verifyBox").innerHTML = "<strong>Please verify before you publish:</strong><ul class='plain'>" + c.map(function (x) { return "<li>" + esc(x) + "</li>"; }).join("") + "</ul>";
       refreshPreview();
     }
+  }
+  // ── Article evidence (Stage B, development only) ──
+  // The start request only checks; when it answers { state: "dispatch" } the page starts the background job itself with its own login token
+  // (no server-to-server call). The server repeats every check there. The page then polls the status, which never contains evidence text.
+  var STAGEB = "/.netlify/functions/agent-marketing-stageb", STAGEB_BG = "/.netlify/functions/agent-marketing-stageb-background";
+  var STAGEB_TEXT = { none: "Article evidence has not been checked yet.", reserved: "Checking the article's evidence…", running: "Checking the article's evidence…",
+    ready: "Article evidence is ready.", failed: "The evidence check did not finish." };
+  function paintStageB(st) {
+    var box = $("stagebBox"); if (!st) { box.classList.add("hidden"); return; }
+    box.classList.remove("hidden");
+    var line = STAGEB_TEXT[st.state] || ("Evidence: " + st.state);
+    if (st.state === "ready" && st.counts) line += " " + st.counts.validated + " checked, " + st.counts.held + " held.";
+    if (st.state === "failed" && st.error) line += " (" + st.error + ")";
+    $("stagebLine").textContent = line;
+    var busy = st.state === "reserved" || st.state === "running";
+    $("stagebBtn").disabled = busy; $("stagebBtn").classList.toggle("hidden", st.state === "ready");
+    $("stagebBtn").textContent = st.state === "failed" ? "Try the evidence check again" : "Check the article's evidence";
+  }
+  async function refreshStageB() {
+    var p = state.project; if (!p || !p.id || SSP_CFG.env === "production") { paintStageB(null); return null; }   // never asked on production
+    try {
+      var r = await api("GET", "?projectId=" + encodeURIComponent(p.id), null, STAGEB);
+      if (!r.ok) { paintStageB(null); return null; }   // 404 = not offered here; anything else = stay out of the way
+      paintStageB(r.json); return r.json;
+    } catch (e) { paintStageB(null); return null; }
+  }
+  async function startStageB() {
+    var p = state.project; if (!p) return;
+    $("stagebBtn").disabled = true;
+    try {
+      var r = await api("POST", "", { action: "start", projectId: p.id }, STAGEB);
+      if (r.status === 202 && r.json.state === "dispatch") {
+        var bg = await api("POST", "", { projectId: p.id }, STAGEB_BG);   // a background function answers 202 at once
+        if (bg.status !== 202 && !bg.ok) throw new Error("The evidence check could not start.");
+      } else if (!r.ok && r.status !== 202) throw new Error(r.json.error || "The evidence check could not start.");
+      paintStageB({ state: r.json.state === "ready" ? "ready" : "running" });
+      var started = Date.now();
+      while (Date.now() - started < 17 * 60 * 1000) {
+        await new Promise(function (res) { setTimeout(res, 5000); });
+        var st = await refreshStageB();
+        if (!st || st.state === "ready" || st.state === "failed") break;
+      }
+    } catch (e) { say("scriptMsg", e.message, "err"); await refreshStageB(); }
   }
   function refreshPreview() {
     var t = $("narration").value, target = state.schema.wordTargets[state.project.durationSec] || [0, 0], w = words(t);
@@ -1440,6 +1489,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     $("newBtn").addEventListener("click", function () { setProject(null); try { history.replaceState(null, "", location.pathname); } catch (e) { /* ignore */ } go(1); });
     $("createBtn").addEventListener("click", createProject);
     $("planBtn").addEventListener("click", plan);
+    $("stagebBtn").addEventListener("click", startStageB);
     $("pickerClose").addEventListener("click", function () { $("picker").classList.add("hidden"); });
     $("toImagesBtn").addEventListener("click", function () { go(5); });
     $("backToBoardBtn").addEventListener("click", function () { go(4); });

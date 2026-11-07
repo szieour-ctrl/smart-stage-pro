@@ -1,8 +1,12 @@
 // lib/agent-marketing-b1-stageb-run-lib.js — Netlify (shared). DEVELOPMENT ONLY (Nov 5, 2026). The owner-only Stage B pathway.
 //
-//   POST agent-marketing-stageb { action: "start", projectId }   (startRequest)  → checks, then dispatches the background job; 202/200
-//   agent-marketing-stageb-background { projectId, userId }        (runJob)        → snapshot, reservation, provider, gate, attach
+//   POST agent-marketing-stageb { action: "start", projectId }   (startRequest)  → checks only; 202 { state: "dispatch" } tells the page to start the job
+//   POST agent-marketing-stageb-background { projectId }  + the user's Bearer token, sent BY THE PAGE (startJob → runJob)
+//                                                                                   → same checks again, then snapshot, reservation, provider, gate, attach
 //   GET  agent-marketing-stageb?projectId=                         (status)        → job state for the page: metadata and counts only
+// Nov 7, 2026: the page dispatches the background function itself, with its own login token. There is no server-to-server call and no shared
+// internal key: a development deploy behind team login cannot call its own functions, and the background function must not trust a userId it is
+// handed. The user is always the one the token belongs to; nothing in the request body names a user.
 //
 // Job state lives in public.agent_marketing_article_evidence (proposed migration 20261105 rev 3), NOT in agent_marketing_jobs (the render pipeline):
 //   (no row) --snapshot+insert--> reserved --ledger reservation--> running --provider+gate--> ready | failed
@@ -62,22 +66,49 @@ async function attachIfNeeded(store, project, userId, row) {
 }
 
 /**
- * startRequest({ userId, projectId, store, loadProject, dispatch, env, now }) → { status, body }
- * Synchronous part (fits a normal function's time limit): no fetch, no worker, no provider. Never starts a second job while one is live.
+ * precheck({ userId, projectId, store, loadProject, env, now }) → { refusal } | { ready } | { live } | { project, topic }
+ * The checks shared by the start request and the background job: admission, the project (owned by this user), the Article-Led topic, and the
+ * newest row for it. A stale reserved/running row (older than the background time limit) is retired here so a new run can start.
  */
-async function startRequest({ userId, projectId, store, loadProject, dispatch, env, now }) {
+async function precheck({ userId, projectId, store, loadProject, env, now }) {
   const e = env || process.env;
-  const a = admit(userId, e); if (a) return out(a.status, { error: a.message, code: a.code });
-  if (!am.UUID_RE.test(String(projectId || ""))) return out(400, { error: "Missing or invalid projectId", code: "bad_request" });
+  const a = admit(userId, e); if (a) return { refusal: a };
+  if (!am.UUID_RE.test(String(projectId || ""))) return { refusal: deny(400, "bad_request", "Missing or invalid projectId") };
   const project = await loadProject(projectId, userId);   // scoped to the signed-in user: another user's project reads as missing
-  const { topic, refusal } = articleLedTopic(project); if (refusal) return out(refusal.status, { error: refusal.message, code: refusal.code });
+  const { topic, refusal } = articleLedTopic(project); if (refusal) return { refusal };
   const nowMs = now ? new Date(now).getTime() : Date.now();
   const live = await store.findForProject(project.id, topic.id);   // the newest non-failed row for this project and topic
-  if (live && live.status === "ready") { await attachIfNeeded(store, project, userId, live); return out(200, { state: "ready", reused: !!live.reused_from }); }
-  if (live && !isStale(live, nowMs)) return out(202, { state: live.status, code: "in_progress" });   // a job is live: no second dispatch
+  if (live && live.status === "ready") { await attachIfNeeded(store, project, userId, live); return { ready: live }; }
+  if (live && !isStale(live, nowMs)) return { live };   // a job is live: no second run
   if (live) { try { await store.fail(live.id, "stale", live.status); } catch (x) { /* another worker moved it on */ } }
-  await dispatch({ projectId: project.id, userId });
-  return out(202, { state: "queued" });
+  return { project, topic };
+}
+
+/**
+ * startRequest({ userId, projectId, store, loadProject, env, now }) → { status, body }
+ * Synchronous part (fits a normal function's time limit): no fetch, no worker, no provider. Answers 202 { state: "dispatch" } when the page should
+ * start the background job; never while one is live.
+ */
+async function startRequest({ userId, projectId, store, loadProject, env, now }) {
+  const p = await precheck({ userId, projectId, store, loadProject, env, now });
+  if (p.refusal) return out(p.refusal.status, { error: p.refusal.message, code: p.refusal.code });
+  if (p.ready) return out(200, { state: "ready", reused: !!p.ready.reused_from });
+  if (p.live) return out(202, { state: p.live.status, code: "in_progress" });
+  return out(202, { state: "dispatch" });
+}
+
+/**
+ * startJob({ userId, projectId, store, loadProject, fetchFn, provider, env, now }) → { state, code?, reused? }
+ * The background job as the page starts it: the same checks as startRequest (the page may skip the start request, send it twice, or send it
+ * for someone else's project), then runJob. Concurrent calls are safe: prepare() and the database allow one in-flight row per cache key, and every
+ * state change is conditional.
+ */
+async function startJob(args) {
+  const p = await precheck(args);
+  if (p.refusal) return { state: "refused", code: p.refusal.code };
+  if (p.ready) return { state: "ready", reused: true };
+  if (p.live) return { state: "in_progress", code: "in_progress" };
+  return runJob(args);
 }
 
 /**
@@ -160,4 +191,4 @@ async function withPlanEvidence(project, { env, store } = {}) {
   return { ...project, selected_topic: sbLib.topicWithEvidence(project, row, e) };
 }
 
-module.exports = { STALE_MS, caps, admit, articleLedTopic, startRequest, runJob, status, withPlanEvidence };
+module.exports = { STALE_MS, caps, admit, articleLedTopic, precheck, startRequest, startJob, runJob, status, withPlanEvidence };

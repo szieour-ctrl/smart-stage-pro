@@ -248,3 +248,7 @@ functions → private fixture worker on Railway → development Supabase), with 
 - Nov 8: live-fetch milestone implemented and tested locally (`docs/b1-live-fetch-spec.md` §7). Migration
   `20261108_agent_marketing_article_capture_attempts` applied to the development database only (append-only attempt log, service role only).
   The code is inert on the branch while `AGENT_MARKETING_B1_EVIDENCE` is unset. No hosted live fetch has run.
+- Nov 8: hosted Live-Fetch Layer C session prepared (owner-approved). Branch values: `AGENT_MARKETING_B1_EVIDENCE=dev` (branch only, set by the
+  owner); `B1_SNAPSHOT_SOURCE` removed (its only value was the branch value) so articles are fetched live; `B1_PROVIDER=worker-fixture`, worker
+  URL/secret and allowlists unchanged; `B1_STAGEB_MAX_PER_USER_DAY=3` (branch value, equal to the default). Baseline: 4 evidence rows,
+  4 reservations, 0 attempt rows, FA/FB/FC linked to their ready rows. Only "Re-check the article" is to be used in this session.

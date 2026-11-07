@@ -737,14 +737,33 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
         if (bg.status !== 202 && !bg.ok) throw new Error("The evidence check could not start.");
       } else if (!r.ok && r.status !== 202) throw new Error(r.json.error || "The evidence check could not start.");
       paintStageB({ state: r.json.state === "ready" ? "ready" : "running" });
-      var started = Date.now();
-      while (Date.now() - started < 17 * 60 * 1000) {
-        await new Promise(function (res) { setTimeout(res, 5000); });
-        var st = await refreshStageB();
-        if (!st || st.state === "ready" || st.state === "failed") break;
+      var w = await stagebWatch({ poll: refreshStageB, sleep: function (ms) { return new Promise(function (res) { setTimeout(res, ms); }); }, now: Date.now });
+      if (w.outcome === "not_started") {   // the job ended before it created a record (e.g. the worker refused it): say so, never retry by itself
+        paintStageB({ state: "failed", error: "no record was created" });
+        say("scriptMsg", STAGEB_NOT_STARTED, "err");
       }
     } catch (e) { say("scriptMsg", e.message, "err"); await refreshStageB(); }
   }
+  // STAGEB_WATCH_BEGIN — self-contained (tests/agent-marketing-stageb-ui.test.js runs it with a fake clock).
+  // Polls the Stage B status after a start. Stops on "ready" or "failed". A record ("reserved"/"running") may take up to two worker calls of at
+  // most 60 s each (fixture article, snapshot) to appear, so "none" is only a failure once STAGEB_GRACE_MS has passed with no record ever seen:
+  // the background job then ended before creating one (nothing was persisted, nothing reserved), and polling stops. Never starts a job itself.
+  var STAGEB_POLL_MS = 5000, STAGEB_GRACE_MS = 150 * 1000, STAGEB_MAX_MS = 17 * 60 * 1000;
+  var STAGEB_NOT_STARTED = "The evidence check could not start. No record was created, so nothing was reserved or charged. You can try again.";
+  async function stagebWatch(o) {
+    var poll = o.poll, sleep = o.sleep, now = o.now, every = o.intervalMs || STAGEB_POLL_MS, grace = o.graceMs || STAGEB_GRACE_MS, max = o.maxMs || STAGEB_MAX_MS;
+    var started = now(), polls = 0, sawRecord = false;
+    while (now() - started < max) {
+      await sleep(every);
+      var st = await poll(); polls++;
+      if (!st) return { outcome: "unavailable", polls: polls };
+      if (st.state === "ready" || st.state === "failed") return { outcome: st.state, polls: polls, status: st };
+      if (st.state !== "none") sawRecord = true;
+      else if (!sawRecord && now() - started >= grace) return { outcome: "not_started", polls: polls };
+    }
+    return { outcome: "timeout", polls: polls };
+  }
+  // STAGEB_WATCH_END
   function refreshPreview() {
     var t = $("narration").value, target = state.schema.wordTargets[state.project.durationSec] || [0, 0], w = words(t);
     $("captionPreview").textContent = stripTags(t) || " ";

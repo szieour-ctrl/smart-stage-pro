@@ -9225,7 +9225,9 @@ async function submitAuth(mode) {
         await handleAuthenticatedUser(data.user);
       }
     } else {
-      const { data, error } = await sb.auth.signUp({ email, password, options: { data: { full_name: name } } });
+      // Nov 7, 2026: the confirmation link returns to the site the user signed up on (production, or a development branch deploy), like the
+      // password reset below. Supabase honours it only when this origin is in the project's Redirect URLs; otherwise it uses the Site URL.
+      const { data, error } = await sb.auth.signUp({ email, password, options: { data: { full_name: name }, emailRedirectTo: window.location.origin } });
       if (error) throw error;
       if (data?.user && !data.session) {
         // Email confirmation required — OR this could be an existing,

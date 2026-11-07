@@ -186,3 +186,9 @@ Only after test 2 passes: the paid provider call, under separate approval.
 - **Supabase:** `SUPABASE_URL` and `SSP_PUBLIC_SUPABASE_URL` must be the development project. If the keys are JWTs, the check reads their project and role, and nothing else.
 - **No SDK picks up credentials on its own:** all S3 clients pass explicit credentials, the Cloudinary SDK is no longer loaded, and Blobs uses the explicit token.
 
+
+## Nov 7: branch deploy configuration (owner-confirmed)
+- Production branch `main`. Branch deploys: "Let me add individual branches", only `b1-stageb-dev`. Deploy Previews: enabled.
+- `b1-stageb-dev` carries branch-specific values (development Supabase, a private `INTERNAL_API_KEY`, `WEBHOOK_SECRET` and `STRIPE_WEBHOOK_SECRET`, placeholders for every production integration and legacy credential). `AGENT_MARKETING_B1_EVIDENCE` is absent, so Stage B is off.
+- `REEL_SHARE_SECRET` and `PROMO_LINK_SECRET` do not exist on the site: share links are then signed with a key derived from the development service-role key, and promo-link creation refuses every request.
+- Verification: `/.netlify/functions/b1-env-check` on `b1-stageb-dev--smart-stage-pro.netlify.app` (states only, never values).

@@ -5163,67 +5163,6 @@ async function stageRoom(roomId) {
   }
 }
 
-// ── DECOR8 BACKGROUND JOB HELPER ────────────────────────────────────────────
-// Fires stage-decor8-background (Netlify Background Function — no 26s limit)
-// Polls check-decor8 every 3 seconds until result arrives or timeout (3 min)
-// onStatus callback updates room card progress text during polling
-async function stageDecor8Background(payload, onStatus) {
-  const jobId = 'job_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
-
-  // Fire background job — returns 202 immediately, Netlify runs it async
-  const startRes = await fetch('/.netlify/functions/stage-decor8-background', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jobId, ...payload }),
-  });
-
-  if (!startRes.ok) {
-    // Background function not available — fall back to synchronous call
-    console.warn('Background function unavailable, falling back to synchronous stage-decor8');
-    onStatus && onStatus('Staging in progress...');
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 80000);
-    const syncRes = await fetch('/.netlify/functions/stage-decor8', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      signal: controller.signal,
-      body: JSON.stringify(payload),
-    });
-    clearTimeout(timer);
-    if (!syncRes.ok) throw new Error('Staging engine error: ' + syncRes.status);
-    return await syncRes.json();
-  }
-
-  // Poll check-decor8 every 3 seconds — max 3 minutes (60 polls)
-  const maxPolls = 60;
-  const pollInterval = 3000;
-  let elapsed = 0;
-
-  for (let poll = 0; poll < maxPolls; poll++) {
-    await new Promise(r => setTimeout(r, pollInterval));
-    elapsed += pollInterval;
-
-    const secs = Math.round(elapsed / 1000);
-    onStatus && onStatus(`Staging in progress — ${secs}s...`);
-
-    const checkRes = await fetch(`/.netlify/functions/check-decor8?jobId=${encodeURIComponent(jobId)}`);
-    if (!checkRes.ok) continue; // network blip — keep polling
-
-    const result = await checkRes.json();
-
-    if (result.status === 'done') {
-      console.log(`Decor8 background job ${jobId} complete in ${secs}s`);
-      return result; // contains stagedBase64
-    }
-    if (result.status === 'error') {
-      throw new Error('Decor8 background job failed: ' + (result.error || 'unknown'));
-    }
-    // status === 'pending' — keep polling
-  }
-
-  throw new Error('Staging timed out after 3 minutes — please retry');
-}
-
 // ── CLEAN COPY FOR PRO PLUS VIDEO (Oct 15, 2026) ────────────────────────────
 // Generate Final bakes the AB 723 badge into the final image (Gallery, compliance
 // pages and Downloads keep that baked version, unchanged). PRO Plus Video now needs

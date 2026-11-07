@@ -49,7 +49,28 @@ test.before(async () => {
   });
   W = { proc, port, dir, cert };
 });
-test.after(() => { if (W) { W.proc.kill("SIGKILL"); fs.rmSync(W.dir, { recursive: true, force: true }); } });
+// The same worker in DEVELOPMENT FIXTURE MODE (Nov 7, 2026): B1_WORKER_FIXTURES=1 with the frozen FA/FB/FC files laid out as Dockerfile.fixtures does.
+let WF = null;
+test.before(async () => {
+  if (SKIP || !fs.existsSync(path.join(WS, "src", "stageb_fixtures.py"))) return;
+  for (let i = 0; !W && i < 300; i++) await new Promise((r) => setTimeout(r, 50));   // the main worker (its certificate) starts first
+  if (!W) throw new Error("the main test worker did not start");
+  const fx = fs.mkdtempSync(path.join(os.tmpdir(), "b1-fixtures-"));
+  fs.copyFileSync(path.join(WS, "fixtures", "manifest.json"), path.join(fx, "manifest.json"));
+  for (const c of ["FA", "FB", "FC"]) {
+    fs.copyFileSync(path.join(WS, "frozen", "raw", `${c}.html`), path.join(fx, `${c}.html`));
+    for (const k of ["request", "response"]) fs.copyFileSync(path.join(WS, "frozen", "v121_run", `${c}.${k}.json`), path.join(fx, `${c}.${k}.json`));
+  }
+  const proc = spawn(PY, [path.join(WS, "src", "stageb_worker.py")], { env: { PATH: process.env.PATH, B1_WORKER_SECRET: SECRET, B1_WORKER_PORT: "0",
+    B1_WORKER_TLS_CERT: W.cert, B1_WORKER_TLS_KEY: path.join(W.dir, "k.pem"), B1_WORKER_FIXTURES: "1", B1_WORKER_FIXTURES_DIR: fx }, stdio: ["ignore", "ignore", "pipe"] });
+  const port = await new Promise((resolve, reject) => {
+    let err = ""; const t = setTimeout(() => reject(new Error(`fixture worker did not start: ${err}`)), 15000);
+    proc.stderr.on("data", (d) => { err += d; const m = err.match(/listening on 127\.0\.0\.1:(\d+) fixture-mode=on/); if (m) { clearTimeout(t); resolve(Number(m[1])); } });
+    proc.on("exit", (c) => { clearTimeout(t); reject(new Error(`fixture worker exited ${c}: ${err}`)); });
+  });
+  WF = { proc, port, fx };
+});
+test.after(() => { if (W) { W.proc.kill("SIGKILL"); fs.rmSync(W.dir, { recursive: true, force: true }); } if (WF) { WF.proc.kill("SIGKILL"); fs.rmSync(WF.fx, { recursive: true, force: true }); } });
 
 const baseEnv = (over) => ({ AGENT_MARKETING_B1_EVIDENCE: "dev", AGENT_MARKETING_ENABLED: "true", AGENT_MARKETING_USER_IDS: "", B1_STAGEB_USER_IDS: `${U.A},${U.B}`,
   SUPABASE_URL: DEV_DB, B1_PROVIDER: "mock",
@@ -339,3 +360,52 @@ test("stageb: no production database or provider credentials anywhere in the pat
   assert.ok(w.db.calls.length > 0 && w.db.calls.every((c) => typeof c.table === "string"), "every database call went to the fake");
   assert.strictEqual(w.provider.paid, false);
 });
+
+test("stageb fixture mode: FA, FB and FC through the private fixture worker with NO live fetch and NO injected provider reach the approved results", { skip: SKIP }, async () => {
+  assert.ok(WF, "the fixture worker is running");
+  const fixtureEnv = { B1_WORKER_URL: `https://127.0.0.1:${WF.port}`, B1_PROVIDER: "worker-fixture", B1_SNAPSHOT_SOURCE: "worker-fixture" };
+  const w = world({ env: fixtureEnv, provider: undefined });
+  const want = { FA: "PASSED_WITH_HOLDS", FB: "COMPLETE", FC: "PASSED_WITH_HOLDS" };
+  const keep = global.fetch; const live = [];
+  global.fetch = async (u) => { live.push(String(u)); throw new Error("a live fetch was attempted"); };
+  try {
+    for (const c of ["FA", "FB", "FC"]) {
+      await w.start("token-a", w.P[c].id);
+      const r = json(await w.background(w.dispatched.pop(), { fetchFn: undefined, provider: undefined }));
+      assert.deepStrictEqual([r.state, r.completeness], ["ready", want[c]], c);
+      const row = w.db.T.agent_marketing_article_evidence.find((e) => e.project_id === w.P[c].id);
+      assert.strictEqual(row.request_text, PRIV.request(c), `${c}: the frozen v1.2.1 request, byte for byte`);
+      assert.strictEqual(row.raw_response_text, PRIV.response(c), `${c}: the saved raw response, byte for byte`);
+      assert.strictEqual(row.bundle.payload, PRIV.bundle(c).payload, `${c}: the reviewed bundle`);
+      assert.strictEqual(row.final_url, M[c].final_url);
+      assert.strictEqual(row.provider_seq, 1001);
+    }
+  } finally { global.fetch = keep; }
+  assert.deepStrictEqual(live, [], "no live article or provider fetch");
+  assert.strictEqual(w.db.T.ledger.length, 3, "one reservation per case");
+});
+
+test("stageb fixture mode: an article outside the FA/FB/FC allowlist fails the snapshot (no live fetch, no reservation, no provider call)", { skip: SKIP }, async () => {
+  assert.ok(WF, "the fixture worker is running");
+  const w = world({ env: { B1_WORKER_URL: `https://127.0.0.1:${WF.port}`, B1_PROVIDER: "worker-fixture", B1_SNAPSHOT_SOURCE: "worker-fixture" }, provider: undefined });
+  const P = w.db.T.agent_marketing_projects.find((p) => p.id === w.P.FA.id);
+  P.selected_topic = { ...P.selected_topic, sources: [{ title: "Other", url: "https://example.org/not-a-fixture", role: "primary" }] };
+  const keep = global.fetch; let live = 0;
+  global.fetch = async () => { live += 1; throw new Error("live fetch"); };
+  try {
+    await w.start("token-a", w.P.FA.id);
+    const r = json(await w.background(w.dispatched.pop(), { fetchFn: undefined, provider: undefined }));
+    assert.deepStrictEqual([r.state, r.code], ["failed", "inaccessible"]);
+  } finally { global.fetch = keep; }
+  assert.strictEqual(live, 0); assert.strictEqual(w.db.T.ledger.length, 0); assert.strictEqual(w.db.T.agent_marketing_article_evidence.length, 0);
+});
+
+test("stageb fixture mode is off unless configured: worker-fixture provider needs the worker; the fixture source needs the Stage B flag", { skip: SKIP }, async () => {
+  const br = require("../netlify/functions/lib/agent-marketing-b1-bridge-lib");
+  assert.strictEqual(br.fixtureSource({ AGENT_MARKETING_B1_EVIDENCE: "dev" }), null, "absent setting: normal live fetch");
+  assert.throws(() => br.fixtureSource({ B1_SNAPSHOT_SOURCE: "worker-fixture" }), (e) => e.code === "disabled", "flag off");
+  assert.throws(() => br.fixtureSource({ AGENT_MARKETING_B1_EVIDENCE: "dev", B1_SNAPSHOT_SOURCE: "worker-fixture", B1_WORKSPACE: WS }), (e) => e.code === "not_configured", "needs the HTTPS worker");
+  assert.throws(() => pv.createProvider({ env: { AGENT_MARKETING_B1_EVIDENCE: "dev", B1_PROVIDER: "worker-fixture", B1_WORKSPACE: WS } }), (e) => e.code === "not_configured");
+  assert.throws(() => pv.createProvider({ env: { B1_PROVIDER: "worker-fixture" } }), (e) => e.code === "disabled");
+});
+

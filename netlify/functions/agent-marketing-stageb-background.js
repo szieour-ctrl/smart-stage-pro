@@ -33,9 +33,15 @@ exports.handler = async (event, context, deps) => {
   if (!am.UUID_RE.test(String(body.projectId || ""))) return { statusCode: 400, body: "" };
   let provider = null;
   try { provider = d.provider || pv.createProvider({ env }); } catch (e) { provider = null; }   // no provider: the run is marked failed, nothing is sent
+  // Development fixture mode: B1_SNAPSHOT_SOURCE=worker-fixture takes the frozen FA/FB/FC article from the private fixture worker (no live fetch).
+  let fetchFn = d.fetchFn;
+  if (!fetchFn) {
+    try { fetchFn = require("./lib/agent-marketing-b1-bridge-lib").fixtureSource(env) || undefined; }
+    catch (e) { const err = e; fetchFn = async () => { throw err; }; }   // misconfigured fixture mode: the snapshot fails, never a live fetch
+  }
   try {
     const result = await run.startJob({ userId, projectId: body.projectId, store: d.store || st.createStore({ env }), loadProject: d.loadProject || loadProject,
-      fetchFn: d.fetchFn, provider, env, now: d.now });
+      fetchFn, provider, env, now: d.now });
     console.log(`agent-marketing-stageb-background ${body.projectId.slice(0, 8)} ${result.state}${result.code ? ` ${result.code}` : ""}`);
     return { statusCode: 200, body: JSON.stringify(result) };
   } catch (e) {

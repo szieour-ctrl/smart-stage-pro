@@ -107,6 +107,27 @@ async function callBridge(op, payload, env, timeoutMs) {
 }
 
 /** The selected article: the topic's first non-background source. */
+/**
+ * DEVELOPMENT FIXTURE MODE (Nov 7, 2026). B1_SNAPSHOT_SOURCE=worker-fixture replaces the live article GET with the private worker's signed
+ * /v1/fixture/article endpoint, which answers ONLY for the three frozen Article-Led cases (FA, FB, FC) and returns their approved raw HTML byte for
+ * byte (src/stageb_fixtures.py, Dockerfile.fixtures). No live article is fetched. Needs the Stage B flag (config() refuses otherwise) and the HTTPS
+ * worker. Returns a fetch-compatible function for fetchArticle, or null when the setting is absent (normal live fetch).
+ */
+function fixtureSource(env) {
+  const e = env || process.env;
+  if (String(e.B1_SNAPSHOT_SOURCE || "").trim().toLowerCase() !== "worker-fixture") return null;
+  const c = config(e);
+  if (c.transport !== "https") fail("not_configured", "B1_SNAPSHOT_SOURCE=worker-fixture needs B1_WORKER_URL (the private fixture worker)");
+  return async (url) => {
+    const j = await callWorker(c, "fixture/article", { url });   // signed both ways; a URL outside the allowlist answers 404 (rejected)
+    if (!j || j.ok !== true || typeof j.html_b64 !== "string") fail("fixture_refused", "the fixture worker returned no article");
+    const buf = Buffer.from(j.html_b64, "base64");
+    if (sha256Hex(buf) !== j.html_sha256) fail("fixture_inconsistent", "the fixture article does not match its hash");
+    return { status: 200, url: String(j.final_url || url), headers: { get: (k) => (String(k).toLowerCase() === "content-type" ? String(j.content_type || "") : null) },
+      arrayBuffer: async () => buf };
+  };
+}
+
 function articleOf(topic) {
   const s = (topic && Array.isArray(topic.sources) ? topic.sources : []).find((x) => x && x.role !== "background" && /^https?:\/\//.test(String(x.url || "")));
   return s ? { url: String(s.url), title: String(s.title || "") } : null;
@@ -213,4 +234,4 @@ async function complete({ record, responseText, store, env }) {
     finished_at: new Date().toISOString() }, record.status);
 }
 
-module.exports = { StageBError, callBridge, callWorker, signRequest, replySignature, articleOf, fetchArticle, checkSnapshot, checkGate, prepare, complete, config };
+module.exports = { StageBError, callBridge, callWorker, fixtureSource, signRequest, replySignature, articleOf, fetchArticle, checkSnapshot, checkGate, prepare, complete, config };

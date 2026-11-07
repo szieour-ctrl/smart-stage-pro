@@ -194,3 +194,11 @@ Only after test 2 passes: the paid provider call, under separate approval.
 - Verification: `/.netlify/functions/b1-env-check` on `b1-stageb-dev--smart-stage-pro.netlify.app` (states only, never values).
 - Nov 7: branch-only redeploy of `b1-stageb-dev` requested by the owner so the deploy picks up the updated branch environment values (Netlify applies environment changes only to new builds). Verified with `b1-env-check`.
 - Nov 7: second branch-only redeploy of `b1-stageb-dev` after the owner saved a new 64-character branch `INTERNAL_API_KEY` (Netlify shows only the last characters of a masked value; the length is confirmed by `b1-env-check`, never by displaying it).
+
+## Nov 7: development fixture mode for the hosted FA/FB/FC evidence test (Option A, owner-approved)
+- The private worker gains a fixture variant (`Dockerfile.fixtures`, `src/stageb_fixtures.py` in `ssp-b1-evidence`). Its two signed endpoints answer only for the frozen FA, FB and FC cases, and only if every file matches the approved hashes in `fixtures/manifest.json`. The normal worker image is unchanged and carries no frozen material.
+- In SSP, on the `b1-stageb-dev` branch only:
+  - `B1_SNAPSHOT_SOURCE=worker-fixture` takes the article from the fixture worker instead of a live fetch.
+  - `B1_PROVIDER=worker-fixture` takes the saved B1 response for the exact frozen request.
+  - Both work only with `AGENT_MARKETING_B1_EVIDENCE=dev` and an HTTPS worker. No live article is fetched and no AI provider is called.
+- Seed: `dev_ops/hosted_test_seed.sql` in the private repository.

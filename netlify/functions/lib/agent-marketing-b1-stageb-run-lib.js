@@ -124,7 +124,11 @@ async function runJob({ userId, projectId, store, loadProject, fetchFn, provider
 
   let record, reused;
   try { ({ record, reused } = await br.prepare({ project, userId, store, fetchFn, env: e, now })); }
-  catch (x) { return { state: x.code === "in_progress" ? "in_progress" : "failed", code: x.code || "prepare_error" }; }   // no row: nothing to finish
+  catch (x) {   // no evidence row: nothing to finish. A capture failure (fetch, snapshot, source_changed) is recorded in the attempt log.
+    if (x.code === "in_progress") return { state: "in_progress", code: "in_progress" };
+    await recordAttempt(store, { userId, project, topic, mode: "evidence", code: x.code || "prepare_error", detail: x.detail });
+    return { state: "failed", code: x.code || "prepare_error" };
+  }
   if (record.status === "ready") { await attachIfNeeded(store, project, userId, record); return { state: "ready", reused: true }; }
   if (record.status !== "reserved") return { state: "in_progress", code: "in_progress" };   // another worker holds it
 
@@ -161,6 +165,70 @@ async function runJob({ userId, projectId, store, loadProject, fetchFn, provider
   return { state: "ready", reused: false, completeness: done.completeness_status };
 }
 
+/** One attempt-log row. Never throws: a log write that fails must not change the job's outcome (it is reported in the function log only). */
+async function recordAttempt(store, { userId, project, topic, mode, code, detail }) {
+  const d = detail || {};
+  if (!d.stage || !store || typeof store.insertAttempt !== "function") return null;
+  const art = br.articleOf(topic) || {};
+  try {
+    return await store.insertAttempt({ userId, projectId: project.id, topicId: topic.id, mode, stage: d.stage, outcome: code, httpStatus: d.httpStatus,
+      contentType: d.contentType, bytes: d.bytes, sourceUrl: art.url, finalUrl: d.finalUrl, observedTitle: d.observedTitle, rawHtmlSha256: d.rawHtmlSha256,
+      snapshotSha256: d.snapshotSha256, comparedTo: d.stage === "compare" ? d.comparedTo || null : null });
+  } catch (x) { console.error("stageb attempt log:", x.code || x.message); return null; }
+}
+
+const verifyCap = (env) => envInt(env, "B1_VERIFY_MAX_PER_USER_DAY", 1, 200, 20);
+
+/** Shared checks for a source verification: admission, the project (owned by this user), its Article-Led topic, the verify-only daily cap. */
+async function verifyCheck({ userId, projectId, store, loadProject, env, now }) {
+  const e = env || process.env;
+  const a = admit(userId, e); if (a) return { refusal: a };
+  if (!am.UUID_RE.test(String(projectId || ""))) return { refusal: deny(400, "bad_request", "Missing or invalid projectId") };
+  const project = await loadProject(projectId, userId);
+  const { topic, refusal } = articleLedTopic(project); if (refusal) return { refusal };
+  if (!br.articleOf(topic)) return { refusal: deny(409, "no_article", "The selected topic has no article URL.") };
+  const since = new Date((now ? new Date(now).getTime() : Date.now()) - DAY_MS).toISOString();
+  if (await store.countVerifications({ userId, sinceIso: since }) >= verifyCap(e)) return { refusal: deny(429, "verify_limit_user_day", "The daily limit for source checks is reached.") };
+  return { project, topic };
+}
+
+/**
+ * startVerifyRequest(...) → { status, body }: the synchronous part of a source verification (checks only). 202 { state: "dispatch",
+ * mode: "verify_source" } tells the page to start the background function with { projectId, mode: "verify_source" }.
+ */
+async function startVerifyRequest(args) {
+  const c = await verifyCheck(args);
+  if (c.refusal) return out(c.refusal.status, { error: c.refusal.message, code: c.refusal.code });
+  return out(202, { state: "dispatch", mode: "verify_source" });
+}
+
+/**
+ * verifyJob({ userId, projectId, store, loadProject, fetchFn, env, now }) → { state: "verified", outcome, ... } | { state: "refused"|"failed", code }
+ * Live fetch → worker snapshot → compare with the project's attached ready evidence row. Outcomes: unchanged | source_changed | no_baseline, or a
+ * capture failure code. It NEVER inserts or changes an evidence row, never reserves on the ledger, never calls a provider and never changes the
+ * project's evidence link: the only write is one attempt-log row.
+ */
+async function verifyJob(args) {
+  const { userId, store, fetchFn, env, now } = args;
+  const e = env || process.env;
+  const c = await verifyCheck(args);
+  if (c.refusal) return { state: "refused", code: c.refusal.code };
+  const { project, topic } = c;
+  let cap;
+  try { cap = await br.capture({ art: br.articleOf(topic), fetchFn, env: e, now }); }
+  catch (x) {
+    const code = x.code || "capture_error";
+    await recordAttempt(store, { userId, project, topic, mode: "verify_source", code, detail: x.detail || { stage: "fetch" } });
+    return { state: "failed", code };
+  }
+  const base = await store.forPlan(project);   // the attached evidence row, read-only
+  const baseline = base && base.status === "ready" && base.topic_id === topic.id ? base : null;
+  const outcome = !baseline ? "no_baseline" : baseline.cache_key === cap.key ? "unchanged" : "source_changed";
+  const detail = { ...br.captureDetail(cap.page, cap.snap, "compare"), comparedTo: baseline ? baseline.id : null };
+  const logged = await recordAttempt(store, { userId, project, topic, mode: "verify_source", code: outcome, detail });
+  return { state: "verified", outcome, logged: !!logged };
+}
+
 /** status({ userId, projectId, store, loadProject, env }) → { status, body }: what the page may know. Never evidence text or raw responses. */
 async function status({ userId, projectId, store, loadProject, env }) {
   const e = env || process.env;
@@ -169,11 +237,14 @@ async function status({ userId, projectId, store, loadProject, env }) {
   const project = await loadProject(projectId, userId);
   const { topic, refusal } = articleLedTopic(project); if (refusal) return out(refusal.status, { error: refusal.message, code: refusal.code });
   const row = await store.latestForProject(project.id, topic.id);
-  if (!row) return out(200, { state: "none" });
+  let la = null;
+  try { la = typeof store.latestAttempt === "function" ? await store.latestAttempt(project.id, topic.id) : null; } catch (x) { la = null; }
+  const lastAttempt = la ? { mode: la.mode, stage: la.stage, outcome: la.outcome, httpStatus: la.http_status || null, at: la.created_at } : null;
+  if (!row) return out(200, { state: "none", lastAttempt });
   const v = row.bundle ? b1.readBundle(row.bundle) : null;
   return out(200, { state: row.status, completeness: row.completeness_status || null, error: row.error || null, reused: !!row.reused_from,
     attached: project.article_evidence_id === row.id, counts: v && v.status !== b1.BLOCKED ? { validated: v.validated.length, held: v.held.length, excluded: v.excluded.length } : null,
-    createdAt: row.created_at || null, finishedAt: row.finished_at || null });
+    createdAt: row.created_at || null, finishedAt: row.finished_at || null, lastAttempt });
 }
 
 /**
@@ -191,4 +262,4 @@ async function withPlanEvidence(project, { env, store } = {}) {
   return { ...project, selected_topic: sbLib.topicWithEvidence(project, row, e) };
 }
 
-module.exports = { STALE_MS, caps, admit, articleLedTopic, precheck, startRequest, startJob, runJob, status, withPlanEvidence };
+module.exports = { STALE_MS, caps, verifyCap, admit, articleLedTopic, precheck, startRequest, startJob, runJob, startVerifyRequest, verifyJob, recordAttempt, status, withPlanEvidence };

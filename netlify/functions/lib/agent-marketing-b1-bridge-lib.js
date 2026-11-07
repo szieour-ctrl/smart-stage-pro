@@ -22,8 +22,10 @@ const sb = require("./agent-marketing-b1-stageb-lib");
 
 const BEGIN = "=====BEGIN RETRIEVED TEXT=====\n", END = "\n=====END RETRIEVED TEXT=====";
 const MAX_HTML = 4000000, FETCH_TIMEOUT_MS = 20000, BRIDGE_TIMEOUT_MS = 60000;
-class StageBError extends Error { constructor(code, message) { super(message); this.code = code; } }
-const fail = (code, msg) => { throw new StageBError(code, msg); };
+// detail (live-fetch milestone): { stage: "fetch"|"snapshot"|"compare", httpStatus, contentType, bytes, finalUrl, observedTitle, rawHtmlSha256,
+// snapshotSha256 }: what the durable attempt log may record about a capture that produced no evidence row. Never HTML, text or a credential.
+class StageBError extends Error { constructor(code, message, detail) { super(message); this.code = code; this.detail = detail || null; } }
+const fail = (code, msg, detail) => { throw new StageBError(code, msg, detail); };
 
 function config(env) {
   const e = env || process.env;
@@ -119,7 +121,9 @@ function fixtureSource(env) {
   const c = config(e);
   if (c.transport !== "https") fail("not_configured", "B1_SNAPSHOT_SOURCE=worker-fixture needs B1_WORKER_URL (the private fixture worker)");
   return async (url) => {
-    const j = await callWorker(c, "fixture/article", { url });   // signed both ways; a URL outside the allowlist answers 404 (rejected)
+    let j;
+    try { j = await callWorker(c, "fixture/article", { url }); }   // signed both ways; a URL outside the allowlist answers a signed 404
+    catch (e) { if (e && e.code === "bridge_error" && /HTTP 404\b/.test(String(e.message))) fail("fixture_refused", "the article is not one of the frozen fixture cases"); throw e; }
     if (!j || j.ok !== true || typeof j.html_b64 !== "string") fail("fixture_refused", "the fixture worker returned no article");
     const buf = Buffer.from(j.html_b64, "base64");
     if (sha256Hex(buf) !== j.html_sha256) fail("fixture_inconsistent", "the fixture article does not match its hash");
@@ -133,28 +137,112 @@ function articleOf(topic) {
   return s ? { url: String(s.url), title: String(s.title || "") } : null;
 }
 
-/** Plain server-side GET of the article's HTML (no provider). Records the final URL; never retries with a different page. */
-async function fetchArticle(url, { fetchFn, now } = {}) {
+// Live fetch limits (live-fetch milestone, Nov 8, 2026).
+const MAX_REDIRECTS = 5;
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+const siteOf = (u) => { try { return new URL(u).hostname.toLowerCase().replace(/^www\./, ""); } catch (e) { return ""; } };
+
+/** The article URL rule: https only, a DNS name (no IP literal, no localhost), no credentials, the default port. Returns a URL or null. */
+function articleUrl(raw) {
+  let u; try { u = new URL(String(raw || "")); } catch (e) { return null; }
+  if (u.protocol !== "https:" || u.username || u.password || (u.port && u.port !== "443")) return null;
+  const h = u.hostname.toLowerCase();
+  if (!h || h === "localhost" || h.endsWith(".localhost") || /^\d{1,3}(\.\d{1,3}){3}$/.test(h) || h.includes(":") || h.startsWith("[") || !h.includes(".")) return null;
+  return u;
+}
+
+/** The page's <title>, as observed provenance only (never used in a request). Plain text, whitespace collapsed, at most 500 characters. */
+function observedTitle(html) {
+  const m = /<title[^>]*>([\s\S]{0,4000}?)<\/title>/i.exec(Buffer.isBuffer(html) ? html.subarray(0, 262144).toString("utf8") : String(html || "").slice(0, 262144));
+  if (!m) return null;
+  const ents = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ", ndash: "\u2013", mdash: "\u2014", rsquo: "\u2019", lsquo: "\u2018", rdquo: "\u201d", ldquo: "\u201c" };
+  const t = m[1].replace(/<[^>]*>/g, "").replace(/&#x([0-9a-f]+);/gi, (x, h) => { const n = parseInt(h, 16); return n > 0 && n < 0x110000 ? String.fromCodePoint(n) : ""; })
+    .replace(/&#(\d+);/g, (x, d) => { const n = Number(d); return n > 0 && n < 0x110000 ? String.fromCodePoint(n) : ""; })
+    .replace(/&([a-z]+);/gi, (x, n) => (ents[n.toLowerCase()] !== undefined ? ents[n.toLowerCase()] : x)).replace(/\s+/g, " ").trim();
+  return t ? t.slice(0, 500) : null;
+}
+
+/** Read a response body with a hard cap: stops (and cancels the stream) as soon as more than max bytes arrived. → Buffer, or null when over. */
+async function readCapped(r, max) {
+  if (r.body && typeof r.body.getReader === "function") {
+    const reader = r.body.getReader(); const parts = []; let n = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      n += value.length;
+      if (n > max) { try { await reader.cancel(); } catch (e) { /* already closed */ } return null; }
+      parts.push(Buffer.from(value));
+    }
+    return Buffer.concat(parts);
+  }
+  const buf = Buffer.from(await r.arrayBuffer());   // fetch-compatible stubs (fixture source, tests) without a stream
+  return buf.length > max ? null : buf;
+}
+
+/**
+ * Plain server-side GET of the article's HTML (no provider, no retry with another page). Redirects are followed by hand (at most 5), each hop
+ * must stay https on the same site, so a cross-site hop is refused BEFORE it is requested. Explicit failure codes, each with stage "fetch":
+ *   bad_url, fetch_timeout, fetch_failed, too_many_redirects, redirected_elsewhere, http_error (+ httpStatus), not_html, empty, too_large.
+ * Returns { html, finalUrl, retrievedAt, httpStatus, contentType, bytes, observedTitle }.
+ */
+async function fetchArticle(url, { fetchFn, now, timeoutMs, maxBytes } = {}) {
   const f = fetchFn || fetch;
-  const ac = new AbortController(); const t = setTimeout(() => ac.abort(), FETCH_TIMEOUT_MS);
-  let r;
-  try { r = await f(url, { redirect: "follow", signal: ac.signal, headers: { accept: "text/html,application/xhtml+xml" } }); }
-  catch (e) { fail("inaccessible", "the article could not be fetched"); }
-  finally { clearTimeout(t); }
-  if (!r || r.status !== 200) fail("inaccessible", `the article returned HTTP ${r ? r.status : "no response"}`);
-  const ct = String((r.headers && r.headers.get && r.headers.get("content-type")) || "");
-  if (!/html/i.test(ct)) fail("not_html", `the article is not HTML (${ct || "no content type"})`);
-  const buf = Buffer.from(await r.arrayBuffer());
-  if (!buf.length || buf.length > MAX_HTML) fail("empty_or_too_large", "the article HTML is empty or over 4 MB");
-  const finalUrl = String(r.url || url);
-  const host = (u) => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch (e) { return ""; } };
-  if (host(finalUrl) !== host(url)) fail("redirected_elsewhere", `the article redirected to another site (${host(finalUrl)})`);
-  return { html: buf, finalUrl, retrievedAt: (now ? new Date(now) : new Date()).toISOString() };
+  const max = maxBytes || MAX_HTML;
+  const d = { stage: "fetch", httpStatus: null, contentType: null, bytes: null, finalUrl: null };
+  const start = articleUrl(url);
+  if (!start) fail("bad_url", "the article URL must be https on a public host name (no IP address, credentials or custom port)", d);
+  const ac = new AbortController(); const t = setTimeout(() => ac.abort(), timeoutMs || FETCH_TIMEOUT_MS);
+  try {
+    let current = start.href, r = null;
+    for (let hop = 0; ; hop++) {
+      try { r = await f(current, { redirect: "manual", signal: ac.signal, headers: { accept: "text/html,application/xhtml+xml" } }); }
+      catch (e) {
+        d.finalUrl = current;
+        if (ac.signal.aborted) fail("fetch_timeout", "the article did not answer in time", d);
+        if (e instanceof StageBError) { e.detail = { ...d, ...(e.detail || {}), stage: "fetch" }; throw e; }   // a fetch source's own code (fixture worker)
+        fail("fetch_failed", "the article could not be fetched", d);
+      }
+      if (!r) { d.finalUrl = current; fail("fetch_failed", "the article returned no response", d); }
+      if (!REDIRECT_STATUSES.has(r.status)) break;
+      d.httpStatus = r.status;
+      const loc = r.headers && r.headers.get ? r.headers.get("location") : null;
+      let next = null; try { next = loc ? new URL(loc, current).href : null; } catch (e) { next = null; }
+      try { if (r.body && r.body.cancel) await r.body.cancel(); } catch (e) { /* nothing to release */ }
+      if (!next) { d.finalUrl = current; fail("fetch_failed", "a redirect had no usable location", d); }
+      if (siteOf(next) !== siteOf(start.href)) { d.finalUrl = current; fail("redirected_elsewhere", `the article redirected to another site (${siteOf(next)})`, d); }
+      if (!articleUrl(next)) { d.finalUrl = current; fail("bad_url", "the article redirected to a URL that is not https on a public host name", d); }
+      if (hop + 1 > MAX_REDIRECTS) { d.finalUrl = current; fail("too_many_redirects", `more than ${MAX_REDIRECTS} redirects`, d); }
+      current = next;
+    }
+    // A fetch-compatible source that resolves redirects itself (the fixture worker) reports the final URL in r.url; it must stay on the site.
+    const finalUrl = String((r.url && siteOf(r.url) === siteOf(current)) ? r.url : current);
+    if (r.url && siteOf(r.url) !== siteOf(current)) { d.finalUrl = String(r.url); fail("redirected_elsewhere", `the article redirected to another site (${siteOf(r.url)})`, d); }
+    d.finalUrl = finalUrl; d.httpStatus = r.status;
+    const ct = String((r.headers && r.headers.get && r.headers.get("content-type")) || "");
+    d.contentType = ct ? ct.slice(0, 200) : null;
+    if (r.status !== 200) fail("http_error", `the article returned HTTP ${r.status}`, d);
+    if (!/\bx?html\b/i.test(ct)) fail("not_html", `the article is not HTML (${ct || "no content type"})`, d);
+    const len = Number(r.headers && r.headers.get && r.headers.get("content-length"));
+    if (Number.isFinite(len) && len > max) { d.bytes = len; try { if (r.body && r.body.cancel) await r.body.cancel(); } catch (e) { /* ignore */ } fail("too_large", `the article is over ${Math.round(max / 1048576)} MB`, d); }
+    let buf;
+    try { buf = await readCapped(r, max); }
+    catch (e) { if (ac.signal.aborted) fail("fetch_timeout", "the article did not finish in time", d); fail("fetch_failed", "the article body could not be read", d); }
+    if (buf === null) { d.bytes = max + 1; fail("too_large", `the article is over ${Math.round(max / 1048576)} MB`, d); }
+    d.bytes = buf.length;
+    if (!buf.length) fail("empty", "the article returned no content", d);
+    return { html: buf, finalUrl, retrievedAt: (now ? new Date(now) : new Date()).toISOString(), httpStatus: r.status, contentType: d.contentType,
+      bytes: buf.length, observedTitle: observedTitle(buf) };
+  } finally { clearTimeout(t); }
 }
 
 /** Independently re-check a snapshot reply from the bridge (never trust it). Returns the checked snapshot. */
 function checkSnapshot(s) {
-  if (!s || s.ok !== true) fail(s && s.code ? s.code : "snapshot_refused", (s && s.message) || "the snapshot was refused");
+  // The worker's "inaccessible" (a script, robot-check, paywall-like or error page) is reported as capture_blocked, so it cannot be confused
+  // with a fetch failure; every snapshot refusal carries stage "snapshot".
+  if (!s || s.ok !== true) {
+    const c = s && s.code ? (s.code === "inaccessible" ? "capture_blocked" : String(s.code)) : "snapshot_refused";
+    fail(c, (s && s.message) || "the snapshot was refused", { stage: "snapshot", rawHtmlSha256: s && /^[0-9a-f]{64}$/.test(String(s.raw_html_sha256 || "")) ? s.raw_html_sha256 : null });
+  }
   const p = [];
   if (sb.sha(s.snapshot_text) !== s.snapshot_sha256) p.push("snapshot hash");
   if (sb.sha(s.input) !== s.input_sha256) p.push("input hash");
@@ -167,7 +255,7 @@ function checkSnapshot(s) {
     if (req.model !== sb.APPROVED_B1.model || req.max_output_tokens !== sb.APPROVED_B1.max_output_tokens || !req.reasoning || req.reasoning.effort !== sb.APPROVED_B1.reasoning_effort) p.push("request settings");
   }
   if (s.extractor !== sb.APPROVED_B1.extractor) p.push("extractor");
-  if (p.length) fail("snapshot_inconsistent", `snapshot failed independent checks: ${p.join(", ")}`);
+  if (p.length) fail("snapshot_inconsistent", `snapshot failed independent checks: ${p.join(", ")}`, { stage: "snapshot" });
   return s;
 }
 
@@ -187,6 +275,32 @@ function checkGate(g, record, responseText) {
   return g.bundle;
 }
 
+/** The attempt-log detail of a capture (hashes, URL, status, type, size, observed title). Never HTML or text. */
+function captureDetail(page, snap, stage) {
+  return { stage, httpStatus: page ? page.httpStatus || null : null, contentType: page ? page.contentType || null : null, bytes: page ? page.bytes || null : null,
+    finalUrl: page ? page.finalUrl : null, observedTitle: page ? page.observedTitle || null : null,
+    rawHtmlSha256: snap && /^[0-9a-f]{64}$/.test(String(snap.raw_html_sha256 || "")) ? snap.raw_html_sha256 : null,
+    snapshotSha256: snap && /^[0-9a-f]{64}$/.test(String(snap.snapshot_sha256 || "")) ? snap.snapshot_sha256 : null };
+}
+
+/**
+ * capture({ art, fetchFn, env, now }) → { page, snap, key }: live fetch (or the fixture source), the worker snapshot, the independent re-check.
+ * The request title is ALWAYS the selected topic's source title (art.title, authoritative for this milestone); the fetched page's <title> is
+ * only recorded as observed provenance (page.observedTitle). Errors carry detail.stage "fetch" or "snapshot".
+ */
+async function capture({ art, fetchFn, env, now }) {
+  const page = await fetchArticle(art.url, { fetchFn, now });
+  let snap;
+  try {
+    snap = checkSnapshot(await callBridge("snapshot", { url: page.finalUrl, title: art.title, html_b64: page.html.toString("base64"), retrieved_at: page.retrievedAt }, env));
+  } catch (e) {
+    const err = e instanceof StageBError ? e : new StageBError("bridge_error", "the snapshot could not be taken");
+    err.detail = { ...captureDetail(page, null, "snapshot"), ...(err.detail && err.detail.rawHtmlSha256 ? { rawHtmlSha256: err.detail.rawHtmlSha256 } : {}) };
+    throw err;
+  }
+  return { page, snap, key: sb.approvedKey(snap.snapshot_sha256) };
+}
+
 /**
  * Step 1: capture (or reuse) the snapshot for the project's selected article and reserve the B1 run.
  * store: { findForProject(projectId, topicId), findLive(cacheKey), insert(row), update(id, fields, expectStatus) } (lib/agent-marketing-b1-store-lib.js;
@@ -201,10 +315,9 @@ async function prepare({ project, userId, store, fetchFn, env, now }) {
   if (!art) fail("no_article", "the selected topic has no article URL");
   const found = await store.findForProject(project.id, t.id);
   const existing = found && found.status !== "failed" ? found : null;   // a failed run never blocks a retry (migration R4)
-  const page = await fetchArticle(art.url, { fetchFn, now });
-  const snap = checkSnapshot(await callBridge("snapshot", { url: page.finalUrl, title: art.title, html_b64: page.html.toString("base64"), retrieved_at: page.retrievedAt }, env));
-  const key = sb.approvedKey(snap.snapshot_sha256);
-  if (existing && existing.cache_key !== key) fail("source_changed", "the article changed since its snapshot was taken; a new snapshot needs an explicit decision");
+  const { page, snap, key } = await capture({ art, fetchFn, env, now });
+  if (existing && existing.cache_key !== key) fail("source_changed", "the article changed since its snapshot was taken; a new snapshot needs an explicit decision",
+    { ...captureDetail(page, snap, "compare"), comparedTo: existing.status === "ready" ? existing.id : null });
   if (existing) return { record: existing, reused: existing.status === "ready" };   // a reserved row is resumed, not duplicated (idempotent retry)
   const live = await store.findLive(key);
   const base = { user_id: userId, project_id: project.id, research_id: t.researchId, topic_id: t.id, source_url: art.url, final_url: page.finalUrl,
@@ -234,4 +347,5 @@ async function complete({ record, responseText, store, env }) {
     finished_at: new Date().toISOString() }, record.status);
 }
 
-module.exports = { StageBError, callBridge, callWorker, fixtureSource, signRequest, replySignature, articleOf, fetchArticle, checkSnapshot, checkGate, prepare, complete, config };
+module.exports = { StageBError, callBridge, callWorker, fixtureSource, signRequest, replySignature, articleOf, articleUrl, observedTitle, fetchArticle, capture, captureDetail,
+  checkSnapshot, checkGate, prepare, complete, config, MAX_REDIRECTS };

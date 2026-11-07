@@ -395,7 +395,7 @@ test("stageb fixture mode: an article outside the FA/FB/FC allowlist fails the s
   try {
     await w.start("token-a", w.P.FA.id);
     const r = json(await w.background(w.dispatched.pop(), { fetchFn: undefined, provider: undefined }));
-    assert.deepStrictEqual([r.state, r.code], ["failed", "inaccessible"]);
+    assert.deepStrictEqual([r.state, r.code], ["failed", "fixture_refused"]);
   } finally { global.fetch = keep; }
   assert.strictEqual(live, 0); assert.strictEqual(w.db.T.ledger.length, 0); assert.strictEqual(w.db.T.agent_marketing_article_evidence.length, 0);
 });

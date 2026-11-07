@@ -31,8 +31,11 @@ exports.handler = async (event, context, deps) => {
   if (run.admit(userId, env)) return { statusCode: 404, body: "" };   // checked before reading the body: refused users learn nothing more
   let body = {}; try { body = JSON.parse(event.body || "{}"); } catch (e) { return { statusCode: 400, body: "" }; }
   if (!am.UUID_RE.test(String(body.projectId || ""))) return { statusCode: 400, body: "" };
+  // Source verification (live-fetch milestone): fetch, snapshot and compare only. No provider is even created on this path.
+  const verify = body.mode === "verify_source";
+  if (body.mode !== undefined && !verify) return { statusCode: 400, body: "" };
   let provider = null;
-  try { provider = d.provider || pv.createProvider({ env }); } catch (e) { provider = null; }   // no provider: the run is marked failed, nothing is sent
+  if (!verify) { try { provider = d.provider || pv.createProvider({ env }); } catch (e) { provider = null; } }   // no provider: the run is marked failed, nothing is sent
   // Development fixture mode: B1_SNAPSHOT_SOURCE=worker-fixture takes the frozen FA/FB/FC article from the private fixture worker (no live fetch).
   let fetchFn = d.fetchFn;
   if (!fetchFn) {
@@ -40,9 +43,10 @@ exports.handler = async (event, context, deps) => {
     catch (e) { const err = e; fetchFn = async () => { throw err; }; }   // misconfigured fixture mode: the snapshot fails, never a live fetch
   }
   try {
-    const result = await run.startJob({ userId, projectId: body.projectId, store: d.store || st.createStore({ env }), loadProject: d.loadProject || loadProject,
-      fetchFn, provider, env, now: d.now });
-    console.log(`agent-marketing-stageb-background ${body.projectId.slice(0, 8)} ${result.state}${result.code ? ` ${result.code}` : ""}`);
+    const store = d.store || st.createStore({ env }), load = d.loadProject || loadProject;
+    const result = verify ? await run.verifyJob({ userId, projectId: body.projectId, store, loadProject: load, fetchFn, env, now: d.now })
+      : await run.startJob({ userId, projectId: body.projectId, store, loadProject: load, fetchFn, provider, env, now: d.now });
+    console.log(`agent-marketing-stageb-background ${verify ? "verify " : ""}${body.projectId.slice(0, 8)} ${result.state}${result.code ? ` ${result.code}` : ""}${result.outcome ? ` ${result.outcome}` : ""}`);
     return { statusCode: 200, body: JSON.stringify(result) };
   } catch (e) {
     console.error("agent-marketing-stageb-background error:", e.code || e.message);

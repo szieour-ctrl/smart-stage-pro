@@ -2,7 +2,9 @@
 //   POST { action: "start", projectId } → 202 { state: "dispatch" }: the page then POSTs { projectId } to agent-marketing-stageb-background with
 //        its own Bearer token (Nov 7, 2026: no server-to-server dispatch) | 202 { state: "reserved" | "running", code: "in_progress" } | 200 { state: "ready" }.
 //        Poll GET until the state is "ready" or "failed".
-//   GET  ?projectId=                    → { state, completeness, counts, error, reused, attached, createdAt, finishedAt } (no evidence text)
+//   POST { action: "verify_source", projectId } → 202 { state: "dispatch", mode: "verify_source" } (live-fetch milestone): the page then POSTs
+//        { projectId, mode: "verify_source" } to the background function. A verification never reserves, calls a provider or changes evidence.
+//   GET  ?projectId=                    → { state, completeness, counts, error, reused, attached, createdAt, finishedAt, lastAttempt } (no evidence text)
 // Off (404 for everyone) unless AGENT_MARKETING_B1_EVIDENCE=dev, Agent Marketing is enabled for the user and the user is listed in
 // B1_STAGEB_USER_IDS; refused (503) when the server's database is the production project. See lib/agent-marketing-b1-stageb-run-lib.js.
 const { supabase } = require("./lib/marketing-profile-lib");
@@ -36,11 +38,13 @@ exports.handler = async (event, context, deps) => {
     }
     if (event.httpMethod !== "POST") return reply(405, { error: "Method not allowed" });
     let body = {}; try { body = JSON.parse(event.body || "{}"); } catch (e) { return reply(400, { error: "Invalid JSON" }); }
-    if (body.action !== "start") return reply(400, { error: "Unknown action", code: "bad_request" });
+    if (body.action !== "start" && body.action !== "verify_source") return reply(400, { error: "Unknown action", code: "bad_request" });
     // Stage B never runs on a production host (the background function refuses it too).
     const { requestHost } = require("./lib/self-dispatch-lib");
     if (require("./lib/public-config-lib").isProductionHost(requestHost(event), env)) return reply(503, { error: "Stage B runs only on a development deploy.", code: "production_dispatch_refused" });
-    const r = await run.startRequest({ userId, projectId: body.projectId, store, loadProject: load, env });
+    // verify_source (live-fetch milestone): checks only; the page then starts the background function with { projectId, mode: "verify_source" }.
+    const r = body.action === "verify_source" ? await run.startVerifyRequest({ userId, projectId: body.projectId, store, loadProject: load, env })
+      : await run.startRequest({ userId, projectId: body.projectId, store, loadProject: load, env });
     return reply(r.status, r.body);
   } catch (e) {
     console.error("agent-marketing-stageb error:", e.code || e.message);

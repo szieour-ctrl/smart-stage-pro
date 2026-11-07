@@ -1,4 +1,4 @@
-# B1 Stage B: Live-Fetch milestone, test specification (DRAFT, not implemented)
+# B1 Stage B: Live-Fetch milestone, test specification (implemented locally Nov 8, 2026; hosted run not yet done)
 
 Nov 7, 2026. Development only (`b1-stageb-dev`, development Supabase `ooxigbxthabstahrexia`, Railway project `ssp-b1-stageb-worker`).
 
@@ -32,7 +32,8 @@ Nov 7, 2026. Development only (`b1-stageb-dev`, development Supabase `ooxigbxtha
    ownership trigger as on the evidence table. One row for every `verify_source` and for every Stage B `prepare` that ends before an
    evidence row exists. Text and HTML are never stored here (hashes only).
 3. **C3 explicit fetch codes (Node `fetchArticle`).**
-   `bad_url` (not https, IP literal, credentials, non-default port), `fetch_timeout`, `fetch_failed` (DNS, TLS, reset, redirect loop),
+   `bad_url` (not https, IP literal, credentials, non-default port), `fetch_timeout`, `fetch_failed` (DNS, TLS, reset, redirect without a location),
+   `too_many_redirects` (more than 5 hops),
    `http_error` (+ `http_status`, e.g. 401/402/403/404/410/451/5xx), `not_html`, `empty`, `too_large` (refused on `Content-Length` before
    reading, and the body read stops at 4 MB), `redirected_elsewhere`. The worker's `inaccessible` is reported as `capture_blocked`
    (`incomplete` unchanged). Existing callers of `inaccessible` are updated in the same change.
@@ -63,7 +64,7 @@ exactly **1** new attempt row with the expected `stage`/`outcome`, and no change
 | LF-04 | Project with no evidence row | `no_baseline` (verify) / proceeds to reservation only in evidence mode | compare |
 | LF-05 | 301/302 within the same site (incl. `www.`) to the article | `unchanged`; `final_url` recorded | compare |
 | LF-06 | Redirect to another site | `redirected_elsewhere` | fetch |
-| LF-07 | Redirect loop | `fetch_failed` | fetch |
+| LF-07 | Redirect loop / more than 5 hops; redirect without a location; https→http hop | `too_many_redirects`; `fetch_failed`; `bad_url` | fetch |
 | LF-08 | 404, 410, 451, 500 | `http_error` with `http_status` | fetch |
 | LF-09 | 401, 402, 403 (hard paywall / blocked) | `http_error` with `http_status` | fetch |
 | LF-10 | 200 soft paywall / robot check page | `capture_blocked` (or `incomplete` if too little text) | snapshot |
@@ -73,7 +74,7 @@ exactly **1** new attempt row with the expected `stage`/`outcome`, and no change
 | LF-14 | No response within the timeout (injected short timeout) | `fetch_timeout` | fetch |
 | LF-15 | `http://`, IP literal, `user:pass@`, odd port | `bad_url`, no request sent | fetch |
 | LF-16 | Empty 200 HTML | `empty` | fetch |
-| LF-17 | Evidence mode, `source_changed` on a project with a ready row (re-check enabled) | `source_changed`, no reservation, ready row and pointer unchanged | compare |
+| LF-17 | Evidence mode: a capture failure before any row; and a project that already has ready evidence | failure recorded as an `evidence` attempt, no row, no reservation, no provider call; a ready project is answered from its row without fetching (`source_changed` on a ready project is reached through the re-check, LF-03) | fetch / — |
 | LF-18 | Retry after any failure above | Allowed immediately; each attempt is its own row; nothing to reset | — |
 | LF-19 | Provenance on success | Attempt row has `source_url`, `final_url`, `page_title`, `raw_html_sha256`, `snapshot_sha256`, `compared_to`; no HTML or text stored | — |
 | LF-20 | Isolation | With `AGENT_MARKETING_B1_EVIDENCE` off, or a non-allowlisted user, or a production host, or the production database: 404/503, no fetch | — |
@@ -92,3 +93,33 @@ calls (no `fixture provider`, no `gate`), attempt rows match the clicks.
 - Approve Layer B (`b1-test-pages` service) or rely on Layers A + C only.
 - Approve the proposed attempt-log migration for the development database.
 - The request's `SOURCE TITLE` source (seeded topic vs fetched page) is recorded, not changed, in this milestone; decide before live research.
+
+## 7. Implementation status (Nov 8, 2026, local only; nothing hosted has run)
+
+| Step | State |
+|---|---|
+| Attempt-log schema (`docs/proposed-migrations/20261108_…capture_attempts.up/down.sql`) | Done. Local throwaway check `scripts/b1-attempts-migration-check.sh`: 25/25 PASS (ownership, append-only, no direct delete, minimal shape, RLS on with no policy, no anon/authenticated privilege, rollback, re-apply). |
+| Applied to development Supabase `ooxigbxthabstahrexia` only | Done. Re-verified there: RLS on, 0 policies, anon/authenticated no privilege, service_role select/insert, 3 triggers, 0 rows. Evidence (4) and reservations (4) unchanged. |
+| C1 verify mode (`run.verifyJob`, `startVerifyRequest`; background `mode: "verify_source"`) | Done. No provider is created on that path; no evidence write, reservation or link change; one attempt row. Verify-only cap `B1_VERIFY_MAX_PER_USER_DAY` (default 20). |
+| C3 explicit codes (`fetchArticle`) | Done: manual same-site https redirects (≤ 5, cross-site hop never requested), `Content-Length` pre-check and streaming 4,000,000-byte cap, timeout code, worker `inaccessible` → `capture_blocked`, fixture refusal → `fixture_refused`. |
+| C2 durable recording | Done: every verification, and every evidence-mode capture failure before a row exists (`fetch`, `snapshot`, `source_changed`). A failed log write never changes the outcome. |
+| C4 status + panel | Done: `lastAttempt` (mode, stage, outcome, HTTP status, time only); plain-language messages; "Re-check the article" button; the watcher ends on the new attempt and ignores the project's earlier rows. |
+| Seeded title | Unchanged and authoritative; the fetched `<title>` is stored only as `observed_title`. FA/FB/FC requests through the live path still hash to the approved fixtures (LF-21). |
+
+**Tests:** `tests/agent-marketing-b1-fetch.test.js` 14/14 (no private material; local server, plain-http adapter and Node's real `fetch`),
+`tests/agent-marketing-b1-live-fetch.test.js` 11/11 (real worker snapshot code on the frozen articles), `tests/agent-marketing-b1-attempts-store.test.js`
+4/4, `tests/agent-marketing-stageb-ui.test.js` 13/13. Full SSP suite: **752/752** with `B1_WORKSPACE` + `B1_FIXTURES_REQUIRED=1` (695 pass,
+57 skipped without the workspace). All 21 acceptance cases covered.
+
+### Layer B assessment (deferred, as instructed)
+Remaining gap after Layer A (which already runs Node's real `fetch`): the failure-path codes (`http_error`, `not_html`, `too_large`,
+`fetch_timeout`, redirects) have not been observed over **real TLS from the Netlify runtime**, and live attempt rows have not yet been written
+through PostgREST. Layer C (real publishers) covers the success path, real TLS/egress and the real attempt writes. **Recommendation: no Layer B
+unless Layer C shows a discrepancy.** If needed, minimum: one Railway service in the development project with ~10 static synthetic routes
+(no secrets, no frozen text), 1 replica at the smallest size; estimated well under US$1/month while it exists, deleted after the run.
+
+### Hosted Layer C run (needs owner go-ahead)
+1. Branch values: add `AGENT_MARKETING_B1_EVIDENCE=dev`; **remove** `B1_SNAPSHOT_SOURCE` (live fetch); keep `B1_PROVIDER=worker-fixture`. Redeploy.
+2. On FA, FB, FC: click "Re-check the article" once each. Expected `unchanged`; `source_changed` or an `http_error` is acceptable and reported.
+3. Verify: 3 new attempt rows; evidence rows still 4, reservations still 4, project links unchanged; worker logs show only `snapshot` calls.
+4. Switch Stage B off again and restore `B1_SNAPSHOT_SOURCE=worker-fixture` if fixture runs are wanted later.

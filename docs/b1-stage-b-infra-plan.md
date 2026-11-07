@@ -245,3 +245,6 @@ functions → private fixture worker on Railway → development Supabase), with 
   `AGENT_MARKETING_B1_EVIDENCE` (no context has a value now); every Stage B endpoint answers 404 and the panel stays hidden. All other branch
   values (worker URL/secret, fixture provider and snapshot source, allowlists) are kept for the next session. Re-enable: add the branch value
   `dev` again and redeploy. `b1-env-check` should now report `ok: true` with `AGENT_MARKETING_B1_EVIDENCE: unset`.
+- Nov 8: live-fetch milestone implemented and tested locally (`docs/b1-live-fetch-spec.md` §7). Migration
+  `20261108_agent_marketing_article_capture_attempts` applied to the development database only (append-only attempt log, service role only).
+  The code is inert on the branch while `AGENT_MARKETING_B1_EVIDENCE` is unset. No hosted live fetch has run.

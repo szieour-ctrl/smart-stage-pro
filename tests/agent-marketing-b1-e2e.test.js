@@ -136,8 +136,8 @@ test("e2e: bad captures and inconsistent bridge replies fail closed", { skip: SK
   const store = memStore(), p = project("FA");
   const page = (body, over) => async (url) => ({ status: 200, url, headers: { get: () => "text/html" }, arrayBuffer: async () => Buffer.from(body), ...(over || {}) });
   await assert.rejects(br.prepare({ project: p, userId: "u", store, fetchFn: page("<html><body><p>Too short.</p></body></html>"), env: ENV }), (e) => e.code === "incomplete");
-  await assert.rejects(br.prepare({ project: p, userId: "u", store, fetchFn: page("<html><body><p>Just a moment... verify you are human. " + "x ".repeat(900) + "</p></body></html>"), env: ENV }), (e) => e.code === "inaccessible");
-  await assert.rejects(br.prepare({ project: p, userId: "u", store, fetchFn: page("x", { status: 404 }), env: ENV }), (e) => e.code === "inaccessible");
+  await assert.rejects(br.prepare({ project: p, userId: "u", store, fetchFn: page("<html><body><p>Just a moment... verify you are human. " + "x ".repeat(900) + "</p></body></html>"), env: ENV }), (e) => e.code === "capture_blocked" && e.detail.stage === "snapshot");
+  await assert.rejects(br.prepare({ project: p, userId: "u", store, fetchFn: page("x", { status: 404 }), env: ENV }), (e) => e.code === "http_error" && e.detail.httpStatus === 404 && e.detail.stage === "fetch");
   await assert.rejects(br.prepare({ project: p, userId: "u", store, fetchFn: async (url) => ({ status: 200, url, headers: { get: () => "application/pdf" }, arrayBuffer: async () => Buffer.from("%PDF") }), env: ENV }), (e) => e.code === "not_html");
   await assert.rejects(br.prepare({ project: p, userId: "u", store, fetchFn: async () => ({ status: 200, url: "https://elsewhere.example/x", headers: { get: () => "text/html" }, arrayBuffer: async () => raw("FA") }), env: ENV }), (e) => e.code === "redirected_elsewhere");
   // a tampered snapshot or gate reply is caught by the Node checks

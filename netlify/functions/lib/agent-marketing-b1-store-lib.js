@@ -14,6 +14,7 @@
 const b1 = require("./agent-marketing-b1-evidence-lib");
 
 const TABLE = "agent_marketing_article_evidence";
+const ATTEMPTS = "agent_marketing_article_capture_attempts";   // proposed migration 20261108 (development database only)
 class StoreError extends Error { constructor(code, message) { super(message); this.code = code; } }
 const enc = encodeURIComponent;
 
@@ -91,6 +92,32 @@ function createStore({ env, request } = {}) {
     async fail(id, code, fromStatus) {
       return this.update(id, { status: "failed", error: String(code).slice(0, 200), finished_at: new Date().toISOString() }, fromStatus);
     },
+    /**
+     * Append one capture attempt (live-fetch milestone): a verification, or a failure before an evidence row could exist. Only the whitelisted
+     * minimal fields are sent; anything else is dropped here, and the database refuses text-sized or malformed values. Never HTML or text.
+     */
+    async insertAttempt(a) {
+      const hex = (v) => (/^[0-9a-f]{64}$/.test(String(v || "")) ? v : null);
+      const str = (v, n) => (v === undefined || v === null || v === "" ? null : String(v).slice(0, n));
+      const intOr = (v, lo, hi) => (Number.isInteger(v) && v >= lo && v <= hi ? v : null);
+      const body = { user_id: a.userId, project_id: a.projectId || null, topic_id: String(a.topicId || "").slice(0, 200), mode: a.mode, stage: a.stage,
+        outcome: String(a.outcome || "").toLowerCase().replace(/[^a-z_]/g, "_").replace(/^[^a-z]+/, "").slice(0, 40) || "unknown_error",
+        http_status: intOr(a.httpStatus, 100, 599), content_type: str(a.contentType, 200), bytes: intOr(a.bytes, 0, 2147483647),
+        source_url: str(a.sourceUrl, 2048), final_url: str(a.finalUrl, 2048), observed_title: str(a.observedTitle, 500),
+        raw_html_sha256: hex(a.rawHtmlSha256), snapshot_sha256: hex(a.snapshotSha256), compared_to: a.comparedTo || null };
+      if (body.outcome.length < 2) body.outcome = "unknown_error";
+      const r = one(check(await rq("POST", ATTEMPTS, body, ""), "insertAttempt"));
+      if (!r) throw new StoreError("store_error", "insertAttempt returned no row");
+      return r;
+    },
+    /** The project's latest attempt, as the page may see it: mode, stage, outcome, HTTP status and time (no URL, title or hashes). */
+    async latestAttempt(projectId, topicId) {
+      return one(check(await rq("GET", ATTEMPTS, null, `?project_id=eq.${enc(projectId)}&topic_id=eq.${enc(topicId)}&select=mode,stage,outcome,http_status,created_at&order=created_at.desc&limit=1`), "latestAttempt"));
+    },
+    /** Source verifications by this user since `sinceIso` (the verify-only daily cap). */
+    async countVerifications({ userId, sinceIso }) {
+      return check(await rq("GET", ATTEMPTS, null, `?user_id=eq.${enc(userId)}&mode=eq.verify_source&created_at=gte.${enc(sinceIso)}&select=id&limit=1000`), "countVerifications").length;
+    },
     /** The plan-time read: the project's chosen record (or null; with the switch on, null makes the Planner fail closed). */
     async forPlan(project) {
       if (!project || !project.article_evidence_id) return null;
@@ -99,4 +126,4 @@ function createStore({ env, request } = {}) {
   };
 }
 
-module.exports = { createStore, StoreError, TABLE };
+module.exports = { createStore, StoreError, TABLE, ATTEMPTS };

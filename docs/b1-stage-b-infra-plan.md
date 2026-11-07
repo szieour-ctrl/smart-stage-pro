@@ -1,18 +1,54 @@
 # Stage B development infrastructure plan (Nov 7, 2026)
 
 **Status: nothing provisioned, no migration applied.** Each numbered step needs its own approval.
-Production configuration is not changed by any step except step 1, which narrows production secrets so they stop reaching non-production deploys.
+No step changes a production value: step 1 only adds values for the branch `b1-stageb-dev`.
 
 ## 0. Prerequisite already in place
 Team-login protection is ON for non-production deploys. That is why the page now starts the Stage B background function itself (`docs/b1-stage-b-step3-browser-dispatch.md`).
 
-## 1. Netlify scoping (production config change; smallest step, $0)
-- Scope every production-only secret to the **Production** context only. Previews and branch deploys must not inherit them.
-  - Paid provider keys: `ANTHROPIC_API_KEY`, `PERPLEXITY_API_KEY`, `OPENAI_API_KEY`, `ELEVENLABS_API_KEY`.
-  - Admin credentials: `SUPABASE_SERVICE_ROLE_KEY` (production), `STRIPE_*`, `S3_*`, `NETLIFY_ACCESS_TOKEN`, `INTERNAL_API_KEY`.
-  - Production URLs: `SITE_URL`, `NETLIFY_URL`.
-- Give the `b1-stageb-dev` **branch deploy** context only the variables in step 5. No other context gets them.
-- How to check afterwards without reading values: in each variable's "Deploy contexts" panel, the Branch deploys and Deploy Previews rows are empty.
+## 1. Netlify isolation for `b1-stageb-dev` (same site; production values untouched; $0)
+Decision (Nov 7, 2026): use the existing site with deploy-context isolation. No second site.
+
+**Method: branch-specific values only.**
+- Every variable listed below gets a value for the specific branch `b1-stageb-dev`. Production, Deploy Preview and other branch values are left exactly as they are.
+- CLI form: `netlify env:set NAME VALUE --context branch:b1-stageb-dev`. This adds only that branch's value.
+- UI form: Site configuration → Environment variables → NAME → Options → Edit → "Different value for each deploy context" → "Add branch value" → `b1-stageb-dev`. Leave the Production row unchanged.
+- **Do not** set `URL` or `DEPLOY_URL`: Netlify reserves both.
+- Until a branch named `b1-stageb-dev` is pushed, these values have no effect on anything.
+
+**a. Replaced with the development project's values** (database and browser config):
+
+| Name | Value |
+|---|---|
+| `SUPABASE_URL` | `https://<dev-ref>.supabase.co` |
+| `SUPABASE_SERVICE_ROLE_KEY` | the dev project's service-role key |
+| `SSP_PUBLIC_SUPABASE_URL` | the same dev URL |
+| `SSP_PUBLIC_SUPABASE_ANON_KEY` | the dev project's anon key |
+
+**b. Billing and self-calls:**
+
+| Name | Value |
+|---|---|
+| `SITE_URL` | `https://b1-stageb-dev--smart-stage-pro.netlify.app` |
+| `NETLIFY_URL` | `https://b1-stageb-dev--smart-stage-pro.netlify.app` |
+| `INTERNAL_API_KEY` | a new random value, different from production |
+
+The four billing callers send `debit-credit` to `${SITE_URL}`. With these values they reach the branch deploy, never production. If any call does reach production, production refuses it because the internal key differs.
+
+**c. Neutralised** with the placeholder `b1-dev-disabled` (any call fails authentication; nothing is charged or written):
+- **Job storage (Netlify Blobs):** `NETLIFY_ACCESS_TOKEN`. Blobs are shared site-wide, and every store in the code passes this token explicitly. Stage B keeps its jobs in the dev database only.
+- **Media storage:** `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`. Also set `S3_BUCKET_NAME` to `b1-dev-disabled`.
+- **Paid AI and data providers:** `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `PERPLEXITY_API_KEY`, `ELEVENLABS_API_KEY`, `REPLICATE_API_KEY`, `BRIGHTDATA_API_KEY`, `RENTCAST_API_KEY`, `GOOGLE_MAPS_API_KEY`.
+- **Payments:** `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`.
+- **Render service:** `RAILWAY_SECRET`, `WEBHOOK_SECRET`, `RAILWAY_RENDER_URL`, `RAILWAY_SMART_CORRECT_URL`, `RAILWAY_SMART_CORRECT_UPLOAD_URL`. Set the URLs to `https://b1-dev-disabled.invalid`.
+- **Customer email and webhooks:** `PABBLY_COMPLIANCE_REPORT_WEBHOOK_URL`, `PABBLY_VIDEO_DELIVERY_WEBHOOK_URL`, `PABBLY_TRANSACTIONAL_EMAIL_WEBHOOK_URL`, `PABBLY_IMAGE_PACK_WEBHOOK_URL`. Set them to `https://b1-dev-disabled.invalid`.
+- **Signing secrets:** `REEL_SHARE_SECRET`, `PROMO_LINK_SECRET`.
+
+**d. Stage B's own variables:** the table in step 5, on the same branch context.
+
+**e. Build setting:** Site configuration → Build & deploy → Branches and deploy contexts → Branch deploys → "Let me add individual branches" → add `b1-stageb-dev`. This does not change Production or Deploy Previews.
+
+**Already in place:** team-login protection covers branch deploys. The browser config on a non-production host comes from the server and refuses the production project (`ssp-public-config.js`).
 
 ## 2. Development Supabase project (new hosted project)
 - **What it contains:** a schema-only copy of production `public`, plus the two `auth.users` triggers (user row and trial-credit seed). No rows are copied.
@@ -65,7 +101,7 @@ Team-login protection is ON for non-production deploys. That is why the page now
 | `B1_STAGEB_MAX_PER_USER_DAY` / `B1_STAGEB_MAX_GLOBAL_DAY` | `3` / `10` (the defaults) |
 | `AGENT_MARKETING_REQUEST_DAILY_LIMIT` / `AGENT_MARKETING_REQUEST_MONTHLY_LIMIT` | ledger limits; defaults apply if unset |
 
-Not set on this context: `INTERNAL_API_KEY` (Stage B no longer uses it) and every paid provider key.
+Stage B itself does not use `INTERNAL_API_KEY` or any paid provider key; on this branch those carry the step 1 values (a new internal key, and the `b1-dev-disabled` placeholders).
 
 ## Open items before a deployed mock run
 - **Mock responses on a deploy:** `B1_PROVIDER=mock` needs the saved B1 responses (`B1_MOCK_RESPONSES_DIR`). Those are private and are not in this public repository, so they can't be bundled into Netlify functions.

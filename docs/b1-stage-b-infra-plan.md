@@ -202,3 +202,8 @@ Only after test 2 passes: the paid provider call, under separate approval.
   - `B1_PROVIDER=worker-fixture` takes the saved B1 response for the exact frozen request.
   - Both work only with `AGENT_MARKETING_B1_EVIDENCE=dev` and an HTTPS worker. No live article is fetched and no AI provider is called.
 - Seed: `dev_ops/hosted_test_seed.sql` in the private repository.
+
+## Nov 7: Stage B switched on for the hosted FA/FB/FC run (branch only)
+- Owner saved the eight `b1-stageb-dev` branch values: `B1_WORKER_URL` (fixture worker), `B1_WORKER_SECRET`, `B1_PROVIDER=worker-fixture`, `B1_SNAPSHOT_SOURCE=worker-fixture`, `AGENT_MARKETING_ENABLED`, `AGENT_MARKETING_USER_IDS`, `B1_STAGEB_USER_IDS` (the development test user), and last `AGENT_MARKETING_B1_EVIDENCE=dev`. Checked through the Netlify API by state only; none of them has a Production value.
+- Branch-only redeploy of `b1-stageb-dev` so the new values reach the functions. `main` and Production are unchanged.
+- Expected: `b1-env-check` now lists `AGENT_MARKETING_B1_EVIDENCE: set` as its one failing check, because that check was written while Stage B had to stay off. Every other check should still pass.

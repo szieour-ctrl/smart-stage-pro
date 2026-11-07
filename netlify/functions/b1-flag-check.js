@@ -10,7 +10,9 @@
 //        unknown path    → 404 not_found, NOT signed
 //      So a 404 alone proves nothing. workerAuth is true only when the reply signature verifies with our secret and our nonce, which a worker
 //      holding a different secret cannot produce.
-//   GET → 200 { agentMarketingEnabled, runtime: { context, branch }, workerAuth: true|false|null, workerAuthCode, workerStatus }
+//   GET → 200 { agentMarketingEnabled, runtime: { context, branch }, workerAuth: true|false|null, workerAuthCode, workerStatus, workerRefusal,
+//              clockSkewSec, deploy: { deployId, source }, secret: { present, length, hex64, ... } }
+//        workerRefusal: the worker's own (unsigned, informational) refusal code; secret: the runtime value's length and character class only.
 //        on the b1-stageb-dev branch deploy only; 404 everywhere else. workerAuth null = could not be checked (see workerAuthCode).
 // Isolation: the request host must be the branch deploy host AND the functions must point at the development database. Netlify's CONTEXT and
 // BRANCH are build-time values that may be absent inside functions at runtime, so, as in b1-env-check, a missing value is accepted and a
@@ -28,6 +30,8 @@ const DEV_URL = "https://ooxigbxthabstahrexia.supabase.co";
 const PROBE_PATH = "/v1/fixture/article";
 const PROBE_URL = "https://b1-flag-check.invalid/not-a-fixture";   // reserved TLD: can never be on the fixture allowlist
 const PROBE_TIMEOUT_MS = 10000;
+// The worker's 401/503 refusal codes before authentication (ssp-b1-evidence src/stageb_worker.py).
+const WORKER_REFUSALS = ["unauthenticated", "stale_or_future_timestamp", "bad_signature", "replayed", "replay_cache_full"];
 const headers = { "Content-Type": "application/json", "Cache-Control": "no-store" };
 const hostOf = (event) => String((event && event.headers && (event.headers.host || event.headers.Host)) || "").toLowerCase().replace(/:\d+$/, "");
 
@@ -40,7 +44,7 @@ function httpsPost(url, pathname, hdrs, body) {
     const req = https.request({ hostname: url.hostname, port: url.port || 443, path: pathname, method: "POST", agent: false, headers: hdrs }, (res) => {
       const parts = []; let size = 0;
       res.on("data", (d) => { size += d.length; if (size <= 65536) parts.push(d); });
-      res.on("end", () => resolve({ status: res.statusCode, signature: String(res.headers["x-b1-response-signature"] || ""), body: Buffer.concat(parts) }));
+      res.on("end", () => resolve({ status: res.statusCode, signature: String(res.headers["x-b1-response-signature"] || ""), body: Buffer.concat(parts), date: String(res.headers.date || "") }));
     });
     req.setTimeout(PROBE_TIMEOUT_MS, () => { req.destroy(new Error("timeout")); });
     req.on("error", reject);
@@ -51,21 +55,46 @@ function httpsPost(url, pathname, hdrs, body) {
 /** One signed probe. → { workerAuth: true|false|null, workerAuthCode, workerStatus }. */
 async function probeWorker(env, post) {
   let c;
-  try { c = br.config(env); } catch (e) { return { workerAuth: null, workerAuthCode: "not_configured", workerStatus: null }; }
-  if (c.transport !== "https") return { workerAuth: null, workerAuthCode: "not_configured", workerStatus: null };
+  try { c = br.config(env); } catch (e) { return { workerAuth: null, workerAuthCode: "not_configured", workerStatus: null, workerRefusal: null, clockSkewSec: null }; }
+  if (c.transport !== "https") return { workerAuth: null, workerAuthCode: "not_configured", workerStatus: null, workerRefusal: null, clockSkewSec: null };
   const body = Buffer.from(JSON.stringify({ url: PROBE_URL }), "utf8");
   const { ts, nonce, sig } = br.signRequest(c.secret, "POST", PROBE_PATH, body);
   let r;
   try {
     r = await (post || httpsPost)(c.url, PROBE_PATH, { "Content-Type": "application/json", "Content-Length": body.length, "X-B1-Timestamp": ts, "X-B1-Nonce": nonce, "X-B1-Signature": sig }, body);
-  } catch (e) { return { workerAuth: null, workerAuthCode: "unreachable", workerStatus: null }; }
+  } catch (e) { return { workerAuth: null, workerAuthCode: "unreachable", workerStatus: null, workerRefusal: null, clockSkewSec: null }; }
   const status = Number(r.status) || null;
   const want = br.replySignature(c.secret, nonce, r.status, r.body);
   const got = String(r.signature || "");
   const signed = got.length === want.length && require("crypto").timingSafeEqual(Buffer.from(got), Buffer.from(want));
-  if (!signed) return { workerAuth: false, workerAuthCode: status === 401 ? "rejected_401_unsigned" : "unsigned_reply", workerStatus: status };
+  // Worker clock vs ours (whole seconds, from the reply's Date header): the worker refuses timestamps outside its CLOCK_SKEW window.
+  const wd = Date.parse(String(r.date || "")), clockSkewSec = Number.isFinite(wd) ? Math.round((wd - Date.now()) / 1000) : null;
+  if (!signed) {
+    // An unsigned reply cannot be trusted, but the worker's own refusal code says WHICH check failed (informational; fixed set only).
+    let reason = null; try { reason = String(JSON.parse(r.body.toString("utf8")).code || ""); } catch (e) { /* not JSON */ }
+    if (!WORKER_REFUSALS.includes(reason)) reason = reason ? "other" : null;
+    return { workerAuth: false, workerAuthCode: status === 401 ? "rejected_401_unsigned" : "unsigned_reply", workerStatus: status, workerRefusal: reason, clockSkewSec };
+  }
   let code = ""; try { code = String(JSON.parse(r.body.toString("utf8")).code || ""); } catch (e) { /* signed but not JSON */ }
-  return { workerAuth: true, workerAuthCode: status === 404 && code === "not_in_fixture_allowlist" ? "accepted_not_in_allowlist" : "accepted_unexpected_reply", workerStatus: status };
+  return { workerAuth: true, workerAuthCode: status === 404 && code === "not_in_fixture_allowlist" ? "accepted_not_in_allowlist" : "accepted_unexpected_reply", workerStatus: status, workerRefusal: null, clockSkewSec };
+}
+
+/** The shape of the runtime B1_WORKER_SECRET, never the value nor anything derived from it beyond its length and character class. */
+function secretShape(env) {
+  const v = env.B1_WORKER_SECRET;
+  if (v === undefined) return { present: false };
+  const s = String(v);
+  return { present: true, length: s.length, hex64: /^[0-9a-f]{64}$/.test(s), hexAnyCase64: /^[0-9a-fA-F]{64}$/.test(s), edgeWhitespace: s !== s.trim(),
+    innerWhitespace: /\s/.test(s.trim()), quoted: /^["']|["']$/.test(s), unresolvedReference: /\$\{|\{\{|\}\}/.test(s), nonPrintable: /[^\x21-\x7e]/.test(s.trim()) };
+}
+
+/** Which deploy is answering: Netlify's x-nf-deploy-id request header, else the id in DEPLOY_URL. Deploy ids are public identifiers. */
+function deployOf(event, env) {
+  const h = (event && event.headers) || {};
+  const fromHeader = String(h["x-nf-deploy-id"] || h["X-Nf-Deploy-Id"] || "");
+  if (/^[0-9a-f]{24}$/.test(fromHeader)) return { deployId: fromHeader, source: "header" };
+  const m = /^https:\/\/([0-9a-f]{24})--/.exec(String(env.DEPLOY_URL || ""));
+  return m ? { deployId: m[1], source: "DEPLOY_URL" } : { deployId: null, source: "unavailable" };
 }
 
 exports.handler = async (event, context, deps) => {
@@ -79,8 +108,9 @@ exports.handler = async (event, context, deps) => {
   const agentMarketingEnabled = switchOn(env);
   const runtime = { context: env.CONTEXT ? CONTEXT : "unset", branch: env.BRANCH ? BRANCH : "unset" };
   const w = await probeWorker(env, d.post);
-  console.log(`b1-flag-check agentMarketingEnabled=${agentMarketingEnabled} workerAuth=${w.workerAuth} code=${w.workerAuthCode} status=${w.workerStatus} context=${runtime.context} branch=${runtime.branch}`);
-  return { statusCode: 200, headers, body: JSON.stringify({ agentMarketingEnabled, runtime, ...w }) };
+  const deploy = deployOf(event, env), secret = secretShape(env);
+  console.log(`b1-flag-check agentMarketingEnabled=${agentMarketingEnabled} workerAuth=${w.workerAuth} code=${w.workerAuthCode} status=${w.workerStatus} refusal=${w.workerRefusal} skew=${w.clockSkewSec} deploy=${deploy.deployId} secretLen=${secret.length} hex64=${secret.hex64}`);
+  return { statusCode: 200, headers, body: JSON.stringify({ agentMarketingEnabled, runtime, ...w, deploy, secret }) };
 };
 
-exports._internals = { BRANCH_HOST, DEV_URL, PROBE_URL, PROBE_PATH, switchOn, probeWorker };
+exports._internals = { BRANCH_HOST, DEV_URL, PROBE_URL, PROBE_PATH, WORKER_REFUSALS, switchOn, probeWorker, secretShape, deployOf };

@@ -62,7 +62,7 @@ test("b1-flag-check: agentMarketingEnabled is one boolean by the feature's own r
     const r = await call(BRANCH_HOST, { ...base, AGENT_MARKETING_ENABLED: v });
     assert.strictEqual(r.statusCode, 200);
     const b = JSON.parse(r.body);
-    assert.deepStrictEqual(Object.keys(b), ["agentMarketingEnabled", "runtime", "workerAuth", "workerAuthCode", "workerStatus"]);
+    assert.deepStrictEqual(Object.keys(b), ["agentMarketingEnabled", "runtime", "workerAuth", "workerAuthCode", "workerStatus", "workerRefusal", "clockSkewSec", "deploy", "secret"]);
     assert.strictEqual(typeof b.agentMarketingEnabled, "boolean");
     assert.strictEqual(b.agentMarketingEnabled, am.isEnabledFor(uid, { AGENT_MARKETING_ENABLED: v }), String(v));
     assert.ok(!r.body.includes("SECRET-NEVER-SHOWN") && !r.body.includes(DEV_URL));
@@ -133,4 +133,41 @@ test("b1-flag-check workerAuth against the real worker code: right secret → tr
     b = JSON.parse((await call(BRANCH_HOST, { ...base, ...workerEnv, B1_WORKER_SECRET: OTHER }, httpPost)).body);
     assert.deepStrictEqual([b.workerAuth, b.workerAuthCode, b.workerStatus], [false, "rejected_401_unsigned", 401]);
   } finally { proc.kill("SIGKILL"); fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("b1-flag-check: wrong secret reports the worker's refusal code and the clock difference; a refusal outside the fixed set is 'other'", async () => {
+  let b = JSON.parse((await call(BRANCH_HOST, { ...base, ...workerEnv }, fakeWorker(OTHER))).body);
+  assert.strictEqual(b.workerRefusal, "bad_signature");
+  const stale = async () => ({ status: 401, signature: "", body: Buffer.from('{"ok": false, "code": "stale_or_future_timestamp"}'), date: new Date(Date.now() + 600000).toUTCString() });
+  b = JSON.parse((await call(BRANCH_HOST, { ...base, ...workerEnv }, stale)).body);
+  assert.strictEqual(b.workerRefusal, "stale_or_future_timestamp");
+  assert.ok(b.clockSkewSec >= 598 && b.clockSkewSec <= 601, String(b.clockSkewSec));
+  const odd = async () => ({ status: 401, signature: "", body: Buffer.from('{"code": "<script>SECRET</script>"}') });
+  b = JSON.parse((await call(BRANCH_HOST, { ...base, ...workerEnv }, odd)).body);
+  assert.strictEqual(b.workerRefusal, "other");
+  assert.ok(!JSON.stringify(b).includes("SECRET"));
+});
+
+test("b1-flag-check: secret shape reports length and character class only; never the value or anything derived from it", async () => {
+  const shape = async (v) => JSON.parse((await call(BRANCH_HOST, { ...base, ...workerEnv, B1_WORKER_SECRET: v }, fakeWorker(SECRET))).body).secret;
+  const hex = "0123456789abcdef".repeat(4);
+  assert.deepStrictEqual(await shape(hex), { present: true, length: 64, hex64: true, hexAnyCase64: true, edgeWhitespace: false, innerWhitespace: false, quoted: false, unresolvedReference: false, nonPrintable: false });
+  assert.strictEqual((await shape(hex + "\n")).edgeWhitespace, true);
+  assert.strictEqual((await shape(hex.toUpperCase())).hex64, false);
+  assert.strictEqual((await shape(hex.toUpperCase())).hexAnyCase64, true);
+  assert.strictEqual((await shape('"' + hex + '"')).quoted, true);
+  assert.strictEqual((await shape("${{ secret(64) }}" + "x".repeat(20))).unresolvedReference, true);
+  const r = await call(BRANCH_HOST, { ...base, ...workerEnv, B1_WORKER_SECRET: hex }, fakeWorker(hex));
+  for (const part of [hex, hex.slice(0, 8), hex.slice(-4)]) assert.ok(!r.body.includes(part), "no part of the secret in the reply");
+  assert.deepStrictEqual(JSON.parse((await call(BRANCH_HOST, { ...base })).body).secret, { present: false });
+});
+
+test("b1-flag-check: reports which deploy answered (x-nf-deploy-id header, else DEPLOY_URL), a public identifier", async () => {
+  const id = "6aef7420303b82711a747047";
+  let r = await fn.handler({ headers: { host: BRANCH_HOST, "x-nf-deploy-id": id } }, {}, { env: { ...base }, post: async () => { throw new Error("x"); } });
+  assert.deepStrictEqual(JSON.parse(r.body).deploy, { deployId: id, source: "header" });
+  r = await fn.handler({ headers: { host: BRANCH_HOST } }, {}, { env: { ...base, DEPLOY_URL: `https://${id}--smart-stage-pro.netlify.app` } });
+  assert.deepStrictEqual(JSON.parse(r.body).deploy, { deployId: id, source: "DEPLOY_URL" });
+  r = await fn.handler({ headers: { host: BRANCH_HOST, "x-nf-deploy-id": "not-an-id" } }, {}, { env: { ...base } });
+  assert.deepStrictEqual(JSON.parse(r.body).deploy, { deployId: null, source: "unavailable" });
 });

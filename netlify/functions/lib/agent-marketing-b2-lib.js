@@ -29,7 +29,8 @@ function articlesFrom(topics, max) {
     const s = (Array.isArray(t && t.sources) ? t.sources : []).find((x) => x && x.role !== "background" && /^https:\/\//.test(String(x.url || "")) && x.type !== "report");
     if (!s || seen.has(s.url)) continue;
     seen.add(s.url);
-    out.push({ url: String(s.url), title: String(s.title || ""), domain: s.domain || null, published: s.published || null, fromTopic: t });
+    out.push({ url: String(s.url), title: String(s.title || ""), domain: s.domain || null, published: s.published || null,
+      sourceGeography: s.sourceGeography || null, reportingPeriod: s.reportingPeriod || null, fromTopic: t });
     if (out.length >= (max || MAX_ARTICLES)) break;
   }
   return out;
@@ -146,7 +147,9 @@ function toTopics({ result, records, articles, evidence, mode, reportSource }) {
       candidate: { id: `b2-${c.id}`, stage: "b2_selected", article: c.article },
       editorial: { headline: null, thesis: c.mechanism, homeownerDecision: c.homeownerImplication, development: from.editorial ? from.editorial.development || null : null, angle: c.editorialAngle },
       b1: { articleKey: articleKey(art.url), evidenceId: ev ? ev.id : null, completeness: rec.completeness, findings: c.findings },
-      b2: { mechanism: c.mechanism, homeownerImplication: c.homeownerImplication, editorialAngle: c.editorialAngle, sourceRefs, reportFigureRefs: c.reportFigureRefs, mode },
+      b2: { mechanism: c.mechanism, homeownerImplication: c.homeownerImplication, editorialAngle: c.editorialAngle, sourceRefs, reportFigureRefs: c.reportFigureRefs, mode,
+        article: { title: art.title, url: art.url, domain: art.domain || null, published: art.published || null, sourceGeography: art.sourceGeography || null, reportingPeriod: art.reportingPeriod || null,
+          completeness: rec.completeness, heldFindingsNotUsed: rec.held_findings_not_used } },
     };
   });
 }
@@ -188,10 +191,14 @@ async function enrich({ row, fields, uploads, userId, env, deps }) {
   if (!fields || fields.status !== "ready" || !Array.isArray(fields.topics) || !fields.topics.length || !applies(row, e)) return fields;
   const run = require("./agent-marketing-b1-stageb-run-lib");
   const log = { state: "started", mode: modeOf(row), articles: [] };
-  const usageOut = (extra) => ({ ...fields, usage: { ...(fields.usage || {}), b1b2: { ...log, ...extra } } });
-  if (run.admit(userId, e)) return usageOut({ state: "not_admitted" });
+  // Article-Led research (modes 2 and 3) shows ONLY B2 topics written from B1-read articles. When none can be made, the research ends as an
+  // incomplete set with the reason (and the page's "try again / change request" options); discovery cards are never shown in their place.
+  // Nothing is charged for it.
+  const failOut = (state, message, extra) => ({ ...fields, status: "failed", topics: null, error: message, charged_at: null,
+    usage: { ...(fields.usage || {}), b1b2: { ...log, ...(extra || {}), state, message } } });
+  if (run.admit(userId, e)) return failOut("not_admitted", "Article-Led research is not available on this account yet. This did not use a session.");
   let store, provider, fetchFn = d.fetchFn;
-  try { store = d.store || require("./agent-marketing-b1-store-lib").createStore({ env: e }); } catch (x) { return usageOut({ state: "store_unavailable" }); }
+  try { store = d.store || require("./agent-marketing-b1-store-lib").createStore({ env: e }); } catch (x) { return failOut("store_unavailable", "Article-Led research is not available right now. This did not use a session."); }
   try { provider = d.provider !== undefined ? d.provider : require("./agent-marketing-b1-provider-lib").createProvider({ env: e }); } catch (x) { provider = null; }
   if (!fetchFn) { try { fetchFn = require("./agent-marketing-b1-bridge-lib").fixtureSource(e) || undefined; } catch (x) { const err = x; fetchFn = async () => { throw err; }; } }
   const articles = articlesFrom(fields.topics, Number(e.B2_MAX_ARTICLES) || MAX_ARTICLES);
@@ -207,7 +214,7 @@ async function enrich({ row, fields, uploads, userId, env, deps }) {
     used.push(art); evidence.set(art.url, r.row);
     records.push(comprehensionOf(view, used.length, art));
   }
-  if (!records.length) return usageOut({ state: "no_article_evidence" });
+  if (!records.length) return failOut("no_article_evidence", `The research found ${articles.length} article${articles.length === 1 ? "" : "s"}, but none could be read and understood, so no Article-Led topics were written. This did not use a session. Start new research to try again, or change your request.`);
   const mode = modeOf(row);
   let reportFigures = [], ctx = null, reportSource = null;
   if (mode === "article_report") {
@@ -220,11 +227,14 @@ async function enrich({ row, fields, uploads, userId, env, deps }) {
   let out;
   try {
     out = await generate({ records, articles: used, evidence, mode, market, audience: row.audience, reportFigures, callFn: d.callFn, anthropicKey: d.anthropicKey !== undefined ? d.anthropicKey : e.ANTHROPIC_API_KEY, reportSource });
-  } catch (x) { return usageOut({ state: "b2_failed", error: String(x.message || x).slice(0, 200) }); }
-  if (!out.topics.length) return usageOut({ state: "b2_no_topics", problems: out.problems.slice(0, 8) });
+  } catch (x) { return failOut("b2_failed", "The articles were read, but the editorial topics could not be written this time. This did not use a session. Start new research to try again.", { error: String(x.message || x).slice(0, 200) }); }
+  if (!out.topics.length) return failOut("b2_no_topics", "The articles were read, but none of the editorial questions met the source rules. This did not use a session. Start new research to try again, or change your request.", { problems: out.problems.slice(0, 8) });
   let topics = out.topics;
   if (mode === "article_report" && ctx && ctx.figures && ctx.figures.size) topics = require("./agent-marketing-research-report-lib").applyReportPrecedence(topics, ctx);
-  return { ...fields, topics, usage: { ...(fields.usage || {}), b1b2: { ...log, state: "ready", records: records.length, candidates: out.candidates.map((c) => ({ id: c.id, question: c.question, article: c.article, findings: c.findings, angle: c.editorialAngle })),
+  // Fewer than five qualified topics: the valid ones are shown with a partial-results note, and the set is not charged.
+  const partial = topics.length < SELECT;
+  const message = partial ? `Only ${topics.length} Article-Led topic${topics.length === 1 ? "" : "s"} met the source rules (from ${records.length} article${records.length === 1 ? "" : "s"} read). This partial set did not use a session.` : null;
+  return { ...fields, topics, ...(partial ? { charged_at: null } : {}), usage: { ...(fields.usage || {}), b1b2: { ...log, state: partial ? "partial" : "ready", message, records: records.length, candidates: out.candidates.map((c) => ({ id: c.id, question: c.question, article: c.article, findings: c.findings, angle: c.editorialAngle })),
     selected: out.selected, notes: out.notes, problems: out.problems.slice(0, 8), b2Usage: out.usage, discoveryTopics: fields.topics.length } } };
 }
 

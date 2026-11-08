@@ -82,7 +82,9 @@ function topicBrief(topic, env) {
     const art = require("./agent-marketing-article-lib");
     const refs = (Array.isArray(t.b2.sourceRefs) ? t.b2.sourceRefs : []).map((r) => ({ finding: String(r && r.finding || ""), quote: t.reportFirst === true ? art.withoutMarketStats(String(r && r.quote || "")) : String(r && r.quote || ""), attribution: r && r.attribution ? String(r.attribution) : null }))
       .filter((r) => r.quote);
-    out.editorial_direction = { angle: String(t.b2.editorialAngle || ""), mechanism: String(t.b2.mechanism || ""), homeowner_implication: String(t.b2.homeownerImplication || ""), source_refs: refs };
+    const a = t.b2.article && typeof t.b2.article === "object" ? t.b2.article : null;
+    out.editorial_direction = { angle: String(t.b2.editorialAngle || ""), mechanism: String(t.b2.mechanism || ""), homeowner_implication: String(t.b2.homeownerImplication || ""), source_refs: refs,
+      ...(a ? { article: { title: String(a.title || ""), publisher: a.domain || null, published: a.published || null, geography: a.sourceGeography || null, reporting_period: a.reportingPeriod || null } } : {}) };
   }
   return out;
 }

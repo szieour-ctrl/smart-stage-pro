@@ -78,9 +78,14 @@ exports.handler = async (event) => {
     if (fields.status === "failed") console.error(`[agent-marketing-research] ${id} failed after ${attempts} attempt(s): ${(problems || []).join("; ").slice(0, 400)} ${fields.error || ""}`);
     // Article-Led Market Update (modes 2 and 3, development switch AGENT_MARKETING_B1_EVIDENCE=dev): B1 reads the articles discovery found, and B2
     // turns B1's validated records into the five research cards (lib/agent-marketing-b2-lib.js). Off, or nothing usable: the discovery cards stay.
+    const b2lib = require("./lib/agent-marketing-b2-lib");
     let finalFields = fields;
-    try { finalFields = await require("./lib/agent-marketing-b2-lib").enrich({ row, fields, uploads, userId }); }
-    catch (e) { console.error(`[agent-marketing-research] ${id} B1/B2 step failed:`, e.code || e.message); }
+    try { finalFields = await b2lib.enrich({ row, fields, uploads, userId }); }
+    catch (e) {
+      console.error(`[agent-marketing-research] ${id} B1/B2 step failed:`, e.code || e.message);
+      // Article-Led research never falls back to discovery cards: the set ends incomplete, uncharged, with the reason.
+      if (fields.status === "ready" && b2lib.applies(row, process.env)) finalFields = { ...fields, status: "failed", topics: null, charged_at: null, error: "The Article-Led research could not be completed. This did not use a session. Start new research to try again.", usage: { ...(fields.usage || {}), b1b2: { state: "error" } } };
+    }
     await writeRow(id, userId, finalFields);
   } catch (err) {
     console.error(`[agent-marketing-research-background] ${id || "unknown"} failed:`, err.message);

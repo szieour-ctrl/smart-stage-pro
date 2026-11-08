@@ -84,7 +84,8 @@ function forClient(row) {
   if (!row) return null;
   const out = {
     id: row.id, projectId: row.project_id, mode: row.mode, geography: row.geography, audience: row.audience, focus: row.focus || {},
-    dataSource: row.data_source || "web", note: (row.usage && row.usage.reportNote) || null,
+    dataSource: row.data_source || "web", note: (row.usage && (row.usage.reportNote || (row.usage.b1b2 && row.usage.b1b2.state === "partial" && row.usage.b1b2.message))) || null,
+    marketUpdateMode: (row.focus && row.focus.marketUpdateMode) || null,
     status: row.status, model: (row.usage && row.usage.pathway === "article_led") ? null : (row.model || null), topics: row.status === "ready" ? (row.topics || []).map(articleLed.clientTopic) : [], researchDate: row.research_date || null,
     error: row.status === "failed" ? (row.error || "The research could not be completed.") : null,
     charged: !!row.charged_at, createdAt: row.created_at,

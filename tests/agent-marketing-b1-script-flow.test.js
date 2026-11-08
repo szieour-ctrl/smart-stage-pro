@@ -550,7 +550,7 @@ test("mode 1 (Market Trend Update): a report-only topic is written through scrip
   assert.strictEqual((await projectCall(UA, { action: "approve_narrative", id: p.id })).status, 200);
 });
 
-test("B1/B2 in research stays off without the development switch, for Local Events, and for a report-only request; nothing usable keeps the discovery cards", { skip: SKIP }, async () => {
+test("B1/B2 in research stays off without the development switch, for Local Events and for a report-only request; with nothing readable the Article-Led set fails, never discovery cards", { skip: SKIP }, async () => {
   fresh();
   const p = project(UA);
   const fields = { status: "ready", topics: discovery(), usage: {} };
@@ -559,8 +559,24 @@ test("B1/B2 in research stays off without the development switch, for Local Even
   assert.strictEqual(await b2lib.enrich({ row: { ...row, mode: "local_events" }, fields, userId: UA, env: env() }), fields);
   assert.strictEqual(await b2lib.enrich({ row: { ...row, data_source: "upload" }, fields, userId: UA, env: env() }), fields);
   const gone = async (url) => ({ status: 410, url, headers: { get: () => "text/html" }, arrayBuffer: async () => Buffer.from("gone") });
-  const kept = await b2lib.enrich({ row, fields, userId: UA, env: env(), deps: { store: st.createStore({ env: env(), request: supabase }), fetchFn: gone, provider, callFn: b2Stub } });
-  assert.strictEqual(kept.topics, fields.topics, "the discovery cards stay");
-  assert.strictEqual(kept.usage.b1b2.state, "no_article_evidence");
+  const none = await b2lib.enrich({ row, fields: { ...fields, charged_at: "2026-11-08T00:00:00Z" }, userId: UA, env: env(), deps: { store: st.createStore({ env: env(), request: supabase }), fetchFn: gone, provider, callFn: b2Stub } });
+  assert.deepStrictEqual([none.status, none.topics, none.charged_at, none.usage.b1b2.state], ["failed", null, null, "no_article_evidence"], "no discovery cards, nothing charged");
+  assert.match(none.error, /none could be read and understood.*Start new research/);
   assert.strictEqual(provider.calls, 0);
+  // B2 answers but nothing meets the source rules: also an incomplete set, never discovery cards
+  const noTopics = await b2lib.enrich({ row, fields, userId: UA, env: env(), deps: { store: st.createStore({ env: env(), request: supabase }), fetchFn, provider, callFn: async () => JSON.stringify({ candidates: [{ id: "C1", question: "Q 999?", article: "A1", findings: ["A1-F1"] }], selected: ["C1"] }) } });
+  assert.deepStrictEqual([noTopics.status, noTopics.topics, noTopics.usage.b1b2.state], ["failed", null, "b2_no_topics"]);
+});
+
+test("fewer than five qualified Article-Led topics: the valid ones are shown with a partial-results note, uncharged", { skip: SKIP }, async () => {
+  fresh();
+  const p = project(UA);
+  const row = researchRow(p, "article_editorial", "web");
+  const two = async (system, user) => { const u = JSON.parse(user); const f = u.articles[0].findings; return JSON.stringify({ candidates: [
+    { id: "C1", question: "What should sellers here make of this?", article: "A1", findings: [f[0].id], mechanism: "m", homeowner_implication: "h", editorial_angle: "a", why_it_matters: "w" },
+    { id: "C2", question: "How should a seller prepare for this?", article: "A1", findings: [f[1].id], mechanism: "mm", homeowner_implication: "hh", editorial_angle: "aa", why_it_matters: "ww" }], selected: ["C1", "C2"] }); };
+  const out = await b2lib.enrich({ row, fields: { status: "ready", topics: discovery(), usage: {}, charged_at: "2026-11-08T00:00:00Z" }, userId: UA, env: env(), deps: { store: st.createStore({ env: env(), request: supabase }), fetchFn, provider, callFn: two } });
+  assert.deepStrictEqual([out.status, out.topics.length, out.charged_at, out.usage.b1b2.state], ["ready", 2, null, "partial"], JSON.stringify(out.usage.b1b2.problems));
+  assert.match(out.usage.b1b2.message, /^Only 2 Article-Led topics met the source rules/);
+  assert.ok(out.topics.every((t) => t.discovery === "b1b2" && t.b1.evidenceId && t.b2.article.url), "only B2 topics, with their article");
 });

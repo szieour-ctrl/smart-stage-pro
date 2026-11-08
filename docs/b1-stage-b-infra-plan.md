@@ -252,3 +252,9 @@ functions → private fixture worker on Railway → development Supabase), with 
   owner); `B1_SNAPSHOT_SOURCE` removed (its only value was the branch value) so articles are fetched live; `B1_PROVIDER=worker-fixture`, worker
   URL/secret and allowlists unchanged; `B1_STAGEB_MAX_PER_USER_DAY=3` (branch value, equal to the default). Baseline: 4 evidence rows,
   4 reservations, 0 attempt rows, FA/FB/FC linked to their ready rows. Only "Re-check the article" is to be used in this session.
+- Nov 8: hosted Live-Fetch Layer C accepted (results and the FC exception in `docs/b1-live-fetch-spec.md` §7). 3 attempt rows (FA `unchanged`,
+  FB `unchanged`, FC `source_changed`); evidence 4, reservations 4, links and bundle hashes unchanged; snapshot calls only; $0 provider spend.
+- Nov 8: session closed (branch values only; Production untouched). The owner removed the `b1-stageb-dev` branch value of
+  `AGENT_MARKETING_B1_EVIDENCE` (Stage B off; endpoints 404, panel hidden) and restored the branch value `B1_SNAPSHOT_SOURCE=worker-fixture`
+  (future runs use the frozen fixtures, not live pages). Kept: `B1_PROVIDER=worker-fixture`, worker URL/secret, allowlists,
+  `B1_STAGEB_MAX_PER_USER_DAY=3`. This commit redeploys the branch; `b1-env-check` should report `ok: true`.

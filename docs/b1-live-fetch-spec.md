@@ -1,4 +1,4 @@
-# B1 Stage B: Live-Fetch milestone, test specification (implemented locally Nov 8, 2026; hosted run not yet done)
+# B1 Stage B: Live-Fetch milestone, test specification (implemented Nov 8, 2026; hosted Layer C run accepted Nov 8)
 
 Nov 7, 2026. Development only (`b1-stageb-dev`, development Supabase `ooxigbxthabstahrexia`, Railway project `ssp-b1-stageb-worker`).
 
@@ -123,3 +123,31 @@ unless Layer C shows a discrepancy.** If needed, minimum: one Railway service in
 2. On FA, FB, FC: click "Re-check the article" once each. Expected `unchanged`; `source_changed` or an `http_error` is acceptable and reported.
 3. Verify: 3 new attempt rows; evidence rows still 4, reservations still 4, project links unchanged; worker logs show only `snapshot` calls.
 4. Switch Stage B off again and restore `B1_SNAPSHOT_SOURCE=worker-fixture` if fixture runs are wanted later.
+
+### Hosted Layer C result (Nov 7–8, 2026: accepted, one exception recorded)
+Owner clicked "Re-check the article" once per article on `b1-stageb-dev` (deploy commit `e008235`), with Stage B on and live snapshots.
+Every fetch: final URL = seeded URL (no redirect), HTTP 200, `text/html; charset=UTF-8`, one fixture-worker `POST /v1/snapshot` 200.
+
+| Case | Attempt | Outcome | Compared to (ready row) | Live raw HTML / frozen | Live snapshot / baseline snapshot |
+|---|---|---|---|---|---|
+| FA | `7721dfd7…` (Nov 7 20:49:59 UTC) | `unchanged` | `4d3de9de…` | `0b8f620e…` ≠ `0ef4131d…` | `f9effc5a…` = `f9effc5a…` |
+| FB | `ec30bbe8…` (Nov 7 20:54:26 UTC) | `unchanged` | `80bd9c28…` | `01229809…` ≠ `95e46235…` | `cd9d1f1f…` = `cd9d1f1f…` |
+| FC | `7dfa0d60…` (Nov 8 14:49:55 UTC) | `source_changed` | `8d760639…` | `254ffbd1…` ≠ `932443b9…` | `11a09d7c…` ≠ `3e37060b…` |
+
+FC full hashes: live snapshot `11a09d7cde784337ed1b49e280351197befa77ce11eadd2a80245ce9d4d3c5d1`; baseline snapshot
+`3e37060bacc90ad30f404137f863a418091478f13ff2206e6f5142702713ec67`. Live page 108,977 bytes, observed title
+"Local housing analyst: Prices down slightly in region for 2026 – Citrus Heights Sentinel".
+
+- **Invariants held** (dev database audit after FC): 3 attempt rows (one per project); evidence rows 4 and reservations 4, none created on Nov 8;
+  project links FA→`4d3de9de…`, FB→`80bd9c28…`, FC→`8d760639…`; stored bundle `payload_sha256` = recomputed hash for all three
+  (`17978cb5…`, `764d1ef4…`, `63b948c9…`); `cost_usd` total 0. Railway: only `POST /v1/snapshot` (3 in total), no fixture article,
+  provider or gate call; primary worker `b1-stageb-worker` had no traffic. No paid provider call; evidence daily cap untouched.
+- **Markup-only changes are tolerated** (FA, FB): raw HTML differed from the frozen copy, extracted text identical, outcome `unchanged` (LF-02).
+- **Exception (FC, open):** the extracted text really differs, so `source_changed` is correct by design and the evidence was kept. But the
+  frozen FC snapshot (5,263 chars) includes the site's "Related stories", "Latest stories" and "Previous/Next post" blocks, which change whenever the
+  publisher posts. The likely cause is that rotating page furniture, not the article body. Not proven: attempt rows store no text by design, and
+  the live page was not re-fetched outside the product. Consequence: `source_changed` can be a false alarm on sites with rotating link lists.
+  Before re-checks drive any evidence refresh, either strip related/latest/previous/next blocks in the extractor (a new extractor version,
+  which changes snapshot hashes and needs its own fixture review) or compare on the article body / quoted passages only.
+- **Layer B** stays deferred: no fetch-path discrepancy was observed; the FC difference comes from page content.
+- Session closed: Stage B switched off and `B1_SNAPSHOT_SOURCE=worker-fixture` restored on the branch (see `docs/b1-stage-b-infra-plan.md`).

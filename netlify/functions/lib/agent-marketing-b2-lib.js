@@ -195,7 +195,7 @@ async function enrich({ row, fields, uploads, userId, env, deps }) {
   // incomplete set with the reason (and the page's "try again / change request" options); discovery cards are never shown in their place.
   // Nothing is charged for it.
   const failOut = (state, message, extra) => ({ ...fields, status: "failed", topics: null, error: message, charged_at: null,
-    usage: { ...(fields.usage || {}), b1b2: { ...log, ...(extra || {}), state, message } } });
+    usage: { ...(fields.usage || {}), reportNote: null, b1b2: { ...log, ...(extra || {}), state, message } } });
   if (run.admit(userId, e)) return failOut("not_admitted", "Article-Led research is not available on this account yet. This did not use a session.");
   let store, provider, fetchFn = d.fetchFn;
   try { store = d.store || require("./agent-marketing-b1-store-lib").createStore({ env: e }); } catch (x) { return failOut("store_unavailable", "Article-Led research is not available right now. This did not use a session."); }
@@ -234,7 +234,7 @@ async function enrich({ row, fields, uploads, userId, env, deps }) {
   // Fewer than five qualified topics: the valid ones are shown with a partial-results note, and the set is not charged.
   const partial = topics.length < SELECT;
   const message = partial ? `Only ${topics.length} Article-Led topic${topics.length === 1 ? "" : "s"} met the source rules (from ${records.length} article${records.length === 1 ? "" : "s"} read). This partial set did not use a session.` : null;
-  return { ...fields, topics, ...(partial ? { charged_at: null } : {}), usage: { ...(fields.usage || {}), b1b2: { ...log, state: partial ? "partial" : "ready", message, records: records.length, candidates: out.candidates.map((c) => ({ id: c.id, question: c.question, article: c.article, findings: c.findings, angle: c.editorialAngle })),
+  return { ...fields, topics, ...(partial ? { charged_at: null } : {}), usage: { ...(fields.usage || {}), reportNote: null, b1b2: { ...log, state: partial ? "partial" : "ready", message, records: records.length, candidates: out.candidates.map((c) => ({ id: c.id, question: c.question, article: c.article, findings: c.findings, angle: c.editorialAngle })),
     selected: out.selected, notes: out.notes, problems: out.problems.slice(0, 8), b2Usage: out.usage, discoveryTopics: fields.topics.length } } };
 }
 

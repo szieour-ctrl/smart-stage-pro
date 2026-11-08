@@ -244,6 +244,11 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
   // The ordinary retry is off for Article-Led until a targeted second pass is evaluated (AGENT_MARKETING_ARTICLE_LED_RETRIES to measure it). Legacy keeps its one retry.
   // Three-lane experiment (AGENT_MARKETING_ARTICLE_LED_LANES=three): three independent compact passes over the same market; merged, deduplicated and ranked in code. No retry.
   const lanesMode = cmp && compact.lanesOn(e);
+  // Article-Led Market Update with B1/B2 (modes 2 and 3, development switch; Nov 8, 2026): discovery only has to find the articles. B1 reads up to
+  // three, and B2 writes the five cards (one article may support several), so discovery aims for that many distinct articles, not five topics, and
+  // the report-topic and reframe steps are skipped (B2 replaces the cards; mode 2's report figures are attached to B2's topics). The place is never widened.
+  const b2Lib = require("./agent-marketing-b2-lib");
+  const b2Mode = !alOn && b2Lib.applies(row, e);
   const maxAttempts = lanesMode ? 1 : 1 + (alOn ? compact.retriesFor(e) : (Number.isInteger(extra) && extra >= 0 && extra <= 2 ? extra : 1));
   let payload = dataSource === "upload" ? null : (cmp ? compact.buildPayloadCompact({ request, today, env: e }) : alOn ? articleLed.buildPayloadV2({ request, today, env: e }) : rl.buildResearchPayload({ request, today, uploadContext, env: e }));
   const baseInput = payload && payload.input;
@@ -384,7 +389,7 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
             ? compact.validateCandidates(g.topics, { today, geography: request.geography, limits: articleLed.extractLimits(text), diag: attemptDiag })
             : alOn
             ? articleLed.validateOpportunities(g.topics, { today, geography: request.geography, limits: articleLed.extractLimits(text), recommendation: rl.extractRecommendation(text), diag: attemptDiag })
-            : rl.validateTopics(g.topics, { mode: request.mode, today, recommendation: rl.extractRecommendation(text), need: dataSource === "both" ? rl.TOPIC_COUNT - reportTopics.REPORT_TOPICS_WHEN_BOTH : rl.TOPIC_COUNT, diag: attemptDiag });
+            : rl.validateTopics(g.topics, { mode: request.mode, today, recommendation: rl.extractRecommendation(text), need: b2Mode ? b2Lib.MAX_ARTICLES : dataSource === "both" ? rl.TOPIC_COUNT - reportTopics.REPORT_TOPICS_WHEN_BOTH : rl.TOPIC_COUNT, diag: attemptDiag });
           problems = validation.problems;
           }
         } catch (parseErr) {
@@ -409,7 +414,7 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
           const tools = alOn ? payload.tools : (tool ? [{ ...tool, max_results: Math.max(tool.max_results || 0, 20), max_tokens: Math.max(tool.max_tokens || 0, 10000) }] : payload.tools);
           if (cmp) payload = { ...payload, tools, input: compact.retryInstructionCompact(why, baseInput) };
           else if (alOn) payload = { ...payload, tools, input: articleLed.retryInstructionV2(why, baseInput) };
-          else payload = { ...payload, tools, input: `${baseInput}\n\nYour previous answer was ${validation.ok ? "usable but needs work" : "rejected"}: ${why.slice(0, 6).join("; ").slice(0, 600)}. Return the JSON again with exactly 5 topics that fix this. Do not invent sources, dates or events.` };
+          else payload = { ...payload, tools, input: `${baseInput}\n\nYour previous answer was ${validation.ok ? "usable but needs work" : "rejected"}: ${why.slice(0, 6).join("; ").slice(0, 600)}. ${b2Mode ? "Return the JSON again with topics that each rest on a real, readable local news article about this exact market (several different articles if they exist; never a wider area)" : "Return the JSON again with exactly 5 topics that fix this"}. Do not invent sources, dates or events.` };
         }
       }
       // Keep the strongest usable answer: an earlier one when a later answer is weaker or unusable (never the reverse).
@@ -438,7 +443,7 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
       const evNote = articleLed.mlsEvidenceNote(validation.topics.map((t) => t.mlsEvidence));
       mlsNote = evNote;
     }
-    if (!alOn && dataSource !== "web" && (dataSource === "upload" || (validation && validation.ok))) {
+    if (!alOn && !b2Mode && dataSource !== "web" && (dataSource === "upload" || (validation && validation.ok))) {
       // Topics from the agent's own report. In "both", a failure here is not fatal: the five web topics are still delivered, and the agent is told.
       const ctx = reportTopics.buildContext(uploads, request);
       const want = dataSource === "both" ? reportTopics.REPORT_TOPICS_WHEN_BOTH : rl.TOPIC_COUNT;

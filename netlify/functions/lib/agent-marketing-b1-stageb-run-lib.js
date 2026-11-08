@@ -4,6 +4,9 @@
 //   POST agent-marketing-stageb-background { projectId }  + the user's Bearer token, sent BY THE PAGE (startJob → runJob)
 //                                                                                   → same checks again, then snapshot, reservation, provider, gate, attach
 //   GET  agent-marketing-stageb?projectId=                         (status)        → job state for the page: metadata and counts only
+//   POST agent-marketing-stageb { action: "script", projectId }  (startScriptRequest) → "Write my script" for an Article-Led project (Nov 8, 2026):
+//        checks + the planning stub; 202 { state: "dispatch", mode: "script" } tells the page to start the background function with
+//        { projectId, mode: "script" } (scriptJob): evidence (reused or obtained) first, then the ONE planning run. No evidence, no script.
 // Nov 7, 2026: the page dispatches the background function itself, with its own login token. There is no server-to-server call and no shared
 // internal key: a development deploy behind team login cannot call its own functions, and the background function must not trust a userId it is
 // handed. The user is always the one the token belongs to; nothing in the request body names a user.
@@ -77,7 +80,7 @@ async function precheck({ userId, projectId, store, loadProject, env, now }) {
   const project = await loadProject(projectId, userId);   // scoped to the signed-in user: another user's project reads as missing
   const { topic, refusal } = articleLedTopic(project); if (refusal) return { refusal };
   const nowMs = now ? new Date(now).getTime() : Date.now();
-  const live = await store.findForProject(project.id, topic.id);   // the newest non-failed row for this project and topic
+  const live = await store.findForProject(project.id, topic.id, topic.researchId);   // the newest non-failed row for this project, topic and research run
   if (live && live.status === "ready") { await attachIfNeeded(store, project, userId, live); return { ready: live }; }
   if (live && !isStale(live, nowMs)) return { live };   // a job is live: no second run
   if (live) { try { await store.fail(live.id, "stale", live.status); } catch (x) { /* another worker moved it on */ } }
@@ -122,6 +125,10 @@ async function runJob({ userId, projectId, store, loadProject, fetchFn, provider
   const project = await loadProject(projectId, userId);
   const { topic, refusal } = articleLedTopic(project); if (refusal) return { state: "refused", code: refusal.code };
 
+  // A saved topic this user already has checked evidence for (in another project) is reused without fetching the article again or calling B1.
+  const saved = await reuseSavedTopic({ store, project, topic, userId });
+  if (saved) { await attachIfNeeded(store, project, userId, saved); return { state: "ready", reused: true, reusedFrom: saved.reused_from }; }
+
   let record, reused;
   try { ({ record, reused } = await br.prepare({ project, userId, store, fetchFn, env: e, now })); }
   catch (x) {   // no evidence row: nothing to finish. A capture failure (fetch, snapshot, source_changed) is recorded in the attempt log.
@@ -132,7 +139,8 @@ async function runJob({ userId, projectId, store, loadProject, fetchFn, provider
   if (record.status === "ready") { await attachIfNeeded(store, project, userId, record); return { state: "ready", reused: true }; }
   if (record.status !== "reserved") return { state: "in_progress", code: "in_progress" };   // another worker holds it
 
-  const finish = async (code, from) => { try { await store.fail(record.id, code, from); } catch (x) { /* already moved on */ } return { state: "failed", code }; };
+  // providerAttempted: the row reached "running", i.e. it holds a ledger reservation and the provider is (or was) called for it.
+  const finish = async (code, from) => { try { await store.fail(record.id, code, from); } catch (x) { /* already moved on */ } return { state: "failed", code, providerAttempted: from === "running" }; };
   if (!provider) return finish("provider_not_implemented", "reserved");
 
   // B1-specific spending caps (on top of the per-user ledger): rows that made or are making a provider call in the last 24 hours.
@@ -141,7 +149,7 @@ async function runJob({ userId, projectId, store, loadProject, fetchFn, provider
   if (await store.countProviderCalls({ userId: null, sinceIso: since }) >= c.globalDay) return finish("b1_limit_global_day", "reserved");
 
   // Re-read just before reserving: if another worker already took this row, do not spend a ledger slot (the conditional update below is the real guard).
-  const fresh = await store.findForProject(project.id, topic.id);
+  const fresh = await store.findForProject(project.id, topic.id, topic.researchId);
   if (!fresh || fresh.id !== record.id || fresh.status !== "reserved") return { state: "in_progress", code: "in_progress" };
   // The atomic per-user ledger reservation, BEFORE any call (a crash after this still counts). Sequence 1001+ on this research run.
   const seq = Math.max(1000, await store.maxProviderSeq(topic.researchId)) + 1;
@@ -160,9 +168,9 @@ async function runJob({ userId, projectId, store, loadProject, fetchFn, provider
   let done;
   try { done = await br.complete({ record: running, responseText, store, env: e }); }
   catch (x) { record = running; return finish(x.code || "gate_error", "running"); }
-  if (done.status !== "ready") return { state: "failed", code: done.error || "evidence_blocked" };
+  if (done.status !== "ready") return { state: "failed", code: done.error || "evidence_blocked", providerAttempted: true };
   await attachIfNeeded(store, project, userId, done);
-  return { state: "ready", reused: false, completeness: done.completeness_status };
+  return { state: "ready", reused: false, completeness: done.completeness_status, providerAttempted: true };
 }
 
 /** One attempt-log row. Never throws: a log write that fails must not change the job's outcome (it is reported in the function log only). */
@@ -177,58 +185,6 @@ async function recordAttempt(store, { userId, project, topic, mode, code, detail
   } catch (x) { console.error("stageb attempt log:", x.code || x.message); return null; }
 }
 
-const verifyCap = (env) => envInt(env, "B1_VERIFY_MAX_PER_USER_DAY", 1, 200, 20);
-
-/** Shared checks for a source verification: admission, the project (owned by this user), its Article-Led topic, the verify-only daily cap. */
-async function verifyCheck({ userId, projectId, store, loadProject, env, now }) {
-  const e = env || process.env;
-  const a = admit(userId, e); if (a) return { refusal: a };
-  if (!am.UUID_RE.test(String(projectId || ""))) return { refusal: deny(400, "bad_request", "Missing or invalid projectId") };
-  const project = await loadProject(projectId, userId);
-  const { topic, refusal } = articleLedTopic(project); if (refusal) return { refusal };
-  if (!br.articleOf(topic)) return { refusal: deny(409, "no_article", "The selected topic has no article URL.") };
-  const since = new Date((now ? new Date(now).getTime() : Date.now()) - DAY_MS).toISOString();
-  if (await store.countVerifications({ userId, sinceIso: since }) >= verifyCap(e)) return { refusal: deny(429, "verify_limit_user_day", "The daily limit for source checks is reached.") };
-  return { project, topic };
-}
-
-/**
- * startVerifyRequest(...) → { status, body }: the synchronous part of a source verification (checks only). 202 { state: "dispatch",
- * mode: "verify_source" } tells the page to start the background function with { projectId, mode: "verify_source" }.
- */
-async function startVerifyRequest(args) {
-  const c = await verifyCheck(args);
-  if (c.refusal) return out(c.refusal.status, { error: c.refusal.message, code: c.refusal.code });
-  return out(202, { state: "dispatch", mode: "verify_source" });
-}
-
-/**
- * verifyJob({ userId, projectId, store, loadProject, fetchFn, env, now }) → { state: "verified", outcome, ... } | { state: "refused"|"failed", code }
- * Live fetch → worker snapshot → compare with the project's attached ready evidence row. Outcomes: unchanged | source_changed | no_baseline, or a
- * capture failure code. It NEVER inserts or changes an evidence row, never reserves on the ledger, never calls a provider and never changes the
- * project's evidence link: the only write is one attempt-log row.
- */
-async function verifyJob(args) {
-  const { userId, store, fetchFn, env, now } = args;
-  const e = env || process.env;
-  const c = await verifyCheck(args);
-  if (c.refusal) return { state: "refused", code: c.refusal.code };
-  const { project, topic } = c;
-  let cap;
-  try { cap = await br.capture({ art: br.articleOf(topic), fetchFn, env: e, now }); }
-  catch (x) {
-    const code = x.code || "capture_error";
-    await recordAttempt(store, { userId, project, topic, mode: "verify_source", code, detail: x.detail || { stage: "fetch" } });
-    return { state: "failed", code };
-  }
-  const base = await store.forPlan(project);   // the attached evidence row, read-only
-  const baseline = base && base.status === "ready" && base.topic_id === topic.id ? base : null;
-  const outcome = !baseline ? "no_baseline" : baseline.cache_key === cap.key ? "unchanged" : "source_changed";
-  const detail = { ...br.captureDetail(cap.page, cap.snap, "compare"), comparedTo: baseline ? baseline.id : null };
-  const logged = await recordAttempt(store, { userId, project, topic, mode: "verify_source", code: outcome, detail });
-  return { state: "verified", outcome, logged: !!logged };
-}
-
 /** status({ userId, projectId, store, loadProject, env }) → { status, body }: what the page may know. Never evidence text or raw responses. */
 async function status({ userId, projectId, store, loadProject, env }) {
   const e = env || process.env;
@@ -236,13 +192,14 @@ async function status({ userId, projectId, store, loadProject, env }) {
   if (!am.UUID_RE.test(String(projectId || ""))) return out(400, { error: "Missing or invalid projectId", code: "bad_request" });
   const project = await loadProject(projectId, userId);
   const { topic, refusal } = articleLedTopic(project); if (refusal) return out(refusal.status, { error: refusal.message, code: refusal.code });
-  const row = await store.latestForProject(project.id, topic.id);
+  const row = await store.latestForProject(project.id, topic.id, topic.researchId);
   let la = null;
   try { la = typeof store.latestAttempt === "function" ? await store.latestAttempt(project.id, topic.id) : null; } catch (x) { la = null; }
   const lastAttempt = la ? { mode: la.mode, stage: la.stage, outcome: la.outcome, httpStatus: la.http_status || null, at: la.created_at } : null;
   if (!row) return out(200, { state: "none", lastAttempt });
   const v = row.bundle ? b1.readBundle(row.bundle) : null;
   return out(200, { state: row.status, completeness: row.completeness_status || null, error: row.error || null, reused: !!row.reused_from,
+    providerAttempted: row.provider_seq != null,   // a B1 provider request was reserved for this row (and may have been sent)
     attached: project.article_evidence_id === row.id, counts: v && v.status !== b1.BLOCKED ? { validated: v.validated.length, held: v.held.length, excluded: v.excluded.length } : null,
     createdAt: row.created_at || null, finishedAt: row.finished_at || null, lastAttempt });
 }
@@ -262,4 +219,125 @@ async function withPlanEvidence(project, { env, store } = {}) {
   return { ...project, selected_topic: sbLib.topicWithEvidence(project, row, e) };
 }
 
-module.exports = { STALE_MS, caps, verifyCap, admit, articleLedTopic, precheck, startRequest, startJob, runJob, startVerifyRequest, verifyJob, recordAttempt, status, withPlanEvidence };
+/**
+ * reuseSavedTopic({ store, project, topic, userId }) → a ready evidence row for THIS project, or null.
+ * The subscriber may open a saved research set in a new project: agent-marketing-research copies the set into that project (usage.copiedFrom), so
+ * the topic keeps its id but gets a new research run id. When this user already has checked evidence for the same topic of the same original
+ * research, it is reused without fetching the article again or calling B1. Before reuse, every one of these must hold:
+ *   ownership: the evidence row is this user's (the store query and the row are both checked);
+ *   topic identity: same topic id, and both research runs lead back to the same original research run;
+ *   source version: the row's source URL is the topic's article URL, and its stored snapshot still matches its hash (immutable snapshot);
+ *   evidence contract: checkRecord passes in full for the row's own project and topic (approved B1 settings, request, raw response, bundle).
+ * The reuse row the database requires for this project's pointer (a project may point only at its own rows) is a provenance-linked record:
+ * reused_from names the original evidence row (never a copy of a copy), it carries no provider reservation, and the database checks that it has
+ * the same cache key and raw response as the original. Nothing is fetched and no provider is called.
+ */
+async function reuseSavedTopic({ store, project, topic, userId }) {
+  if (typeof store.findReadyForTopic !== "function" || typeof store.researchRoot !== "function") return null;
+  const art = br.articleOf(topic);
+  if (!art) return null;
+  let root;
+  try { root = await store.researchRoot(topic.researchId, userId); } catch (x) { return null; }
+  if (!root) return null;
+  let rows;
+  try { rows = await store.findReadyForTopic(userId, topic.id); } catch (x) { return null; }
+  const sbLib = require("./agent-marketing-b1-stageb-lib");
+  // Originals first: a reuse row always points at the original evidence row.
+  const ordered = rows.filter((r) => !r.reused_from).concat(rows.filter((r) => r.reused_from));
+  for (const row of ordered) {
+    if (!row || row.user_id !== userId || row.status !== "ready" || row.topic_id !== topic.id || row.project_id === project.id || !row.research_id) continue;
+    if (row.source_url !== art.url) continue;
+    let rootR; try { rootR = await store.researchRoot(row.research_id, userId); } catch (x) { rootR = null; }
+    if (rootR !== root) continue;
+    const ownProject = { id: row.project_id, selected_topic: { ...topic, researchId: row.research_id } };
+    if (sbLib.checkRecord(row, ownProject).length) continue;   // integrity, approved settings and bundle, re-verified before reuse
+    const { id, created_at, reserved_at, finished_at, cost_usd, error, provider_seq, provider_reservation_id, reused_from, project_id, research_id, ...copy } = row;
+    try {
+      return await store.insert({ ...copy, user_id: userId, project_id: project.id, research_id: topic.researchId, topic_id: topic.id, status: "ready", reused_from: reused_from || id });
+    } catch (x) { console.error("stageb saved-topic reuse:", x.code || x.message); return null; }
+  }
+  return null;
+}
+
+/** Where the script text comes from in script mode: the development fixture script writer, or the real planner (needs ANTHROPIC_API_KEY). */
+function plannerConfig(env, durationSec) {
+  const fx = require("./agent-marketing-b1-fixture-planner-lib");
+  if (fx.enabled(env)) return { fixture: true, callFn: fx.createCallFn(durationSec), anthropicKey: null, extraWarnings: [fx.WARNING], narrativeExtra: { plannerFixture: true } };
+  const key = String((env || {}).ANTHROPIC_API_KEY || "");
+  return key ? { fixture: false, anthropicKey: key } : null;
+}
+
+const CAPTURE_TEXT = {
+  bad_url: "the article address is not a secure public web address", fetch_timeout: "the article did not answer in time", fetch_failed: "the article could not be reached",
+  too_many_redirects: "the article redirected too many times", redirected_elsewhere: "the article redirected to another website", http_error: "the article's website answered with an error",
+  not_html: "the address is not a web page", empty: "the article page was empty", too_large: "the article page is too large", capture_blocked: "the page looks like a paywall, robot check or error page",
+  incomplete: "the page has too little article text to check", fixture_refused: "this article is not one of the test articles", source_changed: "the article no longer matches the snapshot this project started from",
+  b1_limit_user_day: "the daily limit for article analysis is reached", b1_limit_global_day: "the daily limit for article analysis is reached", provider_not_implemented: "article analysis is not available here",
+  evidence_blocked: "the article's evidence did not pass the evidence check", in_progress: "an evidence check for this article is still running",
+};
+/**
+ * evidenceFailureMessage(code, providerAttempted) → what the subscriber is told when no script can be written. It never says that nothing was
+ * spent unless no provider request was made: providerAttempted is true once a B1 provider request was reserved for the run.
+ */
+function evidenceFailureMessage(code, providerAttempted) {
+  const c = String(code || "");
+  const reason = CAPTURE_TEXT[c] || (/^provider_limit_/.test(c) ? "the monthly or daily limit for article analysis is reached" : `the evidence check did not finish (${c || "unknown"})`);
+  const cost = providerAttempted ? "An article analysis request was made, so it counts toward your usage." : "No article analysis was run, so there is no analysis cost.";
+  return `Your script was not written: ${reason}. ${cost} You can try again.`;
+}
+
+/**
+ * startScriptRequest({ userId, projectId, loadProject, patchNarrative, env, now }) → { status, body }
+ * "Write my script" for an Article-Led project while Stage B is on. Checks only (admission, the Article-Led topic, the usual planning checks and
+ * the planner configuration), then writes the "planning" stub. 202 { state: "dispatch", mode: "script" }: the page starts the background function.
+ */
+async function startScriptRequest({ userId, projectId, loadProject, patchNarrative, env, now }) {
+  const e = env || process.env;
+  const a = admit(userId, e); if (a) return out(a.status, { error: a.message, code: a.code });
+  if (!am.UUID_RE.test(String(projectId || ""))) return out(400, { error: "Missing or invalid projectId", code: "bad_request" });
+  const project = await loadProject(projectId, userId);
+  const { refusal } = articleLedTopic(project); if (refusal) return out(refusal.status, { error: refusal.message, code: refusal.code });
+  if (am.NOT_EDITABLE_AFTER.includes(project.status)) return out(409, { error: "This piece is already rendering or finished. Start a new one to change it.", code: "not_editable" });
+  const ps = require("./agent-marketing-plan-run-lib").planStart(project, now ? new Date(now).getTime() : undefined);
+  if (ps.error) return out(ps.error.status, { error: ps.error.message, code: ps.error.code || "plan_refused" });
+  if (!plannerConfig(e, project.duration_sec)) return out(500, { error: "Planning is not configured.", code: "not_configured" });
+  const saved = await patchNarrative(project.id, userId, ps.stub);
+  if (!saved) return out(500, { error: "Could not start planning", code: "error" });
+  return out(202, { state: "dispatch", mode: "script" });
+}
+
+/**
+ * scriptJob({ userId, projectId, store, loadProject, fetchFn, provider, env, now, sleep, supabase }) → { state, code? }
+ * The background part of "Write my script": evidence first (an existing ready row, a saved topic's evidence, or a new run through startJob),
+ * then the planning run with that evidence. When no ready evidence exists the planner is never called: the narrative becomes an error with the
+ * reason, and says whether an article analysis request was made.
+ */
+async function scriptJob(args) {
+  const { userId, projectId, store, loadProject, env } = args;
+  const e = env || process.env;
+  const sleep = args.sleep || ((ms) => new Promise((r) => setTimeout(r, ms)));
+  const planRun = require("./agent-marketing-plan-run-lib");
+  const supabase = args.supabase || require("./marketing-profile-lib").supabase;
+  const project = await loadProject(projectId, userId);
+  if (!project || !project.narrative || project.narrative.status !== "planning") return { state: "skipped", code: "no_stub" };
+  const stub = project.narrative;
+  const failScript = async (code, providerAttempted) => {
+    await planRun.writeNarrative(supabase, project.id, userId, planRun.errorNarrative(stub, evidenceFailureMessage(code, providerAttempted), { evidence: { code, providerAttempted: !!providerAttempted } }));
+    return { state: "failed", code };
+  };
+  let ev;
+  try {
+    ev = await startJob(args);
+    // Another evidence job for this topic is live (a second tab): wait for it, within this function's time limit, instead of starting another.
+    for (let i = 0; ev.state === "in_progress" && i < 144; i++) { await sleep(5000); ev = await startJob(args); }
+  } catch (x) { console.error("stageb script evidence:", x.code || x.message); return failScript(x.code || "evidence_error", false); }
+  if (ev.state !== "ready") return failScript(ev.code || ev.state, !!ev.providerAttempted);
+  const pc = plannerConfig(e, project.duration_sec);
+  if (!pc) { await planRun.writeNarrative(supabase, project.id, userId, planRun.errorNarrative(stub, "Planning is not configured.")); return { state: "failed", code: "not_configured" }; }
+  const r = await planRun.runPlan({ id: project.id, userId, deps: { supabase, env: e, anthropicKey: pc.anthropicKey, callFn: pc.callFn, extraWarnings: pc.extraWarnings, narrativeExtra: pc.narrativeExtra,
+    withEvidence: (p) => withPlanEvidence(p, { env: e, store }) } });
+  return { state: r.state === "ready" ? "ready" : "failed", code: r.code, evidence: ev.reused ? "reused" : "new", fixture: !!pc.fixture };
+}
+
+module.exports = { STALE_MS, caps, admit, articleLedTopic, precheck, startRequest, startJob, runJob, reuseSavedTopic, recordAttempt, status, withPlanEvidence,
+  startScriptRequest, scriptJob, evidenceFailureMessage, plannerConfig };

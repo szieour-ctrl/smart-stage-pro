@@ -2,9 +2,11 @@
 //   POST { action: "start", projectId } → 202 { state: "dispatch" }: the page then POSTs { projectId } to agent-marketing-stageb-background with
 //        its own Bearer token (Nov 7, 2026: no server-to-server dispatch) | 202 { state: "reserved" | "running", code: "in_progress" } | 200 { state: "ready" }.
 //        Poll GET until the state is "ready" or "failed".
-//   POST { action: "verify_source", projectId } → 202 { state: "dispatch", mode: "verify_source" } (live-fetch milestone): the page then POSTs
-//        { projectId, mode: "verify_source" } to the background function. A verification never reserves, calls a provider or changes evidence.
-//   GET  ?projectId=                    → { state, completeness, counts, error, reused, attached, createdAt, finishedAt, lastAttempt } (no evidence text)
+//   POST { action: "script", projectId } → 202 { state: "dispatch", mode: "script" } (Nov 8, 2026): "Write my script" for an Article-Led project. The
+//        page then POSTs { projectId, mode: "script" } to the background function: evidence (reused or obtained) first, then the script. The
+//        subscriber-facing "Re-check the article" action (verify_source) was removed on Nov 8, 2026; its attempt rows are kept as history.
+//   GET  ?projectId=                    → { state, completeness, counts, error, reused, providerAttempted, attached, createdAt, finishedAt, lastAttempt }
+//        (no evidence text)
 // Off (404 for everyone) unless AGENT_MARKETING_B1_EVIDENCE=dev, Agent Marketing is enabled for the user and the user is listed in
 // B1_STAGEB_USER_IDS; refused (503) when the server's database is the production project. See lib/agent-marketing-b1-stageb-run-lib.js.
 const { supabase } = require("./lib/marketing-profile-lib");
@@ -15,13 +17,18 @@ const st = require("./lib/agent-marketing-b1-store-lib");
 const headers = { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json", "Cache-Control": "no-store" };
 const reply = (statusCode, obj) => ({ statusCode, headers, body: JSON.stringify(obj) });
 
+async function patchNarrative(id, userId, narrative) {
+  const r = await supabase("PATCH", "agent_marketing_projects", { narrative, updated_at: new Date().toISOString() }, `?id=eq.${encodeURIComponent(id)}&user_id=eq.${encodeURIComponent(userId)}`);
+  return r && r.status < 300 && Array.isArray(r.data) && r.data[0] ? r.data[0] : null;
+}
+
 async function loadProject(id, userId) {
   const r = await supabase("GET", "agent_marketing_projects", null, `?id=eq.${encodeURIComponent(id)}&user_id=eq.${encodeURIComponent(userId)}&select=*&limit=1`);
   return Array.isArray(r.data) && r.data[0] ? r.data[0] : null;
 }
 
 exports.handler = async (event, context, deps) => {
-  const d = deps || {};   // tests inject requireUser, store, loadProject, env
+  const d = deps || {};   // tests inject requireUser, store, loadProject, patchNarrative, env
   if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: { ...headers, "Access-Control-Allow-Headers": "Content-Type, Authorization", "Access-Control-Allow-Methods": "GET, POST, OPTIONS" }, body: "" };
   const env = d.env || process.env;
   const auth = await (d.requireUser || requireUser)(event);
@@ -38,12 +45,12 @@ exports.handler = async (event, context, deps) => {
     }
     if (event.httpMethod !== "POST") return reply(405, { error: "Method not allowed" });
     let body = {}; try { body = JSON.parse(event.body || "{}"); } catch (e) { return reply(400, { error: "Invalid JSON" }); }
-    if (body.action !== "start" && body.action !== "verify_source") return reply(400, { error: "Unknown action", code: "bad_request" });
+    if (body.action !== "start" && body.action !== "script") return reply(400, { error: "Unknown action", code: "bad_request" });
     // Stage B never runs on a production host (the background function refuses it too).
     const { requestHost } = require("./lib/self-dispatch-lib");
     if (require("./lib/public-config-lib").isProductionHost(requestHost(event), env)) return reply(503, { error: "Stage B runs only on a development deploy.", code: "production_dispatch_refused" });
-    // verify_source (live-fetch milestone): checks only; the page then starts the background function with { projectId, mode: "verify_source" }.
-    const r = body.action === "verify_source" ? await run.startVerifyRequest({ userId, projectId: body.projectId, store, loadProject: load, env })
+    // script: checks and the planning stub only; the page then starts the background function with { projectId, mode: "script" }.
+    const r = body.action === "script" ? await run.startScriptRequest({ userId, projectId: body.projectId, loadProject: load, patchNarrative: d.patchNarrative || patchNarrative, env })
       : await run.startRequest({ userId, projectId: body.projectId, store, loadProject: load, env });
     return reply(r.status, r.body);
   } catch (e) {

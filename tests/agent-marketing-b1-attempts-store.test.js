@@ -11,7 +11,7 @@ function stub(reply) { const sent = []; return { sent, request: async (method, t
 
 test("insertAttempt sends only the minimal whitelisted fields to the attempt table; extra fields (HTML, text, secrets) are dropped", async () => {
   const s = stub(); const store = st.createStore({ env: ENV, request: s.request });
-  await store.insertAttempt({ userId: "u", projectId: "p", topicId: "t-FA", mode: "verify_source", stage: "compare", outcome: "unchanged", httpStatus: 200,
+  await store.insertAttempt({ userId: "u", projectId: "p", topicId: "t-FA", mode: "evidence", stage: "snapshot", outcome: "capture_blocked", httpStatus: 200,
     contentType: "text/html", bytes: 1234, sourceUrl: "https://a.example/x", finalUrl: "https://a.example/x", observedTitle: "T", rawHtmlSha256: H,
     snapshotSha256: H, comparedTo: "e1", html: "<html>BODY</html>", snapshotText: "ARTICLE TEXT", requestText: "REQ", secret: "S3CRET" });
   const { method, table, body } = s.sent[0];
@@ -34,13 +34,12 @@ test("insertAttempt normalises values to what the database accepts (codes, bound
   assert.strictEqual(s.sent[1].body.outcome, "unknown_error");
 });
 
-test("latestAttempt asks only for page-safe metadata; countVerifications counts this user's verifications only", async () => {
+test("latestAttempt asks only for page-safe metadata; the removed re-check left no verification counter", async () => {
   const s = stub({ status: 200, data: [] }); const store = st.createStore({ env: ENV, request: s.request });
   await store.latestAttempt("p1", "t-FA");
   assert.match(s.sent[0].query, /select=mode,stage,outcome,http_status,created_at&/);
   assert.doesNotMatch(s.sent[0].query, /url|title|sha256/);
-  await store.countVerifications({ userId: "u1", sinceIso: "2026-11-08T00:00:00.000Z" });
-  assert.match(s.sent[1].query, /user_id=eq\.u1&mode=eq\.verify_source&created_at=gte\./);
+  assert.strictEqual(store.countVerifications, undefined);
 });
 
 test("the attempt store is inert unless Stage B is switched on; a database refusal is a store error, not a crash", async () => {

@@ -7,6 +7,8 @@
 //     the explicit B1_STAGEB_USER_IDS allowlist, a non-production database, the project owned by this user, an Article-Led topic.
 //   - Refused outright on a production host.
 // A background function answers 202 to the page before this runs; the page learns the outcome from GET agent-marketing-stageb?projectId=.
+// Nov 8, 2026: { projectId, mode: "script" } runs "Write my script" (scriptJob): evidence first, then the planning run, which writes the narrative the
+// page polls through agent-marketing-project. The source re-check mode (verify_source) was removed; its attempt rows are kept.
 const { supabase } = require("./lib/marketing-profile-lib");
 const { requireUser } = require("./lib/reel-auth-lib");
 const run = require("./lib/agent-marketing-b1-stageb-run-lib");
@@ -31,11 +33,10 @@ exports.handler = async (event, context, deps) => {
   if (run.admit(userId, env)) return { statusCode: 404, body: "" };   // checked before reading the body: refused users learn nothing more
   let body = {}; try { body = JSON.parse(event.body || "{}"); } catch (e) { return { statusCode: 400, body: "" }; }
   if (!am.UUID_RE.test(String(body.projectId || ""))) return { statusCode: 400, body: "" };
-  // Source verification (live-fetch milestone): fetch, snapshot and compare only. No provider is even created on this path.
-  const verify = body.mode === "verify_source";
-  if (body.mode !== undefined && !verify) return { statusCode: 400, body: "" };
+  const script = body.mode === "script";
+  if (body.mode !== undefined && !script) return { statusCode: 400, body: "" };
   let provider = null;
-  if (!verify) { try { provider = d.provider || pv.createProvider({ env }); } catch (e) { provider = null; } }   // no provider: the run is marked failed, nothing is sent
+  try { provider = d.provider || pv.createProvider({ env }); } catch (e) { provider = null; }   // no provider: the run is marked failed, nothing is sent
   // Development fixture mode: B1_SNAPSHOT_SOURCE=worker-fixture takes the frozen FA/FB/FC article from the private fixture worker (no live fetch).
   let fetchFn = d.fetchFn;
   if (!fetchFn) {
@@ -44,9 +45,9 @@ exports.handler = async (event, context, deps) => {
   }
   try {
     const store = d.store || st.createStore({ env }), load = d.loadProject || loadProject;
-    const result = verify ? await run.verifyJob({ userId, projectId: body.projectId, store, loadProject: load, fetchFn, env, now: d.now })
-      : await run.startJob({ userId, projectId: body.projectId, store, loadProject: load, fetchFn, provider, env, now: d.now });
-    console.log(`agent-marketing-stageb-background ${verify ? "verify " : ""}${body.projectId.slice(0, 8)} ${result.state}${result.code ? ` ${result.code}` : ""}${result.outcome ? ` ${result.outcome}` : ""}`);
+    const args = { userId, projectId: body.projectId, store, loadProject: load, fetchFn, provider, env, now: d.now };
+    const result = script ? await run.scriptJob({ ...args, sleep: d.sleep, supabase: d.supabase }) : await run.startJob(args);
+    console.log(`agent-marketing-stageb-background ${script ? "script " : ""}${body.projectId.slice(0, 8)} ${result.state}${result.code ? ` ${result.code}` : ""}${result.evidence ? ` evidence=${result.evidence}` : ""}`);
     return { statusCode: 200, body: JSON.stringify(result) };
   } catch (e) {
     console.error("agent-marketing-stageb-background error:", e.code || e.message);

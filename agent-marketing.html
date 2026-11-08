@@ -398,15 +398,8 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
       <div id="scriptEmpty">
         <div class="panel-sub">We'll write a short, first-person script from your answers. You can edit every word before approving.</div>
         <div class="actions"><button class="btn gold" type="button" id="planBtn">Write my script</button></div>
-        <!-- Article evidence (Stage B). Development only: shown only when the server answers for this user and project (404 everywhere else). -->
-        <div id="stagebBox" class="hidden" style="margin-top:14px">
-          <div class="panel-sub" id="stagebLine"></div>
-          <div class="panel-sub hidden" id="stagebAttempt"></div>
-          <div class="actions"><button class="btn ghost small" type="button" id="stagebBtn">Check the article's evidence</button>
-            <button class="btn ghost small" type="button" id="stagebVerifyBtn">Re-check the article</button></div>
-        </div>
       </div>
-      <div id="scriptWait" class="hidden"><span class="spinner"></span>Writing your script… this usually takes under a minute.</div>
+      <div id="scriptWait" class="hidden"><span class="spinner"></span><span id="scriptWaitText">Writing your script… this usually takes under a minute.</span></div>
       <div id="scriptReady" class="hidden">
         <p class="panel-sub" id="angleLine"></p>
         <label class="lbl" for="narration">Narration</label>
@@ -688,7 +681,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     say("scriptMsg", "");
     if (n && n.status === "error") { say("scriptMsg", n.error || "The script could not be written.", "err"); $("planBtn").textContent = "Try again"; }
     if (planning) startPoll();
-    if (!planning && !ready) refreshStageB(); else paintStageB(null);
+    if (planning) watchEvidenceFlow(); else $("scriptWaitText").textContent = SCRIPT_WAIT_DEFAULT;
     if (ready && !planning) {
       $("narration").value = n.narrationTagged;
       loadSavedPron().then(function () { paintPron(n.pronunciations); });
@@ -704,125 +697,55 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
       refreshPreview();
     }
   }
-  // ── Article evidence (Stage B, development only) ──
-  // The start request only checks; when it answers { state: "dispatch" } the page starts the background job itself with its own login token
-  // (no server-to-server call). The server repeats every check there. The page then polls the status, which never contains evidence text.
+  // ── Article evidence for "Write my script" (B1 Stage B, development only; Nov 8, 2026) ──
+  // There is no separate evidence step for the subscriber. On a development deploy where the server offers Stage B for this user and project
+  // (the status answers 200; 404 everywhere else, and the page never asks on production), "Write my script" starts the server's script mode:
+  // the page sends { action: "script" } (checks + the planning stub), then starts the background function itself with its own login token
+  // (a development deploy behind team login cannot call its own functions). The background job reuses or obtains the article evidence and only
+  // then writes the script; without ready evidence no script is written and the narrative error says why (and whether an analysis was run).
   var STAGEB = "/.netlify/functions/agent-marketing-stageb", STAGEB_BG = "/.netlify/functions/agent-marketing-stageb-background";
-  var STAGEB_TEXT = { none: "Article evidence has not been checked yet.", reserved: "Checking the article's evidence…", running: "Checking the article's evidence…",
-    ready: "Article evidence is ready.", failed: "The evidence check did not finish." };
-  // Live-fetch milestone: the latest capture attempt (a source re-check, or an evidence run that ended before it created a record), in plain words.
-  var STAGEB_ATTEMPT_TEXT = { unchanged: "The article is unchanged since its evidence was checked.",
-    source_changed: "The article has changed since its evidence was checked. The checked evidence was kept; nothing was replaced.",
-    no_baseline: "The article was read, but there is no checked evidence to compare it with yet.",
-    bad_url: "The article address is not a secure public web address.", fetch_timeout: "The article did not answer in time.",
-    fetch_failed: "The article could not be reached.", too_many_redirects: "The article redirected too many times.",
-    redirected_elsewhere: "The article redirected to another website.", http_error: "The article's website answered with an error",
-    not_html: "The address is not a web page.", empty: "The article page was empty.", too_large: "The article page is too large (over 4 MB).",
-    capture_blocked: "The page looks like a paywall, robot check or error page.", incomplete: "The page has too little article text to check.",
-    fixture_refused: "This article is not one of the test articles.", verify_limit_user_day: "The daily limit for article re-checks is reached." };
-  function attemptText(a) {
-    if (!a || !a.outcome) return "";
-    var t = STAGEB_ATTEMPT_TEXT[a.outcome] || ("The article could not be checked (" + a.outcome + ").");
-    if (a.outcome === "http_error") t += a.httpStatus ? " (HTTP " + a.httpStatus + ")." : ".";
-    return t;
+  async function evidenceStatus() {
+    var p = state.project; if (!p || !p.id || SSP_CFG.env === "production") return null;   // never asked on production
+    try { var r = await api("GET", "?projectId=" + encodeURIComponent(p.id), null, STAGEB); return r.ok ? r.json : null; } catch (e) { return null; }
   }
-  function paintStageB(st) {
-    var box = $("stagebBox"); if (!st) { box.classList.add("hidden"); return; }
-    box.classList.remove("hidden");
-    var line = STAGEB_TEXT[st.state] || ("Evidence: " + st.state);
-    if (st.state === "ready" && st.counts) line += " " + st.counts.validated + " checked, " + st.counts.held + " held.";
-    if (st.state === "failed" && st.error) line += " (" + st.error + ")";
-    $("stagebLine").textContent = line;
-    var la = st.lastAttempt, at = $("stagebAttempt");
-    at.classList.toggle("hidden", !la);
-    at.textContent = la ? (la.mode === "verify_source" ? "Last re-check: " : "Last attempt: ") + attemptText(la) : "";
-    var busy = st.state === "reserved" || st.state === "running";
-    $("stagebBtn").disabled = busy; $("stagebBtn").classList.toggle("hidden", st.state === "ready");
-    $("stagebBtn").textContent = st.state === "failed" ? "Try the evidence check again" : "Check the article's evidence";
-    $("stagebVerifyBtn").disabled = busy;
+  // While a script is being written, show what the job is doing (the narrative poll in startPoll decides when it is finished).
+  async function watchEvidenceFlow() {
+    var st = await evidenceStatus();
+    state.evidenceFlow = !!st;
+    if (!st) return;
+    $("scriptWaitText").textContent = scriptWaitText(st);
+    if (state.evidenceTimer) return;
+    state.evidenceTimer = setInterval(async function () {
+      var n = narr(); if (!n || n.status !== "planning") { clearInterval(state.evidenceTimer); state.evidenceTimer = null; return; }
+      var s2 = await evidenceStatus(); if (s2) $("scriptWaitText").textContent = scriptWaitText(s2);
+    }, SCRIPT_EVIDENCE_POLL_MS);
   }
-  async function refreshStageB() {
-    var p = state.project; if (!p || !p.id || SSP_CFG.env === "production") { paintStageB(null); return null; }   // never asked on production
-    try {
-      var r = await api("GET", "?projectId=" + encodeURIComponent(p.id), null, STAGEB);
-      if (!r.ok) { paintStageB(null); return null; }   // 404 = not offered here; anything else = stay out of the way
-      paintStageB(r.json); return r.json;
-    } catch (e) { paintStageB(null); return null; }
+  async function planWithEvidence(p) {
+    var r = await api("POST", "", { action: "script", projectId: p.id }, STAGEB);
+    if (!(r.status === 202 && r.json && r.json.state === "dispatch")) throw new Error((r.json && r.json.error) || "Your script could not start.");
+    var bg = await api("POST", "", { projectId: p.id, mode: "script" }, STAGEB_BG);   // a background function answers 202 at once
+    if (bg.status !== 202 && !bg.ok) throw new Error("Your script could not start. Nothing was run. Please try again in a few minutes.");
+    state.evidenceFlow = true;
+    var g = await api("GET", "?id=" + encodeURIComponent(p.id));
+    if (g.ok && g.json.project) setProject(g.json.project);
+    renderScript();
   }
-  var stagebSleep = function (ms) { return new Promise(function (res) { setTimeout(res, ms); }); };
-  // What the status said just before a start, so the watcher ignores the project's earlier rows and attempts.
-  function stagebPrev(st) { return { createdAt: st && st.state !== "none" ? st.createdAt || null : null, attemptAt: st && st.lastAttempt ? st.lastAttempt.at : null }; }
-  async function startStageB() {
-    var p = state.project; if (!p) return;
-    $("stagebBtn").disabled = true; $("stagebVerifyBtn").disabled = true;
-    try {
-      var before = await refreshStageB();
-      var r = await api("POST", "", { action: "start", projectId: p.id }, STAGEB);
-      if (r.status === 200 && r.json.state === "ready") { await refreshStageB(); return; }   // already checked: nothing was started
-      var prev = stagebPrev(before);
-      if (r.status === 202 && r.json.state === "dispatch") {
-        var bg = await api("POST", "", { projectId: p.id }, STAGEB_BG);   // a background function answers 202 at once
-        if (bg.status !== 202 && !bg.ok) throw new Error("The evidence check could not start.");
-      } else if (r.status === 202) prev.createdAt = null;   // a run is already live: watch that one
-      else throw new Error(r.json.error || "The evidence check could not start.");
-      paintStageB({ state: "running", lastAttempt: before && before.lastAttempt });
-      var w = await stagebWatch({ poll: refreshStageB, sleep: stagebSleep, now: Date.now, prev: prev, mode: "evidence" });
-      if (w.outcome === "not_started") {   // the job ended before it created a record: say so (with its recorded reason), never retry by itself
-        if (!w.attempt) paintStageB({ state: "failed", error: "no record was created" });
-        say("scriptMsg", STAGEB_NOT_STARTED + (w.attempt ? " " + attemptText(w.attempt) : ""), "err");
-      }
-    } catch (e) { say("scriptMsg", e.message, "err"); await refreshStageB(); }
-  }
-  // Re-check the article (development only): live fetch, snapshot, compare with the checked evidence. Never reserves, calls a provider or
-  // changes the evidence; the result is one attempt record, shown in the panel.
-  async function verifyStageB() {
-    var p = state.project; if (!p) return;
-    $("stagebVerifyBtn").disabled = true; $("stagebBtn").disabled = true; say("scriptMsg", "");
-    try {
-      var before = await refreshStageB();
-      var r = await api("POST", "", { action: "verify_source", projectId: p.id }, STAGEB);
-      if (!(r.status === 202 && r.json.state === "dispatch")) {
-        throw new Error(r.json.code === "verify_limit_user_day" ? STAGEB_ATTEMPT_TEXT.verify_limit_user_day : (r.json.error || "The re-check could not start."));
-      }
-      var bg = await api("POST", "", { projectId: p.id, mode: "verify_source" }, STAGEB_BG);
-      if (bg.status !== 202 && !bg.ok) throw new Error("The re-check could not start.");
-      $("stagebAttempt").classList.remove("hidden"); $("stagebAttempt").textContent = "Re-checking the article…";
-      var w = await stagebWatch({ poll: refreshStageB, sleep: stagebSleep, now: Date.now, prev: stagebPrev(before), mode: "verify_source" });
-      if (w.outcome !== "verified") say("scriptMsg", "The re-check did not finish. Nothing was changed. You can try again.", "err");
-    } catch (e) { say("scriptMsg", e.message, "err"); }
-    await refreshStageB();
-  }
-  // STAGEB_WATCH_BEGIN — self-contained (tests/agent-marketing-stageb-ui.test.js runs it with a fake clock).
-  // Polls the Stage B status after a start. o.prev = { createdAt, attemptAt } from the status just before the start, so the project's earlier
-  // rows and attempts never end a new run. Evidence mode: stops on a NEW row that is "ready" or "failed"; a NEW attempt while no new row exists
-  // means the job ended before creating one (fetch, snapshot or source_changed): not_started, with that attempt. Without either, "none" is a
-  // failure only after STAGEB_GRACE_MS (a record may take two worker calls of at most 60 s each to appear). verify_source mode: stops on the NEW
-  // attempt. Never starts a job itself.
-  var STAGEB_POLL_MS = 5000, STAGEB_GRACE_MS = 150 * 1000, STAGEB_MAX_MS = 17 * 60 * 1000;
-  var STAGEB_NOT_STARTED = "The evidence check could not start. No record was created, so nothing was reserved or charged. You can try again.";
-  async function stagebWatch(o) {
-    var poll = o.poll, sleep = o.sleep, now = o.now, every = o.intervalMs || STAGEB_POLL_MS, grace = o.graceMs || STAGEB_GRACE_MS, max = o.maxMs || STAGEB_MAX_MS;
-    var prev = o.prev || {}, mode = o.mode || "evidence";
-    var started = now(), polls = 0, sawRecord = false;
-    while (now() - started < max) {
-      await sleep(every);
-      var st = await poll(); polls++;
-      if (!st) return { outcome: "unavailable", polls: polls };
-      var la = st.lastAttempt, freshAttempt = !!(la && la.at && la.at !== prev.attemptAt && la.mode === mode);
-      if (mode === "verify_source") {
-        if (freshAttempt) return { outcome: "verified", polls: polls, attempt: la };
-        if (now() - started >= grace) return { outcome: "not_started", polls: polls };
-        continue;
-      }
-      var newRow = st.state !== "none" && (!prev.createdAt || st.createdAt !== prev.createdAt);
-      if (newRow && (st.state === "ready" || st.state === "failed")) return { outcome: st.state, polls: polls, status: st };
-      if (newRow) sawRecord = true;
-      else if (!sawRecord && freshAttempt) return { outcome: "not_started", polls: polls, attempt: la };
-      else if (!sawRecord && now() - started >= grace) return { outcome: "not_started", polls: polls };
+  // SCRIPT_FLOW_BEGIN — self-contained (tests/agent-marketing-stageb-ui.test.js runs it).
+  var SCRIPT_WAIT_DEFAULT = "Writing your script… this usually takes under a minute.";
+  var SCRIPT_EVIDENCE_POLL_MS = 5000, SCRIPT_PLAIN_MAX_MS = 330000, SCRIPT_EVIDENCE_MAX_MS = 18 * 60 * 1000;
+  /** The progress line while "Write my script" runs with article evidence. st: the Stage B status (metadata only). */
+  function scriptWaitText(st) {
+    if (!st) return SCRIPT_WAIT_DEFAULT;
+    if (st.state === "ready") {
+      var c = st.counts, held = c && c.held ? ", " + c.held + " held back as unverified" : "";
+      return "Article evidence is ready" + (c ? " (" + c.validated + " checked" + held + ")" : "") + ". Writing your script…";
     }
-    return { outcome: "timeout", polls: polls };
+    if (st.state === "failed") return "Finishing up…";
+    return "Reading the article and checking its evidence… this can take a few minutes.";
   }
-  // STAGEB_WATCH_END
+  /** How long the page waits for a script before saying it is taking too long. */
+  function scriptMaxMs(evidenceFlow) { return evidenceFlow ? SCRIPT_EVIDENCE_MAX_MS : SCRIPT_PLAIN_MAX_MS; }
+  // SCRIPT_FLOW_END
   function refreshPreview() {
     var t = $("narration").value, target = state.schema.wordTargets[state.project.durationSec] || [0, 0], w = words(t);
     $("captionPreview").textContent = stripTags(t) || " ";
@@ -831,6 +754,8 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
   async function plan() {
     $("planBtn").disabled = true; say("scriptMsg", "");
     try {
+      // Development only: an Article-Led project with Stage B offered writes its script with checked article evidence (see planWithEvidence).
+      if (await evidenceStatus()) { await planWithEvidence(state.project); $("planBtn").disabled = false; return; }
       var r = await api("POST", "", { action: "plan", id: state.project.id });
       if (!r.ok) throw new Error(r.json.error || "Could not start");
       setProject(r.json.project); renderScript();
@@ -840,7 +765,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
   function startPoll() {
     var started = Date.now();
     state.poll = setInterval(async function () {
-      if (Date.now() - started > 330000) { stopPoll(); say("scriptMsg", "This is taking longer than expected. Please reload in a minute.", "err"); return; }
+      if (Date.now() - started > scriptMaxMs(state.evidenceFlow)) { stopPoll(); say("scriptMsg", "This is taking longer than expected. Please reload in a minute.", "err"); return; }
       try {
         var r = await api("GET", "?id=" + encodeURIComponent(state.project.id));
         if (r.ok && r.json.project) { setProject(r.json.project); var n = narr(); if (!n || n.status !== "planning") { stopPoll(); renderScript(); } }
@@ -1567,8 +1492,6 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     $("newBtn").addEventListener("click", function () { setProject(null); try { history.replaceState(null, "", location.pathname); } catch (e) { /* ignore */ } go(1); });
     $("createBtn").addEventListener("click", createProject);
     $("planBtn").addEventListener("click", plan);
-    $("stagebBtn").addEventListener("click", startStageB);
-    $("stagebVerifyBtn").addEventListener("click", verifyStageB);
     $("pickerClose").addEventListener("click", function () { $("picker").classList.add("hidden"); });
     $("toImagesBtn").addEventListener("click", function () { go(5); });
     $("backToBoardBtn").addEventListener("click", function () { go(4); });

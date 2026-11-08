@@ -111,10 +111,10 @@ test("fail closed: no service-role or secret key in any browser-served file; pre
   assert.deepStrictEqual([L.publicConfig({ host: PREVIEW, env: {} }).ok], [false], "an unconfigured preview gets nothing");
 });
 
-test("Stage B page: never asked on production; the page starts the background job with its own token and sends only the projectId", () => {
+test("Stage B page: never asked on production; the page starts the background job with its own token and sends only the projectId and mode", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "agent-marketing.html"), "utf8");
-  assert.match(html, /if \(!p \|\| !p\.id \|\| SSP_CFG\.env === "production"\) \{ paintStageB\(null\); return null; \}/, "status is not requested on production");
-  assert.match(html, /await api\("POST", "", \{ projectId: p\.id \}, STAGEB_BG\)/, "the background call goes through api() (Bearer token) with only the projectId");
+  assert.match(html, /if \(!p \|\| !p\.id \|\| SSP_CFG\.env === "production"\) return null;/, "status is not requested on production");
+  assert.match(html, /await api\("POST", "", \{ projectId: p\.id, mode: "script" \}, STAGEB_BG\)/, "the background call goes through api() (Bearer token) with only the projectId and mode");
   assert.ok(!/STAGEB_BG[^\n]*userId/.test(html), "the page never names a user");
-  assert.ok(/id="stagebBox" class="hidden"/.test(html), "the panel starts hidden");
+  assert.ok(!/id="stagebBox"/.test(html), "there is no evidence panel (Nov 8, 2026)");
 });

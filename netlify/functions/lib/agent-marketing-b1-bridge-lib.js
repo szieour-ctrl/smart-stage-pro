@@ -313,7 +313,7 @@ async function prepare({ project, userId, store, fetchFn, env, now }) {
   if (!t || !t.candidate) fail("not_article_led", "the project has no selected Article-Led topic");
   const art = articleOf(t);
   if (!art) fail("no_article", "the selected topic has no article URL");
-  const found = await store.findForProject(project.id, t.id);
+  const found = await store.findForProject(project.id, t.id, t.researchId);   // topic ids repeat across research sets (Nov 8, 2026)
   const existing = found && found.status !== "failed" ? found : null;   // a failed run never blocks a retry (migration R4)
   const { page, snap, key } = await capture({ art, fetchFn, env, now });
   if (existing && existing.cache_key !== key) fail("source_changed", "the article changed since its snapshot was taken; a new snapshot needs an explicit decision",

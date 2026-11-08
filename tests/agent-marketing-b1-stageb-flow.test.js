@@ -280,7 +280,7 @@ test("stageb: failures: a failed run can be retried with a new reservation; stal
   const w = world();
   const pid = w.P.FC.id;
   await w.start("token-a", pid);
-  assert.deepStrictEqual(json(await w.background(w.dispatched.pop(), { provider: flaky })), { state: "failed", code: "provider_error" });
+  assert.deepStrictEqual(json(await w.background(w.dispatched.pop(), { provider: flaky })), { state: "failed", code: "provider_error", providerAttempted: true }, "the provider was called: the run says so");
   assert.strictEqual(w.db.T.agent_marketing_article_evidence[0].status, "failed");
   await w.start("token-a", pid);   // retry
   const r = json(await w.background(w.dispatched.pop()));
@@ -298,11 +298,11 @@ test("stageb: failures: a failed run can be retried with a new reservation; stal
   // limits: the B1 per-user cap and the ledger's own daily limit refuse BEFORE any provider call
   const w3 = world({ env: { B1_STAGEB_MAX_PER_USER_DAY: "1" } });
   await w3.start("token-a", w3.P.FA.id); assert.strictEqual(json(await w3.background(w3.dispatched.pop())).state, "ready");
-  await w3.start("token-a", w3.P.FB.id); assert.deepStrictEqual(json(await w3.background(w3.dispatched.pop())), { state: "failed", code: "b1_limit_user_day" });
+  await w3.start("token-a", w3.P.FB.id); assert.deepStrictEqual(json(await w3.background(w3.dispatched.pop())), { state: "failed", code: "b1_limit_user_day", providerAttempted: false });
   assert.strictEqual(w3.provider.calls, 1);
   const w4 = world({ env: { AGENT_MARKETING_REQUEST_DAILY_LIMIT: "1" } });
   w4.db.T.ledger.push({ id: crypto.randomUUID(), user_id: U.A, research_id: "11111111-0000-4000-8000-00000000000f", seq: 1, at: Date.now() });   // research already used today's request
-  await w4.start("token-a", w4.P.FA.id); assert.deepStrictEqual(json(await w4.background(w4.dispatched.pop())), { state: "failed", code: "provider_limit_daily" });
+  await w4.start("token-a", w4.P.FA.id); assert.deepStrictEqual(json(await w4.background(w4.dispatched.pop())), { state: "failed", code: "provider_limit_daily", providerAttempted: false });
   assert.strictEqual(w4.provider.calls, 0);
 });
 
@@ -313,7 +313,7 @@ test("stageb: the live provider is absent: without B1_PROVIDER=mock the run fail
   assert.throws(() => pv.createProvider({ env: { B1_PROVIDER: "mock", B1_MOCK_RESPONSES_DIR: "/x" } }), (e) => e.code === "disabled");
   await w.start("token-a", w.P.FA.id);
   const r = json(await w.background(w.dispatched.pop(), { provider: undefined }));
-  assert.deepStrictEqual(r, { state: "failed", code: "provider_not_implemented" });
+  assert.deepStrictEqual(r, { state: "failed", code: "provider_not_implemented", providerAttempted: false });
   assert.strictEqual(w.db.T.ledger.length, 0, "no reservation was spent");
 });
 

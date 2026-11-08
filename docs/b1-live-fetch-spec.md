@@ -151,3 +151,12 @@ FC full hashes: live snapshot `11a09d7cde784337ed1b49e280351197befa77ce11eadd2a8
   which changes snapshot hashes and needs its own fixture review) or compare on the article body / quoted passages only.
 - **Layer B** stays deferred: no fetch-path discrepancy was observed; the FC difference comes from page content.
 - Session closed: Stage B switched off and `B1_SNAPSHOT_SOURCE=worker-fixture` restored on the branch (see `docs/b1-stage-b-infra-plan.md`).
+
+## 8. Scope correction (Nov 8, 2026): the source re-check is removed
+The subscriber workflow has no article monitoring, re-checks or research refresh. The "Re-check the article" capability (`verify_source`: start
+action, background mode, `verifyJob`, `B1_VERIFY_MAX_PER_USER_DAY`, the page button) is removed. Kept: live capture for evidence, the explicit fetch
+codes, immutable snapshots and provenance, and the attempt log as the audit trail of capture failures (the Layer C rows above stay as history).
+Acceptance cases LF-01, LF-03, LF-04 and LF-18 were re-check cases and are gone; LF-02, LF-10, LF-17, LF-19…LF-21 now run on the evidence path.
+Article evidence is now obtained inside "Write my script": `docs/b1-script-integration.md`. The FC exception above (related/latest-story blocks in
+the snapshot) is a first-capture quality question for `extract_v3`, deferred to a separate review; it is not an ongoing comparison feature.
+

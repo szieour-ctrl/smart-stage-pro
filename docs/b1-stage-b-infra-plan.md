@@ -258,3 +258,7 @@ functions → private fixture worker on Railway → development Supabase), with 
   `AGENT_MARKETING_B1_EVIDENCE` (Stage B off; endpoints 404, panel hidden) and restored the branch value `B1_SNAPSHOT_SOURCE=worker-fixture`
   (future runs use the frozen fixtures, not live pages). Kept: `B1_PROVIDER=worker-fixture`, worker URL/secret, allowlists,
   `B1_STAGEB_MAX_PER_USER_DAY=3`. This commit redeploys the branch; `b1-env-check` should report `ok: true`.
+- Nov 8: subscriber workflow integration (`docs/b1-script-integration.md`): "Write my script" obtains or reuses the evidence, then writes the script
+  (background `mode: "script"`, started by the page). The source re-check is removed. New branch value for deterministic hosted tests (owner action,
+  `b1-stageb-dev` only): `B1_PLANNER=fixture` (the development fixture script writer; never with the production database). No new paid call.
+

@@ -1,7 +1,8 @@
 // lib/agent-marketing-b1-store-lib.js — Netlify (shared). DEVELOPMENT ONLY (Nov 5, 2026). Stage B persistence over Supabase PostgREST.
 //
 // The store the bridge (lib/agent-marketing-b1-bridge-lib.js) and Stage B (lib/agent-marketing-b1-stageb-run-lib.js) use: findForProject, findLive,
-// insert, update, attach, forPlan, latestForProject, maxProviderSeq, countProviderCalls, reserveProvider, fail. It reads and writes
+// insert, update, attach, forPlan, latestForProject, findReadyForTopic, researchRoot, maxProviderSeq, countProviderCalls, reserveProvider, fail,
+// insertAttempt, latestAttempt. It reads and writes
 // public.agent_marketing_article_evidence, which exists only once the PROPOSED migration
 // docs/proposed-migrations/20261105_agent_marketing_article_evidence.up.sql is applied to an authorized development database (it is NOT applied).
 // Service role only (RLS on, no policies): this file is server-side, has no handler export and never reads a request.
@@ -36,9 +37,27 @@ function createStore({ env, request } = {}) {
   const rq = request || defaultRequest();
   const one = (rows) => (rows.length ? rows[0] : null);
   return {
-    /** The project's current non-failed record for the topic (a failed run never blocks a retry). */
-    async findForProject(projectId, topicId) {
-      return one(check(await rq("GET", TABLE, null, `?project_id=eq.${enc(projectId)}&topic_id=eq.${enc(topicId)}&status=neq.failed&order=created_at.desc&limit=1`), "findForProject"));
+    /** The project's current non-failed record for the topic (a failed run never blocks a retry). Topic ids (t1..t5) repeat across research
+     *  sets, so the research run is part of the match whenever it is known (Nov 8, 2026). */
+    async findForProject(projectId, topicId, researchId) {
+      const r = researchId ? `&research_id=eq.${enc(researchId)}` : "";
+      return one(check(await rq("GET", TABLE, null, `?project_id=eq.${enc(projectId)}&topic_id=eq.${enc(topicId)}${r}&status=neq.failed&order=created_at.desc&limit=1`), "findForProject"));
+    },
+    /** This user's ready records for a topic id, oldest first (saved-topic reuse; the caller checks research lineage and integrity). */
+    async findReadyForTopic(userId, topicId) {
+      return check(await rq("GET", TABLE, null, `?user_id=eq.${enc(userId)}&topic_id=eq.${enc(topicId)}&status=eq.ready&order=created_at.asc&limit=50`), "findReadyForTopic");
+    },
+    /** The original research run behind a saved set: a set opened in another project is a copy (usage.copiedFrom); follows at most 10 links. */
+    async researchRoot(researchId, userId) {
+      let id = researchId;
+      for (let i = 0; i < 10 && id; i++) {
+        const r = one(check(await rq("GET", "agent_marketing_research", null, `?id=eq.${enc(id)}&user_id=eq.${enc(userId)}&select=id,usage&limit=1`), "researchRoot"));
+        if (!r) return null;   // not this user's research: no lineage
+        const from = r.usage && typeof r.usage === "object" ? r.usage.copiedFrom : null;
+        if (!from || from === id) return r.id;
+        id = from;
+      }
+      return null;
     },
     /** An in-flight run for the key if there is one, otherwise the earliest ready result (the original B1 run, not a copy). */
     async findLive(cacheKey) {
@@ -66,8 +85,9 @@ function createStore({ env, request } = {}) {
       return r;
     },
     /** Stage B job status for the page: metadata only, never the snapshot, request, raw response or bundle text (counts are derived). */
-    async latestForProject(projectId, topicId) {
-      const rows = check(await rq("GET", TABLE, null, `?project_id=eq.${enc(projectId)}&topic_id=eq.${enc(topicId)}&select=id,status,completeness_status,error,reused_from,provider_seq,created_at,finished_at,bundle&order=created_at.desc&limit=1`), "latestForProject");
+    async latestForProject(projectId, topicId, researchId) {
+      const r = researchId ? `&research_id=eq.${enc(researchId)}` : "";
+      const rows = check(await rq("GET", TABLE, null, `?project_id=eq.${enc(projectId)}&topic_id=eq.${enc(topicId)}${r}&select=id,status,completeness_status,error,reused_from,provider_seq,created_at,finished_at,bundle&order=created_at.desc&limit=1`), "latestForProject");
       return one(rows);
     },
     /** Highest Stage B ledger sequence used on this research run (Stage B uses 1001 and up; research itself uses 1, 2, ...). */
@@ -93,7 +113,8 @@ function createStore({ env, request } = {}) {
       return this.update(id, { status: "failed", error: String(code).slice(0, 200), finished_at: new Date().toISOString() }, fromStatus);
     },
     /**
-     * Append one capture attempt (live-fetch milestone): a verification, or a failure before an evidence row could exist. Only the whitelisted
+     * Append one capture attempt: a failure before an evidence row could exist (the audit trail of capture failures). The earlier
+     * "Re-check the article" verifications (mode verify_source) are kept as history; nothing writes that mode any more (Nov 8, 2026). Only the whitelisted
      * minimal fields are sent; anything else is dropped here, and the database refuses text-sized or malformed values. Never HTML or text.
      */
     async insertAttempt(a) {
@@ -113,10 +134,6 @@ function createStore({ env, request } = {}) {
     /** The project's latest attempt, as the page may see it: mode, stage, outcome, HTTP status and time (no URL, title or hashes). */
     async latestAttempt(projectId, topicId) {
       return one(check(await rq("GET", ATTEMPTS, null, `?project_id=eq.${enc(projectId)}&topic_id=eq.${enc(topicId)}&select=mode,stage,outcome,http_status,created_at&order=created_at.desc&limit=1`), "latestAttempt"));
-    },
-    /** Source verifications by this user since `sinceIso` (the verify-only daily cap). */
-    async countVerifications({ userId, sinceIso }) {
-      return check(await rq("GET", ATTEMPTS, null, `?user_id=eq.${enc(userId)}&mode=eq.verify_source&created_at=gte.${enc(sinceIso)}&select=id&limit=1000`), "countVerifications").length;
     },
     /** The plan-time read: the project's chosen record (or null; with the switch on, null makes the Planner fail closed). */
     async forPlan(project) {

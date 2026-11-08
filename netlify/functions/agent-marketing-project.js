@@ -25,6 +25,16 @@ const mediaLib = require("./lib/agent-marketing-media-lib");
 
 const headers = { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json", "Cache-Control": "no-store" };
 const reply = (statusCode, obj) => ({ statusCode, headers, body: JSON.stringify(obj) });
+// B1 article evidence (development only, AGENT_MARKETING_B1_EVIDENCE=dev; Nov 8, 2026): script edits and approval are checked with the same evidence
+// the script was written from, so validated article figures stay allowed and held findings stay blocked. With the switch off the project is unchanged.
+async function withGateEvidence(project) {
+  return require("./lib/agent-marketing-b1-stageb-run-lib").withPlanEvidence(project);
+}
+const evidenceBlocked = (project) => {
+  const b1 = require("./lib/agent-marketing-b1-evidence-lib");
+  const v = project && project.template === "local_market_insider" ? b1.viewForTopic(project.selected_topic) : null;
+  return v && v.status === b1.BLOCKED ? v.blockedReason : null;
+};
 const PUBLIC_COLS = "id,template,angle,formats,duration_sec,voice,music,intake,narrative,narrative_approved_at,storyboard,selected_topic,status,gate_version,gate_result,created_at,updated_at,hidden_at";
 
 // A saved script written for another topic or other answers is kept for the agent to see, but the page must offer "Write my script" again (Sam, Oct 29, 2026).
@@ -159,7 +169,7 @@ exports.handler = async (event) => {
       const v = am.validateNarrative(b.narrative, project.duration_sec);
       if (v.error) return reply(400, { error: v.error });
       am.attachNotice(project, v.narrative); // a script edit must never drop the required notice (on-screen overlay, never spoken)
-      const g = gate.evaluate(am.gateInputFor(project, v.narrative, "edited"));
+      const g = gate.evaluate(am.gateInputFor(await withGateEvidence(project), v.narrative, "edited"));
       if (!g.ok) return reply(422, { error: gate.explain(g), gate: gateSummary(g) });
       // Keep what the planner produced (scene plan, photo shopping list, claims to verify, planning counters) and replace only
       // what the agent edited. If the words changed, the scene excerpts no longer match them: flag that for the next step.
@@ -182,17 +192,13 @@ exports.handler = async (event) => {
     }
 
     if (action === "plan") {
+      // The pre-planning checks (intake, topic, one call per set of answers, attempts) are shared with the development script mode.
       if (!project.intake || !project.intake.market) return reply(409, { error: "Answer the intake questions first." });
       if (project.template === "local_market_insider" && !project.selected_topic) return reply(409, { error: "Choose one of the five topics first." });
       if (!process.env.ANTHROPIC_API_KEY || !process.env.INTERNAL_API_KEY) return reply(500, { error: "Planning is not configured." });
-      const n = project.narrative;
-      const hash = planLib.intakeHash(project.intake, project.selected_topic);
-      const attempts = (n && Number(n.attempts)) || 0;
-      if (n && n.status === "planning" && Date.now() - Number(n.startedAt || 0) < planLib.STALE_PLANNING_MS) return reply(409, { error: "Your script is already being written." });
-      // One planning call per distinct set of answers: a ready script for the same answers is reused, not re-bought.
-      if (n && n.narrationTagged && n.intakeHash === hash) return reply(409, { error: "A script already exists for these answers. Edit it, or change your answers to plan again." });
-      if (attempts >= planLib.MAX_ATTEMPTS) return reply(429, { error: "This project has used all of its planning attempts. Start a new one." });
-      const stub = { status: "planning", startedAt: Date.now(), attempts: attempts + 1, intakeHash: hash };
+      const ps = require("./lib/agent-marketing-plan-run-lib").planStart(project);
+      if (ps.error) return reply(ps.error.status, { error: ps.error.message });
+      const { stub, hash } = ps;
       const saved = await patch(project.id, userId, { narrative: stub });
       if (!saved) return reply(500, { error: "Could not start planning" });
       const siteUrl = selfBase(event, process.env.URL || `https://${event.headers && event.headers.host}`);
@@ -217,7 +223,11 @@ exports.handler = async (event) => {
       return reply(409, { error: "This script was written for a different topic or different answers. Write a new script for the topic you chose, then approve it.", code: "script_stale" });
     }
     am.attachNotice(project, n); // scripts saved before the notice was kept still carry it
-    const g = gate.evaluate(am.gateInputFor(project, n, n.source === "claude" ? "claude" : "edited"));
+    // Development only: an Article-Led script is approved only while its topic's checked evidence is attached and valid.
+    const gateProject = await withGateEvidence(project);
+    const blockedWhy = evidenceBlocked(gateProject);
+    if (blockedWhy) return reply(409, { error: "This script can't be approved because the article evidence for this topic is missing or no longer valid. Write the script again.", code: "evidence_blocked" });
+    const g = gate.evaluate(am.gateInputFor(gateProject, n, n.source === "claude" ? "claude" : "edited"));
     if (!g.ok) return reply(422, { error: gate.explain(g), gate: gateSummary(g) });
     const now = new Date().toISOString();
     const saved = await patch(project.id, userId, { narrative_approved: { ...n, approvedAt: now, gateVersion: g.version }, narrative_approved_at: now, status: "narrative_approved", gate_version: g.version, gate_result: gateSummary(g) });

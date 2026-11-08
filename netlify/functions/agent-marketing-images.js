@@ -40,10 +40,12 @@ const SELECTABLE = ["narrative_approved", "images", "ready_to_render"];
 
 async function loadProject(id, userId) {
   if (!am.UUID_RE.test(String(id || ""))) return { error: reply(400, { error: "Missing or invalid project id" }) };
-  const r = await supabase("GET", "agent_marketing_projects", null, `?id=eq.${id}&user_id=eq.${userId}&select=id,status,formats,narrative,template,intake,selected_topic&limit=1`);
+  const r = await supabase("GET", "agent_marketing_projects", null, `?id=eq.${id}&user_id=eq.${userId}&select=id,status,formats,narrative,template,intake,selected_topic,article_evidence_id&limit=1`);
   const row = rowsOf(r)[0];
   if (!row) return { error: reply(404, { error: "Project not found" }) };
-  return { row };
+  // B1 article evidence (development only, Nov 8, 2026): image notes and descriptions are checked with the same evidence as the script.
+  // With AGENT_MARKETING_B1_EVIDENCE unset the row is unchanged.
+  return { row: await require("./lib/agent-marketing-b1-stageb-run-lib").withPlanEvidence(row) };
 }
 const loadAssets = async (projectId, userId) => rowsOf(await supabase("GET", "agent_marketing_assets", null, `?project_id=eq.${projectId}&user_id=eq.${userId}&source=eq.gpt_image_2&select=*&order=created_at.asc&limit=200`));
 

@@ -1,8 +1,9 @@
 // Run with: npm test   (needs B1_WORKSPACE = the private ssp-b1-evidence workspace and Python 3 with beautifulsoup4 + lxml; skipped with the reason
 // otherwise; B1_FIXTURES_REQUIRED=1 makes a missing workspace a failure). No network: a local HTTP server serves the frozen article HTML.
-// DEVELOPMENT ONLY (live-fetch milestone, Nov 8, 2026): source verification and evidence-mode capture failures through the REAL worker snapshot
-// code. Acceptance cases LF-01…LF-04, LF-10, LF-17…LF-21 (docs/b1-live-fetch-spec.md). Every case also proves the no-spend rule: no evidence row,
-// no ledger reservation, no provider call, no change to existing evidence or the project's evidence link, exactly one attempt record.
+// DEVELOPMENT ONLY (live-fetch milestone, Nov 8, 2026): article capture for evidence through the REAL worker snapshot code, and the audit trail of
+// capture failures. Acceptance cases LF-02, LF-10, LF-17, LF-19…LF-21 (docs/b1-live-fetch-spec.md). Nov 8, 2026 (workflow scope correction): the
+// subscriber-facing source re-check (verify_source; LF-01, LF-03, LF-04, LF-18) was removed, so those cases are gone and the background function
+// now refuses that mode. Every failure case proves the no-spend rule: no evidence row, no ledger reservation, no provider call, one attempt record.
 const test = require("node:test");
 const assert = require("node:assert");
 const fs = require("fs");
@@ -64,7 +65,6 @@ function world(c, { attached = true } = {}) {
     async forPlan(p) { return p.article_evidence_id ? ev.find((r) => r.id === p.article_evidence_id) || null : null; },
     async insertAttempt(a) { const row = { ...a, id: `at-${attempts.length + 1}`, created_at: new Date(Date.now() + attempts.length).toISOString() }; attempts.push(row); return row; },
     async latestAttempt(pid, tid) { const a = attempts.filter((x) => x.projectId === pid && x.topicId === tid).pop(); return a ? { mode: a.mode, stage: a.stage, outcome: a.outcome, http_status: a.httpStatus || null, created_at: a.created_at } : null; },
-    async countVerifications({ userId }) { return attempts.filter((a) => a.userId === userId && a.mode === "verify_source").length; },
   };
   return { project, store, loadProject: async (id, uid) => (id === project.id && uid === UID ? project : null),
     async baseline() {   // the approved snapshot of the frozen article, captured without HTTP, attached as the project's ready evidence row
@@ -74,7 +74,8 @@ function world(c, { attached = true } = {}) {
       ev.push(row); if (attached) project.article_evidence_id = row.id; return { row, cap };
     } };
 }
-const verify = (w) => run.verifyJob({ userId: UID, projectId: w.project.id, store: w.store, loadProject: w.loadProject, fetchFn: localFetch, env: ENV });
+const evidence = (w, env) => run.runJob({ userId: UID, projectId: w.project.id, store: w.store, loadProject: w.loadProject, fetchFn: localFetch,
+  provider: { call: async () => { throw new Error("no provider call expected"); } }, env: env || ENV });
 function noSpend(w, evBefore, pointer) {
   assert.strictEqual(w.store.ev.length, evBefore, "no evidence row was inserted");
   assert.deepStrictEqual(w.store.calls, { insert: 0, update: 0, attach: 0, reserve: 0 }, "no evidence write, link change or reservation");
@@ -90,55 +91,25 @@ test("LF-21 the live path reproduces the APPROVED frozen requests (seeded title 
   }
 });
 
-test("LF-01 unchanged source: the live capture matches the approved snapshot → unchanged, compared with the attached ready row", { skip: SKIP }, async () => {
-  const w = world("FA"); const { row } = await w.baseline(); serve(M.FA.final_url, raw("FA"));
-  const r = await verify(w);
-  assert.deepStrictEqual(r, { state: "verified", outcome: "unchanged", logged: true });
-  noSpend(w, 1, row.id);
-  const a = w.store.attempts[0];
-  assert.deepStrictEqual([w.store.attempts.length, a.mode, a.stage, a.outcome, a.comparedTo, a.snapshotSha256], [1, "verify_source", "compare", "unchanged", row.id, row.snapshot_sha256]);
-});
-
-test("LF-02 markup-only changes (scripts, comments, attributes outside the article) do not count as a change → unchanged", { skip: SKIP }, async () => {
-  const w = world("FB"); const { row } = await w.baseline();
+test("LF-02 markup-only changes (scripts, comments, attributes outside the article) give the same snapshot and cache key as the approved capture", { skip: SKIP }, async () => {
+  const w = world("FB"); const { cap } = await w.baseline();
   const html = raw("FB").toString("utf8").replace(/<head([^>]*)>/i, '<head$1><script>window.ad = "' + Date.now() + '";</script><!-- cache 123 -->');
   assert.notStrictEqual(html, raw("FB").toString("utf8"));
   serve(M.FB.final_url, html);
-  assert.strictEqual((await verify(w)).outcome, "unchanged");
-  noSpend(w, 1, row.id);
+  const live = await br.capture({ art: br.articleOf(w.project.selected_topic), fetchFn: localFetch, env: ENV });
+  assert.notStrictEqual(live.snap.raw_html_sha256, cap.snap.raw_html_sha256);
+  assert.deepStrictEqual([live.snap.snapshot_sha256, live.key], [cap.snap.snapshot_sha256, cap.key]);
 });
 
-test("LF-03 one edited sentence of article text → source_changed; the approved evidence is kept untouched", { skip: SKIP }, async () => {
-  const w = world("FC"); const { row, cap } = await w.baseline();
-  const word = (cap.snap.snapshot_text.match(/\b[A-Za-z]{9,}\b/g) || []).find((x) => raw("FC").toString("utf8").split(x).length === 2);
-  assert.ok(word, "a distinctive word to edit");
-  serve(M.FC.final_url, raw("FC").toString("utf8").replace(word, word + "s"));
-  const r = await verify(w);
-  assert.deepStrictEqual([r.state, r.outcome], ["verified", "source_changed"]);
-  noSpend(w, 1, row.id);
-  assert.strictEqual(w.store.ev[0], row, "the ready row object is the same frozen object");
-  const a = w.store.attempts[0];
-  assert.deepStrictEqual([a.stage, a.outcome, a.comparedTo], ["compare", "source_changed", row.id]);
-  assert.notStrictEqual(a.snapshotSha256, row.snapshot_sha256);
-});
-
-test("LF-04 no checked evidence yet → no_baseline (read and recorded, nothing compared, nothing created)", { skip: SKIP }, async () => {
-  const w = world("FA", { attached: false }); serve(M.FA.final_url, raw("FA"));
-  const r = await verify(w);
-  assert.strictEqual(r.outcome, "no_baseline");
-  noSpend(w, 0, null);
-  assert.deepStrictEqual([w.store.attempts[0].stage, w.store.attempts[0].comparedTo], ["compare", null]);
-});
-
-test("LF-10 a 200 robot-check / paywall page is capture_blocked at the snapshot stage; too little text is incomplete", { skip: SKIP }, async () => {
+test("LF-10 a 200 robot-check / paywall page is capture_blocked at the snapshot stage; too little text is incomplete (evidence attempt, no spend)", { skip: SKIP }, async () => {
   for (const [body, code] of [["<html><body><p>Just a moment... verify you are human. " + "x ".repeat(900) + "</p></body></html>", "capture_blocked"],
     ["<html><body><p>Subscribe to read.</p></body></html>", "incomplete"]]) {
-    const w = world("FA"); const { row } = await w.baseline(); serve(M.FA.final_url, body);
-    const r = await verify(w);
-    assert.deepStrictEqual([r.state, r.code], ["failed", code]);
-    noSpend(w, 1, row.id);
+    const w = world("FA", { attached: false }); serve(M.FA.final_url, body);
+    const r = await evidence(w);
+    assert.deepStrictEqual([r.state, r.code, r.providerAttempted], ["failed", code, undefined]);
+    noSpend(w, 0, null);
     const a = w.store.attempts[0];
-    assert.deepStrictEqual([a.stage, a.outcome, a.httpStatus, a.comparedTo], ["snapshot", code, 200, null]);
+    assert.deepStrictEqual([a.mode, a.stage, a.outcome, a.httpStatus, a.comparedTo], ["evidence", "snapshot", code, 200, null]);
   }
 });
 
@@ -156,59 +127,47 @@ test("LF-17 evidence mode: a capture failure before any row is recorded as an ev
   assert.deepStrictEqual([s.status, s.body.state], [200, "ready"]); assert.strictEqual(hits.length, before); assert.strictEqual(w2.project.article_evidence_id, row.id);
 });
 
-test("LF-18 retries are safe: each verification is its own record; nothing to reset; the status shows the latest attempt only as metadata", { skip: SKIP }, async () => {
-  const w = world("FA"); const { row } = await w.baseline();
-  serve(M.FA.final_url, "<html>x</html>", { status: 503 });
-  assert.strictEqual((await verify(w)).code, "http_error");
-  serve(M.FA.final_url, raw("FA"));
-  assert.strictEqual((await verify(w)).outcome, "unchanged");
-  noSpend(w, 1, row.id);
-  assert.deepStrictEqual(w.store.attempts.map((a) => a.outcome), ["http_error", "unchanged"]);
-  const st = await run.status({ userId: UID, projectId: w.project.id, store: w.store, loadProject: w.loadProject, env: ENV });
-  assert.deepStrictEqual(Object.keys(st.body.lastAttempt).sort(), ["at", "httpStatus", "mode", "outcome", "stage"]);
-  assert.deepStrictEqual([st.body.lastAttempt.mode, st.body.lastAttempt.outcome], ["verify_source", "unchanged"]);
-  for (const s of [M.FA.final_url, row.snapshot_sha256]) assert.ok(!JSON.stringify(st.body).includes(s), "no URL or hash reaches the page");
-});
-
-test("LF-19 provenance: the attempt keeps source URL, final URL, observed title and hashes, and never article text or HTML", { skip: SKIP }, async () => {
-  const w = world("FC"); const { row } = await w.baseline(); serve(M.FC.final_url, raw("FC"));
-  await verify(w);
+test("LF-19 provenance: a capture-failure attempt keeps source URL, final URL, observed title and hashes, and never article text or HTML", { skip: SKIP }, async () => {
+  const w = world("FC", { attached: false });
+  const body = "<html><head><title>Just a moment</title></head><body><p>Just a moment... verify you are human. " + "x ".repeat(900) + "</p></body></html>";
+  serve(M.FC.final_url, body);
+  const r = await evidence(w);
+  assert.deepStrictEqual([r.state, r.code], ["failed", "capture_blocked"]);
   const a = w.store.attempts[0];
-  assert.deepStrictEqual([a.sourceUrl, a.finalUrl, a.comparedTo], [M.FC.final_url, M.FC.final_url, row.id]);
-  assert.ok(a.observedTitle && a.observedTitle.length <= 500);
-  assert.ok(/^[0-9a-f]{64}$/.test(a.rawHtmlSha256) && /^[0-9a-f]{64}$/.test(a.snapshotSha256));
-  assert.ok(a.bytes === raw("FC").length && /html/.test(a.contentType) && a.httpStatus === 200);
+  assert.deepStrictEqual([a.sourceUrl, a.finalUrl, a.mode, a.stage], [M.FC.final_url, M.FC.final_url, "evidence", "snapshot"]);
+  assert.strictEqual(a.observedTitle, "Just a moment");
+  assert.ok(/^[0-9a-f]{64}$/.test(a.rawHtmlSha256));
+  assert.ok(a.bytes === Buffer.byteLength(body) && /html/.test(a.contentType) && a.httpStatus === 200);
   const all = JSON.stringify(a);
   assert.ok(all.length < 2000, "a small record");
-  assert.ok(!all.includes(raw("FC").toString("utf8").slice(2000, 2100)), "no HTML in the record");
+  assert.ok(!all.includes("verify you are human"), "no page text in the record");
   assert.deepStrictEqual(Object.keys(a).filter((k) => /text|html$|body|response|request|secret|token/i.test(k)), [], "no text, HTML, request, response or credential field");
   // the request title is still the seeded title, even when the page's own <title> differs
   assert.strictEqual(w.project.selected_topic.sources[0].title, M.FC.page_title);
 });
 
-test("LF-20 isolation: switch off, not allowlisted, production database, cap reached, wrong owner → refused before any fetch", { skip: SKIP }, async () => {
-  const w = world("FA"); await w.baseline(); serve(M.FA.final_url, raw("FA")); const before = hits.length;
-  const v = (env, uid, pid) => run.verifyJob({ userId: uid || UID, projectId: pid || w.project.id, store: w.store, loadProject: w.loadProject, fetchFn: localFetch, env });
-  assert.deepStrictEqual(await v({ ...ENV, AGENT_MARKETING_B1_EVIDENCE: "" }), { state: "refused", code: "not_found" });
-  assert.deepStrictEqual(await v({ ...ENV, B1_STAGEB_USER_IDS: "" }), { state: "refused", code: "not_found" });
-  assert.deepStrictEqual(await v({ ...ENV, SUPABASE_URL: "https://dnpaenpwdhjmslymgkse.supabase.co" }), { state: "refused", code: "production_database_refused" });
-  assert.deepStrictEqual(await v(ENV, "0aaaaaaa-0000-4000-8000-000000000000"), { state: "refused", code: "not_found" });
-  assert.deepStrictEqual(await v({ ...ENV, B1_VERIFY_MAX_PER_USER_DAY: "1" }), { state: "verified", outcome: "unchanged", logged: true });
-  assert.deepStrictEqual(await v({ ...ENV, B1_VERIFY_MAX_PER_USER_DAY: "1" }), { state: "refused", code: "verify_limit_user_day" });
-  assert.strictEqual(hits.length, before + 1, "only the one admitted verification fetched");
-  const r = await run.startVerifyRequest({ userId: UID, projectId: w.project.id, store: w.store, loadProject: w.loadProject, env: { ...ENV, B1_VERIFY_MAX_PER_USER_DAY: "1" } });
-  assert.deepStrictEqual([r.status, r.body.code], [429, "verify_limit_user_day"]);
+test("LF-20 isolation: switch off, not allowlisted, production database, wrong owner → refused before any fetch", { skip: SKIP }, async () => {
+  const w = world("FA", { attached: false }); serve(M.FA.final_url, raw("FA")); const before = hits.length;
+  assert.deepStrictEqual(await evidence(w, { ...ENV, AGENT_MARKETING_B1_EVIDENCE: "" }), { state: "refused", code: "not_found" });
+  assert.deepStrictEqual(await evidence(w, { ...ENV, B1_STAGEB_USER_IDS: "" }), { state: "refused", code: "not_found" });
+  assert.deepStrictEqual(await evidence(w, { ...ENV, SUPABASE_URL: "https://dnpaenpwdhjmslymgkse.supabase.co" }), { state: "refused", code: "production_database_refused" });
+  const other = await run.runJob({ userId: "0aaaaaaa-0000-4000-8000-000000000000", projectId: w.project.id, store: w.store, loadProject: w.loadProject, fetchFn: localFetch, provider: null, env: ENV });
+  assert.deepStrictEqual(other, { state: "refused", code: "not_found" });
+  assert.strictEqual(hits.length, before, "nothing was fetched");
+  noSpend(w, 0, null);
 });
 
-test("the background function's verify path never creates a provider, and refuses an unknown mode", { skip: SKIP }, async () => {
+test("the removed source re-check: the background function and the start endpoint refuse verify_source; nothing is fetched", { skip: SKIP }, async () => {
   const fn = require("../netlify/functions/agent-marketing-stageb-background");
-  const w = world("FA"); const { row } = await w.baseline(); serve(M.FA.final_url, raw("FA"));
-  let created = 0;
-  const deps = { env: ENV, requireUser: async () => ({ user: { id: UID } }), store: w.store, loadProject: w.loadProject, fetchFn: localFetch,
-    get provider() { created++; return { call: async () => { throw new Error("no provider call"); } }; } };
+  const ep = require("../netlify/functions/agent-marketing-stageb");
+  const w = world("FA"); const { row } = await w.baseline(); serve(M.FA.final_url, raw("FA")); const before = hits.length;
+  const deps = { env: ENV, requireUser: async () => ({ user: { id: UID } }), store: w.store, loadProject: w.loadProject, fetchFn: localFetch, provider: { call: async () => { throw new Error("no provider call"); } } };
   const ev = (body) => ({ httpMethod: "POST", headers: { host: "b1-stageb-dev--smart-stage-pro.netlify.app" }, body: JSON.stringify(body) });
-  const r = await fn.handler(ev({ projectId: w.project.id, mode: "verify_source" }), {}, deps);
-  assert.deepStrictEqual([r.statusCode, JSON.parse(r.body).outcome, created], [200, "unchanged", 0]);
-  noSpend(w, 1, row.id);
+  assert.strictEqual((await fn.handler(ev({ projectId: w.project.id, mode: "verify_source" }), {}, deps)).statusCode, 400);
   assert.strictEqual((await fn.handler(ev({ projectId: w.project.id, mode: "live_research" }), {}, deps)).statusCode, 400);
+  const r = await ep.handler(ev({ action: "verify_source", projectId: w.project.id }), {}, deps);
+  assert.deepStrictEqual([r.statusCode, JSON.parse(r.body).code], [400, "bad_request"]);
+  assert.strictEqual(hits.length, before); assert.strictEqual(w.store.attempts.length, 0);
+  noSpend(w, 1, row.id);
+  for (const k of ["verifyJob", "startVerifyRequest", "verifyCap"]) assert.strictEqual(run[k], undefined, k);
 });

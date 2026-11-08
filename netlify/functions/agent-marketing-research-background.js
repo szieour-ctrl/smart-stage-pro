@@ -13,14 +13,33 @@ async function writeRow(id, userId, fields) {
   return supabase("PATCH", "agent_marketing_research", fields, `?id=eq.${id}&user_id=eq.${userId}&status=eq.running`);
 }
 
+/**
+ * Development deploys only (Nov 8, 2026): a branch deploy behind Netlify team login cannot call its own functions over HTTP, so there the PAGE
+ * starts this job with the user's own login token (as it does for the B1 job). Accepted only with AGENT_MARKETING_B1_EVIDENCE=dev, on a
+ * non-production host, against a non-production database; the user is always the token's user, never one named in the body.
+ */
+async function pageDispatchUser(event) {
+  const env = process.env;
+  if (!require("./lib/agent-marketing-b1-evidence-lib").enabled(env)) return null;
+  const { requestHost } = require("./lib/self-dispatch-lib");
+  const pc = require("./lib/public-config-lib");
+  if (pc.isProductionHost(requestHost(event), env) || !env.SUPABASE_URL || String(env.SUPABASE_URL).includes(pc.PRODUCTION_REF)) return null;
+  const auth = await require("./lib/reel-auth-lib").requireUser(event);
+  return auth && !auth.error && auth.user ? auth.user.id : null;
+}
+
 exports.handler = async (event) => {
   const h = event.headers || {};
   const key = process.env.INTERNAL_API_KEY || "";
-  if (!key || h["x-internal-key"] !== key) return { statusCode: 401, body: "" };
+  let pageUser = null;
+  if (!key || h["x-internal-key"] !== key) {
+    pageUser = await pageDispatchUser(event);
+    if (!pageUser) return { statusCode: 401, body: "" };
+  }
   let id = null, userId = null;
   try {
     const body = JSON.parse(event.body || "{}");
-    id = body.researchId; userId = body.owner;
+    id = body.researchId; userId = pageUser || body.owner;
     if (!am.UUID_RE.test(String(id || "")) || !am.UUID_RE.test(String(userId || ""))) return { statusCode: 400, body: "" };
     if (!am.isEnabledFor(userId)) return { statusCode: 404, body: "" };
     const r = await supabase("GET", "agent_marketing_research", null, `?id=eq.${id}&user_id=eq.${userId}&select=*&limit=1`);
@@ -57,7 +76,12 @@ exports.handler = async (event) => {
     const onDispatch = isAL ? async (n) => { await supabase("PATCH", "agent_marketing_research", { usage: { pathway: "article_led", providerRequests: n } }, `?id=eq.${id}&user_id=eq.${userId}&status=eq.running`); } : undefined;
     const { fields, problems, attempts } = await runLib.runResearch({ row, apiKey: process.env.PERPLEXITY_API_KEY, uploads, anthropicKey: process.env.ANTHROPIC_API_KEY, quotaFn, onDispatch, startingRequests: isAL ? (Number.isInteger(Number(row.usage && row.usage.providerRequests)) ? Number(row.usage.providerRequests) : 0) : 0 });
     if (fields.status === "failed") console.error(`[agent-marketing-research] ${id} failed after ${attempts} attempt(s): ${(problems || []).join("; ").slice(0, 400)} ${fields.error || ""}`);
-    await writeRow(id, userId, fields);
+    // Article-Led Market Update (modes 2 and 3, development switch AGENT_MARKETING_B1_EVIDENCE=dev): B1 reads the articles discovery found, and B2
+    // turns B1's validated records into the five research cards (lib/agent-marketing-b2-lib.js). Off, or nothing usable: the discovery cards stay.
+    let finalFields = fields;
+    try { finalFields = await require("./lib/agent-marketing-b2-lib").enrich({ row, fields, uploads, userId }); }
+    catch (e) { console.error(`[agent-marketing-research] ${id} B1/B2 step failed:`, e.code || e.message); }
+    await writeRow(id, userId, finalFields);
   } catch (err) {
     console.error(`[agent-marketing-research-background] ${id || "unknown"} failed:`, err.message);
     if (id && userId) {

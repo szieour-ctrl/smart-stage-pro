@@ -25,7 +25,28 @@
     $("dataFocus").innerHTML = (s.dataFocus || []).map(function (d) { return '<option value="' + esc(d.key) + '"' + (d.key === "all" ? " selected" : "") + ">" + esc(d.label) + "</option>"; }).join("");
     $("dataFocus").addEventListener("change", applyFocus);
     $("period").addEventListener("change", applyFocus);
-    $("modeChoices").addEventListener("change", function () { applyFocus(); applyZip(); }); applyFocus();
+    $("modeChoices").addEventListener("change", function () { applyFocus(); applyZip(); applyMuMode(); }); applyFocus();
+    if (s.marketUpdateModes && $("muModeChoices")) {
+      $("muModeChoices").innerHTML = s.marketUpdateModes.map(function (m) { return '<label class="choice" style="display:flex;align-items:flex-start;gap:8px"><input type="radio" name="muMode" value="' + esc(m.key) + '"><span><b>' + esc(m.label) + '</b><br><span class="hint" style="margin:0">' + esc(m.hint) + "</span></span></label>"; }).join("");
+      $("muModeChoices").addEventListener("change", function () { applyMuMode(); saveMuMode(); hideConfirm(); });
+    }
+    applyMuMode();
+  }
+  // ── Market Update type (Nov 8, 2026): three explicit choices, kept with the project ──
+  function muModeDef(key) { return ((state.schema && state.schema.marketUpdateModes) || []).filter(function (m) { return m.key === key; })[0] || null; }
+  function setMuMode(key) { var el = document.querySelector('input[name="muMode"][value="' + key + '"]'); if (el) el.checked = true; applyMuMode(); }
+  function applyMuMode() {
+    var box = $("muModeBox"); if (!box) return;
+    var market = picked("mode") !== "local_events";
+    box.classList.toggle("hidden", !market || !(state.schema && state.schema.marketUpdateModes));
+    var m = market ? muModeDef(picked("muMode")) : null;
+    var lbl = $("upLabelNote");
+    if (lbl) lbl.textContent = !market ? "(not used for Local Events)" : !m ? "(choose a Market Update type above)" : m.reportRequired ? "(required)" : "(not used: the article is the source)";
+    var up = $("uploadBox"); if (up) up.classList.toggle("hidden", market && !!m && !m.reportRequired);
+  }
+  async function saveMuMode() {
+    var m = picked("muMode"); if (!m || !state.projectId) return;
+    try { await api(API, "POST", "", { action: "set_mode", projectId: state.projectId, marketUpdateMode: m }); } catch (e) { /* the choice is sent again with the research request */ }
   }
   // Optional data applies to Local Market Update only; a period is needed for anything but "None".
   function applyFocus() {
@@ -62,6 +83,7 @@
       geography: { type: type, name: $("geoName").value, city: type === "neighborhood" ? $("geoCity").value : "", zip: type === "zip" ? "" : $("geoZip").value },
       focus: { active_adult_55: $("f55").checked, new_construction: $("fNew").checked }, keywords: $("keywords").value, dataFocus: $("dataFocus").value, period: collectPeriod(),
       dataSource: state.mlsTrend ? "upload" : reportSource().dataSource, uploadIds: reportSource().uploadIds,
+      marketUpdateMode: picked("mode") !== "local_events" ? (state.mlsTrend ? "trend_report" : picked("muMode")) || undefined : undefined,
     };
   }
   // A report is used only once the agent has confirmed "This report covers\u2026 Correct?". Attached and confirmed = both (report figures win); otherwise web only.
@@ -107,6 +129,16 @@
     if (t.reframed && t.areaContext && t.areaContext.length) parts.push("<b>Article context:</b> " + t.areaContext.map(function (c) { return esc(c.text); }).join(" \u00b7 "));
     if (t.trendSignals && t.trendSignals.length) parts.push("<b>Trend signals:</b> " + t.trendSignals.map(esc).join(" \u00b7 "));
     if (t.recommended && (t.recommended.evidence || []).length) parts.push("<b>Evidence:</b> " + t.recommended.evidence.map(esc).join(" \u00b7 "));
+    // B2 (Nov 8, 2026): the Realtor editorial direction and the article statements it rests on (B1 validated findings).
+    if (t.b2) {
+      if (t.b2.editorialAngle) parts.push("<b>Editorial angle:</b> " + esc(t.b2.editorialAngle));
+      if (t.b2.mechanism) parts.push("<b>From the article:</b> " + esc(t.b2.mechanism));
+      if (t.b2.homeownerImplication) parts.push("<b>For homeowners:</b> " + esc(t.b2.homeownerImplication));
+      var refs = (t.b2.sourceRefs || []).filter(function (r) { return r && r.quote; });
+      if (refs.length) parts.push("<b>Article sources:</b> " + refs.map(function (r) { return "\u201c" + esc(r.quote) + "\u201d" + (r.attribution ? " (" + esc(r.attribution) + ")" : ""); }).join(" \u00b7 "));
+      if (t.b1 && t.b1.completeness && t.b1.completeness !== "COMPLETE") parts.push("<b>Note:</b> some statements in this article were held back as unverified and are not used.");
+    }
+    if (t.reportFigures && t.reportFigures.length && t.origin !== "report" && t.b2) parts.push("<b>Market figures from your report:</b> " + t.reportFigures.slice(0, 6).map(function (f) { return esc(f.text); }).join(" \u00b7 "));
     if (!parts.length) return "";
     return '<details class="kv"><summary style="cursor:pointer">Details</summary>' + parts.map(function (x) { return '<div class="kv">' + x + "</div>"; }).join("") + "</details>";
   }
@@ -418,6 +450,7 @@
     var g = await api(API, "GET", "?projectId=" + encodeURIComponent(state.projectId));
     if (!g.ok) return;
     state.selected = g.json.selectedTopic || null;
+    if (g.json.marketUpdateMode) setMuMode(g.json.marketUpdateMode);
     renderSession(g.json.session);
     renderSaved(g.json.research || [], g.json.earlier || []);
     return g.json.research || [];
@@ -446,7 +479,9 @@
     var focus = [q.focus.active_adult_55 ? "55+ Active Adult" : "", q.focus.new_construction ? "New Construction" : ""].filter(Boolean).join(", ");
     var win = state.upload && state.upload.summary && state.upload.summary.window;
     var data = q.dataSource === "upload" ? "Your confirmed MLS report only (no web research): five MLS Market Trend topics built from its figures" : q.dataSource === "both" ? "Your confirmed report (its figures are the source of truth" + (win ? "; closed sales limited to " + win.label : "") + ") plus web research for the story" : "Web research. Each figure names its source, and preliminary figures are flagged";
-    var rows = [["Content", mode], ["Area", area], ["Audience", aud], ["Focus", focus || "None"], ["Keywords", (q.keywords || "").trim() || "None"], ["Data", data]];
+    var mdl = muModeDef(q.marketUpdateMode);
+    if (mdl) data = mdl.key === "trend_report" ? "Your confirmed Trend/CMA report only: topics and script from its figures" : mdl.key === "article_report" ? "Local articles for the story; your confirmed report (" + (win ? "closed sales limited to " + win.label + "; " : "") + "its figures are the only market statistics)" : "Local articles and your perspective; the article's figures are attributed to it. No report";
+    var rows = [["Content", mode + (mdl ? ": " + mdl.label : "")], ["Area", area], ["Audience", aud], ["Focus", focus || "None"], ["Keywords", (q.keywords || "").trim() || "None"], ["Data", data]];
     if (q.mode !== "local_events") rows.splice(5, 0, ["Optional data", focusLabel(q)]);
     return rows.map(function (r) { return "<div><b>" + esc(r[0]) + ":</b> " + esc(r[1]) + "</div>"; }).join("");
   }
@@ -461,6 +496,9 @@
     var q = collect(); say("startMsg", "");
     if (q.mode !== "local_events" && q.dataFocus !== "none" && q.period && q.period.start !== undefined && (!q.period.start || !q.period.end)) { say("startMsg", "Enter both dates for the period.", "err"); return; }
     if (q.mode !== "local_events" && q.geography.type !== "zip" && !/^\d{5}$/.test(String(q.geography.zip || "").trim())) { say("startMsg", "Enter the 5-digit ZIP code for this market.", "err"); $("geoZip").focus(); return; }
+    if (q.mode !== "local_events" && state.schema.marketUpdateModes && !q.marketUpdateMode) { say("startMsg", "Choose the type of Market Update first.", "err"); $("muModeBox").scrollIntoView({ block: "center" }); return; }
+    var mdef = muModeDef(q.marketUpdateMode);
+    if (mdef && mdef.reportRequired && !(q.uploadIds && q.uploadIds.length)) { say("startMsg", "This Market Update type uses your Trend or CMA report. Upload it and confirm it, then research.", "err"); $("uploadBox").scrollIntoView({ block: "center" }); return; }
     if (!q.mode || !q.geography.name.trim() || !q.audience) { say("startMsg", !q.audience ? "Choose who this is for." : "Enter the place to research.", "err"); return; }
     $("confirmList").innerHTML = confirmLines(q);
     var x = state.session;
@@ -477,7 +515,14 @@
       state.mlsTrend = false;
       var r = await api(API, "POST", "", body);
       if (r.json && r.json.session) renderSession(r.json.session);
-      if (r.status === 202) { showResult(r.json.research); startPoll(r.json.research.id); return; }
+      if (r.status === 202) {
+        // Development deploys: the page starts the research job itself, with its own login (the server cannot call its own functions there).
+        if (r.json.dispatch) {
+          var bg = await api("/.netlify/functions/agent-marketing-research-background", "POST", "", { researchId: r.json.research.id });
+          if (bg.status !== 202 && !bg.ok) { $("startBtn").disabled = false; say("startMsg", "The research could not start. This did not use a session.", "err"); return; }
+        }
+        showResult(r.json.research); startPoll(r.json.research.id); return;
+      }
       $("startBtn").disabled = false;
       if (r.status === 200) { showResult(r.json.research); say("startMsg", r.json.reused ? "You already had this set, so it was reopened and no session was used." : "", "ok"); return; }
       say("startMsg", (r.json && r.json.error) || "Something went wrong.", "err");

@@ -33,10 +33,13 @@ function inputOf(userText) {
 
 const words = (s) => String(s).trim().split(/\s+/).filter(Boolean).length;
 
-/** The one validated finding the fixture states: a figure first, then any claim; quotations of at most 45 words. */
-function pickFinding(ae) {
+/** The one validated finding the fixture states: a figure first, then any claim; quotations of at most 45 words. On a report-first topic (mode 2)
+ *  only a quotation without a local market statistic qualifies: those come from the agent's report. */
+function pickFinding(ae, reportFirst) {
   const list = ae && Array.isArray(ae.validated_findings) ? ae.validated_findings : [];
-  const usable = list.map((f) => ({ f, q: (Array.isArray(f.source_quotes) ? f.source_quotes : []).find((x) => typeof x === "string" && x.trim() && words(x) <= 45) })).filter((x) => x.q);
+  const art = require("./agent-marketing-article-lib");
+  const ok = (x) => typeof x === "string" && x.trim() && words(x) <= 45 && (!reportFirst || !art.numberRoles(x).some((n) => n.role === "market"));
+  const usable = list.map((f) => ({ f, q: (Array.isArray(f.source_quotes) ? f.source_quotes : []).find(ok) })).filter((x) => x.q);
   return usable.find((x) => x.f.kind === "figure") || usable.find((x) => x.f.kind === "headline_claim") || usable[0] || null;
 }
 
@@ -55,7 +58,9 @@ const FILLER = [
 function planJson(input, durationSec) {
   const dur = [30, 45, 60].includes(Number(durationSec)) ? Number(durationSec) : 45;
   const t = (input && input.selected_topic) || {};
-  const pick = pickFinding(t.article_evidence);
+  const reportFirst = t.report_is_source_of_truth_for_market_numbers === true;
+  const pick = pickFinding(t.article_evidence, reportFirst);
+  const figure = Array.isArray(t.figures_you_may_state) && t.figures_you_may_state.length ? String(t.figures_you_may_state[0]).trim() : "";
   const att = pick && typeof pick.f.attribution === "string" && pick.f.attribution.trim() && words(pick.f.attribution) <= 8 ? pick.f.attribution.trim() : "";
   const quote = pick ? pick.q.trim().replace(/\s+/g, " ") : "";
   // The quotation is one sentence of its own: a quotation that stops mid-sentence still ends here, so it never runs into the next scene's words.
@@ -63,7 +68,10 @@ function planJson(input, durationSec) {
   const hook = "Here's what I'm watching in the area right now, and why it matters if you're thinking about selling.";
   const close = "If you want to talk through what this means for your home, I'm happy to help.";
   const n = dur === 30 ? 4 : 6;
-  const middle = [articleLine];
+  // A report figure, stated as the report gives it, in a data scene (modes 1 and 2).
+  const dataLine = figure ? `My market report shows this. ${figure}${/[.!?]$/.test(figure) ? "" : "."}` : "";
+  const middle = pick || !figure ? [articleLine] : [];
+  if (dataLine) middle.push(dataLine);
   for (let i = 0; middle.length < n - 2; i++) middle.push(FILLER[i % FILLER.length]);
   const ex = [hook, ...middle, close];
   // Pad the middle scenes (never the quotation scene) with plain sentences until the spoken length reaches the target's lower bound.
@@ -75,7 +83,7 @@ function planJson(input, durationSec) {
   const roles = ["local_hook", "article_point", "context", "insight", "advice", "cta"];
   const scenes = ex.map((x, i) => ({
     role: i === n - 1 ? "cta" : roles[Math.min(i, roles.length - 2)], narration_excerpt: x, purpose: `Scene ${i + 1}`,
-    source_role: i === 1 && pick ? "article" : "data", visual_source: kinds[i], visual_brief: "An ordinary residential street of single-story and two-story homes in soft daylight.",
+    source_role: pick && x === articleLine ? "article" : "data", visual_source: kinds[i], visual_brief: "An ordinary residential street of single-story and two-story homes in soft daylight.",
     reuse_of_scene: kinds[i] === "CONCEPT_REUSE" ? 1 : null, card_text: kinds[i] === "BRAND_CARD" ? "Let's talk about your home" : null, authentic_photo_request: null,
     ai_generation_prompt: kinds[i] === "GPT_IMAGE_2_CONCEPT" ? "Photorealistic editorial view of ordinary single-story and two-story stucco homes on a residential street, soft daylight, no people, no text, wide composition" : null,
     camera_motion: "push_in", framing_9x16: "Centered", framing_16x9: "Centered", text_safe_placement: "lower middle",

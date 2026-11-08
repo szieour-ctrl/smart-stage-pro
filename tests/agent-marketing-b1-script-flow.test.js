@@ -449,3 +449,118 @@ test("evidence made with extract_v2 stays usable after the switch: a saved topic
   assert.strictEqual(evidenceRows().at(-1).extractor, "extract_v2");
   assert.strictEqual(out.narrative.status, "ready");
 });
+
+// ── Market Update modes with B1/B2 in research (Nov 8, 2026) ────────────────────────────────────────────────────────────────────────────────
+const b2lib = require("../netlify/functions/lib/agent-marketing-b2-lib");
+const reportLibM = require("../netlify/functions/lib/agent-marketing-report-lib");
+const rtM = require("../netlify/functions/lib/agent-marketing-research-report-lib");
+const trendFx = require("./helpers/trend-fixture");
+const b2Inputs = [];
+/** A stand-in for the B2 model call: three candidates per article from its first findings, no figures in the questions, five selected. */
+const b2Stub = async (system, user) => {
+  b2Inputs.push({ system, user: JSON.parse(user) });
+  const u = JSON.parse(user);
+  const candidates = [];
+  u.articles.forEach((a) => a.findings.slice(0, 3).forEach((f, i) => candidates.push({ id: `C${candidates.length + 1}`, question: `What does this ${a.id === "A1" ? "inventory" : "price"} story mean for sellers here, ${["first", "second", "third"][i]} point?`,
+    article: a.id, findings: [f.id], mechanism: f.finding.slice(0, 120), homeowner_implication: "Plan the sale around it.", editorial_angle: "One practical point for sellers.", why_it_matters: "It changes how a seller prepares." })));
+  return JSON.stringify({ candidates, selected: candidates.slice(0, 5).map((c) => c.id), selection_notes: "first five" });
+};
+function researchRow(p, mode, dataSource, uploads) {
+  const r = { id: uid("11111111"), project_id: p.id, user_id: p.user_id, status: "running", mode: "market_update", data_source: dataSource, audience: "sellers",
+    geography: { type: "city", name: "Sacramento", zip: "95814" }, focus: { marketUpdateMode: mode }, upload_refs: (uploads || []).map((u) => ({ id: u.id })), topics: null, usage: {}, created_at: new Date().toISOString() };
+  db.T.agent_marketing_research.push(r); return r;
+}
+const discovery = () => ["FB", "FC"].map((c, i) => ({ id: `t${i + 1}`, origin: "web", question: `Discovery topic ${c}`, whyItMatters: "w", scope: "selected", sources: [{ title: M[c].page_title, url: M[c].final_url, role: "primary", domain: "example" }], editorial: { development: c } }));
+
+async function researchAndScript({ mode, dataSource, uploads }) {
+  const p = project(UA);
+  const row = researchRow(p, mode, dataSource, uploads);
+  const fields = { status: "ready", topics: discovery(), usage: {} };
+  const out = await b2lib.enrich({ row, fields, uploads, userId: UA, env: env(), deps: { store: st.createStore({ env: env(), request: supabase }), fetchFn, provider, callFn: b2Stub, anthropicKey: "" } });
+  return { p, row, out };
+}
+
+test("mode 3 (Article-Led Editorial): research reads the articles with B1, B2 writes the five cards from validated findings, and the selected card's script is sourced", { skip: SKIP }, async () => {
+  fresh(); b2Inputs.length = 0;
+  const { p, row, out } = await researchAndScript({ mode: "article_editorial", dataSource: "web" });
+  assert.strictEqual(out.usage.b1b2.state, "ready", JSON.stringify(out.usage.b1b2).slice(0, 400));
+  assert.deepStrictEqual(out.usage.b1b2.articles.map((a) => a.state), ["ready", "ready"]);
+  assert.strictEqual(out.topics.length, 5);
+  assert.strictEqual(provider.calls, 2, "one B1 analysis per article");
+  // B2 saw only validated findings (held as a count), never held quotations
+  const seen = JSON.stringify(b2Inputs[0].user);
+  for (const q of quotesOf("FC", "held")) assert.ok(!seen.includes(JSON.stringify(q).slice(1, -1)), "a held quotation reached B2");
+  assert.strictEqual(b2Inputs[0].user.articles[1].held_findings_not_used, b1.readBundle(PRIV.bundle("FC")).held.length);
+  const t = out.topics[0];
+  assert.ok(t.candidate && t.b1.articleKey && t.b1.evidenceId && t.b2.sourceRefs.length && t.reportFirst === false);
+  // the agent selects the card (as agent-marketing-research.js "select" freezes it) and writes the script
+  await supabase("PATCH", "agent_marketing_research", { status: "ready", topics: out.topics }, `?id=eq.${row.id}`);
+  await supabase("PATCH", "agent_marketing_projects", { selected_research_id: row.id, selected_topic: { ...t, researchId: row.id }, narrative: null }, `?id=eq.${p.id}`);
+  const calls = provider.calls;
+  const w = await writeScript("token-a", p);
+  assert.deepStrictEqual([w.result.state, w.result.evidence], ["ready", "reused"], "the article evidence read during research is used");
+  assert.strictEqual(provider.calls, calls, "the script uses the evidence read during research: no second B1 call");
+  const brief = JSON.parse(plannerInputs.at(-1)).selected_topic;
+  assert.ok(brief.article_evidence && brief.editorial_direction && brief.editorial_direction.angle === t.b2.editorialAngle);
+  const artScene = w.narrative.scenes.find((s) => s.sourceRole === "article");
+  assert.ok(artScene, "a scene on the article");
+  assert.strictEqual((await projectCall(UA, { action: "approve_narrative", id: p.id })).status, 200);
+});
+
+test("mode 2 (Article-Led + Trend/CMA): cards cite B1 findings and carry the report's figures; the script's market figure comes from the report, never the article", { skip: SKIP }, async () => {
+  fresh(); b2Inputs.length = 0;
+  const facts = reportLibM.analyzePages(trendFx.standard().pages).facts; facts.mlsSource = "MetroList";
+  const uploads = [{ id: uid("33333333"), facts }];
+  const { p, row, out } = await researchAndScript({ mode: "article_report", dataSource: "both", uploads });
+  assert.strictEqual(out.usage.b1b2.state, "ready", JSON.stringify(out.usage.b1b2).slice(0, 400));
+  assert.ok(b2Inputs[0].user.agent_report_figures.length > 0, "B2 was given the report figures");
+  assert.match(b2Inputs[0].system, /LOCAL MARKET PERFORMANCE STATISTICS .* come ONLY from the agent's report/);
+  const t = out.topics.find((x) => x.b1 && x.sources[0].url === M.FC.final_url) || out.topics[0];
+  assert.ok(t.reportFirst === true && t.reportFigures.length > 0 && t.sources.some((s) => s.type === "report"));
+  await supabase("PATCH", "agent_marketing_research", { status: "ready", topics: out.topics }, `?id=eq.${row.id}`);
+  await supabase("PATCH", "agent_marketing_projects", { selected_research_id: row.id, selected_topic: { ...t, researchId: row.id }, narrative: null }, `?id=eq.${p.id}`);
+  const w = await writeScript("token-a", p);
+  assert.strictEqual(w.result.state, "ready", JSON.stringify(w.narrative).slice(0, 300));
+  const brief = JSON.parse(plannerInputs.at(-1)).selected_topic;
+  assert.strictEqual(brief.report_is_source_of_truth_for_market_numbers, true);
+  assert.ok(brief.figures_you_may_state.length > 0);
+  const art = require("../netlify/functions/lib/agent-marketing-article-lib");
+  for (const r of brief.editorial_direction.source_refs) assert.ok(!art.numberRoles(r.quote).some((n) => n.role === "market"), "no article market statistic in the direction");
+  const caption = w.narrative.captionText;
+  assert.ok(caption.includes(brief.figures_you_may_state[0].replace(/[.]$/, "")), "the report figure is stated as the report gives it");
+  assert.ok(!/1\.68%/.test(caption), "FC's article price statistic is not used in mode 2");
+  assert.strictEqual((await projectCall(UA, { action: "approve_narrative", id: p.id })).status, 200);
+});
+
+test("mode 1 (Market Trend Update): a report-only topic is written through script mode with no article step", { skip: SKIP }, async () => {
+  fresh();
+  const facts = reportLibM.analyzePages(trendFx.standard().pages).facts; facts.mlsSource = "MetroList";
+  const ctx = rtM.buildContext([{ id: uid("33333333"), facts }], { audience: "sellers", geography: { type: "zip", name: "95999", city: "", state: "CA", label: "ZIP 95999, CA" }, focus: {} });
+  const dom = [...ctx.figures.values()].find((c) => c.fig.key === "avg_dom");
+  const { topics } = rtM.validateReportTopics([{ question: "How long are homes in ZIP 95999 taking to sell?", why_it_matters: "It sets a seller's timeline.", figure_ids: [dom.ref] }], ctx, { want: 5 });
+  assert.strictEqual(topics.length, 1);
+  const p = project(UA); const r = research(p.id, UA, topics);
+  await supabase("PATCH", "agent_marketing_projects", { selected_research_id: r.id, selected_topic: { ...topics[0], researchId: r.id }, narrative: null }, `?id=eq.${p.id}`);
+  const st0 = JSON.parse((await stagebFn.handler({ httpMethod: "GET", headers: { authorization: "Bearer token-a" }, queryStringParameters: { projectId: p.id } }, {}, deps())).body);
+  assert.strictEqual(st0.state, "not_needed");
+  const w = await writeScript("token-a", p);
+  assert.deepStrictEqual([w.result.state, w.result.evidence], ["ready", "not_needed"], JSON.stringify(w.narrative || {}).slice(0, 300));
+  assert.strictEqual(provider.calls, 0); assert.strictEqual(fetches.length, 0);
+  assert.ok(w.narrative.captionText.includes(topics[0].reportFigures[0].text.replace(/[.]$/, "")));
+  assert.strictEqual((await projectCall(UA, { action: "approve_narrative", id: p.id })).status, 200);
+});
+
+test("B1/B2 in research stays off without the development switch, for Local Events, and for a report-only request; nothing usable keeps the discovery cards", { skip: SKIP }, async () => {
+  fresh();
+  const p = project(UA);
+  const fields = { status: "ready", topics: discovery(), usage: {} };
+  const row = researchRow(p, "article_editorial", "web");
+  assert.strictEqual(await b2lib.enrich({ row, fields, userId: UA, env: env({ AGENT_MARKETING_B1_EVIDENCE: "" }) }), fields);
+  assert.strictEqual(await b2lib.enrich({ row: { ...row, mode: "local_events" }, fields, userId: UA, env: env() }), fields);
+  assert.strictEqual(await b2lib.enrich({ row: { ...row, data_source: "upload" }, fields, userId: UA, env: env() }), fields);
+  const gone = async (url) => ({ status: 410, url, headers: { get: () => "text/html" }, arrayBuffer: async () => Buffer.from("gone") });
+  const kept = await b2lib.enrich({ row, fields, userId: UA, env: env(), deps: { store: st.createStore({ env: env(), request: supabase }), fetchFn: gone, provider, callFn: b2Stub } });
+  assert.strictEqual(kept.topics, fields.topics, "the discovery cards stay");
+  assert.strictEqual(kept.usage.b1b2.state, "no_article_evidence");
+  assert.strictEqual(provider.calls, 0);
+});

@@ -314,14 +314,14 @@ async function prepare({ project, userId, store, fetchFn, env, now }) {
   if (!t || !t.candidate) fail("not_article_led", "the project has no selected Article-Led topic");
   const art = articleOf(t);
   if (!art) fail("no_article", "the selected topic has no article URL");
-  const found = await store.findForProject(project.id, t.id, t.researchId);   // topic ids repeat across research sets (Nov 8, 2026)
+  const found = await store.findForProject(project.id, sb.topicKeyOf(t), t.researchId);   // topic ids repeat across research sets (Nov 8, 2026)
   const existing = found && found.status !== "failed" ? found : null;   // a failed run never blocks a retry (migration R4)
   const { page, snap, key } = await capture({ art, fetchFn, env, now });
   if (existing && existing.cache_key !== key) fail("source_changed", "the article changed since its snapshot was taken; a new snapshot needs an explicit decision",
     { ...captureDetail(page, snap, "compare"), comparedTo: existing.status === "ready" ? existing.id : null });
   if (existing) return { record: existing, reused: existing.status === "ready" };   // a reserved row is resumed, not duplicated (idempotent retry)
   const live = await store.findLive(key);
-  const base = { user_id: userId, project_id: project.id, research_id: t.researchId, topic_id: t.id, source_url: art.url, final_url: page.finalUrl,
+  const base = { user_id: userId, project_id: project.id, research_id: t.researchId, topic_id: sb.topicKeyOf(t), source_url: art.url, final_url: page.finalUrl,
     snapshot_retrieved_at: page.retrievedAt, raw_html_sha256: snap.raw_html_sha256, extractor_sha256: snap.extractor_sha256, bridge_version: snap.bridge, capture_flags: snap.flags };
   if (live && live.status !== "ready") fail("in_progress", "a B1 run for this exact article and settings is already in progress; try again when it finishes");
   if (live) {   // no new B1 call: copy the completed result (its own snapshot, request, raw response and bundle) to this project

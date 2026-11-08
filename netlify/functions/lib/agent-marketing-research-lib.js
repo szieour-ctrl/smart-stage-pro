@@ -27,6 +27,13 @@ const AUDIENCES = [
 ];
 const AUDIENCE_KEYS = AUDIENCES.map((a) => a.key);
 const DATA_SOURCES = ["web", "upload", "both"];
+// The three Market Update modes the agent chooses (Nov 8, 2026), each with the one data source it allows. Persisted on the project.
+const MARKET_UPDATE_MODES = [
+  { key: "trend_report", label: "Market Trend Update", hint: "Topics and script from your uploaded Trend or CMA report only.", dataSource: "upload", reportRequired: true },
+  { key: "article_report", label: "Article-Led Market Update + Trend/CMA", hint: "A local article is the story; your uploaded report supplies every market statistic.", dataSource: "both", reportRequired: true },
+  { key: "article_editorial", label: "Article-Led Market Update: Realtor Editorial Perspective", hint: "A local article and your perspective. No report needed; the article's figures are attributed to it.", dataSource: "web", reportRequired: false },
+];
+const MODE_SOURCE = Object.fromEntries(MARKET_UPDATE_MODES.map((m) => [m.key, m.dataSource]));
 const TOPIC_COUNT = 5;
 const MAX_UPLOADS = 3;
 const FRESH_DAYS = 60;            // an ARTICLE for a market update may be at most this old (Sam, Oct 27: the 30-day window belongs to the uploaded trend data, not to articles)
@@ -150,13 +157,18 @@ function validateResearchRequest(body) {
   if (ids.length > MAX_UPLOADS) errors.push({ field: "uploadIds", message: `Attach at most ${MAX_UPLOADS} reports.` });
   const uploadIds = [...new Set(ids)].filter((id) => am.UUID_RE.test(id));
   if (uploadIds.length !== new Set(ids).size) errors.push({ field: "uploadIds", message: "One of the attached reports is not valid." });
-  // Where the topics come from. No choice made: a report that is attached is used together with web research, otherwise web only.
-  let dataSource = b.dataSource == null || b.dataSource === "" ? (uploadIds.length ? "both" : "web") : String(b.dataSource);
+  // Where the topics come from. A Market Update mode (Nov 8, 2026) decides it; with no mode, a report that is attached is used together with web
+  // research, otherwise web only (the earlier behaviour).
+  const marketUpdateMode = mode === "market_update" && b.marketUpdateMode != null && b.marketUpdateMode !== "" ? String(b.marketUpdateMode) : null;
+  if (marketUpdateMode && !MODE_SOURCE[marketUpdateMode]) errors.push({ field: "marketUpdateMode", message: "Choose one of the three Market Update types." });
+  let dataSource = marketUpdateMode && MODE_SOURCE[marketUpdateMode] ? MODE_SOURCE[marketUpdateMode]
+    : b.dataSource == null || b.dataSource === "" ? (uploadIds.length ? "both" : "web") : String(b.dataSource);
+  if (marketUpdateMode && MODE_SOURCE[marketUpdateMode] !== "web" && uploadIds.length === 0) errors.push({ field: "uploadIds", message: "This Market Update type needs your uploaded Trend or CMA report. Attach it and confirm it first." });
   if (!DATA_SOURCES.includes(dataSource)) errors.push({ field: "dataSource", message: "Choose web research, your report, or both." });
   else if (dataSource !== "web" && uploadIds.length === 0) errors.push({ field: "dataSource", message: "Attach and confirm a report to use it, or choose web research only." });
   if (mode === "local_events" && dataSource !== "web") errors.push({ field: "dataSource", message: "Local Events uses web research only." });
   if (errors.length) return { ok: false, errors, request: null };
-  return { ok: true, errors: [], request: { mode, audience, geography: geo.geography, focus, keywords, dataFocus, period, dataSource, uploadIds: dataSource === "web" ? [] : uploadIds } };
+  return { ok: true, errors: [], request: { mode, audience, geography: geo.geography, focus, keywords, dataFocus, period, dataSource, uploadIds: dataSource === "web" ? [] : uploadIds, ...(marketUpdateMode ? { marketUpdateMode } : {}) } };
 }
 
 // A short, stable fingerprint of a request, so the same request is recognised (reuse saved results, never re-buy).
@@ -604,6 +616,7 @@ function outcomeFields({ validation, usage, model, today, now, error, charge }) 
 }
 
 module.exports = {
+  MARKET_UPDATE_MODES, MODE_SOURCE,
   cleanVisualCues, MODES, MODE_LABELS, DATA_SOURCES, GEO_TYPES, AUDIENCES, AUDIENCE_KEYS, TOPIC_COUNT, MAX_UPLOADS, FRESH_DAYS, ALLOWANCE_BY_PLAN, PAYWALLED_DOMAINS, DEFAULT_MODEL, DEFAULT_COST_TARGET_USD,
   DATA_FOCUS, DATA_FOCUS_KEYS, validatePeriod, periodDates, validateGeography, geoLabel, validateResearchRequest, requestKey, researchModel, researchSettings, systemPrompt, buildResearchPayload,
   extractTopics, extractRecommendation, validateTopics, similar, articleKey, usageSummary, monthKeyPT, allowanceFor, sessionStatus, outcomeFields,

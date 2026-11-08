@@ -219,6 +219,10 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
       <div id="setupBody">
       <label class="lbl">Content type</label>
       <div class="choices row" id="modeChoices"></div>
+      <div id="muModeBox" class="hidden">
+        <label class="lbl">Market Update type</label>
+        <div class="choices" id="muModeChoices"></div>
+      </div>
 
       <div class="row2">
         <div><label class="lbl" for="geoType">Market type</label><select id="geoType"></select></div>
@@ -260,7 +264,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
         <div class="hint" id="dataFocusHint">Web research looks for figures that cover this period and says when a source does not. Figures from an uploaded report always come first, and its own dates decide what it covers.</div>
       </div>
 
-      <label class="lbl">Your MLS market report or CMA <span style="font-weight:400;color:var(--muted)">(optional)</span></label>
+      <label class="lbl">Your MLS market report or CMA <span style="font-weight:400;color:var(--muted)" id="upLabelNote">(optional)</span></label>
       <div class="upload" id="uploadBox">
         <div class="ut">Upload MLS Report or CMA</div>
         <div class="us">PDF, Excel or CSV</div>
@@ -735,7 +739,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
   var SCRIPT_EVIDENCE_POLL_MS = 5000, SCRIPT_PLAIN_MAX_MS = 330000, SCRIPT_EVIDENCE_MAX_MS = 18 * 60 * 1000;
   /** The progress line while "Write my script" runs with article evidence. st: the Stage B status (metadata only). */
   function scriptWaitText(st) {
-    if (!st) return SCRIPT_WAIT_DEFAULT;
+    if (!st || st.state === "not_needed") return SCRIPT_WAIT_DEFAULT;
     if (st.state === "ready") {
       var c = st.counts, held = c && c.held ? ", " + c.held + " held back as unverified" : "";
       return "Article evidence is ready" + (c ? " (" + c.validated + " checked" + held + ")" : "") + ". Writing your script…";

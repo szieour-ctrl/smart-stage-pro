@@ -110,6 +110,10 @@ input:focus,select:focus{outline:2px solid var(--gold-light);outline-offset:1px;
       <div id="setupBody">
       <label class="lbl">Content type</label>
       <div class="choices row" id="modeChoices"></div>
+      <div id="muModeBox" class="hidden">
+        <label class="lbl">Market Update type</label>
+        <div class="choices" id="muModeChoices"></div>
+      </div>
 
       <div class="row2">
         <div><label class="lbl" for="geoType">Market type</label><select id="geoType"></select></div>
@@ -150,7 +154,7 @@ input:focus,select:focus{outline:2px solid var(--gold-light);outline-offset:1px;
         <div class="hint" id="dataFocusHint">Web research looks for figures that cover this period and says when a source does not. Figures from an uploaded report always come first, and its own dates decide what it covers.</div>
       </div>
 
-      <label class="lbl">Your MLS market report or CMA <span style="font-weight:400;color:var(--muted)">(optional)</span></label>
+      <label class="lbl">Your MLS market report or CMA <span style="font-weight:400;color:var(--muted)" id="upLabelNote">(optional)</span></label>
       <div class="upload" id="uploadBox">
         <div class="ut">Upload MLS Report or CMA</div>
         <div class="us">PDF, Excel or CSV</div>

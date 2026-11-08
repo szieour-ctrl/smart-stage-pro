@@ -71,6 +71,15 @@ async function attachReports(row, project, userId) {
   return up.status < 300 && out ? out : row;
 }
 
+/** Development only: the page dispatches the research job (see agent-marketing-research-background.js pageDispatchUser). */
+function pageDispatch(event) {
+  const env = process.env;
+  if (!require("./lib/agent-marketing-b1-evidence-lib").enabled(env)) return false;
+  const pc = require("./lib/public-config-lib");
+  const { requestHost } = require("./lib/self-dispatch-lib");
+  return !pc.isProductionHost(requestHost(event), env) && !!env.SUPABASE_URL && !String(env.SUPABASE_URL).includes(pc.PRODUCTION_REF);
+}
+
 function forClient(row) {
   if (!row) return null;
   const out = {
@@ -152,6 +161,7 @@ exports.handler = async (event) => {
           dataFocus: rl.DATA_FOCUS, modes: rl.MODES.map((k) => ({ key: k, label: rl.MODE_LABELS[k] })), audiences: rl.AUDIENCES,
           geoTypes: rl.GEO_TYPES.map((k) => ({ key: k, label: GEO[k] })), topicCount: rl.TOPIC_COUNT, maxUploads: rl.MAX_UPLOADS,
           articleLed: articleLed.articleLedEnabled(process.env),
+          marketUpdateModes: rl.MARKET_UPDATE_MODES.map((m) => ({ key: m.key, label: m.label, hint: m.hint, reportRequired: m.reportRequired })),
         });
       }
       if (qs.id) {
@@ -171,20 +181,29 @@ exports.handler = async (event) => {
         const er = await supabase("GET", "agent_marketing_research", null, `?user_id=eq.${userId}&project_id=neq.${p.row.id}&status=eq.ready&select=*&order=created_at.desc&limit=20`);
         earlier = (Array.isArray(er.data) ? er.data : []).filter((x) => !(x.usage && x.usage.copiedFrom)).map(forClient); // copies are hidden: the original is listed
       } catch (e) { /* the library still shows this project's own sets */ }
-      return reply(200, { earlier, research: rows.map(forClient), selectedResearchId: p.row.selected_research_id || null, selectedTopic: articleLed.clientTopic(p.row.selected_topic) || null, session: await sessionFor(await poolFor(userId)) });
+      return reply(200, { earlier, research: rows.map(forClient), selectedResearchId: p.row.selected_research_id || null, selectedTopic: articleLed.clientTopic(p.row.selected_topic) || null, marketUpdateMode: p.row.market_update_mode || null, session: await sessionFor(await poolFor(userId)) });
     }
 
     if (event.httpMethod !== "POST") return reply(405, { error: "Method not allowed" });
     let b;
     try { b = JSON.parse(event.body || "{}"); } catch { return reply(400, { error: "Invalid JSON" }); }
     const action = String(b.action || "");
-    if (!["start", "select"].includes(action)) return reply(400, { error: "Unknown action" });
+    if (!["start", "select", "set_mode"].includes(action)) return reply(400, { error: "Unknown action" });
 
     const p = await loadProject(b.projectId, userId);
     if (p.error) return p.error;
     const project = p.row;
     if (project.template !== "local_market_insider") return reply(409, { error: "Research is only used by Local Market Insider." });
     if (am.NOT_EDITABLE_AFTER.includes(project.status)) return reply(409, { error: "This piece is already rendering or finished. Start a new one to change it." });
+
+    // The Market Update type the agent chose (Nov 8, 2026), kept with the project so it is there when they return.
+    if (action === "set_mode") {
+      const m = String(b.marketUpdateMode || "");
+      if (!rl.MODE_SOURCE[m]) return reply(400, { error: "Choose one of the three Market Update types." });
+      const saved = await supabase("PATCH", "agent_marketing_projects", { market_update_mode: m, updated_at: new Date().toISOString() }, `?id=eq.${project.id}&user_id=eq.${userId}`);
+      if (saved.status >= 300) return reply(500, { error: "Could not save your choice" });
+      return reply(200, { marketUpdateMode: m });
+    }
 
     if (action === "select") {
       if (!am.UUID_RE.test(String(b.researchId || ""))) return reply(400, { error: "Missing or invalid research id" });
@@ -264,9 +283,13 @@ exports.handler = async (event) => {
 
     const ins = await supabase("POST", "agent_marketing_research", {
       project_id: project.id, user_id: userId, pool_user_id: pool.poolUserId, mode: v.request.mode, geography: v.request.geography, audience: v.request.audience, focus: { ...v.request.focus, keywords: v.request.keywords, dataFocus: v.request.dataFocus, period: v.request.period },
-      data_source: v.request.dataSource, upload_refs: refs, status: "running", model: rl.researchModel(), ...(alOn ? { usage: { pathway: "article_led" } } : {}),
+      data_source: v.request.dataSource, upload_refs: refs, status: "running",
+      ...(v.request.marketUpdateMode ? { focus: { ...v.request.focus, keywords: v.request.keywords, dataFocus: v.request.dataFocus, period: v.request.period, marketUpdateMode: v.request.marketUpdateMode } } : {}), model: rl.researchModel(), ...(alOn ? { usage: { pathway: "article_led" } } : {}),
     });
     const row = Array.isArray(ins.data) ? ins.data[0] : null;
+    if (v.request.marketUpdateMode && project.market_update_mode !== v.request.marketUpdateMode) {
+      try { await supabase("PATCH", "agent_marketing_projects", { market_update_mode: v.request.marketUpdateMode }, `?id=eq.${project.id}&user_id=eq.${userId}`); } catch (e) { /* the research row keeps the mode too */ }
+    }
     if (ins.status >= 300 || !row) { console.error("agent-marketing-research insert failed:", ins.status, JSON.stringify(ins.data).slice(0, 200)); return reply(500, { error: "Could not start the research" }); }
     if (alOn) {
       // Checked again now that the row exists: only rows ordered before this one count, so of two racing requests the earlier stays and this one is withdrawn.
@@ -277,6 +300,8 @@ exports.handler = async (event) => {
         return reply(adm.status, { error: adm.message, code: adm.code, scope: adm.scope, mlsTrendAvailable: adm.code === "partial_limit" });
       }
     }
+    // Development deploys (behind team login) cannot call their own functions: the page starts the background job with its own login token.
+    if (pageDispatch(event)) return reply(202, { research: forClient(row), session, dispatch: true });
     const siteUrl = selfBase(event, process.env.URL || `https://${event.headers && event.headers.host}`);
     try {
       await fetch(`${siteUrl}/.netlify/functions/agent-marketing-research-background`, {

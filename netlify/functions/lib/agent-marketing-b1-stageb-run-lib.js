@@ -29,6 +29,7 @@ const br = require("./agent-marketing-b1-bridge-lib");
 const am = require("./agent-marketing-lib");
 const articleLed = require("./agent-marketing-article-led-lib");
 const { PRODUCTION_REF } = require("./public-config-lib");
+const keyOf = (t) => require("./agent-marketing-b1-stageb-lib").topicKeyOf(t);
 
 const STALE_MS = 16 * 60 * 1000;   // longer than the background function's 15-minute limit
 const DAY_MS = 24 * 3600 * 1000;
@@ -50,6 +51,12 @@ function admit(userId, env) {
   const db = String(e.SUPABASE_URL || "");
   if (!db || db.includes(PRODUCTION_REF)) return deny(503, "production_database_refused", "Stage B runs only against a development database.");
   return null;
+}
+
+/** A Local Market Insider project with a selected topic that has no article (report-only or legacy): written without article evidence. */
+function plainMarketTopic(project) {
+  const t = project && project.selected_topic;
+  return !!(project && project.template === "local_market_insider" && t && typeof t === "object" && !t.candidate);
 }
 
 /** The project's Article-Led selection, or a refusal. */
@@ -80,7 +87,7 @@ async function precheck({ userId, projectId, store, loadProject, env, now }) {
   const project = await loadProject(projectId, userId);   // scoped to the signed-in user: another user's project reads as missing
   const { topic, refusal } = articleLedTopic(project); if (refusal) return { refusal };
   const nowMs = now ? new Date(now).getTime() : Date.now();
-  const live = await store.findForProject(project.id, topic.id, topic.researchId);   // the newest non-failed row for this project, topic and research run
+  const live = await store.findForProject(project.id, keyOf(topic), topic.researchId);   // the newest non-failed row for this project, topic and research run
   if (live && live.status === "ready") { await attachIfNeeded(store, project, userId, live); return { ready: live }; }
   if (live && !isStale(live, nowMs)) return { live };   // a job is live: no second run
   if (live) { try { await store.fail(live.id, "stale", live.status); } catch (x) { /* another worker moved it on */ } }
@@ -149,7 +156,7 @@ async function runJob({ userId, projectId, store, loadProject, fetchFn, provider
   if (await store.countProviderCalls({ userId: null, sinceIso: since }) >= c.globalDay) return finish("b1_limit_global_day", "reserved");
 
   // Re-read just before reserving: if another worker already took this row, do not spend a ledger slot (the conditional update below is the real guard).
-  const fresh = await store.findForProject(project.id, topic.id, topic.researchId);
+  const fresh = await store.findForProject(project.id, keyOf(topic), topic.researchId);
   if (!fresh || fresh.id !== record.id || fresh.status !== "reserved") return { state: "in_progress", code: "in_progress" };
   // The atomic per-user ledger reservation, BEFORE any call (a crash after this still counts). Sequence 1001+ on this research run.
   const seq = Math.max(1000, await store.maxProviderSeq(topic.researchId)) + 1;
@@ -179,7 +186,7 @@ async function recordAttempt(store, { userId, project, topic, mode, code, detail
   if (!d.stage || !store || typeof store.insertAttempt !== "function") return null;
   const art = br.articleOf(topic) || {};
   try {
-    return await store.insertAttempt({ userId, projectId: project.id, topicId: topic.id, mode, stage: d.stage, outcome: code, httpStatus: d.httpStatus,
+    return await store.insertAttempt({ userId, projectId: project.id, topicId: keyOf(topic), mode, stage: d.stage, outcome: code, httpStatus: d.httpStatus,
       contentType: d.contentType, bytes: d.bytes, sourceUrl: art.url, finalUrl: d.finalUrl, observedTitle: d.observedTitle, rawHtmlSha256: d.rawHtmlSha256,
       snapshotSha256: d.snapshotSha256, comparedTo: d.stage === "compare" ? d.comparedTo || null : null });
   } catch (x) { console.error("stageb attempt log:", x.code || x.message); return null; }
@@ -191,10 +198,13 @@ async function status({ userId, projectId, store, loadProject, env }) {
   const a = admit(userId, e); if (a) return out(a.status, { error: a.message, code: a.code });
   if (!am.UUID_RE.test(String(projectId || ""))) return out(400, { error: "Missing or invalid projectId", code: "bad_request" });
   const project = await loadProject(projectId, userId);
-  const { topic, refusal } = articleLedTopic(project); if (refusal) return out(refusal.status, { error: refusal.message, code: refusal.code });
-  const row = await store.latestForProject(project.id, topic.id, topic.researchId);
+  const { topic, refusal } = articleLedTopic(project);
+  // A Market Update topic without an article (a Market Trend Update from the agent's report): no article evidence is needed (Nov 8, 2026).
+  if (refusal && refusal.code === "not_article_led" && plainMarketTopic(project)) return out(200, { state: "not_needed" });
+  if (refusal) return out(refusal.status, { error: refusal.message, code: refusal.code });
+  const row = await store.latestForProject(project.id, keyOf(topic), topic.researchId);
   let la = null;
-  try { la = typeof store.latestAttempt === "function" ? await store.latestAttempt(project.id, topic.id) : null; } catch (x) { la = null; }
+  try { la = typeof store.latestAttempt === "function" ? await store.latestAttempt(project.id, keyOf(topic)) : null; } catch (x) { la = null; }
   const lastAttempt = la ? { mode: la.mode, stage: la.stage, outcome: la.outcome, httpStatus: la.http_status || null, at: la.created_at } : null;
   if (!row) return out(200, { state: "none", lastAttempt });
   const v = row.bundle ? b1.readBundle(row.bundle) : null;
@@ -240,12 +250,12 @@ async function reuseSavedTopic({ store, project, topic, userId }) {
   try { root = await store.researchRoot(topic.researchId, userId); } catch (x) { return null; }
   if (!root) return null;
   let rows;
-  try { rows = await store.findReadyForTopic(userId, topic.id); } catch (x) { return null; }
+  try { rows = await store.findReadyForTopic(userId, keyOf(topic)); } catch (x) { return null; }
   const sbLib = require("./agent-marketing-b1-stageb-lib");
   // Originals first: a reuse row always points at the original evidence row.
   const ordered = rows.filter((r) => !r.reused_from).concat(rows.filter((r) => r.reused_from));
   for (const row of ordered) {
-    if (!row || row.user_id !== userId || row.status !== "ready" || row.topic_id !== topic.id || row.project_id === project.id || !row.research_id) continue;
+    if (!row || row.user_id !== userId || row.status !== "ready" || row.topic_id !== keyOf(topic) || row.project_id === project.id || !row.research_id) continue;
     if (row.source_url !== art.url) continue;
     let rootR; try { rootR = await store.researchRoot(row.research_id, userId); } catch (x) { rootR = null; }
     if (rootR !== root) continue;
@@ -253,7 +263,7 @@ async function reuseSavedTopic({ store, project, topic, userId }) {
     if (sbLib.checkRecord(row, ownProject).length) continue;   // integrity, approved settings and bundle, re-verified before reuse
     const { id, created_at, reserved_at, finished_at, cost_usd, error, provider_seq, provider_reservation_id, reused_from, project_id, research_id, ...copy } = row;
     try {
-      return await store.insert({ ...copy, user_id: userId, project_id: project.id, research_id: topic.researchId, topic_id: topic.id, status: "ready", reused_from: reused_from || id });
+      return await store.insert({ ...copy, user_id: userId, project_id: project.id, research_id: topic.researchId, topic_id: keyOf(topic), status: "ready", reused_from: reused_from || id });
     } catch (x) { console.error("stageb saved-topic reuse:", x.code || x.message); return null; }
   }
   return null;
@@ -298,7 +308,8 @@ async function startScriptRequest({ userId, projectId, loadProject, patchNarrati
   const a = admit(userId, e); if (a) return out(a.status, { error: a.message, code: a.code });
   if (!am.UUID_RE.test(String(projectId || ""))) return out(400, { error: "Missing or invalid projectId", code: "bad_request" });
   const project = await loadProject(projectId, userId);
-  const { refusal } = articleLedTopic(project); if (refusal) return out(refusal.status, { error: refusal.message, code: refusal.code });
+  const { refusal } = articleLedTopic(project);
+  if (refusal && !(refusal.code === "not_article_led" && plainMarketTopic(project))) return out(refusal.status, { error: refusal.message, code: refusal.code });
   if (am.NOT_EDITABLE_AFTER.includes(project.status)) return out(409, { error: "This piece is already rendering or finished. Start a new one to change it.", code: "not_editable" });
   const ps = require("./agent-marketing-plan-run-lib").planStart(project, now ? new Date(now).getTime() : undefined);
   if (ps.error) return out(ps.error.status, { error: ps.error.message, code: ps.error.code || "plan_refused" });
@@ -328,7 +339,8 @@ async function scriptJob(args) {
     return { state: "failed", code };
   };
   let ev;
-  try {
+  if (plainMarketTopic(project)) ev = { state: "ready", reused: false, plain: true };   // no article: nothing to read, straight to the script
+  else try {
     ev = await startJob(args);
     // Another evidence job for this topic is live (a second tab): wait for it, within this function's time limit, instead of starting another.
     for (let i = 0; ev.state === "in_progress" && i < 144; i++) { await sleep(5000); ev = await startJob(args); }
@@ -338,8 +350,28 @@ async function scriptJob(args) {
   if (!pc) { await planRun.writeNarrative(supabase, project.id, userId, planRun.errorNarrative(stub, "Planning is not configured.")); return { state: "failed", code: "not_configured" }; }
   const r = await planRun.runPlan({ id: project.id, userId, deps: { supabase, env: e, anthropicKey: pc.anthropicKey, callFn: pc.callFn, extraWarnings: pc.extraWarnings, narrativeExtra: pc.narrativeExtra,
     withEvidence: (p) => withPlanEvidence(p, { env: e, store }) } });
-  return { state: r.state === "ready" ? "ready" : "failed", code: r.code, evidence: ev.reused ? "reused" : "new", fixture: !!pc.fixture };
+  return { state: r.state === "ready" ? "ready" : "failed", code: r.code, evidence: ev.plain ? "not_needed" : ev.reused ? "reused" : "new", fixture: !!pc.fixture };
+}
+
+/**
+ * articleEvidence({ userId, projectId, researchId, art: { url, title }, store, fetchFn, provider, env, now })
+ *   → { articleKey, state, code?, providerAttempted, row }
+ * B1 for one ARTICLE during research (Nov 8, 2026), before any topic exists: the same job as startJob (admission, existing or reusable evidence,
+ * snapshot with extract_v3, ledger reservation and caps, provider, evidence gate), keyed by the article (topic_id = its article key) under this
+ * research run. The project's evidence pointer is NOT set here: the topic the agent selects later points at its article's row.
+ */
+async function articleEvidence({ userId, projectId, researchId, art, store, fetchFn, provider, env, now }) {
+  const sbLib = require("./agent-marketing-b1-stageb-lib");
+  const articleKey = require("./agent-marketing-b2-lib").articleKey(art.url);
+  const topic = { id: articleKey, researchId, candidate: { id: articleKey, stage: "b1_article" }, sources: [{ url: art.url, title: art.title || "", role: "primary" }], b1: { articleKey } };
+  const project = { id: projectId, user_id: userId, template: "local_market_insider", selected_research_id: researchId, selected_topic: topic, article_evidence_id: null };
+  const noAttach = Object.assign(Object.create(Object.getPrototypeOf(store)), store, { attach: async () => null });
+  const res = await startJob({ userId, projectId, store: noAttach, loadProject: async (id, uid) => (id === projectId && uid === userId ? project : null), fetchFn, provider, env, now });
+  let row = null;
+  if (res.state === "ready") { try { row = await store.findForProject(projectId, articleKey, researchId); } catch (x) { row = null; } }
+  if (row && sbLib.checkRecord(row, project).length) row = null;   // the same contract as at planning time
+  return { articleKey, state: row ? "ready" : res.state, code: row ? undefined : res.code || (res.state === "ready" ? "evidence_unreadable" : undefined), providerAttempted: !!res.providerAttempted, row };
 }
 
 module.exports = { STALE_MS, caps, admit, articleLedTopic, precheck, startRequest, startJob, runJob, reuseSavedTopic, recordAttempt, status, withPlanEvidence,
-  startScriptRequest, scriptJob, evidenceFailureMessage, plannerConfig };
+  startScriptRequest, scriptJob, evidenceFailureMessage, plannerConfig, articleEvidence };

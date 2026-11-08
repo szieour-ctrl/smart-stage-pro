@@ -34,6 +34,9 @@ function extractorFor(env) {
   if (String(e.B1_SNAPSHOT_SOURCE || "").trim().toLowerCase() === "worker-fixture") return FIXTURE_EXTRACTOR;
   return APPROVED_B1.extractor;
 }
+/** The evidence key of a topic: a topic written by B2 during research (Nov 8, 2026) points at its ARTICLE's evidence (b1.articleKey); any other
+ *  Article-Led topic is its own key (its topic id). Topic ids alone repeat across research sets, so lookups also match the research run. */
+function topicKeyOf(t) { return t && t.b1 && typeof t.b1 === "object" && typeof t.b1.articleKey === "string" && t.b1.articleKey ? t.b1.articleKey : (t && t.id); }
 const KEY_FIELDS = ["snapshot_sha256", "extractor", "instructions_sha256", "model", "max_output_tokens", "reasoning_effort"];
 const sha = (s) => crypto.createHash("sha256").update(String(s), "utf8").digest("hex");
 const HEX64 = /^[0-9a-f]{64}$/;
@@ -61,7 +64,7 @@ function checkRecord(record, project) {
   const t = project && project.selected_topic && typeof project.selected_topic === "object" ? project.selected_topic : null;
   if (!t) return ["the project has no selected topic"];
   if (r.project_id !== project.id) p.push("record belongs to another project");
-  if (r.research_id !== t.researchId || r.topic_id !== t.id) p.push("record is for a different selected topic (the topic changed after B1 ran)");
+  if (r.research_id !== t.researchId || r.topic_id !== topicKeyOf(t)) p.push("record is for a different selected topic (the topic changed after B1 ran)");
   if (r.status !== "ready") p.push(`record status is ${r.status || "missing"}, not ready`);
   for (const f of ["instructions_sha256", "model", "max_output_tokens", "reasoning_effort", "prompt_version"]) {
     if (r[f] !== APPROVED_B1[f]) p.push(`${f} is not the approved B1 setting`);
@@ -108,4 +111,4 @@ function topicWithEvidence(project, record, env) {
   return b1.attachToTopic(t, problems.length ? blockedDoc(problems) : record.bundle);
 }
 
-module.exports = { APPROVED_B1, EXTRACTORS, FIXTURE_EXTRACTOR, extractorFor, KEY_FIELDS, cacheKey, approvedKey, checkRecord, topicWithEvidence, sha };
+module.exports = { topicKeyOf, APPROVED_B1, EXTRACTORS, FIXTURE_EXTRACTOR, extractorFor, KEY_FIELDS, cacheKey, approvedKey, checkRecord, topicWithEvidence, sha };

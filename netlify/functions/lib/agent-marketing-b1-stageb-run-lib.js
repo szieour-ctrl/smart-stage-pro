@@ -274,6 +274,8 @@ const CAPTURE_TEXT = {
   incomplete: "the page has too little article text to check", fixture_refused: "this article is not one of the test articles", source_changed: "the article no longer matches the snapshot this project started from",
   b1_limit_user_day: "the daily limit for article analysis is reached", b1_limit_global_day: "the daily limit for article analysis is reached", provider_not_implemented: "article analysis is not available here",
   evidence_blocked: "the article's evidence did not pass the evidence check", in_progress: "an evidence check for this article is still running",
+  provider_http_error: "the article analysis service returned an error", provider_incomplete: "the article analysis did not complete",
+  provider_unreachable: "the article analysis service could not be reached", mock_no_response: "no saved analysis exists for this article (test mode)",
 };
 /**
  * evidenceFailureMessage(code, providerAttempted) → what the subscriber is told when no script can be written. It never says that nothing was

@@ -40,7 +40,7 @@ async function startWorker() {
 test.before(async () => { if (!SKIP) await startWorker(); });
 test.after(() => { if (W) { W.proc.kill("SIGKILL"); fs.rmSync(W.dir, { recursive: true, force: true }); } });
 
-const env = (over) => ({ AGENT_MARKETING_B1_EVIDENCE: "dev", B1_WORKER_URL: `https://127.0.0.1:${W.port}`, B1_WORKER_SECRET: SECRET, B1_WORKER_CA_FILE: W.cert, ...(over || {}) });
+const env = (over) => ({ AGENT_MARKETING_B1_EVIDENCE: "dev", B1_EXTRACTOR: "extract_v2", B1_WORKER_URL: `https://127.0.0.1:${W.port}`, B1_WORKER_SECRET: SECRET, B1_WORKER_CA_FILE: W.cert, ...(over || {}) });
 function memStore() {
   const rows = []; let n = 0;
   return { rows,

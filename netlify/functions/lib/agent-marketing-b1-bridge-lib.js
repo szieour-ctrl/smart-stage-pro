@@ -236,7 +236,7 @@ async function fetchArticle(url, { fetchFn, now, timeoutMs, maxBytes } = {}) {
 }
 
 /** Independently re-check a snapshot reply from the bridge (never trust it). Returns the checked snapshot. */
-function checkSnapshot(s) {
+function checkSnapshot(s, expectedExtractor) {
   // The worker's "inaccessible" (a script, robot-check, paywall-like or error page) is reported as capture_blocked, so it cannot be confused
   // with a fetch failure; every snapshot refusal carries stage "snapshot".
   if (!s || s.ok !== true) {
@@ -254,7 +254,7 @@ function checkSnapshot(s) {
     if (sb.sha(String(req.instructions)) !== sb.APPROVED_B1.instructions_sha256) p.push("request does not use the approved B1 prompt");
     if (req.model !== sb.APPROVED_B1.model || req.max_output_tokens !== sb.APPROVED_B1.max_output_tokens || !req.reasoning || req.reasoning.effort !== sb.APPROVED_B1.reasoning_effort) p.push("request settings");
   }
-  if (s.extractor !== sb.APPROVED_B1.extractor) p.push("extractor");
+  if (s.extractor !== (expectedExtractor || sb.APPROVED_B1.extractor) || !sb.EXTRACTORS.includes(s.extractor)) p.push("extractor");
   if (p.length) fail("snapshot_inconsistent", `snapshot failed independent checks: ${p.join(", ")}`, { stage: "snapshot" });
   return s;
 }
@@ -292,13 +292,14 @@ async function capture({ art, fetchFn, env, now }) {
   const page = await fetchArticle(art.url, { fetchFn, now });
   let snap;
   try {
-    snap = checkSnapshot(await callBridge("snapshot", { url: page.finalUrl, title: art.title, html_b64: page.html.toString("base64"), retrieved_at: page.retrievedAt }, env));
+    const extractor = sb.extractorFor(env);
+    snap = checkSnapshot(await callBridge("snapshot", { url: page.finalUrl, title: art.title, html_b64: page.html.toString("base64"), retrieved_at: page.retrievedAt, extractor }, env), extractor);
   } catch (e) {
     const err = e instanceof StageBError ? e : new StageBError("bridge_error", "the snapshot could not be taken");
     err.detail = { ...captureDetail(page, null, "snapshot"), ...(err.detail && err.detail.rawHtmlSha256 ? { rawHtmlSha256: err.detail.rawHtmlSha256 } : {}) };
     throw err;
   }
-  return { page, snap, key: sb.approvedKey(snap.snapshot_sha256) };
+  return { page, snap, key: sb.approvedKey(snap.snapshot_sha256, snap.extractor) };
 }
 
 /**
@@ -327,7 +328,7 @@ async function prepare({ project, userId, store, fetchFn, env, now }) {
     const { id, created_at, reserved_at, finished_at, cost_usd, error, provider_seq, provider_reservation_id, ...copy } = live;   // a copy makes no call: no ledger link
     return { record: await store.insert({ ...copy, ...base, status: "ready", reused_from: id }), reused: true };
   }
-  const row = { ...base, ...sb.APPROVED_B1, snapshot_text: snap.snapshot_text, snapshot_sha256: snap.snapshot_sha256, input_sha256: snap.input_sha256,
+  const row = { ...base, ...sb.APPROVED_B1, extractor: snap.extractor, snapshot_text: snap.snapshot_text, snapshot_sha256: snap.snapshot_sha256, input_sha256: snap.input_sha256,
     request_text: snap.request_text, request_sha256: snap.request_sha256, cache_key: key, status: "reserved" };
   return { record: await store.insert(row), reused: false };
 }
@@ -343,7 +344,7 @@ async function complete({ record, responseText, store, env }) {
   const bundle = checkGate(g, withRaw, responseText);
   const blocked = g.completeness_status === b1.BLOCKED;
   return store.update(record.id, { raw_response_text: responseText, raw_response_sha256: withRaw.raw_response_sha256, gate_version: g.gate_version,
-    bundle, completeness_status: g.completeness_status, status: blocked ? "failed" : "ready", ...(blocked ? { error: "evidence_blocked" } : {}),
+    bundle, completeness_status: g.completeness_status, cost_usd: require("./agent-marketing-b1-provider-lib").reportedCost(responseText), status: blocked ? "failed" : "ready", ...(blocked ? { error: "evidence_blocked" } : {}),
     finished_at: new Date().toISOString() }, record.status);
 }
 

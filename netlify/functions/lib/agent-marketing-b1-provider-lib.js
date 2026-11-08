@@ -20,7 +20,8 @@ function createProvider({ env, responses } = {}) {
   if (!b1.enabled(e)) throw new ProviderError("disabled", "Stage B is development-only and switched off");
   const kind = String(e.B1_PROVIDER || "").trim().toLowerCase();
   if (kind === "worker-fixture") return workerFixtureProvider(e);
-  if (kind !== "mock") throw new ProviderError("provider_not_implemented", "the live B1 provider is not implemented (it is paid and needs separate approval)");
+  if (kind === "live") return liveProvider(e);
+  if (kind !== "mock") throw new ProviderError("provider_not_implemented", "no B1 provider is configured (B1_PROVIDER=live is paid and needs explicit approval)");
   const dir = String(e.B1_MOCK_RESPONSES_DIR || "");
   if (!responses && !dir) throw new ProviderError("not_configured", "B1_PROVIDER=mock needs saved responses (B1_MOCK_RESPONSES_DIR)");
   return {
@@ -60,4 +61,37 @@ function workerFixtureProvider(e) {
   };
 }
 
-module.exports = { createProvider, ProviderError };
+/**
+ * B1_PROVIDER=live (Nov 8, 2026): the PAID B1 call, exactly as the approved v1.2.1 runs made it (frozen/runner/run_b1_baseline.mjs in the private
+ * workspace): the stored request body is POSTed byte for byte to B1_ENDPOINT (a Responses-style URL) with Authorization: Bearer B1_API_KEY,
+ * 120 s timeout. Accepted only when the answer is HTTP 200 with status "completed"; the raw response text is returned for the evidence gate.
+ * Configured only by the server environment, development only (Stage B admission refuses the production database), and always behind Stage B's
+ * ledger reservation and its per-user / global daily caps, which run before any call. Turning it on is an owner decision (paid).
+ */
+function liveProvider(e, fetchImpl) {
+  const ep = String(e.B1_ENDPOINT || "").trim(), key = String(e.B1_API_KEY || "").trim();
+  if (!/^https:\/\//.test(ep) || !key) throw new ProviderError("not_configured", "B1_PROVIDER=live needs B1_ENDPOINT (https) and B1_API_KEY");
+  const doFetch = fetchImpl || fetch;
+  return {
+    name: "live", paid: true, calls: 0,
+    async call({ requestText }) {
+      this.calls += 1;
+      let r, text;
+      try {
+        r = await doFetch(ep, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${key}` }, body: requestText, signal: AbortSignal.timeout(120000) });
+        text = await r.text();
+      } catch (x) { throw new ProviderError("provider_unreachable", "the B1 provider could not be reached"); }
+      if (r.status !== 200) throw new ProviderError("provider_http_error", `the B1 provider answered HTTP ${r.status}`);
+      let j = null; try { j = JSON.parse(text); } catch (x) { j = null; }
+      if (!j || j.status !== "completed") throw new ProviderError("provider_incomplete", "the B1 provider did not complete the analysis");
+      return text;
+    },
+  };
+}
+
+/** The provider's reported cost of a raw B1 response (usage.cost.total_cost), or null. */
+function reportedCost(responseText) {
+  try { const c = JSON.parse(String(responseText)).usage.cost.total_cost; return typeof c === "number" && c >= 0 && c < 100 ? c : null; } catch (x) { return null; }
+}
+
+module.exports = { createProvider, liveProvider, reportedCost, ProviderError };

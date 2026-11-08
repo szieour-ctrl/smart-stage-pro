@@ -21,7 +21,7 @@ const M = !SKIP ? JSON.parse(fs.readFileSync(path.join(WS, "frozen", "manifest_c
 const FX = !SKIP ? JSON.parse(fs.readFileSync(path.join(WS, "fixtures", "manifest.json"), "utf8")).cases : {};
 const raw = (c) => fs.readFileSync(path.join(WS, "frozen", "raw", `${c}.html`));
 const UID = "f3abd467-cf79-455d-bdae-a2b32bafaa17";
-const ENV = { AGENT_MARKETING_B1_EVIDENCE: "dev", AGENT_MARKETING_ENABLED: "true", AGENT_MARKETING_USER_IDS: UID, B1_STAGEB_USER_IDS: UID,
+const ENV = { AGENT_MARKETING_B1_EVIDENCE: "dev", B1_EXTRACTOR: "extract_v2", AGENT_MARKETING_ENABLED: "true", AGENT_MARKETING_USER_IDS: UID, B1_STAGEB_USER_IDS: UID,
   SUPABASE_URL: "https://ooxigbxthabstahrexia.supabase.co", B1_WORKSPACE: WS };
 
 // The local "web": path /<host><path> → body and type; set per test.

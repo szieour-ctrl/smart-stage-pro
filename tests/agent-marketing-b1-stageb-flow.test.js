@@ -72,7 +72,7 @@ test.before(async () => {
 });
 test.after(() => { if (W) { W.proc.kill("SIGKILL"); fs.rmSync(W.dir, { recursive: true, force: true }); } if (WF) { WF.proc.kill("SIGKILL"); fs.rmSync(WF.fx, { recursive: true, force: true }); } });
 
-const baseEnv = (over) => ({ AGENT_MARKETING_B1_EVIDENCE: "dev", AGENT_MARKETING_ENABLED: "true", AGENT_MARKETING_USER_IDS: "", B1_STAGEB_USER_IDS: `${U.A},${U.B}`,
+const baseEnv = (over) => ({ AGENT_MARKETING_B1_EVIDENCE: "dev", B1_EXTRACTOR: "extract_v2", AGENT_MARKETING_ENABLED: "true", AGENT_MARKETING_USER_IDS: "", B1_STAGEB_USER_IDS: `${U.A},${U.B}`,
   SUPABASE_URL: DEV_DB, B1_PROVIDER: "mock",
   B1_WORKER_URL: W ? `https://127.0.0.1:${W.port}` : "", B1_WORKER_SECRET: SECRET, B1_WORKER_CA_FILE: W ? W.cert : "", ...(over || {}) });
 

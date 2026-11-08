@@ -91,16 +91,54 @@ Kept:
 - Its output passes through `generatePlan`'s normal checks.
 - It is labelled `narrative.plannerFixture = true`, with a warning the agent sees.
 
-## Extractor
+## Extractor (`extract_v3`, Nov 8, 2026)
 
-`extract_v2` and the approved FA/FB/FC fixtures are unchanged.
-- `extract_v3`, which leaves out navigation and related-story lists, is deferred to a separate quality review.
-- No Railway worker was rebuilt.
-- FC was not re-approved.
+New snapshots use `extract_v3` (private workspace `src/extract_v3.py`). It keeps the article and drops page furniture, deciding by page structure, never by article wording.
+
+**Removed:**
+- navigation, banners, footers, dialogs and pop-ups;
+- hidden elements;
+- blocks whose class or id tokens name furniture (related, share, subscribe, comments, ads, tags, chatbot, sign-in and similar);
+- link-heavy story lists, previous/next-post links and short subscription promos.
+
+**Kept:**
+- the headline, byline and publication line, even when it is link-heavy;
+- captions, quotations, tables and figures.
+
+**Text assembly:** the same as `extract_v2`, so every kept line is an unaltered line of the page.
+
+| Frozen page | `extract_v2` → `extract_v3` | What `extract_v3` removes |
+|---|---|---|
+| FA | 15,660 → 15,649 characters | the "Share:" line |
+| FB | 9,318 → 7,699 | menus, pop-ups, the hiring modal, tags, the footer, the chatbot |
+| FC | 5,263 → 3,941 | the Related, Latest and previous/next story lists, and the subscribe promo |
+
+Every claim quotation in the approved bundles survives verbatim. Re-gating the frozen v1.2.1 analyses against the `extract_v3` snapshots qualifies the same validated and held claim findings. The one change is FC's extraction-defect finding, which quoted the "Latest stories" contamination and is now excluded.
+
+**Choosing the extractor:**
+- `extract_v3` by default;
+- `extract_v2` in fixture mode (`B1_SNAPSHOT_SOURCE=worker-fixture`), because the frozen B1 responses were made from `extract_v2` text;
+- `B1_EXTRACTOR` names either one explicitly.
+
+The extractor is part of the cache key. Records made with `extract_v2` stay valid immutable evidence and are still reused.
+
+**The frozen fixtures:**
+- They are a regression comparison, not a hash lock.
+- Tests that replay the saved responses run with `B1_EXTRACTOR=extract_v2`.
+- With `extractor: "extract_v2"`, the worker still reproduces the frozen requests byte for byte.
+
+**A new `extract_v3` capture needs a real B1 analysis.**
+- `B1_PROVIDER=live` (`lib/agent-marketing-b1-provider-lib.js` `liveProvider`) sends the stored request body byte for byte to `B1_ENDPOINT` with `B1_API_KEY`, as the approved v1.2.1 runner did.
+- It accepts only HTTP 200 with status `completed`, and stores the reported cost in `cost_usd`.
+- It runs behind the ledger reservation and the per-user and global daily caps.
+- It is paid: switching it on is an owner decision.
+- Without it, a new capture fails closed and the subscriber is told that no script was written.
+
+**Deployment:** the Railway workers build from `ssp-b1-evidence` `dev/stageb-worker`, which has no `extract_v3` yet. `extract_v3` is on branch `dev/extract-v3`. Until that branch is merged (which rebuilds both workers), a hosted live-mode snapshot returns `extract_v2`, and SSP refuses it as `snapshot_inconsistent`. Fixture mode is unaffected.
 
 ## Tests
 
-- `tests/agent-marketing-b1-script-flow.test.js` (11 cases). It runs the real Python worker on 127.0.0.1, a fake PostgREST that enforces the migration rules, the mock provider, the fixture script writer, and the unmodified `agent-marketing-project.js`. It covers:
+- `tests/agent-marketing-b1-script-flow.test.js` (14 cases, including `extract_v3`); `tests/agent-marketing-b1-provider-live.test.js` (stub only). It runs the real Python worker on 127.0.0.1, a fake PostgREST that enforces the migration rules, the mock provider, the fixture script writer, and the unmodified `agent-marketing-project.js`. It covers:
   - evidence obtained automatically;
   - validated-only input to the script writer;
   - held findings never reaching the script;
@@ -114,8 +152,8 @@ Kept:
   - refusals and configuration;
   - one script per set of answers.
 - Full suite:
-  - with the private workspace (`B1_WORKSPACE`, `B1_FIXTURES_REQUIRED=1`): **753/753**;
-  - without it: 689 pass, 64 skipped.
+  - with the private workspace (`B1_WORKSPACE`, `B1_FIXTURES_REQUIRED=1`): **760/760**;
+  - without it: 693 pass, 67 skipped.
 
 ## Hosted run: branch values needed (owner actions, `b1-stageb-dev` only)
 

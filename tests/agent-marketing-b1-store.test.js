@@ -84,7 +84,7 @@ test("store: queries are scoped by project and key; failed rows are ignored for 
 });
 
 test("store + bridge: reserve, complete, reuse, retry after failure, concurrent duplicate refused", { skip: PRIV.skip || (!HAVE_PY && "python3 not available") }, async () => {
-  const ws = stubWorkspace(); const ENV = { AGENT_MARKETING_B1_EVIDENCE: "dev", B1_WORKSPACE: ws };
+  const ws = stubWorkspace(); const ENV = { AGENT_MARKETING_B1_EVIDENCE: "dev", B1_EXTRACTOR: "extract_v2", B1_WORKSPACE: ws };
   const f = fakeRest(); const store = st.createStore({ env: ENV, request: f.rq });
   try {
     const a = await br.prepare({ project: project("pA", "uA"), userId: "uA", store, fetchFn: page, env: ENV });
@@ -125,14 +125,14 @@ test("bridge: Node rejects a stub bridge reply that is inconsistent, so nothing 
     [{ snapshot: { extractor: "fetch_url" } }, "snapshot_inconsistent"],
   ];
   for (const [over, code] of cases) {
-    const ws = stubWorkspace(over); const ENV = { AGENT_MARKETING_B1_EVIDENCE: "dev", B1_WORKSPACE: ws };
+    const ws = stubWorkspace(over); const ENV = { AGENT_MARKETING_B1_EVIDENCE: "dev", B1_EXTRACTOR: "extract_v2", B1_WORKSPACE: ws };
     const f = fakeRest(); const store = st.createStore({ env: ENV, request: f.rq });
     try {
       await assert.rejects(br.prepare({ project: project("pA", "uA"), userId: "uA", store, fetchFn: page, env: ENV }), (e) => e.code === code);
       assert.strictEqual(f.t.agent_marketing_article_evidence.length, 0);
     } finally { fs.rmSync(ws, { recursive: true, force: true }); }
   }
-  const ws = stubWorkspace({ gate: { raw_response_sha256: "f".repeat(64) } }); const ENV = { AGENT_MARKETING_B1_EVIDENCE: "dev", B1_WORKSPACE: ws };
+  const ws = stubWorkspace({ gate: { raw_response_sha256: "f".repeat(64) } }); const ENV = { AGENT_MARKETING_B1_EVIDENCE: "dev", B1_EXTRACTOR: "extract_v2", B1_WORKSPACE: ws };
   const f = fakeRest(); const store = st.createStore({ env: ENV, request: f.rq });
   try {
     const a = await br.prepare({ project: project("pA", "uA"), userId: "uA", store, fetchFn: page, env: ENV });
@@ -142,7 +142,7 @@ test("bridge: Node rejects a stub bridge reply that is inconsistent, so nothing 
 });
 
 test("bridge: a BLOCKED gate result finishes the row as failed (evidence_blocked), never ready", { skip: PRIV.skip || (!HAVE_PY && "python3 not available") }, async () => {
-  const ws = stubWorkspace({ gate: { bundle: PRIV.bundle("BLOCKED"), completeness_status: "BLOCKED" } }); const ENV = { AGENT_MARKETING_B1_EVIDENCE: "dev", B1_WORKSPACE: ws };
+  const ws = stubWorkspace({ gate: { bundle: PRIV.bundle("BLOCKED"), completeness_status: "BLOCKED" } }); const ENV = { AGENT_MARKETING_B1_EVIDENCE: "dev", B1_EXTRACTOR: "extract_v2", B1_WORKSPACE: ws };
   const f = fakeRest(); const store = st.createStore({ env: ENV, request: f.rq });
   try {
     const a = await br.prepare({ project: project("pA", "uA"), userId: "uA", store, fetchFn: page, env: ENV });

@@ -19,8 +19,21 @@ const APPROVED_B1 = Object.freeze({
   model: "anthropic/claude-sonnet-5-5",
   max_output_tokens: 5000,
   reasoning_effort: "minimal",
-  extractor: "extract_v2", // the input text the v1.2.1 regression was run on
+  extractor: "extract_v3", // the default for new snapshots (Nov 8, 2026): the article without page furniture
 });
+// Extractors a stored record may have used. extract_v2 is the input text the v1.2.1 regression and the frozen FA/FB/FC fixtures were made from;
+// records made with it stay valid (immutable evidence). The extractor is part of the cache key, so the two never share a B1 result.
+const EXTRACTORS = Object.freeze(["extract_v3", "extract_v2"]);
+const FIXTURE_EXTRACTOR = "extract_v2";
+/** The extractor for a new snapshot: B1_EXTRACTOR when it names an accepted one; extract_v2 in fixture mode (its saved B1 responses were made
+ *  from extract_v2 text); otherwise extract_v3. */
+function extractorFor(env) {
+  const e = env || process.env;
+  const want = String(e.B1_EXTRACTOR || "").trim();
+  if (EXTRACTORS.includes(want)) return want;
+  if (String(e.B1_SNAPSHOT_SOURCE || "").trim().toLowerCase() === "worker-fixture") return FIXTURE_EXTRACTOR;
+  return APPROVED_B1.extractor;
+}
 const KEY_FIELDS = ["snapshot_sha256", "extractor", "instructions_sha256", "model", "max_output_tokens", "reasoning_effort"];
 const sha = (s) => crypto.createHash("sha256").update(String(s), "utf8").digest("hex");
 const HEX64 = /^[0-9a-f]{64}$/;
@@ -35,7 +48,7 @@ function cacheKey(k) {
 }
 
 /** The reuse key for an approved B1 run over a snapshot. */
-function approvedKey(snapshotSha256) { return cacheKey({ ...APPROVED_B1, snapshot_sha256: snapshotSha256 }); }
+function approvedKey(snapshotSha256, extractor) { return cacheKey({ ...APPROVED_B1, extractor: extractor || APPROVED_B1.extractor, snapshot_sha256: snapshotSha256 }); }
 
 /**
  * checkRecord(record, project) → [] when the record may be used for this project, else a list of problems.
@@ -50,9 +63,10 @@ function checkRecord(record, project) {
   if (r.project_id !== project.id) p.push("record belongs to another project");
   if (r.research_id !== t.researchId || r.topic_id !== t.id) p.push("record is for a different selected topic (the topic changed after B1 ran)");
   if (r.status !== "ready") p.push(`record status is ${r.status || "missing"}, not ready`);
-  for (const f of ["instructions_sha256", "model", "max_output_tokens", "reasoning_effort", "extractor", "prompt_version"]) {
+  for (const f of ["instructions_sha256", "model", "max_output_tokens", "reasoning_effort", "prompt_version"]) {
     if (r[f] !== APPROVED_B1[f]) p.push(`${f} is not the approved B1 setting`);
   }
+  if (!EXTRACTORS.includes(r.extractor)) p.push("extractor is not an accepted extractor");
   for (const f of ["snapshot_sha256", "input_sha256", "raw_response_sha256", "cache_key"]) if (!HEX64.test(String(r[f] || ""))) p.push(`${f} missing or malformed`);
   if (p.length) return p;
   if (typeof r.snapshot_text !== "string" || sha(r.snapshot_text) !== r.snapshot_sha256) p.push("source snapshot is missing or does not match its hash");
@@ -94,4 +108,4 @@ function topicWithEvidence(project, record, env) {
   return b1.attachToTopic(t, problems.length ? blockedDoc(problems) : record.bundle);
 }
 
-module.exports = { APPROVED_B1, KEY_FIELDS, cacheKey, approvedKey, checkRecord, topicWithEvidence, sha };
+module.exports = { APPROVED_B1, EXTRACTORS, FIXTURE_EXTRACTOR, extractorFor, KEY_FIELDS, cacheKey, approvedKey, checkRecord, topicWithEvidence, sha };

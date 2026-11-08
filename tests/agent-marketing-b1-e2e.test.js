@@ -17,7 +17,7 @@ const PRIV = require("./helpers/b1-private");   // PRIVATE fixtures and article-
 const WS = process.env.B1_WORKSPACE || "";
 const HAVE = !PRIV.skip && fs.existsSync(path.join(WS, "src", "stageb_bridge.py"));
 const SKIP = HAVE ? false : (PRIV.skip || "B1_WORKSPACE has no src/stageb_bridge.py");
-const ENV = { AGENT_MARKETING_B1_EVIDENCE: "dev", B1_WORKSPACE: WS };
+const ENV = { AGENT_MARKETING_B1_EVIDENCE: "dev", B1_EXTRACTOR: "extract_v2", B1_WORKSPACE: WS };   // frozen v1.2.1 regression (extract_v2 text)
 const M = HAVE ? JSON.parse(fs.readFileSync(path.join(WS, "frozen", "manifest_cases.json"), "utf8")) : {};
 const raw = (c) => fs.readFileSync(path.join(WS, "frozen", "raw", `${c}.html`));
 const saved = (c, k) => fs.readFileSync(path.join(WS, "frozen", "v121_run", `${c}.${k}.json`), "utf8");
@@ -168,4 +168,20 @@ test("e2e: with the switch off the Planner input and verified text are unchanged
   const t = sb.topicWithEvidence(p, null, {});
   assert.strictEqual(t, p.selected_topic);
   assert.strictEqual(JSON.parse(planLib.buildUserMessage(p)).selected_topic.article_evidence, undefined);
+});
+
+test("extract_v3: the evidence gate qualifies the same claim findings on the article-only snapshot (frozen v1.2.1 analyses re-gated)", { skip: SKIP }, async () => {
+  const V3 = { AGENT_MARKETING_B1_EVIDENCE: "dev", B1_WORKSPACE: WS };
+  for (const c of ["FA", "FB", "FC"]) {
+    const s2 = await br.callBridge("snapshot", { url: M[c].final_url, title: M[c].page_title, html_b64: raw(c).toString("base64"), extractor: "extract_v2" }, V3);
+    const s3 = await br.callBridge("snapshot", { url: M[c].final_url, title: M[c].page_title, html_b64: raw(c).toString("base64") }, V3);
+    assert.deepStrictEqual([s2.extractor, s3.extractor], ["extract_v2", "extract_v3"]);
+    assert.ok(s3.snapshot_text.length <= s2.snapshot_text.length, `${c}: furniture removed, nothing added`);
+    const g2 = b1.readBundle((await br.callBridge("gate", { request_text: s2.request_text, response_text: saved(c, "response") }, V3)).bundle);
+    const g3 = b1.readBundle((await br.callBridge("gate", { request_text: s3.request_text, response_text: saved(c, "response") }, V3)).bundle);
+    assert.strictEqual(g3.status, g2.status, c);
+    const claims = (v) => v.validated.filter((x) => b1.CLAIM_SECTIONS.includes(x.section)).map((x) => JSON.stringify(x.finding)).sort();
+    assert.deepStrictEqual(claims(g3), claims(g2), `${c}: the same validated claim findings`);
+    assert.deepStrictEqual(g3.held.map((x) => JSON.stringify(x.finding)).sort(), g2.held.map((x) => JSON.stringify(x.finding)).sort(), `${c}: the same held findings`);
+  }
 });

@@ -124,7 +124,8 @@ test.before(async () => {
 });
 test.after(() => { if (W) { W.proc.kill("SIGKILL"); fs.rmSync(W.dir, { recursive: true, force: true }); } });
 
-const env = (over) => ({ AGENT_MARKETING_B1_EVIDENCE: "dev", AGENT_MARKETING_ENABLED: "true", AGENT_MARKETING_USER_IDS: "", B1_STAGEB_USER_IDS: `${UA},${UB}`,
+// The mock provider answers with the frozen v1.2.1 responses, made from extract_v2 text: these workflow tests run in that regression mode.
+const env = (over) => ({ AGENT_MARKETING_B1_EVIDENCE: "dev", B1_EXTRACTOR: "extract_v2", AGENT_MARKETING_ENABLED: "true", AGENT_MARKETING_USER_IDS: "", B1_STAGEB_USER_IDS: `${UA},${UB}`,
   SUPABASE_URL: DEV_DB, B1_PROVIDER: "mock", B1_PLANNER: "fixture", ANTHROPIC_API_KEY: "", INTERNAL_API_KEY: "internal-test",
   B1_WORKER_URL: W ? `https://127.0.0.1:${W.port}` : "", B1_WORKER_SECRET: SECRET, B1_WORKER_CA_FILE: W ? W.cert : "", ...(over || {}) });
 
@@ -406,4 +407,45 @@ test("a second Write my script for the same answers is refused like the producti
   const again = await writeScript("token-a", p);
   assert.deepStrictEqual([again.start, again.startBody.code], [409, "script_exists"]);
   assert.strictEqual(plannerInputs.length, 1);
+});
+
+// ── extract_v3 (Nov 8, 2026): the default for new snapshots ──────────────────────────────────────────────────────────────────────────────────
+test("extractor choice: extract_v3 by default, extract_v2 in fixture mode or when named; records from either stay valid", () => {
+  const sb = require("../netlify/functions/lib/agent-marketing-b1-stageb-lib");
+  assert.strictEqual(sb.extractorFor({}), "extract_v3");
+  assert.strictEqual(sb.extractorFor({ B1_SNAPSHOT_SOURCE: "worker-fixture" }), "extract_v2", "the fixture worker's saved responses were made from extract_v2 text");
+  assert.strictEqual(sb.extractorFor({ B1_EXTRACTOR: "extract_v2" }), "extract_v2");
+  assert.strictEqual(sb.extractorFor({ B1_EXTRACTOR: "extract_v9" }), "extract_v3", "an unknown name is ignored");
+  const k = "a".repeat(64);
+  assert.notStrictEqual(sb.approvedKey(k, "extract_v3"), sb.approvedKey(k, "extract_v2"), "the extractor is part of the reuse key");
+  assert.deepStrictEqual(sb.EXTRACTORS, ["extract_v3", "extract_v2"]);
+});
+
+test("a new capture uses extract_v3: article text without page furniture; until B1 analyses it there is no evidence and no script", { skip: SKIP }, async () => {
+  fresh();
+  const p = project(UA); const r = research(p.id, UA, [topicOf("FC")]); await select(p, r, "t-FC");
+  const out = await writeScript("token-a", p, { env: { B1_EXTRACTOR: "" } });
+  const e = evidenceRows().at(-1);
+  assert.strictEqual(e.extractor, "extract_v3");
+  for (const gone of ["Related stories", "Latest stories", "Previous post", "Click here to subscribe"]) assert.ok(!e.snapshot_text.includes(gone), gone);
+  assert.ok(/Date: March 28, 2026/.test(e.snapshot_text) && /By Sara Beth Williams/.test(e.snapshot_text), "publication details kept");
+  // The mock provider only knows the frozen extract_v2 requests, as the real B1 provider is not implemented (paid): the run fails closed.
+  assert.deepStrictEqual([out.result.state, out.result.code, e.status, e.error], ["failed", "mock_no_response", "failed", "mock_no_response"]);
+  assert.strictEqual(out.narrative.evidence.providerAttempted, true);
+  assert.match(out.narrative.error, /An article analysis request was made/);
+  assert.strictEqual(plannerInputs.length, 0, "no script without evidence");
+});
+
+test("evidence made with extract_v2 stays usable after the switch: a saved topic is reused, not re-captured", { skip: SKIP }, async () => {
+  fresh();
+  const p1 = project(UA); const r1 = research(p1.id, UA, [topicOf("FB")]); await select(p1, r1, "t-FB");
+  assert.strictEqual((await writeScript("token-a", p1)).result.state, "ready");   // regression mode: extract_v2
+  assert.strictEqual(evidenceRows().at(-1).extractor, "extract_v2");
+  const p2 = project(UA); const r1c = research(p2.id, UA, r1.topics, r1.id); await select(p2, r1c, "t-FB");
+  const f0 = fetches.length, c0 = provider.calls;
+  const out = await writeScript("token-a", p2, { env: { B1_EXTRACTOR: "" } });   // the default (extract_v3) is in force now
+  assert.deepStrictEqual([out.result.state, out.result.evidence], ["ready", "reused"]);
+  assert.deepStrictEqual([fetches.length, provider.calls], [f0, c0], "no fetch, no provider call");
+  assert.strictEqual(evidenceRows().at(-1).extractor, "extract_v2");
+  assert.strictEqual(out.narrative.status, "ready");
 });

@@ -18,6 +18,7 @@ const { FONTS } = require("./brand-themes");
 const sourcesLib = require("./agent-marketing-sources-lib");
 const MANIFEST_VERSION = "am-manifest-2";
 const FORMATS = ["9x16", "16x9"];
+const EDITORIAL_CODES = ["claim", "number", "small_sample"]; // not applied in the development Test environment (validateManifest)
 const SMALL_SAMPLE_BELOW = 10; // Sam, Oct 25: fewer than 10 listings is a count, never a trend on its own
 // The automatic AI-image disclosure (Sam, Oct 29, 2026). The words are fixed here, never written by Claude and never placed in a GPT Image 2 prompt;
 // the renderer draws them in the bottom source area of every scene whose visible image is AI-generated (per the image's recorded provenance).
@@ -281,6 +282,12 @@ function validateManifest(manifest) {
     const want = m.narration_text.replace(/\[[^\]\n]{1,40}\]/g, " ").split(/\s+/).filter(Boolean);
     const have = caps.map((c) => c.text).join(" ").split(/\s+/).filter(Boolean);
     if (want.length !== have.length || want.some((w, i) => w !== have[i])) err("captions", "captions", "The captions are not the approved narration, word for word.");
+  }
+  // Development Test environment only (Nov 9, 2026, product-owner directive): the editorial claim checks are not applied at render either
+  // (numbers on screen tracing to a source, small-sample trend wording, article in the opening or closing scene). Production is unchanged.
+  if (require("./agent-marketing-gate").testEvaluation()) {
+    const kept = errors.filter((e) => !EDITORIAL_CODES.includes(e.code) && !(e.code === "source_role" && /^Opening and closing/.test(e.message)));
+    return { ok: kept.length === 0, errors: kept, warnings };
   }
   return { ok: errors.length === 0, errors, warnings };
 }

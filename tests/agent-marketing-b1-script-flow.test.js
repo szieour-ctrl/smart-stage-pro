@@ -226,24 +226,25 @@ test("only validated evidence reaches the script writer; held and excluded findi
   }
 });
 
-test("Test evaluation mode: Edit and Approve report the evidence-based checks without blocking; Fair Housing still blocks", { skip: SKIP }, async () => {
+test("Test creative evaluation: Edit and Approve run no editorial claim checks (no block, no warning); Fair Housing still blocks", { skip: SKIP }, async () => {
   fresh();
   const p = project(UA); const r = research(p.id, UA, [topicOf("FC")]); await select(p, r, "t-FC");
   const out = await writeScript("token-a", p);
   assert.strictEqual(out.result.state, "ready");
   const E = PRIV.cases.e2e;
-  // Nov 9, 2026 (product-owner decision): in the development Test environment the claim-evidence rules are diagnostics only.
+  // Nov 9, 2026 (product-owner directive): in the development Test environment the editorial claim checks are not run at all.
   for (const line of E.fc_restore_lines) {
     const s = await projectCall(UA, { action: "save_narrative", id: p.id, narrative: editWith(row(p.id).narrative, line) });
     assert.strictEqual(s.status, 200, `restoring the held headline is saved in Test mode: ${line}`);
-    assert.ok(JSON.stringify(row(p.id).gate_result.warnings).includes("Test mode, not blocking"), "the held-claim finding is kept as a warning");
+    assert.ok(!/b1_|invented_number|report_priority/.test(JSON.stringify(row(p.id).gate_result)), "no editorial claim finding, not even as a warning");
   }
   const ok = await projectCall(UA, { action: "save_narrative", id: p.id, narrative: editWith(row(p.id).narrative, E.fc_valid_line) });
   assert.strictEqual(ok.status, 200, JSON.stringify(ok.json).slice(0, 300));
   const saved = JSON.parse(JSON.stringify(row(p.id).narrative));
   row(p.id).narrative = { ...saved, source: "claude", narrationTagged: `${saved.narrationTagged} ${E.fc_unsupported_line}`, captionText: `${saved.captionText} ${E.fc_unsupported_line}` };
   const ap = await projectCall(UA, { action: "approve_narrative", id: p.id });
-  assert.strictEqual(ap.status, 200, `an unsupported figure is reported, not refused: ${JSON.stringify(ap.json).slice(0, 300)}`);
+  assert.strictEqual(ap.status, 200, `an unsupported figure is not checked: ${JSON.stringify(ap.json).slice(0, 300)}`);
+  assert.ok(!/b1_|invented_number|report_priority/.test(JSON.stringify(row(p.id).gate_result)), "approval runs no editorial claim checks");
   assert.strictEqual(row(p.id).status, "narrative_approved");
   assert.ok(!JSON.stringify(row(p.id).selected_topic).includes("b1Evidence"), "the evidence is read for each check, never written onto the project");
   // Fair Housing is not part of the evaluation change: written scene text with steering language is still refused.
@@ -252,13 +253,22 @@ test("Test evaluation mode: Edit and Approve report the evidence-based checks wi
   assert.strictEqual(fh.ok, false, "Fair Housing still blocks");
 });
 
-test("Test evaluation mode is off on the production database and without the development flag", async () => {
+test("Test creative evaluation is off on the production database and without the development flag; research-time topic checks keep it", async () => {
   const gate = require("../netlify/functions/lib/agent-marketing-gate");
+  const src = ["agent-marketing-reframe-lib.js", "agent-marketing-research-report-lib.js"].map((f) => fs.readFileSync(path.join(__dirname, "..", "netlify", "functions", "lib", f), "utf8"));
+  src.forEach((t) => assert.match(t, /gate\.evaluate\(\{ keepEditorialChecks: true,/));
   const env = { AGENT_MARKETING_B1_EVIDENCE: "dev", SUPABASE_URL: DEV_DB };
   assert.strictEqual(gate.testEvaluation(env), true);
   assert.strictEqual(gate.testEvaluation({ ...env, SUPABASE_URL: "https://dnpaenpwdhjmslymgkse.supabase.co" }), false);
   assert.strictEqual(gate.testEvaluation({ ...env, AGENT_MARKETING_B1_EVIDENCE: "" }), false);
   assert.strictEqual(gate.testEvaluation({ ...env, SUPABASE_URL: "" }), false);
+  // Page-started image jobs follow the same rule.
+  const sd = require("../netlify/functions/lib/self-dispatch-lib");
+  const ev = (host) => ({ headers: { host } });
+  assert.strictEqual(sd.pageDispatch(ev("b1-stageb-dev--smart-stage-pro.netlify.app"), env), true);
+  assert.strictEqual(sd.pageDispatch(ev("smartstagepro.com"), env), false);
+  assert.strictEqual(sd.pageDispatch(ev("b1-stageb-dev--smart-stage-pro.netlify.app"), { ...env, SUPABASE_URL: "https://dnpaenpwdhjmslymgkse.supabase.co" }), false);
+  assert.strictEqual(sd.pageDispatch(ev("b1-stageb-dev--smart-stage-pro.netlify.app"), { ...env, AGENT_MARKETING_B1_EVIDENCE: "" }), false);
 });
 
 test("without valid attached evidence an Article-Led script cannot be approved", { skip: SKIP }, async () => {

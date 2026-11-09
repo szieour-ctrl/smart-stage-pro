@@ -26,4 +26,22 @@ function selfBase(event, legacy, env) {
   return `${local ? "http" : "https"}://${host}`;
 }
 
-module.exports = { selfBase, requestHost };
+/**
+ * Development deploys sit behind Netlify team login, so a function cannot call its own background function there (the edge answers 401).
+ * pageDispatch(event, env) is true only when AGENT_MARKETING_B1_EVIDENCE=dev, the request host is not production and the database is not the
+ * production project: the page then starts the background job itself with the subscriber's own login token. pageDispatchUser(event, env)
+ * is the background side: the logged-in user's id under the same conditions, else null. Same rule as research and script mode.
+ */
+function pageDispatch(event, env) {
+  const e = env || process.env;
+  if (!require("./agent-marketing-b1-evidence-lib").enabled(e)) return false;
+  const pc = require("./public-config-lib");
+  return !isProductionHost(requestHost(event), e) && !!e.SUPABASE_URL && !String(e.SUPABASE_URL).includes(pc.PRODUCTION_REF);
+}
+async function pageDispatchUser(event, env) {
+  if (!pageDispatch(event, env)) return null;
+  const auth = await require("./reel-auth-lib").requireUser(event);
+  return auth && !auth.error && auth.user ? auth.user.id : null;
+}
+
+module.exports = { selfBase, requestHost, pageDispatch, pageDispatchUser };

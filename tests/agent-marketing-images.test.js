@@ -250,3 +250,24 @@ test("9:16 is its own image: the vertical generate records the tall format and s
   const nope = await call("POST", { action: "generate", projectId: P1, sceneIndex: 1, format: "4x5", kind: "concept" });
   assert.strictEqual(nope.status, 400);
 });
+
+test("development deploy behind team login: generate creates the draft and asks the page to start the image job (no server-to-server call); production unchanged", async () => {
+  process.env.AGENT_MARKETING_ENABLED = "true";
+  const old = { f: process.env.AGENT_MARKETING_B1_EVIDENCE, u: process.env.SUPABASE_URL };
+  process.env.AGENT_MARKETING_B1_EVIDENCE = "dev"; process.env.SUPABASE_URL = "https://abcdefghijklmnopqrst.supabase.co";
+  try {
+    db.agent_marketing_assets.length = 0; const before = dispatched.length;
+    const r = await handler({ httpMethod: "POST", headers: { host: "b1-stageb-dev--smart-stage-pro.netlify.app" }, body: JSON.stringify({ action: "generate", projectId: P1, sceneIndex: 1, format: "16x9" }), queryStringParameters: null });
+    const j = JSON.parse(r.body);
+    assert.strictEqual(r.statusCode, 202); assert.strictEqual(j.dispatch, true); assert.ok(j.assetId);
+    assert.strictEqual(dispatched.length, before, "no server-to-server dispatch on a development deploy");
+    assert.strictEqual(db.agent_marketing_assets.at(-1).generation.state, "generating");
+    // The background job accepts the subscriber's own login there, and only there.
+    const bg = require("../netlify/functions/agent-marketing-image-background");
+    const prod = await bg.handler({ headers: { host: "smartstagepro.com" }, body: JSON.stringify({ assetId: j.assetId }) });
+    assert.strictEqual(prod.statusCode, 401, "no page-started jobs on the production host");
+  } finally {
+    if (old.f === undefined) delete process.env.AGENT_MARKETING_B1_EVIDENCE; else process.env.AGENT_MARKETING_B1_EVIDENCE = old.f;
+    if (old.u === undefined) delete process.env.SUPABASE_URL; else process.env.SUPABASE_URL = old.u;
+  }
+});

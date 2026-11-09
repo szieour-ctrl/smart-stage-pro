@@ -127,7 +127,7 @@ function validateOne(entry, topic, ctx) {
 
   // The content gate (addresses, listings, sale advertising, Fair Housing).
   const verifiedTexts = [...cited.map(figureText), ...reports.map((r) => r.scopeSentence), ...areaContext.map((c) => c.text), ...articleTexts(topic)];
-  const g = gate.evaluate({ template: "local_market_insider", intake: {}, verified: { texts: verifiedTexts, addresses: [] }, generated: { narration: question, captions: why } });
+  const g = gate.evaluate({ keepEditorialChecks: true, template: "local_market_insider", intake: {}, verified: { texts: verifiedTexts, addresses: [] }, generated: { narration: question, captions: why } });
   if (!g.ok) return { problem: `topic ${topic.id}: ${g.blocks[0].message}` };
 
   return {

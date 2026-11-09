@@ -26,10 +26,11 @@
 "use strict";
 
 const GATE_VERSION = "2026-10-25.1";
-// Editorial evaluation in the development Test environment (Nov 9, 2026, product-owner decision): the claim-evidence rules below report but never
-// block, so the subscriber sees the whole script the writer produced. Only when AGENT_MARKETING_B1_EVIDENCE=dev AND the server's database is not
-// the production project; Production is unchanged. Fair Housing, listing/property, notice, template and fabricated-result rules still block.
-const TEST_EVAL_RULES = ["b1_claim_context", "b1_held_quote", "b1_unsupported_figure", "invented_number", "report_priority"];
+// Creative evaluation in the development Test environment (Nov 9, 2026, product-owner directive): the editorial claim checks are not run at all
+// (no block, no warning): b1_claim_context, b1_held_quote, b1_unsupported_figure, invented_number, report_priority, and the "opinion with no
+// figure" note. Only when AGENT_MARKETING_B1_EVIDENCE=dev AND the server's database is not the production project; Production is unchanged.
+// Fair Housing, the specific-home/listing rules, the required notice, the template allowlist and fabricated testimonials/results still apply.
+// Research-time callers that build topics (reframe, report topics) pass keepEditorialChecks: true and are unchanged.
 function testEvaluation(env) {
   const e = env || process.env;
   if (!require("./agent-marketing-b1-evidence-lib").enabled(e)) return false;
@@ -366,6 +367,7 @@ function evaluate(input) {
   const warnings = [];
   const agentSuppliedClaims = [];
   const i = input || {};
+  const editorial = i.keepEditorialChecks === true || !testEvaluation();   // false only in the development Test environment
 
   // Template allowlist
   if (!TEMPLATES.includes(i.template)) blocks.push({ rule: "template", field: "template", match: String(i.template || ""), message: "Unknown Agent Marketing template." });
@@ -419,9 +421,8 @@ function evaluate(input) {
     // Approving or saving a script sends Claude's words back as the agent's own text. On a sourced piece the same context rules apply to it
     // (the agent's own intake answers are theirs and are not held to them).
     if (market && !field.startsWith("intake.") && field !== "cta") {
-      scanMarketClaims(text, field, ctx, blocks, sourcedFacts, agentSuppliedClaims, warnings);
-      scanReportPriority(text, field, precedence, blocks);
-      b1Scan(text, field);
+      scanMarketClaims(text, field, ctx, blocks, sourcedFacts, agentSuppliedClaims, editorial ? warnings : null);
+      if (editorial) { scanReportPriority(text, field, precedence, blocks); b1Scan(text, field); }
     }
   }
 
@@ -442,9 +443,8 @@ function evaluate(input) {
     scan(text, field, FAIR_HOUSING, blocks);
     scan(text, field, FAIR_HOUSING_SOFT, warnings);
     if (market) {
-      scanMarketClaims(text, field, ctx, blocks, sourcedFacts, agentSuppliedClaims, warnings);
-      scanReportPriority(text, field, precedence, blocks);
-      b1Scan(text, field);
+      scanMarketClaims(text, field, ctx, blocks, sourcedFacts, agentSuppliedClaims, editorial ? warnings : null);
+      if (editorial) { scanReportPriority(text, field, precedence, blocks); b1Scan(text, field); }
     } else {
       for (const r of CLAIM_RULES) {
         const t = norm(text);
@@ -457,7 +457,7 @@ function evaluate(input) {
         }
       }
     }
-    for (const n of (market ? marketFigureTokens(text) : numberTokens(text))) {
+    if (editorial) for (const n of (market ? marketFigureTokens(text) : numberTokens(text))) {
       if (intakeNumbers.has(n)) continue;
       if (market && verifiedNumbers.has(n)) sourcedFacts.push(`${field}: ${n}`); // the figure is in the validated source topic
       else blocks.push({ rule: "invented_number", field, match: n, message: market ? (vIn && vIn.reportFirst ? `The number ${n} is not in your uploaded report. You chose to use your report with web research, so your report is the source of truth: use only its figures.` : `The number ${n} is not in your research topic, your uploaded report or your answers. Use only figures from those sources.`) : "Contains a number the agent did not provide." });
@@ -481,11 +481,7 @@ function evaluate(input) {
 
   // De-duplicate identical issues
   const uniq = (arr) => { const seen = new Set(); return arr.filter((x) => { const k = `${x.rule}|${x.field}|${x.match}`; if (seen.has(k)) return false; seen.add(k); return true; }); };
-  let b = uniq(blocks);
-  if (testEvaluation()) {
-    b.filter((x) => TEST_EVAL_RULES.includes(x.rule)).forEach((x) => warnings.push({ ...x, message: `Test mode, not blocking: ${x.message}` }));
-    b = b.filter((x) => !TEST_EVAL_RULES.includes(x.rule));
-  }
+  const b = uniq(blocks);
   return { ok: b.length === 0, version: GATE_VERSION, review: market ? "market_insider" : "strict", blocks: b, warnings: uniq(warnings), agentSuppliedClaims: [...new Set(agentSuppliedClaims)], sourcedFacts: [...new Set(sourcedFacts)] };
 }
 
@@ -498,4 +494,4 @@ function explain(result) {
   return `${first.message}${where}${first.match ? ` — “${first.match}”` : ""}${more}. Agent Marketing is for your expertise and services; use a Listing Reel to advertise a specific home.`;
 }
 
-module.exports = { TEST_EVAL_RULES, testEvaluation, GATE_VERSION, ATTESTATION_VERSION, ATTESTATION_TEXT, TEMPLATES, ENABLED_TEMPLATES, evaluate, explain, verifiedFromTopic, verifiedFromProject };
+module.exports = { testEvaluation, GATE_VERSION, ATTESTATION_VERSION, ATTESTATION_TEXT, TEMPLATES, ENABLED_TEMPLATES, evaluate, explain, verifiedFromTopic, verifiedFromProject };

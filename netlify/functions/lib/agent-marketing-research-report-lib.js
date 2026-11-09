@@ -133,7 +133,7 @@ function validateReportTopics(raw, ctx, opts) {
     if (NOW_WORDS.test(text) && reports.some((r) => r.facts.sample && r.facts.sample.broadWindow)) return problems.push(`topic ${n}: calls a long window "this month", "recent" or "now"`);
     // 3. the content gate (addresses, listings, sale advertising, Fair Housing)
     const verifiedTexts = cited.map(figureText).concat(reports.map((r) => r.scopeSentence));
-    const g = gate.evaluate({ template: "local_market_insider", intake: {}, verified: { texts: verifiedTexts, addresses: [] }, generated: { narration: question, captions: why } });
+    const g = gate.evaluate({ keepEditorialChecks: true, template: "local_market_insider", intake: {}, verified: { texts: verifiedTexts, addresses: [] }, generated: { narration: question, captions: why } });
     if (!g.ok) return problems.push(`topic ${n}: ${g.blocks[0].message}`);
     // 4. scope, set by code
     const different = reports.filter((r) => r.geoStatus === "different");

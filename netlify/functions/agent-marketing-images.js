@@ -231,6 +231,8 @@ exports.handler = async (event) => {
       if (charged) { try { await quota.callDebitCredit(userId, charged.credits, "agent_marketing_image_refund_dispatch_failed", true); } catch (e) { console.error("refund failed:", e.message); } }
       return reply(500, { error: "Could not start the image." });
     }
+    // Development deploys (behind team login) cannot call their own functions: the page starts the image job with its own login token.
+    if (require("./lib/self-dispatch-lib").pageDispatch(event)) return reply(202, { assetId: row.id, charged: !!charged, credits: charged ? charged.credits : 0, dispatch: true });
     const siteUrl = selfBase(event, process.env.URL || `https://${event.headers && event.headers.host}`);
     try {
       await fetch(`${siteUrl}/.netlify/functions/agent-marketing-image-background`, { method: "POST", headers: { "Content-Type": "application/json", "x-internal-key": process.env.INTERNAL_API_KEY }, body: JSON.stringify({ assetId: row.id, owner: userId }) });

@@ -871,6 +871,16 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
   }
 
   // ── Storyboard (read-only for now) ──
+  // Test environment only (Nov 9, 2026): the rest of each scene's plan, so the storyboard can be evaluated in full. Never shown on production.
+  function testRows(s) {
+    if (SSP_CFG.env === "production") return "";
+    var d = s.director || {};
+    return (s.aiGenerationPrompt ? "<dt>Image prompt</dt><dd>" + esc(s.aiGenerationPrompt) + "</dd>" : "") +
+      (s.cameraMotion ? "<dt>Camera motion</dt><dd>" + esc(String(s.cameraMotion).replace(/_/g, " ")) + "</dd>" : "") +
+      (s.textSafePlacement ? "<dt>Text and caption placement</dt><dd>" + esc(s.textSafePlacement) + "</dd>" : "") +
+      (d.overlay ? "<dt>Overlay</dt><dd>" + esc(d.overlay) + "</dd>" : "") +
+      (s.sourceRole ? "<dt>Source role</dt><dd>" + esc(s.sourceRole) + "</dd>" : "");
+  }
   function renderBoard() {
     var n = (state.project && (state.project.narrative)) || {}, scenes = n.scenes || [];
     $("boardWarn").classList.toggle("hidden", !n.scenesStale);
@@ -889,7 +899,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
       var dirRows = (dr.objective ? "<dt>Visual goal</dt><dd>" + esc(dr.objective) + "</dd>" : "") + (dr.direction ? "<dt>Camera and light</dt><dd>" + esc(dr.direction) + "</dd>" : "") + (dr.contrast ? "<dt>Different from the last scene</dt><dd>" + esc(dr.contrast) + "</dd>" : "");
       return '<div class="scene"><h4>Scene ' + (i + 1) + ' · ' + esc(String(s.role || "").replace(/_/g, " ")) + ' <span class="pill ' + (real || vs === "AGENT_PROFILE" ? "real" : "concept") + '">' + label + '</span><span class="pill">about ' + esc(s.provisionalSeconds) + 's</span></h4>' +
         '<div class="q">“' + esc(s.narrationExcerpt) + '”</div><dl>' + rows + dirRows +
-        (fr["9x16"] ? "<dt>Vertical crop</dt><dd>" + esc(fr["9x16"]) + "</dd>" : "") + (fr["16x9"] ? "<dt>Wide frame</dt><dd>" + esc(fr["16x9"]) + "</dd>" : "") + "</dl>" + (real ? '<div class="pick" id="pick' + i + '"></div>' : "") + "</div>";
+        (fr["9x16"] ? "<dt>Vertical crop</dt><dd>" + esc(fr["9x16"]) + "</dd>" : "") + (fr["16x9"] ? "<dt>Wide frame</dt><dd>" + esc(fr["16x9"]) + "</dd>" : "") + testRows(s) + "</dl>" + (real ? '<div class="pick" id="pick' + i + '"></div>' : "") + "</div>";
     }).join("") || '<div class="hint">No scene plan yet.</div>';
     var m = n.missingAgentInputs || [];
     $("missingBox").classList.toggle("hidden", !m.length);
@@ -1341,6 +1351,11 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
       if (d) { body.description = d.description; body.note = d.note; if (d.revise) body.reviseAssetId = d.revise; }
       if (et) { body.description = et; body.note = d ? d.note : (im.note[sceneIndex] || "").trim(); }
       var r = await api("POST", "", body, IMG);
+      // Development deploys: the page starts the image job itself, with its own login (the server cannot call its own functions there).
+      if (r.status === 202 && r.json && r.json.dispatch && r.json.assetId) {
+        var bg = await api("POST", "", { assetId: r.json.assetId }, "/.netlify/functions/agent-marketing-image-background");
+        if (bg.status !== 202 && !bg.ok) { setSlotMsg(k, "The image could not be started (error " + bg.status + "). It will be released shortly; please try again.", "err"); return; }
+      }
       var code = r.json && r.json.code;
       setSlotMsg(k, "");
       if (r.status === 402 && code === "confirm_charge") { im.confirming[k] = r.json.credits || im.per; im.sig = ""; }

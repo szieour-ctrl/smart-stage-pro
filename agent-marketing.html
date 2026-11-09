@@ -698,7 +698,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
       var c = n.claimsToVerify || [];
       $("noticeBox").classList.toggle("hidden", !n.notice);
       if (n.notice) $("noticeBox").innerHTML = "<strong>Required notice (MetroList Rule 12.9).</strong> This line must appear with the figures in your piece, and it is added for you: " + esc(n.notice);
-      $("verifyBox").classList.toggle("hidden", !c.length);
+      $("verifyBox").classList.toggle("hidden", !c.length || state.project.testEvaluation === true);   // hidden in the development Test environment only
       $("verifyBox").innerHTML = "<strong>Please verify before you publish:</strong><ul class='plain'>" + c.map(function (x) { return "<li>" + esc(x) + "</li>"; }).join("") + "</ul>";
       refreshPreview();
     }

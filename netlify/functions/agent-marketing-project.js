@@ -59,6 +59,9 @@ function forClient(row) {
     intake: row.intake || {}, narrative: row.narrative || null, narrativeApprovedAt: row.narrative_approved_at || null,
     storyboard: row.storyboard || null, selectedTopic: require("./lib/agent-marketing-article-led-lib").clientTopic(row.selected_topic) || null, status: row.status, gate: row.gate_result || null,
     createdAt: row.created_at, updatedAt: row.updated_at, hidden: !!row.hidden_at,
+    // Development Test environment only (AGENT_MARKETING_B1_EVIDENCE=dev, scoped to b1-stageb-dev, and a non-production database): the page hides
+    // the "Please verify before you publish" panel there. Never set on production or on other deploys.
+    ...(gate.testEvaluation() ? { testEvaluation: true } : {}),
   };
 }
 

@@ -240,6 +240,9 @@ test("Test creative evaluation: Edit and Approve run no editorial claim checks (
   }
   const ok = await projectCall(UA, { action: "save_narrative", id: p.id, narrative: editWith(row(p.id).narrative, E.fc_valid_line) });
   assert.strictEqual(ok.status, 200, JSON.stringify(ok.json).slice(0, 300));
+  assert.strictEqual(ok.json.project.testEvaluation, true, "the project tells the page it is in the development Test environment");
+  assert.match(fs.readFileSync(path.join(__dirname, "..", "agent-marketing.html"), "utf8"), /\$\("verifyBox"\)\.classList\.toggle\("hidden", !c\.length \|\| state\.project\.testEvaluation === true\)/,
+    "the verification panel is hidden only when the server says Test environment");
   const saved = JSON.parse(JSON.stringify(row(p.id).narrative));
   row(p.id).narrative = { ...saved, source: "claude", narrationTagged: `${saved.narrationTagged} ${E.fc_unsupported_line}`, captionText: `${saved.captionText} ${E.fc_unsupported_line}` };
   const ap = await projectCall(UA, { action: "approve_narrative", id: p.id });

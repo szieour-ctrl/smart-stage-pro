@@ -208,16 +208,28 @@ function railwayPost(pathname, payload) {
     req.on("error", reject); req.write(body); req.end();
   });
 }
-async function dispatchRender(job, manifest, headshotKey) {
+// The branding the Reel carries, from the subscriber's default Marketing Profile. The logo is optional (Nov 9, 2026): it is passed only when the profile has one.
+function brandFromProfile(profile) {
+  return { primary: profile.brand_primary, secondary: profile.brand_secondary, border: profile.brand_border, font: profile.brand_font || undefined, headshot_key: profile.headshot_key, ...(profile.logo_key ? { logo_key: profile.logo_key } : {}), agent: { name: profile.licensed_name, brokerage: profile.brokerage_name || "" } };
+}
+// Every storage key the renderer needs a download link for.
+function dispatchKeys(manifest, headshotKey) {
   const keys = new Set([manifest.audio.narration_key]);
   if (headshotKey) keys.add(headshotKey);
+  if (manifest.brand && manifest.brand.logo_key) keys.add(manifest.brand.logo_key);
   manifest.scenes.forEach((s) => Object.values(s.visual.image_keys || {}).forEach((k) => keys.add(k)));
+  return keys;
+}
+async function dispatchRender(job, manifest, headshotKey) {
+  const keys = dispatchKeys(manifest, headshotKey);
   const assets = {};
   for (const k of keys) assets[k] = await presign(k, 12 * 3600);
   const r = await railwayPost("/render-agent-marketing", { jobId: job.id, manifest, assets, musicStyle: job.music || "default" });
   return r;
 }
 
+exports.brandFromProfile = brandFromProfile;
+exports.dispatchKeys = dispatchKeys;
 exports.handler = async (event) => {
   const h = event.headers || {};
   const key = process.env.INTERNAL_API_KEY || "";
@@ -255,7 +267,7 @@ exports.handler = async (event) => {
     if (!fromReport && !sourcesLib.sourceLine(topic.sources, topic.scopeNote)) return await fail(job, sourcesLib.usableSources(topic.sources).length ? "The source note for this topic is too long to show on screen. Run the research again to get a shorter one." : "This Reel needs either your uploaded report or at least one checked, dated research source."), { statusCode: 200, body: "" };
     const profile = await getProfileRow(job.user_id);
     if (!profile || !profile.licensed_name || !profile.headshot_key) return await fail(job, "Your Agent Profile needs your name and headshot before a Reel can be made."), { statusCode: 200, body: "" };
-    const brand = { primary: profile.brand_primary, secondary: profile.brand_secondary, border: profile.brand_border, font: profile.brand_font || undefined, headshot_key: profile.headshot_key, agent: { name: profile.licensed_name, brokerage: profile.brokerage_name || "" } };
+    const brand = brandFromProfile(profile);
     const formats = job.formats;
     job.music = project.music || "default";
 

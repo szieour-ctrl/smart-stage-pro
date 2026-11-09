@@ -1234,6 +1234,13 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
       if (r.ok && r.json && r.json.jobId && r.json.status !== "none") { reel.job = r.json.jobId; pollReel(); }
     } catch (e) { /* the panel still works for a new Reel */ }
   }
+  // Development deploys: the page starts the Reel's preparation job itself, with its own login (the server cannot call its own functions there).
+  async function startPrepare(jobId, retry) {
+    var bg = await api("POST", "", { jobId: jobId, retry: !!retry }, "/.netlify/functions/agent-marketing-prepare-background");
+    if (bg.status === 202 || bg.ok) return true;
+    reelBusyUi(false); $("reelRetry").classList.remove("hidden"); say("reelMsg", "Your Reel could not be started (error " + bg.status + "). Please try again.", "err");
+    return false;
+  }
   async function startReel() {
     var formats = selectedReelFormats();
     if (!formats.length) return say("reelMsg", "Choose at least one format.", "err");
@@ -1243,12 +1250,14 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
       var r = await rapi("POST", "", { projectId: state.project.id, formats: formats, advertisingConfirmed: true });
       if (r.status === 409 && r.json.jobId) { reel.job = r.json.jobId; say("reelMsg", "A Reel is already being made for this project; following it …"); return pollReel(); }
       if (!r.ok) { reelBusyUi(false); return say("reelMsg", r.json.error || "Could not start your Reel.", "err"); }
-      reel.job = r.json.jobId; pollReel();
+      reel.job = r.json.jobId;
+      if (r.json.dispatch && !(await startPrepare(reel.job, false))) return;
+      pollReel();
     } catch (e) { reelBusyUi(false); say("reelMsg", e.message, "err"); }
   }
   async function retryReel() {
     $("reelRetry").classList.add("hidden"); reelBusyUi(true); say("reelMsg", "Retrying. Images and narration already made are reused …");
-    try { var r = await rapi("POST", "", { jobId: reel.job, retry: true }); if (!r.ok) { reelBusyUi(false); $("reelRetry").classList.remove("hidden"); return say("reelMsg", r.json.error || "Could not retry.", "err"); } pollReel(); }
+    try { var r = await rapi("POST", "", { jobId: reel.job, retry: true }); if (!r.ok) { reelBusyUi(false); $("reelRetry").classList.remove("hidden"); return say("reelMsg", r.json.error || "Could not retry.", "err"); } if (r.json.dispatch && !(await startPrepare(reel.job, true))) return; pollReel(); }
     catch (e) { reelBusyUi(false); say("reelMsg", e.message, "err"); }
   }
 

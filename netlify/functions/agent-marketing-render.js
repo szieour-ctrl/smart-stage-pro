@@ -32,7 +32,10 @@ function railwayGet(pathname) {
   });
 }
 async function patchJob(id, fields) { await supabase("PATCH", "agent_marketing_jobs", { ...fields, updated_at: new Date().toISOString() }, `?id=eq.${encodeURIComponent(id)}`); }
+// Development deploys (behind team login) cannot call their own functions: there the page starts the preparation job with the subscriber's
+// own login token (same pattern as research, script mode and images). Returns true when the page must start it.
 async function dispatchPrepare(jobId, retry, event) {
+  if (require("./lib/self-dispatch-lib").pageDispatch(event)) return true;
   const siteUrl = selfBase(event, (process.env.SITE_URL || process.env.URL || "https://smartstagepro.com").replace(/\/+$/, ""));
   await fetch(`${siteUrl}/.netlify/functions/agent-marketing-prepare-background`, { method: "POST", headers: { "Content-Type": "application/json", "x-internal-key": process.env.INTERNAL_API_KEY }, body: JSON.stringify({ jobId, retry: !!retry }) });
 }
@@ -88,9 +91,12 @@ exports.handler = async (event) => {
   if (b.retry) {
     const { job, err } = await loadJob(b.jobId);
     if (err) return err;
-    if (job.status !== "error") return reply(409, { error: "Only a stopped render can be retried." });
-    try { await dispatchPrepare(job.id, true, event); } catch (e) { console.error("agent-marketing retry dispatch failed:", e.message); return reply(502, { error: "Could not restart the render" }); }
-    return reply(200, { jobId: job.id });
+    // Development deploys: a job whose page-started preparation never began stays "queued"; it can be started again from the page.
+    const pageQueued = job.status === "queued" && require("./lib/self-dispatch-lib").pageDispatch(event);
+    if (job.status !== "error" && !pageQueued) return reply(409, { error: "Only a stopped render can be retried." });
+    let page = false;
+    try { page = await dispatchPrepare(job.id, true, event); } catch (e) { console.error("agent-marketing retry dispatch failed:", e.message); return reply(502, { error: "Could not restart the render" }); }
+    return reply(200, { jobId: job.id, ...(page ? { dispatch: true } : {}) });
   }
 
   if (!am.UUID_RE.test(String(b.projectId || ""))) return reply(400, { error: "Missing projectId" });
@@ -108,6 +114,7 @@ exports.handler = async (event) => {
   const jobId = `amj-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const ins = await supabase("POST", "agent_marketing_jobs", { id: jobId, project_id: project.id, user_id: userId, formats, status: "queued", step: "Queued" });
   if (ins.status >= 300) { console.error("agent_marketing_jobs insert failed:", ins.status, JSON.stringify(ins.data).slice(0, 200)); return reply(500, { error: "Could not start the render" }); }
-  try { await dispatchPrepare(jobId, false, event); } catch (e) { console.error("agent-marketing dispatch failed:", e.message); await patchJob(jobId, { status: "error", error: "Could not start preparation", step: "Stopped" }); return reply(502, { error: "Could not start the render" }); }
-  return reply(200, { jobId, formats });
+  let page = false;
+  try { page = await dispatchPrepare(jobId, false, event); } catch (e) { console.error("agent-marketing dispatch failed:", e.message); await patchJob(jobId, { status: "error", error: "Could not start preparation", step: "Stopped" }); return reply(502, { error: "Could not start the render" }); }
+  return reply(200, { jobId, formats, ...(page ? { dispatch: true } : {}) });
 };

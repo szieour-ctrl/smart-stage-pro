@@ -221,14 +221,19 @@ async function dispatchRender(job, manifest, headshotKey) {
 exports.handler = async (event) => {
   const h = event.headers || {};
   const key = process.env.INTERNAL_API_KEY || "";
-  if (!key || h["x-internal-key"] !== key) return { statusCode: 401, body: "" };
+  // Development deploys only: the page starts this job with the subscriber's own login token (see self-dispatch-lib pageDispatch).
+  let pageUser = null;
+  if (!key || h["x-internal-key"] !== key) {
+    pageUser = await require("./lib/self-dispatch-lib").pageDispatchUser(event);
+    if (!pageUser) return { statusCode: 401, body: "" };
+  }
   let job = null;
   try {
     const body = JSON.parse(event.body || "{}");
     if (!/^[\w-]{6,80}$/.test(String(body.jobId || ""))) return { statusCode: 400, body: "" };
     const jr = await supabase("GET", "agent_marketing_jobs", null, `?id=eq.${encodeURIComponent(body.jobId)}&select=*&limit=1`);
     job = Array.isArray(jr.data) ? jr.data[0] : null;
-    if (!job || !am.isEnabledFor(job.user_id)) return { statusCode: 404, body: "" };
+    if (!job || !am.isEnabledFor(job.user_id) || (pageUser && job.user_id !== pageUser)) return { statusCode: 404, body: "" };
     if (!["queued", "error"].includes(job.status) || (job.status === "error" && !body.retry)) return { statusCode: 200, body: "" }; // late or duplicate call
     await patchJob(job.id, { status: "preparing", error: null, step: "Starting", attempt: body.retry ? job.attempt + 1 : job.attempt });
 

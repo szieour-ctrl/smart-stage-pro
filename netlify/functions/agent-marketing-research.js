@@ -26,7 +26,8 @@ const quota = require("./lib/reel-quota-lib");
 
 const headers = { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json", "Cache-Control": "no-store" };
 const reply = (statusCode, obj) => ({ statusCode, headers, body: JSON.stringify(obj) });
-const STALE_RUNNING_MS = 6 * 60 * 1000;      // a run that never reported back is treated as failed (and was never charged)
+const STALE_RUNNING_MS = 6 * 60 * 1000;
+const DISPATCH_FAILED = "Research could not start. This did not use a session. Please try again.";      // a run that never reported back is treated as failed (and was never charged)
 const CHARGE_LOOKBACK_MS = 40 * 24 * 60 * 60 * 1000;
 
 // A saved set opened from another project points at that project's report. The report is the agent's own, so, once the agent says "use", it is copied into THIS project
@@ -305,14 +306,16 @@ exports.handler = async (event) => {
     if (pageDispatch(event)) return reply(202, { research: forClient(row), session, dispatch: true });
     const siteUrl = selfBase(event, process.env.URL || `https://${event.headers && event.headers.host}`);
     try {
-      await fetch(`${siteUrl}/.netlify/functions/agent-marketing-research-background`, {
+      const res = await fetch(`${siteUrl}/.netlify/functions/agent-marketing-research-background`, {
         method: "POST", headers: { "Content-Type": "application/json", "x-internal-key": process.env.INTERNAL_API_KEY },
         body: JSON.stringify({ researchId: row.id, owner: userId }),
       });
+      // A refused dispatch (e.g. 401 from a deploy behind team login) never starts the job: fail now instead of leaving the row "running".
+      if (!res.ok) { const e = new Error(`HTTP ${res.status}`); throw e; }
     } catch (e) {
       console.error("agent-marketing research dispatch failed:", e.message);
-      await supabase("PATCH", "agent_marketing_research", { status: "failed", error: "Research failed to start.", charged_at: null, updated_at: new Date().toISOString() }, `?id=eq.${row.id}`);
-      return reply(502, { error: "Research failed to start. Please try again. This did not use a session." });
+      await supabase("PATCH", "agent_marketing_research", { status: "failed", error: DISPATCH_FAILED, charged_at: null, updated_at: new Date().toISOString() }, `?id=eq.${row.id}&status=eq.running`);
+      return reply(502, { error: DISPATCH_FAILED });
     }
     return reply(202, { research: forClient(row), session });
   } catch (e) {

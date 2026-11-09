@@ -102,6 +102,26 @@ test("start: only the owner's local_market_insider project that can still be edi
   global.fetch = async (url, opts) => { fetched.push({ url, opts }); return { ok: true }; };
 });
 
+test("start: a dispatch refused with a non-success HTTP status (e.g. 401 behind team login) fails the run at once, uncharged", async () => {
+  reset();
+  const p = mkProject();
+  global.fetch = async (url, opts) => { fetched.push({ url, opts }); return { ok: false, status: 401 }; };
+  try {
+    const r = await call("POST", { action: "start", projectId: p.id, request: REQ });
+    assert.strictEqual(r.status, 502);
+    assert.strictEqual(r.json.error, "Research could not start. This did not use a session. Please try again.");
+    const row = db.agent_marketing_research[0];
+    assert.strictEqual(row.status, "failed");
+    assert.strictEqual(row.error, "Research could not start. This did not use a session. Please try again.");
+    assert.strictEqual(row.charged_at, null);
+    // nothing is left running, so the agent can try again straight away
+    global.fetch = async (url, opts) => { fetched.push({ url, opts }); return { ok: true, status: 202 }; };
+    assert.strictEqual((await call("POST", { action: "start", projectId: p.id, request: { ...REQ, audience: "buyers" } })).status, 202);
+  } finally {
+    global.fetch = async (url, opts) => { fetched.push({ url, opts }); return { ok: true }; };
+  }
+});
+
 test("start: one run at a time; a second request while one is running is refused", async () => {
   reset();
   const p = mkProject();

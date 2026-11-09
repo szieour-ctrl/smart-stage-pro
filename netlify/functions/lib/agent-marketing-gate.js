@@ -26,6 +26,16 @@
 "use strict";
 
 const GATE_VERSION = "2026-10-25.1";
+// Editorial evaluation in the development Test environment (Nov 9, 2026, product-owner decision): the claim-evidence rules below report but never
+// block, so the subscriber sees the whole script the writer produced. Only when AGENT_MARKETING_B1_EVIDENCE=dev AND the server's database is not
+// the production project; Production is unchanged. Fair Housing, listing/property, notice, template and fabricated-result rules still block.
+const TEST_EVAL_RULES = ["b1_claim_context", "b1_held_quote", "b1_unsupported_figure", "invented_number", "report_priority"];
+function testEvaluation(env) {
+  const e = env || process.env;
+  if (!require("./agent-marketing-b1-evidence-lib").enabled(e)) return false;
+  const db = String(e.SUPABASE_URL || "");
+  return !!db && !db.includes(require("./public-config-lib").PRODUCTION_REF);
+}
 
 // One checkbox, extending the existing Reel advertising-accuracy confirmation. Store the version with the timestamp.
 const ATTESTATION_VERSION = "agent-marketing-1";
@@ -471,7 +481,11 @@ function evaluate(input) {
 
   // De-duplicate identical issues
   const uniq = (arr) => { const seen = new Set(); return arr.filter((x) => { const k = `${x.rule}|${x.field}|${x.match}`; if (seen.has(k)) return false; seen.add(k); return true; }); };
-  const b = uniq(blocks);
+  let b = uniq(blocks);
+  if (testEvaluation()) {
+    b.filter((x) => TEST_EVAL_RULES.includes(x.rule)).forEach((x) => warnings.push({ ...x, message: `Test mode, not blocking: ${x.message}` }));
+    b = b.filter((x) => !TEST_EVAL_RULES.includes(x.rule));
+  }
   return { ok: b.length === 0, version: GATE_VERSION, review: market ? "market_insider" : "strict", blocks: b, warnings: uniq(warnings), agentSuppliedClaims: [...new Set(agentSuppliedClaims)], sourcedFacts: [...new Set(sourcedFacts)] };
 }
 
@@ -484,4 +498,4 @@ function explain(result) {
   return `${first.message}${where}${first.match ? ` — “${first.match}”` : ""}${more}. Agent Marketing is for your expertise and services; use a Listing Reel to advertise a specific home.`;
 }
 
-module.exports = { GATE_VERSION, ATTESTATION_VERSION, ATTESTATION_TEXT, TEMPLATES, ENABLED_TEMPLATES, evaluate, explain, verifiedFromTopic, verifiedFromProject };
+module.exports = { TEST_EVAL_RULES, testEvaluation, GATE_VERSION, ATTESTATION_VERSION, ATTESTATION_TEXT, TEMPLATES, ENABLED_TEMPLATES, evaluate, explain, verifiedFromTopic, verifiedFromProject };

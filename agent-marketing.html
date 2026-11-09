@@ -406,6 +406,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
       <div id="scriptWait" class="hidden"><span class="spinner"></span><span id="scriptWaitText">Writing your script… this usually takes under a minute.</span></div>
       <div id="scriptReady" class="hidden">
         <p class="panel-sub" id="angleLine"></p>
+        <div id="evalBox" class="hidden" style="margin:0 0 12px;font-size:0.9rem;line-height:1.5"></div>
         <label class="lbl" for="narration">Narration</label>
         <textarea id="narration" style="min-height:190px"></textarea>
         <div class="hint">Words in [brackets] are delivery cues for the narrator. They never appear in captions. <span id="wordInfo"></span></div>
@@ -691,6 +692,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
       loadSavedPron().then(function () { paintPron(n.pronunciations); });
       $("cta").value = (n.cta && n.cta.text) || "";
       $("angleLine").textContent = n.editorialAngle || "";
+      renderEvalBox();
       var w = n.warnings || [];
       $("warnBox").classList.toggle("hidden", !w.length); $("warnBox").innerHTML = w.map(esc).join("<br>");
       var c = n.claimsToVerify || [];
@@ -700,6 +702,19 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
       $("verifyBox").innerHTML = "<strong>Please verify before you publish:</strong><ul class='plain'>" + c.map(function (x) { return "<li>" + esc(x) + "</li>"; }).join("") + "</ul>";
       refreshPreview();
     }
+  }
+  // Test environment only (Nov 9, 2026): the selected B2 topic, its editorial angle, the source article and its quotations next to the script, so the
+  // script can be compared with the article. Never shown on production.
+  function renderEvalBox() {
+    var t = state.project && state.project.selectedTopic, b = t && t.b2, box = $("evalBox");
+    if (!b || SSP_CFG.env === "production") { box.classList.add("hidden"); box.innerHTML = ""; return; }
+    var a = b.article || {}, parts = ["<strong>Test evaluation: what this script was written from</strong>"];
+    if (t.question) parts.push("<b>Topic:</b> " + esc(t.question));
+    if (b.editorialAngle) parts.push("<b>B2 editorial angle:</b> " + esc(b.editorialAngle));
+    if (a.url && /^https?:\/\//i.test(a.url)) parts.push("<b>Source article:</b> <a href=\"" + esc(a.url) + "\" target=\"_blank\" rel=\"noopener\">" + esc(a.title || a.url) + "</a>" + (a.domain ? " (" + esc(a.domain) + (a.published ? ", " + esc(a.published) : "") + ")" : ""));
+    var refs = (b.sourceRefs || []).filter(function (r) { return r && r.quote; });
+    if (refs.length) parts.push("<b>Article quotations used:</b><ul class='plain'>" + refs.map(function (r) { return "<li>\u201c" + esc(r.quote) + "\u201d</li>"; }).join("") + "</ul>");
+    box.innerHTML = parts.join("<br>"); box.classList.remove("hidden");
   }
   // ── Article evidence for "Write my script" (B1 Stage B, development only; Nov 8, 2026) ──
   // There is no separate evidence step for the subscriber. On a development deploy where the server offers Stage B for this user and project

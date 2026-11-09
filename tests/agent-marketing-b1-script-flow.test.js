@@ -226,30 +226,39 @@ test("only validated evidence reaches the script writer; held and excluded findi
   }
 });
 
-test("Edit and Approve keep the evidence-based checks: held claims and unsupported figures are refused, validated figures pass", { skip: SKIP }, async () => {
+test("Test evaluation mode: Edit and Approve report the evidence-based checks without blocking; Fair Housing still blocks", { skip: SKIP }, async () => {
   fresh();
   const p = project(UA); const r = research(p.id, UA, [topicOf("FC")]); await select(p, r, "t-FC");
   const out = await writeScript("token-a", p);
   assert.strictEqual(out.result.state, "ready");
   const E = PRIV.cases.e2e;
+  // Nov 9, 2026 (product-owner decision): in the development Test environment the claim-evidence rules are diagnostics only.
   for (const line of E.fc_restore_lines) {
     const s = await projectCall(UA, { action: "save_narrative", id: p.id, narrative: editWith(row(p.id).narrative, line) });
-    assert.strictEqual(s.status, 422, `restoring the held headline is refused: ${line}`);
+    assert.strictEqual(s.status, 200, `restoring the held headline is saved in Test mode: ${line}`);
+    assert.ok(JSON.stringify(row(p.id).gate_result.warnings).includes("Test mode, not blocking"), "the held-claim finding is kept as a warning");
   }
   const ok = await projectCall(UA, { action: "save_narrative", id: p.id, narrative: editWith(row(p.id).narrative, E.fc_valid_line) });
-  assert.strictEqual(ok.status, 200, `the validated figure, as its quotation gives it, is accepted: ${JSON.stringify(ok.json).slice(0, 300)}`);
-  // Approval checks the script again with the same evidence: a written script carrying a figure no validated finding gives is refused
-  // (a number the agent types into an edit is the agent's own claim under the existing gate rules; held and article figures are checked above).
+  assert.strictEqual(ok.status, 200, JSON.stringify(ok.json).slice(0, 300));
   const saved = JSON.parse(JSON.stringify(row(p.id).narrative));
-  const tampered = { ...saved, source: "claude", narrationTagged: `${saved.narrationTagged} ${E.fc_unsupported_line}`, captionText: `${saved.captionText} ${E.fc_unsupported_line}` };
-  row(p.id).narrative = tampered;
-  const refused = await projectCall(UA, { action: "approve_narrative", id: p.id });
-  assert.strictEqual(refused.status, 422, "approval re-checks a written figure against the evidence");
-  row(p.id).narrative = saved;
+  row(p.id).narrative = { ...saved, source: "claude", narrationTagged: `${saved.narrationTagged} ${E.fc_unsupported_line}`, captionText: `${saved.captionText} ${E.fc_unsupported_line}` };
   const ap = await projectCall(UA, { action: "approve_narrative", id: p.id });
-  assert.strictEqual(ap.status, 200, JSON.stringify(ap.json).slice(0, 300));
+  assert.strictEqual(ap.status, 200, `an unsupported figure is reported, not refused: ${JSON.stringify(ap.json).slice(0, 300)}`);
   assert.strictEqual(row(p.id).status, "narrative_approved");
   assert.ok(!JSON.stringify(row(p.id).selected_topic).includes("b1Evidence"), "the evidence is read for each check, never written onto the project");
+  // Fair Housing is not part of the evaluation change: written scene text with steering language is still refused.
+  const withEv = await run.withPlanEvidence(JSON.parse(JSON.stringify(row(p.id))));
+  const fh = elab.checkText(withEv, "This neighborhood is perfect for young families.", false);
+  assert.strictEqual(fh.ok, false, "Fair Housing still blocks");
+});
+
+test("Test evaluation mode is off on the production database and without the development flag", async () => {
+  const gate = require("../netlify/functions/lib/agent-marketing-gate");
+  const env = { AGENT_MARKETING_B1_EVIDENCE: "dev", SUPABASE_URL: DEV_DB };
+  assert.strictEqual(gate.testEvaluation(env), true);
+  assert.strictEqual(gate.testEvaluation({ ...env, SUPABASE_URL: "https://dnpaenpwdhjmslymgkse.supabase.co" }), false);
+  assert.strictEqual(gate.testEvaluation({ ...env, AGENT_MARKETING_B1_EVIDENCE: "" }), false);
+  assert.strictEqual(gate.testEvaluation({ ...env, SUPABASE_URL: "" }), false);
 });
 
 test("without valid attached evidence an Article-Led script cannot be approved", { skip: SKIP }, async () => {
@@ -262,15 +271,16 @@ test("without valid attached evidence an Article-Led script cannot be approved",
   assert.strictEqual(row(p.id).status, "narrative_ready");
 });
 
-test("storyboard text checks use the same evidence: a validated figure passes, a held claim is refused, and both are refused without evidence", { skip: SKIP }, async () => {
+test("storyboard text checks use the same evidence; in Test evaluation mode held claims and unsourced figures are not refused", { skip: SKIP }, async () => {
   fresh();
   const p = project(UA); const r = research(p.id, UA, [topicOf("FC")]); await select(p, r, "t-FC");
   assert.strictEqual((await writeScript("token-a", p)).result.state, "ready");
   const E = PRIV.cases.e2e;
   const withEv = await run.withPlanEvidence(JSON.parse(JSON.stringify(row(p.id))));
   assert.strictEqual(elab.checkText(withEv, E.fc_valid_line, false).ok, true, "validated figure in scene text");
-  assert.strictEqual(elab.checkText(withEv, E.fc_restore_lines[0], false).ok, false, "held claim in scene text");
-  assert.strictEqual(elab.checkText(JSON.parse(JSON.stringify(row(p.id))), E.fc_valid_line, false).ok, false, "without evidence the article figure has no source");
+  // Test evaluation mode (Nov 9, 2026): a held claim or an unsourced figure is reported, never refused.
+  assert.strictEqual(elab.checkText(withEv, E.fc_restore_lines[0], false).ok, true, "held claim in scene text is not refused in Test mode");
+  assert.strictEqual(elab.checkText(JSON.parse(JSON.stringify(row(p.id))), E.fc_valid_line, false).ok, true, "an article figure without evidence is not refused in Test mode");
   const src = fs.readFileSync(path.join(__dirname, "..", "netlify", "functions", "agent-marketing-images.js"), "utf8");
   assert.match(src, /article_evidence_id&limit=1`\);[\s\S]{0,400}withPlanEvidence\(row\)/, "the images step loads its project with the attached evidence");
 });

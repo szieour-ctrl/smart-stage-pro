@@ -35,3 +35,23 @@ test("live provider: a non-200, an incomplete analysis or an unreachable endpoin
   await assert.rejects(pv.liveProvider(ENV, async () => { throw new Error("ECONNRESET"); }).call({ requestText: "{}" }), (e) => e.code === "provider_unreachable");
   assert.strictEqual(pv.reportedCost("{}"), null);
 });
+
+test("live provider credential: B1_API_KEY first; otherwise the server's Perplexity key, and only for the exact Perplexity Agent endpoint", async () => {
+  const base = { AGENT_MARKETING_B1_EVIDENCE: "dev", B1_PROVIDER: "live", PERPLEXITY_API_KEY: "pplx-test" };
+  const sent = async (env) => { let auth = null; const p = pv.liveProvider(env, async (url, init) => { auth = init.headers.authorization; return { status: 200, text: async () => JSON.stringify(DONE) }; }); await p.call({ requestText: "{}" }); return auth; };
+  // the approved endpoint with no B1_API_KEY: the existing Perplexity key is used
+  assert.strictEqual(await sent({ ...base, B1_ENDPOINT: pv.PERPLEXITY_AGENT_ENDPOINT }), "Bearer pplx-test");
+  // an explicit B1_API_KEY always wins
+  assert.strictEqual(await sent({ ...base, B1_ENDPOINT: pv.PERPLEXITY_AGENT_ENDPOINT, B1_API_KEY: "b1-own" }), "Bearer b1-own");
+  assert.strictEqual(await sent({ ...base, B1_ENDPOINT: "https://b1.example/v1/responses", B1_API_KEY: "b1-own" }), "Bearer b1-own");
+  // any other endpoint never receives the Perplexity key
+  for (const ep of ["https://b1.example/v1/responses", "https://api.perplexity.ai/v1/agent?x=1", "https://api.perplexity.ai/v1/agent/", "https://api.perplexity.ai/chat/completions",
+    "https://api.perplexity.ai:8443/v1/agent", "http://api.perplexity.ai/v1/agent", "https://user:pw@api.perplexity.ai/v1/agent", "https://api.perplexity.ai.evil.example/v1/agent", "https://evil.example/?u=https://api.perplexity.ai/v1/agent"]) {
+    assert.throws(() => pv.liveProvider({ ...base, B1_ENDPOINT: ep }), (e) => e.code === "not_configured" && !/pplx-test/.test(e.message), ep);
+  }
+  assert.strictEqual(pv.isPerplexityAgentEndpoint("https://api.perplexity.ai/v1/agent"), true);
+  // no key anywhere: not configured, and the message names no secret
+  assert.throws(() => pv.liveProvider({ ...base, PERPLEXITY_API_KEY: "", B1_ENDPOINT: pv.PERPLEXITY_AGENT_ENDPOINT }), (e) => e.code === "not_configured");
+  // createProvider takes the same path
+  assert.strictEqual(pv.createProvider({ env: { ...base, B1_ENDPOINT: pv.PERPLEXITY_AGENT_ENDPOINT } }).name, "live");
+});

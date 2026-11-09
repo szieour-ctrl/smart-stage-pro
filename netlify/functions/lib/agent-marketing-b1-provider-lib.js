@@ -68,9 +68,23 @@ function workerFixtureProvider(e) {
  * Configured only by the server environment, development only (Stage B admission refuses the production database), and always behind Stage B's
  * ledger reservation and its per-user / global daily caps, which run before any call. Turning it on is an owner decision (paid).
  */
+// The approved B1 v1.2.1 calls ran on the Perplexity Agent API. SSP's research already holds a server-side Perplexity key (PERPLEXITY_API_KEY);
+// B1 may use it ONLY when B1_ENDPOINT is exactly this endpoint, so that key is never sent to any other host (Nov 9, 2026).
+const PERPLEXITY_AGENT_ENDPOINT = "https://api.perplexity.ai/v1/agent";
+function isPerplexityAgentEndpoint(ep) {
+  let u; try { u = new URL(String(ep || "")); } catch (x) { return false; }
+  return u.protocol === "https:" && u.hostname === "api.perplexity.ai" && !u.port && !u.username && !u.password && u.pathname === "/v1/agent" && !u.search && !u.hash;
+}
+/** The B1 credential: B1_API_KEY first; otherwise PERPLEXITY_API_KEY, and only for the exact Perplexity Agent endpoint. Never logged or returned. */
+function liveCredential(e, ep) {
+  const own = String(e.B1_API_KEY || "").trim();
+  if (own) return own;
+  return isPerplexityAgentEndpoint(ep) ? String(e.PERPLEXITY_API_KEY || "").trim() : "";
+}
+
 function liveProvider(e, fetchImpl) {
-  const ep = String(e.B1_ENDPOINT || "").trim(), key = String(e.B1_API_KEY || "").trim();
-  if (!/^https:\/\//.test(ep) || !key) throw new ProviderError("not_configured", "B1_PROVIDER=live needs B1_ENDPOINT (https) and B1_API_KEY");
+  const ep = String(e.B1_ENDPOINT || "").trim(), key = liveCredential(e, ep);
+  if (!/^https:\/\//.test(ep) || !key) throw new ProviderError("not_configured", "B1_PROVIDER=live needs B1_ENDPOINT (https) and a credential: B1_API_KEY, or PERPLEXITY_API_KEY when B1_ENDPOINT is the Perplexity Agent API");
   const doFetch = fetchImpl || fetch;
   return {
     name: "live", paid: true, calls: 0,
@@ -94,4 +108,4 @@ function reportedCost(responseText) {
   try { const c = JSON.parse(String(responseText)).usage.cost.total_cost; return typeof c === "number" && c >= 0 && c < 100 ? c : null; } catch (x) { return null; }
 }
 
-module.exports = { createProvider, liveProvider, reportedCost, ProviderError };
+module.exports = { createProvider, liveProvider, reportedCost, ProviderError, PERPLEXITY_AGENT_ENDPOINT, isPerplexityAgentEndpoint };

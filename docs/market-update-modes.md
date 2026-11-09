@@ -43,12 +43,11 @@ Mode 3 topics written by B2 are not `reportFirst`, so their validated, attribute
 2. **B2:** one Claude call with the structured Realtor editorial prompt (`b2.systemPrompt`).
    - **Input:** the validated findings (held findings as a count), the market, the audience, and in mode 2 the report figures (R ids).
    - **Output:** up to 10 candidates, each grounded in one article's findings, with mechanism, homeowner implication, angle and why it matters, plus 5 selected.
-3. **Code checks (`b2.validate`):**
+3. **Code checks (`b2.validate`), structure only since Nov 9, 2026:**
    - each cited finding exists and belongs to the candidate's article;
    - no near-duplicate questions;
-   - mode 2: no article market statistic unless it is a cited report figure;
-   - mode 3: every number appears in the cited quotations;
    - fewer than 5 selected are filled in order from the remaining valid candidates.
+   - The number-matching checks (mode 2 article market statistics, mode 3 numbers outside the cited quotations) are retired (product-owner decision).
 4. **Cards:** the five become the existing research cards (`b2.toTopics`). Each carries:
    - `b1` (article key, evidence id, completeness, findings) and `b2` (mechanism, implication, angle, source quotations);
    - a `candidate` marker;
@@ -79,3 +78,19 @@ This is the same pattern as the B1 job and script mode.
 | `tests/agent-marketing-b1-script-flow.test.js` | modes 1–3 end to end with the real worker and evidence gate, the mock B1 provider and a stub B2 answer; fallbacks |
 
 Full suite with the private workspace: 773/773.
+
+## Creative architecture (Nov 9, 2026, product-owner decisions, development only)
+
+- **Editorial claim-evidence checks retired** in the development Test environment (`AGENT_MARKETING_B1_EVIDENCE=dev` and a non-production database):
+  `b1_claim_context`, `b1_held_quote`, `b1_unsupported_figure`, `invented_number`, `report_priority` and the market-opinion note are not run for
+  script generation, edits, approval, card copy or image descriptions; the render manifest skips its claim, on-screen number, small-sample and
+  article-in-opening/closing errors; B2 no longer drops candidates by number matching. Kept: Fair Housing, specific-home/listing rules, the
+  MetroList notice, AI-image disclosure, template allowlist, fabricated testimonials/results, structure and renderer checks.
+- **Audience continuum.** B2's prompt (AUDIENCE, INTERPRETATION, rule 3b) and the development script-writer prompt (rules 2j, 2k) treat Seller and
+  Buyer as interests, not readiness: sellers thinking (2–5 years), planning (1–2), preparing (0–1) or actively selling; buyers (renters and owners)
+  exploring, considering, actively searching or preparing to decide. One coherent story, natural inclusive wording, no stage list.
+- **Professional interpretation.** The article is the factual foundation, not the boundary. Missing dates, costs or outcomes do not force generic
+  narration; nothing precise is invented. B2 returns `audience_journey`, carried as `editorial_direction.audience_journey` to the script writer.
+  With no report, rule 2g no longer keeps article facts out of the first and last scenes.
+- **End to end on the Test site.** Images and Reel preparation are started by the page with the subscriber's login on development deploys
+  (`self-dispatch-lib` `pageDispatch` / `pageDispatchUser`), like research and script mode. Production keeps server-to-server dispatch.

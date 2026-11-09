@@ -586,8 +586,9 @@ test("B1/B2 in research stays off without the development switch, for Local Even
   assert.deepStrictEqual([none.status, none.topics, none.charged_at, none.usage.b1b2.state], ["failed", null, null, "no_article_evidence"], "no discovery cards, nothing charged");
   assert.match(none.error, /none could be read and understood.*Start new research/);
   assert.strictEqual(provider.calls, 0);
-  // B2 answers but nothing meets the source rules: also an incomplete set, never discovery cards
-  const noTopics = await b2lib.enrich({ row, fields, userId: UA, env: env(), deps: { store: st.createStore({ env: env(), request: supabase }), fetchFn, provider, callFn: async () => JSON.stringify({ candidates: [{ id: "C1", question: "Q 999?", article: "A1", findings: ["A1-F1"] }], selected: ["C1"] }) } });
+  // B2 answers but nothing is structurally usable (a finding of an article that was not read): also an incomplete set, never discovery cards.
+  // (Nov 9, 2026: a number that is not in the cited quotations no longer drops a candidate.)
+  const noTopics = await b2lib.enrich({ row, fields, userId: UA, env: env(), deps: { store: st.createStore({ env: env(), request: supabase }), fetchFn, provider, callFn: async () => JSON.stringify({ candidates: [{ id: "C1", question: "Q 999?", article: "A1", findings: ["A9-F1"] }], selected: ["C1"] }) } });
   assert.deepStrictEqual([noTopics.status, noTopics.topics, noTopics.usage.b1b2.state], ["failed", null, "b2_no_topics"]);
 });
 

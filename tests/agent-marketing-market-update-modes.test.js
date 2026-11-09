@@ -76,31 +76,51 @@ test("B2: candidates must cite findings of ONE article, be distinct, and up to f
   assert.ok(r.problems.some((p) => /duplicate/.test(p)) && r.problems.some((p) => /cites no finding/.test(p)));
 });
 
-test("B2 mode 2: an article market statistic is refused in a question; a report figure cited by id is accepted", () => {
+test("B2 (Nov 9, 2026): number-matching no longer drops candidates in mode 2 or mode 3; report figure ids are still kept", () => {
   const facts = reportLib.analyzePages(tv.standard().pages).facts;
   const ctx = rt.buildContext([{ id: ID, facts }], { geography: { type: "city", name: "Lincoln", zip: "95648" } });
   const figs = [...ctx.figures.values()].map((cf) => ({ ref: cf.ref, text: rt.figureText(cf) }));
   const dom = figs.findIndex((f) => /days on market/i.test(f.text));
   assert.ok(dom >= 0, "the fixture report has a days-on-market figure");
   const domNum = (figs[dom].text.match(/\d[\d,]*(?:\.\d+)?/) || [])[0];
-  const raw = { candidates: [
+  const raw2 = { candidates: [
     cand({ id: "C1", question: "Will 81 builder listings push Lincoln prices down?", findings: ["A1-F2"] }),
     cand({ id: "C2", question: `Homes take ${domNum} days on market: should I price against builders?`, findings: ["A1-F1"], report_figures: [`R${dom + 1}`] }),
-    cand({ id: "C3", question: "What can a resale home offer that a new build can't?", findings: ["A1-F3"] }),
-  ], selected: ["C1", "C2", "C3"] };
-  const r = b2.validate(raw, { records: RECORDS, mode: "article_report", reportFigures: figs });
-  assert.deepStrictEqual(r.candidates.map((c) => c.id), ["C2", "C3"]);
-  assert.ok(r.problems.some((p) => /C1: market statistic not from the report \(81\)/.test(p)));
+  ], selected: ["C1", "C2"] };
+  const r2 = b2.validate(raw2, { records: RECORDS, mode: "article_report", reportFigures: figs });
+  assert.deepStrictEqual(r2.candidates.map((c) => c.id), ["C1", "C2"]);
+  assert.deepStrictEqual(r2.candidates[1].reportFigureRefs, [`R${dom + 1}`]);
+  const raw3 = { candidates: [
+    cand({ id: "C1", question: "What do 95 builder listings mean for Lincoln sellers?", findings: ["A1-F2"] }),
+    cand({ id: "C2", question: "Thinking of selling in 2 to 5 years: does new construction change the plan?", findings: ["A1-F2"] }),
+  ], selected: ["C1", "C2"] };
+  const r3 = b2.validate(raw3, { records: RECORDS, mode: "article_editorial", reportFigures: [] });
+  assert.deepStrictEqual(r3.candidates.map((c) => c.id), ["C1", "C2"]);
+  assert.deepStrictEqual(r3.problems, []);
+  // structure is still checked: a finding from another article, or a duplicate question, is dropped
+  const r4 = b2.validate({ candidates: [cand({ id: "C1", findings: ["A9-F1"] }), cand({ id: "C2" }), cand({ id: "C3" })], selected: ["C1", "C2", "C3"] }, { records: RECORDS, mode: "article_editorial", reportFigures: [] });
+  assert.deepStrictEqual(r4.candidates.map((c) => c.id), ["C2"]);
 });
 
-test("B2 mode 3: an article figure is allowed only as its cited quotation gives it", () => {
-  const raw = { candidates: [
-    cand({ id: "C1", question: "What do 81 builder listings mean for Lincoln sellers?", findings: ["A1-F2"] }),
-    cand({ id: "C2", question: "What do 95 builder listings mean for Lincoln sellers?", findings: ["A1-F2"] }),
-  ], selected: ["C1", "C2"] };
-  const r = b2.validate(raw, { records: RECORDS, mode: "article_editorial", reportFigures: [] });
-  assert.deepStrictEqual(r.candidates.map((c) => c.id), ["C1"]);
-  assert.ok(r.problems.some((p) => /C2: figure not in the cited quotations \(95\)/.test(p)));
+test("B2 audience continuum: the prompt carries the Seller and Buyer decision journey and professional interpretation; audience_journey reaches the planner", () => {
+  for (const mode of ["article_editorial", "article_report"]) {
+    const sp = b2.systemPrompt(mode);
+    assert.match(sp, /2 to 5 years/); assert.match(sp, /renters and existing homeowners/);
+    assert.match(sp, /do not assume an immediate listing, purchase, tour or transaction/);
+    assert.match(sp, /not the boundary of the agent's professional interpretation/);
+    assert.match(sp, /Never invent a specific date, price, assessment or guaranteed outcome/);
+    assert.match(sp, /"audience_journey": string/);
+  }
+  const articles = [{ url: RECORDS[0].url, title: RECORDS[0].title, domain: "example.org", published: "2026-10-20", fromTopic: { scope: "selected" } }];
+  const result = b2.validate({ candidates: [cand({ audience_journey: "Useful whether you sell next spring or in a few years." })], selected: ["C1"] }, { records: RECORDS, mode: "article_editorial", reportFigures: [] });
+  const [t] = b2.toTopics({ result, records: RECORDS, articles, evidence: new Map(), mode: "article_editorial", reportSource: null });
+  assert.strictEqual(t.b2.audienceJourney, "Useful whether you sell next spring or in a few years.");
+  const old = process.env.AGENT_MARKETING_B1_EVIDENCE; process.env.AGENT_MARKETING_B1_EVIDENCE = "dev";
+  try {
+    const brief = planLib.topicBrief({ ...t, sources: t.sources });
+    assert.strictEqual(brief.editorial_direction.audience_journey, "Useful whether you sell next spring or in a few years.");
+    assert.ok(brief.editorial_direction.mechanism && brief.editorial_direction.homeowner_implication !== undefined);
+  } finally { if (old === undefined) delete process.env.AGENT_MARKETING_B1_EVIDENCE; else process.env.AGENT_MARKETING_B1_EVIDENCE = old; }
 });
 
 test("B2 topic cards carry the B1 evidence reference and the B2 editorial direction; mode decides report-first", () => {
@@ -142,4 +162,21 @@ test("the page offers the three types, requires the report for types 1 and 2, an
   assert.match(ui, /This Market Update type uses your Trend or CMA report/);
   assert.match(ui, /if \(r\.json\.dispatch\) \{\s*var bg = await api\("\/\.netlify\/functions\/agent-marketing-research-background", "POST", "", \{ researchId: r\.json\.research\.id \}\)/);
   assert.doesNotThrow(() => new Function(ui));
+});
+
+test("script writer handoff (development): a B2 topic gets the interpretation-and-audience story architecture; the system prompt carries rules 2j and 2k", () => {
+  const old = process.env.AGENT_MARKETING_B1_EVIDENCE; process.env.AGENT_MARKETING_B1_EVIDENCE = "dev";
+  try {
+    const topic = { id: "t2", question: "Hidden Hills Phase 2 is going up nearby: when will those homes be for sale?", whyItMatters: "w", scope: "selected", origin: "web", reportFirst: false, trendSignals: [], reportFigures: [],
+      sources: [{ url: "https://example.org/a", kind: "article", role: "primary", title: "t" }],
+      b2: { mode: "article_editorial", mechanism: "Design review is not lot creation", homeownerImplication: "Plan with the real timeline", editorialAngle: "Design review is an early step", audienceJourney: "Matters whether you sell this year or later.", sourceRefs: [{ finding: "A2-F1", quote: "the city held a design review" }] } };
+    const u = JSON.parse(planLib.buildUserMessage({ template: "local_market_insider", duration_sec: 45, formats: ["9x16"], intake: { market: "Lincoln, CA", audience: "Home sellers", action: "Ask for a local perspective" }, selected_topic: topic }));
+    assert.match(u.narrative_architecture, /what is still unresolved/); assert.match(u.narrative_architecture, /different points in their decision/);
+    assert.deepStrictEqual(Object.keys(u.selected_topic.editorial_direction).slice(0, 4), ["angle", "mechanism", "homeowner_implication", "audience_journey"]);
+    const sp = planLib.buildSystemPrompt();
+    assert.ok(sp.includes("\n2j. REALTOR INTERPRETATION.") && sp.includes("\n2k. AUDIENCE."));
+  } finally { if (old === undefined) delete process.env.AGENT_MARKETING_B1_EVIDENCE; else process.env.AGENT_MARKETING_B1_EVIDENCE = old; }
+  // without the development switch the legacy architecture and prompt are unchanged
+  const u0 = JSON.parse(planLib.buildUserMessage({ template: "local_market_insider", duration_sec: 45, formats: ["9x16"], intake: { market: "Lincoln, CA", audience: "Home sellers" }, selected_topic: { question: "q", sources: [{ url: "https://example.org/a" }], b2: { editorialAngle: "a" } } }));
+  assert.match(u0.narrative_architecture, /what the sourced facts show \(only those\)/);
 });

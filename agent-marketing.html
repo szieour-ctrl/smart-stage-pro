@@ -691,7 +691,7 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
   function stage() {
     var p = state.project;
     if (!p) return 1;
-    if (!p.selectedTopic || !p.intake || !p.intake.market) return 2;
+    if (!p.selectedTopic || p.selectedTopic.reportOutdated || !p.intake || !p.intake.market) return 2;   // a topic chosen before the report confirmation changed is not a selection
     if (p.status === "images" || p.status === "ready_to_render") return 5;
     if (p.status !== "narrative_approved") return 3;
     return 4;
@@ -733,7 +733,7 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
   // ── Research: request, five topics, select (the shared module) ──
   var researchUI = null;
   // Choosing a topic opens this dialog: pick what viewers should do, then "Write my script" lands on the Script step.
-  function openCta() { if (!(state.project && state.project.selectedTopic)) return; showContinue(); $("resNext").classList.remove("hidden"); $("resAction").focus(); }
+  function openCta() { if (!(state.project && state.project.selectedTopic) || state.project.selectedTopic.reportOutdated) return; showContinue(); $("resNext").classList.remove("hidden"); $("resAction").focus(); }
   function closeCta() { $("resNext").classList.add("hidden"); }
   function showContinue() {
     var has = !!(state.project && state.project.selectedTopic);

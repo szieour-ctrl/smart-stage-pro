@@ -161,3 +161,19 @@ test("action bar: reserves its own height for scrolling and focus, and is compac
   assert.match(uiSrc, /aria-label|setAttribute\("aria-label", full\[id\]\)/, "short labels keep their full accessible names");
   assert.doesNotMatch(htmlSrc, /\.rs-bar-btns \.btn\.gold\{[^}]*order:-1/, "visual order matches tab order");
 });
+
+// ── Review round 2: restoration, cost visibility, out-of-date wording ──
+test("a new research session is announced before it is started, in the bar and in the request summary, and the two-step confirmation is unchanged", () => {
+  assert.match(uiSrc, /Finding topics again uses a new research session\. You will see that and confirm before anything runs\./);
+  assert.match(uiSrc, /A new session will be used<\/b> because your earlier topics are out of date/);
+  assert.match(uiSrc, /STALE_COST[\s\S]*This will use one new research session/);
+  assert.match(uiSrc, /\$\("startBtn"\)\.addEventListener\("click", review\); \$\("confirmBtn"\)\.addEventListener\("click", start\)/, "Find topics only opens the summary; Confirm and research starts it");
+});
+
+test("invalid research is never described as ready or selected, and a restored set is described as available again", () => {
+  assert.match(uiSrc, /Earlier topics out of date/);
+  assert.match(uiSrc, /Earlier topics \(out of date\)/);
+  assert.match(uiSrc, /Earlier topic, no longer selected\./);
+  assert.match(uiSrc, /are available again, with no new session needed/);
+  assert.match(htmlSrc, /p\.selectedTopic\.reportOutdated \|\| !p\.intake/, "the project's progress does not count an outdated topic as chosen");
+});

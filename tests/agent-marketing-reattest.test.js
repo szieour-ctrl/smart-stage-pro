@@ -175,7 +175,7 @@ test("downstream: sets, the selected topic and its approved script are marked wh
   Object.assign(p, { selected_research_id: a.id, selected_topic: { id: "t1", researchId: a.id, question: "Q" }, status: "narrative_approved", intake: { market: "Roseville" }, narrative: { narrationTagged: true, intakeHash: "x", scenes: [] }, narrative_approved: { approvedAt: "x" } });
   const r = await edit(id, { scope: COMBINED });
   assert.strictEqual(r.status, 200, JSON.stringify(r.json));
-  assert.deepStrictEqual(r.json.revalidation, { researchSets: 2, topicSelected: true, scriptMarked: true, scriptReopened: true });
+  assert.deepStrictEqual(r.json.revalidation, { researchSets: 2, restoredSets: 0, topicSelected: true, topicRestored: false, scriptMarked: true, scriptReopened: true });
   for (const x of [a, b]) {
     assert.ok(x.upload_refs[0].outdated, "marked");
     assert.strictEqual(x.upload_refs[0].outdated.was.area, "Roseville");
@@ -193,7 +193,7 @@ test("downstream: nothing marked means the message says so; a topic from another
   const { p, id } = await confirmed();
   Object.assign(p, { selected_research_id: "zzz", selected_topic: { id: "t9", researchId: "zzz" }, status: "draft" });
   const r = await edit(id, { scope: COMBINED });
-  assert.deepStrictEqual(r.json.revalidation, { researchSets: 0, topicSelected: false, scriptMarked: false, scriptReopened: false });
+  assert.deepStrictEqual(r.json.revalidation, { researchSets: 0, restoredSets: 0, topicSelected: false, topicRestored: false, scriptMarked: false, scriptReopened: false });
   assert.ok(!p.selected_topic.reportOutdated);
 });
 
@@ -222,4 +222,79 @@ test("an outdated set is never reopened as 'the same request'; the source says s
   const act = rep.slice(rep.indexOf('if (action === "reattest")'), rep.indexOf('if (action === "confirm" || action === "remove")'));
   assert.doesNotMatch(act, /charge|debit|session|quota|credit/i, "editing a confirmation never touches research sessions or credits");
   assert.doesNotMatch(act, /agent_marketing_uploads", \{ *project_id/, "no new copy of the report is stored");
+});
+
+// ── Returning to the exact original context ──
+test("reverting to the exact original confirmation restores the sets made under it, leaves other sets alone, and starts no research", async () => {
+  reset();
+  const { p, id } = await confirmed();
+  const a = mkResearch(p, id), unrelated = mkResearch(p, uuid(9999));
+  Object.assign(p, { selected_research_id: a.id, selected_topic: { id: "t1", researchId: a.id, question: "Q" }, status: "narrative_approved", intake: { market: "Roseville" }, narrative: { narrationTagged: "x", intakeHash: "h", scenes: [] } });
+  const rowsBefore = db.agent_marketing_research.length;
+  assert.strictEqual((await edit(id, { scope: COMBINED })).status, 200);
+  assert.ok(a.upload_refs[0].outdated && p.selected_topic.reportOutdated);
+  const back = await edit(id, {});   // same area, same types as the original
+  assert.strictEqual(back.status, 200, JSON.stringify(back.json));
+  assert.strictEqual(back.json.unchanged, false, "it is a change from the combined version");
+  assert.strictEqual(back.json.revalidation.restoredSets, 1);
+  assert.strictEqual(back.json.revalidation.topicRestored, true);
+  assert.ok(!a.upload_refs[0].outdated, "the set is eligible again");
+  assert.ok(!p.selected_topic.reportOutdated, "the chosen topic is valid again");
+  assert.strictEqual(p.status, "draft", "the script is NOT re-approved for the subscriber");
+  assert.ok(!unrelated.upload_refs[0].outdated, "unrelated sets were never touched");
+  assert.strictEqual(db.agent_marketing_research.length, rowsBefore, "no research was started or created");
+  const list = await getResearch(p.id);
+  assert.ok(!(list.json.research || []).find((x) => x.id === a.id).reportOutdated);
+  const sel = await callResearch({ action: "select", projectId: p.id, researchId: a.id, topicId: "t1" });
+  assert.notStrictEqual(sel.json.code, "report_changed", "choosing a restored topic is allowed again");
+});
+
+test("a different change is not a revert: sets stay out of date, 'was' keeps pointing at the original, and a name that merely looks similar does not restore", async () => {
+  reset();
+  const { p, id } = await confirmed();
+  const a = mkResearch(p, id);
+  await edit(id, { scope: COMBINED });
+  const origWas = a.upload_refs[0].outdated.was.area;
+  const r2 = await edit(id, { scope: { type: "cities", names: ["Roseville", "Granite Bay"] } });
+  assert.strictEqual(r2.json.revalidation.restoredSets, 0);
+  assert.ok(a.upload_refs[0].outdated, "still out of date");
+  assert.strictEqual(a.upload_refs[0].outdated.was.area, origWas, "the original context is what the banner compares against");
+  assert.strictEqual(a.upload_refs[0].outdated.now.area, "Roseville and Granite Bay combined");
+  // same market name, different property types: not the original context
+  const r3 = await edit(id, { propertyTypes: ["Condo"] });
+  assert.strictEqual(r3.json.revalidation.restoredSets, 0); assert.ok(a.upload_refs[0].outdated);
+  // exact original again
+  const r4 = await edit(id, {});
+  assert.strictEqual(r4.json.revalidation.restoredSets, 1); assert.ok(!a.upload_refs[0].outdated);
+});
+
+test("a set made AFTER an edit belongs to the edited context: it is marked when the context changes again, and restored only for that exact context", async () => {
+  reset();
+  const { p, id } = await confirmed();
+  const old = mkResearch(p, id);
+  await edit(id, { scope: COMBINED });
+  const fresh = mkResearch(p, id);   // researched under the combined context
+  await edit(id, {});                 // back to the original
+  assert.ok(!old.upload_refs[0].outdated, "original set restored");
+  assert.ok(fresh.upload_refs[0].outdated, "the combined-market set is now the out-of-date one");
+  await edit(id, { scope: COMBINED });
+  assert.ok(old.upload_refs[0].outdated && !fresh.upload_refs[0].outdated, "and the other way round");
+});
+
+test("a changed data-through date is a material change and a revert to the original date restores", async () => {
+  reset();
+  const { p, id } = await confirmed("yearly", undefined, { dataThrough: "2026-10-15" });
+  const a = mkResearch(p, id);
+  await edit(id, { dataThrough: "2026-09-30" });
+  assert.ok(a.upload_refs[0].outdated);
+  const back = await edit(id, { dataThrough: "2026-10-15" });
+  assert.strictEqual(back.json.revalidation.restoredSets, 1); assert.ok(!a.upload_refs[0].outdated);
+});
+
+test("billing is untouched: the edit path creates no research, and the confirm-and-research code has no knowledge of restoration", () => {
+  const rep = require("fs").readFileSync(require("path").join(__dirname, "..", "netlify/functions/agent-marketing-report.js"), "utf8");
+  const md = rep.slice(rep.indexOf("async function markDependents"), rep.indexOf("async function loadUpload"));
+  assert.doesNotMatch(md, /"POST", "agent_marketing_research"|charged|session|quota|credit/i);
+  const res = require("fs").readFileSync(require("path").join(__dirname, "..", "netlify/functions/agent-marketing-research.js"), "utf8");
+  assert.doesNotMatch(res, /restoredSets|wasFp/, "reuse and billing look only at whether a set is currently flagged");
 });

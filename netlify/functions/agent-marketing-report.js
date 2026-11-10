@@ -53,21 +53,40 @@ async function companionReports(projectId, userId, exceptId) {
 // Everything made from this report under its OLD attestation is marked, not deleted and not quietly kept: research sets that used it get
 // an "outdated" flag on their report reference, the selected topic (if it came from one of them) gets the same flag, and an approved script
 // drops back to a draft. Nothing here is a new table: the flags live in the existing upload_refs and selected_topic JSON.
-async function markDependents(project, userId, uploadId, flag) {
+async function markDependents(project, userId, uploadId, ctx) {
+  // ctx: { at, was, now (readable summaries), fromFp, toFp (attestation fingerprints before and after this edit) }
   const rr = await supabase("GET", "agent_marketing_research", null, `?project_id=eq.${project.id}&user_id=eq.${userId}&select=id,upload_refs`);
   const hit = (Array.isArray(rr.data) ? rr.data : []).filter((r) => Array.isArray(r.upload_refs) && r.upload_refs.some((x) => x && x.id === uploadId));
   const now = new Date().toISOString();
+  const marked = new Set(), restored = new Set();
   for (const r of hit) {
-    await supabase("PATCH", "agent_marketing_research", { upload_refs: r.upload_refs.map((x) => (x && x.id === uploadId ? { ...x, outdated: flag } : x)), updated_at: now }, `?id=eq.${r.id}&user_id=eq.${userId}`);
+    const refs = r.upload_refs.map((x) => {
+      if (!x || x.id !== uploadId) return x;
+      const o = x.outdated;
+      if (o && o.wasFp) {
+        if (o.wasFp === ctx.toFp) { restored.add(r.id); const { outdated, ...rest } = x; return rest; }   // back to the exact context this set was made under
+        return { ...x, outdated: { ...o, now: ctx.now } };                                               // still different: stays out of date, "was" keeps pointing at the original
+      }
+      if (o) return x;                                                                                 // a flag with no recorded origin is never lifted
+      marked.add(r.id);
+      return { ...x, outdated: { at: ctx.at, was: ctx.was, now: ctx.now, wasFp: ctx.fromFp } };
+    });
+    await supabase("PATCH", "agent_marketing_research", { upload_refs: refs, updated_at: now }, `?id=eq.${r.id}&user_id=eq.${userId}`);
   }
-  const ids = new Set(hit.map((r) => r.id));
-  const sel = project.selected_topic;
-  const out = { researchSets: hit.length, topicSelected: false, scriptMarked: false, scriptReopened: false };
+  const out = { researchSets: marked.size, restoredSets: restored.size, topicSelected: false, topicRestored: false, scriptMarked: false, scriptReopened: false };
+  const sel = project.selected_topic, ids = new Set(hit.map((r) => r.id));
   if (sel && typeof sel === "object" && (ids.has(sel.researchId) || ids.has(project.selected_research_id))) {
-    const fields = { selected_topic: { ...sel, reportOutdated: flag }, updated_at: now };
-    out.topicSelected = true;
-    out.scriptMarked = !!(project.narrative && project.narrative.narrationTagged);
-    if (["narrative_approved", "images"].includes(project.status)) { fields.status = "draft"; out.scriptReopened = true; }
+    const o = sel.reportOutdated, fields = { updated_at: now };
+    if (o && o.wasFp && o.wasFp === ctx.toFp && (restored.has(sel.researchId) || restored.has(project.selected_research_id))) {
+      const { reportOutdated, ...rest } = sel; fields.selected_topic = rest; out.topicRestored = true;   // the chosen topic is valid again; the script stays a draft to be approved again
+    } else if (o) {
+      fields.selected_topic = { ...sel, reportOutdated: { ...o, now: ctx.now } };
+    } else {
+      fields.selected_topic = { ...sel, reportOutdated: { at: ctx.at, was: ctx.was, now: ctx.now, wasFp: ctx.fromFp } };
+      out.topicSelected = true;
+      out.scriptMarked = !!(project.narrative && project.narrative.narrationTagged);
+      if (["narrative_approved", "images"].includes(project.status)) { fields.status = "draft"; out.scriptReopened = true; }
+    }
     await supabase("PATCH", "agent_marketing_projects", fields, `?id=eq.${project.id}&user_id=eq.${userId}`);
   }
   return out;
@@ -140,13 +159,13 @@ exports.handler = async (event) => {
       if (next.error === "bad_data_through") return reply(400, { error: next.message, code: "bad_data_through", review: mr.readBackView(next.facts) });
       if (next.error) return reply(422, { error: "That change could not be saved." });
       if (next.facts.confirmation.needed.length) return reply(409, { error: next.facts.confirmation.question || "Confirm the details before this change can be saved.", code: "confirmation_needed", needed: next.facts.confirmation.needed, review: mr.readBackView(next.facts) });
-      if (mr.attestationFingerprint(next.facts) === wasPrint) return reply(200, { upload: forClient(up), unchanged: true, revalidation: { researchSets: 0, topicSelected: false, scriptMarked: false, scriptReopened: false } });
+      if (mr.attestationFingerprint(next.facts) === wasPrint) return reply(200, { upload: forClient(up), unchanged: true, revalidation: { researchSets: 0, restoredSets: 0, topicSelected: false, topicRestored: false, scriptMarked: false, scriptReopened: false } });
       const now = new Date().toISOString(), prior = priorRevs;
       next.facts.attestation = { ...next.facts.attestation, revisedAt: now, revisions: prior + 1 };
       const saved = await supabase("PATCH", "agent_marketing_uploads", { facts: next.facts, scope_note: lib.scopeNote(next.facts), updated_at: now }, `?id=eq.${up.id}&user_id=eq.${userId}&status=eq.confirmed`);
       const row = Array.isArray(saved.data) ? saved.data[0] : null;
       if (saved.status >= 300 || !row) return reply(500, { error: "Could not save your change" });
-      const revalidation = await markDependents(p.row, userId, up.id, { at: now, was, now: mr.attestationSummary(next.facts) });
+      const revalidation = await markDependents(p.row, userId, up.id, { at: now, was, now: mr.attestationSummary(next.facts), fromFp: wasPrint, toFp: mr.attestationFingerprint(next.facts) });
       return reply(200, { upload: forClient(row), unchanged: false, revalidation });
     }
 

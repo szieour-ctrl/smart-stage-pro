@@ -183,6 +183,13 @@
     return bits.join("; ");
   }
   function outdatedFor(r) { return (r && r.reportOutdated) || (r && state.selected && state.selected.researchId === r.id && state.selected.reportOutdated) || null; }
+  // Would this request be answered by a saved set, or does it need a new session because the matching set is out of date? (The server decides; this only words the notice.)
+  function sameReq(r, q) { var g = r.geography || {}, n = function (v) { return String(v || "").trim().toLowerCase(); }; return r.status === "ready" && r.mode === q.mode && r.audience === q.audience && n(g.name || g.label) === n(q.geography && q.geography.name); }
+  function staleForRequest(q) {
+    var l = (state.saved || []).filter(function (r) { return sameReq(r, q); });
+    return l.length > 0 && l.every(function (r) { return !!r.reportOutdated; });
+  }
+  var STALE_COST = "Your report confirmation changed after your earlier topics for this market were made, so they can\u2019t be reopened. This will use one new research session.";
   function reportSummaryHtml() {
     if (!reportConfirmed()) return '<div><b>No report.</b> Topics come from web research, and each figure names its source.</div><div class="rs-sum-btns"><button type="button" class="btn ghost small" data-rs-go="report">Add a report</button></div>';
     var u = state.upload, rv = reviewOf(u), bits = [];
@@ -209,11 +216,11 @@
   }
   function rsStepper() {
     var s = state.rs, mode = reportMode();
-    var done = { market: s.marketDone, report: mode !== "none" && reportDone(), topics: !!(state.current && state.current.status === "ready") };
+    var done = { market: s.marketDone, report: mode !== "none" && reportDone(), topics: !!(state.current && state.current.status === "ready" && !outdatedFor(state.current)) };
     var note = {
       market: s.marketDone && !marketMissing().length ? marketSummaryHtml().replace(/<[^>]+>/g, "").split(" · ").slice(0, 2).join(" · ") : "Place, audience, focus",
       report: mode === "none" ? "Not used for this request" : reportConfirmed() ? "Confirmed" + (reviewOf(state.upload) ? " · " + reviewOf(state.upload).reported.period.label : "") : s.reportSkipped && mode === "optional" ? "Skipped" : mode === "required" ? "Required" : "Optional",
-      topics: done.topics ? "Topics ready" : state.current && state.current.status === "running" ? "Researching…" : "Five sourced topics",
+      topics: state.current && state.current.status === "ready" && outdatedFor(state.current) ? "Earlier topics out of date" : done.topics ? "Topics ready" : state.current && state.current.status === "running" ? "Researching…" : "Five sourced topics",
     };
     $("rsSteps").innerHTML = STEPS.map(function (st, i) {
       var k = st[0], on = s.step === k, ok = canGo(k) && !(k === "report" && mode === "none");
@@ -252,10 +259,11 @@
     } else {
       vis.rsBack = true;
       var cur = state.current;
-      if (confirmOpen) { text = "<b>Confirm to research.</b> This is the only action that uses a research session."; vis.confirmBtn = true; vis.confirmEdit = true; }
+      var stale = false; try { stale = reportConfirmed() && staleForRequest(collect()); } catch (e) { /* form not ready */ }
+      if (confirmOpen) { text = "<b>Confirm to research.</b> This is the only action that uses a research session." + (stale ? " <b>A new session will be used</b> because your earlier topics are out of date." : ""); vis.confirmBtn = true; vis.confirmEdit = true; }
       else {
         vis.startBtn = true; vis.libBtn = !option1On();
-        text = cur && cur.status === "running" ? "<b>Researching…</b> This usually takes under a minute." : cur && cur.status === "ready" ? "<b>Topics ready.</b> Choose one below, or run a new request." : "<b>Next: find topics.</b> " + (reportConfirmed() ? "Your confirmed report's figures come first. " : "") + "You will review the request before anything is researched.";
+        text = cur && cur.status === "running" ? "<b>Researching…</b> This usually takes under a minute." : cur && cur.status === "ready" && outdatedFor(cur) ? "<b>These topics are out of date.</b> Your report confirmation changed. They are kept for reference and cannot be chosen. Finding topics again uses a new research session. You will see that and confirm before anything runs." : cur && cur.status === "ready" ? "<b>Topics ready.</b> Choose one below, or run a new request." : "<b>Next: find topics.</b> " + (reportConfirmed() ? "Your confirmed report's figures come first. " : "") + (stale ? "Your earlier topics are out of date, so a new research session will be used. " : "") + "You will review the request before anything is researched.";
       }
     }
     ["rsBack", "libBtn", "upNo", "rsEdit", "rsSave", "rsCancelEdit", "confirmEdit", "rsNext", "upYes", "startBtn", "confirmBtn"].forEach(function (id) { if ($(id)) $(id).classList.toggle("hidden", !vis[id]); });
@@ -395,7 +403,7 @@
     $("resultPanel").classList.remove("hidden");
     state.current = r;
     $("resEyebrow").textContent = (r.mode === "local_events" ? "Local Events" : "Local Market Update") + " · " + (r.geography && r.geography.label || "");
-    $("resTitle").textContent = r.status === "ready" ? (r.pathway === "article_led" && r.delivered < 5 ? r.delivered + " of 5 opportunities" : r.marketUpdateMode === "trend_report" && (r.topics || []).some(function (t) { return t.b2 && t.b2.mode === "trend_report"; }) ? r.topics.length + " perspectives from your report" : "Five topics") + (r.researchDate ? " from " + r.researchDate : "") : r.status === "failed" ? "No topics this time" : "Researching…";
+    $("resTitle").textContent = r.status === "ready" && outdatedFor(r) ? "Earlier topics (out of date)" + (r.researchDate ? " from " + r.researchDate : "") : r.status === "ready" ? (r.pathway === "article_led" && r.delivered < 5 ? r.delivered + " of 5 opportunities" : r.marketUpdateMode === "trend_report" && (r.topics || []).some(function (t) { return t.b2 && t.b2.mode === "trend_report"; }) ? r.topics.length + " perspectives from your report" : "Five topics") + (r.researchDate ? " from " + r.researchDate : "") : r.status === "failed" ? "No topics this time" : "Researching…";
     $("resWait").classList.toggle("hidden", r.status !== "running");
     $("resError").classList.toggle("hidden", r.status !== "failed");
     if (r.status === "failed") $("resError").textContent = (r.error || "The research could not be completed.") + (/did not use a session/.test(r.error || "") ? "" : " This did not use a session.");
@@ -406,7 +414,7 @@
     var banner = od && r.status === "ready" ? '<div class="rs-alert bad" id="odBanner" role="alert"><b>These topics are out of date.</b> You changed this report\u2019s confirmation after they were made' + (changeText(od) ? " (" + esc(changeText(od)) + ")" : "") + ". They are kept for reference and cannot be chosen. Find topics again to get a set that matches your confirmation.</div>" : "";
     var pickedId = state.selected && state.selected.researchId === r.id ? state.selected.id : null;
     var chosen = pickedId && r.status === "ready" ? r.topics.filter(function (t) { return t.id === pickedId; })[0] : null;
-    var bar = chosen ? '<div id="selBar" style="border:1px solid var(--gold);background:#fdf9f0;border-radius:6px;padding:12px 14px;margin-top:12px;display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap"><div style="font-size:0.88rem"><b style="color:var(--success)">\u2713 Topic selected</b><div>' + esc(chosen.question) + "</div></div>" +
+    var bar = chosen && od ? '<div id="selBar" class="rs-alert" role="status" style="margin-top:12px"><b>Earlier topic, no longer selected.</b> It was chosen before you changed the report confirmation, so it cannot be used. Your script and the call to action need a topic from a matching set.<div>' + esc(chosen.question) + "</div></div>" : chosen ? '<div id="selBar" style="border:1px solid var(--gold);background:#fdf9f0;border-radius:6px;padding:12px 14px;margin-top:12px;display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap"><div style="font-size:0.88rem"><b style="color:var(--success)">\u2713 Topic selected</b><div>' + esc(chosen.question) + "</div></div>" +
       (opts.onContinue && !od ? '<button class="btn gold small" type="button" id="selContinue">Choose the call to action</button>' : "") + "</div>" : "";
     var hasNotice = r.status === "ready" && r.topics.some(function (t) { return t.reportNotice; });
     var noticeLine = hasNotice ? '<div class="hint" style="margin-top:10px">Topics that use your report carry MetroList\u2019s required notice automatically; you do not need to write it.</div>' : "";
@@ -508,7 +516,7 @@
   }
   function renderSaved(list, earlier) {
     earlier = earlier || [];
-    var all = list.concat(earlier);
+    var all = list.concat(earlier); state.saved = list;
     var rowHtml = function (r) {
       return '<div class="saved"><div><b>' + esc(r.mode === "local_events" ? "Local Events" : "Market Update") + "</b> · " + esc(r.geography && r.geography.label) + " · " + esc(r.audience) +
         '<div class="hint">' + esc(r.status === "ready" ? "Five topics, " + (r.researchDate || "") + (r.reportOutdated ? " \u00b7 out of date: the report confirmation changed" : "") : r.status === "failed" ? "Failed, not charged" : "Running") + "</div></div>" +
@@ -762,7 +770,10 @@
         if (rv.researchSets) parts.push(rv.researchSets + " saved topic set" + (rv.researchSets === 1 ? " was" : "s were") + " marked out of date");
         if (rv.topicSelected) parts.push("your chosen topic needs to be chosen again");
         if (rv.scriptMarked || rv.scriptReopened) parts.push("your script needs to be written again");
-        var msg = "Confirmation updated. Nothing was researched." + (parts.length ? " " + parts.join("; ") + "." : " Nothing you made depends on the old confirmation.");
+        var back = [], cap = function (t) { return t.charAt(0).toUpperCase() + t.slice(1); };
+        if (rv.restoredSets) back.push("your earlier topics made under this confirmation are available again, with no new session needed");
+        if (rv.topicRestored) back.push("your chosen topic is valid again, but your script needs your approval again");
+        var msg = "Confirmation updated. Nothing was researched." + (parts.length ? " " + cap(parts.join("; ")) + "." : "") + (back.length ? " " + cap(back.join("; ")) + "." : "") + (!parts.length && !back.length ? " Nothing you made depends on the old confirmation." : "") + (parts.length ? " Finding topics again will use a new research session; you will see that and confirm first." : "");
         var list = await refreshSaved();
         if (opts.onReportChanged) { try { await opts.onReportChanged(rv); } catch (e) { /* the page keeps its copy */ } }
         var cur = state.current && (list || []).filter(function (x) { return x.id === state.current.id; })[0];
@@ -859,6 +870,7 @@
     $("confirmList").innerHTML = confirmLines(q);
     var x = state.session;
     $("confirmCost").textContent = state.schema.articleLed && q.mode === "market_update" && q.dataSource !== "upload" ? "A research session is used only when five opportunities are delivered. A result with fewer is kept and does not use a session." : "Running this uses one research session" + (x ? " (" + x.remaining + " of " + x.allowance + " left this month)" : "") + ", unless you already have this exact set saved, which is simply reopened.";
+    if (reportConfirmed() && staleForRequest(q)) $("confirmCost").textContent = STALE_COST + " " + $("confirmCost").textContent.replace(/, unless you already have this exact set saved, which is simply reopened\./, ".");
     $("confirmBox").classList.remove("hidden"); $("startBtn").classList.add("hidden"); rsRender();
     $("confirmBox").scrollIntoView({ behavior: "smooth", block: "nearest" });
   }

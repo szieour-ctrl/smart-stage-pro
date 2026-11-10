@@ -152,11 +152,13 @@ function analyzeReport(rep, figures, refOf, basis) {
       evidence: ev("avg_close_to_list_pct", "avg_close_to_orig_list_pct") });
   }
   // 6. Asking prices against sold prices
-  const askF = F("median_list_price") || F("avg_list_price"), soldF = F("median_close_price") || F("avg_close_price");
+  // like with like: a median asking price against a median sold price, or an average against an average (never a mean against a median)
+  const pair = F("median_list_price") && F("median_close_price") ? ["median_list_price", "median_close_price"] : F("avg_list_price") && F("avg_close_price") ? ["avg_list_price", "avg_close_price"] : null;
+  const askF = pair ? F(pair[0]) : null, soldF = pair ? F(pair[1]) : null;
   if (askF && soldF && askF.unit === "usd" && soldF.unit === "usd" && soldF.value > 0) {
     const gap = (askF.value - soldF.value) / soldF.value * 100;
     if (Math.abs(gap) >= 3) {
-      const askKey = F("median_list_price") ? "median_list_price" : "avg_list_price", soldKey = F("median_close_price") ? "median_close_price" : "avg_close_price";
+      const askKey = pair[0], soldKey = pair[1];
       add({ kind: "asking_vs_sold", signal: gap > 0 ? "buyer_favoring" : "seller_favoring", strength: 1, title: gap > 0 ? "Asking prices sit above recent sold prices" : "Sold prices sit above current asking prices",
         statement: `The current ${labelOf(askF).toLowerCase()} is ${gap > 0 ? "above" : "below"} the ${labelOf(soldF).toLowerCase()}, so what sellers ask and what buyers have recently paid are not the same thing.`, evidence: ev(askKey, soldKey) });
     }

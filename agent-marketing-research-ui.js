@@ -43,7 +43,13 @@
     var lbl = $("upLabelNote");
     if (lbl) lbl.textContent = !market ? "(not used for Local Events)" : !m ? "(choose a Market Update type above)" : m.reportRequired ? "(required)" : "(not used: the article is the source)";
     var up = $("uploadBox"); if (up) up.classList.toggle("hidden", market && !!m && !m.reportRequired);
+    // Option 1 (Agent Market Update): one button, no choice between new research and the library. Saved analyses stay under "Saved research".
+    var opt1 = option1On();
+    var sb = $("startBtn"); if (sb) sb.textContent = opt1 ? "Analyze My Market Report" : "Research this market";
+    var lb = $("libBtn"); if (lb) lb.classList.toggle("hidden", opt1);
+    var nt = $("newTopics"); if (nt && nt.closest("label")) nt.closest("label").classList.toggle("hidden", opt1);
   }
+  function option1On() { return !!(state.schema && state.schema.reportAnalysis && picked("mode") !== "local_events" && picked("muMode") === "trend_report"); }
   async function saveMuMode() {
     var m = picked("muMode"); if (!m || !state.projectId) return;
     try { await api(API, "POST", "", { action: "set_mode", projectId: state.projectId, marketUpdateMode: m }); } catch (e) { /* the choice is sent again with the research request */ }
@@ -130,7 +136,13 @@
     if (t.trendSignals && t.trendSignals.length) parts.push("<b>Trend signals:</b> " + t.trendSignals.map(esc).join(" \u00b7 "));
     if (t.recommended && (t.recommended.evidence || []).length) parts.push("<b>Evidence:</b> " + t.recommended.evidence.map(esc).join(" \u00b7 "));
     // B2 (Nov 8, 2026): the Realtor editorial direction and the article statements it rests on (B1 validated findings).
-    if (t.b2) {
+    if (t.b2 && t.b2.mode === "trend_report") {
+      if (t.b2.relationship) parts.push("<b>What the report shows:</b> " + esc(t.b2.relationship));
+      if (t.b2.realtorInterpretation) parts.push("<b>Realtor interpretation:</b> " + esc(t.b2.realtorInterpretation));
+      if (t.b2.homeownerImplication) parts.push("<b>For homeowners:</b> " + esc(t.b2.homeownerImplication));
+      if (t.b2.audienceJourney) parts.push("<b>Across the decision journey:</b> " + esc(t.b2.audienceJourney));
+      if (t.b2.editorialAngle) parts.push("<b>Editorial angle:</b> " + esc(t.b2.editorialAngle));
+    } else if (t.b2) {
       if (t.b2.editorialAngle) parts.push("<b>Editorial angle:</b> " + esc(t.b2.editorialAngle));
       if (t.b2.mechanism) parts.push("<b>From the article:</b> " + esc(t.b2.mechanism));
       if (t.b2.homeownerImplication) parts.push("<b>For homeowners:</b> " + esc(t.b2.homeownerImplication));
@@ -158,7 +170,7 @@
       (ev ? '<div class="kv"><b>' + esc(ev.name) + "</b> · " + esc(ev.date) + (ev.endDate ? " to " + esc(ev.endDate) : "") + " · " + esc(ev.time) + "</div>" +
         '<div class="kv"><b>Where:</b> ' + esc(ev.location) + " · <b>Organizer:</b> " + esc(ev.organizer) + " · <b>Status:</b> " + esc(ev.status) + "</div>" : "") +
       "<div style=\"margin-top:6px\">" + (t.sources || []).map(srcLine).join("") + "</div>" +
-      '<div class="actions" style="margin-top:10px"><button class="btn small ' + (t.id === pickedId ? "" : "gold") + '" type="button" data-pick="' + esc(t.id) + '">' + (t.id === pickedId ? "Selected" : "Select this topic") + "</button></div></div>";
+      '<div class="actions" style="margin-top:10px"><button class="btn small ' + (t.id === pickedId ? "" : "gold") + '" type="button" data-pick="' + esc(t.id) + '">' + (t.id === pickedId ? "Selected" : (t.b2 && t.b2.mode === "trend_report" ? "Choose this perspective" : "Select this topic")) + "</button></div></div>";
   }
   // Results get the screen: the request folds into one line (Change request brings the form back).
   function foldSetup(on) {
@@ -175,7 +187,7 @@
     $("resultPanel").classList.remove("hidden");
     state.current = r;
     $("resEyebrow").textContent = (r.mode === "local_events" ? "Local Events" : "Local Market Update") + " · " + (r.geography && r.geography.label || "");
-    $("resTitle").textContent = r.status === "ready" ? (r.pathway === "article_led" && r.delivered < 5 ? r.delivered + " of 5 opportunities" : "Five topics") + (r.researchDate ? " from " + r.researchDate : "") : r.status === "failed" ? "No topics this time" : "Researching…";
+    $("resTitle").textContent = r.status === "ready" ? (r.pathway === "article_led" && r.delivered < 5 ? r.delivered + " of 5 opportunities" : r.marketUpdateMode === "trend_report" && (r.topics || []).some(function (t) { return t.b2 && t.b2.mode === "trend_report"; }) ? r.topics.length + " perspectives from your report" : "Five topics") + (r.researchDate ? " from " + r.researchDate : "") : r.status === "failed" ? "No topics this time" : "Researching…";
     $("resWait").classList.toggle("hidden", r.status !== "running");
     $("resError").classList.toggle("hidden", r.status !== "failed");
     if (r.status === "failed") $("resError").textContent = (r.error || "The research could not be completed.") + (/did not use a session/.test(r.error || "") ? "" : " This did not use a session.");
@@ -500,6 +512,7 @@
     var mdef = muModeDef(q.marketUpdateMode);
     if (mdef && mdef.reportRequired && !(q.uploadIds && q.uploadIds.length)) { say("startMsg", "This Market Update type uses your Trend or CMA report. Upload it and confirm it, then research.", "err"); $("uploadBox").scrollIntoView({ block: "center" }); return; }
     if (!q.mode || !q.geography.name.trim() || !q.audience) { say("startMsg", !q.audience ? "Choose who this is for." : "Enter the place to research.", "err"); return; }
+    if (option1On() && q.marketUpdateMode === "trend_report") { start(); return; }   // the report was already confirmed ("This report covers… Correct?"); nothing else to confirm
     $("confirmList").innerHTML = confirmLines(q);
     var x = state.session;
     $("confirmCost").textContent = state.schema.articleLed && q.mode === "market_update" && q.dataSource !== "upload" ? "A research session is used only when five opportunities are delivered. A result with fewer is kept and does not use a session." : "Running this uses one research session" + (x ? " (" + x.remaining + " of " + x.allowance + " left this month)" : "") + ", unless you already have this exact set saved, which is simply reopened.";

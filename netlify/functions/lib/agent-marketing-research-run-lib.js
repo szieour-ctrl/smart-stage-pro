@@ -249,6 +249,10 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
   // the report-topic and reframe steps are skipped (B2 replaces the cards; mode 2's report figures are attached to B2's topics). The place is never widened.
   const b2Lib = require("./agent-marketing-b2-lib");
   const b2Mode = !alOn && b2Lib.applies(row, e);
+  // Option 1, Agent Market Update (Nov 9, 2026, development switch): report only. Trend Intelligence + one Claude call write ten relationship questions and keep the best three to five. No Perplexity, no articles.
+  const reportEditorial = require("./agent-marketing-report-editorial-lib");
+  const option1 = !alOn && !b2Mode && dataSource === "upload" && reportEditorial.applies(row, e);
+  let option1Log = null;
   const maxAttempts = lanesMode ? 1 : 1 + (alOn ? compact.retriesFor(e) : (Number.isInteger(extra) && extra >= 0 && extra <= 2 ? extra : 1));
   let payload = dataSource === "upload" ? null : (cmp ? compact.buildPayloadCompact({ request, today, env: e }) : alOn ? articleLed.buildPayloadV2({ request, today, env: e }) : rl.buildResearchPayload({ request, today, uploadContext, env: e }));
   const baseInput = payload && payload.input;
@@ -443,7 +447,21 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
       const evNote = articleLed.mlsEvidenceNote(validation.topics.map((t) => t.mlsEvidence));
       mlsNote = evNote;
     }
-    if (!alOn && !b2Mode && dataSource !== "web" && (dataSource === "upload" || (validation && validation.ok))) {
+    if (option1) {
+      const ctx = reportTopics.buildContext(uploads, request);
+      try {
+        if (!ctx.reports.length) throw new Error("no report figures");
+        const geo = request.geography || {};
+        const out = await reportEditorial.generate({ ctx, market: [geo.name, geo.type === "neighborhood" && geo.city ? geo.city : null, geo.zip ? `ZIP ${geo.zip}` : null].filter(Boolean).join(", "), audience: request.audience, today, anthropicKey, callFn: claudeFn });
+        modelUsed = planLib.MODEL; reportAttempts = 1;
+        option1Log = { state: out.topics.length ? "ready" : "no_topics", candidates: out.candidates.map((c) => ({ id: c.id, question: c.question, relationships: c.relationships })), selected: out.selected, notes: out.notes, problems: out.problems.slice(0, 8), character: out.analysis && out.analysis.character ? out.analysis.character.key : null, usage: out.usage };
+        if (out.topics.length >= reportEditorial.SELECT_MIN) validation = { ok: true, topics: out.topics, problems: [] };
+        else { problems = out.problems.length ? out.problems : ["the report did not give enough distinct market relationships"]; validation = { ok: false, topics: [], problems }; error = "Your report could not be turned into editorial questions this time. This did not use a session."; }
+      } catch (err) {
+        console.error(`[agent-marketing-research] option 1 failed: ${String(err && err.message).slice(0, 200)}`);
+        error = "Your report could not be analyzed this time. This did not use a session.";
+      }
+    } else if (!alOn && !b2Mode && dataSource !== "web" && (dataSource === "upload" || (validation && validation.ok))) {
       // Topics from the agent's own report. In "both", a failure here is not fatal: the five web topics are still delivered, and the agent is told.
       const ctx = reportTopics.buildContext(uploads, request);
       const want = dataSource === "both" ? reportTopics.REPORT_TOPICS_WHEN_BOTH : rl.TOPIC_COUNT;
@@ -508,7 +526,7 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
     rec.final = fin ? { topics: fin.length, origin: { web: fin.filter((t) => t.origin !== "report").length, report: fin.filter((t) => t.origin === "report").length }, scope: { selected: fin.filter((t) => t.scope !== "broader_context").length, broader_context: fin.filter((t) => t.scope === "broader_context").length }, reframed: fin.filter((t) => t.reframed === true).length } : null;
     return diagLib.bound(rec);
   });
-  const finalUsage = { ...usage, ...(alOn ? { providerRequests } : {}), ...(gapFill ? { gapFill } : {}), ...(discovery ? { discovery } : {}), ...(alOn ? { pathway: "article_led", articleLed: { delivered: validation && validation.ok ? validation.topics.length : 0, charged: !!(validation && validation.ok && alCharge), limits: validation && validation.limits || null, offerMlsTrend: !!(validation && validation.ok && !alCharge), ...(gapFill ? { gapFill: { triggered: gapFill.triggered, executed: gapFill.executed, added: gapFill.addedQualified || 0, converted: !!gapFill.convertedToFive } } : {}), ...(laneLog ? { lanes: laneLog.length, lanesSucceeded: laneLog.filter((l) => l.state === "success").length, lanesRateLimited: laneLog.filter((l) => l.state === "rate_limited").length, lanesFailed: laneLog.filter((l) => l.state === "failed").length, lanesNotAttempted: laneLog.filter((l) => l.state === "not_attempted").length, lanesIncomplete: laneLog.some((l) => l.state !== "success") } : {}) } } : {}), costUsd, costEstimated: usage.costUsd == null && estimated != null, targetUsd: cfg.costTargetUsd, withinTarget: costUsd == null ? null : costUsd <= cfg.costTargetUsd, attempts, grounded, providerError, dataSource, reportAttempts, reframeAttempts, reframed, reportNote, topicDebug: validation && validation.ok ? null : topicAnswer, problems: problems.slice(0, 6).map((x) => String(x).slice(0, 200)) };
+  const finalUsage = { ...usage, ...(option1Log ? { option1: option1Log } : {}), ...(alOn ? { providerRequests } : {}), ...(gapFill ? { gapFill } : {}), ...(discovery ? { discovery } : {}), ...(alOn ? { pathway: "article_led", articleLed: { delivered: validation && validation.ok ? validation.topics.length : 0, charged: !!(validation && validation.ok && alCharge), limits: validation && validation.limits || null, offerMlsTrend: !!(validation && validation.ok && !alCharge), ...(gapFill ? { gapFill: { triggered: gapFill.triggered, executed: gapFill.executed, added: gapFill.addedQualified || 0, converted: !!gapFill.convertedToFive } } : {}), ...(laneLog ? { lanes: laneLog.length, lanesSucceeded: laneLog.filter((l) => l.state === "success").length, lanesRateLimited: laneLog.filter((l) => l.state === "rate_limited").length, lanesFailed: laneLog.filter((l) => l.state === "failed").length, lanesNotAttempted: laneLog.filter((l) => l.state === "not_attempted").length, lanesIncomplete: laneLog.some((l) => l.state !== "success") } : {}) } } : {}), costUsd, costEstimated: usage.costUsd == null && estimated != null, targetUsd: cfg.costTargetUsd, withinTarget: costUsd == null ? null : costUsd <= cfg.costTargetUsd, attempts, grounded, providerError, dataSource, reportAttempts, reframeAttempts, reframed, reportNote, topicDebug: validation && validation.ok ? null : topicAnswer, problems: problems.slice(0, 6).map((x) => String(x).slice(0, 200)) };
   const fields = rl.outcomeFields({ validation: error ? null : validation, usage: finalUsage, model: modelUsed, today, now, error, charge: alCharge });
   return { fields, problems, attempts };
 }

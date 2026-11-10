@@ -163,6 +163,7 @@ exports.handler = async (event) => {
           dataFocus: rl.DATA_FOCUS, modes: rl.MODES.map((k) => ({ key: k, label: rl.MODE_LABELS[k] })), audiences: rl.AUDIENCES,
           geoTypes: rl.GEO_TYPES.map((k) => ({ key: k, label: GEO[k] })), topicCount: rl.TOPIC_COUNT, maxUploads: rl.MAX_UPLOADS,
           articleLed: articleLed.articleLedEnabled(process.env),
+          reportAnalysis: require("./lib/agent-marketing-b1-evidence-lib").enabled(process.env),   // Option 1 "Analyze My Market Report" (development switch)
           marketUpdateModes: rl.MARKET_UPDATE_MODES.map((m) => ({ key: m.key, label: m.label, hint: m.hint, reportRequired: m.reportRequired })),
         });
       }

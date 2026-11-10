@@ -29,7 +29,7 @@ const AUDIENCE_KEYS = AUDIENCES.map((a) => a.key);
 const DATA_SOURCES = ["web", "upload", "both"];
 // The three Market Update modes the agent chooses (Nov 8, 2026), each with the one data source it allows. Persisted on the project.
 const MARKET_UPDATE_MODES = [
-  { key: "trend_report", label: "Market Trend Update", hint: "Topics and script from your uploaded Trend or CMA report only.", dataSource: "upload", reportRequired: true },
+  { key: "trend_report", label: "Agent Market Update", hint: "Your uploaded Trend or CMA report only: the Realtor perspectives your market figures support, then your script.", dataSource: "upload", reportRequired: true },
   { key: "article_report", label: "Article-Led Market Update + Trend/CMA", hint: "A local article is the story; your uploaded report supplies every market statistic.", dataSource: "both", reportRequired: true },
   { key: "article_editorial", label: "Article-Led Market Update: Realtor Editorial Perspective", hint: "A local article and your perspective. No report needed; the article's figures are attributed to it.", dataSource: "web", reportRequired: false },
 ];

@@ -203,7 +203,7 @@ function windowText(w) { return w ? (w.start === w.end ? shortDate(w.start, true
 function listText(a) { return a.length <= 1 ? a.join("") : a.length === 2 ? `${a[0]} and ${a[1]}` : `${a.slice(0, -1).join(", ")}, and ${a[a.length - 1]}`; }
 function placesOf(facts) {
   const g = (facts && facts.geography) || {};
-  const out = [...(g.cities || [])];
+  const out = [...(g.cities || []), ...(g.counties || [])];
   if (!out.length && (g.zips || []).length) return (g.zips || []).slice(0, 4).map((z) => `ZIP ${z}`);
   return out;
 }
@@ -221,6 +221,10 @@ function scopeSentence(facts) {
   if (f.layout === "market_summary") {
     const where = placesOf(f);
     return `This ${f.mlsSource ? f.mlsSource + " " : ""}market summary covers ${where.length ? listText(where) : "an area it does not name"}${(f.propertyTypes || []).length ? ` (${f.propertyTypes.join(", ")})` : ""}, for ${f.period ? f.period.label : "the month it names"}. ${f.disclosure ? `It says: "${f.disclosure}."` : ""}`.trim();
+  }
+  if ((f.layout === "market_update" || f.layout === "monthly_snapshot") && f.period) {
+    const where = placesOf(f);
+    return `This ${f.mlsSource ? f.mlsSource + " " : ""}${f.layout === "market_update" ? "market update" : "monthly report"} covers ${where.length ? listText(where) : "an area it does not name"}${(f.propertyTypes || []).length ? ` (${f.propertyTypes.join(", ")})` : ""}, for ${f.period.label}${f.layout === "market_update" ? " and the year to date" : ""}${f.reportDate ? `, dated ${longDate(f.reportDate)}` : ""}.`;
   }
   if (f.layout === "weekly_snapshot" && f.period) {
     const where = placesOf(f);
@@ -267,8 +271,8 @@ function scopeNote(facts) {
   if (f.layout === "market_summary") {
     return [`${f.mlsSource ? f.mlsSource + " " : ""}market summary`, places.length ? `covering ${listText(places)}` : null, (f.propertyTypes || []).length ? f.propertyTypes.join(", ") : null, f.period ? `for ${f.period.label}` : null].filter(Boolean).join(", ").slice(0, 400);
   }
-  if ((f.layout === "market_trends" || f.layout === "weekly_snapshot") && f.period) {
-    const bits = [`${f.mlsSource ? f.mlsSource + " " : ""}${f.layout === "weekly_snapshot" ? "weekly" : "market-trends"} report`, places.length ? `covering ${listText(places)}` : null, (f.propertyTypes || []).length ? f.propertyTypes.join(", ") : null, `for ${f.period.label}`];
+  if ((f.layout === "market_trends" || f.layout === "weekly_snapshot" || f.layout === "market_update" || f.layout === "monthly_snapshot") && f.period) {
+    const bits = [`${f.mlsSource ? f.mlsSource + " " : ""}${f.layout === "weekly_snapshot" ? "weekly" : f.layout === "monthly_snapshot" ? "monthly" : f.layout === "market_update" ? "market-update" : "market-trends"} report`, places.length ? `covering ${listText(places)}` : null, (f.propertyTypes || []).length ? f.propertyTypes.join(", ") : null, `for ${f.period.label}`];
     if (f.sample && f.sample.small) bits.push("a small sample of closed sales");
     return bits.filter(Boolean).join(", ").slice(0, 400);
   }
@@ -306,8 +310,8 @@ function compareText(facts, f) {
   if (!p || !f) return "";
   const at = (v) => formatFigure({ ...f, value: v });
   const bits = [];
-  if (f.prior != null) bits.push(`${at(f.prior)} in ${p.priorLabel}${changeText(f, f.prior, "prior")}`);
-  if (f.yearAgo != null) bits.push(`${at(f.yearAgo)} in ${p.yearAgoLabel}${changeText(f, f.yearAgo, "yearAgo")}`);
+  if (f.prior != null) bits.push(`${at(f.prior)} in ${f.priorLabel || p.priorLabel}${changeText(f, f.prior, "prior")}`);
+  if (f.yearAgo != null) bits.push(`${at(f.yearAgo)} in ${f.yearAgoLabel || p.yearAgoLabel}${changeText(f, f.yearAgo, "yearAgo")}`);
   const vs = bits.length ? `vs ${bits.join(" and ")}` : "";
   // Reports that print a percent change instead of the earlier value (the weekly dashboards): "down 1.8% from the week ending October 10, 2026".
   const ch = (Array.isArray(f.changes) ? f.changes : []).map((c) => `${c.pct < 0 ? "down" : c.pct > 0 ? "up" : "unchanged"}${c.pct === 0 ? "" : ` ${Math.abs(c.pct)}%`} from ${c.vs}`);
@@ -353,19 +357,37 @@ function verifiedFromReport(facts) {
 function geographyCheck(facts, geography) {
   const g = geography && typeof geography === "object" ? geography : null;
   const rg = (facts && facts.geography) || {};
-  const cities = (rg.cities || []).map((c) => c.toLowerCase());
-  const zips = rg.zips || [];
+  const nk = (x) => String(x || "").toLowerCase().replace(/[.,]/g, " ").replace(/\b(?:ca|california|city of)\b/g, " ").replace(/\s+/g, " ").trim();
+  const ck = (x) => nk(x).replace(/\bcounty\b/g, "").replace(/\s+/g, " ").trim();
+  const cities = (rg.cities || []).map(nk);
+  const counties = (rg.counties || []).map(ck);
+  const zips = (rg.zips || []).map(String);
   if (!g) return { status: "not_named", message: "" };
-  const name = String(g.name || "").trim().toLowerCase();
-  const city = String(g.city || "").trim().toLowerCase();
+  const name = String(g.name || "").trim();
+  const zipOf = (x) => { const m = /\b(\d{5})(?:-\d{4})?\b/.exec(String(x || "")); return m ? m[1] : null; };
+  const cityName = nk(g.city);
+  const countyName = ck(g.county);
+  const names = (arr) => listText(arr);
+  const wider = (what) => ({ status: "different", message: `This report covers all of ${names(rg.counties)}, which is wider than ${what}. Its figures describe the county, not ${what}.` });
   if (g.type === "city") {
-    if (cities.includes(name)) return { status: "match", message: "" };
+    if (cities.includes(nk(name))) return { status: "match", message: "" };
+    if (counties.length && !cities.length) {
+      if (countyName && counties.includes(countyName)) return wider(g.name);
+      return { status: "not_named", message: `This report covers ${names(rg.counties)}. Confirm that ${g.name} is the area you want it to describe.` };
+    }
     if (cities.length) return { status: "different", message: `This report names ${listText(rg.cities)}, not ${g.name}.` };
   } else if (g.type === "zip") {
-    if (zips.includes(name)) return { status: "match", message: "" };
+    const z = zipOf(name);
+    if (z && zips.includes(z)) return { status: "match", message: "" };
     if (zips.length) return { status: "different", message: `This report names ZIP ${zips.join(", ")}, not ${g.name}.` };
+    if (cities.length || counties.length) return { status: "not_named", message: `This report names ${listText([...(rg.cities || []), ...(rg.counties || [])])}, not ZIP ${z || g.name}. Confirm it covers that ZIP code.` };
+  } else if (g.type === "county") {
+    if (counties.includes(ck(name))) return { status: "match", message: "" };
+    if (counties.length) return { status: "different", message: `This report names ${names(rg.counties)}, not ${g.name}.` };
+    if (cities.length || zips.length) return { status: "different", message: `This report covers ${listText([...(rg.cities || []), ...zips.map((z) => "ZIP " + z)])}, which is narrower than ${g.name}. Its figures describe that area, not the county.` };
   } else if (g.type === "neighborhood") {
-    if (cities.length && city && !cities.includes(city)) return { status: "different", message: `This report names ${listText(rg.cities)}, not ${g.city}.` };
+    if (cities.length && cityName && !cities.includes(cityName)) return { status: "different", message: `This report names ${listText(rg.cities)}, not ${g.city}.` };
+    if (!cities.length && counties.length && countyName && counties.includes(countyName)) return wider(g.name);
     return { status: "not_named", message: `This report does not name ${g.name}. Confirm it covers that neighborhood.` };
   }
   return { status: "not_named", message: `This report does not name ${g.name || "your place"}. Confirm it covers the area you chose.` };
@@ -1191,6 +1213,198 @@ function analyzeMarketSummary(pages) {
   };
 }
 
+// ── Places: counties, cities and ZIP codes ───────────────────────────────────────────────────────────────────────────
+// Reports from different associations name their area differently: a ZIP ("ZIP 95747"), a city ("Roseville"), or a county ("Placer").
+// A county is kept apart from cities so a county report is never passed off as a city report (and the reverse).
+const CA_COUNTIES = ["Alameda", "Alpine", "Amador", "Butte", "Calaveras", "Colusa", "Contra Costa", "Del Norte", "El Dorado", "Fresno", "Glenn", "Humboldt", "Imperial", "Inyo", "Kern", "Kings", "Lake", "Lassen", "Los Angeles", "Madera", "Marin", "Mariposa", "Mendocino", "Merced", "Modoc", "Mono", "Monterey", "Napa", "Nevada", "Orange", "Placer", "Plumas", "Riverside", "Sacramento", "San Benito", "San Bernardino", "San Diego", "San Francisco", "San Joaquin", "San Luis Obispo", "San Mateo", "Santa Barbara", "Santa Clara", "Santa Cruz", "Shasta", "Sierra", "Siskiyou", "Solano", "Sonoma", "Stanislaus", "Sutter", "Tehama", "Trinity", "Tulare", "Tuolumne", "Ventura", "Yolo", "Yuba"];
+const placeKey = (s) => String(s || "").toLowerCase().replace(/[.,]/g, " ").replace(/\b(?:county|city of|city|ca|california)\b/g, " ").replace(/\s+/g, " ").trim();
+/** classifyPlace("Placer") → { county: "Placer County" };  ("Roseville, CA") → { city: "Roseville" };  ("95747") → { zip: "95747" }; null when it is not a plain place name. */
+function classifyPlace(raw) {
+  const s = String(raw || "").replace(/\s+/g, " ").trim();
+  if (!s || s.length > 80 || !/^[A-Za-z0-9 ,.&'\/-]+$/.test(s)) return null;
+  const zip = /^(?:ZIP\s*(?:code\s*)?)?(\d{5})(?:-\d{4})?$/i.exec(s);
+  if (zip) return { zip: zip[1] };
+  if (/^all\s+counties$/i.test(s)) return { city: "All MetroList counties" };
+  const k = placeKey(s);
+  if (/\bcounty\b/i.test(s) || CA_COUNTIES.some((c) => placeKey(c) === k) && !/\bcity\b/i.test(s) && k !== "sierra madre") {
+    const name = CA_COUNTIES.find((c) => placeKey(c) === k);
+    // "Sacramento" alone is ambiguous (the city and the county); an explicit "County" settles it, otherwise a county report names the county.
+    return { county: `${name || s.replace(/\s*county\s*/i, "").trim()} County` };
+  }
+  return { city: s.replace(/,\s*(?:CA|California)$/i, "") };
+}
+function geographyFrom(raws) {
+  const g = { cities: [], zips: [], counties: [], drawnOnMap: false };
+  (raws || []).map(classifyPlace).filter(Boolean).forEach((c) => {
+    if (c.zip && !g.zips.includes(c.zip)) g.zips.push(c.zip);
+    else if (c.county && !g.counties.includes(c.county)) g.counties.push(c.county);
+    else if (c.city && !g.cities.includes(c.city)) g.cities.push(c.city);
+  });
+  return g;
+}
+
+// ── Printed percent changes: the check that a table was read into the right columns ────────────────────────────────────
+const decimalsOf = (tok) => { const m = /\.(\d+)/.exec(tok); return m ? m[1].length : 0; };
+/** True when the percent a report printed is what its two printed (rounded) values allow. */
+function pctAgrees(prevTok, curTok, pctTok, minDecimals) {
+  const prev = Number(String(prevTok).replace(/,/g, "")), cur = Number(String(curTok).replace(/,/g, "")), pct = Number(String(pctTok).replace(/[%,]/g, ""));
+  if (![prev, cur, pct].every(Number.isFinite)) return false;
+  const hp = 0.5 * Math.pow(10, -Math.max(decimalsOf(prevTok), minDecimals || 0)), hc = 0.5 * Math.pow(10, -Math.max(decimalsOf(curTok), minDecimals || 0));
+  if (prev - hp <= 0) return true;                        // too close to zero for a percent to be checked
+  const lo = ((cur - hc) / (prev + hp) - 1) * 100, hi = ((cur + hc) / (prev - hp) - 1) * 100;
+  return pct >= lo - 0.1 && pct <= hi + 0.1;
+}
+
+// ── One-page "Market Update" (TrendVision / MetroList): one month and the year to date, this year against last, in a table ──────────
+const MU_YTD_KEYS = ["count_new", "count_closed", "count_pending", "median_close_price", "avg_dom", "months_supply"];
+const MU_NUM = /^-?[\d,]+(?:\.\d+)?$/, MU_PCT = /^-?[\d,]+(?:\.\d+)?%$/;
+/** analyzeMarketUpdate(pages) → { facts } | { error } | null  (null = not this layout) */
+function analyzeMarketUpdate(pages) {
+  const list = Array.isArray(pages) ? pages : [];
+  const text = list.join("\n");
+  const page = list.find((p) => /Market Update/i.test(p) && /Data Metrics/i.test(p) && /Year To Date|YTD/i.test(p));
+  if (!page) return null;
+  const lines = page.split(/\r?\n/).map((l) => l.replace(/\s+/g, " ").trim()).filter(Boolean);
+  const hi = lines.findIndex((l) => /^Data Metrics\b/i.test(l));
+  const head = lines.slice(0, hi < 0 ? 10 : hi);
+  const monthLine = head.find((l) => new RegExp(`^${MS_MONTH}\\s+Year To Date$`, "i").test(l));
+  const mm = monthLine ? new RegExp(`^${MS_MONTH}`, "i").exec(monthLine) : null;
+  const yrs = hi >= 0 ? (lines[hi].match(/\b(20\d\d)\b/g) || []).map(Number) : [];
+  if (!mm || yrs.length < 2 || yrs[1] !== yrs[0] + 1) return { error: "no_figures" };
+  const month = monthIdx(mm[1]), year = yrs[1];
+  const rest = head.filter((l) => l !== monthLine && !/^Market Update$/i.test(l) && !/^Published\b/i.test(l));
+  const typeLine = rest.find((l) => /\b(?:Homes?|Condos?|Townhomes?|Residential|Multi[- ]?Family|Land|Properties|Family)\b/i.test(l) && l.length < 60);
+  const placeLine = rest.find((l) => l !== typeLine);
+  const geo = placeLine ? geographyFrom([placeLine]) : { cities: [], zips: [], counties: [], drawnOnMap: false };
+  const series = {}, bad = []; let checked = 0, rows = 0;
+  TV_ROWS.forEach((r) => {
+    const line = lines.slice(hi + 1).find((l) => l.startsWith(r.label + " "));
+    if (!line) return;
+    const t = line.slice(r.label.length).trim().split(" ");
+    if (t.length !== 6 || !(MU_NUM.test(t[0]) && MU_NUM.test(t[1]) && MU_PCT.test(t[2]) && MU_NUM.test(t[3]) && MU_NUM.test(t[4]) && MU_PCT.test(t[5]))) return;
+    const md = r.unit === "months" ? 1 : 0;
+    const okM = pctAgrees(t[0], t[1], t[2], md), okY = pctAgrees(t[3], t[4], t[5], md);
+    checked += 2; if (!okM || !okY) bad.push(r.name.toLowerCase());
+    const n = (x) => Number(x.replace(/,/g, "")), p = (x) => Number(x.replace(/[%,]/g, ""));
+    series[r.key] = { r, month: [n(t[0]), n(t[1]), p(t[2])], ytd: [n(t[3]), n(t[4]), p(t[5])] };
+    rows++;
+  });
+  if (rows < 8) return { error: "no_figures" };
+  if (bad.length > rows / 2) return { error: "no_figures" };
+  const last = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const window = { start: isoDay(year, month, 1), end: isoDay(year, month, last) };
+  const ytdWindow = { start: isoDay(year, 1, 1), end: window.end };
+  const mName = MONTH_NAMES[month - 1];
+  const ytdPrev = month === 1 ? `${mName} ${yrs[0]}` : `January through ${mName} ${yrs[0]}`;
+  const figures = [];
+  const add = (o) => figures.push({ id: `f${figures.length + 1}`, n: 0, small: false, reported: true, ...o });
+  TV_ROWS.filter((r) => series[r.key]).forEach((r) => {
+    const s = series[r.key], sc = r.scale || 1;
+    add({ status: r.status, key: r.key, label: r.name, value: s.month[1] * sc, unit: r.unit, window, yearAgo: s.month[0] * sc, printed: { yearAgo: s.month[2] } });
+  });
+  MU_YTD_KEYS.filter((k) => series[k]).forEach((k) => {
+    const s = series[k], r = s.r, sc = r.scale || 1;
+    add({ status: r.status, key: `${k}_ytd`, label: `${r.name}, year to date`, value: s.ytd[1] * sc, unit: r.unit, window: ytdWindow, yearAgo: s.ytd[0] * sc, yearAgoLabel: ytdPrev, printed: { yearAgo: s.ytd[2] } });
+  });
+  const closed = series.count_closed ? series.count_closed.month[1] : null;
+  const small = closed != null && closed < SMALL_SAMPLE_BELOW;
+  const warnings = [];
+  if (bad.length) warnings.push(`A percent change printed in this report does not match its own figures for ${listText(bad)}. Please check those against the report.`);
+  if (small) warnings.push(`Only ${closed} closed ${closed === 1 ? "sale" : "sales"} in ${mName} ${year}: a small sample. Topics will say so and will not claim a trend.`);
+  if (!geo.cities.length && !geo.zips.length && !geo.counties.length) warnings.push("I couldn't read the area this report covers. Check it before using it.");
+  const mls = MLS_SOURCES.find((n) => new RegExp(`\\b${n}\\b`, "i").test(text)) || null;
+  const pt = typeLine && /^[A-Za-z ,\/-]{3,40}$/.test(typeLine) ? [typeLine] : [];
+  const facts = {
+    version: FACTS_VERSION, kind: "pdf", layout: "market_update", reportDate: null, mlsSource: mls, propertyTypes: pt, criteria: { closedSince: null },
+    geography: geo, period: { label: `${mName} ${year}`, start: window.start, end: window.end, priorLabel: null, yearAgoLabel: `${mName} ${yrs[0]}`, months: 1, ytd: true },
+    disclosure: disclosureFrom(text), statuses: {}, figures,
+    sample: { total: closed != null ? closed : 0, closed: closed != null ? closed : 0, small, broadWindow: false, windowDays: last - 1 },
+    reportedTotal: null, checks: { checked, mismatched: bad.length }, warnings,
+    notes: ["Only market-level figures were kept. Each figure is compared with the same period a year earlier, as the report prints it."],
+  };
+  return { facts };
+}
+
+// ── Domus Analytics monthly "Market Infographic" (MetroList's replacement for TrendVision from December 2026) ────────────────────────
+const DOMUS_TILES = WEEKLY_TILES.filter((t) => t.key !== "weeks_supply").concat([
+  { label: "Months Supply of Inventory", key: "months_supply", name: "Months of inventory", status: "market", unit: "months" },
+  { label: "Months of Inventory", key: "months_supply", name: "Months of inventory", status: "market", unit: "months" },
+  { label: "Average Sales Price", key: "avg_close_price", name: "Average sold price", status: "closed", unit: "usd" },
+  { label: "Average Days on Market", key: "avg_dom", name: "Average days on market", status: "market", unit: "days" },
+  { label: "Pending Sales", key: "count_pending", name: "Pending sales", status: "pending", unit: "count" },
+]);
+/** Cheapest way to give every change to a different tile (tiles are few, so every assignment is tried). */
+function assignChanges(costs) {
+  // costs[c][t] = distance from change c to tile t's big number
+  const nC = costs.length, nT = costs[0] ? costs[0].length : 0;
+  let best = { total: Infinity, pick: null };
+  const pick = new Array(nC).fill(-1), used = new Array(nT).fill(false);
+  (function go(c, total) {
+    if (total >= best.total) return;
+    if (c === nC) { best = { total, pick: pick.slice() }; return; }
+    for (let t = 0; t < nT; t++) { if (used[t]) continue; used[t] = true; pick[c] = t; go(c + 1, total + costs[c][t]); used[t] = false; }
+  })(0, 0);
+  return best.pick;
+}
+/** analyzeDomusMonthly(pages, items) → { facts } | { error } | null  (null = not this layout) */
+function analyzeDomusMonthly(pages, items) {
+  const text = (Array.isArray(pages) ? pages : []).join("\n");
+  if (!/Domus Analytics/i.test(text) || /Weekly (?:Review|Infographic)/i.test(text) || /Pricing Insights/i.test(text)) return null;
+  const its = (Array.isArray(items) ? items : []).filter((i) => i && typeof i.s === "string" && Number.isFinite(i.x) && Number.isFinite(i.y)).map((i) => ({ ...i, s: i.s.trim() })).filter((i) => i.s);
+  const monthItem = its.find((i) => new RegExp(`^${MS_MONTH}\\s+20\\d\\d$`, "i").test(i.s));
+  if (!its.length || !monthItem) return null;
+  const NUMLIKE = /^\$?\d[\d,]*(?:\.\d+)?%?$/;
+  const values = its.filter((i) => NUMLIKE.test(i.s));
+  const labels = DOMUS_TILES.map((t) => ({ t, it: its.find((i) => i.s.toLowerCase() === t.label.toLowerCase()) })).filter((x) => x.it);
+  const pairs = [];
+  labels.forEach((l) => values.forEach((v) => { const dy = v.y - l.it.y; if (dy > 0 && dy < 260 && Math.abs(v.x - l.it.x) <= 130) pairs.push({ l, v, cost: dy + 1.5 * Math.abs(v.x - l.it.x) }); }));
+  pairs.sort((a, b) => a.cost - b.cost);
+  const usedL = new Set(), usedV = new Set(), tiles = [];
+  pairs.forEach((p) => {
+    if (usedL.has(p.l) || usedV.has(p.v) || tiles.some((x) => x.t.key === p.l.t.key)) return;
+    const n = Number(p.v.s.replace(/[$,%]/g, "").replace(/,/g, "")), [lo, hi] = RANGE[p.l.t.unit] || [0, Infinity];
+    if (!Number.isFinite(n) || !(n >= lo && n <= hi)) return;
+    if (p.l.t.unit === "usd" && !p.v.s.startsWith("$")) return;
+    usedL.add(p.l); usedV.add(p.v); tiles.push({ t: p.l.t, value: n, v: p.v });
+  });
+  if (tiles.length < 4) return { error: "no_figures" };
+  // "Up 2.8%" / "Down 16.9%": the change printed beside a tile belongs to the tile whose big number it sits nearest; every tile takes at most one.
+  const changeItems = its.map((i) => { const m = /^(Up|Down)\s+(\d+(?:\.\d+)?)%$/i.exec(i.s); return m ? { i, pct: (/^down$/i.test(m[1]) ? -1 : 1) * Number(m[2]) } : /^(?:Flat|Unchanged|No change)$/i.test(i.s) ? { i, pct: 0 } : null; }).filter(Boolean);
+  const costs = changeItems.map((c) => tiles.map((t) => Math.hypot(c.i.x - t.v.x, c.i.y - t.v.y)));
+  const pickT = changeItems.length && changeItems.length <= tiles.length ? assignChanges(costs) : null;
+  const vsItem = its.find((i) => new RegExp(`^vs\\.?\\s+${MS_MONTH}\\s+20\\d\\d$`, "i").test(i.s));
+  const vsLabel = vsItem ? vsItem.s.replace(/^vs\.?\s+/i, "") : null;
+  if (pickT && vsLabel) pickT.forEach((t, c) => { if (t >= 0 && costs[c][t] < 330) tiles[t].change = changeItems[c].pct; });
+  const mm = new RegExp(`^${MS_MONTH}\\s+(20\\d\\d)$`, "i").exec(monthItem.s);
+  const month = monthIdx(mm[1]), year = Number(mm[2]);
+  const last = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const window = { start: isoDay(year, month, 1), end: isoDay(year, month, last) };
+  const figures = tiles.map((x, i) => {
+    const f = { id: `f${i + 1}`, status: x.t.status, key: x.t.key, label: x.t.name, value: x.value, unit: x.t.unit, n: 0, small: false, reported: true, window };
+    if (x.change != null) f.changes = [{ pct: x.change, vs: vsLabel }];
+    return f;
+  });
+  const scope = its.map((i) => /^Includes\s+(.{3,80}?)\s+in\s+(.{3,80})$/.exec(i.s)).find(Boolean);
+  const geo = scope ? geographyFrom([scope[2]]) : { cities: [], zips: [], counties: [], drawnOnMap: false };
+  const types = scope && /^[A-Za-z0-9 ,.&'\/-]+$/.test(scope[1]) ? scope[1].replace(/^all\s+/i, "All ") : null;
+  const updated = /updated\s+(\d{1,2})\/(\d{1,2})\/(\d{2})\b/.exec(text);
+  const closed = (figures.find((f) => f.key === "count_closed") || {}).value;
+  const small = closed != null && closed < SMALL_SAMPLE_BELOW;
+  const warnings = [];
+  if (!geo.cities.length && !geo.zips.length && !geo.counties.length) warnings.push("I couldn't read the area this report covers. Check it before using it.");
+  if (small) warnings.push(`Only ${closed} closed ${closed === 1 ? "sale" : "sales"} in ${MONTH_NAMES[month - 1]} ${year}: a small sample. Topics will say so and will not claim a trend.`);
+  if (!vsLabel) warnings.push("I couldn't tell which month this report compares against, so its percent changes were left out.");
+  const facts = {
+    version: FACTS_VERSION, kind: "pdf", layout: "monthly_snapshot", reportDate: updated ? isoDay(2000 + Number(updated[3]), Number(updated[1]), Number(updated[2])) : null,
+    mlsSource: /Data provided by MetroList/i.test(text) ? "MetroList" : null, propertyTypes: types ? [types] : [], criteria: { closedSince: null },
+    geography: geo, period: { label: `${MONTH_NAMES[month - 1]} ${year}`, start: window.start, end: window.end, priorLabel: vsLabel, yearAgoLabel: null, months: 1 },
+    statuses: {}, figures,
+    sample: { total: closed != null ? closed : 0, closed: closed != null ? closed : 0, small, broadWindow: false, windowDays: last - 1 }, reportedTotal: null,
+    warnings, notes: ["Only the dashboard's figures were kept. Each percent change is against the earlier month the report names."],
+  };
+  return { facts };
+}
+
 /** analyzePages(pages, { items }) → { facts } | { error }  for PDF text. `items` = positioned text of page 1 (weekly dashboards only). */
 function analyzePages(pages, opts) {
   const list = Array.isArray(pages) ? pages : [String(pages || "")];
@@ -1200,6 +1414,10 @@ function analyzePages(pages, opts) {
   if (trend) return trend;
   const trendEmail = analyzeTrendEmail(list);
   if (trendEmail) return trendEmail;
+  const update = analyzeMarketUpdate(list);
+  if (update) return update;
+  const monthly = analyzeDomusMonthly(list, opts && opts.items);
+  if (monthly) return monthly;
   const weekly = analyzeWeeklySnapshot(list, opts && opts.items);
   if (weekly) return weekly;
   const summary = analyzeMarketSummary(list);
@@ -1215,7 +1433,7 @@ function analyzePages(pages, opts) {
 const ERROR_MESSAGES = {
   no_window_rows: "No listings in this file fall inside those dates. Choose a longer window or a report that covers them.",
   no_text: "This PDF has no readable text. It may be a scan or a photo. Download the report as a text PDF, CSV or Excel file from your MLS and try again.",
-  no_figures: "I couldn't find market figures in this file. A report with listing prices, closed prices or days on market works best.",
+  no_figures: "I couldn't find market figures in this file. I can read the MetroList Market Update (one page), Market Summary and TrendVision reports, Domus Analytics monthly and weekly infographics, CMAs, and CSV or Excel exports. If this is another kind of report, send me a copy and I'll add it.",
   no_header: "I couldn't find a header row with price or status columns in this file.",
   too_large: "This report has more detail than I can use. Try one property type or a shorter date range.",
   xls: "Old .xls files can't be read here. Save it as .xlsx or CSV from Excel and upload that.",
@@ -1264,6 +1482,6 @@ module.exports = {
   validateWindow, WINDOW_PRESETS, FEEDBACK_REASONS, cleanFeedback, feedbackContext,
   FACTS_VERSION, PERMISSION_VERSION, PERMISSION_TEXT, SMALL_SAMPLE_BELOW, BROAD_WINDOW_DAYS, MAX_RECORDS, STATUS_ORDER, STATUS_PLURAL,
   normStatus, parseMoney, parseDom, parseDate, parseSqft, median, mean, statsFromRecords, formatFigure, scopeSentence, scopeNote, displayFigures,
-  verifiedFromReport, attributionNotice, disclosureFrom, DISCLOSURE_RE, analyzeMarketSummary, analyzeTrendReport, analyzeTrendEmail, analyzeTrendTable, analyzeWeeklySnapshot, compareText, windowText, geographyCheck, recordsFromRows, extractLabeledMetrics, analyzeCmaPages, cmaMeta, buildFacts, analyzeRows, analyzePages,
+  verifiedFromReport, attributionNotice, disclosureFrom, DISCLOSURE_RE, analyzeMarketSummary, analyzeTrendReport, analyzeTrendEmail, analyzeTrendTable, analyzeWeeklySnapshot, analyzeMarketUpdate, analyzeDomusMonthly, classifyPlace, geographyFrom, compareText, windowText, geographyCheck, recordsFromRows, extractLabeledMetrics, analyzeCmaPages, cmaMeta, buildFacts, analyzeRows, analyzePages,
   errorMessage, summarize,
 };

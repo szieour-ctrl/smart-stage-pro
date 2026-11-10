@@ -106,7 +106,7 @@ async function readPdf(buf) {
   const out = await unpdf.extractText(pdf, { mergePages: false });
   const pages = (Array.isArray(out.text) ? out.text : [String(out.text || "")]).map((t) => String(t || "").slice(0, MAX_TEXT_CHARS));
   let items = null;
-  if (/Domus Analytics/i.test(pages.join("\n")) && /Weekly (?:Review|Infographic)/i.test(pages.join("\n"))) {
+  if (/Domus Analytics/i.test(pages.join("\n"))) {
     const page = await pdf.getPage(1);
     const h = page.getViewport({ scale: 1 }).height;
     const tc = await page.getTextContent();

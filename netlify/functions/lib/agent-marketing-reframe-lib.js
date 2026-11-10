@@ -15,6 +15,7 @@
 "use strict";
 
 const planLib = require("./agent-marketing-plan-lib");
+const rl3 = require("./agent-marketing-report-lib");
 const reportTopics = require("./agent-marketing-research-report-lib");
 const gate = require("./agent-marketing-gate");
 const intakeLib = require("./agent-marketing-intake");
@@ -119,7 +120,7 @@ function validateOne(entry, topic, ctx) {
   // Trend and time-frame claims: the same rules the report topics follow. The article's own trend signals count as support for what the article says.
   const reports = [...new Set(cited.map((c) => c.report))];
   const small = reports.some((r) => r.facts.sample && r.facts.sample.small) || cited.some((c) => c.fig.small);
-  const hasComparison = cited.some((c) => c.fig.prior != null || c.fig.yearAgo != null || (Array.isArray(c.fig.changes) && c.fig.changes.length > 0));
+  const hasComparison = cited.some((c) => c.fig.prior != null || c.fig.yearAgo != null || rl3.eligibleChanges(c.fig).length > 0);
   const articleSupport = (Array.isArray(topic.trendSignals) && topic.trendSignals.length > 0) || areaContext.length > 0;
   if (TREND_CLAIM.test(text) && (small || !(hasComparison || articleSupport))) return { problem: `topic ${topic.id}: describes a change or trend that the cited figures do not support` };
   if (/\btrend/i.test(text) && reports.some((r) => r.facts.period && r.facts.period.weekly)) return { problem: `topic ${topic.id}: calls one week of data a trend` };

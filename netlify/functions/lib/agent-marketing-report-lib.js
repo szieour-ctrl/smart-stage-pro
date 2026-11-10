@@ -198,7 +198,7 @@ function formatFigure(f) {
     default: return Math.round(f.value).toLocaleString("en-US");
   }
 }
-function windowText(w) { return w ? (w.start === w.end ? shortDate(w.start, true) : `${shortDate(w.start, true)} to ${shortDate(w.end, true)}`) : ""; }
+function windowText(w) { return w && w.start && !w.end ? `from ${shortDate(w.start, true)}` : w ? (w.start === w.end ? shortDate(w.start, true) : `${shortDate(w.start, true)} to ${shortDate(w.end, true)}`) : ""; }
 
 function listText(a) { return a.length <= 1 ? a.join("") : a.length === 2 ? `${a[0]} and ${a[1]}` : `${a.slice(0, -1).join(", ")}, and ${a[a.length - 1]}`; }
 function placesOf(facts) {
@@ -290,6 +290,8 @@ function scopeNote(facts) {
  * " (up 12.1%)" for counts, prices, days and months; " (up 1.2 points)" for a figure that is itself a percent. Rounded to one decimal.
  * The text becomes part of the verified figure, so a script may quote it exactly; any other percentage still blocks.
  */
+/** The printed changes a consumer may describe: a change marked likeWithLike:false (for example a partial year's count against a full year) is never offered. */
+function eligibleChanges(f) { return (f && Array.isArray(f.changes) ? f.changes : []).filter((c) => c && Number.isFinite(c.pct) && c.likeWithLike !== false); }
 function changeText(f, earlier, which) {
   const now = Number(f && f.value), then = Number(earlier);
   if (!Number.isFinite(now) || !Number.isFinite(then)) return "";
@@ -314,7 +316,7 @@ function compareText(facts, f) {
   if (f.yearAgo != null) bits.push(`${at(f.yearAgo)} in ${f.yearAgoLabel || p.yearAgoLabel}${changeText(f, f.yearAgo, "yearAgo")}`);
   const vs = bits.length ? `vs ${bits.join(" and ")}` : "";
   // Reports that print a percent change instead of the earlier value (the weekly dashboards): "down 1.8% from the week ending October 10, 2026".
-  const ch = (Array.isArray(f.changes) ? f.changes : []).map((c) => `${c.pct < 0 ? "down" : c.pct > 0 ? "up" : "unchanged"}${c.pct === 0 ? "" : ` ${Math.abs(c.pct)}%`} from ${c.vs}`);
+  const ch = eligibleChanges(f).map((c) => `${c.pct < 0 ? "down" : c.pct > 0 ? "up" : "unchanged"}${c.pct === 0 ? "" : ` ${Math.abs(c.pct)}%`} from ${c.vs}`);
   const trend = f.trend6 ? `the report's 6-month trend: ${f.trend6}` : "";
   return [vs, ...ch, trend].filter(Boolean).join("; ");
 }
@@ -1438,6 +1440,11 @@ function analyzePages(pages, opts) {
   const list = Array.isArray(pages) ? pages : [String(pages || "")];
   const text = list.join("\n");
   if (text.replace(/\s+/g, "").length < 150) return { error: "no_text" };
+  // Domus Market Review (all five periods), opt-in until it is wired into intake: { marketReview: true, items, scope }. Default behavior is unchanged.
+  if (opts && opts.marketReview) {
+    const review = require("./agent-marketing-market-review-lib").readMarketReview(list, { items: opts.items, scope: opts.scope, propertyTypes: opts.propertyTypes, verifiedDataThrough: opts.verifiedDataThrough });
+    if (review) return review;
+  }
   const trend = analyzeTrendReport(list);
   if (trend) return trend;
   const trendEmail = analyzeTrendEmail(list);
@@ -1507,7 +1514,7 @@ function summarize(facts, opts) {
 }
 
 module.exports = {
-  validateWindow, WINDOW_PRESETS, FEEDBACK_REASONS, cleanFeedback, feedbackContext,
+  validateWindow, eligibleChanges, WINDOW_PRESETS, FEEDBACK_REASONS, cleanFeedback, feedbackContext,
   FACTS_VERSION, PERMISSION_VERSION, PERMISSION_TEXT, SMALL_SAMPLE_BELOW, BROAD_WINDOW_DAYS, MAX_RECORDS, STATUS_ORDER, STATUS_PLURAL,
   normStatus, parseMoney, parseDom, parseDate, parseSqft, median, mean, statsFromRecords, formatFigure, scopeSentence, scopeNote, displayFigures,
   verifiedFromReport, attributionNotice, disclosureFrom, DISCLOSURE_RE, analyzeMarketSummary, analyzeTrendReport, analyzeTrendEmail, analyzeTrendTable, analyzeWeeklySnapshot, analyzeMarketUpdate, analyzeDomusMonthly, classifyPlace, geographyFrom, compareText, windowText, geographyCheck, recordsFromRows, extractLabeledMetrics, analyzeCmaPages, cmaMeta, buildFacts, analyzeRows, analyzePages,

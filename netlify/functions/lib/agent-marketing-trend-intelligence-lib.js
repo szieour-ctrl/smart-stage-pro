@@ -44,7 +44,8 @@ const FLAT_BELOW = { pct: 0.5, default: 2.5 };
 function changeOf(f, basis) {
   if (!f) return null;
   if (f.printed && Number.isFinite(f.printed[basis])) return { pct: f.printed[basis], points: f.unit === "pct" };
-  if (basis === "prior" && Array.isArray(f.changes) && f.changes.length) return { pct: f.changes[0].pct, points: false, vs: f.changes[0].vs };
+  const elig = reportLib.eligibleChanges(f);
+  if (basis === "prior" && elig.length) return { pct: elig[0].pct, points: false, vs: elig[0].vs, kind: elig[0].kind };
   const earlier = f[basis];
   if (earlier == null || !Number.isFinite(Number(earlier))) return null;
   const now = Number(f.value), then = Number(earlier);
@@ -78,9 +79,9 @@ const balanceOf = (months) => (months < 3 ? "sellers" : months > 6 ? "buyers" : 
 function basesFor(facts) {
   const p = (facts && facts.period) || {};
   const out = [];
-  const has = (k) => (facts.figures || []).some((f) => (k === "prior" ? f.prior != null || (f.changes && f.changes.length) : f[k] != null || (f.printed && f.printed[k] != null)));
+  const has = (k) => (facts.figures || []).some((f) => (k === "prior" ? f.prior != null || reportLib.eligibleChanges(f).length > 0 : f[k] != null || (f.printed && f.printed[k] != null)));
   if (has("yearAgo")) out.push({ type: "yearAgo", label: p.yearAgoLabel || "a year earlier" });
-  if (has("prior")) out.push({ type: "prior", label: p.priorLabel || ((facts.figures || []).find((f) => f.changes && f.changes.length) || { changes: [{ vs: "the earlier period" }] }).changes[0].vs });
+  if (has("prior")) out.push({ type: "prior", label: p.priorLabel || (((facts.figures || []).map((f) => reportLib.eligibleChanges(f)).find((e) => e.length) || [{ vs: "the earlier period" }])[0]).vs });
   return out;
 }
 
@@ -348,6 +349,7 @@ function analyze(ctx, opts) {
     if (r.geoStatus === "different" && r.geoMessage) caveats.push(r.geoMessage);
     if (r.facts.sample && r.facts.sample.small) caveats.push("The report has a small sample of closed sales: describe it as a snapshot, not a trend.");
     if (r.facts.period && r.facts.period.weekly) caveats.push("The report covers one week: describe the week and its changes, never a trend.");
+    if (r.facts.period && r.facts.period.partial) caveats.push(`The report covers only part of the period (${r.facts.period.label}): never describe it as a completed ${r.facts.period.kind === "year" ? "year" : "period"}, and never compare its counts with a full prior period.`);
   });
   const usable = obs.length >= 2;
   return { version: VERSION, usable, reports: view, character: usable ? characterOf(obs) : null, observations: obs, contrasts, interpretations, caveats: [...new Set(caveats)] };

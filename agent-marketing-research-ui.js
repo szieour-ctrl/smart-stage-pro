@@ -340,6 +340,55 @@
         fr.readAsDataURL(file);
       });
     }
+    // The project's chosen place, sent only so the read-back form can PRE-FILL a suggestion. It is never an attestation: the agent must still confirm.
+    function uploadGeography() {
+      try { var q = collect().geography; return q && q.name ? q : undefined; } catch (e) { return undefined; }
+    }
+    var SCOPE_TYPES = [["city", "One city"], ["cities", "Several cities combined"], ["county", "A county"], ["zips", "ZIP code(s)"], ["custom", "Another area"]];
+    function listIn(a) { return (a || []).map(esc).join(", "); }
+    // Two zones: what the DOCUMENT reported, and what the AGENT attests. The second zone is never filled in silently.
+    function renderReadBack(u) {
+      var box = $("upReadBack"), rv = (u.summary || {}).review;
+      if (!rv) { box.classList.add("hidden"); box.innerHTML = ""; return; }
+      var r = rv.reported, a = rv.attested, done = u.status === "confirmed", need = rv.needed || [];
+      var sel = a.geography.selected, sug = (!sel && a.geography.suggested) || null, pts = a.propertyTypes.selected, psug = (!pts && a.propertyTypes.suggested) || null;
+      var type = (sel || sug || {}).type || "city", names = (sel || sug || {}).names || [];
+      var h = '<div style="margin-top:12px;padding:10px;border:1px solid #d9d4c9;border-radius:8px"><div style="font-weight:700;font-size:0.9rem">Reported by the document</div><ul style="margin:6px 0 0 18px;padding:0;font-size:0.85rem">';
+      h += "<li>Period: <b>" + esc(r.period.label) + "</b>" + (r.period.partial ? " (part of a year)" : "") + "</li>";
+      h += (r.comparisons || []).map(function (c) { return "<li>" + esc(c.printed) + ' <span class="hint">(' + esc(c.meaning) + (c.eligibility.note ? ". " + esc(c.eligibility.note) : "") + ")</span></li>"; }).join("");
+      h += "<li>Header says: " + esc(r.header.geography || "no area") + (r.header.geographyUnreliable ? ' <span class="hint">(this header reads the same on every export, so it is not used to decide the area)</span>' : "") + "; property types: " + esc(r.header.propertyTypes || "none shown") + "</li>";
+      if ((r.notPrinted || []).length) h += '<li class="hint">Not printed in this report: ' + r.notPrinted.map(function (n) { return esc(n.key); }).join(", ") + "</li>";
+      if ((r.unread || []).length) h += '<li class="hint">Could not read: ' + r.unread.map(function (n) { return esc(n.label || n); }).join(", ") + "</li>";
+      h += "</ul></div>";
+      h += '<div style="margin-top:10px;padding:10px;border:1px solid #b9c9b9;border-radius:8px;background:#f4f8f4"><div style="font-weight:700;font-size:0.9rem">Confirmed by you</div><div class="hint">' + esc(a.note) + "</div>";
+      if (done) {
+        h += '<div style="margin-top:6px;font-size:0.88rem">Area: <b>' + esc(a.geography.areaLabel || "") + "</b>" + (a.geography.scopeKind === "combined" ? " (combined market: never stated for one place alone)" : "") + "<br>Property types: <b>" + listIn(pts && pts.names) + "</b>" + (a.dataThrough ? "<br>Data through: <b>" + esc(a.dataThrough.date) + "</b> " + (a.dataThrough.provenance === "subscriber_attested" ? '<span class="hint">(your date; not independently verified)</span>' : '<span class="hint">(' + (a.dataThrough.provenance === "cross_report" ? "supported by your year-to-date report" : "printed in the report") + ")</span>") : "") + "</div>";
+      } else {
+        if (a.carriedFrom) h += '<div class="hint" style="margin-top:6px">Carried forward from ' + esc(a.carriedFrom) + ". Change it below if this report is different.</div>";
+        else if (sug || psug) h += '<div class="hint" style="margin-top:6px">Suggested from your project. Check it, change it if needed, then confirm.</div>';
+        h += '<label class="lbl" for="rbType">Area this report covers</label><select id="rbType">' + SCOPE_TYPES.map(function (t) { return '<option value="' + t[0] + '"' + (t[0] === type ? " selected" : "") + ">" + t[1] + "</option>"; }).join("") + "</select>";
+        h += '<input type="text" id="rbNames" maxlength="200" placeholder="Name(s), separated by commas" value="' + esc(names.join(", ")) + '" style="margin-top:6px">';
+        h += '<label class="lbl" for="rbTypes">Property types this report covers</label><input type="text" id="rbTypes" maxlength="200" placeholder="For example: Single Family, Condo" value="' + esc(((pts && pts.names) || psug || []).join(", ")) + '">';
+        if (need.indexOf("dataThrough") >= 0) h += '<label class="lbl" for="rbThrough">Last date this report\'s data covers</label><input type="date" id="rbThrough" value="' + esc(a.dataThrough ? a.dataThrough.date : "") + '"><div class="hint">The report does not say. A date you enter is recorded as yours, not verified.</div>';
+        if (need.indexOf("conflicts") >= 0 || (a.conflicts || []).length) h += '<label class="choice" style="margin-top:8px"><input type="checkbox" id="rbAck"><span>I have read the differences noted above and my selection is right.</span></label>';
+        if (!a.carriedFrom || a.geography.status !== "ok") h += '<label class="choice" style="margin-top:8px"><input type="checkbox" id="rbAttest"><span>I confirm these describe this report. I understand they are my statements and are not checked against the file.</span></label>';
+      }
+      h += "</div>";
+      box.innerHTML = h; box.classList.remove("hidden");
+    }
+    function readBackPayload(u) {
+      var rv = (u.summary || {}).review;
+      if (!rv || u.status === "confirmed") return {};
+      var carried = !!(rv.attested && rv.attested.carriedFrom), out = {};
+      if ($("rbType")) {
+        if (!carried && $("rbAttest") && !$("rbAttest").checked) return { error: "Tick the box to confirm the area and property types are yours." };
+        out.scope = { type: $("rbType").value, names: $("rbNames").value.split(",").map(function (x) { return x.trim(); }).filter(Boolean) };
+        out.propertyTypes = $("rbTypes").value.split(",").map(function (x) { return x.trim(); }).filter(Boolean);
+        if ($("rbThrough") && $("rbThrough").value) out.dataThrough = $("rbThrough").value;
+        if ($("rbAck")) out.acknowledgeConflicts = $("rbAck").checked;
+      }
+      return out;
+    }
     function renderReview(u) {
       var s = u.summary || {};
       $("upScope").textContent = (s.scopeSentence || "") + " Correct?";
@@ -353,6 +402,7 @@
       $("upNo").textContent = u.status === "confirmed" ? "Remove this report" : "Not right, remove";
       var rows = s.layout === "cma_table" || s.layout === "listing_table";
       $("upWindowBox").classList.toggle("hidden", !rows);
+      renderReadBack(u);
       $("upReview").classList.remove("hidden");
     }
     // The date window for a report that has dated rows (a CMA or an MLS export). Trend reports are monthly figures and have none.
@@ -378,7 +428,7 @@
       $("attestMsg").textContent = "Reading your report…";
       try {
         var b64 = await toBase64(file);
-        var r = await api(REPORT, "POST", "", { action: "upload", projectId: state.projectId, fileName: file.name, fileBase64: b64, permission: true, window: state.pendingWindow || null });
+        var r = await api(REPORT, "POST", "", { action: "upload", projectId: state.projectId, fileName: file.name, fileBase64: b64, permission: true, window: state.pendingWindow || null, geography: uploadGeography() });
         if (!r.ok) { state.upload = null; $("upOk").checked = false; $("attestMsg").textContent = (r.json && r.json.error) || "Could not read that file."; return; }
         state.upload = { id: r.json.upload.id, status: r.json.upload.status, summary: r.json.upload.summary };
         state.pendingWindow = null;
@@ -427,9 +477,15 @@
       var u = state.upload; if (!u || !u.id) return;
       $("upMsg").textContent = "";
       try {
-        var r = await api(REPORT, "POST", "", { action: "confirm", uploadId: u.id, correct: true });
-        if (!r.ok) { $("upMsg").textContent = (r.json && r.json.error) || "Could not confirm."; return; }
-        u.status = "confirmed"; renderReview(u); syncUpload();
+        var extra = readBackPayload(u);
+        if (extra.error) { $("upMsg").textContent = extra.error; return; }
+        var r = await api(REPORT, "POST", "", Object.assign({ action: "confirm", uploadId: u.id, correct: true }, extra));
+        if (!r.ok) {
+          $("upMsg").textContent = (r.json && r.json.error) || "Could not confirm.";
+          if (r.json && r.json.review) { u.summary = Object.assign({}, u.summary, { review: r.json.review }); renderReadBack(u); }
+          return;
+        }
+        u.status = "confirmed"; if (r.json && r.json.upload) { u.summary = r.json.upload.summary; } renderReview(u); syncUpload();
         say("upMsg", "Report confirmed.", "ok");
       } catch (e) { $("upMsg").textContent = e.message; }
     });

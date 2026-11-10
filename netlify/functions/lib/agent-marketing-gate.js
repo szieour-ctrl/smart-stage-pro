@@ -197,7 +197,15 @@ function verifiedFromTopic(topic, env) {
     if (e.location) addresses.push(e.location);
   }
   const clean = texts.filter((x) => typeof x === "string" && x.trim()).map(norm);
-  return clean.length ? { texts: clean, addresses: addresses.map(norm), reportNotice, precedence, reportFirst, ...(b1Claims ? { b1: b1Claims } : {}) } : null;
+  // Scope the agent's Market Review figures were frozen with (area, combined or not, partial period, development). See scanReportScope.
+  const scopedFigs = (Array.isArray(t.reportFigures) ? t.reportFigures : []).filter((f) => f && f.areaLabel && typeof f.text === "string");
+  const scope = scopedFigs.length ? {
+    figures: scopedFigs.map((f) => ({ areaLabel: String(f.areaLabel), scopeKind: String(f.scopeKind || ""), role: String(f.role || ""), nums: [...numberTokens(String(f.display || ""))].filter((n) => !/^(?:19|20)\d\d$/.test(n)), partial: f.partialPeriod === true, partialComparison: f.partialComparison === true })),
+    places: [...new Set((Array.isArray(t.reportScope) ? t.reportScope : []).flatMap((r) => (Array.isArray(r.places) ? r.places : [])).map(String))],
+    combined: (Array.isArray(t.reportScope) ? t.reportScope : []).some((r) => r.scopeKind !== "exact"),
+    development: String((Array.isArray(t.reportScope) ? t.reportScope : []).map((r) => r.development).filter(Boolean)[0] || ""),
+  } : null;
+  return clean.length ? { texts: clean, addresses: addresses.map(norm), reportNotice, precedence, reportFirst, ...(scope ? { scope } : {}), ...(b1Claims ? { b1: b1Claims } : {}) } : null;
 }
 
 /** verifiedFromProject(project) → verified facts for a stored project row, or null (any other template, no topic). */
@@ -285,6 +293,35 @@ function scanSpecificHome(text, field, addresses, blocks, sourcedFacts) {
       else blocks.push({ rule: r.rule, field, match: snippet(m), message: r.message });
       if (m[0].length === 0) re.lastIndex++;
     }
+  }
+}
+
+// Phase 2 (development switch): a Market Review's statistic keeps its geographic scope and reporting period. The topic was frozen with each figure's
+// area, whether it is a combined/county (broader-market) figure and whether its period is partial. This check is structural: it looks only at
+// sentences that state one of those figures. It does not forbid comparisons the report supports, only the three misstatements below.
+const COMBINED_WORDS = /\b(combined|together|across|overall|region(?:al)?|market[- ]wide|countywide|county|area[- ]wide|both|all of)\b/i;
+const FULL_YEAR_WORDS = /\b(?:full|whole|entire|complete|completed)\s+year\b|\byear[- ]end\b|\bfor\s+the\s+year\b|\bthe\s+year\s+(?:ended|closed|finished)\b/i;
+const YOY_WORDS = /\byear[- ]over[- ]year\b|\byoy\b|\bcompared\s+(?:to|with)\s+(?:last\s+year|the\s+(?:previous|prior)\s+year|20\d\d)\b|\bvs\.?\s+(?:last\s+year|20\d\d)\b|\bfrom\s+last\s+year\b/i;
+function scanReportScope(text, field, scope, blocks) {
+  if (!scope || !scope.figures.length) return;
+  const sentences = norm(text).split(/(?<=[.!?])\s+/);
+  const esc = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  for (const sent of sentences) {
+    const nums = numberTokens(sent);
+    const hit = scope.figures.filter((f) => f.nums.some((n) => nums.has(n)));
+    if (!hit.length) continue;
+    const low = sent.toLowerCase();
+    if (scope.development && low.includes(scope.development.toLowerCase()) && !COMBINED_WORDS.test(sent) && !/\b(market|area|citywide|city[- ]wide)\b/i.test(sent))
+      blocks.push({ rule: "report_scope_development", field, match: snippet([sent.slice(0, 80)]), message: `${hit[0].areaLabel} is a broader market. Its figures are not statistics for ${scope.development}. Name the market as the source of the figure, not the development.` });
+    else if (scope.combined && scope.places.length > 1) {
+      const named = scope.places.filter((pl) => new RegExp(`\\b${esc(pl.toLowerCase())}\\b`).test(low));
+      if (named.length === 1 && !COMBINED_WORDS.test(sent))
+        blocks.push({ rule: "report_scope_constituent", field, match: snippet([sent.slice(0, 80)]), message: `This figure covers ${hit[0].areaLabel}, not ${named[0]} alone. Say it describes the combined market.` });
+    }
+    if (hit.some((f) => f.partial) && FULL_YEAR_WORDS.test(sent))
+      blocks.push({ rule: "report_partial_year", field, match: snippet([sent.slice(0, 80)]), message: "This report covers only part of the year. Do not describe its figures as a full year." });
+    else if (hit.some((f) => f.partial && f.partialComparison) && YOY_WORDS.test(sent))
+      blocks.push({ rule: "report_partial_year", field, match: snippet([sent.slice(0, 80)]), message: "This figure's year is still in progress, so its count is not comparable with a full prior year. Describe only the comparison the report itself supports." });
   }
 }
 
@@ -388,6 +425,7 @@ function evaluate(input) {
   const vIn = i.template === VERIFIED_TEMPLATE && i.verified && typeof i.verified === "object" ? i.verified : null;
   const vTexts = vIn && Array.isArray(vIn.texts) ? vIn.texts.filter((x) => typeof x === "string" && x.trim()).map(norm) : [];
   const vAddresses = vIn && Array.isArray(vIn.addresses) ? vIn.addresses.filter((x) => typeof x === "string" && x.trim()).map(norm) : [];
+  const reportScope = vIn && vIn.scope ? vIn.scope : null;
   const precedence = vIn && Array.isArray(vIn.precedence) ? vIn.precedence.filter((p) => p && Array.isArray(p.supersededNumbers)) : [];
   const verifiedText = vTexts.join(" \n ");
   const verifiedLower = verifiedText.toLowerCase();
@@ -422,7 +460,7 @@ function evaluate(input) {
     // (the agent's own intake answers are theirs and are not held to them).
     if (market && !field.startsWith("intake.") && field !== "cta") {
       scanMarketClaims(text, field, ctx, blocks, sourcedFacts, agentSuppliedClaims, editorial ? warnings : null);
-      if (editorial) { scanReportPriority(text, field, precedence, blocks); b1Scan(text, field); }
+      if (editorial) { scanReportPriority(text, field, precedence, blocks); scanReportScope(text, field, reportScope, blocks); b1Scan(text, field); }
     }
   }
 
@@ -444,7 +482,7 @@ function evaluate(input) {
     scan(text, field, FAIR_HOUSING_SOFT, warnings);
     if (market) {
       scanMarketClaims(text, field, ctx, blocks, sourcedFacts, agentSuppliedClaims, editorial ? warnings : null);
-      if (editorial) { scanReportPriority(text, field, precedence, blocks); b1Scan(text, field); }
+      if (editorial) { scanReportPriority(text, field, precedence, blocks); scanReportScope(text, field, reportScope, blocks); b1Scan(text, field); }
     } else {
       for (const r of CLAIM_RULES) {
         const t = norm(text);
@@ -494,4 +532,4 @@ function explain(result) {
   return `${first.message}${where}${first.match ? ` — “${first.match}”` : ""}${more}. Agent Marketing is for your expertise and services; use a Listing Reel to advertise a specific home.`;
 }
 
-module.exports = { testEvaluation, GATE_VERSION, ATTESTATION_VERSION, ATTESTATION_TEXT, TEMPLATES, ENABLED_TEMPLATES, evaluate, explain, verifiedFromTopic, verifiedFromProject };
+module.exports = { scanReportScope, testEvaluation, GATE_VERSION, ATTESTATION_VERSION, ATTESTATION_TEXT, TEMPLATES, ENABLED_TEMPLATES, evaluate, explain, verifiedFromTopic, verifiedFromProject };

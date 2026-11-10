@@ -65,7 +65,7 @@ function check(name, f, want) {
     console.log(`\n=== ${name}`);
     let pdf;
     try { pdf = await read.readPdf(fs.readFileSync(file)); } catch (e) { console.log("  could not open:", e.code || e.message); bad++; continue; }
-    const r = mr.readMarketReview(pdf.pages, { items: pdf.items, scope, propertyTypes: types && types.confirmed, verifiedDataThrough: throughArg || undefined });
+    const r = mr.readMarketReview(pdf.pages, { items: pdf.items, scope, propertyTypes: types && types.confirmed, dataThrough: throughArg || undefined });
     if (!r) { console.log("  NOT RECOGNIZED as a Market Review. Header items:", (pdf.items || []).filter((i) => i.y < 140).map((i) => i.s).slice(0, 12)); bad++; continue; }
     if (r.error) { console.log("  ERROR:", r.error, r.detail || ""); bad++; continue; }
     const f = r.facts; parsed.push({ name, f });

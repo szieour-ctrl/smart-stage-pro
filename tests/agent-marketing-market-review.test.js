@@ -12,6 +12,9 @@ const get = (f, k) => f.figures.find((x) => x.key === k);
 const printed = (fig) => fig.comparisons.map((c) => c.printed);
 const scopeOf = (sel) => { const r = mr.confirmScope(sel); assert.ok(r.ok, JSON.stringify(r)); return r.confirmed; };
 const ROSEVILLE = scopeOf({ type: "city", names: ["Roseville"] });
+const SF = mr.confirmPropertyTypes(["Single Family Homes"]).confirmed;
+// a fully attested read (area + property types), the only kind Trend Intelligence accepts
+const attested = (f, scope, dataThrough) => mr.readMarketReview(f.pages, { items: f.items, scope: scope || ROSEVILLE, propertyTypes: SF, dataThrough }).facts;
 
 // ── 1. Every printed figure, with its exact printed comparison labels ───────────────────────────────────────────────────
 test("weekly: 8 figures, weeks of supply, comparisons keep the printed week-ending labels", () => {
@@ -63,21 +66,27 @@ test("yearly 2026: flagged partial, values equal the year-to-date report, and th
   assert.strictEqual(y.period.partial, true);
   assert.strictEqual(y.period.end, null, "December 31 is never claimed for a year in progress");
   assert.strictEqual(y.period.label, "2026 \u2014 Partial Year", "the update date is not proof of the last day covered");
-  assert.deepStrictEqual(y.period.coverageDate, { updated: "2026-11-09", dataThrough: null, verified: false, note: "Date the report was updated; the last day its data covers is not verified." });
+  assert.deepStrictEqual(y.period.coverage, { through: null, provenance: null, independentlyVerified: false, updated: "2026-11-09" }, "the update date is not a coverage date");
+  assert.ok(y.confirmation.needed.includes("dataThrough"));
   assert.deepStrictEqual(y.period.comparisons.map((c) => c.kind), ["earlier_period", "full_prior_year"]);
   assert.ok(y.warnings.some((w) => /only part of the year/.test(w) && /not a full-year decline/.test(w)));
   assert.deepStrictEqual(mr.crossCheckPeriods(y, t), { relation: "yearly_equals_year_to_date", yearlyIsPartial: true, valuesCoverThrough: "2026-10-31" });
   assert.strictEqual(lib.attributionNotice(y), null, "no end date is invented for the MetroList notice");
 });
 
-test("the 'Year to Date (through ...)' label is used only for a data-through date the caller has verified", () => {
+test("coverage date hierarchy: subscriber-attested date labels the period but is never called verified; an impossible date is refused", () => {
   const f = fx.yearly();
-  const ok = mr.readMarketReview(f.pages, { items: f.items, verifiedDataThrough: "2026-11-09" }).facts;
+  const ok = mr.readMarketReview(f.pages, { items: f.items, dataThrough: "2026-11-09" }).facts;
   assert.strictEqual(ok.period.label, "2026 Year to Date (through November 9, 2026)");
-  assert.deepStrictEqual([ok.period.coverageDate.dataThrough, ok.period.coverageDate.verified], ["2026-11-09", true]);
-  const none = mr.readMarketReview(f.pages, { items: f.items, verifiedDataThrough: "2026-12-30" }).facts;     // after the update date: cannot be verified
-  assert.strictEqual(none.period.label, "2026 \u2014 Partial Year");
-  assert.strictEqual(none.period.coverageDate.dataThrough, null);
+  assert.deepStrictEqual([ok.period.coverage.through, ok.period.coverage.provenance, ok.period.coverage.independentlyVerified], ["2026-11-09", "subscriber_attested", false]);
+  assert.strictEqual(ok.period.end, null, "the report's own end date is still not invented");
+  assert.strictEqual(ok.period.disclosureEnd, "2026-11-09");
+  const bad = mr.readMarketReview(f.pages, { items: f.items, dataThrough: "2026-12-30" });
+  assert.strictEqual(bad.error, "bad_data_through");
+  assert.strictEqual(bad.facts.period.label, "2026 \u2014 Partial Year");
+  assert.strictEqual(bad.facts.period.coverage.through, null);
+  const wrongYear = mr.readMarketReview(f.pages, { items: f.items, dataThrough: "2025-10-31" });
+  assert.strictEqual(wrongYear.error, "bad_data_through");
 });
 
 test("a yearly report updated after the year ended is complete", () => {
@@ -250,7 +259,7 @@ test("property type: the header value is shown as printed and a subscriber confi
 test("Trend Intelligence and every consumer drop a change marked likeWithLike:false, whoever produced it", () => {
   const rr = require("../netlify/functions/lib/agent-marketing-research-report-lib");
   const ti = require("../netlify/functions/lib/agent-marketing-trend-intelligence-lib");
-  const f = JSON.parse(JSON.stringify(facts(fx.yearly(), mr.confirmPropertyTypes(["Single Family Homes"]).ok && ROSEVILLE)));
+  const f = JSON.parse(JSON.stringify(attested(fx.yearly(), null, "2026-10-31")));
   // put the ineligible change back where a producer might have left it
   const closed = get(f, "count_closed");
   closed.changes = [{ pct: -15.4, vs: "Yr ending 2025", printed: "vs Yr ending 2025", kind: "full_prior_year", likeWithLike: false }];
@@ -261,14 +270,14 @@ test("Trend Intelligence and every consumer drop a change marked likeWithLike:fa
   const a = ti.analyze(ctx);
   assert.ok(!/15\.4|14\.1/.test(JSON.stringify(a)));
   assert.ok(a.caveats.some((c) => /only part of the period/.test(c) && /never describe it as a completed year/.test(c)), JSON.stringify(a.caveats));
-  assert.match(rr.userMessage(ctx, 3, "2026-11-10"), /only part of the period \(2026 \u2014 Partial Year\)/);
+  assert.match(rr.userMessage(ctx, 3, "2026-11-10"), /only part of the period \(2026 Year to Date \(through October 31, 2026\)\)/);
   assert.ok(!/15\.4|14\.1/.test(rr.userMessage(ctx, 3, "2026-11-10")), "the model prompt never carries the full-year comparison of a count");
 });
 
 test("Trend Intelligence reads comparison kinds: the prior-period change leads for a complete report, and nothing is described as year over year for Q3 2023", () => {
   const rr = require("../netlify/functions/lib/agent-marketing-research-report-lib");
   const ti = require("../netlify/functions/lib/agent-marketing-trend-intelligence-lib");
-  const f = facts(fx.quarterly(), ROSEVILLE);
+  const f = attested(fx.quarterly());
   const a = ti.analyze(rr.buildContext([{ id: "u1", facts: f }], { geography: { type: "city", name: "Roseville", label: "Roseville" } }));
   assert.ok(a.observations.length >= 3);
   assert.ok(a.observations.every((o) => o.basis.label === "Q2 2026"));
@@ -358,7 +367,7 @@ test("the original positioned text and page text are not retained in the facts b
 test("partial yearly: counts compared with the FULL prior year are kept as printed but not offered as changes, so Trend Intelligence cannot call them a decline", () => {
   const rr = require("../netlify/functions/lib/agent-marketing-research-report-lib");
   const ti = require("../netlify/functions/lib/agent-marketing-trend-intelligence-lib");
-  const f = facts(fx.yearly(), ROSEVILLE);
+  const f = attested(fx.yearly(), null, "2026-10-31");
   const closed = get(f, "count_closed");
   assert.deepStrictEqual(closed.comparisons.map((c) => [c.printed, c.pct, c.likeWithLike]), [["vs Yr ending 2016", -35.1, true], ["vs Yr ending 2025", -15.4, false]]);
   assert.ok(!(closed.changes || []).some((c) => c.printed === "vs Yr ending 2025"));

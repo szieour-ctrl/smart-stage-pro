@@ -131,7 +131,7 @@ async function readReport(bytes, fileName, opts) {
   if (k.error) return { ok: false, code: k.error, message: k.error === "too_big" ? "That file is larger than 4 MB. Try one property type or a shorter date range." : lib.errorMessage(k.error) };
   try {
     let result;
-    if (k.kind === "pdf") { const pdf = await withTimeout(readPdf(buf), READ_TIMEOUT_MS); result = lib.analyzePages(pdf.pages, { items: pdf.items, window: opts && opts.window }); }
+    if (k.kind === "pdf") { const pdf = await withTimeout(readPdf(buf), READ_TIMEOUT_MS); result = lib.analyzePages(pdf.pages, { items: pdf.items, window: opts && opts.window, marketReview: !!(opts && opts.marketReview), suggestions: opts && opts.suggestions, scope: opts && opts.scope, propertyTypes: opts && opts.propertyTypes }); }
     else if (k.kind === "xlsx") result = lib.analyzeRows(await withTimeout(readXlsxRows(buf), READ_TIMEOUT_MS), "xlsx", { window: opts && opts.window });
     else result = lib.analyzeRows(parseCsv(buf.toString("utf8")), "csv", { window: opts && opts.window });
     if (result.error) return { ok: false, code: result.error, message: lib.errorMessage(result.error) };

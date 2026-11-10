@@ -224,7 +224,7 @@ async function enrich({ row, fields, uploads, userId, env, deps }) {
   let reportFigures = [], ctx = null, reportSource = null, trend = null;
   if (mode === "article_report") {
     const reportTopics = require("./agent-marketing-research-report-lib");
-    try { ctx = reportTopics.buildContext(uploads, { geography: row.geography }); reportFigures = [...ctx.figures.values()].slice(0, 24).map((cf) => ({ ref: cf.ref, text: reportTopics.figureText(cf) }));
+    try { ctx = reportTopics.buildContext(uploads, { geography: row.geography }); reportFigures = [...ctx.figures.values()].slice(0, 24).map((cf) => ({ ref: cf.ref, text: reportTopics.scopedFigureText(cf) }));
       // The shared Trend Intelligence analysis names figures by the same R<n> ids B2 already uses, so a candidate cites one id space.
       const rid = new Map(reportFigures.map((f, i) => [f.ref, `R${i + 1}`]));
       trend = ti.analyze(ctx, { refOf: (r) => rid.get(r) || r }); } catch (x) { ctx = null; trend = null; }

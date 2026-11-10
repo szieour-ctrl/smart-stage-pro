@@ -20,6 +20,7 @@ const am = require("./lib/agent-marketing-lib");
 const rl = require("./lib/agent-marketing-research-lib");
 const lib = require("./lib/agent-marketing-report-lib");
 const readLib = require("./lib/agent-marketing-report-read-lib");
+const mr = require("./lib/agent-marketing-market-review-lib");
 
 const headers = { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json", "Cache-Control": "no-store" };
 const reply = (statusCode, obj) => ({ statusCode, headers, body: JSON.stringify(obj) });
@@ -36,6 +37,12 @@ async function loadProject(id, userId) {
   const row = Array.isArray(r.data) ? r.data[0] : null;
   if (!row) return { error: reply(404, { error: "Project not found" }) };
   return { row };
+}
+
+// Other reports in this project, for cross-report support of a partial year's coverage date (a matching year-to-date report).
+async function companionReports(projectId, userId, exceptId) {
+  const r = await supabase("GET", "agent_marketing_uploads", null, `?project_id=eq.${projectId}&user_id=eq.${userId}&select=id,facts,status&limit=10`);
+  return (Array.isArray(r.data) ? r.data : []).filter((x) => x.id !== exceptId && x.facts && x.facts.layout === "market_review").map((x) => x.facts);
 }
 
 async function loadUpload(id, userId) {
@@ -97,7 +104,25 @@ exports.handler = async (event) => {
       }
       if (b.correct !== true) return reply(400, { error: "Say whether the summary is correct." });
       const now = new Date().toISOString();
-      const saved = await supabase("PATCH", "agent_marketing_uploads", { status: "confirmed", confirmed_at: now, updated_at: now }, `?id=eq.${up.id}&user_id=eq.${userId}`);
+      const patch = { status: "confirmed", confirmed_at: now, updated_at: now };
+      if (up.facts && up.facts.layout === "market_review") {
+        // Development switch: a Market Review only becomes usable once the subscriber has attested the area and property types. Those are the
+        // subscriber's statements about the report's filters; they are stored beside what the document reported and never described as verified.
+        if (!am.marketReviewEnabled()) return reply(404, { error: "Not found" });
+        const extra = {};
+        if (b.scope != null) { const sc = mr.confirmScope(b.scope); if (!sc.ok) return reply(400, { error: sc.question, code: "scope_needed" }); extra.scope = sc.confirmed; }
+        if (b.propertyTypes != null) { const pt = mr.confirmPropertyTypes(b.propertyTypes); if (!pt.ok) return reply(400, { error: pt.question, code: "property_types_needed" }); extra.propertyTypes = pt.confirmed; }
+        if (b.dataThrough != null && b.dataThrough !== "") extra.dataThrough = String(b.dataThrough).slice(0, 10);
+        if (b.acknowledgeConflicts === true) extra.acknowledgeConflicts = true;
+        extra.companions = await companionReports(p.row.id, userId, up.id);
+        const next = mr.reapply(up.facts, extra);
+        if (next.error === "bad_data_through") return reply(400, { error: next.message, code: "bad_data_through", review: mr.readBackView(next.facts) });
+        if (next.error) return reply(422, { error: "That report could not be confirmed." });
+        if (next.facts.confirmation.needed.length) return reply(409, { error: next.facts.confirmation.question || "Confirm the details below before this report can be used.", code: "confirmation_needed", needed: next.facts.confirmation.needed, review: mr.readBackView(next.facts) });
+        patch.facts = next.facts;
+        patch.scope_note = lib.scopeNote(next.facts);
+      }
+      const saved = await supabase("PATCH", "agent_marketing_uploads", patch, `?id=eq.${up.id}&user_id=eq.${userId}`);
       const row = Array.isArray(saved.data) ? saved.data[0] : null;
       if (saved.status >= 300 || !row) return reply(500, { error: "Could not save your confirmation" });
       return reply(200, { upload: forClient(row) });
@@ -119,10 +144,19 @@ exports.handler = async (event) => {
     const win = lib.validateWindow(b.window);
     if (win.error) return reply(400, { error: win.error, code: "bad_window" });
     const bytes = Buffer.from(raw, "base64");
-    const read = await readLib.readReport(bytes, String(b.fileName || "").slice(0, 200), { window: win.window });
-    if (!read.ok) return reply(read.code === "too_big" ? 413 : 422, { error: read.message, code: read.code });
-
     const geo = rl.validateGeography(b.geography);
+    const useReview = am.marketReviewEnabled();
+    const read = await readLib.readReport(bytes, String(b.fileName || "").slice(0, 200), { window: win.window, marketReview: useReview, suggestions: useReview ? mr.suggestFrom(geo.ok ? geo.geography : null, b.propertyTypes) : null });
+    if (!read.ok) return reply(read.code === "too_big" ? 413 : 422, { error: read.message, code: read.code });
+    if (read.facts && read.facts.layout === "market_review") {
+      // Not a second confirmation: when this project already holds a confirmed Market Review with the same displayed header, its area and
+      // property-type attestation is reused and marked as carried forward. Companion reports can also support a partial year's date.
+      const sibs = await supabase("GET", "agent_marketing_uploads", null, `?project_id=eq.${project.id}&user_id=eq.${userId}&status=eq.confirmed&select=id,facts&limit=10`);
+      const prior = (Array.isArray(sibs.data) ? sibs.data : []).find((x) => x.facts && x.facts.layout === "market_review" && x.facts.attestation && x.facts.attestation.scope && x.facts.attestation.propertyTypes && ((x.facts.geography || {}).displayed || {}).raw === ((read.facts.geography || {}).displayed || {}).raw && (x.facts.propertyTypeScope || {}).displayed === (read.facts.propertyTypeScope || {}).displayed);
+      const comps = await companionReports(project.id, userId, null);
+      const re = mr.reapply(read.facts, { scope: prior && prior.facts.attestation.scope, propertyTypes: prior && prior.facts.attestation.propertyTypes, companions: comps, carriedFrom: prior ? "an earlier confirmed report in this piece" : null });
+      if (re.facts) read.facts = re.facts;
+    }
     const now = new Date().toISOString();
     const ins = await supabase("POST", "agent_marketing_uploads", {
       project_id: project.id, user_id: userId, file_kind: read.kind, file_bytes: bytes.length, status: "pending",

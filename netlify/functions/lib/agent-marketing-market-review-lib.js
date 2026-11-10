@@ -104,14 +104,14 @@ function periodLabel(p) {
   if (p.kind === "month") return `${MONTHS[p.month - 1]} ${p.year}`;
   if (p.kind === "quarter") return `Q${p.q} ${p.year}`;
   if (p.kind === "ytd") return p.end ? `year to date through ${MONTHS[Number(p.end.slice(5, 7)) - 1]} ${p.year}` : `${p.year} year to date`;
-  if (p.partial && p.verifiedThrough) { const [y, m, d] = p.verifiedThrough.split("-").map(Number); return `${p.year} Year to Date (through ${MONTHS[m - 1]} ${d}, ${y})`; }
+  if (p.partial !== false && p.coverageThrough) { const [y, m, d] = p.coverageThrough.split("-").map(Number); return `${p.year} Year to Date (through ${MONTHS[m - 1]} ${d}, ${y})`; }
   return p.partial ? `${p.year} \u2014 Partial Year` : `${p.year}`;
 }
 /**
  * detectPeriod(headerTexts, basisKinds, updated) → { period } | { error }.
  * The comparison labels (printed beside every figure) decide the report type; the header supplies the period itself. Disagreement is reported.
  */
-function detectPeriod(header, bases, updated, verifiedThrough) {
+function detectPeriod(header, bases, updated) {
   const head = header.join(" ");
   const fromBases = [...new Set(bases.map((b) => b && b.type).filter(Boolean))];
   const hasYtd = /\bYTD\b|year[\s-]*to[\s-]*date/i.test(head);
@@ -168,7 +168,7 @@ function detectPeriod(header, bases, updated, verifiedThrough) {
     // A year is complete only if the data was last updated after it ended. The title "2026" alone never says so.
     // The footer's "updated" date is when the data was refreshed, NOT proof of the last day it covers. A "through" date is used only when the caller has verified it.
     if (updated) p.partial = updated < p.end; else p.partial = null;
-    if (p.partial) { p.end = null; if (verifiedThrough && validIso(verifiedThrough) && verifiedThrough <= updated) p.verifiedThrough = verifiedThrough; }   // never claim December 31 for a year still in progress
+    if (p.partial !== false) p.end = null;      // never claim December 31 for a year still in progress or one whose completeness is unknown
   }
   p.label = periodLabel(p);
   return { period: p };
@@ -342,7 +342,7 @@ function readMarketReview(pages, opts) {
   // 2. Period, from the comparison labels and the header.
   const tileTexts = new Set(TILES.flatMap((t) => t.labels.map(norm)));
   const header = its.filter((i) => i.y < 140 && !/^vs\.?\s/i.test(i.s) && !/^Includes\s/i.test(i.s) && !tileTexts.has(norm(i.s)) && !(NUMLIKE.test(i.s) && !/^20\d\d$/.test(i.s)) && !CHANGE.test(i.s) && !NOTE_RE.test(i.s) && i.s.length > 1).map((i) => i.s);
-  const per = detectPeriod(header, heads.map((h) => h.basis), updated, o.verifiedDataThrough);
+  const per = detectPeriod(header, heads.map((h) => h.basis), updated);
   if (per.error) return { error: per.error, detail: per.detail || null };
   const period = per.period;
 
@@ -438,47 +438,136 @@ function readMarketReview(pages, opts) {
   });
   const missingComps = figures.filter((f) => cols.length && (f.comparisons || []).length < cols.length).map((f) => f.key);
 
-  // 6. Geography: displayed (verbatim) and confirmed (attested) are stored separately.
+  // 6. Geography and property type as the document displays them. The subscriber's attestation is applied by finalize().
   const displayed = parseHeaderScope(its);
-  const geo = geographyBlock(displayed, o.scope || null);
-  const types = propertyTypeBlock(displayed, o.propertyTypes || null);
-
   const closed = (figures.find((f) => f.key === "count_closed") || {}).value;
   const small = closed != null && closed < lib.SMALL_SAMPLE_BELOW;
-  const warnings = [];
-  if (period.kind === "week") warnings.push("This is one week of data. Weekly figures swing from week to week, so topics will describe the week and will not call it a trend.");
-  if (small) warnings.push(`Only ${closed} closed ${closed === 1 ? "sale" : "sales"} in ${period.label}: a small sample.`);
-  if (period.kind === "year" && period.partial) warnings.push(`This report is titled ${period.year} but covers only part of the year. Its comparison with the year ending ${period.year - 1} is against a full year, so a drop in counts is not a full-year decline.`);
-  if (period.kind === "year" && period.partial === null) warnings.push("I can't tell from this report whether the year is complete. Don't describe it as a finished year.");
-  if (period.kind === "ytd" && !period.end) warnings.push("This year-to-date report does not print the month it runs through, so its end date is unknown.");
-  if (coverage.unread.length) warnings.push(`I couldn't read ${coverage.unread.length} measure${coverage.unread.length === 1 ? "" : "s"}: ${coverage.unread.map((u) => u.label).join(", ")}. They were left out.`);
-  if (missingComps.length) warnings.push("Some comparisons could not be read for every measure; the ones that were read are shown exactly as printed.");
-  if (figures.some((f) => (f.comparisons || []).some((c) => c.unverified))) warnings.push("A printed percent change did not agree with the two values beside it, so that change was left out.");
-  if (cols.some((c) => c.kind === "unknown")) warnings.push("A comparison label could not be classified, so it is shown as printed and not described further.");
-  const needed = [geo.status === "needs_scope" ? "geography" : null, types.status === "needs_confirmation" ? "propertyTypes" : null].filter(Boolean);
-  const confirmation = { needed, question: needed.length === 2 ? "Please confirm the area and the property types this report covers; its header can't be relied on for either." : needed[0] === "geography" ? "Which area does this report cover? The header can't be used for that." : needed[0] === "propertyTypes" ? "Which property types does this report cover? The header can't be relied on for that." : null };
-  if (confirmation.question) warnings.push(confirmation.question);       // one concise confirmation, never a rejection
-  geo.conflicts.concat(types.conflicts).forEach((c) => warnings.push(c.message));
+  const base = [];
+  if (period.kind === "week") base.push("This is one week of data. Weekly figures swing from week to week, so topics will describe the week and will not call it a trend.");
+  if (small) base.push(`Only ${closed} closed ${closed === 1 ? "sale" : "sales"} in ${period.label}: a small sample.`);
+  if (period.kind === "year" && period.partial) base.push(`This report is titled ${period.year} but covers only part of the year. Its comparison with the year ending ${period.year - 1} is against a full year, so a drop in counts is not a full-year decline.`);
+  if (period.kind === "year" && period.partial === null) base.push("I can't tell from this report whether the year is complete. Don't describe it as a finished year.");
+  if (coverage.unread.length) base.push(`I couldn't read ${coverage.unread.length} measure${coverage.unread.length === 1 ? "" : "s"}: ${coverage.unread.map((u) => u.label).join(", ")}. They were left out.`);
+  if (missingComps.length) base.push("Some comparisons could not be read for every measure; the ones that were read are shown exactly as printed.");
+  if (figures.some((f) => (f.comparisons || []).some((c) => c.unverified))) base.push("A printed percent change did not agree with the two values beside it, so that change was left out.");
+  if (cols.some((c) => c.kind === "unknown")) base.push("A comparison label could not be classified, so it is shown as printed and not described further.");
 
   const facts = {
     version: lib.FACTS_VERSION, kind: "pdf", layout: "market_review", reportDate: updated,
     mlsSource: /Data provided by MetroList/i.test(text) ? "MetroList" : null,
     propertyTypes: displayed.propertyTypesRaw ? [displayed.propertyTypesRaw.replace(/^all\s+/i, "All ")] : [], propertyTypesSource: "report_header",
-    criteria: { closedSince: null }, geography: geo, propertyTypeScope: types, confirmation,
-    period: { kind: period.kind, label: period.label, start: period.start, end: period.end, partial: period.partial, weekly: period.kind === "week",
-      coverageDate: period.partial ? { updated, dataThrough: period.verifiedThrough || null, verified: !!period.verifiedThrough, note: period.verifiedThrough ? "Data-through date verified." : "Date the report was updated; the last day its data covers is not verified." } : null,
+    criteria: { closedSince: null }, geography: { displayed }, propertyTypeScope: { displayed: displayed.propertyTypesRaw ? displayed.propertyTypesRaw.replace(/^all\s+/i, "All ") : null },
+    period: { kind: period.kind, label: period.label, start: period.start, end: period.end, partial: period.partial, weekly: period.kind === "week", year: period.year || null, month: period.month || null, q: period.q || null,
       comparisons: cols.map((c) => ({ printed: c.printed, kind: c.kind })) },
     statuses: {}, figures,
     sample: { total: closed != null ? closed : 0, closed: closed != null ? closed : 0, small, broadWindow: false, windowDays: period.start && period.end ? dayNum(period.end) - dayNum(period.start) : null },
-    reportedTotal: null, coverage, warnings,
+    reportedTotal: null, coverage, baseWarnings: base, warnings: [],
+    suggestions: o.suggestions || null,
     notes: ["Only the dashboard's figures were kept. Each percent change is as printed, against the period named beside it."],
   };
-  return { facts };
+  const att = (o.scope || o.propertyTypes || o.dataThrough || o.companions) ? { scope: o.scope || null, propertyTypes: o.propertyTypes || null, dataThrough: o.dataThrough || null, companions: o.companions || [], acknowledgeConflicts: !!o.acknowledgeConflicts } : null;
+  return att ? applyAttestation(facts, att) : { facts: finalize(facts, {}) };
+}
+
+// ── The subscriber's attestations, applied to the stored facts (the PDF is gone by then) ─────────────────────────────────
+const SUBSCRIBER = "subscriber_attested", DOCUMENT = "document", CROSS = "cross_report";
+
+/** validateDataThrough(period, date, updated) → { ok } | { ok:false, message }. Checked against the reporting year and what the report itself shows. */
+function validateDataThrough(period, date, updated) {
+  if (!validIso(String(date || ""))) return { ok: false, message: "Enter the date as a real calendar date." };
+  if (!period.year || Number(date.slice(0, 4)) !== period.year) return { ok: false, message: `The date must fall in ${period.year}, the year this report covers.` };
+  if (period.start && date < period.start) return { ok: false, message: "The date is before this report's period begins." };
+  if (updated && date > updated) return { ok: false, message: "The data cannot run past the date the report was updated." };
+  return { ok: true };
+}
+
+/** The coverage date, by the agreed hierarchy: (1) the document, (2) a compatible matching YTD report, (3) the subscriber, confirmed. */
+function resolveCoverage(f, att) {
+  const p = f.period, updated = f.reportDate || null;
+  if (p.kind !== "year" && !(p.kind === "ytd" && !p.end)) return p.end ? { through: p.end, provenance: DOCUMENT, independentlyVerified: true } : null;
+  if (p.kind === "ytd" && p.end) return { through: p.end, provenance: DOCUMENT, independentlyVerified: true };
+  if (p.partial === false) return { through: p.end || `${p.year}-12-31`, provenance: DOCUMENT, independentlyVerified: true };
+  const comp = (att.companions || []).map((c) => c && (c.facts || c)).find((c) => c && c.layout === "market_review" && c.period && c.period.kind === "ytd" && c.period.year === p.year && c.period.end && (!updated || c.period.end <= updated) && (p.kind === "ytd" || crossCheckPeriods(f, c).yearlyIsPartial));
+  if (comp) {
+    const out = { through: comp.period.end, provenance: CROSS, independentlyVerified: true };
+    if (att.dataThrough && att.dataThrough !== comp.period.end) out.note = `You entered ${att.dataThrough}; your year-to-date report shows the data runs through ${comp.period.end}, so that date is used.`;
+    return out;
+  }
+  if (att.dataThrough) {
+    const v = validateDataThrough(p, att.dataThrough, updated);
+    return v.ok ? { through: att.dataThrough, provenance: SUBSCRIBER, independentlyVerified: false } : { error: v.message };
+  }
+  return null;
+}
+
+function geoAreaLabel(g) {
+  const c = g && g.confirmed;
+  if (!c) return null;
+  if (c.type === "cities") return `${listText(c.names)} combined`;
+  if (c.type === "zips" && c.names.length > 1) return `ZIP codes ${listText(c.names)} combined`;
+  if (c.type === "zips") return `ZIP ${c.names[0]}`;
+  return c.names[0];
+}
+
+/** finalize(facts, att) → facts with geography, property type, coverage date, confirmation and warnings all derived from the document + the attestation. */
+function finalize(f, att) {
+  const out = JSON.parse(JSON.stringify(f));
+  const displayed = (out.geography && out.geography.displayed) || { kind: "absent", places: [] };
+  out.geography = geographyBlock(displayed, att.scope || null);
+  out.geography.areaLabel = geoAreaLabel(out.geography);
+  out.geography.scopeKind = !att.scope ? null : att.scope.type === "cities" || (att.scope.type === "zips" && att.scope.names.length > 1) ? "combined" : att.scope.type === "county" ? "county" : att.scope.type === "custom" ? "custom" : "exact";
+  out.propertyTypeScope = { ...propertyTypeBlock({ propertyTypesRaw: (f.propertyTypeScope || {}).displayed || null }, att.propertyTypes || null) };
+  const p = out.period;
+  const cov = resolveCoverage(out, att);
+  const needsThrough = (p.kind === "year" && p.partial !== false) || (p.kind === "ytd" && !p.end);
+  p.coverage = cov && !cov.error ? { through: cov.through, provenance: cov.provenance, independentlyVerified: cov.independentlyVerified, updated: out.reportDate || null, ...(cov.note ? { note: cov.note } : {}) }
+    : { through: null, provenance: null, independentlyVerified: false, updated: out.reportDate || null };
+  // A year whose completeness the document could not settle becomes a partial year once a coverage date before its end is established.
+  if (p.kind === "year" && p.partial === null && cov && !cov.error && p.year && cov.through < `${p.year}-12-31`) p.partial = true;
+  p.coverageThrough = p.partial !== false && cov && !cov.error ? cov.through : null;
+  p.disclosureEnd = p.end ? null : (cov && !cov.error ? cov.through : null);
+  delete p.coverageDate;
+  if (p.kind === "year" || p.kind === "ytd") p.label = periodLabel(p);
+  const conflicts = out.geography.conflicts.concat(out.propertyTypeScope.conflicts || []);
+  const acked = !!att.acknowledgeConflicts;
+  const needed = [];
+  if (out.geography.status === "needs_scope") needed.push("geography");
+  if (out.propertyTypeScope.status === "needs_confirmation") needed.push("propertyTypes");
+  if (needsThrough && !(cov && !cov.error)) needed.push("dataThrough");
+  if (conflicts.length && !acked) needed.push("conflicts");
+  const q = { geography: "the area", propertyTypes: "the property types", dataThrough: "the last date this report's data covers" };
+  const asks = needed.filter((k) => q[k]);
+  let question = null;
+  if (cov && cov.error) question = cov.message || cov.error;
+  else if (asks.length === 2 && !asks.includes("dataThrough")) question = "Please confirm the area and the property types this report covers; its header can't be relied on for either.";
+  else if (asks.length === 1 && asks[0] === "geography") question = "Which area does this report cover? The header can't be used for that.";
+  else if (asks.length === 1 && asks[0] === "propertyTypes") question = "Which property types does this report cover? The header can't be relied on for that.";
+  else if (asks.length) question = `Please confirm ${listText(asks.map((k) => q[k]))}. The report itself does not establish ${asks.length === 1 ? "it" : "them"}.`;
+  out.confirmation = { needed, question, suggested: out.suggestions || null, conflictsAcknowledged: acked && conflicts.length > 0 };
+  const warnings = (out.baseWarnings || []).slice();
+  if (p.kind === "ytd" && !p.end && !(cov && !cov.error)) warnings.push("This year-to-date report does not print the month it runs through, so its end date is unknown.");
+  if (question) warnings.push(question);
+  if (cov && cov.note) warnings.push(cov.note);
+  if (cov && cov.provenance === SUBSCRIBER) warnings.push(`The data-through date (${cov.through}) is the one you entered. It is not independently verified.`);
+  conflicts.forEach((c) => warnings.push(c.message));
+  if (out.geography.scopeKind === "combined") warnings.push(`This report's figures describe the combined ${out.geography.areaLabel.replace(/ combined$/, "")} market. They are never stated for one of those places alone.`);
+  out.warnings = warnings;
+  out.attestation = att.scope || att.propertyTypes || att.dataThrough ? { scope: att.scope || null, propertyTypes: att.propertyTypes || null, dataThrough: cov && !cov.error ? { date: cov.through, provenance: cov.provenance } : null, acknowledgedConflicts: acked ? conflicts.map((c) => c.message) : [], carriedFrom: att.carriedFrom || null } : null;
+  return out;
+}
+
+/** applyAttestation(facts, { scope, propertyTypes, dataThrough, companions, acknowledgeConflicts, carriedFrom }) → { facts } | { error }. */
+function applyAttestation(facts, att) {
+  if (!facts || facts.layout !== "market_review") return { error: "not_a_market_review" };
+  const a = att || {};
+  const cov = facts.period && (facts.period.kind === "year" || facts.period.kind === "ytd") ? resolveCoverage(JSON.parse(JSON.stringify(facts)), a) : null;
+  if (cov && cov.error) { const f = finalize(facts, { ...a, dataThrough: null }); f.confirmation.question = cov.error; f.confirmation.needed = Array.from(new Set([...f.confirmation.needed, "dataThrough"])); return { facts: f, error: "bad_data_through", message: cov.error }; }
+  return { facts: finalize(facts, a) };
 }
 
 /** crossCheckPeriods(a, b): the same values in a yearly and a year-to-date report show the yearly one is a partial year. */
 function crossCheckPeriods(a, b) {
-  const pick = (f, k) => f.facts ? f.facts : f;
+  const pick = (f) => f.facts ? f.facts : f;
   const A = pick(a), B = pick(b);
   if (!A.period || !B.period) return { relation: "unknown" };
   const [y, t] = A.period.kind === "year" ? [A, B] : [B, A];
@@ -487,17 +576,65 @@ function crossCheckPeriods(a, b) {
   return { relation: same ? "yearly_equals_year_to_date" : "different", yearlyIsPartial: !!same, valuesCoverThrough: same ? t.period.end : null };
 }
 
-// ── The read-back the subscriber confirms ───────────────────────────────────────────────────────────────────────────────
-function readBack(facts) {
-  const f = facts || {}, g = f.geography || {}, p = f.period || {};
-  const lines = [];
-  lines.push({ kind: "period", text: p.label || "Period not read", partial: !!p.partial });
-  lines.push({ kind: "comparisons", items: (p.comparisons || []).map((c) => ({ printed: c.printed, kind: c.kind })) });
-  lines.push({ kind: "read", keys: (f.coverage || {}).read || [] });
-  lines.push({ kind: "not_printed", keys: (f.coverage || {}).notPrinted || [] });
-  lines.push({ kind: "unread", items: (f.coverage || {}).unread || [] });
-  lines.push({ kind: "geography", displayed: g.displayed && g.displayed.raw, confirmed: g.confirmed ? g.confirmed.areasIncluded : null, attested: !!(g.confirmed && g.confirmed.attestedBySubscriber), status: g.status, combined: !!g.combined });
-  return lines;
+// ── The read-back the subscriber confirms: what the DOCUMENT reported, apart from what the SUBSCRIBER attests ─────────────────
+const KIND_TEXT = { prior_period: "the period just before", same_period_last_year: "the same period a year earlier", full_prior_year: "the full prior year", earlier_period: "an earlier period", unknown: "a period I could not classify" };
+function readBackView(facts) {
+  const f = facts || {}, g = f.geography || {}, p = f.period || {}, c = f.coverage || {}, t = f.propertyTypeScope || {}, conf = f.confirmation || {};
+  const partialYear = p.kind === "year" && p.partial === true;
+  const reported = {
+    reportType: p.kind || null, period: { label: p.label, start: p.start, end: p.end, partial: p.partial === true, coverage: p.coverage || null },
+    comparisons: (p.comparisons || []).map((x) => ({ printed: x.printed, kind: x.kind, meaning: KIND_TEXT[x.kind] || KIND_TEXT.unknown,
+      eligibility: partialYear && x.kind === "full_prior_year" ? { counts: false, other: true, note: "Counts are not compared: this year is still in progress and the comparison is a full year. Prices and rates are shown as printed." } : { counts: true, other: true, note: null } })),
+    figuresRead: c.read || [], notPrinted: (c.notPrinted || []).map((k) => ({ key: k, note: (c.notPrintedNotes || {})[k] || null })), unread: c.unread || [],
+    header: { geography: g.displayed && g.displayed.raw || null, geographyUnreliable: !!(g.displayed && g.displayed.unreliable), propertyTypes: t.displayed || null },
+    notice: lib.attributionNotice(f), noticeProvenance: p.coverage && p.coverage.provenance || (p.end ? DOCUMENT : null),
+    source: f.mlsSource,
+  };
+  const attested = {
+    note: "These come from you, not from the document. They are not checked against the PDF.",
+    geography: { selected: g.confirmed || null, areaLabel: g.areaLabel || null, scopeKind: g.scopeKind || null, status: g.status, suggested: (conf.suggested && conf.suggested.scope) || null },
+    propertyTypes: { selected: t.confirmed || null, status: t.status, suggested: (conf.suggested && conf.suggested.propertyTypes) || null },
+    dataThrough: p.coverage ? { date: p.coverage.through, provenance: p.coverage.provenance, independentlyVerified: p.coverage.independentlyVerified } : null,
+    conflicts: (g.conflicts || []).concat(t.conflicts || []), carriedFrom: f.attestation && f.attestation.carriedFrom || null,
+  };
+  return { reported, attested, needed: conf.needed || [], question: conf.question || null, canConfirm: (conf.needed || []).length === 0, warnings: f.warnings || [] };
 }
 
-module.exports = { confirmPropertyTypes, TILES, parseBasis, compareKind, detectPeriod, parseHeaderScope, confirmScope, reconcileGeography, isMarketReview, readMarketReview, crossCheckPeriods, readBack, updatedDate };
+function readBack(facts) {
+  const v = readBackView(facts);
+  return [
+    { kind: "period", text: v.reported.period.label || "Period not read", partial: v.reported.period.partial },
+    { kind: "comparisons", items: v.reported.comparisons.map((c) => ({ printed: c.printed, kind: c.kind })) },
+    { kind: "read", keys: v.reported.figuresRead }, { kind: "not_printed", keys: v.reported.notPrinted.map((n) => n.key) }, { kind: "unread", items: v.reported.unread },
+    { kind: "geography", displayed: v.reported.header.geography, confirmed: v.attested.geography.selected ? v.attested.geography.selected.areasIncluded : null, attested: !!(v.attested.geography.selected && v.attested.geography.selected.attestedBySubscriber), status: v.attested.geography.status, combined: v.attested.geography.scopeKind === "combined" },
+  ];
+}
+
+/** suggestFrom(geography, propertyTypes) → a SUGGESTED selection for the read-back form. It is never an attestation: the subscriber must still choose it. */
+function suggestFrom(geography, propertyTypes) {
+  const g = geography && typeof geography === "object" ? geography : null;
+  const out = {};
+  if (g && g.name) {
+    const name = String(g.name).trim();
+    if (g.type === "city") out.scope = { type: "city", names: [name] };
+    else if (g.type === "zip") { const z = (/\b(9\d{4})\b/.exec(name) || [])[1]; if (z) out.scope = { type: "zips", names: [z] }; }
+    else if (g.type === "county") out.scope = { type: "county", names: [name] };
+    else if (g.type === "neighborhood" || g.type === "metro") out.scope = { type: "custom", names: [name] };
+  }
+  if (Array.isArray(propertyTypes) && propertyTypes.length) out.propertyTypes = propertyTypes.map(String).slice(0, 6);
+  return out.scope || out.propertyTypes ? out : null;
+}
+
+/** reapply(facts, extra) → the stored facts re-derived with the attestation already on them plus new input (companion YTD reports, a date, an acknowledgement). */
+function reapply(facts, extra) {
+  const a = (facts && facts.attestation) || {};
+  const x = extra || {};
+  const prevDate = a.dataThrough && a.dataThrough.provenance === "subscriber_attested" ? a.dataThrough.date : null;
+  return applyAttestation(facts, {
+    scope: x.scope || a.scope || null, propertyTypes: x.propertyTypes || a.propertyTypes || null,
+    dataThrough: x.dataThrough || prevDate, companions: x.companions || [], acknowledgeConflicts: x.acknowledgeConflicts != null ? x.acknowledgeConflicts : !!(a.acknowledgedConflicts && a.acknowledgedConflicts.length),
+    carriedFrom: x.carriedFrom || a.carriedFrom || null,
+  });
+}
+
+module.exports = { suggestFrom, reapply, confirmPropertyTypes, TILES, parseBasis, compareKind, detectPeriod, parseHeaderScope, confirmScope, reconcileGeography, isMarketReview, readMarketReview, applyAttestation, validateDataThrough, readBackView, crossCheckPeriods, readBack, updatedDate };

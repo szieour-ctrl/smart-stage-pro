@@ -214,6 +214,12 @@ function placesOf(facts) {
  */
 function scopeSentence(facts) {
   const f = facts || {};
+  if (f.layout === "market_review" && f.period) {
+    const g = f.geography || {}, t = f.propertyTypeScope || {};
+    const area = g.areaLabel ? (g.scopeKind === "combined" ? `the combined ${g.areaLabel.replace(/ combined$/, "")} market` : g.areaLabel) : "an area not yet confirmed";
+    const types = t.confirmed ? ` (${t.confirmed.names.join(", ")})` : "";
+    return `This ${f.mlsSource ? f.mlsSource + " " : ""}Market Review covers ${area}${types}, for ${f.period.label}${f.reportDate ? `, updated ${longDate(f.reportDate)}` : ""}.`;
+  }
   if (f.layout === "market_trends" && f.period) {
     const where = placesOf(f);
     return `This ${f.mlsSource ? f.mlsSource + " " : ""}market-trends report covers ${where.length ? listText(where) : "an area it does not name"}${(f.propertyTypes || []).length ? ` (${f.propertyTypes.join(", ")})` : ""}, for ${f.period.label}. It shows ${f.period.months} months of history; the latest month has ${f.sample ? Number(f.sample.closed).toLocaleString("en-US") : "?"} closed ${f.sample && f.sample.closed === 1 ? "sale" : "sales"}.`;
@@ -268,6 +274,7 @@ function feedbackContext(facts) {
 function scopeNote(facts) {
   const f = facts || {};
   const places = placesOf(f);
+  if (f.layout === "market_review" && f.period) return [`${f.mlsSource ? f.mlsSource + " " : ""}Market Review`, f.geography && f.geography.areaLabel ? `covering ${f.geography.areaLabel}` : null, f.propertyTypeScope && f.propertyTypeScope.confirmed ? f.propertyTypeScope.confirmed.names.join(", ") : null, `for ${f.period.label}`].filter(Boolean).join(", ").slice(0, 400);
   if (f.layout === "market_summary") {
     return [`${f.mlsSource ? f.mlsSource + " " : ""}market summary`, places.length ? `covering ${listText(places)}` : null, (f.propertyTypes || []).length ? f.propertyTypes.join(", ") : null, f.period ? `for ${f.period.label}` : null].filter(Boolean).join(", ").slice(0, 400);
   }
@@ -366,6 +373,19 @@ function geographyCheck(facts, geography) {
   const zips = (rg.zips || []).map(String);
   if (!g) return { status: "not_named", message: "" };
   const name = String(g.name || "").trim();
+  // A Market Review carries the subscriber's confirmed scope. A combined multi-city / multi-ZIP market never "matches" one of its parts, and a county
+  // report is wider than a city: those are broader-market context, not the area itself.
+  if (facts && facts.layout === "market_review") {
+    const mg = facts.geography || {};
+    if (!mg.confirmed) return { status: "not_named", message: "Confirm which area this report covers before it can be used." };
+    const kind = mg.scopeKind, label = mg.areaLabel;
+    const same = (mg.confirmed.type === g.type || (mg.confirmed.type === "zips" && g.type === "zip")) && mg.confirmed.names.length === 1 && (g.type === "zip" ? mg.confirmed.names[0] === ((/\b(\d{5})\b/.exec(name) || [])[1] || null) : nk(mg.confirmed.names[0]) === nk(name) || ck(mg.confirmed.names[0]) === ck(name));
+    if ((kind === "exact" || kind === "county") && same) return { status: "match", message: "" };
+    if (kind === "combined") return { status: "combined", message: `This report combines ${label.replace(/ combined$/, "")}. Its figures describe that combined market, not ${g.name || "your area"} alone, so they can be used only as broader-market context.` };
+    if (kind === "county") return { status: "combined", message: `This report covers ${label}. Its figures describe the county, not ${g.name || "your area"}, so they can be used only as broader-market context.` };
+    if (kind === "exact") return { status: "different", message: `This report covers ${label}, not ${g.name || "your area"}.` };
+    return { status: "not_named", message: `You described this report's area as ${label}. Confirm it is the area you want it to describe.` };
+  }
   const zipOf = (x) => { const m = /\b(\d{5})(?:-\d{4})?\b/.exec(String(x || "")); return m ? m[1] : null; };
   const cityName = nk(g.city);
   const countyName = ck(g.county);
@@ -1442,7 +1462,7 @@ function analyzePages(pages, opts) {
   if (text.replace(/\s+/g, "").length < 150) return { error: "no_text" };
   // Domus Market Review (all five periods), opt-in until it is wired into intake: { marketReview: true, items, scope }. Default behavior is unchanged.
   if (opts && opts.marketReview) {
-    const review = require("./agent-marketing-market-review-lib").readMarketReview(list, { items: opts.items, scope: opts.scope, propertyTypes: opts.propertyTypes, verifiedDataThrough: opts.verifiedDataThrough });
+    const review = require("./agent-marketing-market-review-lib").readMarketReview(list, { items: opts.items, scope: opts.scope, propertyTypes: opts.propertyTypes, dataThrough: opts.dataThrough, suggestions: opts.suggestions });
     if (review) return review;
   }
   const trend = analyzeTrendReport(list);
@@ -1498,7 +1518,7 @@ function attributionNotice(facts) {
   const f = facts || {};
   if (f.mlsSource !== "MetroList") return null;
   if (f.disclosure && DISCLOSURE_RE.test(f.disclosure)) return `Based on information from MetroList Services, Inc. ${f.disclosure}.`;
-  const w = f.period ? { start: f.period.start, end: f.period.end } : f.statuses && f.statuses.closed && f.statuses.closed.dateRange;
+  const w = f.period ? { start: f.period.start, end: f.period.end || f.period.disclosureEnd } : f.statuses && f.statuses.closed && f.statuses.closed.dateRange;
   if (!w || !w.start || !w.end) return null;
   return `Based on information from MetroList Services, Inc. for the period ${shortDate(w.start, true)} through ${shortDate(w.end, true)}.`;
 }
@@ -1510,6 +1530,7 @@ function summarize(facts, opts) {
     scopeSentence: scopeSentence(f), scopeNote: scopeNote(f), notice: attributionNotice(f), groups: displayFigures(f),
     warnings: [...(f.warnings || []), ...(geo.message ? [geo.message] : []), ...(f.mlsSource === "MetroList" && !attributionNotice(f) ? ["I couldn't find the dates this report covers, and a MetroList Reel needs them for its required notice. Use a report that prints its dates, or the Reel will stop at the last step."] : [])], geography: geo.status, notes: f.notes || [],
     sample: f.sample || null, layout: f.layout, reportDate: f.reportDate || null, window: f.window || null,
+    ...(f.layout === "market_review" ? { review: require("./agent-marketing-market-review-lib").readBackView(f) } : {}),
   };
 }
 

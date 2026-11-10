@@ -346,7 +346,8 @@ function analyze(ctx, opts) {
   const interpretations = readingsFor(obs).map((r, i) => ({ ...r, id: `TR${i + 1}` }));
   const caveats = [];
   reports.forEach((r) => {
-    if (r.geoStatus === "different" && r.geoMessage) caveats.push(r.geoMessage);
+    if ((r.geoStatus === "different" || r.geoStatus === "combined") && r.geoMessage) caveats.push(r.geoMessage);
+    if (r.areaLabel && r.scopeKind && r.scopeKind !== "exact") caveats.push(`Report ${r.key} describes ${r.areaLabel}: state it only as that broader market, never for one place inside it.`);
     if (r.facts.sample && r.facts.sample.small) caveats.push("The report has a small sample of closed sales: describe it as a snapshot, not a trend.");
     if (r.facts.period && r.facts.period.weekly) caveats.push("The report covers one week: describe the week and its changes, never a trend.");
     if (r.facts.period && r.facts.period.partial) caveats.push(`The report covers only part of the period (${r.facts.period.label}): never describe it as a completed ${r.facts.period.kind === "year" ? "year" : "period"}, and never compare its counts with a full prior period.`);

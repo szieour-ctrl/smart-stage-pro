@@ -40,6 +40,8 @@ function wordTargets(durationSec, env) {
   const dev = String((env || process.env).AGENT_MARKETING_B1_EVIDENCE || "").trim().toLowerCase() === "dev";
   return (dev ? DEV_WORD_TARGETS : WORD_TARGETS)[durationSec] || (dev ? DEV_WORD_TARGETS : WORD_TARGETS)[45];
 }
+// Development only: AGENT_MARKETING_MARKET_REVIEW=dev routes supported Domus Market Review PDFs to the deterministic reader. Server environment only; no request field turns it on.
+function marketReviewEnabled(env) { return String((env || process.env).AGENT_MARKETING_MARKET_REVIEW || "").trim().toLowerCase() === "dev"; }
 const CTA_SOURCES_FROM_CLIENT = ["user_edited", "user_inserted"];
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -150,6 +152,7 @@ function gateInputFor(project, narrative, source) {
 const NOT_EDITABLE_AFTER = ["rendering", "rendered", "published"];
 
 module.exports = {
+  marketReviewEnabled,
   DURATIONS, FORMATS, VOICES, MUSIC, WORD_TARGETS, DEV_WORD_TARGETS, wordTargets, UUID_RE, NOT_EDITABLE_AFTER,
   isEnabledFor, validateCreate, stripAudioTags, countWords, validateNarrative, gateInputFor, topicNotice, noticeOverlayFor, attachNotice,
 };

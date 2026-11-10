@@ -81,6 +81,12 @@ function pageDispatch(event) {
   return !pc.isProductionHost(requestHost(event), env) && !!env.SUPABASE_URL && !String(env.SUPABASE_URL).includes(pc.PRODUCTION_REF);
 }
 
+// A report this set used was re-confirmed with a different area, property types or data-through date after the set was made (set by agent-marketing-report.js).
+function outdatedRef(row) {
+  const r = (Array.isArray(row && row.upload_refs) ? row.upload_refs : []).find((x) => x && x.outdated);
+  return r ? r.outdated : null;
+}
+
 function forClient(row) {
   if (!row) return null;
   const out = {
@@ -90,6 +96,7 @@ function forClient(row) {
     status: row.status, model: (row.usage && row.usage.pathway === "article_led") ? null : (row.model || null), topics: row.status === "ready" ? (row.topics || []).map(articleLed.clientTopic) : [], researchDate: row.research_date || null,
     error: row.status === "failed" ? (row.error || "The research could not be completed.") : null,
     charged: !!row.charged_at, createdAt: row.created_at,
+    reportOutdated: outdatedRef(row),
   };
   // Article-Led (PR 2): how many opportunities were delivered, why fewer than five, and whether the MLS Market Trend option is offered.
   const al = row.usage && row.usage.pathway === "article_led" ? row.usage.articleLed || {} : null;
@@ -229,6 +236,7 @@ exports.handler = async (event) => {
       }
       if (!row || row.status !== "ready") return reply(404, { error: "That research set was not found." });
       if (pending.length) { try { row = await attachReports(row, project, userId); } catch (e) { console.error("agent-marketing-research attachReports failed:", e.message); } }
+      if (outdatedRef(row)) return reply(409, { error: "You changed this report's confirmation after these topics were made, so they can't be used. Find topics again to get a set that matches it.", code: "report_changed" });
       const topic = (row.topics || []).find((t) => t && t.id === String(b.topicId || ""));
       if (!topic) return reply(400, { error: "Choose one of the five topics." });
       const frozen = { ...topic, researchId: row.id, researchDate: row.research_date, mode: row.mode, audience: row.audience, focus: row.focus || {}, geography: row.geography };
@@ -250,7 +258,7 @@ exports.handler = async (event) => {
     const existing = await settleStale((await supabase("GET", "agent_marketing_research", null, `?project_id=eq.${project.id}&user_id=eq.${userId}&select=*&order=created_at.desc&limit=10`)).data || []);
     const wantKey = rl.requestKey(v.request);
     // Saved results are reused, never re-bought. The agent asks for a NEW set with a different request (or "New Topics", below).
-    const reuse = !b.newTopics && existing.find((r) => r.status === "ready" && keyOfRow(r) === wantKey);
+    const reuse = !b.newTopics && existing.find((r) => r.status === "ready" && !outdatedRef(r) && keyOfRow(r) === wantKey);   // a set made under an outdated report scope is never reopened as "the same request"
     const pool = await poolFor(userId);
     if (reuse) return reply(200, { research: forClient(reuse), reused: true, session: await sessionFor(pool) });
     const mine = await supabase("GET", "agent_marketing_research", null, `?user_id=eq.${userId}&status=eq.running&created_at=gte.${encodeURIComponent(new Date(Date.now() - STALE_RUNNING_MS).toISOString())}&select=id&limit=1`);

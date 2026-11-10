@@ -218,6 +218,11 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
 .rs-bar-btns{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;}
 .rs-bar .btn.ghost{background:transparent;color:#f7f4ef;border:1px solid #6b6256;}
 .rs-bar .btn.gold{background:#c9a15f;color:#1a1714;}
+/* The bar is sticky at the foot of the page: keep whatever has focus, and anything scrolled to, clear of it (--rs-bar-h is set from its real height). */
+html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
+#stepResearch .rs-card,#stepResearch .choice,#stepResearch .topic{scroll-margin-bottom:calc(var(--rs-bar-h,96px) + 20px);}
+#stepResearch{padding-bottom:12px;}
+.rs-bar .btn:focus-visible{outline:2px solid #e9d5a6;outline-offset:2px;}
 @media(max-width:860px){
   .rs-grid,.rs-grid.rv,.rs-grid.rt{grid-template-columns:1fr;gap:16px;}
   .stage.wide{padding-left:14px;padding-right:14px;}
@@ -225,8 +230,13 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
 @media(max-width:640px){
   .rs-steps{grid-template-columns:1fr;gap:6px;}
   .rs-step{padding:8px 10px;}
-  .rs-bar{border-radius:0;padding:10px 14px;margin-left:-14px;margin-right:-14px;}
-  .rs-bar-btns{width:100%;justify-content:stretch;} .rs-bar-btns .btn{flex:1 1 auto;}
+  .rs-bar{border-radius:0;padding:8px 12px;gap:6px;margin-left:-14px;margin-right:-14px;}
+  .rs-bar-text{flex:1 1 100%;font-size:0.82rem;line-height:1.3;}
+  .rs-bar-text #rsBarText{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
+  .rs-bar-text .msg{font-size:0.78rem;}
+  .rs-bar-btns{width:100%;flex-wrap:nowrap;gap:6px;justify-content:stretch;}
+  .rs-bar-btns .btn{padding:8px 10px;font-size:0.82rem;min-height:40px;white-space:nowrap;flex:0 1 auto;}
+  .rs-bar-btns .btn.gold{flex:1 1 auto;}   /* the primary action takes the spare width; tab order stays the same as the visual order */
   .fig-t thead{display:none;}
   .fig-t tr{display:grid;grid-template-columns:1fr auto;gap:0 10px;border-bottom:1px solid #eee7dc;padding:6px 0;}
   .fig-t td{border:0;padding:1px 0;} .fig-t td.cmp{grid-column:1 / -1;font-size:0.84rem;}
@@ -441,10 +451,13 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
       <div class="rs-bar-btns">
         <button class="btn ghost" type="button" id="rsBack">Back</button>
         <button class="btn ghost hidden" type="button" id="libBtn">Browse Research Library</button>
+        <button class="btn ghost hidden" type="button" id="rsEdit">Edit confirmation</button>
         <button class="btn ghost hidden" type="button" id="upNo">Not right, remove</button>
+        <button class="btn ghost hidden" type="button" id="rsCancelEdit">Cancel</button>
         <button class="btn ghost hidden" type="button" id="confirmEdit">Edit</button>
         <button class="btn gold hidden" type="button" id="rsNext">Continue</button>
         <button class="btn gold hidden" type="button" id="upYes">Confirm report</button>
+        <button class="btn gold hidden" type="button" id="rsSave">Save changes</button>
         <button class="btn gold hidden" type="button" id="startBtn">Find topics</button>
         <button class="btn gold hidden" type="button" id="confirmBtn">Confirm and research</button>
       </div>
@@ -748,6 +761,11 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     } catch (e) { say("resNextMsg", e.message, "err"); }
     $("resContinueBtn").disabled = false;
   }
+  (function trackBar() {
+    var bar = $("rsBar"); if (!bar) return;
+    var set = function () { document.documentElement.style.setProperty("--rs-bar-h", Math.ceil(bar.getBoundingClientRect().height) + "px"); };
+    if (window.ResizeObserver) new ResizeObserver(set).observe(bar); window.addEventListener("resize", set); set();
+  })();
   async function renderResearch() {
     if (!researchUI) {
       researchUI = AMResearchUI({
@@ -760,6 +778,10 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
           state.project.selectedTopic = topic; renderSteps(2); openCta();
         },
         onContinue: function () { openCta(); },
+        // The subscriber edited a confirmed report: the server marked the topic, script and sets that depended on it, so reload the project and its status.
+        onReportChanged: async function () {
+          try { var x = await api("GET", "?id=" + encodeURIComponent(state.project.id)); if (x.ok && x.json.project) { setProject(x.json.project); renderSteps(2); } } catch (e) { /* the page keeps its copy */ }
+        },
       });
       $("resContinueBtn").addEventListener("click", continueWithTopic);
       $("ctaX").addEventListener("click", closeCta);

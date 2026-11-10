@@ -640,6 +640,20 @@ function reapply(facts, extra) {
 const lc = (v) => String(v).toLowerCase().replace(/\s+/g, " ").trim();
 function sameScope(a, b) { return !!(a && b && a.type === b.type && a.names.length === b.names.length && a.names.map(lc).sort().join("|") === b.names.map(lc).sort().join("|")); }
 function sameTypes(a, b) { return !!(a && b && a.names.map(lc).sort().join("|") === b.names.map(lc).sort().join("|")); }
+
+/** attestationFingerprint(facts) → a stable string for what the subscriber attested (area, property types, data-through date). Equal strings mean nothing downstream is affected. */
+function attestationFingerprint(facts) {
+  const a = (facts && facts.attestation) || {};
+  const sc = a.scope ? `${a.scope.type}:${a.scope.names.map(lc).sort().join("|")}` : "";
+  const pt = a.propertyTypes ? a.propertyTypes.names.map(lc).sort().join("|") : "";
+  const through = a.dataThrough && a.dataThrough.provenance === SUBSCRIBER ? a.dataThrough.date : (a.dataThrough ? `${a.dataThrough.provenance}:${a.dataThrough.date}` : "");
+  return JSON.stringify([sc, pt, through]);
+}
+/** attestationSummary(facts) → short words for "was / now" messages. Never contains anything from the file beyond the subscriber's own statements. */
+function attestationSummary(facts) {
+  const f = facts || {}, g = f.geography || {}, a = f.attestation || {};
+  return { area: g.areaLabel || null, propertyTypes: a.propertyTypes ? a.propertyTypes.names.slice() : [], dataThrough: a.dataThrough ? a.dataThrough.date : null };
+}
 /** carryApplies(prior, suggestions): an earlier attestation is reused only if the project's own current selection does not contradict it. */
 function carryApplies(priorAtt, suggestions) {
   if (!priorAtt || !priorAtt.scope || !priorAtt.propertyTypes) return false;
@@ -649,4 +663,4 @@ function carryApplies(priorAtt, suggestions) {
   return true;
 }
 
-module.exports = { carryApplies, suggestFrom, reapply, confirmPropertyTypes, TILES, parseBasis, compareKind, detectPeriod, parseHeaderScope, confirmScope, reconcileGeography, isMarketReview, readMarketReview, applyAttestation, validateDataThrough, readBackView, crossCheckPeriods, readBack, updatedDate };
+module.exports = { attestationFingerprint, attestationSummary, carryApplies, suggestFrom, reapply, confirmPropertyTypes, TILES, parseBasis, compareKind, detectPeriod, parseHeaderScope, confirmScope, reconcileGeography, isMarketReview, readMarketReview, applyAttestation, validateDataThrough, readBackView, crossCheckPeriods, readBack, updatedDate };

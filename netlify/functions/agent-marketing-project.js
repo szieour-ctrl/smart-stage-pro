@@ -40,6 +40,7 @@ const PUBLIC_COLS = "id,template,angle,formats,duration_sec,voice,music,intake,n
 // A saved script written for another topic or other answers is kept for the agent to see, but the page must offer "Write my script" again (Sam, Oct 29, 2026).
 function scriptStale(row) {
   const n = row && row.narrative;
+  if (n && n.narrationTagged && row.selected_topic && row.selected_topic.reportOutdated) return true;   // the report's confirmation changed after the topic (and so the script) was made
   if (!n || !n.narrationTagged || !n.intakeHash || !row.selected_topic) return false;
   try { return n.intakeHash !== planLib.intakeHash(row.intake || {}, row.selected_topic); } catch (e) { return false; }
 }
@@ -153,6 +154,8 @@ exports.handler = async (event) => {
     if (o.error) return o.error;
     const project = o.row;
     if (am.NOT_EDITABLE_AFTER.includes(project.status)) return reply(409, { error: "This piece is already rendering or finished. Start a new one to change it." });
+    // The report behind the selected topic was re-confirmed with a different scope: nothing moves forward under the old one.
+    if (project.selected_topic && project.selected_topic.reportOutdated) return reply(409, { error: "You changed the report's confirmation after this topic was chosen. Find topics again and choose one that matches it.", code: "report_changed" });
 
     if (action === "save_intake") {
       // Local Market Insider starts from one of the five researched topics; its figures and sources are on the project, never from the browser.

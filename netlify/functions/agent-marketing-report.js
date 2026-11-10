@@ -8,6 +8,10 @@
 //        → 201 { upload }   The file is read in memory and only its market-level figures are kept. The agent must still confirm.
 //   POST { action: "confirm", uploadId, correct: true | false }
 //        → correct true: the report becomes usable (status "confirmed"); false: it is deleted.
+//   POST { action: "reattest", uploadId, scope, propertyTypes, dataThrough?, acknowledgeConflicts? }
+//        → a Market Review that is already confirmed: the subscriber revises the area, property types or their own data-through date. The same
+//          attestation and conflict checks as "confirm" run; the extracted figures and document metadata are never touched. If the attestation really
+//          changed, research sets made with the old one, the selected topic and its script are marked for revalidation (see markDependents).
 //   POST { action: "remove", uploadId }
 //        → deletes the stored figures.
 //
@@ -45,6 +49,30 @@ async function companionReports(projectId, userId, exceptId) {
   return (Array.isArray(r.data) ? r.data : []).filter((x) => x.id !== exceptId && x.facts && x.facts.layout === "market_review").map((x) => x.facts);
 }
 
+
+// Everything made from this report under its OLD attestation is marked, not deleted and not quietly kept: research sets that used it get
+// an "outdated" flag on their report reference, the selected topic (if it came from one of them) gets the same flag, and an approved script
+// drops back to a draft. Nothing here is a new table: the flags live in the existing upload_refs and selected_topic JSON.
+async function markDependents(project, userId, uploadId, flag) {
+  const rr = await supabase("GET", "agent_marketing_research", null, `?project_id=eq.${project.id}&user_id=eq.${userId}&select=id,upload_refs`);
+  const hit = (Array.isArray(rr.data) ? rr.data : []).filter((r) => Array.isArray(r.upload_refs) && r.upload_refs.some((x) => x && x.id === uploadId));
+  const now = new Date().toISOString();
+  for (const r of hit) {
+    await supabase("PATCH", "agent_marketing_research", { upload_refs: r.upload_refs.map((x) => (x && x.id === uploadId ? { ...x, outdated: flag } : x)), updated_at: now }, `?id=eq.${r.id}&user_id=eq.${userId}`);
+  }
+  const ids = new Set(hit.map((r) => r.id));
+  const sel = project.selected_topic;
+  const out = { researchSets: hit.length, topicSelected: false, scriptMarked: false, scriptReopened: false };
+  if (sel && typeof sel === "object" && (ids.has(sel.researchId) || ids.has(project.selected_research_id))) {
+    const fields = { selected_topic: { ...sel, reportOutdated: flag }, updated_at: now };
+    out.topicSelected = true;
+    out.scriptMarked = !!(project.narrative && project.narrative.narrationTagged);
+    if (["narrative_approved", "images"].includes(project.status)) { fields.status = "draft"; out.scriptReopened = true; }
+    await supabase("PATCH", "agent_marketing_projects", fields, `?id=eq.${project.id}&user_id=eq.${userId}`);
+  }
+  return out;
+}
+
 async function loadUpload(id, userId) {
   if (!am.UUID_RE.test(String(id || ""))) return null;
   const r = await supabase("GET", "agent_marketing_uploads", null, `?id=eq.${id}&user_id=eq.${userId}&select=*&limit=1`);
@@ -73,7 +101,7 @@ exports.handler = async (event) => {
     let b;
     try { b = JSON.parse(event.body || "{}"); } catch { return reply(400, { error: "Invalid JSON" }); }
     const action = String(b.action || "");
-    if (!["upload", "confirm", "remove", "feedback"].includes(action)) return reply(400, { error: "Unknown action" });
+    if (!["upload", "confirm", "remove", "feedback", "reattest"].includes(action)) return reply(400, { error: "Unknown action" });
 
     // "Not right": the agent says what is wrong (reasons and a short note). The note is kept for us with a small, file-free context, and the
     // report is removed exactly as "Not right, remove" always did.
@@ -90,6 +118,36 @@ exports.handler = async (event) => {
       if (ins.status >= 300) console.error("agent-marketing-report feedback insert failed:", ins.status, JSON.stringify(ins.data).slice(0, 200));
       await supabase("DELETE", "agent_marketing_uploads", null, `?id=eq.${up.id}&user_id=eq.${userId}`);
       return reply(200, { removed: true, saved: ins.status < 300 });
+    }
+
+    // Edit a confirmation: the subscriber revises what THEY attested about an already-confirmed Market Review. No new upload, no new storage.
+    if (action === "reattest") {
+      if (!am.marketReviewEnabled()) return reply(404, { error: "Not found" });
+      const up = await loadUpload(b.uploadId, userId);
+      if (!up) return reply(404, { error: "That report was not found." });
+      const p = await loadProject(up.project_id, userId);
+      if (p.error) return p.error;
+      if (am.NOT_EDITABLE_AFTER.includes(p.row.status)) return reply(409, { error: "This piece is already rendering or finished. Start a new one to change it." });
+      if (up.status !== "confirmed") return reply(409, { error: "Confirm the report first." });
+      if (!up.facts || up.facts.layout !== "market_review") return reply(409, { error: "Only a Market Review's confirmation can be edited. Replace the report instead.", code: "not_editable" });
+      const sc = mr.confirmScope(b.scope); if (!sc.ok) return reply(400, { error: sc.question, code: "scope_needed" });
+      const pt = mr.confirmPropertyTypes(b.propertyTypes); if (!pt.ok) return reply(400, { error: pt.question, code: "property_types_needed" });
+      const extra = { scope: sc.confirmed, propertyTypes: pt.confirmed, acknowledgeConflicts: b.acknowledgeConflicts === true };   // an acknowledgement is never carried over: conflicts are re-read against the new selection
+      if (b.dataThrough != null && b.dataThrough !== "") extra.dataThrough = String(b.dataThrough).slice(0, 10);
+      extra.companions = await companionReports(p.row.id, userId, up.id);
+      const was = mr.attestationSummary(up.facts), wasPrint = mr.attestationFingerprint(up.facts), priorRevs = (up.facts.attestation && up.facts.attestation.revisions) || 0;   // read before reapply, which must never be trusted to leave its input alone
+      const next = mr.reapply(JSON.parse(JSON.stringify(up.facts)), extra);
+      if (next.error === "bad_data_through") return reply(400, { error: next.message, code: "bad_data_through", review: mr.readBackView(next.facts) });
+      if (next.error) return reply(422, { error: "That change could not be saved." });
+      if (next.facts.confirmation.needed.length) return reply(409, { error: next.facts.confirmation.question || "Confirm the details before this change can be saved.", code: "confirmation_needed", needed: next.facts.confirmation.needed, review: mr.readBackView(next.facts) });
+      if (mr.attestationFingerprint(next.facts) === wasPrint) return reply(200, { upload: forClient(up), unchanged: true, revalidation: { researchSets: 0, topicSelected: false, scriptMarked: false, scriptReopened: false } });
+      const now = new Date().toISOString(), prior = priorRevs;
+      next.facts.attestation = { ...next.facts.attestation, revisedAt: now, revisions: prior + 1 };
+      const saved = await supabase("PATCH", "agent_marketing_uploads", { facts: next.facts, scope_note: lib.scopeNote(next.facts), updated_at: now }, `?id=eq.${up.id}&user_id=eq.${userId}&status=eq.confirmed`);
+      const row = Array.isArray(saved.data) ? saved.data[0] : null;
+      if (saved.status >= 300 || !row) return reply(500, { error: "Could not save your change" });
+      const revalidation = await markDependents(p.row, userId, up.id, { at: now, was, now: mr.attestationSummary(next.facts) });
+      return reply(200, { upload: forClient(row), unchanged: false, revalidation });
     }
 
     if (action === "confirm" || action === "remove") {

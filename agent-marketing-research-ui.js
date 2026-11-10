@@ -138,7 +138,7 @@
     return $("audience");
   }
   function unresolvedReport() {   // what still stands between the agent and "Confirm report"
-    var u = state.upload; if (!u || !u.id || u.status === "confirmed" || !reviewOf(u)) return [];
+    var u = state.upload; if (!u || !u.id || (u.status === "confirmed" && !state.edit) || !reviewOf(u)) return [];
     var out = [];
     if ($("rbNames") && !$("rbNames").value.trim()) out.push("area name");
     if ($("rbTypes") && !$("rbTypes").value.trim()) out.push("property types");
@@ -175,6 +175,14 @@
     var n = u && u.summary && u.summary.notice; if (!n) return "";
     return '<details class="rs-attr"><summary>MetroList attribution</summary><div>Required notice for anything you publish with these figures: <b>' + esc(n) + "</b></div></details>";
   }
+  function changeText(o) {   // "was Roseville, now Roseville and Rocklin combined" from what the server recorded
+    var w = (o && o.was) || {}, n = (o && o.now) || {}, bits = [];
+    if (w.area !== n.area) bits.push("area was " + (w.area || "not set") + ", now " + (n.area || "not set"));
+    if ((w.propertyTypes || []).join(", ") !== (n.propertyTypes || []).join(", ")) bits.push("property types were " + ((w.propertyTypes || []).join(", ") || "not set") + ", now " + ((n.propertyTypes || []).join(", ") || "not set"));
+    if (w.dataThrough !== n.dataThrough) bits.push("data-through date was " + (w.dataThrough ? fmtDate(w.dataThrough) : "not set") + ", now " + (n.dataThrough ? fmtDate(n.dataThrough) : "not set"));
+    return bits.join("; ");
+  }
+  function outdatedFor(r) { return (r && r.reportOutdated) || (r && state.selected && state.selected.researchId === r.id && state.selected.reportOutdated) || null; }
   function reportSummaryHtml() {
     if (!reportConfirmed()) return '<div><b>No report.</b> Topics come from web research, and each figure names its source.</div><div class="rs-sum-btns"><button type="button" class="btn ghost small" data-rs-go="report">Add a report</button></div>';
     var u = state.upload, rv = reviewOf(u), bits = [];
@@ -183,7 +191,7 @@
       bits = [REPORT_TYPES[rv.reported.reportType] ? REPORT_TYPES[rv.reported.reportType] + " report" : "", rv.reported.period.label + (rv.reported.period.partial ? " (part of a year)" : ""),
         (a.geography.areaLabel || "") + (a.geography.scopeKind === "combined" ? " (combined market)" : ""), pt.join(", "), a.dataThrough ? "data through " + fmtDate(a.dataThrough.date) : ""];
     } else bits = [(u.summary || {}).scopeSentence || "Report attached"];
-    return '<div><span class="rs-tag ok">Report confirmed</span> ' + bits.filter(Boolean).map(esc).join(" · ") + attrHtml(u) + '</div><div class="rs-sum-btns"><button type="button" class="btn ghost small" data-rs-go="report">View or replace</button><button type="button" class="btn ghost small" id="rsRepRemove">Remove report</button></div>';
+    return '<div><span class="rs-tag ok">Report confirmed</span> ' + bits.filter(Boolean).map(esc).join(" · ") + attrHtml(u) + '</div><div class="rs-sum-btns"><button type="button" class="btn ghost small" id="rsRepEdit">Edit confirmation</button><button type="button" class="btn ghost small" data-rs-go="report">View report</button><button type="button" class="btn ghost small" id="rsRepRemove">Remove report</button></div>';
   }
   function webLookbackText(q) {
     if (q.mode === "local_events" || q.dataFocus === "none" || !q.period) return "";
@@ -232,7 +240,8 @@
       vis.rsNext = true; next = mode === "none" ? "Continue to Find Topics" : "Continue to Report Review";
     } else if (step === "report") {
       vis.rsBack = true;
-      if (reportConfirmed()) { text = "<b>Report confirmed.</b> Nothing has been researched yet. Next: Find Topics."; vis.rsNext = true; next = "Continue to Find Topics"; vis.upNo = true; }
+      if (state.edit && reportConfirmed()) { text = "<b>Editing your confirmation.</b> The figures stay as read; only your statements change." + need(unresolvedReport()) + " Saving does not start research."; vis.rsSave = true; vis.rsCancelEdit = true; vis.rsBack = false; }
+      else if (reportConfirmed()) { text = "<b>Report confirmed.</b> Nothing has been researched yet. Next: Find Topics."; vis.rsNext = true; next = "Continue to Find Topics"; vis.rsEdit = true; vis.upNo = true; }
       else if (u && u.busy) text = "<b>Reading your report…</b>";
       else if (u && u.id) {
         var un = unresolvedReport();
@@ -249,8 +258,11 @@
         text = cur && cur.status === "running" ? "<b>Researching…</b> This usually takes under a minute." : cur && cur.status === "ready" ? "<b>Topics ready.</b> Choose one below, or run a new request." : "<b>Next: find topics.</b> " + (reportConfirmed() ? "Your confirmed report's figures come first. " : "") + "You will review the request before anything is researched.";
       }
     }
-    ["rsBack", "libBtn", "upNo", "confirmEdit", "rsNext", "upYes", "startBtn", "confirmBtn"].forEach(function (id) { if ($(id)) $(id).classList.toggle("hidden", !vis[id]); });
-    $("rsNext").textContent = next;
+    ["rsBack", "libBtn", "upNo", "rsEdit", "rsSave", "rsCancelEdit", "confirmEdit", "rsNext", "upYes", "startBtn", "confirmBtn"].forEach(function (id) { if ($(id)) $(id).classList.toggle("hidden", !vis[id]); });
+    // Narrow screens: short visible labels keep the bar to one row; the full wording stays available to assistive technology.
+    var mob = !!(window.matchMedia && window.matchMedia("(max-width: 640px)").matches), full = { rsEdit: "Edit confirmation", upNo: u && u.status === "confirmed" ? "Remove this report" : "Not right, remove" }, short = { rsEdit: "Edit", upNo: u && u.status === "confirmed" ? "Remove" : "Not right" };
+    ["rsEdit", "upNo"].forEach(function (id) { var el = $(id); if (!el) return; el.textContent = mob ? short[id] : full[id]; el.setAttribute("aria-label", full[id]); });
+    $("rsNext").textContent = mob ? next.replace(/^Continue to .*/, "Continue").replace(/^Continue without a report$/, "Skip report") : next; $("rsNext").setAttribute("aria-label", next);
     $("rsBarText").innerHTML = text;
   }
   function rsRender() {
@@ -344,7 +356,7 @@
     if (!parts.length) return "";
     return '<details class="kv"><summary style="cursor:pointer">Details</summary>' + parts.map(function (x) { return '<div class="kv">' + x + "</div>"; }).join("") + "</details>";
   }
-  function renderTopic(t, pickedId) {
+  function renderTopic(t, pickedId, outdated) {
     var ev = t.event;
     return '<div class="topic' + (t.id === pickedId ? " picked" : "") + '"><div class="tags"><span class="tag">' + esc(t.id.toUpperCase()) + "</span>" +
       '<span class="tag ' + (t.scope === "selected" ? "ok" : "warn") + '">' + (t.scope === "selected" ? "Your exact market" : "Broader context") + "</span>" +
@@ -360,7 +372,7 @@
       (ev ? '<div class="kv"><b>' + esc(ev.name) + "</b> · " + esc(ev.date) + (ev.endDate ? " to " + esc(ev.endDate) : "") + " · " + esc(ev.time) + "</div>" +
         '<div class="kv"><b>Where:</b> ' + esc(ev.location) + " · <b>Organizer:</b> " + esc(ev.organizer) + " · <b>Status:</b> " + esc(ev.status) + "</div>" : "") +
       "<div style=\"margin-top:6px\">" + (t.sources || []).map(srcLine).join("") + "</div>" +
-      '<div class="actions" style="margin-top:10px"><button class="btn small ' + (t.id === pickedId ? "" : "gold") + '" type="button" data-pick="' + esc(t.id) + '">' + (t.id === pickedId ? "Selected" : (t.b2 && t.b2.mode === "trend_report" ? "Choose this perspective" : "Select this topic")) + "</button></div></div>";
+      '<div class="actions" style="margin-top:10px"><button class="btn small ' + (t.id === pickedId ? "" : "gold") + '" type="button" data-pick="' + esc(t.id) + '"' + (outdated ? ' disabled aria-disabled="true" title="Out of date: find topics again"' : "") + ">" + (outdated ? "Out of date" : t.id === pickedId ? "Selected" : (t.b2 && t.b2.mode === "trend_report" ? "Choose this perspective" : "Select this topic")) + "</button></div></div>";
   }
   // Results get the screen: the request folds into one line (Change request brings the form back).
   // The research request folds into a summary once results are showing. On the stepper page this opens the Find Topics task (or the task named in target).
@@ -390,13 +402,15 @@
     renderFailOptions(r);
     say("resNote", r.status === "ready" ? (r.note || (r.marketUpdateMode === "article_editorial" || r.marketUpdateMode === "article_report" ? "Each topic was written from a local article the system read; open Details for the article's own words and the editorial angle." : r.dataSource !== "report" && r.mode !== "local_events" ? "Figures from web research come from public pages. They can differ from your MLS numbers or be preliminary. Upload your MLS report to base your topics on your own data." : "")) : "");
     renderMlsOption(r);
+    var od = outdatedFor(r);
+    var banner = od && r.status === "ready" ? '<div class="rs-alert bad" id="odBanner" role="alert"><b>These topics are out of date.</b> You changed this report\u2019s confirmation after they were made' + (changeText(od) ? " (" + esc(changeText(od)) + ")" : "") + ". They are kept for reference and cannot be chosen. Find topics again to get a set that matches your confirmation.</div>" : "";
     var pickedId = state.selected && state.selected.researchId === r.id ? state.selected.id : null;
     var chosen = pickedId && r.status === "ready" ? r.topics.filter(function (t) { return t.id === pickedId; })[0] : null;
     var bar = chosen ? '<div id="selBar" style="border:1px solid var(--gold);background:#fdf9f0;border-radius:6px;padding:12px 14px;margin-top:12px;display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap"><div style="font-size:0.88rem"><b style="color:var(--success)">\u2713 Topic selected</b><div>' + esc(chosen.question) + "</div></div>" +
-      (opts.onContinue ? '<button class="btn gold small" type="button" id="selContinue">Choose the call to action</button>' : "") + "</div>" : "";
+      (opts.onContinue && !od ? '<button class="btn gold small" type="button" id="selContinue">Choose the call to action</button>' : "") + "</div>" : "";
     var hasNotice = r.status === "ready" && r.topics.some(function (t) { return t.reportNotice; });
     var noticeLine = hasNotice ? '<div class="hint" style="margin-top:10px">Topics that use your report carry MetroList\u2019s required notice automatically; you do not need to write it.</div>' : "";
-    $("resTopics").innerHTML = bar + noticeLine + (r.status === "ready" ? r.topics.map(function (t) { return renderTopic(t, pickedId); }).join("") : "");
+    $("resTopics").innerHTML = banner + bar + noticeLine + (r.status === "ready" ? r.topics.map(function (t) { return renderTopic(t, pickedId, !!od); }).join("") : "");
     if ($("selContinue")) $("selContinue").addEventListener("click", function () { opts.onContinue(state.selected); });
     renderCost(r);
     if (RS()) { state.rs.marketDone = true; if (!reportConfirmed() && reportMode() === "optional") state.rs.reportSkipped = true; setStep("topics"); } else foldSetup(r.status === "ready");
@@ -497,7 +511,7 @@
     var all = list.concat(earlier);
     var rowHtml = function (r) {
       return '<div class="saved"><div><b>' + esc(r.mode === "local_events" ? "Local Events" : "Market Update") + "</b> · " + esc(r.geography && r.geography.label) + " · " + esc(r.audience) +
-        '<div class="hint">' + esc(r.status === "ready" ? "Five topics, " + (r.researchDate || "") : r.status === "failed" ? "Failed, not charged" : "Running") + "</div></div>" +
+        '<div class="hint">' + esc(r.status === "ready" ? "Five topics, " + (r.researchDate || "") + (r.reportOutdated ? " \u00b7 out of date: the report confirmation changed" : "") : r.status === "failed" ? "Failed, not charged" : "Running") + "</div></div>" +
         '<button class="btn ghost small" type="button" data-open="' + esc(r.id) + '">Open</button></div>';
     };
     $("savedList").innerHTML = !all.length ? '<div class="hint" style="padding:14px 0">No saved research yet. Run a request and it will appear here.</div>'
@@ -516,7 +530,7 @@
     var REPORT = "/.netlify/functions/agent-marketing-report";
     var MAX_BYTES = 4 * 1024 * 1024;
     // state.upload: null | { busy, id, status: "pending" | "confirmed", summary }
-    function resetReview() { state.upload = null; $("upFix").classList.add("hidden"); $("upFixText").value = ""; Array.prototype.forEach.call(document.querySelectorAll('input[name="upWhy"]'), function (c) { c.checked = false; }); $("upReview").classList.add("hidden"); $("upMsg").textContent = ""; $("upGroups").innerHTML = ""; $("upWarn").innerHTML = ""; }
+    function resetReview() { state.upload = null; state.edit = null; $("upFix").classList.add("hidden"); $("upFixText").value = ""; Array.prototype.forEach.call(document.querySelectorAll('input[name="upWhy"]'), function (c) { c.checked = false; }); $("upReview").classList.add("hidden"); $("upMsg").textContent = ""; $("upGroups").innerHTML = ""; $("upWarn").innerHTML = ""; }
     function syncUpload() {
       var has = !!($("upFile").files && $("upFile").files.length > 0);
       var ok = has && $("upOk").checked;
@@ -550,7 +564,7 @@
       if (!box && $("upWarn")) { box = document.createElement("div"); box.id = "upReadBack"; box.className = "hidden"; $("upWarn").parentNode.insertBefore(box, $("upWarn").nextSibling); }   // pages that predate the markup
       if (!box) return;
       if (!rv) { box.classList.add("hidden"); box.innerHTML = ""; return; }
-      var r = rv.reported, a = rv.attested, done = u.status === "confirmed", need = rv.needed || [], conflicts = a.conflicts || [];
+      var editing = !!state.edit && u.status === "confirmed", r = rv.reported, a = rv.attested, done = u.status === "confirmed" && !editing, need = rv.needed || [], conflicts = a.conflicts || [];
       var sel = a.geography.selected, sug = (!sel && a.geography.suggested) || null, pts = a.propertyTypes.selected, psug = (!pts && a.propertyTypes.suggested) || null;
       var type = (sel || sug || {}).type || "city", names = (sel || sug || {}).names || [];
       var h = '<div class="rs-grid rv"><div class="rs-col"><div class="rs-card"><div class="ch">Reported by the document <span class="rs-tag">as printed</span></div>';
@@ -563,19 +577,20 @@
       if ((r.notPrinted || []).length) h += '<div class="hint">Not printed in this report: ' + r.notPrinted.map(function (n) { return esc(n.label || n.key); }).join(", ") + "</div>";
       if ((r.unread || []).length) h += '<div class="hint">Could not read: ' + r.unread.map(function (n) { return esc(n.label || n); }).join(", ") + "</div>";
       h += attrHtml(u) + "</div></div>";
-      h += '<div class="rs-col"><div class="rs-card you"><div class="ch">Confirmed by you <span class="rs-tag ' + (done ? "ok" : "wait") + '">' + (done ? "confirmed" : "to confirm") + '</span></div><div class="hint" style="margin-top:0">' + esc(a.note) + "</div>";
+      h += '<div class="rs-col"><div class="rs-card you"><div class="ch">Confirmed by you <span class="rs-tag ' + (done ? "ok" : "wait") + '">' + (done ? "confirmed" : editing ? "editing" : "to confirm") + '</span></div><div class="hint" style="margin-top:0">' + esc(a.note) + "</div>";
       if (done) {
         h += '<div style="margin-top:8px;font-size:0.88rem">Area: <b>' + esc(a.geography.areaLabel || "") + "</b>" + (a.geography.scopeKind === "combined" ? " (combined market: never stated for one place alone)" : "") + "<br>Property types: <b>" + listIn(pts && pts.names) + "</b>" + (a.dataThrough ? "<br>Data through: <b>" + esc(fmtDate(a.dataThrough.date)) + "</b> " + (a.dataThrough.provenance === "subscriber_attested" ? '<span class="hint">(your date; not independently verified)</span>' : '<span class="hint">(' + (a.dataThrough.provenance === "cross_report" ? "supported by your year-to-date report" : "printed in the report") + ")</span>") : "") + "</div>";
       } else {
-        if (a.carriedFrom) h += '<div class="hint" style="margin-top:6px">Carried forward from ' + esc(a.carriedFrom) + ". Change it below if this report is different.</div>";
+        if (editing) h += '<div class="hint" style="margin-top:6px">You are editing this confirmation. Tick the box again to save. Topics already made with the old confirmation will be marked out of date.</div>';
+        else if (a.carriedFrom) h += '<div class="hint" style="margin-top:6px">Carried forward from ' + esc(a.carriedFrom) + ". Change it below if this report is different.</div>";
         else if (sug || psug) h += '<div class="hint" style="margin-top:6px">Suggested from your project. Check it, change it if needed, then confirm.</div>';
         h += '<div class="row2"><div><label class="lbl" for="rbType">Area this report covers</label><select id="rbType">' + SCOPE_TYPES.map(function (t) { return '<option value="' + t[0] + '"' + (t[0] === type ? " selected" : "") + ">" + t[1] + "</option>"; }).join("") + '</select></div>';
         h += '<div><label class="lbl" for="rbNames">Place name(s)</label><input type="text" id="rbNames" maxlength="200" placeholder="Separated by commas" value="' + esc(names.join(", ")) + '"></div></div>';
         h += '<label class="lbl" for="rbTypes">Property types this report covers</label><input type="text" id="rbTypes" maxlength="200" placeholder="For example: Single Family, Condo" value="' + esc(((pts && pts.names) || psug || []).join(", ")) + '">';
-        if (need.indexOf("dataThrough") >= 0) h += '<label class="lbl" for="rbThrough">Last date this report\'s data covers (required)</label><input type="date" id="rbThrough" value="' + esc(a.dataThrough ? a.dataThrough.date : "") + '"><div class="hint">The report does not say. A date you enter is recorded as yours, not verified.</div>';
+        if (need.indexOf("dataThrough") >= 0 || (editing && a.dataThrough && a.dataThrough.provenance === "subscriber_attested")) h += '<label class="lbl" for="rbThrough">Last date this report\'s data covers (required)</label><input type="date" id="rbThrough" value="' + esc(a.dataThrough ? a.dataThrough.date : "") + '"><div class="hint">The report does not say. A date you enter is recorded as yours, not verified.</div>';
         conflicts.forEach(function (c) { h += '<div class="rs-alert bad" role="alert">' + esc(c.message) + "</div>"; });
         if (need.indexOf("conflicts") >= 0 || conflicts.length) h += '<label class="choice" style="margin-top:8px"><input type="checkbox" id="rbAck"><span>I have read the differences noted above and my selection is right.</span></label>';
-        if (!a.carriedFrom || a.geography.status !== "ok") h += '<label class="choice" style="margin-top:8px"><input type="checkbox" id="rbAttest"><span>I confirm these describe this report. I understand they are my statements and are not checked against the file.</span></label>';
+        if (editing || !a.carriedFrom || a.geography.status !== "ok") h += '<label class="choice" style="margin-top:8px"><input type="checkbox" id="rbAttest"><span>I confirm these describe this report. I understand they are my statements and are not checked against the file.</span></label>';
       }
       h += "</div></div></div>";
       box.innerHTML = h; box.classList.remove("hidden");
@@ -591,8 +606,8 @@
     }
     function readBackPayload(u) {
       var rv = (u.summary || {}).review;
-      if (!rv || u.status === "confirmed") return {};
-      var carried = !!(rv.attested && rv.attested.carriedFrom), out = {};
+      if (!rv || (u.status === "confirmed" && !state.edit)) return {};
+      var carried = !state.edit && !!(rv.attested && rv.attested.carriedFrom), out = {};
       if ($("rbType")) {
         if (!carried && $("rbAttest") && !$("rbAttest").checked) return { error: "Tick the box to confirm the area and property types are yours." };
         out.scope = { type: $("rbType").value, names: $("rbNames").value.split(",").map(function (x) { return x.trim(); }).filter(Boolean) };
@@ -610,6 +625,7 @@
       $("upWarn").innerHTML = (s.warnings || []).map(function (w) { return '<div class="rs-alert" role="status">' + esc(w) + "</div>"; }).join("");
       if (s.notice && !s.review) $("upWarn").innerHTML += '<div class="rs-attr"><details><summary>MetroList attribution</summary><div>Required notice for anything you publish with these figures: <b>' + esc(s.notice) + "</b></div></details></div>";
       $("upYes").classList.toggle("hidden", u.status === "confirmed");
+      if (u.status !== "confirmed") state.edit = null;
       $("upNo").textContent = u.status === "confirmed" ? "Remove this report" : "Not right, remove";
       if ($("upSourceNote")) $("upSourceNote").classList.toggle("hidden", u.status === "confirmed");
       var rows = s.layout === "cma_table" || s.layout === "listing_table";
@@ -709,6 +725,56 @@
         if (RS()) { state.rs.reportSkipped = false; setStep("topics", true); say("startMsg", "Report confirmed. Nothing has been researched yet.", "ok"); }
       } catch (e) { $("upMsg").textContent = e.message; }
     });
+    function enterEdit() {
+      var u = state.upload; if (!u || !u.id || u.status !== "confirmed" || !reviewOf(u)) return;
+      state.edit = { draft: null }; say("startMsg", ""); $("upMsg").textContent = "";
+      renderReview(u); setStep("report", true);
+      var f = $("rbNames"); if (f) { try { f.scrollIntoView({ block: "center" }); } catch (e) { /* older browsers */ } f.focus(); }
+    }
+    function cancelEdit() {
+      var u = state.upload; state.edit = null; $("upMsg").textContent = "";
+      if (u) renderReview(u);
+      say("startMsg", "No change was made to your confirmation.", "ok");
+      var b = $("rsEdit"); if (b) b.focus();
+    }
+    async function saveEdit() {
+      var u = state.upload; if (!u || !u.id || !state.edit) return;
+      $("upMsg").textContent = "";
+      var draft = readDraft(), extra = readBackPayload(u);
+      if (extra.error) { say("startMsg", extra.error, "err"); $("upMsg").textContent = extra.error; if ($("rbAttest")) $("rbAttest").focus(); return; }
+      var un = unresolvedReport();
+      if (un.length) { say("startMsg", "Still needed: " + un.join(", ") + ".", "err"); var f2 = [$("rbNames"), $("rbTypes"), $("rbThrough"), $("rbAck"), $("rbAttest")].filter(function (x) { return x && ((x.type === "checkbox" && !x.checked) || (x.type !== "checkbox" && !x.value.trim())); })[0]; if (f2) f2.focus(); return; }
+      $("rsSave").disabled = true;
+      try {
+        var r = await api(REPORT, "POST", "", Object.assign({ action: "reattest", uploadId: u.id }, extra));
+        if (!r.ok) {
+          $("upMsg").textContent = (r.json && r.json.error) || "Could not save the change.";
+          var rvNeed = (r.json && r.json.review && r.json.review.needed) || [];
+          say("startMsg", rvNeed.indexOf("conflicts") >= 0 ? "The report header differs from your selection. Read the note under \u201cConfirmed by you\u201d, then tick the acknowledgement or change your selection." : $("upMsg").textContent, "err");
+          if (r.json && r.json.review) { u.summary = Object.assign({}, u.summary, { review: r.json.review }); renderReadBack(u, draft); rsSyncBar(); }
+          return;
+        }
+        state.edit = null;
+        if (r.json && r.json.upload) u.summary = r.json.upload.summary;
+        renderReview(u); syncUpload();
+        var rv = (r.json && r.json.revalidation) || {}, parts = [];
+        if (r.json && r.json.unchanged) { say("startMsg", "Nothing changed, so nothing needs to be redone.", "ok"); return; }
+        if (rv.researchSets) parts.push(rv.researchSets + " saved topic set" + (rv.researchSets === 1 ? " was" : "s were") + " marked out of date");
+        if (rv.topicSelected) parts.push("your chosen topic needs to be chosen again");
+        if (rv.scriptMarked || rv.scriptReopened) parts.push("your script needs to be written again");
+        var msg = "Confirmation updated. Nothing was researched." + (parts.length ? " " + parts.join("; ") + "." : " Nothing you made depends on the old confirmation.");
+        var list = await refreshSaved();
+        if (opts.onReportChanged) { try { await opts.onReportChanged(rv); } catch (e) { /* the page keeps its copy */ } }
+        var cur = state.current && (list || []).filter(function (x) { return x.id === state.current.id; })[0];
+        if (cur) { opts.__pickedNow = true; showResult(cur); opts.__pickedNow = false; } else setStep("topics", true);
+        say("startMsg", msg, "ok");
+      } catch (e) { $("upMsg").textContent = e.message; say("startMsg", e.message, "err"); }
+      finally { $("rsSave").disabled = false; }
+    }
+    state.enterEdit = enterEdit;
+    $("rsEdit").addEventListener("click", enterEdit);
+    $("rsCancelEdit").addEventListener("click", cancelEdit);
+    $("rsSave").addEventListener("click", saveEdit);
     $("libClose").addEventListener("click", closeLib);
     $("resX").addEventListener("click", function () { $("resultPanel").classList.add("hidden"); state.current = null; foldSetup(false, "topics"); });
     $("setupEdit").addEventListener("click", function () { foldSetup(false, "market"); if (RS()) { $("rsMarketH").focus(); } else $("setupBody").scrollIntoView({ behavior: "smooth", block: "start" }); });
@@ -813,9 +879,11 @@
     $("stepResearch").addEventListener("click", function (e) {
       var g = e.target.closest("[data-rs-go]"); if (g) { say("startMsg", ""); setStep(g.getAttribute("data-rs-go"), true); return; }
       if (e.target.id === "rsRepRemove" && state.removeUpload) state.removeUpload();
+      if (e.target.id === "rsRepEdit" && state.enterEdit) state.enterEdit();
     });
     $("rsBack").addEventListener("click", function () { say("startMsg", ""); setStep(state.rs.step === "topics" && reportMode() !== "none" ? "report" : "market", true); });
     $("rsNext").addEventListener("click", rsNextClick);
+    if (window.matchMedia) { var mq = window.matchMedia("(max-width: 640px)"); (mq.addEventListener ? mq.addEventListener.bind(mq, "change") : mq.addListener.bind(mq))(rsSyncBar); }
     ["input", "change"].forEach(function (ev) { $("upReadBack").addEventListener(ev, rsSyncBar); $("rsMarket").addEventListener(ev, rsRender); });
   }
   async function start() {

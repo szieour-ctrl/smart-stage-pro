@@ -58,7 +58,7 @@ test("Report Review: reported facts (left) and subscriber attestations (right) s
   const rb = fn("function renderReadBack(", "function readDraft()");
   assert.match(rb, /rs-grid rv/);
   assert.ok(rb.indexOf("Reported by the document") < rb.indexOf("Confirmed by you"));
-  assert.match(rb, /need\.indexOf\("dataThrough"\) >= 0\) h \+=/);                 // date field only when the report needs it
+  assert.match(rb, /need\.indexOf\("dataThrough"\) >= 0 \|\| \(editing/);                 // date field only when the report needs it
   assert.match(rb, /conflicts\.forEach\(function \(c\) \{ h \+= '<div class="rs-alert bad"/);   // a conflict is shown only if one exists
   assert.match(rb, /need\.indexOf\("conflicts"\) >= 0 \|\| conflicts\.length\) h \+=[^;]*rbAck/);
   // the reader's own text and the attestation note are kept
@@ -95,7 +95,7 @@ test("MetroList attribution is available once per view, collapsed, not repeated 
 test("completed tasks collapse to summaries; a confirmed report offers view/replace and remove, and server-side confirmation is untouched", () => {
   const s = fn("function reportSummaryHtml()", "function webLookbackText(");
   assert.match(s, /Report confirmed/);
-  assert.match(s, /View or replace/);
+  assert.match(s, /Edit confirmation[\s\S]*View report/);
   assert.match(s, /rsRepRemove/);
   // confirmation still goes to the server with the attestation payload and acknowledgement flags
   assert.match(ui, /action: "confirm", uploadId: u\.id, correct: true/);
@@ -122,4 +122,42 @@ test("responsive: columns stack, the table becomes stacked rows without shrinkin
 test("the stepper page keeps working with the older research-test page, which has none of the new markup", () => {
   assert.match(ui, /function RS\(\) \{ return !!\$\("rsSteps"\); \}/);
   for (const g of ["function rsRender()", "function rsSyncBar()", "function setStep("]) assert.match(fn(g, "function "), /if \(!RS\(\)/);
+});
+
+// ── Final refinements: editing a confirmed report, and the action bar ──
+const fsR = require("fs"), pathR = require("path");
+const uiSrc = fsR.readFileSync(pathR.join(__dirname, "..", "agent-marketing-research-ui.js"), "utf8");
+const htmlSrc = fsR.readFileSync(pathR.join(__dirname, "..", "agent-marketing.html"), "utf8");
+
+test("Edit confirmation is offered in the confirmed summary and the Report Review bar, with Save and Cancel while editing", () => {
+  assert.match(uiSrc, /id="rsRepEdit">Edit confirmation/);
+  for (const id of ["rsEdit", "rsSave", "rsCancelEdit"]) assert.match(htmlSrc, new RegExp('id="' + id + '"'));
+  assert.match(uiSrc, /vis\.rsSave = true; vis\.rsCancelEdit = true/);
+  assert.match(uiSrc, /action: "reattest", uploadId: u\.id/);
+});
+
+test("editing never re-uploads a file, never starts research, and requires the attestation to be ticked again", () => {
+  const save = uiSrc.slice(uiSrc.indexOf("async function saveEdit"), uiSrc.indexOf("state.enterEdit = enterEdit"));
+  assert.doesNotMatch(save, /action: "(upload|start)"/);
+  assert.doesNotMatch(save, /setStep\("topics", true\)[\s\S]*start\(\)/);
+  assert.match(uiSrc, /editing \|\| !a\.carriedFrom/, "the confirmation box is always shown in edit mode");
+  assert.match(uiSrc, /carried = !state\.edit/, "an edit is never treated as carried forward");
+  assert.match(save, /Confirmation updated\. Nothing was researched\./);
+});
+
+test("downstream: outdated topic sets show a banner, cannot be chosen, and hide 'Choose the call to action'", () => {
+  assert.match(uiSrc, /id="odBanner"/);
+  assert.match(uiSrc, /disabled aria-disabled="true"/);
+  assert.match(uiSrc, /opts\.onContinue && !od/);
+  assert.match(uiSrc, /out of date: the report confirmation changed/);
+  assert.match(htmlSrc, /onReportChanged: async function/, "the page reloads the project so its topic, script and status match the server");
+});
+
+test("action bar: reserves its own height for scrolling and focus, and is compact with short labels on narrow screens", () => {
+  assert.match(htmlSrc, /scroll-padding-bottom:calc\(var\(--rs-bar-h,96px\) \+ 20px\)/);
+  assert.match(htmlSrc, /--rs-bar-h/);
+  assert.match(htmlSrc, /\.rs-bar-btns\{width:100%;flex-wrap:nowrap/);
+  assert.match(htmlSrc, /-webkit-line-clamp:2/);
+  assert.match(uiSrc, /aria-label|setAttribute\("aria-label", full\[id\]\)/, "short labels keep their full accessible names");
+  assert.doesNotMatch(htmlSrc, /\.rs-bar-btns \.btn\.gold\{[^}]*order:-1/, "visual order matches tab order");
 });

@@ -532,6 +532,8 @@ const CMA_LEFT = /^(.*?)\s+(\d{1,2}(?:-\d{1,2})?)\s+(\d{1,2}(?:\.\d)?)(?:\s+\(\d
 const CMA_SECTION = /^(active|pending|closed|expired|cancell?ed|withdrawn|contingent|coming soon|active under contract|sold off mls)$/i;
 
 function cityFromPrefix(prefix) {
+  // Some PDFs print the street suffix and the city with no space between them ("Tawny Meadow WayAntelope"): split them at a capital letter that follows a capitalized suffix.
+  prefix = String(prefix || "").replace(new RegExp(`\\b(${STREET_SUFFIX})(?=[A-Z][a-z])`, "g"), "$1 ");
   const withSuffix = new RegExp(`^\\d+\\s+.+?\\b(?:${STREET_SUFFIX})\\b\\.?\\s+(.+)$`, "i").exec(prefix);
   const tail = withSuffix ? withSuffix[1] : (prefix.split(/\s+/).slice(-1)[0] || "");
   return sanitizeCity(tail.trim());

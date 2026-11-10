@@ -65,3 +65,20 @@ test("the analysis is deterministic", () => {
   const f = lib.analyzePages([fx.marketUpdate()], {}).facts;
   assert.deepStrictEqual(ti.analyze(ctxOf(f)), ti.analyze(ctxOf(f)));
 });
+
+test("a CMA (one snapshot, no earlier period) is analyzed across its statuses, not refused", () => {
+  const cma = require("./helpers/cma-fixture");
+  const r = lib.analyzePages(cma.standard().pages, {});
+  assert.ok(r.facts, JSON.stringify(r));
+  const a = ti.analyze(ctxOf(r.facts));
+  assert.ok(a.usable, "a CMA has relationships between its active, pending, closed and canceled listings");
+  assert.ok(a.observations.every((o) => o.basis.type === "snapshot" && o.evidence.length >= 2));
+  assert.ok(a.observations.every((o) => !/\d/.test(o.statement)));
+});
+
+test("a street suffix fused to the city by the PDF text (\"Tawny Meadow WayAntelope\") still reads as the city", () => {
+  const cma = require("./helpers/cma-fixture");
+  const pages = cma.standard().pages.map((p) => p.replace(/(Cedar Way) (\S+)/, "$1$2"));
+  const f = lib.analyzePages(pages, {}).facts;
+  assert.ok(!f.geography.cities.some((c) => /Way/.test(c)), JSON.stringify(f.geography));
+});

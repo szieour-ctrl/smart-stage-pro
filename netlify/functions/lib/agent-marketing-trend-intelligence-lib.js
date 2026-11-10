@@ -162,6 +162,57 @@ function analyzeReport(rep, figures, refOf, basis) {
   }
   return out;
 }
+// A snapshot with no earlier-period figures (a CMA: active, pending, closed and canceled listings at one date) still has relationships ACROSS statuses.
+function analyzeSnapshot(rep, figures, refOf) {
+  const get = (status, key) => figures.find((cf) => cf.fig.status === status && cf.fig.key === key) || null;
+  const basis = { type: "snapshot", label: "the other listings in this same report" };
+  const out = [];
+  const ev = (...cfs) => cfs.filter(Boolean).map((cf) => ({ ref: refOf(cf.ref), text: oneLine(rep, cf, basis) }));
+  const add = (o) => out.push({ reportKey: rep.key, basis, ...o });
+  const v = (cf) => (cf && Number.isFinite(cf.fig.value) ? cf.fig.value : null);
+  const act = get("active", "count"), pen = get("pending", "count"), clo = get("closed", "count"), can = get("canceled", "count");
+  if (v(act) > 0 && v(pen) != null) {
+    const r = v(pen) / v(act);
+    const sig = r < 0.25 ? "buyer_favoring" : r > 0.5 ? "seller_favoring" : "neutral";
+    add({ kind: "pending_vs_active", signal: sig, strength: sig === "neutral" ? 1 : 3, title: sig === "buyer_favoring" ? "Few homes under contract for the number available" : sig === "seller_favoring" ? "Many homes under contract for the number available" : "A middling share of homes under contract",
+      statement: `The number of pending listings is ${sig === "buyer_favoring" ? "small" : sig === "seller_favoring" ? "large" : "moderate"} next to the number of active listings.`, evidence: ev(act, pen) });
+  }
+  const aDom = get("active", "median_dom") || get("active", "avg_dom"), cDom = get("closed", "median_dom") || get("closed", "avg_dom");
+  if (v(aDom) != null && v(cDom) > 0 && aDom.fig.key === cDom.fig.key) {
+    const r = v(aDom) / v(cDom);
+    if (r >= 1.4 || r <= 0.8) add({ kind: "pace_split", signal: r >= 1.4 ? "mixed" : "seller_favoring", strength: 3, title: r >= 1.4 ? "Sold homes went fast; what is still listed has waited longer" : "Active listings are newer than the homes that sold",
+      statement: r >= 1.4 ? "Homes that closed spent fewer days on the market than the homes still active, so the market moves quickly for some homes and slowly for others." : "Active listings have been on the market for fewer days than the homes that closed.", evidence: ev(cDom, aDom) });
+  }
+  const red = get("active", "reduced_count");
+  if (v(act) > 0 && v(red) != null) {
+    const r = v(red) / v(act);
+    if (r >= 0.4 || r <= 0.15) add({ kind: "price_reductions", signal: r >= 0.4 ? "buyer_favoring" : "seller_favoring", strength: 3, title: r >= 0.4 ? "A large share of active listings have cut their price" : "Few active listings have cut their price",
+      statement: r >= 0.4 ? "A large share of active listings have already reduced their price, which says initial pricing is being corrected by the market." : "Few active listings have needed a price reduction.", evidence: ev(red, act) });
+  }
+  const s2l = get("closed", "avg_close_to_list_pct"), atAbove = get("closed", "at_or_above_list_count");
+  if (v(s2l) != null) {
+    const lvl = v(s2l) >= 100 ? "above" : v(s2l) >= 98 ? "near" : "below";
+    const share = v(clo) > 0 && v(atAbove) != null ? v(atAbove) / v(clo) : null;
+    add({ kind: "negotiation", signal: lvl === "above" || (share != null && share >= 0.5) ? "seller_favoring" : lvl === "below" ? "buyer_favoring" : "neutral", strength: 2,
+      title: lvl === "below" ? "Room to negotiate" : share != null && share >= 0.5 ? "Many homes closing at or above list" : "Sales landing close to list",
+      statement: `Sold prices are ${lvl === "above" ? "above" : lvl === "below" ? "meaningfully below" : "close to"} list prices${share != null ? `, and ${share >= 0.5 ? "a majority of" : "fewer than half of"} closed sales reached or beat list price` : ""}.`, evidence: ev(s2l, atAbove, clo) });
+  }
+  const aList = get("active", "median_list_price"), cSold = get("closed", "median_close_price");
+  if (v(aList) != null && v(cSold) > 0) {
+    const gap = (v(aList) - v(cSold)) / v(cSold) * 100;
+    if (Math.abs(gap) >= 3) add({ kind: "asking_vs_sold", signal: gap > 0 ? "buyer_favoring" : "seller_favoring", strength: 2, title: gap > 0 ? "Asking prices sit above what homes sold for" : "Homes sold for more than current asking prices",
+      statement: `The typical active asking price is ${gap > 0 ? "above" : "below"} the typical closed price, so what sellers ask and what buyers have recently paid are not the same thing.`, evidence: ev(aList, cSold) });
+  }
+  const pList = get("pending", "median_list_price");
+  if (v(pList) != null && v(aList) > 0 && Math.abs((v(pList) - v(aList)) / v(aList)) * 100 >= 3) {
+    const lower = v(pList) < v(aList);
+    add({ kind: "price_tier", signal: lower ? "buyer_favoring" : "seller_favoring", strength: 2, title: lower ? "Homes going under contract are priced below those still available" : "Homes going under contract are priced above those still available",
+      statement: lower ? "The typical pending listing is priced below the typical active listing, which suggests buyers are committing at the more modest price points." : "The typical pending listing is priced above the typical active listing.", evidence: ev(pList, aList) });
+  }
+  if (v(can) != null && v(clo) > 0 && v(can) / v(clo) >= 0.3) add({ kind: "cancellations", signal: "mixed", strength: 2, title: "Many listings left the market unsold",
+    statement: "A notable number of listings were canceled in the same period that others closed, which says some sellers were not meeting the market where they priced.", evidence: ev(can, clo) });
+  return out;
+}
 function labelOf(f) { return f ? f.label.charAt(0).toUpperCase() + f.label.slice(1) : ""; }
 function oneLine(rep, cf, basis) {
   const f = cf.fig;
@@ -215,6 +266,26 @@ const READINGS = {
     buyer_favoring: { realtor: "A gap between today's asking prices and what recently sold is the usual place where listings stall.", homeowner: "Asking prices are not sold prices; an owner is better served by what homes actually closed for.", buyer: "Sold prices, not asking prices, show what the market is paying." },
     seller_favoring: { realtor: "Recent sold prices running above current asking prices suggest new listings are priced conservatively.", homeowner: "Recent sold prices are a better guide to value than a few current listings.", buyer: "Recent sold prices running above asking prices mean list price alone understates what homes may fetch." },
   },
+  pending_vs_active: {
+    buyer_favoring: { realtor: "When few homes are under contract next to the number for sale, supply is outrunning demand in this snapshot; the listings that do go under contract are the ones priced and presented to the market.", homeowner: "A long list of available homes with few contracts means an owner who sells competes for attention, so planning price and preparation ahead matters.", buyer: "Plenty of choice and less pressure can give a buyer time to compare." },
+    seller_favoring: { realtor: "A large share of homes under contract next to those available says demand is absorbing supply.", homeowner: "When many homes go under contract, a well-prepared home tends to get attention quickly.", buyer: "With many homes going under contract, a buyer needs to be ready." },
+    neutral: { realtor: "A moderate share under contract says neither side clearly dominates; individual pricing decides.", homeowner: "A balanced snapshot rewards realistic pricing.", buyer: "A balanced snapshot means choice, with some competition." },
+  },
+  pace_split: {
+    mixed: { realtor: "A market where sold homes were quick but active homes have waited is really two markets: homes priced and prepared for today sell quickly, and the rest sit. The gap is the story.", homeowner: "Whether a home sells quickly or sits depends heavily on price and condition, not on the market as a whole.", buyer: "Longer-waiting listings may be open to negotiation, while the fresh ones move fast." },
+    seller_favoring: { realtor: "Active listings that are newer than what sold say the market is turning over quickly.", homeowner: "Quick turnover favors a home that is ready on day one.", buyer: "A quick-turning market rewards decisiveness." },
+  },
+  price_reductions: {
+    buyer_favoring: { realtor: "When a large share of active listings have cut their price, the market is correcting initial pricing; a seller who starts at the right number avoids the cut.", homeowner: "Price cuts are a sign that the first price matters; starting right is worth more than correcting later.", buyer: "Many price reductions mean sellers are adjusting, which can leave room to negotiate." },
+    seller_favoring: { realtor: "Few price cuts say initial pricing is largely holding.", homeowner: "Few price cuts suggest sellers are pricing in line with buyers.", buyer: "Few price cuts mean less room to expect a discount." },
+  },
+  cancellations: {
+    mixed: { realtor: "Listings that are canceled rather than sold are the quiet measure of overpricing or unready homes; they tell sellers how not to position a home.", homeowner: "A canceled listing is a costly lesson; preparation and pricing before listing avoid it.", buyer: "Canceled listings can come back at different prices." },
+  },
+  price_tier: {
+    buyer_favoring: { realtor: "Contracts clustering below the price of what remains available suggests the pressure is at the more modest price points.", homeowner: "Where a home sits in the price range changes how quickly it draws a buyer.", buyer: "More modest price points may see the most competition." },
+    seller_favoring: { realtor: "Contracts at higher price points than what remains available says buyers are committing at the upper end.", homeowner: "Upper-range homes are drawing buyers in this snapshot.", buyer: "Buyers at higher price points should expect competition." },
+  },
   month_vs_year: {
     mixed: { realtor: "When one month differs from the year so far, the month may be an interruption rather than a change of direction; both numbers belong in the story.", homeowner: "One month is a snapshot; the year to date gives the longer background.", buyer: "A single month is a snapshot, so weigh it against the year so far." },
   },
@@ -245,6 +316,7 @@ function analyze(ctx, opts) {
   reports.forEach((rep) => {
     const figures = [...((ctx.figures && ctx.figures.values && ctx.figures.values()) || [])].filter((cf) => cf.report === rep);
     const bases = basesFor(rep.facts);
+    if (!bases.length) { analyzeSnapshot(rep, figures, refOf).forEach((o) => obs.push(o)); return; }
     // The comparison against the same period a year earlier is the primary basis; the earlier month adds only what it says differently.
     const seen = new Set();
     bases.forEach((b) => {

@@ -163,6 +163,75 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
 .reel-out{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:18px;margin-top:16px;}
 .reel-out video{width:100%;max-height:640px;background:#000;border-radius:4px;}
 .reel-out .dl{display:inline-block;margin-top:6px;font-size:0.82rem;color:#ad864b;}
+
+/* Research workspace: stepper, two columns, persistent action bar (Concept A) */
+.stage.wide{max-width:1240px;}
+.rs-top{padding-bottom:16px;}
+.rs-steps{list-style:none;display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:14px 0 0;padding:0;}
+.rs-step{width:100%;text-align:left;display:flex;gap:10px;align-items:flex-start;border:1px solid var(--border);background:#fff;border-radius:6px;padding:10px 12px;font:inherit;color:var(--ink);cursor:pointer;}
+.rs-step .n{flex:none;width:26px;height:26px;border-radius:50%;background:var(--warm);color:var(--muted);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:0.8rem;}
+.rs-step b{display:block;font-size:0.9rem;line-height:1.3;}
+.rs-step small{display:block;color:var(--muted);font-size:0.78rem;line-height:1.35;margin-top:1px;}
+.rs-step.active{border-color:var(--gold);background:#fdf9f0;box-shadow:inset 0 0 0 1px var(--gold);}
+.rs-step.active .n{background:var(--ink);color:#fff;}
+.rs-step.done .n{background:var(--success);color:#fff;}
+.rs-step:disabled{opacity:0.55;cursor:default;}
+.rs-step:focus-visible,.btn:focus-visible,.rs-link:focus-visible{outline:2px solid var(--gold);outline-offset:2px;}
+.rs-sum{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-top:10px;background:#fbfaf7;font-size:0.88rem;line-height:1.45;}
+.rs-sum-btns{display:flex;gap:8px;flex-wrap:wrap;}
+.rs-sum details{margin-top:4px;font-size:0.8rem;color:var(--muted);}
+.rs-sum summary,.rs-attr summary{cursor:pointer;color:#7a5a12;font-weight:600;}
+.rs-h{font-family:'Cormorant Garamond',serif;font-size:1.35rem;font-weight:500;margin-bottom:12px;outline:none;}
+.rs-grid{display:grid;grid-template-columns:1fr 1fr;gap:26px;align-items:start;}
+.rs-grid.rv{grid-template-columns:1.2fr 1fr;gap:18px;}
+.rs-grid.rt{grid-template-columns:minmax(280px,1fr) 1.6fr;}
+.rs-col{min-width:0;}
+.rs-card{border:1px solid var(--border);border-radius:8px;padding:14px 16px;background:#fff;font-size:0.88rem;}
+.rs-card.you{border-color:#b9c9b9;background:#f4f8f4;}
+.rs-card .ch{font-weight:700;font-size:0.9rem;margin-bottom:2px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+.rs-tag{font-size:0.66rem;text-transform:uppercase;letter-spacing:0.06em;font-weight:700;padding:2px 8px;border-radius:10px;background:var(--warm);color:var(--muted);}
+.rs-tag.ok{background:#eaf3ee;color:var(--success);} .rs-tag.wait{background:#fdf3d8;color:#7a5a12;}
+.rs-chips{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0;}
+.rs-chip{border:1px solid var(--border);border-radius:14px;background:#fff;padding:2px 10px;font-size:0.82rem;}
+.rs-chip.hl{background:#fbe9e6;border-color:#e6b6ae;}
+.rs-scope{font-weight:600;font-size:0.92rem;margin:14px 0 10px;}
+.upload.has{padding:8px 12px;text-align:left;}.upload.has .ut,.upload.has .us{display:none;}
+.rs-grid.rt.one{grid-template-columns:minmax(280px,620px);}
+.rs-alert{border-radius:6px;padding:8px 12px;font-size:0.84rem;margin:8px 0;background:#fdf3d8;border:1px solid #ecd9a3;color:#6b5314;}
+.rs-alert.bad{background:#fbe9e6;border-color:#e6b6ae;color:#8f2a1c;}
+.fig-t{width:100%;border-collapse:collapse;font-size:0.86rem;margin-top:6px;}
+.fig-t th{text-align:left;font-size:0.7rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--muted);font-weight:600;padding:4px 6px;border-bottom:1px solid var(--border);}
+.fig-t td{padding:6px;border-bottom:1px solid #eee7dc;vertical-align:top;}
+.fig-t td.v{font-weight:700;white-space:nowrap;}
+.fig-t td.cmp{color:#4a423a;}
+.fig-t tr.sh td{background:#faf7f0;font-weight:700;font-size:0.72rem;text-transform:uppercase;letter-spacing:0.06em;color:var(--muted);}
+.rs-more{margin-top:8px;}
+.rs-more summary{cursor:pointer;color:#7a5a12;font-weight:600;font-size:0.84rem;}
+.rs-link{background:none;border:0;color:#7a5a12;font:inherit;font-weight:600;text-decoration:underline;cursor:pointer;padding:0;}
+.rs-attr{margin-top:12px;font-size:0.8rem;}
+.rs-attr div{margin-top:4px;color:#4a423a;}
+.rs-bar{position:sticky;bottom:0;z-index:30;display:flex;gap:14px;align-items:center;justify-content:space-between;flex-wrap:wrap;background:#1a1714;color:#f7f4ef;border-radius:8px 8px 0 0;padding:12px 18px;margin-top:6px;box-shadow:0 -6px 18px rgba(0,0,0,0.12);}
+.rs-bar-text{flex:1 1 320px;min-width:0;font-size:0.9rem;line-height:1.4;}
+.rs-bar-text .msg{margin:2px 0 0;min-height:0;font-size:0.82rem;}
+.rs-bar-text .msg.err{color:#ffb4a8;} .rs-bar-text .msg.ok{color:#a8e0bf;}
+.rs-bar-text b{color:#fff;} .rs-bar-text .need{color:#e9d5a6;}
+.rs-bar-btns{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;}
+.rs-bar .btn.ghost{background:transparent;color:#f7f4ef;border:1px solid #6b6256;}
+.rs-bar .btn.gold{background:#c9a15f;color:#1a1714;}
+@media(max-width:860px){
+  .rs-grid,.rs-grid.rv,.rs-grid.rt{grid-template-columns:1fr;gap:16px;}
+  .stage.wide{padding-left:14px;padding-right:14px;}
+}
+@media(max-width:640px){
+  .rs-steps{grid-template-columns:1fr;gap:6px;}
+  .rs-step{padding:8px 10px;}
+  .rs-bar{border-radius:0;padding:10px 14px;margin-left:-14px;margin-right:-14px;}
+  .rs-bar-btns{width:100%;justify-content:stretch;} .rs-bar-btns .btn{flex:1 1 auto;}
+  .fig-t thead{display:none;}
+  .fig-t tr{display:grid;grid-template-columns:1fr auto;gap:0 10px;border-bottom:1px solid #eee7dc;padding:6px 0;}
+  .fig-t td{border:0;padding:1px 0;} .fig-t td.cmp{grid-column:1 / -1;font-size:0.84rem;}
+  .fig-t tr.sh{display:block;} .fig-t tr.sh td{display:block;}
+}
 </style>
 </head>
 <body>
@@ -207,69 +276,83 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
 
     <!-- 2. Research: request, five topics, select -->
     <div class="hidden" id="stepResearch">
-    <div class="panel">
+    <div class="panel rs-top">
       <div class="eyebrow">02 / Research</div>
       <div class="panel-title">What are people in this market interested in right now?</div>
       <div class="panel-sub" id="sessionLine"></div>
-
-      <div id="setupBar" class="hidden" style="display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-top:10px">
-        <div id="setupBarText" style="font-size:0.86rem;line-height:1.4"></div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn ghost small" type="button" id="setupEdit">Change request</button><button class="btn ghost small" type="button" id="libBtn2">Saved research</button></div>
+      <ol class="rs-steps" id="rsSteps" aria-label="Research tasks"></ol>
+      <div id="setupBar" class="rs-sum hidden">
+        <div id="setupBarText"></div>
+        <div class="rs-sum-btns"><button class="btn ghost small" type="button" id="setupEdit">Change request</button><button class="btn ghost small" type="button" id="libBtn2">Saved research</button></div>
       </div>
+      <div id="rsSumReport" class="rs-sum hidden"></div>
+    </div>
+
+    <!-- Task 1: Market & Audience -->
+    <div class="panel rs-panel" id="rsMarket" aria-labelledby="rsMarketH">
+      <div class="rs-h" id="rsMarketH" tabindex="-1">Market &amp; Audience</div>
       <div id="setupBody">
-      <label class="lbl">Content type</label>
-      <div class="choices row" id="modeChoices"></div>
-      <div id="muModeBox" class="hidden">
-        <label class="lbl">Market Update type</label>
-        <div class="choices" id="muModeChoices"></div>
-      </div>
+      <div class="rs-grid">
+        <div class="rs-col">
+          <label class="lbl" style="margin-top:0">Content type</label>
+          <div class="choices row" id="modeChoices"></div>
+          <div id="muModeBox" class="hidden">
+            <label class="lbl">Market Update type</label>
+            <div class="choices" id="muModeChoices"></div>
+          </div>
+          <div class="row2">
+            <div><label class="lbl" for="geoType">Market type</label><select id="geoType"></select></div>
+            <div><label class="lbl" for="geoName" id="geoNameLbl">Place</label><input type="text" id="geoName" maxlength="60" placeholder="e.g. Roseville"></div>
+          </div>
+          <div id="cityWrap" class="hidden"><label class="lbl" for="geoCity">City this neighborhood is in</label><input type="text" id="geoCity" maxlength="60" placeholder="e.g. Roseville"></div>
+          <div id="zipWrap" class="hidden"><label class="lbl" for="geoZip">ZIP code (required)</label><input type="text" id="geoZip" maxlength="5" inputmode="numeric" placeholder="e.g. 95746"><div class="hint">Attach your own Trend or statistical report (MLS, Zillow or Redfin) for the market data; web research supplies the local story.</div></div>
+          <div class="hint">The research stays inside exactly this place. It is never widened to the city or county for you.</div>
+        </div>
+        <div class="rs-col">
+          <label class="lbl" style="margin-top:0" for="audience">Who is this for?</label>
+          <select id="audience"></select>
 
-      <div class="row2">
-        <div><label class="lbl" for="geoType">Market type</label><select id="geoType"></select></div>
-        <div><label class="lbl" for="geoName" id="geoNameLbl">Place</label><input type="text" id="geoName" maxlength="60" placeholder="e.g. Roseville"></div>
-      </div>
-      <div id="cityWrap" class="hidden"><label class="lbl" for="geoCity">City this neighborhood is in</label><input type="text" id="geoCity" maxlength="60" placeholder="e.g. Roseville"></div>
-      <div id="zipWrap" class="hidden"><label class="lbl" for="geoZip">ZIP code (required)</label><input type="text" id="geoZip" maxlength="5" inputmode="numeric" placeholder="e.g. 95746"><div class="hint">Attach your own Trend or statistical report (MLS, Zillow or Redfin) for the market data; web research supplies the local story.</div></div>
-      <div class="hint">The research stays inside exactly this place. It is never widened to the city or county for you.</div>
+          <label class="lbl">Optional focus</label>
+          <div class="choices row">
+            <label class="choice"><input type="checkbox" id="f55"><span>55+ Active Adult</span></label>
+            <label class="choice"><input type="checkbox" id="fNew"><span>New Construction</span></label>
+          </div>
 
-      <label class="lbl" for="audience">Who is this for?</label>
-      <select id="audience"></select>
+          <label class="lbl" for="keywords" id="keywordsLbl"><span id="keywordsLblText">Keywords or brand names to look for</span> <span style="font-weight:400;color:var(--muted)">(optional)</span></label>
+          <input type="text" id="keywords" maxlength="120" placeholder="e.g. 55+, Four Seasons, Heritage, mortgage rates">
+          <div class="hint" id="keywordsHint">Separate with commas. The research looks for local news and data that mention them. The market itself is never widened.</div>
 
-      <label class="lbl">Optional focus</label>
-      <div class="choices row">
-        <label class="choice"><input type="checkbox" id="f55"><span>55+ Active Adult</span></label>
-        <label class="choice"><input type="checkbox" id="fNew"><span>New Construction</span></label>
-      </div>
-
-      <label class="lbl" for="keywords" id="keywordsLbl"><span id="keywordsLblText">Keywords or brand names to look for</span> <span style="font-weight:400;color:var(--muted)">(optional)</span></label>
-      <input type="text" id="keywords" maxlength="120" placeholder="e.g. 55+, Four Seasons, Heritage, mortgage rates">
-      <div class="hint" id="keywordsHint">Separate with commas. The research looks for local news and data that mention them. The market itself is never widened.</div>
-
-      <div id="dataFocusBox">
-        <label class="lbl" for="dataFocus">Optional data to include</label>
-        <select id="dataFocus"></select>
-        <div id="periodBox">
-          <label class="lbl" for="period">Period</label>
-          <select id="period">
-            <option value="30">Last 30 days</option>
-            <option value="60">Last 60 days</option>
-            <option value="90">Last 90 days</option>
-            <option value="custom">Choose dates</option>
-          </select>
-          <div id="periodDates" class="row2 hidden" style="margin-top:8px">
-            <div><label class="lbl" for="periodFrom">From</label><input type="date" id="periodFrom"></div>
-            <div><label class="lbl" for="periodTo">To</label><input type="date" id="periodTo"></div>
+          <div id="dataFocusBox">
+            <label class="lbl" for="dataFocus">Optional data to include</label>
+            <select id="dataFocus"></select>
+            <div id="periodBox">
+              <label class="lbl" for="period">Web research lookback</label>
+              <select id="period">
+                <option value="30">Last 30 days</option>
+                <option value="60">Last 60 days</option>
+                <option value="90">Last 90 days</option>
+                <option value="custom">Choose dates</option>
+              </select>
+              <div id="periodDates" class="row2 hidden" style="margin-top:8px">
+                <div><label class="lbl" for="periodFrom">From</label><input type="date" id="periodFrom"></div>
+                <div><label class="lbl" for="periodTo">To</label><input type="date" id="periodTo"></div>
+              </div>
+            </div>
+            <div class="hint" id="dataFocusHint">The lookback is how far back web research searches for news and figures. It is separate from your uploaded report's own reporting period, which you confirm in Report Review. Figures from a confirmed report always come first.</div>
           </div>
         </div>
-        <div class="hint" id="dataFocusHint">Web research looks for figures that cover this period and says when a source does not. Figures from an uploaded report always come first, and its own dates decide what it covers.</div>
       </div>
+      </div>
+    </div>
 
-      <label class="lbl">Your MLS market report or CMA <span style="font-weight:400;color:var(--muted)" id="upLabelNote">(optional)</span></label>
+    <!-- Task 2: Report Review -->
+    <div class="panel rs-panel hidden" id="rsReport" aria-labelledby="rsReportH">
+      <div class="rs-h" id="rsReportH" tabindex="-1">Report Review <span style="font-weight:400;color:var(--muted);font-size:0.85rem" id="upLabelNote">(optional)</span></div>
       <div class="upload" id="uploadBox">
         <div class="ut">Upload MLS Report or CMA</div>
         <div class="us">PDF, Excel or CSV</div>
         <div class="us">Up to 4 MB. Your file is read once and never stored; only the market-level figures are kept.</div>
-        <input type="file" id="upFile" accept=".pdf,.csv,.xls,.xlsx">
+        <input type="file" id="upFile" accept=".pdf,.csv,.xls,.xlsx" aria-label="Choose your MLS report or CMA">
         <div class="filerow hidden" id="upRow"><span id="upName"></span><button type="button" class="xbtn" id="upX" aria-label="Remove this file" title="Remove this file">&times;</button></div>
       </div>
       <div class="attest-box hidden" id="attestBox">
@@ -277,10 +360,10 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
         <div class="hint">Client names, phone numbers, emails and street addresses in a report are never used in your topics. Only market-level figures (counts, medians, days on market, price ranges) are.</div>
         <div class="msg err" id="attestMsg"></div>
       </div>
-      <div class="attest-box hidden" id="upReview" aria-live="polite">
-        <div id="upScope" style="font-weight:600;font-size:0.9rem"></div>
-        <div id="upGroups"></div>
+      <div class="rs-review hidden" id="upReview" aria-live="polite">
+        <div id="upScope" class="rs-scope"></div>
         <div id="upWarn"></div>
+        <div id="upGroups"></div>
         <div id="upReadBack" class="hidden"></div>
         <div class="msg err" id="upMsg"></div>
         <div id="upWindowBox" class="hidden" style="margin-top:12px">
@@ -299,10 +382,6 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
           <div style="margin-top:8px"><button type="button" class="btn ghost small" id="upWindowGo">Update the figures</button></div>
           <div class="hint">Counted from your report's own dates while it is read; the listings are not kept. Active and pending listings stay as of the report date.</div>
         </div>
-        <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
-          <button type="button" class="btn small" id="upYes">Correct, use it</button>
-          <button type="button" class="btn ghost small" id="upNo">Not right, remove</button>
-        </div>
         <div id="upFix" class="hidden" style="margin-top:12px">
           <div style="font-weight:600;font-size:0.88rem">What is not right?</div>
           <div class="choices" style="flex-direction:column;align-items:flex-start;margin-top:6px">
@@ -320,27 +399,25 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
           </div>
           <div class="hint">Your note comes to us so we can fix how reports are read. The report itself is never kept. Try another file, or an export filtered to your area, after removing it.</div>
         </div>
-        <div class="hint">Once you confirm, your report is the source of truth for the figures. Web research only adds the story around them, and up to three topics come from your report first.</div>
+        <div class="hint" id="upSourceNote">Once you confirm, your report is the source of truth for the figures. Web research only adds the story around them, and up to three topics come from your report first.</div>
       </div>
-      <div class="hint" id="dataNote">No report attached: the topics come from web research, and each figure names its source. Attach and confirm a report and your report's figures take priority over web figures.</div>
-
-      <label class="lbl" style="margin-top:18px"><span class="choice" style="display:inline-flex"><input type="checkbox" id="newTopics"><span>Get a fresh set even if I already have one for this request (uses a session)</span></span></label>
-
-      <div class="attest-box hidden" id="confirmBox" aria-live="polite">
-        <div style="font-weight:600;font-size:0.9rem">Please confirm before I research</div>
-        <div id="confirmList" style="margin-top:8px;font-size:0.88rem;line-height:1.6"></div>
-        <div class="hint" id="confirmCost"></div>
-        <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
-          <button type="button" class="btn gold small" id="confirmBtn">Confirm and research</button>
-          <button type="button" class="btn ghost small" id="confirmEdit">Edit</button>
-        </div>
-      </div>
-
-      <div class="actions"><button class="btn gold" type="button" id="startBtn">Research this market</button><button class="btn ghost" type="button" id="libBtn">Browse Research Library</button></div>
-      <div class="msg" id="startMsg" role="status"></div>
-      </div>
+      <div class="hint" id="dataNote">No report yet: topics would come from web research, and each figure names its source. Add and confirm a report and its figures take priority over web figures.</div>
     </div>
 
+    <!-- Task 3: Find Topics -->
+    <div class="panel rs-panel hidden" id="rsTopics" aria-labelledby="rsTopicsH">
+      <div class="rs-h" id="rsTopicsH" tabindex="-1">Find Topics</div>
+      <div class="rs-grid rt">
+        <div class="rs-col">
+          <div class="rs-card" id="rsRequest"></div>
+          <label class="choice" style="margin-top:12px"><input type="checkbox" id="newTopics"><span>Get a fresh set even if I already have one for this request (uses a session)</span></label>
+          <div class="attest-box hidden" id="confirmBox" aria-live="polite">
+            <div style="font-weight:600;font-size:0.9rem">Please confirm before I research</div>
+            <div id="confirmList" style="margin-top:8px;font-size:0.88rem;line-height:1.6"></div>
+            <div class="hint" id="confirmCost"></div>
+          </div>
+        </div>
+        <div class="rs-col">
     <div class="panel hidden" id="resultPanel">
       <button class="closepill res-x" type="button" id="resX" aria-label="Close these results" title="Close these results"><span>Close</span><i>&times;</i></button>
       <div class="eyebrow" id="resEyebrow">Result</div>
@@ -353,7 +430,25 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
       <div id="resTopics"></div>
       <div id="resCost"></div>
       <div class="msg" id="selMsg" role="status"></div>
+    </div>
+        </div>
       </div>
+    </div>
+
+    <!-- Persistent action area: the next action and what is still unresolved -->
+    <div class="rs-bar" id="rsBar" role="region" aria-label="Next action">
+      <div class="rs-bar-text"><div id="rsBarText" aria-live="polite"></div><div class="msg" id="startMsg" role="status"></div></div>
+      <div class="rs-bar-btns">
+        <button class="btn ghost" type="button" id="rsBack">Back</button>
+        <button class="btn ghost hidden" type="button" id="libBtn">Browse Research Library</button>
+        <button class="btn ghost hidden" type="button" id="upNo">Not right, remove</button>
+        <button class="btn ghost hidden" type="button" id="confirmEdit">Edit</button>
+        <button class="btn gold hidden" type="button" id="rsNext">Continue</button>
+        <button class="btn gold hidden" type="button" id="upYes">Confirm report</button>
+        <button class="btn gold hidden" type="button" id="startBtn">Find topics</button>
+        <button class="btn gold hidden" type="button" id="confirmBtn">Confirm and research</button>
+      </div>
+    </div>
 
 <div class="modal-back hidden" id="resNext" role="dialog" aria-modal="true" aria-labelledby="ctaTitle">
   <div class="modal">
@@ -577,7 +672,7 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
     return { status: res.status, ok: res.ok, json: json };
   }
   function say(id, text, kind) { var el = $(id); el.textContent = text || ""; el.className = "msg" + (kind ? " " + kind : ""); }
-  function show(ids) { ["stepProjects", "stepSetup", "stepResearch", "stepScript", "stepBoard", "stepImages"].forEach(function (s) { $(s).classList.toggle("hidden", ids.indexOf(s) < 0); }); }
+  function show(ids) { ["stepProjects", "stepSetup", "stepResearch", "stepScript", "stepBoard", "stepImages"].forEach(function (s) { $(s).classList.toggle("hidden", ids.indexOf(s) < 0); }); var st = document.querySelector(".stage"); if (st) st.classList.toggle("wide", ids.indexOf("stepResearch") >= 0); }
 
   // ── Progress pills ──
   function stage() {

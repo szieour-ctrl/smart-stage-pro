@@ -58,6 +58,12 @@ function dirOf(c, unit) {
   return Math.abs(c.pct) < flat ? "flat" : c.pct > 0 ? "up" : "down";
 }
 const word = { up: "rose", down: "fell", flat: "held steady" };
+/** What a "flat" reading may be called: a small decline is never described as unchanged ("edged lower"); "held steady" is only for a change of zero. */
+function said(c, d) {
+  if (d !== "flat") return word[d];
+  const p = c && Number.isFinite(c.pct) ? c.pct : 0;
+  return p < 0 ? "edged lower" : p > 0 ? "edged higher" : word.flat;
+}
 
 /** The months of inventory a report shows, whatever it calls them (weeks are converted). */
 function monthsSupply(figs) {
@@ -86,6 +92,7 @@ function analyzeReport(rep, figures, refOf, basis) {
   const figsOnly = {}; Object.keys(byKey).forEach((k) => { figsOnly[k] = byKey[k].fig; });
   const ev = (...keys) => keys.map((k) => byKey[k]).filter(Boolean).map((cf) => ({ ref: refOf(cf.ref), text: oneLine(rep, cf, basis) }));
   const evYtd = (...keys) => keys.map((k) => ytd[k]).filter(Boolean).map((cf) => ({ ref: refOf(cf.ref), text: oneLine(rep, cf, { type: "yearAgo" }) }));
+  const chg = (k) => { const f = F(k); return f ? changeOf(f, basis.type) : null; };
   const dir = (k) => { const f = F(k); return f ? dirOf(changeOf(f, basis.type), f.unit) : null; };
   const out = [];
   const add = (o) => out.push({ reportKey: rep.key, basis: { type: basis.type, label: basis.label }, ...o });
@@ -106,7 +113,7 @@ function analyzeReport(rep, figures, refOf, basis) {
     if (sig !== "neutral" || supplySide !== "flat" || demandSide !== "flat") {
       add({ kind: "supply_demand", signal: sig, strength: sig === "buyer_favoring" || sig === "seller_favoring" ? 3 : 2,
         title: sig === "buyer_favoring" ? "More homes, fewer sales" : sig === "seller_favoring" ? "Fewer homes, more sales" : "Supply and sales moving together",
-        statement: `${inv ? "Active listings" : "New listings"} ${word[supplySide]} while ${sold ? "closed sales" : "pended sales"} ${word[demandSide]}.`,
+        statement: `${inv ? "Active listings" : "New listings"} ${said(chg(supplyKey), supplySide)} while ${sold ? "closed sales" : "pended sales"} ${said(chg(demandKey), demandSide)}.`,
         evidence: ev(supplyKey, demandKey) });
     }
   }
@@ -117,22 +124,23 @@ function analyzeReport(rep, figures, refOf, basis) {
     const key = Object.keys(byKey).find((k) => byKey[k].fig === ms.fig);
     add({ kind: "market_balance", signal: bal === "sellers" ? "seller_favoring" : bal === "buyers" ? "buyer_favoring" : "neutral", strength: bal === "balanced" ? 2 : 3,
       title: bal === "sellers" ? "Inventory is lean" : bal === "buyers" ? "Inventory is ample" : "Inventory is in the balanced range",
-      statement: `Months of inventory sit in the ${bal === "sellers" ? "seller's-market" : bal === "buyers" ? "buyer's-market" : "balanced"} range${d ? ` and ${d === "flat" ? "held steady" : d === "up" ? "rose" : "fell"}` : ""}.`,
+      statement: `Months of inventory sit in the ${bal === "sellers" ? "seller's-market" : bal === "buyers" ? "buyer's-market" : "balanced"} range${d ? ` and ${said(c, d)}` : ""}.`,
       evidence: ev(key), balance: bal, direction: d });
   }
   // 3. Pricing against activity
+  const flatPrice = () => { const c = chg(priceKey); return c && c.pct < 0 ? "Prices edged lower" : c && c.pct > 0 ? "Prices edged higher" : "Prices unchanged"; };
   if (price && demandSide && (price !== "flat" || demandSide !== "flat")) {
     const sig = price === "up" && demandSide === "down" ? "mixed" : price === "down" && demandSide === "up" ? "mixed" : price === "flat" ? "mixed" : price === "up" ? "seller_favoring" : price === "down" ? "buyer_favoring" : "neutral";
     add({ kind: "price_vs_activity", signal: sig, strength: sig === "mixed" ? 3 : 2,
-      title: price === "up" && demandSide === "down" ? "Prices firm while sales slow" : price === "down" && demandSide === "up" ? "Sales up while prices ease" : price === "flat" ? (demandSide === "down" ? "Prices steady while sales slow" : "Prices steady while sales pick up") : price === "up" ? (demandSide === "up" ? "Prices and sales rising together" : "Prices rising, sales steady") : (demandSide === "down" ? "Prices easing with sales" : "Prices easing, sales steady"),
-      statement: `${labelOf(F(priceKey))} ${word[price]} while ${sold ? "closed sales" : "pended sales"} ${word[demandSide]}.`,
+      title: price === "up" && demandSide === "down" ? "Prices firm while sales slow" : price === "down" && demandSide === "up" ? "Sales up while prices ease" : price === "flat" ? (flatPrice() + (demandSide === "down" ? " while sales slow" : " while sales pick up")) : price === "up" ? (demandSide === "up" ? "Prices and sales rising together" : "Prices rising, sales steady") : (demandSide === "down" ? "Prices easing with sales" : "Prices easing, sales steady"),
+      statement: `${labelOf(F(priceKey))} ${said(chg(priceKey), price)} while ${sold ? "closed sales" : "pended sales"} ${said(chg(demandKey), demandSide)}.`,
       evidence: ev(priceKey, demandKey) });
   }
   // 4. Speed of sale
   if (dom) {
     const sig = dom === "up" ? "buyer_favoring" : dom === "down" ? "seller_favoring" : "neutral";
     if (dom !== "flat") add({ kind: "sales_velocity", signal: sig, strength: 2, title: dom === "up" ? "Homes taking longer to sell" : "Homes selling faster",
-      statement: `${labelOf(F(domKey))} ${word[dom]}.`, evidence: ev(domKey) });
+      statement: `${labelOf(F(domKey))} ${said(chg(domKey), dom)}.`, evidence: ev(domKey) });
   }
   // 5. Negotiation room: the price actually received against the list price
   const s2lFig = F("avg_close_to_list_pct");
@@ -158,7 +166,7 @@ function analyzeReport(rep, figures, refOf, basis) {
   if (ytdC && monC) {
     const m = dirOf(changeOf(monC.fig, "yearAgo"), "count"), y = dirOf(changeOf(ytdC.fig, "yearAgo"), "count");
     if (m && y && m !== y && (m !== "flat" || y !== "flat")) add({ kind: "month_vs_year", signal: "mixed", strength: 3, title: "This month differs from the year so far",
-      statement: `Closed sales ${word[m]} this month against a year ago, while the year to date ${word[y]}.`, evidence: ev("count_closed").concat(evYtd("count_closed")) });
+      statement: `Closed sales ${said(changeOf(monC.fig, "yearAgo"), m)} this month against a year ago, while the year to date ${said(changeOf(ytdC.fig, "yearAgo"), y)}.`, evidence: ev("count_closed").concat(evYtd("count_closed")) });
   }
   return out;
 }
@@ -248,7 +256,7 @@ const READINGS = {
     neutral: { realtor: "Inventory in the balanced range means neither side has a clear structural advantage; individual pricing and preparation decide results.", homeowner: "A balanced market rewards realistic pricing more than waiting for conditions to change.", buyer: "A balanced market means both choice and competition; knowing the specific neighborhood matters." },
   },
   price_vs_activity: {
-    mixed: { realtor: "Prices and sales are pulling in different directions. Prices tend to move more slowly than activity, so a price that holds while sales slow can reflect owners who are not yet reducing prices and buyers who are waiting; it is a signal to watch rather than a conclusion.", homeowner: "A headline price that has held does not mean a home will sell as it would have last season; pace and presentation matter alongside price.", buyer: "A firm price with slower sales can leave room to negotiate on individual homes." },
+    mixed: { realtor: "Prices and sales are not moving in step: the price has moved far less than sales activity. Prices tend to move more slowly than activity, so a price that has barely moved while sales slow can reflect owners who are not yet reducing prices and buyers who are waiting; it is a signal to watch rather than a conclusion.", homeowner: "A headline price that has barely moved does not mean a home will sell as it would have in a faster month; pace and presentation matter alongside price.", buyer: "A price that has barely moved while sales slow can leave room to negotiate on individual homes." },
     seller_favoring: { realtor: "Prices and sales rising together point to demand that is keeping up with, and lifting, what homes sell for.", homeowner: "Rising sold prices support an owner's equity, and still depend on the specific home and street.", buyer: "Rising prices with strong sales reward preparation and speed." },
     buyer_favoring: { realtor: "Sold prices easing with fewer sales suggests buyers have more say in the price.", homeowner: "Easing prices are worth knowing about before deciding when to sell or refinance.", buyer: "Easing prices can improve affordability, and good homes still sell." },
     neutral: { realtor: "Prices and sales are moving in step.", homeowner: "Steady prices reduce the guesswork about timing.", buyer: "Steady prices make planning easier." },
@@ -331,7 +339,7 @@ function analyze(ctx, opts) {
     const a = sig("buyer_favoring")[0], b = sig("seller_favoring")[0];
     contrasts.push({ id: "TC1", kind: "mixed_signal", between: [a.id, b.id], statement: `"${a.title}" favors buyers, while "${b.title}" favors sellers: the report does not point one way.` });
   }
-  obs.filter((o) => o.signal === "mixed").slice(0, 2).forEach((o) => contrasts.push({ id: `TC${contrasts.length + 1}`, kind: "mixed_signal", between: [o.id], statement: `${o.title}: the figures pull in different directions.` }));
+  obs.filter((o) => o.signal === "mixed").slice(0, 2).forEach((o) => contrasts.push({ id: `TC${contrasts.length + 1}`, kind: "mixed_signal", between: [o.id], statement: `${o.title}: the price and the sales activity are not moving in step.` }));
   const interpretations = readingsFor(obs).map((r, i) => ({ ...r, id: `TR${i + 1}` }));
   const caveats = [];
   reports.forEach((r) => {
@@ -342,6 +350,15 @@ function analyze(ctx, opts) {
   const usable = obs.length >= 2;
   return { version: VERSION, usable, reports: view, character: usable ? characterOf(obs) : null, observations: obs, contrasts, interpretations, caveats: [...new Set(caveats)] };
 }
+
+/** Rules every editorial prompt (Option 1 and Option 2) gives the model about periods, comparisons and interpretation. Prompt text only; nothing here is validated by code. */
+const COMPARISON_RULES = [
+  "PERIODS AND COMPARISONS",
+  "- Every evidence line states what the change is measured against (for example \"from September 2026\"). Use exactly that comparison. A change from the prior month is a month-over-month change: never call it year over year, \"last year\", \"a year ago\" or \"last season\" unless an evidence line says so.",
+  "- Never describe a measure that rose or fell as unchanged, steady or flat. A small move is \"edged lower\" or \"edged higher\", as the evidence reads; \"held steady\" only when the evidence says it did not change.",
+  "- Do not introduce a historical comparison, season, earlier period or trend that the supplied report does not contain (no \"last spring\", \"recent months\", \"a faster market\" as if measured). If the report has no earlier period for a measure, do not compare it.",
+  "- Keep two voices apart. REPORTED STATISTICS are the evidence lines, stated as written. PROFESSIONAL INTERPRETATION is what an experienced local Realtor would reasonably make of them: pricing strategy, competitive positioning, carrying costs, buyer behavior, negotiation room, preparation, timing. Interpretation is welcome, is phrased as a reading (\"this can mean\", \"a Realtor would weigh\"), and never carries a number that is not in the evidence.",
+].join("\n");
 
 /** What a model is shown. Observation statements carry no numbers; the evidence lines are the report's own figure text. */
 function promptBlock(a) {
@@ -376,4 +393,4 @@ function editorialInput(a, observationIds) {
   };
 }
 
-module.exports = { VERSION, CHARACTERS, MAX_OBSERVATIONS, analyze, promptBlock, editorialInput, changeOf, dirOf, balanceOf };
+module.exports = { COMPARISON_RULES, VERSION, CHARACTERS, MAX_OBSERVATIONS, analyze, promptBlock, editorialInput, changeOf, dirOf, balanceOf };

@@ -33,6 +33,13 @@ const MUSIC = [
 const MUSIC_KEYS = MUSIC.map((m) => m.key);
 // Spoken words per duration (addendum A2). Guidance only; the audio length decides final timing.
 const WORD_TARGETS = { 30: [55, 70], 45: [105, 125], 60: [110, 130] };
+// Nov 9, 2026 (development only): measured ElevenLabs narration runs about 2.8 spoken words a second (118 words = 41-42 s), so 60 seconds needs 140-160 words.
+// Production keeps the table above; the 30- and 45-second targets are the same everywhere.
+const DEV_WORD_TARGETS = { ...WORD_TARGETS, 60: [140, 160] };
+function wordTargets(durationSec, env) {
+  const dev = String((env || process.env).AGENT_MARKETING_B1_EVIDENCE || "").trim().toLowerCase() === "dev";
+  return (dev ? DEV_WORD_TARGETS : WORD_TARGETS)[durationSec] || (dev ? DEV_WORD_TARGETS : WORD_TARGETS)[45];
+}
 const CTA_SOURCES_FROM_CLIENT = ["user_edited", "user_inserted"];
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -86,7 +93,7 @@ function validateNarrative(body, durationSec) {
   if (tagged.length > 2500) return { error: "The narration is too long." };
   const captionText = stripAudioTags(tagged);
   const words = countWords(tagged);
-  const [lo, hi] = WORD_TARGETS[durationSec] || WORD_TARGETS[45];
+  const [lo, hi] = wordTargets(durationSec);
   const warnings = [];
   if (words < lo) warnings.push(`About ${words} spoken words; a ${durationSec}-second piece usually runs ${lo}–${hi}. It may feel short.`);
   if (words > hi) warnings.push(`About ${words} spoken words; a ${durationSec}-second piece usually runs ${lo}–${hi}. Speech may run long.`);
@@ -143,6 +150,6 @@ function gateInputFor(project, narrative, source) {
 const NOT_EDITABLE_AFTER = ["rendering", "rendered", "published"];
 
 module.exports = {
-  DURATIONS, FORMATS, VOICES, MUSIC, WORD_TARGETS, UUID_RE, NOT_EDITABLE_AFTER,
+  DURATIONS, FORMATS, VOICES, MUSIC, WORD_TARGETS, DEV_WORD_TARGETS, wordTargets, UUID_RE, NOT_EDITABLE_AFTER,
   isEnabledFor, validateCreate, stripAudioTags, countWords, validateNarrative, gateInputFor, topicNotice, noticeOverlayFor, attachNotice,
 };

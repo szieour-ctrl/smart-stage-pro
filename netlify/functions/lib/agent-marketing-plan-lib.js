@@ -289,7 +289,7 @@ function buildUserMessage(project) {
     desired_viewer_action: intake.action,
     agents_firsthand_observation: intake.observation || null,
     duration_seconds: dur,
-    spoken_word_range: am.WORD_TARGETS[dur],
+    spoken_word_range: am.wordTargets(dur),
     scene_count_range: SCENE_RANGE[dur],
     gpt_image_2_scene_count: GPT_RANGE[dur],
     generated_images_allowed_total: GPT_RANGE[dur][1], // GPT_IMAGE_2_CONCEPT + AGENT_SCENE combined, never more
@@ -406,7 +406,7 @@ function normalizePlan(raw, project) {
   const captionText = am.stripAudioTags(tagged);
   const wordCount = am.countWords(tagged);
   const warnings = [];
-  const [wlo, whi] = am.WORD_TARGETS[dur];
+  const [wlo, whi] = am.wordTargets(dur);
   if (wordCount < wlo || wordCount > whi) warnings.push(`The script is about ${wordCount} spoken words; a ${dur}-second piece usually runs ${wlo}–${whi}.`);
 
   const rawScenes = repairExcerpts((Array.isArray(raw.scenes) ? raw.scenes : []).map((sc) => (sc && typeof sc === "object" ? { ...sc, narration_excerpt: stripNotice(sc.narration_excerpt) } : sc)), captionText, SCENE_RANGE[dur][0], warnings);
@@ -501,13 +501,13 @@ function normalizePlan(raw, project) {
 // How far the spoken script is outside its word range (0 inside), and what is wrong with the length or the scene balance, in the writer's terms.
 const MIN_SCENE_WORDS = 8, MAX_SCENE_SHARE = 0.4;
 function lengthDistance(narrative, dur) {
-  const [lo, hi] = am.WORD_TARGETS[dur];
+  const [lo, hi] = am.wordTargets(dur);
   const n = narrative.wordCount;
   const tiny = (narrative.scenes || []).filter((sc) => am.countWords(sc.narrationExcerpt) < MIN_SCENE_WORDS).length;
   return (n < lo ? lo - n : n > hi ? n - hi : 0) + tiny * 5;
 }
 function lengthProblems(narrative, dur) {
-  const [lo, hi] = am.WORD_TARGETS[dur], n = narrative.wordCount, out = [];
+  const [lo, hi] = am.wordTargets(dur), n = narrative.wordCount, out = [];
   if (n > hi) out.push(`The narration is ${n} spoken words; a ${dur}-second video needs ${lo}-${hi}, so cut at least ${n - hi}.`);
   else if (n < lo) out.push(`The narration is ${n} spoken words; a ${dur}-second video needs ${lo}-${hi}, so add about ${lo - n}.`);
   (narrative.scenes || []).forEach((sc, i) => {

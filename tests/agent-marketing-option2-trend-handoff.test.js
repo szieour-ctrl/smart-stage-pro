@@ -88,3 +88,11 @@ test("script writer handoff: Option 2 carries article direction plus market inte
   assert.ok(!plan.topicBrief(o1.topics[0], {}).editorial_direction);
   assert.ok(/2l\. MARKET INTERPRETATION/.test(plan.buildSystemPrompt(env)) && !/2l\. MARKET INTERPRETATION/.test(plan.buildSystemPrompt({})));
 });
+
+test("development only: a 60-second Reel targets 140-160 words; 30 and 45 and Production are unchanged", () => {
+  const am = require("../netlify/functions/lib/agent-marketing-lib");
+  assert.deepStrictEqual([am.wordTargets(30, {}), am.wordTargets(45, {}), am.wordTargets(60, {})], [[55, 70], [105, 125], [110, 130]]);
+  const dev = { AGENT_MARKETING_B1_EVIDENCE: "dev" };
+  assert.deepStrictEqual([am.wordTargets(30, dev), am.wordTargets(45, dev), am.wordTargets(60, dev)], [[55, 70], [105, 125], [140, 160]]);
+  assert.deepStrictEqual(am.WORD_TARGETS[60], [110, 130]);
+});

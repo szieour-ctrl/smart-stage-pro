@@ -75,7 +75,7 @@ function planJson(input, durationSec) {
   for (let i = 0; middle.length < n - 2; i++) middle.push(FILLER[i % FILLER.length]);
   const ex = [hook, ...middle, close];
   // Pad the middle scenes (never the quotation scene) with plain sentences until the spoken length reaches the target's lower bound.
-  const [lo] = am.WORD_TARGETS[dur];
+  const [lo] = am.wordTargets(dur);
   let k = 0;
   while (words(ex.join(" ")) < lo && k < 12) { const i = 2 + (k % Math.max(1, n - 3)); ex[i] = `${ex[i]} ${FILLER[(k + 3) % FILLER.length]}`; k++; }
   const gpt = dur === 30 ? 2 : dur === 45 ? 3 : 4;

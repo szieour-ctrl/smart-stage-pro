@@ -299,3 +299,66 @@ test("a partial year's counts are not offered as changes and the label says it i
   assert.ok(t.reportFigures.find((x) => x.key === "count_closed").partialComparison);
   assert.strictEqual(t.reportPeriods[0].partial, true);
 });
+
+// ── Phase 3, step 1: carry-forward applies only to a report the earlier attestation still fits ───────────────────────────
+test("carry-forward: not applied when the project's current area or property types contradict the earlier attestation", async () => {
+  reset(); const p = mkProject();
+  const first = (await upload(p, "monthly", { geography: CITY, propertyTypes: SF })).json.upload;
+  assert.strictEqual((await call({ action: "confirm", uploadId: first.id, correct: true, scope: ROSE, propertyTypes: SF })).status, 200);
+  const same = (await upload(p, "quarterly", { geography: CITY, propertyTypes: SF })).json.upload;
+  assert.deepStrictEqual(same.summary.review.needed, [], "same header, same area and types: carried");
+  const other = (await upload(p, "weekly", { geography: { type: "city", name: "Rocklin" } })).json.upload;
+  assert.deepStrictEqual(other.summary.review.needed.sort(), ["geography", "propertyTypes"], "a different area is not covered by the earlier attestation");
+  assert.strictEqual(other.summary.review.attested.carriedFrom, null);
+  db.agent_marketing_uploads.pop();
+  const types = (await upload(p, "weekly", { geography: CITY, propertyTypes: ["Condo"] })).json.upload;
+  assert.ok(types.summary.review.needed.includes("propertyTypes"), "different property types are not carried");
+});
+
+test("carry-forward: a selection the subscriber changes at confirmation is theirs and is not recorded as carried", async () => {
+  reset(); const p = mkProject();
+  const first = (await upload(p, "monthly", { geography: CITY })).json.upload;
+  await call({ action: "confirm", uploadId: first.id, correct: true, scope: ROSE, propertyTypes: SF });
+  const second = (await upload(p, "quarterly", { geography: CITY })).json.upload;
+  assert.ok(second.summary.review.attested.carriedFrom);
+  const ok = await call({ action: "confirm", uploadId: second.id, correct: true, scope: { type: "cities", names: ["Roseville", "Rocklin"] }, propertyTypes: SF });
+  assert.strictEqual(ok.status, 200);
+  const f = db.agent_marketing_uploads.find((r) => r.id === second.id).facts;
+  assert.strictEqual(f.attestation.carriedFrom, null);
+  assert.strictEqual(f.geography.scopeKind, "combined");
+  const unchanged = (await upload(p, "weekly", { geography: CITY })).json.upload;
+  await call({ action: "confirm", uploadId: unchanged.id, correct: true, scope: ROSE, propertyTypes: SF });
+  assert.ok(db.agent_marketing_uploads.find((r) => r.id === unchanged.id).facts.attestation.carriedFrom, "re-sending the same selection keeps it carried");
+});
+
+test("carry-forward: a header that contradicts the carried selection still requires acknowledgement", async () => {
+  reset(); const p = mkProject();
+  const first = (await upload(p, "monthly", { geography: CITY })).json.upload;
+  await call({ action: "confirm", uploadId: first.id, correct: true, scope: ROSE, propertyTypes: SF });
+  const cond = (await call({ action: "upload", projectId: p.id, fileName: "m.pdf", fileBase64: (await pdfFromItems(fx.monthly({ scopeLine: "Includes Condo in all Counties" }))).toString("base64"), permission: true, geography: CITY })).json.upload;
+  assert.ok(cond.summary.review.needed.includes("propertyTypes") || cond.summary.review.needed.includes("conflicts"));
+  assert.strictEqual(cond.summary.review.canConfirm, false);
+});
+
+// ── Phase 3 review: deterministic scope/period safeguards stay on when creative editorial checks are relaxed ──────────────────
+test("Test environment: creative editorial checks are relaxed, but geographic-attribution and partial-year checks still block", () => {
+  const combo = attest("monthly", { type: "cities", names: ["Roseville", "Rocklin"] });
+  const yearly = attest("yearly", ROSE);
+  const topic = (facts, dev) => { const ctx = rr.buildContext([{ id: "u1", facts }], {}); return rr.applyReportPrecedence([webTopic({ editorial: dev ? { development: dev } : {} })], ctx)[0]; };
+  const run = (t, text, keep) => gate.evaluate({ template: "local_market_insider", intake: {}, verified: gate.verifiedFromProject({ template: "local_market_insider", selected_topic: t }), generated: { narration: text, captions: "" }, cta: { text: "Ask me.", source: "claude" }, ...(keep ? { keepEditorialChecks: true } : {}) }).blocks.map((b) => b.rule);
+  const saved = { b1: process.env.AGENT_MARKETING_B1_EVIDENCE, db: process.env.SUPABASE_URL };
+  try {
+    Object.assign(process.env, { AGENT_MARKETING_B1_EVIDENCE: "dev", SUPABASE_URL: "https://notprod.supabase.co" });
+    assert.strictEqual(gate.testEvaluation(), true, "this is the relaxed Test environment");
+    const n = num(combo, "count_closed"), ny = num(yearly, "count_closed");
+    assert.ok(run(topic(combo, "Foxwood"), `Foxwood saw ${n} closed sales last month.`).includes("report_scope_development"));
+    assert.ok(run(topic(combo, null), `Roseville had ${n} closed sales.`).includes("report_scope_constituent"));
+    assert.ok(run(topic(yearly, null), `There were ${ny} closed sales for the full year.`).includes("report_partial_year"));
+    assert.ok(run(topic(yearly, null), `Closed sales were ${ny}, down year-over-year.`).includes("report_partial_year"));
+    assert.deepStrictEqual(run(topic(combo, "Foxwood"), `Across Roseville and Rocklin combined there were ${n} closed sales.`).filter((r) => /^report_scope/.test(r)), []);
+    // the creative editorial checks remain relaxed there: a superseded web figure is not blocked (report_priority is an editorial check)
+    const prec = { ...topic(combo, null), reportPrecedence: [{ key: "count_closed", label: "Closed sales", reportText: "Closed sales: 1", supersededNumbers: ["777"] }] };
+    assert.ok(!run(prec, "Closed sales were 777 last month.").includes("report_priority"));
+    assert.ok(run(prec, "Closed sales were 777 last month.", true).includes("report_priority"), "and it still runs when the editorial checks are kept");
+  } finally { for (const [k, v] of [["AGENT_MARKETING_B1_EVIDENCE", saved.b1], ["SUPABASE_URL", saved.db]]) { if (v === undefined) delete process.env[k]; else process.env[k] = v; } }
+});

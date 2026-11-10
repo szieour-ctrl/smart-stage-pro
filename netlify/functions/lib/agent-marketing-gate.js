@@ -26,6 +26,7 @@
 "use strict";
 
 const GATE_VERSION = "2026-10-25.1";
+// (Report scope/period checks, scanReportScope, are deterministic and stay on in the Test environment.)
 // Creative evaluation in the development Test environment (Nov 9, 2026, product-owner directive): the editorial claim checks are not run at all
 // (no block, no warning): b1_claim_context, b1_held_quote, b1_unsupported_figure, invented_number, report_priority, and the "opinion with no
 // figure" note. Only when AGENT_MARKETING_B1_EVIDENCE=dev AND the server's database is not the production project; Production is unchanged.
@@ -460,7 +461,9 @@ function evaluate(input) {
     // (the agent's own intake answers are theirs and are not held to them).
     if (market && !field.startsWith("intake.") && field !== "cta") {
       scanMarketClaims(text, field, ctx, blocks, sourcedFacts, agentSuppliedClaims, editorial ? warnings : null);
-      if (editorial) { scanReportPriority(text, field, precedence, blocks); scanReportScope(text, field, reportScope, blocks); b1Scan(text, field); }
+      // Deterministic geographic-attribution and partial-year checks are not creative editorial checks: they run in the development Test environment too.
+      scanReportScope(text, field, reportScope, blocks);
+      if (editorial) { scanReportPriority(text, field, precedence, blocks); b1Scan(text, field); }
     }
   }
 
@@ -482,7 +485,9 @@ function evaluate(input) {
     scan(text, field, FAIR_HOUSING_SOFT, warnings);
     if (market) {
       scanMarketClaims(text, field, ctx, blocks, sourcedFacts, agentSuppliedClaims, editorial ? warnings : null);
-      if (editorial) { scanReportPriority(text, field, precedence, blocks); scanReportScope(text, field, reportScope, blocks); b1Scan(text, field); }
+      // Deterministic geographic-attribution and partial-year checks are not creative editorial checks: they run in the development Test environment too.
+      scanReportScope(text, field, reportScope, blocks);
+      if (editorial) { scanReportPriority(text, field, precedence, blocks); b1Scan(text, field); }
     } else {
       for (const r of CLAIM_RULES) {
         const t = norm(text);

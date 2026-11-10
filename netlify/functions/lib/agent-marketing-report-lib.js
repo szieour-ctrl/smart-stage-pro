@@ -1526,9 +1526,16 @@ function attributionNotice(facts) {
 function summarize(facts, opts) {
   const f = facts || {};
   const geo = geographyCheck(f, opts && opts.geography);
+  // A Market Review shows what it still needs once, in the read-back panel: the question, the area message and the "no dates" warning would repeat it.
+  const mrv = f.layout === "market_review";
+  const askedBack = mrv && ((f.confirmation || {}).needed || []);
+  const q = mrv && (f.confirmation || {}).question;
+  const base = (f.warnings || []).filter((w) => !(mrv && w === q));
+  const geoWarn = geo.message && !(mrv && geo.status === "not_named" && askedBack.includes("geography")) ? [geo.message] : [];
+  const noDates = f.mlsSource === "MetroList" && !attributionNotice(f) && !(mrv && askedBack.includes("dataThrough"));
   return {
     scopeSentence: scopeSentence(f), scopeNote: scopeNote(f), notice: attributionNotice(f), groups: displayFigures(f),
-    warnings: [...(f.warnings || []), ...(geo.message ? [geo.message] : []), ...(f.mlsSource === "MetroList" && !attributionNotice(f) ? ["I couldn't find the dates this report covers, and a MetroList Reel needs them for its required notice. Use a report that prints its dates, or the Reel will stop at the last step."] : [])], geography: geo.status, notes: f.notes || [],
+    warnings: [...base, ...geoWarn, ...(noDates ? ["I couldn't find the dates this report covers, and a MetroList Reel needs them for its required notice. Use a report that prints its dates, or the Reel will stop at the last step."] : [])], geography: geo.status, notes: f.notes || [],
     sample: f.sample || null, layout: f.layout, reportDate: f.reportDate || null, window: f.window || null,
     ...(f.layout === "market_review" ? { review: require("./agent-marketing-market-review-lib").readBackView(f) } : {}),
   };

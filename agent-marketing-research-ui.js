@@ -347,8 +347,10 @@
     var SCOPE_TYPES = [["city", "One city"], ["cities", "Several cities combined"], ["county", "A county"], ["zips", "ZIP code(s)"], ["custom", "Another area"]];
     function listIn(a) { return (a || []).map(esc).join(", "); }
     // Two zones: what the DOCUMENT reported, and what the AGENT attests. The second zone is never filled in silently.
-    function renderReadBack(u) {
+    function renderReadBack(u, draft) {
       var box = $("upReadBack"), rv = (u.summary || {}).review;
+      if (!box && $("upWarn")) { box = document.createElement("div"); box.id = "upReadBack"; box.className = "hidden"; $("upWarn").parentNode.insertBefore(box, $("upWarn").nextSibling); }   // pages that predate the markup
+      if (!box) return;
       if (!rv) { box.classList.add("hidden"); box.innerHTML = ""; return; }
       var r = rv.reported, a = rv.attested, done = u.status === "confirmed", need = rv.needed || [];
       var sel = a.geography.selected, sug = (!sel && a.geography.suggested) || null, pts = a.propertyTypes.selected, psug = (!pts && a.propertyTypes.suggested) || null;
@@ -357,7 +359,7 @@
       h += "<li>Period: <b>" + esc(r.period.label) + "</b>" + (r.period.partial ? " (part of a year)" : "") + "</li>";
       h += (r.comparisons || []).map(function (c) { return "<li>" + esc(c.printed) + ' <span class="hint">(' + esc(c.meaning) + (c.eligibility.note ? ". " + esc(c.eligibility.note) : "") + ")</span></li>"; }).join("");
       h += "<li>Header says: " + esc(r.header.geography || "no area") + (r.header.geographyUnreliable ? ' <span class="hint">(this header reads the same on every export, so it is not used to decide the area)</span>' : "") + "; property types: " + esc(r.header.propertyTypes || "none shown") + "</li>";
-      if ((r.notPrinted || []).length) h += '<li class="hint">Not printed in this report: ' + r.notPrinted.map(function (n) { return esc(n.key); }).join(", ") + "</li>";
+      if ((r.notPrinted || []).length) h += '<li class="hint">Not printed in this report: ' + r.notPrinted.map(function (n) { return esc(n.label || n.key); }).join(", ") + "</li>";
       if ((r.unread || []).length) h += '<li class="hint">Could not read: ' + r.unread.map(function (n) { return esc(n.label || n); }).join(", ") + "</li>";
       h += "</ul></div>";
       h += '<div style="margin-top:10px;padding:10px;border:1px solid #b9c9b9;border-radius:8px;background:#f4f8f4"><div style="font-weight:700;font-size:0.9rem">Confirmed by you</div><div class="hint">' + esc(a.note) + "</div>";
@@ -370,11 +372,21 @@
         h += '<input type="text" id="rbNames" maxlength="200" placeholder="Name(s), separated by commas" value="' + esc(names.join(", ")) + '" style="margin-top:6px">';
         h += '<label class="lbl" for="rbTypes">Property types this report covers</label><input type="text" id="rbTypes" maxlength="200" placeholder="For example: Single Family, Condo" value="' + esc(((pts && pts.names) || psug || []).join(", ")) + '">';
         if (need.indexOf("dataThrough") >= 0) h += '<label class="lbl" for="rbThrough">Last date this report\'s data covers</label><input type="date" id="rbThrough" value="' + esc(a.dataThrough ? a.dataThrough.date : "") + '"><div class="hint">The report does not say. A date you enter is recorded as yours, not verified.</div>';
+        (a.conflicts || []).forEach(function (c) { h += '<div class="hint" style="margin-top:8px;color:#a33">⚠ ' + esc(c.message) + "</div>"; });
         if (need.indexOf("conflicts") >= 0 || (a.conflicts || []).length) h += '<label class="choice" style="margin-top:8px"><input type="checkbox" id="rbAck"><span>I have read the differences noted above and my selection is right.</span></label>';
         if (!a.carriedFrom || a.geography.status !== "ok") h += '<label class="choice" style="margin-top:8px"><input type="checkbox" id="rbAttest"><span>I confirm these describe this report. I understand they are my statements and are not checked against the file.</span></label>';
       }
       h += "</div>";
       box.innerHTML = h; box.classList.remove("hidden");
+      if (draft && $("rbType")) {   // after a refused confirmation keep what the agent typed and ticked
+        ["rbType", "rbNames", "rbTypes", "rbThrough"].forEach(function (id) { if ($(id) && draft[id] != null) $(id).value = draft[id]; });
+        ["rbAck", "rbAttest"].forEach(function (id) { if ($(id) && draft[id]) $(id).checked = true; });
+      }
+    }
+    function readDraft() {
+      var d = {}; ["rbType", "rbNames", "rbTypes", "rbThrough"].forEach(function (id) { if ($(id)) d[id] = $(id).value; });
+      ["rbAck", "rbAttest"].forEach(function (id) { if ($(id)) d[id] = $(id).checked; });
+      return d;
     }
     function readBackPayload(u) {
       var rv = (u.summary || {}).review;
@@ -391,7 +403,7 @@
     }
     function renderReview(u) {
       var s = u.summary || {};
-      $("upScope").textContent = (s.scopeSentence || "") + " Correct?";
+      $("upScope").textContent = (s.scopeSentence || "") + (s.review ? (u.status === "confirmed" ? "" : " Confirm the details below.") : " Correct?");
       $("upGroups").innerHTML = !(s.groups || []).length ? "" : '<details style="margin-top:10px"><summary class="hint" style="cursor:pointer">See the figures I read</summary>' + (s.groups || []).map(function (g) {
         return '<div style="margin-top:10px"><b>' + esc(g.heading) + "</b>" + (g.window ? '<div class="hint">' + esc(g.window) + "</div>" : "") +
           '<ul style="margin:4px 0 0 18px;padding:0;font-size:0.85rem">' + g.figures.map(function (f) { return "<li>" + esc(f.label) + ": " + esc(f.display) + (f.compare ? ' <span class="hint">(' + esc(f.compare) + ")</span>" : "") + (f.small ? ' <span class="hint">(small sample)</span>' : "") + "</li>"; }).join("") + "</ul></div>";
@@ -477,12 +489,12 @@
       var u = state.upload; if (!u || !u.id) return;
       $("upMsg").textContent = "";
       try {
-        var extra = readBackPayload(u);
+        var draft = readDraft(), extra = readBackPayload(u);
         if (extra.error) { $("upMsg").textContent = extra.error; return; }
         var r = await api(REPORT, "POST", "", Object.assign({ action: "confirm", uploadId: u.id, correct: true }, extra));
         if (!r.ok) {
           $("upMsg").textContent = (r.json && r.json.error) || "Could not confirm.";
-          if (r.json && r.json.review) { u.summary = Object.assign({}, u.summary, { review: r.json.review }); renderReadBack(u); }
+          if (r.json && r.json.review) { u.summary = Object.assign({}, u.summary, { review: r.json.review }); renderReadBack(u, draft); }
           return;
         }
         u.status = "confirmed"; if (r.json && r.json.upload) { u.summary = r.json.upload.summary; } renderReview(u); syncUpload();

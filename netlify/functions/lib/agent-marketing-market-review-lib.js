@@ -585,7 +585,7 @@ function readBackView(facts) {
     reportType: p.kind || null, period: { label: p.label, start: p.start, end: p.end, partial: p.partial === true, coverage: p.coverage || null },
     comparisons: (p.comparisons || []).map((x) => ({ printed: x.printed, kind: x.kind, meaning: KIND_TEXT[x.kind] || KIND_TEXT.unknown,
       eligibility: partialYear && x.kind === "full_prior_year" ? { counts: false, other: true, note: "Counts are not compared: this year is still in progress and the comparison is a full year. Prices and rates are shown as printed." } : { counts: true, other: true, note: null } })),
-    figuresRead: c.read || [], notPrinted: (c.notPrinted || []).map((k) => ({ key: k, note: (c.notPrintedNotes || {})[k] || null })), unread: c.unread || [],
+    figuresRead: c.read || [], notPrinted: (c.notPrinted || []).map((k) => ({ key: k, label: ((TILES.find((t) => t.key === k) || {}).name) || k, note: (c.notPrintedNotes || {})[k] || null })), unread: c.unread || [],
     header: { geography: g.displayed && g.displayed.raw || null, geographyUnreliable: !!(g.displayed && g.displayed.unreliable), propertyTypes: t.displayed || null },
     notice: lib.attributionNotice(f), noticeProvenance: p.coverage && p.coverage.provenance || (p.end ? DOCUMENT : null),
     source: f.mlsSource,
@@ -633,8 +633,20 @@ function reapply(facts, extra) {
   return applyAttestation(facts, {
     scope: x.scope || a.scope || null, propertyTypes: x.propertyTypes || a.propertyTypes || null,
     dataThrough: x.dataThrough || prevDate, companions: x.companions || [], acknowledgeConflicts: x.acknowledgeConflicts != null ? x.acknowledgeConflicts : !!(a.acknowledgedConflicts && a.acknowledgedConflicts.length),
-    carriedFrom: x.carriedFrom || a.carriedFrom || null,
+    // "Carried forward" describes an attestation the subscriber has not touched: a changed area or property-type selection is theirs, not carried.
+    carriedFrom: (x.scope && a.scope && !sameScope(x.scope, a.scope)) || (x.propertyTypes && a.propertyTypes && !sameTypes(x.propertyTypes, a.propertyTypes)) ? null : (x.carriedFrom || a.carriedFrom || null),
   });
 }
+const lc = (v) => String(v).toLowerCase().replace(/\s+/g, " ").trim();
+function sameScope(a, b) { return !!(a && b && a.type === b.type && a.names.length === b.names.length && a.names.map(lc).sort().join("|") === b.names.map(lc).sort().join("|")); }
+function sameTypes(a, b) { return !!(a && b && a.names.map(lc).sort().join("|") === b.names.map(lc).sort().join("|")); }
+/** carryApplies(prior, suggestions): an earlier attestation is reused only if the project's own current selection does not contradict it. */
+function carryApplies(priorAtt, suggestions) {
+  if (!priorAtt || !priorAtt.scope || !priorAtt.propertyTypes) return false;
+  const s = suggestions || {};
+  if (s.scope && !sameScope(confirmScope(s.scope).confirmed, priorAtt.scope)) return false;
+  if (s.propertyTypes && !sameTypes({ names: s.propertyTypes }, priorAtt.propertyTypes)) return false;
+  return true;
+}
 
-module.exports = { suggestFrom, reapply, confirmPropertyTypes, TILES, parseBasis, compareKind, detectPeriod, parseHeaderScope, confirmScope, reconcileGeography, isMarketReview, readMarketReview, applyAttestation, validateDataThrough, readBackView, crossCheckPeriods, readBack, updatedDate };
+module.exports = { carryApplies, suggestFrom, reapply, confirmPropertyTypes, TILES, parseBasis, compareKind, detectPeriod, parseHeaderScope, confirmScope, reconcileGeography, isMarketReview, readMarketReview, applyAttestation, validateDataThrough, readBackView, crossCheckPeriods, readBack, updatedDate };

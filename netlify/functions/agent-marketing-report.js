@@ -152,7 +152,7 @@ exports.handler = async (event) => {
       // Not a second confirmation: when this project already holds a confirmed Market Review with the same displayed header, its area and
       // property-type attestation is reused and marked as carried forward. Companion reports can also support a partial year's date.
       const sibs = await supabase("GET", "agent_marketing_uploads", null, `?project_id=eq.${project.id}&user_id=eq.${userId}&status=eq.confirmed&select=id,facts&limit=10`);
-      const prior = (Array.isArray(sibs.data) ? sibs.data : []).find((x) => x.facts && x.facts.layout === "market_review" && x.facts.attestation && x.facts.attestation.scope && x.facts.attestation.propertyTypes && ((x.facts.geography || {}).displayed || {}).raw === ((read.facts.geography || {}).displayed || {}).raw && (x.facts.propertyTypeScope || {}).displayed === (read.facts.propertyTypeScope || {}).displayed);
+      const prior = (Array.isArray(sibs.data) ? sibs.data : []).find((x) => x.facts && x.facts.layout === "market_review" && x.facts.attestation && x.facts.attestation.scope && x.facts.attestation.propertyTypes && mr.carryApplies(x.facts.attestation, read.facts.suggestions) && ((x.facts.geography || {}).displayed || {}).raw === ((read.facts.geography || {}).displayed || {}).raw && (x.facts.propertyTypeScope || {}).displayed === (read.facts.propertyTypeScope || {}).displayed);
       const comps = await companionReports(project.id, userId, null);
       const re = mr.reapply(read.facts, { scope: prior && prior.facts.attestation.scope, propertyTypes: prior && prior.facts.attestation.propertyTypes, companions: comps, carriedFrom: prior ? "an earlier confirmed report in this piece" : null });
       if (re.facts) read.facts = re.facts;

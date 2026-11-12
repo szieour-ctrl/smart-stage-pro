@@ -47,6 +47,11 @@ function createStore({ env, request } = {}) {
     async findReadyForTopic(userId, topicId) {
       return check(await rq("GET", TABLE, null, `?user_id=eq.${enc(userId)}&topic_id=eq.${enc(topicId)}&status=eq.ready&order=created_at.asc&limit=50`), "findReadyForTopic");
     },
+    /** This project's own completed record for an article snapshot (same cache key and gate version), whatever research run wrote it. The database
+     *  allows one such row per project, so a later run in the same project uses this row instead of inserting a second copy (Nov 12, 2026). */
+    async findReadyForProjectKey(userId, projectId, cacheKey, gateVersion) {
+      return one(check(await rq("GET", TABLE, null, `?user_id=eq.${enc(userId)}&project_id=eq.${enc(projectId)}&cache_key=eq.${enc(cacheKey)}&gate_version=eq.${enc(gateVersion)}&status=eq.ready&order=created_at.asc&limit=1`), "findReadyForProjectKey"));
+    },
     /** The original research run behind a saved set: a set opened in another project is a copy (usage.copiedFrom); follows at most 10 links. */
     async researchRoot(researchId, userId) {
       let id = researchId;

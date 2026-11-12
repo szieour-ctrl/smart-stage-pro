@@ -324,6 +324,10 @@ async function prepare({ project, userId, store, fetchFn, env, now }) {
   const base = { user_id: userId, project_id: project.id, research_id: t.researchId, topic_id: sb.topicKeyOf(t), source_url: art.url, final_url: page.finalUrl,
     snapshot_retrieved_at: page.retrievedAt, raw_html_sha256: snap.raw_html_sha256, extractor_sha256: snap.extractor_sha256, bridge_version: snap.bridge, capture_flags: snap.flags };
   if (live && live.status !== "ready") fail("in_progress", "a B1 run for this exact article and settings is already in progress; try again when it finishes");
+  if (live && typeof store.findReadyForProjectKey === "function") {   // this project already holds that completed snapshot (an earlier research run): use it, insert nothing
+    const own = await store.findReadyForProjectKey(userId, project.id, live.cache_key, live.gate_version);
+    if (own && own.topic_id === base.topic_id && own.source_url === art.url) return { record: own, reused: true };
+  }
   if (live) {   // no new B1 call: copy the completed result (its own snapshot, request, raw response and bundle) to this project
     const { id, created_at, reserved_at, finished_at, cost_usd, error, provider_seq, provider_reservation_id, ...copy } = live;   // a copy makes no call: no ledger link
     return { record: await store.insert({ ...copy, ...base, status: "ready", reused_from: id }), reused: true };

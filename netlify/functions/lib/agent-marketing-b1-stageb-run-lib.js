@@ -76,6 +76,25 @@ async function attachIfNeeded(store, project, userId, row) {
 }
 
 /**
+ * ownReadyEvidence({ store, project, topic, userId }) → this project's own completed, checked evidence row for the selected article, or null.
+ * It is what lets a project resume, or move to a later research run on the same article, without a second evidence row (Nov 12, 2026). Only an
+ * article-keyed topic qualifies, only rows of this subscriber and this project, and the same integrity, settings and bundle checks apply.
+ */
+async function ownReadyEvidence({ store, project, topic, userId }) {
+  if (!topic || !topic.b1 || typeof topic.b1.articleKey !== "string" || !topic.b1.articleKey || typeof store.findReadyForTopic !== "function") return null;
+  const art = br.articleOf(topic);
+  let rows; try { rows = await store.findReadyForTopic(userId, keyOf(topic)); } catch (x) { return null; }
+  const sbLib = require("./agent-marketing-b1-stageb-lib");
+  for (const row of rows || []) {
+    if (!row || row.user_id !== userId || row.project_id !== project.id || row.status !== "ready" || row.topic_id !== keyOf(topic)) continue;
+    if (art && row.source_url !== art.url) continue;
+    if (sbLib.checkRecord(row, project).length) continue;
+    return row;
+  }
+  return null;
+}
+
+/**
  * precheck({ userId, projectId, store, loadProject, env, now }) → { refusal } | { ready } | { live } | { project, topic }
  * The checks shared by the start request and the background job: admission, the project (owned by this user), the Article-Led topic, and the
  * newest row for it. A stale reserved/running row (older than the background time limit) is retired here so a new run can start.
@@ -90,6 +109,7 @@ async function precheck({ userId, projectId, store, loadProject, env, now }) {
   const live = await store.findForProject(project.id, keyOf(topic), topic.researchId);   // the newest non-failed row for this project, topic and research run
   if (live && live.status === "ready") { await attachIfNeeded(store, project, userId, live); return { ready: live }; }
   if (live && !isStale(live, nowMs)) return { live };   // a job is live: no second run
+  if (!live) { const own = await ownReadyEvidence({ store, project, topic, userId }); if (own) { await attachIfNeeded(store, project, userId, own); return { ready: own }; } }   // resume / a later run on the same article
   if (live) { try { await store.fail(live.id, "stale", live.status); } catch (x) { /* another worker moved it on */ } }
   return { project, topic };
 }
@@ -202,7 +222,8 @@ async function status({ userId, projectId, store, loadProject, env }) {
   // A Market Update topic without an article (a Market Trend Update from the agent's report): no article evidence is needed (Nov 8, 2026).
   if (refusal && refusal.code === "not_article_led" && plainMarketTopic(project)) return out(200, { state: "not_needed" });
   if (refusal) return out(refusal.status, { error: refusal.message, code: refusal.code });
-  const row = await store.latestForProject(project.id, keyOf(topic), topic.researchId);
+  let row = await store.latestForProject(project.id, keyOf(topic), topic.researchId);
+  if (!row && topic.b1 && topic.b1.articleKey) row = await store.latestForProject(project.id, keyOf(topic), null);   // the article's evidence written by an earlier run of this project
   let la = null;
   try { la = typeof store.latestAttempt === "function" ? await store.latestAttempt(project.id, keyOf(topic)) : null; } catch (x) { la = null; }
   const lastAttempt = la ? { mode: la.mode, stage: la.stage, outcome: la.outcome, httpStatus: la.http_status || null, at: la.created_at } : null;
@@ -262,6 +283,10 @@ async function reuseSavedTopic({ store, project, topic, userId }) {
     const ownProject = { id: row.project_id, selected_topic: { ...topic, researchId: row.research_id } };
     if (sbLib.checkRecord(row, ownProject).length) continue;   // integrity, approved settings and bundle, re-verified before reuse
     const { id, created_at, reserved_at, finished_at, cost_usd, error, provider_seq, provider_reservation_id, reused_from, project_id, research_id, ...copy } = row;
+    if (typeof store.findReadyForProjectKey === "function") {   // this project already holds that snapshot: use it, insert nothing
+      let own = null; try { own = await store.findReadyForProjectKey(userId, project.id, row.cache_key, row.gate_version); } catch (x) { own = null; }
+      if (own && own.topic_id === keyOf(topic) && !sbLib.checkRecord(own, project).length) return own;
+    }
     try {
       return await store.insert({ ...copy, user_id: userId, project_id: project.id, research_id: topic.researchId, topic_id: keyOf(topic), status: "ready", reused_from: reused_from || id });
     } catch (x) { console.error("stageb saved-topic reuse:", x.code || x.message); return null; }
@@ -373,5 +398,5 @@ async function articleEvidence({ userId, projectId, researchId, art, store, fetc
   return { articleKey, state: row ? "ready" : res.state, code: row ? undefined : res.code || (res.state === "ready" ? "evidence_unreadable" : undefined), providerAttempted: !!res.providerAttempted, row };
 }
 
-module.exports = { STALE_MS, caps, admit, articleLedTopic, precheck, startRequest, startJob, runJob, reuseSavedTopic, recordAttempt, status, withPlanEvidence,
+module.exports = { STALE_MS, caps, admit, articleLedTopic, ownReadyEvidence, precheck, startRequest, startJob, runJob, reuseSavedTopic, recordAttempt, status, withPlanEvidence,
   startScriptRequest, scriptJob, evidenceFailureMessage, plannerConfig, articleEvidence };

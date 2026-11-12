@@ -64,7 +64,10 @@ function checkRecord(record, project) {
   const t = project && project.selected_topic && typeof project.selected_topic === "object" ? project.selected_topic : null;
   if (!t) return ["the project has no selected topic"];
   if (r.project_id !== project.id) p.push("record belongs to another project");
-  if (r.research_id !== t.researchId || r.topic_id !== topicKeyOf(t)) p.push("record is for a different selected topic (the topic changed after B1 ran)");
+  // An article-keyed topic points at its ARTICLE's evidence, so an otherwise compatible record of this project written by an earlier research run is
+  // still the right record (Nov 12, 2026). Any other topic key repeats across research sets, so its research run must still match.
+  const articleKeyed = !!(t.b1 && typeof t.b1.articleKey === "string" && t.b1.articleKey && r.topic_id === t.b1.articleKey);
+  if (r.topic_id !== topicKeyOf(t) || (r.research_id !== t.researchId && !articleKeyed)) p.push("record is for a different selected topic (the topic changed after B1 ran)");
   if (r.status !== "ready") p.push(`record status is ${r.status || "missing"}, not ready`);
   for (const f of ["instructions_sha256", "model", "max_output_tokens", "reasoning_effort", "prompt_version"]) {
     if (r[f] !== APPROVED_B1[f]) p.push(`${f} is not the approved B1 setting`);

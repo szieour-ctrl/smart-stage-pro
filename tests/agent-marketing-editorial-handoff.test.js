@@ -89,11 +89,13 @@ const KEYS = new Set(["months_supply", "count_closed", "median_dom", "count_acti
 const PENDING = "Only 130 Roseville homes went pending in September, compared with 191 last September.";
 const SUPPLY = "Roseville had about 2.8 months of supply in September.";
 
-test("article-only facts: a pending-contract sentence stays when the report has no pending figure; supply, sales and prices stay with the report", () => {
+test("article-only facts: an article statistic stays when the report supplies no equivalent measure; measures the report supplies stay with the report", () => {
   assert.strictEqual(art.withoutMarketStats(PENDING, KEYS), PENDING);
   assert.strictEqual(art.withoutMarketStats(SUPPLY, KEYS), "", "months of supply is a report measure");
-  assert.strictEqual(art.withoutMarketStats("Closed sales fell 12% from last year.", KEYS), "");
-  assert.strictEqual(art.withoutMarketStats("The median sold price rose 3% to $620,000.", KEYS), "");
+  assert.strictEqual(art.withoutMarketStats("Closed sales fell 12% from last year.", KEYS), "", "the report supplies closed sales");
+  assert.strictEqual(art.withoutMarketStats("The median sold price rose 3% to $620,000.", KEYS), "", "the report supplies the median sold price");
+  const FEW = new Set(["months_supply"]);
+  assert.match(art.withoutMarketStats("Closed sales fell 12% from last year.", FEW), /Closed sales fell 12%/, "no category is suppressed as a class: a report without closed sales leaves the article's fact usable");
   assert.strictEqual(art.withoutMarketStats(PENDING), "", "with no report measures given the earlier rule is unchanged");
   assert.strictEqual(art.withoutMarketStats(PENDING, new Set([...KEYS, "count_pending"])), "", "a report that has a pending figure is authoritative for it");
   assert.strictEqual(art.withoutMarketStats(`${PENDING} ${SUPPLY}`, KEYS), PENDING, "a mixed text keeps only the article-only sentence");
@@ -112,10 +114,10 @@ test("article-only facts: a topic's why-it-matters and the planner's cited quote
 });
 
 test("article-only facts: the B2 prompt and the planner's article rule allow them, attributed to the article and never as the agent's own data", () => {
-  assert.match(b2.systemPrompt("article_report", false), /A distinct fact the report has NO measure for \(for example pending contracts, mortgage rates or a payment example\) may come from the article's validated findings: attribute it to the article/);
-  assert.match(b2.systemPrompt("article_report", false), /that the agent's report also measures .* come ONLY from the agent's report/);
+  assert.match(b2.systemPrompt("article_report", false), /A distinct verified article fact for which the report supplies no equivalent measure \(whatever its category\) may come from the article's validated findings: attribute it to the article/);
+  assert.match(b2.systemPrompt("article_report", false), /report also measures for the same geography, period and statistical definition/);
   const p = planLib.buildSystemPrompt(DEV, {});
-  assert.match(p, /A distinct fact about a measure the report does not contain \(for example pending contracts, mortgage rates or a payment example\) may be stated from a validated finding/);
+  assert.match(p, /A distinct verified article fact for which the report supplies no equivalent measure \(same geography, period and statistical definition\), whatever its category, may be stated from a validated finding/);
   assert.match(p, /never as the agent's own market data/);
   assert.match(p, /rule 2f decides every measure that figures_you_may_state contains/);
 });

@@ -61,23 +61,22 @@ const sentencesOf = (x) => String(x || "").split(/(?<=[.!?])\s+/).filter(Boolean
 
 /**
  * Nov 12, 2026: the report is authoritative only for the measures it contains. measuredKeys (a Set of the report figures' keys, for example
- * "months_supply") lets a sentence about a measure the report does NOT have (pending contracts, for instance) stay as an article-only fact; a sentence
- * that also touches a measure the report has still goes to the report. Without measuredKeys every market statistic is removed, as before.
+ * "months_supply") lets a sentence about a measure the report does NOT supply stay as a distinct article fact; a sentence
+ * that touches a measure the report supplies still goes to the report. Without measuredKeys every market statistic is removed, as before.
  */
 function measuredKeysOf(topic) {
+  if (!(topic && topic.b2)) return null; // only a topic built from validated article findings (B2) carries distinct article facts; a legacy web topic's free text stays report-only
   const f = topic && Array.isArray(topic.reportFigures) ? topic.reportFigures : [];
   const keys = f.map((x) => x && x.key).filter(Boolean);
   return keys.length ? new Set(keys) : null;
 }
-// Pending-contract activity is the measure Sam's accepted correction names (the report has no pending figure). Price, inventory, sales and time-on-market
-// measures stay the report's even when a particular report happens to lack one of them.
-const ARTICLE_ONLY_KEYS = ["count_pending"];
+// Nov 12, 2026 (Sam): the subscriber's confirmed report is authoritative for a measure it supplies. A sentence stays as a distinct article fact when every
+// measure it states is one the report does NOT supply; no category of article statistics is suppressed as a class.
 function articleOnlyMeasure(sentence, measuredKeys) {
   if (!measuredKeys || !measuredKeys.size) return false;
   const M = require("./agent-marketing-research-report-lib").MEASURES;
   const s = String(sentence || "").toLowerCase();
-  const hit = M.filter((m) => m.re.test(s));
-  return hit.length > 0 && hit.every((m) => ARTICLE_ONLY_KEYS.includes(m.key) && !measuredKeys.has(m.key)) && !/\b(?:closed|closings?|sold)\b/.test(s);
+  return !M.some((m) => m.re.test(s) && measuredKeys.has(m.key));
 }
 const keepWith = (measuredKeys) => (sentence) => !statOf(sentence) || articleOnlyMeasure(sentence, measuredKeys);
 const keep = keepWith(null);

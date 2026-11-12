@@ -305,9 +305,11 @@ function buildUserMessage(project) {
 }
 
 // ── Claude call (raw https, like the rest of the codebase) ─────────────────────────────────────────────────────
-function callClaudeText(systemPrompt, userText, anthropicKey, usageSink) {
+// opts.maxTokens raises the output allowance for one caller (the Article-Led editorial writer); every other caller keeps MAX_TOKENS.
+function callClaudeText(systemPrompt, userText, anthropicKey, usageSink, opts) {
+  const maxTokens = opts && Number(opts.maxTokens) > 0 ? Math.floor(Number(opts.maxTokens)) : MAX_TOKENS;
   return new Promise((resolve, reject) => {
-    const bodyStr = JSON.stringify({ model: MODEL, max_tokens: MAX_TOKENS, system: systemPrompt, messages: [{ role: "user", content: userText }] });
+    const bodyStr = JSON.stringify({ model: MODEL, max_tokens: maxTokens, system: systemPrompt, messages: [{ role: "user", content: userText }] });
     const req = https.request({
       hostname: "api.anthropic.com", path: "/v1/messages", method: "POST",
       headers: { "x-api-key": anthropicKey, "anthropic-version": "2023-06-01", "Content-Type": "application/json", "Content-Length": Buffer.byteLength(bodyStr) },
@@ -320,7 +322,12 @@ function callClaudeText(systemPrompt, userText, anthropicKey, usageSink) {
           const parsed = JSON.parse(data);
           const text = parsed && parsed.content && parsed.content.find((b) => b.type === "text") && parsed.content.find((b) => b.type === "text").text;
           if (!text) return reject(new Error(`Planner call returned no text: ${data.slice(0, 300)}`));
-          if (parsed.stop_reason === "max_tokens") return reject(new Error("Planner response was cut off"));
+          if (parsed.stop_reason === "max_tokens") {
+            // Counts and settings only: never the prompt, the article text or the key.
+            const err = new Error("Planner response was cut off");
+            err.diagnostics = { model: String(parsed.model || MODEL), stop_reason: "max_tokens", input_tokens: Number(parsed.usage && parsed.usage.input_tokens) || 0, output_tokens: Number(parsed.usage && parsed.usage.output_tokens) || 0, max_output_tokens: maxTokens };
+            return reject(err);
+          }
           if (Array.isArray(usageSink) && parsed.usage) usageSink.push({ model: MODEL, input_tokens: Number(parsed.usage.input_tokens) || 0, output_tokens: Number(parsed.usage.output_tokens) || 0 });
           resolve(text);
         } catch (e) { reject(new Error(`Planner response parse error: ${e.message}`)); }

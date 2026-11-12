@@ -15,12 +15,18 @@ const b1 = require("./agent-marketing-b1-evidence-lib");
 const ti = require("./agent-marketing-trend-intelligence-lib");   // Nov 9, 2026: the same Trend Intelligence Option 1 uses
 
 const MAX_CANDIDATES = 10, SELECT = 5, MAX_ARTICLES = 3;
+const B2_MAX_OUTPUT_TOKENS = 8000; // ten candidates with their evidence fields need more room than the planner default (4000)
 const clean = (s, n) => String(s == null ? "" : s).replace(/\s+/g, " ").trim().slice(0, n);
 const normQ = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
 const numbersOf = (s) => (String(s || "").match(/\d[\d,]*(?:\.\d+)?/g) || []).map((n) => n.replace(/,/g, "").replace(/\.0+$/, ""));
 
 /** The evidence key of an article (shared with the B1 evidence rows written during research). */
 function articleKey(url) { return `a-${crypto.createHash("sha256").update(String(url), "utf8").digest("hex").slice(0, 24)}`; }
+
+/** What is kept when the editorial call fails: the stage and, for a cut-off reply, the model, stop reason, token counts and configured limit. */
+function failureDiagnostics(x) {
+  return { stage: "editorial_topic_generation", ...((x && x.diagnostics) || {}), ...(x && x.diagnostics ? {} : { max_output_tokens: B2_MAX_OUTPUT_TOKENS }) };
+}
 
 /** The articles to read: the first distinct article source of each discovery topic, in discovery order, at most MAX_ARTICLES. */
 function articlesFrom(topics, max) {
@@ -168,7 +174,7 @@ async function generate(o) {
   const planLib = require("./agent-marketing-plan-lib");
   const call = o.callFn || planLib.callClaudeText;
   const sink = [];
-  const text = await call(systemPrompt(o.mode, !!(o.trend && o.trend.usable)), userMessage({ records: o.records, market: o.market, audience: o.audience, reportFigures: o.reportFigures, trend: o.trend }), o.anthropicKey, sink);
+  const text = await call(systemPrompt(o.mode, !!(o.trend && o.trend.usable)), userMessage({ records: o.records, market: o.market, audience: o.audience, reportFigures: o.reportFigures, trend: o.trend }), o.anthropicKey, sink, { maxTokens: B2_MAX_OUTPUT_TOKENS });
   const raw = planLib.extractJsonObject(text);
   const result = validate(raw, { records: o.records, mode: o.mode, reportFigures: o.reportFigures, trend: o.trend });
   const topics = result.selected.length ? toTopics({ result, records: o.records, articles: o.articles, evidence: o.evidence, mode: o.mode, reportSource: o.reportSource, trend: o.trend }) : [];
@@ -235,7 +241,7 @@ async function enrich({ row, fields, uploads, userId, env, deps }) {
   let out;
   try {
     out = await generate({ records, articles: used, evidence, mode, market, audience: row.audience, reportFigures, trend, callFn: d.callFn, anthropicKey: d.anthropicKey !== undefined ? d.anthropicKey : e.ANTHROPIC_API_KEY, reportSource });
-  } catch (x) { return failOut("b2_failed", "The articles were read, but the editorial topics could not be written this time. This did not use a session. Start new research to try again.", { error: String(x.message || x).slice(0, 200) }); }
+  } catch (x) { return failOut("b2_failed", "The articles were read, but the editorial topics could not be written this time. This did not use a session. Start new research to try again.", { error: String(x.message || x).slice(0, 200), diagnostics: failureDiagnostics(x) }); }
   if (!out.topics.length) return failOut("b2_no_topics", "The articles were read, but none of the editorial questions met the source rules. This did not use a session. Start new research to try again, or change your request.", { problems: out.problems.slice(0, 8) });
   let topics = out.topics;
   if (mode === "article_report" && ctx && ctx.figures && ctx.figures.size) topics = require("./agent-marketing-research-report-lib").applyReportPrecedence(topics, ctx);
@@ -246,4 +252,4 @@ async function enrich({ row, fields, uploads, userId, env, deps }) {
     selected: out.selected, notes: out.notes, problems: out.problems.slice(0, 8), b2Usage: out.usage, discoveryTopics: fields.topics.length } } };
 }
 
-module.exports = { applies, enrich, MAX_CANDIDATES, SELECT, MAX_ARTICLES, articleKey, articlesFrom, comprehensionOf, systemPrompt, userMessage, validate, toTopics, generate };
+module.exports = { applies, enrich, failureDiagnostics, B2_MAX_OUTPUT_TOKENS, MAX_CANDIDATES, SELECT, MAX_ARTICLES, articleKey, articlesFrom, comprehensionOf, systemPrompt, userMessage, validate, toTopics, generate };

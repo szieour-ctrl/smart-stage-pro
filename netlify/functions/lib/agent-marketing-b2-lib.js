@@ -15,6 +15,10 @@ const b1 = require("./agent-marketing-b1-evidence-lib");
 const ti = require("./agent-marketing-trend-intelligence-lib");   // Nov 9, 2026: the same Trend Intelligence Option 1 uses
 
 const MAX_CANDIDATES = 10, SELECT = 5, MAX_ARTICLES = 3;
+const B2_TIMEOUT_MS = 210000; // the editorial reply is not streamed, so a long answer needs more than the planner's default 120 s
+// A research run still "running" after 6 minutes is marked failed (agent-marketing-research.js STALE_RUNNING_MS). The editorial call is only
+// started when it can finish, with a little room left to write the result.
+const B2_RUN_WINDOW_MS = 6 * 60 * 1000, B2_RESULT_MARGIN_MS = 15000;
 const B2_MAX_OUTPUT_TOKENS = 8000; // ten candidates with their evidence fields need more room than the planner default (4000)
 const clean = (s, n) => String(s == null ? "" : s).replace(/\s+/g, " ").trim().slice(0, n);
 const normQ = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
@@ -23,9 +27,17 @@ const numbersOf = (s) => (String(s || "").match(/\d[\d,]*(?:\.\d+)?/g) || []).ma
 /** The evidence key of an article (shared with the B1 evidence rows written during research). */
 function articleKey(url) { return `a-${crypto.createHash("sha256").update(String(url), "utf8").digest("hex").slice(0, 24)}`; }
 
+/** Whether the editorial call can finish inside the run's window: { ok, elapsed } (elapsed is null when the start time is unknown, which allows the call). */
+function timeLeft(createdAt, now) {
+  const started = Date.parse(createdAt);
+  if (!Number.isFinite(started)) return { ok: true, elapsed: null };
+  const elapsed = now - started;
+  return { ok: elapsed + B2_TIMEOUT_MS + B2_RESULT_MARGIN_MS <= B2_RUN_WINDOW_MS, elapsed };
+}
+
 /** What is kept when the editorial call fails: the stage and, for a cut-off reply, the model, stop reason, token counts and configured limit. */
 function failureDiagnostics(x) {
-  return { stage: "editorial_topic_generation", ...((x && x.diagnostics) || {}), ...(x && x.diagnostics ? {} : { max_output_tokens: B2_MAX_OUTPUT_TOKENS }) };
+  return { stage: "editorial_topic_generation", ...((x && x.diagnostics) || {}), ...(x && x.diagnostics ? {} : { max_output_tokens: B2_MAX_OUTPUT_TOKENS, configured_timeout_ms: B2_TIMEOUT_MS }) };
 }
 
 /** The articles to read: the first distinct article source of each discovery topic, in discovery order, at most MAX_ARTICLES. */
@@ -174,7 +186,7 @@ async function generate(o) {
   const planLib = require("./agent-marketing-plan-lib");
   const call = o.callFn || planLib.callClaudeText;
   const sink = [];
-  const text = await call(systemPrompt(o.mode, !!(o.trend && o.trend.usable)), userMessage({ records: o.records, market: o.market, audience: o.audience, reportFigures: o.reportFigures, trend: o.trend }), o.anthropicKey, sink, { maxTokens: B2_MAX_OUTPUT_TOKENS });
+  const text = await call(systemPrompt(o.mode, !!(o.trend && o.trend.usable)), userMessage({ records: o.records, market: o.market, audience: o.audience, reportFigures: o.reportFigures, trend: o.trend }), o.anthropicKey, sink, { maxTokens: B2_MAX_OUTPUT_TOKENS, timeoutMs: B2_TIMEOUT_MS });
   const raw = planLib.extractJsonObject(text);
   const result = validate(raw, { records: o.records, mode: o.mode, reportFigures: o.reportFigures, trend: o.trend });
   const topics = result.selected.length ? toTopics({ result, records: o.records, articles: o.articles, evidence: o.evidence, mode: o.mode, reportSource: o.reportSource, trend: o.trend }) : [];
@@ -236,12 +248,18 @@ async function enrich({ row, fields, uploads, userId, env, deps }) {
       trend = ti.analyze(ctx, { refOf: (r) => rid.get(r) || r }); } catch (x) { ctx = null; trend = null; }
     reportSource = { type: "report", title: "Your MLS report", url: null, role: "data" };
   }
+  // Not enough of the run's time left for the editorial call to finish: stop cleanly, uncharged, instead of starting a call that would be cut off.
+  const time = timeLeft(row.created_at, typeof d.now === "number" ? d.now : Date.now());
+  if (!time.ok) {
+    return failOut("b2_no_time", "The articles were read, but there was not enough time left to write the editorial topics. This did not use a session. Start new research to try again.",
+      { diagnostics: { stage: "editorial_topic_generation", reason: "insufficient_time", elapsed_since_start_ms: time.elapsed, required_ms: B2_TIMEOUT_MS + B2_RESULT_MARGIN_MS, run_window_ms: B2_RUN_WINDOW_MS, configured_timeout_ms: B2_TIMEOUT_MS } });
+  }
   const geo = row.geography || {};
   const market = [geo.name, geo.type === "neighborhood" && geo.city ? geo.city : null, geo.zip ? `ZIP ${geo.zip}` : null].filter(Boolean).join(", ");
   let out;
   try {
     out = await generate({ records, articles: used, evidence, mode, market, audience: row.audience, reportFigures, trend, callFn: d.callFn, anthropicKey: d.anthropicKey !== undefined ? d.anthropicKey : e.ANTHROPIC_API_KEY, reportSource });
-  } catch (x) { return failOut("b2_failed", "The articles were read, but the editorial topics could not be written this time. This did not use a session. Start new research to try again.", { error: String(x.message || x).slice(0, 200), diagnostics: failureDiagnostics(x) }); }
+  } catch (x) { return failOut("b2_failed", "The articles were read, but the editorial topics could not be written this time. This did not use a session. Start new research to try again.", { error: String(x.message || x).slice(0, 200), diagnostics: { ...failureDiagnostics(x), ...(time.elapsed !== null ? { elapsed_since_start_ms: time.elapsed } : {}) } }); }
   if (!out.topics.length) return failOut("b2_no_topics", "The articles were read, but none of the editorial questions met the source rules. This did not use a session. Start new research to try again, or change your request.", { problems: out.problems.slice(0, 8) });
   let topics = out.topics;
   if (mode === "article_report" && ctx && ctx.figures && ctx.figures.size) topics = require("./agent-marketing-research-report-lib").applyReportPrecedence(topics, ctx);
@@ -252,4 +270,4 @@ async function enrich({ row, fields, uploads, userId, env, deps }) {
     selected: out.selected, notes: out.notes, problems: out.problems.slice(0, 8), b2Usage: out.usage, discoveryTopics: fields.topics.length } } };
 }
 
-module.exports = { applies, enrich, failureDiagnostics, B2_MAX_OUTPUT_TOKENS, MAX_CANDIDATES, SELECT, MAX_ARTICLES, articleKey, articlesFrom, comprehensionOf, systemPrompt, userMessage, validate, toTopics, generate };
+module.exports = { applies, enrich, failureDiagnostics, timeLeft, B2_MAX_OUTPUT_TOKENS, B2_TIMEOUT_MS, B2_RUN_WINDOW_MS, B2_RESULT_MARGIN_MS, MAX_CANDIDATES, SELECT, MAX_ARTICLES, articleKey, articlesFrom, comprehensionOf, systemPrompt, userMessage, validate, toTopics, generate };

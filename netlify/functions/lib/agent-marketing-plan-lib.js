@@ -15,6 +15,7 @@ const b1 = require("./agent-marketing-b1-evidence-lib"); // DEVELOPMENT ONLY: in
 
 const MODEL = "claude-sonnet-4-6"; // same model family the other planners use
 const MAX_TOKENS = 4000;
+const CALL_TIMEOUT_MS = 120000; // the planner default; opts.timeoutMs lets one caller (the Article-Led editorial writer) wait longer
 const WPM = 130; // pipeline's planning rate (narrationGen.js); real timing comes from the generated audio
 const MAX_ATTEMPTS = 4;
 const STALE_PLANNING_MS = 5 * 60 * 1000;
@@ -305,9 +306,14 @@ function buildUserMessage(project) {
 }
 
 // ── Claude call (raw https, like the rest of the codebase) ─────────────────────────────────────────────────────
-// opts.maxTokens raises the output allowance for one caller (the Article-Led editorial writer); every other caller keeps MAX_TOKENS.
+// opts.maxTokens and opts.timeoutMs raise the output allowance and the wait for one caller (the Article-Led editorial writer); every other
+// caller keeps MAX_TOKENS and CALL_TIMEOUT_MS.
 function callClaudeText(systemPrompt, userText, anthropicKey, usageSink, opts) {
   const maxTokens = opts && Number(opts.maxTokens) > 0 ? Math.floor(Number(opts.maxTokens)) : MAX_TOKENS;
+  const timeoutMs = opts && Number(opts.timeoutMs) > 0 ? Math.floor(Number(opts.timeoutMs)) : CALL_TIMEOUT_MS;
+  const startedAt = Date.now();
+  // Counts and settings only: never the prompt, the article text or the key.
+  const diag = (stop, usage) => ({ model: MODEL, stop_reason: stop, input_tokens: Number(usage && usage.input_tokens) || 0, output_tokens: Number(usage && usage.output_tokens) || 0, max_output_tokens: maxTokens, configured_timeout_ms: timeoutMs, elapsed_ms: Date.now() - startedAt });
   return new Promise((resolve, reject) => {
     const bodyStr = JSON.stringify({ model: MODEL, max_tokens: maxTokens, system: systemPrompt, messages: [{ role: "user", content: userText }] });
     const req = https.request({
@@ -323,9 +329,8 @@ function callClaudeText(systemPrompt, userText, anthropicKey, usageSink, opts) {
           const text = parsed && parsed.content && parsed.content.find((b) => b.type === "text") && parsed.content.find((b) => b.type === "text").text;
           if (!text) return reject(new Error(`Planner call returned no text: ${data.slice(0, 300)}`));
           if (parsed.stop_reason === "max_tokens") {
-            // Counts and settings only: never the prompt, the article text or the key.
             const err = new Error("Planner response was cut off");
-            err.diagnostics = { model: String(parsed.model || MODEL), stop_reason: "max_tokens", input_tokens: Number(parsed.usage && parsed.usage.input_tokens) || 0, output_tokens: Number(parsed.usage && parsed.usage.output_tokens) || 0, max_output_tokens: maxTokens };
+            err.diagnostics = { ...diag("max_tokens", parsed.usage), model: String(parsed.model || MODEL) };
             return reject(err);
           }
           if (Array.isArray(usageSink) && parsed.usage) usageSink.push({ model: MODEL, input_tokens: Number(parsed.usage.input_tokens) || 0, output_tokens: Number(parsed.usage.output_tokens) || 0 });
@@ -333,7 +338,7 @@ function callClaudeText(systemPrompt, userText, anthropicKey, usageSink, opts) {
         } catch (e) { reject(new Error(`Planner response parse error: ${e.message}`)); }
       });
     });
-    req.setTimeout(120000, () => req.destroy(new Error("Planner call timed out")));
+    req.setTimeout(timeoutMs, () => { const err = new Error("Planner call timed out"); err.diagnostics = diag("timeout", null); req.destroy(err); });
     req.on("error", reject);
     req.write(bodyStr);
     req.end();

@@ -177,3 +177,12 @@ test("invalid research is never described as ready or selected, and a restored s
   assert.match(uiSrc, /are available again, with no new session needed/);
   assert.match(htmlSrc, /p\.selectedTopic\.reportOutdated \|\| !p\.intake/, "the project's progress does not count an outdated topic as chosen");
 });
+
+test("removing or replacing a report clears the old status message (no stale 'Confirmation updated')", () => {
+  const m = /function resetReview\(\) \{([^\n]*)\}\n/.exec(uiSrc);
+  assert.ok(m, "resetReview exists");
+  assert.match(m[1], /say\("startMsg", ""\)/, "the shared reset clears the bar status line");
+  // Both removing a report and choosing a different file go through resetReview.
+  assert.match(uiSrc, /async function removeUpload\(\)[\s\S]*?resetReview\(\)/);
+  assert.match(uiSrc, /\$\("upFile"\)\.addEventListener\("change"[\s\S]*?resetReview\(\)/);
+});

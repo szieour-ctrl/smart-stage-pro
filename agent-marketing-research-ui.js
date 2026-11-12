@@ -538,7 +538,7 @@
     var REPORT = "/.netlify/functions/agent-marketing-report";
     var MAX_BYTES = 4 * 1024 * 1024;
     // state.upload: null | { busy, id, status: "pending" | "confirmed", summary }
-    function resetReview() { state.upload = null; state.edit = null; $("upFix").classList.add("hidden"); $("upFixText").value = ""; Array.prototype.forEach.call(document.querySelectorAll('input[name="upWhy"]'), function (c) { c.checked = false; }); $("upReview").classList.add("hidden"); $("upMsg").textContent = ""; $("upGroups").innerHTML = ""; $("upWarn").innerHTML = ""; }
+    function resetReview() { state.upload = null; state.edit = null; say("startMsg", ""); $("upFix").classList.add("hidden"); $("upFixText").value = ""; Array.prototype.forEach.call(document.querySelectorAll('input[name="upWhy"]'), function (c) { c.checked = false; }); $("upReview").classList.add("hidden"); $("upMsg").textContent = ""; $("upGroups").innerHTML = ""; $("upWarn").innerHTML = ""; }
     function syncUpload() {
       var has = !!($("upFile").files && $("upFile").files.length > 0);
       var ok = has && $("upOk").checked;

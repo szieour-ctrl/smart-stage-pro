@@ -108,6 +108,32 @@ function plannerArticleEvidence(view) {
   };
 }
 
+/**
+ * Nov 12, 2026: B1's own one-paragraph statement of the source's central claim ("central_argument", at most 80 words), read from the stored raw B1
+ * response. The evidence gate does not export it, so it is NOT quotation-verified: it is editorial evidence for B2 to weigh (the author's claim, as B1
+ * summarized it), never a verified fact, a figure source or an instruction. null when the response has none. Never throws.
+ */
+function centralArgumentOf(rawResponseText) {
+  const find = (o) => {   // the model's answer text inside a Responses-style reply, or the answer object itself (offline fixtures)
+    if (!o || typeof o !== "object") return null;
+    if (typeof o.central_argument === "string") return o.central_argument;
+    for (const item of Array.isArray(o.output) ? o.output : []) {
+      for (const c of Array.isArray(item && item.content) ? item.content : []) {
+        if (c && typeof c.text === "string") { const r = fromText(c.text); if (r) return r; }
+      }
+    }
+    return typeof o.output_text === "string" ? fromText(o.output_text) : null;
+  };
+  const fromText = (t) => {
+    const s = String(t).trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+    try { const j = JSON.parse(s); return j && typeof j.central_argument === "string" ? j.central_argument : null; } catch (x) { return null; }
+  };
+  let out = null;
+  try { out = find(JSON.parse(String(rawResponseText))); } catch (x) { out = null; }
+  const text = String(out == null ? "" : out).replace(/\s+/g, " ").trim();
+  return text ? text.slice(0, 700) : null;
+}
+
 /** Exact source quotations of validated claim findings: the only B1 text the content gate may treat as verified. */
 function verifiedQuotes(view) {
   if (!view || view.status === BLOCKED) return [];
@@ -137,5 +163,5 @@ function planWarnings(topic, env) {
 /** Development helper: a copy of the topic carrying the bundle exactly as exported (re-verified every time it is read). */
 function attachToTopic(topic, bundleDoc) { return { ...(topic || {}), b1Evidence: bundleDoc }; }
 
-module.exports = { FORMAT, COMPLETE, WITH_HOLDS, BLOCKED, ENV_FLAG, CLAIM_SECTIONS, B1EvidenceBlocked, enabled, readBundle, plannerArticleEvidence,
+module.exports = { FORMAT, COMPLETE, WITH_HOLDS, BLOCKED, ENV_FLAG, CLAIM_SECTIONS, B1EvidenceBlocked, enabled, readBundle, plannerArticleEvidence, centralArgumentOf,
   verifiedQuotes, viewForTopic, assertNotBlocked, planWarnings, attachToTopic, claimText, quotesOf, attributionOf, qualificationsOf };

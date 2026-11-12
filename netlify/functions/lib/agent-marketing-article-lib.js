@@ -58,14 +58,36 @@ function numberRoles(sentence) {
 
 const statOf = (sentence) => numberRoles(sentence).some((n) => n.role === "market");
 const sentencesOf = (x) => String(x || "").split(/(?<=[.!?])\s+/).filter(Boolean);
-const keep = (sentence) => !statOf(sentence);
-/** The text without the sentences that state a local market performance statistic (mode 2). Article facts and dates stay. */
-function withoutMarketStats(text) { return sentencesOf(text).filter(keep).join(" "); }
+
+/**
+ * Nov 12, 2026: the report is authoritative only for the measures it contains. measuredKeys (a Set of the report figures' keys, for example
+ * "months_supply") lets a sentence about a measure the report does NOT have (pending contracts, for instance) stay as an article-only fact; a sentence
+ * that also touches a measure the report has still goes to the report. Without measuredKeys every market statistic is removed, as before.
+ */
+function measuredKeysOf(topic) {
+  const f = topic && Array.isArray(topic.reportFigures) ? topic.reportFigures : [];
+  const keys = f.map((x) => x && x.key).filter(Boolean);
+  return keys.length ? new Set(keys) : null;
+}
+// Pending-contract activity is the measure Sam's accepted correction names (the report has no pending figure). Price, inventory, sales and time-on-market
+// measures stay the report's even when a particular report happens to lack one of them.
+const ARTICLE_ONLY_KEYS = ["count_pending"];
+function articleOnlyMeasure(sentence, measuredKeys) {
+  if (!measuredKeys || !measuredKeys.size) return false;
+  const M = require("./agent-marketing-research-report-lib").MEASURES;
+  const s = String(sentence || "").toLowerCase();
+  const hit = M.filter((m) => m.re.test(s));
+  return hit.length > 0 && hit.every((m) => ARTICLE_ONLY_KEYS.includes(m.key) && !measuredKeys.has(m.key)) && !/\b(?:closed|closings?|sold)\b/.test(s);
+}
+const keepWith = (measuredKeys) => (sentence) => !statOf(sentence) || articleOnlyMeasure(sentence, measuredKeys);
+const keep = keepWith(null);
+/** The text without the sentences that state a local market performance statistic (mode 2). Article facts and dates stay; so do (given measuredKeys) article-only measures. */
+function withoutMarketStats(text, measuredKeys) { return sentencesOf(text).filter(keepWith(measuredKeys)).join(" "); }
 
 /** A question keeps its idea: only the market-statistic figures are removed ("Could 81 builder listings change…" → "Could builder listings change…"). */
-function neutralizeMarketFigures(text) {
+function neutralizeMarketFigures(text, measuredKeys) {
   const s = String(text || "");
-  const roles = numberRoles(s).filter((n) => n.role === "market").sort((a, b) => b.index - a.index);
+  const roles = (articleOnlyMeasure(s, measuredKeys) ? [] : numberRoles(s).filter((n) => n.role === "market")).sort((a, b) => b.index - a.index);
   let out = s;
   for (const n of roles) out = out.slice(0, n.index) + out.slice(n.index + n.length);
   return out.replace(/\s+([,.;:?!)])/g, "$1").replace(/\(\s*\)/g, "").replace(/\s{2,}/g, " ").replace(/\b(?:of|by|to|at|about|nearly|roughly|around|up|down)\s+([,.;:?!])/gi, "$1").trim();
@@ -86,15 +108,16 @@ function articleFacts(topic) {
       reframed: true, areaContext: areaContextOf(t), answeredBy: answeredByOf(t), articleQuestion: String(t.articleQuestion || ""),
     };
   }
+  const mk = measuredKeysOf(t), kp = keepWith(mk);
   return {
-    question: neutralizeMarketFigures(t.question),
-    whyItMatters: withoutMarketStats(t.whyItMatters),
-    scopeNote: withoutMarketStats(t.scopeNote),
-    trendSignals: (Array.isArray(t.trendSignals) ? t.trendSignals : []).map(String).filter((s) => s && keep(s)),
+    question: neutralizeMarketFigures(t.question, mk),
+    whyItMatters: withoutMarketStats(t.whyItMatters, mk),
+    scopeNote: withoutMarketStats(t.scopeNote, mk),
+    trendSignals: (Array.isArray(t.trendSignals) ? t.trendSignals : []).map(String).filter((s) => s && kp(s)),
     areaContext: [], answeredBy: [],
   };
 }
 
 // Kept for callers that only need a coarse test; the decision is numberRoles().
 const MARKET_STAT = MEASURE;
-module.exports = { articleFacts, withoutMarketStats, neutralizeMarketFigures, numberRoles, MARKET_STAT };
+module.exports = { articleFacts, withoutMarketStats, neutralizeMarketFigures, numberRoles, measuredKeysOf, articleOnlyMeasure, MARKET_STAT };

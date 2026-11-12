@@ -128,12 +128,26 @@ function noticeOverlayFor(project, narrative) {
   const count = Array.isArray(narrative && narrative.scenes) ? narrative.scenes.length : 0;
   return { text, position: "bottom", scenes: count > 1 ? [0, count - 1] : [0], showHeadshot: true, headshotSource: "marketing_profile" };
 }
-// Sets (or removes) narrative.notice and narrative.noticeOverlay from the stored topic. A script edit can never drop or change the notice.
+// Nov 12, 2026 (Sam): the article is credited in the on-screen source footer, never in the narration, captions or scene copy, and only when a scene
+// actually draws on the article (source_role "article"). A Reel built only on the subscriber's confirmed report needs no article credit. The text is built
+// by code from the checked source (title, site and date), like the source line of a web-research Reel. This is the contract field for the renderer.
+function sourceCreditFor(project, narrative) {
+  const t = project && project.template === "local_market_insider" && project.selected_topic;
+  if (!t || !t.b2 || !t.b2.article) return null;
+  const scenes = (Array.isArray(narrative && narrative.scenes) ? narrative.scenes : []).map((s, i) => (s && s.sourceRole === "article" ? i : -1)).filter((i) => i >= 0);
+  if (!scenes.length) return null;
+  const articles = (Array.isArray(t.sources) ? t.sources : []).filter((x) => x && x.kind === "article");
+  const text = require("./agent-marketing-sources-lib").sourceLine(articles.slice(0, 1), "");
+  return text ? { text, position: "bottom", scenes } : null;
+}
+// Sets (or removes) narrative.notice, narrative.noticeOverlay and narrative.sourceCredit from the stored topic. A script edit can never drop or change the notice.
 function attachNotice(project, narrative) {
   const n = narrative || {};
   const overlay = noticeOverlayFor(project, n);
   if (overlay) { n.notice = overlay.text; n.noticeOverlay = overlay; }
   else { delete n.notice; delete n.noticeOverlay; }
+  const credit = sourceCreditFor(project, n);
+  if (credit) n.sourceCredit = credit; else delete n.sourceCredit;
   return n;
 }
 
@@ -154,5 +168,5 @@ const NOT_EDITABLE_AFTER = ["rendering", "rendered", "published"];
 module.exports = {
   marketReviewEnabled,
   DURATIONS, FORMATS, VOICES, MUSIC, WORD_TARGETS, DEV_WORD_TARGETS, wordTargets, UUID_RE, NOT_EDITABLE_AFTER,
-  isEnabledFor, validateCreate, stripAudioTags, countWords, validateNarrative, gateInputFor, topicNotice, noticeOverlayFor, attachNotice,
+  isEnabledFor, validateCreate, stripAudioTags, countWords, validateNarrative, gateInputFor, topicNotice, noticeOverlayFor, sourceCreditFor, attachNotice,
 };

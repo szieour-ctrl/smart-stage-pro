@@ -185,7 +185,7 @@ function verifiedFromTopic(topic, env) {
   // B1 article evidence (development only, AGENT_MARKETING_B1_EVIDENCE=dev): the exact source quotations of VALIDATED B1 findings are verified text.
   // Held and excluded findings never are, and a BLOCKED bundle contributes nothing. On a "Both" topic the article's market statistics stay out.
   const b1v = require("./agent-marketing-b1-evidence-lib").viewForTopic(t, env);
-  if (b1v) require("./agent-marketing-b1-evidence-lib").verifiedQuotes(b1v).forEach((q) => texts.push(reportFirst ? require("./agent-marketing-article-lib").withoutMarketStats(q) : q));
+  if (b1v) require("./agent-marketing-b1-evidence-lib").verifiedQuotes(b1v).forEach((q) => texts.push(reportFirst ? require("./agent-marketing-article-lib").withoutMarketStats(q, require("./agent-marketing-article-lib").measuredKeysOf(t)) : q));
   // D1 (development only): with B1 evidence present, article figures must be authorized by an applicable validated finding, and held quotations
   // may not be restored (lib/agent-marketing-b1-claims-lib.js). The agent's own report figures stay with rule 2f and are not checked there.
   const b1Claims = b1v ? require("./agent-marketing-b1-claims-lib").contextFromView(b1v) : null;

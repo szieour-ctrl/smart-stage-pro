@@ -211,6 +211,17 @@ function validateManifest(manifest) {
   if (scenes.some((sc) => Object.values((sc.visual || {}).image_provenance || {}).includes("ai")) && !(m.disclosure && Object.values(AI_DISCLOSURES).includes(m.disclosure.text))) {
     err("disclosure", "disclosure.text", "A Reel with AI-generated images needs the approved AI image disclosure, built by code.");
   }
+  // Article credit (Nov 12, 2026): on a Reel that carries the MetroList notice, the approved article is credited on the scene(s) that draw on it. The text
+  // is rebuilt here from the checked source, and only article-sourced middle scenes may carry it.
+  if (m.source_credit !== undefined) {
+    const sc0 = m.source_credit || {};
+    const want = sourcesLib.sourceLine(sc0.sources, "");
+    const nums = Array.isArray(sc0.scenes) ? sc0.scenes : [];
+    if (!noticeNeeded) err("source_credit", "source_credit", "A Reel with a source line does not take a separate article credit.");
+    else if (!want) err("source_credit", "source_credit", "An article credit needs a checked, dated article source.");
+    else if (sc0.text !== want) err("source_credit", "source_credit.text", "The article credit must be built from the checked source, not typed.");
+    if (!nums.length || !nums.every((n) => Number.isInteger(n) && scenes[n - 1] && scenes[n - 1].source_role === "article")) err("source_credit", "source_credit.scenes", "The article credit belongs only on scenes that draw on the article.");
+  }
   if (scenes.length < 3) err("scenes", "scenes", "A Reel needs at least three scenes.");
   const audio = m.audio || {};
   let prevEnd = 0;

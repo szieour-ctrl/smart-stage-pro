@@ -192,6 +192,7 @@ exports.handler = async (event) => {
         scenesStale: false,
         source: "edited", status: "ready", savedAt: new Date().toISOString(),
       };
+      am.attachNotice(project, narrative); // again, now that the scenes are in place: the notice bars (opening and closing) and the article credit follow the scenes, never the client
       const saved = await patch(project.id, userId, { narrative, status: "narrative_ready", gate_version: g.version, gate_result: gateSummary(g) });
       if (!saved) return reply(500, { error: "Could not save the script" });
       return reply(200, { project: forClient(saved), warnings: v.warnings, gate: gateSummary(g) });

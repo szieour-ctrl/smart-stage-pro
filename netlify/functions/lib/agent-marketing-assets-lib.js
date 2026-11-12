@@ -89,6 +89,19 @@ function disclosureKind(project) {
   return project && project.template === "local_market_insider" ? "market" : "default";
 }
 
+// Nov 12, 2026 (Sam): a Reel built from the subscriber's MetroList report AND an approved article keeps the MetroList notice on the opening and closing
+// bars and credits the article on the scene(s) that draw on it. The credit is built by code from the checked article source (never typed, never spoken,
+// never in the captions) and travels in the manifest for the renderer. A web-research Reel already carries its source_line and needs no credit.
+function sourceCreditFor(input, scenes) {
+  if (input.webTopic || !input.articleTopic) return null;
+  const articles = (Array.isArray(input.articleTopic.sources) ? input.articleTopic.sources : []).filter((x) => x && x.kind === "article");
+  const first = sourcesLib.usableSources(articles).slice(0, 1);
+  const text = sourcesLib.sourceLine(first, "");
+  const credited = (scenes || []).filter((s) => s.source_role === "article").map((s) => s.n);
+  if (!text || !credited.length) return null;
+  return { sources: first.map((x) => ({ title: x.title, url: x.url, published: x.published })), text, scenes: credited };
+}
+
 /**
  * buildManifest(input) → { manifest, edits, plan, validation }
  *   input: { cardCopy (optional, { [sceneIndex]: { headline, statement, support } } from the card copy writer), projectId, formats, narrative (approved), intake, reportFigures, notice:{period}, brand:{primary,secondary,border,font,agent,headshot_key},
@@ -132,6 +145,8 @@ function buildManifest(input) {
     audio: { narration_key: input.audio.narration_key, duration_sec: input.audio.duration_sec, ...(input.voiceShape ? { voice_shape: input.voiceShape } : {}) },
     captions, scenes,
   };
+  const credit = sourceCreditFor(input, scenes);
+  if (credit) manifest.source_credit = credit;
   if (scenes.some((sc) => Object.values((sc.visual || {}).image_provenance || {}).includes("ai"))) manifest.disclosure = { kind: input.disclosureKind || "default", text: manifestLib.AI_DISCLOSURES[input.disclosureKind] || manifestLib.AI_DISCLOSURES.default };
   const q = manifestLib.applySmallSampleQualifiers(manifest);
   manifest = q.manifest;

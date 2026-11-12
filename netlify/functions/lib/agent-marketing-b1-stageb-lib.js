@@ -111,7 +111,11 @@ function topicWithEvidence(project, record, env) {
   const t = project && project.selected_topic;
   if (!b1.enabled(env) || !t || typeof t !== "object" || !t.candidate) return t;
   const problems = checkRecord(record, project);
-  return b1.attachToTopic(t, problems.length ? blockedDoc(problems) : record.bundle);
+  const withBundle = b1.attachToTopic(t, problems.length ? blockedDoc(problems) : record.bundle);
+  // Nov 12, 2026: B1's stored summary of the author's central claim rides along as editorial context for the planner (read from the stored raw
+  // response; nothing is stored or fetched). Only with a record that passed the contract; never a verified quotation.
+  const central = !problems.length && record ? b1.centralArgumentOf(record.raw_response_text) : null;
+  return central ? { ...withBundle, b1CentralArgument: central } : withBundle;
 }
 
 module.exports = { topicKeyOf, APPROVED_B1, EXTRACTORS, FIXTURE_EXTRACTOR, extractorFor, KEY_FIELDS, cacheKey, approvedKey, checkRecord, topicWithEvidence, sha };

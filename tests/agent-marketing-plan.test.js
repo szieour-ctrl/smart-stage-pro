@@ -331,7 +331,7 @@ test("the research prompt asks for curiosity hooks with a different pattern each
   assert.doesNotMatch(p.input, /\d{3},\d{3}/, "no report figures are sent to the research provider");
 });
 
-test("a script outside the word range gets up to two rewrites; a closer, gate-clean rewrite is used, otherwise the first draft stands", async () => {
+test("a script outside the word range gets one rewrite; a closer, gate-clean rewrite is used, otherwise the first draft stands", async () => {
   const long = goodPlan(); long.scenes[1].narration_excerpt += " And that is only the start of what many owners are noticing across the whole area right now, which is why so many of them keep asking me the very same question about timing and price.";
   long.narration_with_audio_tags = `[conversational] ${long.scenes.map((s) => s.narration_excerpt).join(" ")}`;
   let seen = [];
@@ -341,8 +341,8 @@ test("a script outside the word range gets up to two rewrites; a closer, gate-cl
   assert.ok(a.narrative.wordCount <= 125);
   seen = [];
   const b = await planLib.generatePlan({ project, anthropicKey: "k", callFn: async (sys, user) => { seen.push(user); return JSON.stringify(long); } });
-  assert.strictEqual(seen.length, 3, "two rewrites, no more");
-  assert.ok(b.narrative.wordCount > 125);   // the rewrites were no closer, so the first draft stands (with the usual warning)
+  assert.strictEqual(seen.length, 2);
+  assert.ok(b.narrative.wordCount > 125);   // the rewrite was no closer, so the first draft stands (with the usual warning)
 });
 
 test("Editorial Image Director: shot plans differ scene to scene and Reel to Reel; the event Reel gets its own rhythm, sign-off, details and card labels", () => {

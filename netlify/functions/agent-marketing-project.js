@@ -230,6 +230,11 @@ exports.handler = async (event) => {
       return reply(409, { error: "This script was written for a different topic or different answers. Write a new script for the topic you chose, then approve it.", code: "script_stale" });
     }
     am.attachNotice(project, n); // scripts saved before the notice was kept still carry it
+    // Development only (Nov 12, Sam): a 60-second Reel's script is approved only within its word range's top. A draft that is still too long stays editable.
+    if (require("./lib/agent-marketing-b1-evidence-lib").enabled() && project.duration_sec === 60) {
+      const top = am.wordTargets(60)[1], words = am.countWords(n.narrationTagged);
+      if (words > top) return reply(409, { error: `This script is ${words} spoken words; a 60-second Reel is at most ${top}. Cut about ${words - top} words, then approve.`, code: "script_too_long" });
+    }
     // Development only: an Article-Led script is approved only while its topic's checked evidence is attached and valid.
     const gateProject = await withGateEvidence(project);
     const blockedWhy = evidenceBlocked(gateProject);

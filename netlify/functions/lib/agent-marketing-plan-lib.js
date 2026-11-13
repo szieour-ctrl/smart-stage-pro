@@ -422,6 +422,15 @@ function repairExcerpts(scenes, captionText, minScenes, warnings) {
   return out;
 }
 
+
+// Provisional shot lengths from each excerpt's share of the words, scaled to the chosen duration.
+function setProvisionalSeconds(scenes, dur) {
+  const wordsPer = scenes.map((s) => Math.max(1, am.countWords(s.narrationExcerpt)));
+  const raws = wordsPer.map((w) => Math.max(3, (w / WPM) * 60));
+  const scale = dur / raws.reduce((a, b) => a + b, 0);
+  scenes.forEach((s, i) => { s.provisionalSeconds = Math.round(raws[i] * scale * 10) / 10; });
+}
+
 /**
  * normalizePlan(raw, project) → { narrative, warnings } or throws Error(message) for an unusable plan.
  */
@@ -498,10 +507,7 @@ function normalizePlan(raw, project) {
 
   // Provisional shot lengths from each excerpt's share of the words, scaled to the chosen duration. The generated audio
   // sets the real timing later.
-  const wordsPer = scenes.map((s) => Math.max(1, am.countWords(s.narrationExcerpt)));
-  const raws = wordsPer.map((w) => Math.max(3, (w / WPM) * 60));
-  const scale = dur / raws.reduce((a, b) => a + b, 0);
-  scenes.forEach((s, i) => { s.provisionalSeconds = Math.round(raws[i] * scale * 10) / 10; });
+  setProvisionalSeconds(scenes, dur);
 
   const cta = str(raw.cta_suggestion, 80);
   const missing = (Array.isArray(raw.missing_agent_inputs) ? raw.missing_agent_inputs : []).map((x) => str(x, 200)).filter(Boolean).slice(0, 10);
@@ -551,6 +557,77 @@ function summarizeClaudeUsage(sink) {
   return { claude_calls: list.length, claude_input_tokens: list.reduce((a, u) => a + u.input_tokens, 0), claude_output_tokens: list.reduce((a, u) => a + u.output_tokens, 0), claude_model: list.length ? list[0].model : MODEL };
 }
 
+
+// ── Scene-by-scene length edit (Nov 12, 2026, Sam; development only, 60-second Reels) ─────────────────────────────────────────────────
+// A script over the top of its word range is edited IN CONTEXT, scene by scene: the editor sees every scene (role, purpose, message, words, text) and how
+// many words must go, and returns each scene's shortened narration. The continuous narration is rebuilt from those scenes, so scenes and narration stay
+// exactly in step. Scene count, order, roles, visuals, sources and the CTA are never touched. No new plan, no new storyboard.
+const LENGTH_EDIT_SYSTEM = [
+  "You are the editor of a finished 60-second first-person Realtor Reel script. Shorten it; do not rewrite it, re-plan it or change its argument.",
+  "You get every scene: its role, purpose, intended message, source role, current word count and narration. Return the narration of EVERY scene, in the same order, with the SAME scene indexes.",
+  "Each scene must say the same thing in fewer words: keep its specific message, its essential facts and figures exactly as written, its attribution when its source_role is \"article\", and its place in the Realtor's position.",
+  "Cut where the words earn the least: a point stated twice, an explanation of something already clear, a sentence that only restates the one before it, filler, hedging added for its own sake, connective padding. Do not cut equally: take more from a scene with more to spare and little or nothing from a scene that is already tight. Every scene keeps at least 8 spoken words.",
+  "Do not add any fact, number, claim, caveat, qualification or new sentence of substance. Do not merge, split, drop, reorder or add scenes. Keep the hook sentence word for word if it appears. Keep first person, contractions and a spoken, unhurried voice. Plain text only: no audio tags, no brackets.",
+  "Reply with JSON only: {\"scenes\":[{\"index\":0,\"narration\":\"...\"}, ...]}"
+].join("\n");
+
+function sentencesOf(text) { return String(text || "").split(/(?<=[.!?…])\s+/).filter(Boolean); }
+
+/** Put the narrator's audio tags back where they were: at the start of the same scene, or before the same sentence of it. */
+function retagScenes(tagged, scenes, newTexts) {
+  const parts = String(tagged || "").split(/(\[[A-Za-z ]+\])/);
+  const starts = []; let cum = 0;
+  scenes.forEach((sc) => { starts.push(cum); cum += am.countWords(sc.narrationExcerpt); });
+  const placed = newTexts.map(() => []);   // per scene: [{ tag, sentence }]
+  let words = 0;
+  for (const part of parts) {
+    if (/^\[[A-Za-z ]+\]$/.test(part)) {
+      let i = 0; for (let k = 0; k < starts.length; k++) if (words >= starts[k]) i = k;
+      let sentence = 0, seen = 0; const offset = words - starts[i];
+      if (offset > 0) { const ss = sentencesOf(scenes[i].narrationExcerpt); for (let k = 0; k < ss.length; k++) { if (offset >= seen) sentence = k; seen += am.countWords(ss[k]); } }
+      placed[i].push({ tag: part, sentence });
+    } else words += am.countWords(part);
+  }
+  return newTexts.map((text, i) => {
+    if (!placed[i].length) return text;
+    const ss = sentencesOf(text);
+    placed[i].forEach((t) => { const at = Math.min(t.sentence, Math.max(0, ss.length - 1)); ss[at] = `${t.tag} ${ss[at]}`; });
+    return ss.join(" ");
+  });
+}
+
+/**
+ * editLengthByScene({ project, narrative, call, key, sink, opts, max }) → { narrative } with the shortened script, or { narrative: null, reason } when the
+ * edit cannot be used (the caller then keeps the original draft). One model call.
+ */
+async function editLengthByScene({ project, narrative, call, anthropicKey, sink, opts, max }) {
+  const scenes = narrative.scenes || [];
+  const total = narrative.wordCount, target = Math.max(1, max - 4);
+  const payload = {
+    total_words: total, max_words: max, target_words: target, words_to_remove: total - target,
+    editorial_angle: narrative.editorialAngle || "", hook: narrative.hook || "",
+    scenes: scenes.map((sc, i) => ({ index: i, role: sc.role, purpose: sc.purpose || "", intended_message: (sc.director && sc.director.objective) || "", source_role: sc.sourceRole || "", words: am.countWords(sc.narrationExcerpt), narration: sc.narrationExcerpt })),
+  };
+  let raw;
+  try { raw = extractJsonObject(await call(LENGTH_EDIT_SYSTEM, JSON.stringify(payload), anthropicKey, sink, opts)); }
+  catch (e) { return { narrative: null, reason: `edit call failed: ${String(e && e.message).slice(0, 160)}` }; }
+  const out = Array.isArray(raw && raw.scenes) ? raw.scenes : null;
+  if (!out || out.length !== scenes.length) return { narrative: null, reason: "edit returned the wrong number of scenes" };
+  const byIndex = new Map(out.map((x) => [Number(x && x.index), String(x && x.narration || "").replace(/\[[A-Za-z ]+\]/g, " ").replace(/\s+/g, " ").trim()]));
+  const texts = scenes.map((_, i) => byIndex.get(i));
+  if (texts.some((t) => !t)) return { narrative: null, reason: "edit left a scene empty or out of order" };
+  const tagged = retagScenes(narrative.narrationTagged, scenes, texts).join(" ").replace(/\s+/g, " ").trim();
+  const candidate = {
+    ...narrative,
+    narrationTagged: tagged, captionText: am.stripAudioTags(tagged), wordCount: am.countWords(tagged),
+    scenes: scenes.map((sc, i) => ({ ...sc, narrationExcerpt: texts[i] })),
+  };
+  setProvisionalSeconds(candidate.scenes, project.duration_sec);
+  const g = gateNarrative(project, candidate);
+  if (!g.ok) return { narrative: null, reason: `edited script failed the content check: ${(g.blocks || []).slice(0, 2).map((b) => b.message).join("; ").slice(0, 200)}` };
+  return { narrative: candidate, gate: g };
+}
+
 /**
  * generatePlan({ project, anthropicKey, callFn }) → { narrative, warnings, gate }  (throws Error with a user-safe message)
  */
@@ -590,9 +667,24 @@ async function generatePlan({ project, anthropicKey, callFn }) {
   }
   // Oct 28, 2026 (Sam): a 45-second Reel ran 57 seconds (136 words for what should be about 118) and one scene got 3 seconds. The word range and the
   // scene balance are held to, not just warned about: one rewrite is asked for, and it is used only if it passes the gate and is closer to the target.
-  let fit = lengthProblems(narrative, project.duration_sec);
-  // Up to two rewrites, and a length problem that remains is tried again with what the last attempt missed (Nov 12, Sam: 60 seconds is a ceiling).
-  for (let round = 0; fit.length && round < 2; round++) {
+  const fit = lengthProblems(narrative, project.duration_sec);
+  const [, whi] = am.wordTargets(project.duration_sec);
+  if (b1.enabled() && project.duration_sec === 60 && narrative.wordCount > whi) {
+    // Development, 60-second Reel over the top of its range: ONE scene-by-scene editing pass (replaces the length rewrite; no extra call).
+    console.error("[agent-marketing-plan] over length:", fit.join("; "));
+    const ed = await editLengthByScene({ project, narrative, call, anthropicKey, sink, opts: { maxTokens: 3000 }, max: whi });
+    if (ed.narrative) {
+      if (ed.narrative.wordCount < narrative.wordCount) { narrative = ed.narrative; g = ed.gate; }
+      warnings = warnings.filter((w) => !/^The script is about \d+ spoken words/.test(w));
+    } else console.error("[agent-marketing-plan] length edit not used:", ed.reason);
+    if (narrative.wordCount > whi) {
+      const over = narrative.wordCount - whi;
+      narrative.lengthOver = { words: narrative.wordCount, max: whi, over };
+      warnings = warnings.filter((w) => !/^The script is about \d+ spoken words/.test(w));
+      warnings.unshift(`Too long for a 60-second Reel: ${narrative.wordCount} spoken words, maximum ${whi}. Cut about ${over} words (or try again) before approving. Your draft is kept so you can edit it.`);
+    }
+  } else if (fit.length) {
+    // Oct 28, 2026 (Sam): one rewrite is asked for, and it is used only if it passes the gate and is closer to the target.
     console.error("[agent-marketing-plan] length/balance outside the target:", fit.join("; "));
     try {
       const fix = `${user}\n\nYour draft does not fit the requested length: ${fit.join(" ")} Rewrite the complete JSON, keeping the same topic, hook, facts and tone. Keep every number you state exactly as the topic gives it, and drop the least important sentence or clause to get inside the limits.`;
@@ -601,8 +693,7 @@ async function generatePlan({ project, anthropicKey, callFn }) {
       if (g2.ok && lengthProblems(again.narrative, project.duration_sec).length <= fit.length && lengthDistance(again.narrative, project.duration_sec) < lengthDistance(narrative, project.duration_sec)) {
         narrative = again.narrative; warnings = again.warnings; g = g2;
       }
-    } catch (e) { console.error("[agent-marketing-plan] length rewrite skipped:", String(e && e.message).slice(0, 200)); break; }
-    fit = lengthProblems(narrative, project.duration_sec);
+    } catch (e) { console.error("[agent-marketing-plan] length rewrite skipped:", String(e && e.message).slice(0, 200)); }
   }
   // The gate has seen the planner's own words; now no sign of any kind survives into anything that reaches the image model (Sam, Oct 27).
   (narrative.scenes || []).forEach((sc) => {
@@ -669,5 +760,5 @@ function gateNarrative(project, narrative) {
 
 module.exports = { topicBrief, blockLines, sourceNameVariants, competingNameBlocks,
   MODEL, stripNotice, SCENE_RANGE, GPT_RANGE, NEW_IMAGE_SOURCES, VISUAL_SOURCES, SOURCE_MAX, MAX_ATTEMPTS, STALE_PLANNING_MS, ALLOWED_TAGS,
-  intakeHash, ctaAngleFor, ctaAngleIndex, CTA_ANGLES, VISUAL_LOOKS, visualLookFor, visualLookIndex, buildSystemPrompt, buildUserMessage, lengthProblems, lengthDistance, callClaudeText, summarizeClaudeUsage, extractJsonObject, sanitizeTags, normalizePlan, generatePlan,
+  intakeHash, ctaAngleFor, ctaAngleIndex, CTA_ANGLES, VISUAL_LOOKS, visualLookFor, visualLookIndex, buildSystemPrompt, buildUserMessage, lengthProblems, lengthDistance, callClaudeText, summarizeClaudeUsage, editLengthByScene, retagScenes, extractJsonObject, sanitizeTags, normalizePlan, generatePlan,
 };

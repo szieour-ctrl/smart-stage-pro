@@ -25,7 +25,7 @@ test("rules the corrections must not touch are pinned word for word: 2g, 2h, 2j,
   const pins = {
     "2g": "5b83c6e60e912f594395e2453badc7010357152ed29cc63ee1bd67c95e5c666d", "2h": "9f74dd63826e49b26b5c4329e1cc0442579dfc55ae78786e003b736dc9405ae2",
     "2j": "aaf6f1ea54c5720056c38d680839eea6bc8e974c932b97036ef7c76bbb4182b8", "2k": "5ac72dcd79ae60bf5a8a1403bee0490fb9de6b7dd0e8dbfafaf5e82e912884c2",
-    "2o": "94e674ff1baeb206af1ba0a78d149518a1d7170e31485be8f0948ad5622fe2a6", "2p": "d3f63971769d9513bab7bb19162f19ca8931fc2c9a68b3028c9232b12c83a67e",
+    "2o": "94e674ff1baeb206af1ba0a78d149518a1d7170e31485be8f0948ad5622fe2a6", "2p": "5ac912ad449e17fa119006604e03166b55f1a10b4b15eccde33baae4a6972408", // Nov 12: only the two "60-second" references were made duration-neutral
   };
   Object.entries(pins).forEach(([id, h]) => assert.strictEqual(sha(rule(DEV, id)), h, `rule ${id} changed`));
 });

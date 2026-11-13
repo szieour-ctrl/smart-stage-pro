@@ -148,7 +148,7 @@ const RULE_2N_B1 = "2n. CHOOSING AND READING STATISTICS. The figures in figures_
 
 // Nov 12, 2026 (product-owner directive, development only): the Realtor takes a position; confidence matches the evidence; no automatic caveats.
 const RULE_2O_B1 = "2o. TAKE A POSITION. Organize the Reel around the Realtor's professional conclusion, not around the limits of the supporting data: build it on one clear position, support it with the relevant figures, explain what it means for homeowners, and close with actionable guidance. Prioritize what the evidence reasonably supports, not an inventory of what it cannot prove. The standard is confident, evidence-grounded professional judgment, not statistical certainty. Match the strength of the conclusion to the strength of the evidence: when several market indicators reasonably support a position, state it directly, explain its significance and recommend action, without interrupting that progression. Tell an unsupported factual assertion (a number, event, date or outcome with no source), which is not allowed, from a professional interpretation reasonably grounded in several indicators, which is the Reel's value. Separate two kinds of limitation. A material limitation is one whose omission would make a specific factual statement or the Realtor's conclusion misleading: respect it, and put it in the narration. A nonmaterial limitation is any other gap in the evidence: it does not belong in the narration just because it exists. Do not replace professional interpretation with methodological commentary, and do not add statements about what the data cannot establish, prove or measure. Before including any methodological qualification, ask whether leaving it out would materially misrepresent the market evidence or the Realtor's conclusion; if not, leave it out. Where the evidence is limited or mixed, moderate the conclusion itself. Words such as \"may\" and \"could\" are right for a genuinely uncertain contributing factor, and are not to be added or stripped by habit. Rule 2h attribution and the exact figures stay as they are."
-const RULE_2P_B1 = "2p. EDITORIAL SYNTHESIS AND PRIORITIZATION FOR A 60-SECOND REEL. SYNTHESIZE BEFORE NARRATING. The spoken-word range defines the available narration space. Before writing the script, evaluate the research and market statistics collectively to identify the strongest evidence-supported Realtor position and the underlying market dynamics. Do not process research findings as a sequential list of facts to report. Identify the relationships between indicators, determine what they collectively reveal, and organize the narration around one cohesive market interpretation. EDITORIAL PRIORITIES. Build the Reel around one central Realtor position, the strongest supporting evidence, one meaningful homeowner implication, and a natural closing invitation. Select evidence by its contribution to the central argument, not by the number of statistics available. Related figures that establish one market condition may be combined into a single supporting observation. Several statistics may strengthen the same conclusion without requiring separate explanations. Include additional evidence only when it materially strengthens the position, establishes an important contrast, or prevents a misleading interpretation. Research is the foundation for professional judgment, not a narration checklist. The writer should understand the available evidence but communicate only what advances the story. SCENE-LEVEL NARRATIVE DEVELOPMENT. Each scene must advance the same central argument while preserving its distinct narrative purpose. A scene does not require its own statistic, separate market conclusion, or additional talking point. Scenes may develop context, establish evidence, explain market dynamics, communicate homeowner consequences, or deliver the closing invitation without introducing new information. The storyboard should function as connected narrative beats developing one argument, not independent observations. Avoid repeating the same interpretation in different language across scenes. Once an important conclusion has been established, subsequent scenes should advance its meaning rather than restate it. WORD-BUDGET DISCIPLINE. The requested spoken-word range is a governing editorial constraint, not a suggestion. For a 60-second Reel, prioritize a complete, compelling argument within the established spoken-word range. When deciding what belongs in the initial script, favor synthesis over explanation-heavy reporting. Eliminate secondary evidence, redundant interpretations, unnecessary transitions, and details that do not materially contribute to the central position. If the draft exceeds the word range, remove lower-priority supporting points before shortening sentences that carry the Realtor's position, essential evidence, or homeowner implication. PRESERVE EDITORIAL AUTHORITY. Professional interpretation should remain confident, specific, and grounded in the available evidence. Do not weaken a reasonable Realtor conclusion merely because it synthesizes multiple indicators or expresses a plausible explanation of market dynamics. Preserve Rule 2o's standards for professional judgment, the required article/report source roles, factual accuracy, source attribution, and the existing storyboard structure. The objective is a concise, persuasive Realtor interpretation of what the market evidence collectively means, not a narrated inventory of research findings.";
+const RULE_2P_B1 = "2p. EDITORIAL SYNTHESIS AND PRIORITIZATION. SYNTHESIZE BEFORE NARRATING. The spoken-word range defines the available narration space. Before writing the script, evaluate the research and market statistics collectively to identify the strongest evidence-supported Realtor position and the underlying market dynamics. Do not process research findings as a sequential list of facts to report. Identify the relationships between indicators, determine what they collectively reveal, and organize the narration around one cohesive market interpretation. EDITORIAL PRIORITIES. Build the Reel around one central Realtor position, the strongest supporting evidence, one meaningful homeowner implication, and a natural closing invitation. Select evidence by its contribution to the central argument, not by the number of statistics available. Related figures that establish one market condition may be combined into a single supporting observation. Several statistics may strengthen the same conclusion without requiring separate explanations. Include additional evidence only when it materially strengthens the position, establishes an important contrast, or prevents a misleading interpretation. Research is the foundation for professional judgment, not a narration checklist. The writer should understand the available evidence but communicate only what advances the story. SCENE-LEVEL NARRATIVE DEVELOPMENT. Each scene must advance the same central argument while preserving its distinct narrative purpose. A scene does not require its own statistic, separate market conclusion, or additional talking point. Scenes may develop context, establish evidence, explain market dynamics, communicate homeowner consequences, or deliver the closing invitation without introducing new information. The storyboard should function as connected narrative beats developing one argument, not independent observations. Avoid repeating the same interpretation in different language across scenes. Once an important conclusion has been established, subsequent scenes should advance its meaning rather than restate it. WORD-BUDGET DISCIPLINE. The requested spoken-word range is a governing editorial constraint, not a suggestion. Prioritize a complete, compelling argument within the established spoken-word range. When deciding what belongs in the initial script, favor synthesis over explanation-heavy reporting. Eliminate secondary evidence, redundant interpretations, unnecessary transitions, and details that do not materially contribute to the central position. If the draft exceeds the word range, remove lower-priority supporting points before shortening sentences that carry the Realtor's position, essential evidence, or homeowner implication. PRESERVE EDITORIAL AUTHORITY. Professional interpretation should remain confident, specific, and grounded in the available evidence. Do not weaken a reasonable Realtor conclusion merely because it synthesizes multiple indicators or expresses a plausible explanation of market dynamics. Preserve Rule 2o's standards for professional judgment, the required article/report source roles, factual accuracy, source attribution, and the existing storyboard structure. The objective is a concise, persuasive Realtor interpretation of what the market evidence collectively means, not a narrated inventory of research findings.";
 const RULE_2Q_B1 = "2q. ONE GOVERNING EDITORIAL PREMISE AND QUESTION-LED HOOK. ONE PREMISE, ONE COHESIVE STORY. Before composing the hook or narration, synthesize the available research and market evidence into one governing editorial premise. Write that premise in `editorial_angle` as one or two sentences establishing the Realtor's central market interpretation and why it matters to the homeowner. The `editorial_angle` governs the complete Reel. The hook, Realtor interpretation, homeowner implication, scene purposes, and closing invitation must develop that same premise. QUESTION-LED HOOK. The hook must take the form of a compelling, specific question grounded in the governing editorial premise. It should create genuine curiosity by raising a meaningful market uncertainty, challenging a common assumption, or questioning whether an important change has occurred. Do not answer the question in the hook. Within the first few sentences after the hook the narration begins developing the Realtor's answer; each later beat deepens, substantiates, or clarifies that interpretation, and the complete answer emerges through the supporting evidence and professional reasoning, ending in a clear, evidence-supported Realtor conclusion that confirms, challenges, or disproves the premise. Do not follow the hook with a complete answer, which would remove the reason to keep watching, and do not hold the interpretation back for a final scene. The hook must be the first spoken sentence of `narration_with_audio_tags`, word for word, and the `hook` field must repeat it exactly. Do not generate a separate headline the narration does not speak. EVIDENCE AND PROGRESSIVE ANSWER. Develop the story around the question rather than narrating research sequentially. Select and combine the evidence that most effectively establishes the answer. The Realtor must articulate the conclusion clearly, rather than leaving viewers to interpret the figures themselves. The homeowner implication must explain why the conclusion matters to the viewer's decisions, expectations, or strategy. SCENE COHESION. Each scene advances the same question toward its answer and homeowner consequence. A scene does not require a separate fact, statistic, or conclusion. Avoid repeating evidence or delaying the answer merely to create suspense. Preserve the required article/report source roles, attribution, factual accuracy, Rule 2o's professional judgment, Rule 2p's editorial synthesis, and the existing storyboard structure. The scene editor must preserve the opening question, the Realtor's answer, and the homeowner implication while removing redundant language and secondary evidence. The objective is a Reel that creates curiosity, earns attention through evidence, and rewards the viewer with a clear professional conclusion: curiosity sustained by professional interpretation, not a question followed by a statistics lecture or an immediate answer.";
 // Nov 9, 2026 (development only): the shared Trend Intelligence handoff. Option 1 is trend-driven Realtor commentary; Option 2 is an article-driven story strengthened by market interpretation.
 const RULE_2L_B1 = "2l. MARKET INTERPRETATION. If editorial_direction has market_interpretation, it is an analysis of how the figures in the agent's own report relate to each other: its relationships each list the report's own figures as evidence, its readings are plausible professional interpretations, and its caveats are honored where they are material under rule 2o and are otherwise not narrated. When editorial_direction.kind is \"trend_commentary\" there is no article: the Reel is the agent's own commentary on those relationships. Open on the relationship itself (two figures that move together or pull apart), state each figure exactly as figures_you_may_state gives it, and let the agent's reading carry the meaning, so every scene is source_role \"data\". When kind is \"article_story_with_market_interpretation\": the article's findings and the subscriber's report figures are complementary evidence supporting one Realtor interpretation. Use each source's evidence in scenes authorized for that source, with the required attribution. Connect their meaning across scenes so the narration develops one cohesive argument rather than separate article and report summaries. The Realtor's interpretation should develop throughout the Reel, not be reserved for a final conclusion scene. Do not name the article's publisher, brokerage, team, agent or website anywhere in the narration, captions or scene copy. Readings are the agent's interpretation, not established fact or forecast: state them with the confidence the supporting figures earn (rule 2o). Do not turn a reading into a number, and never present an article figure as the agent's own market data.";
@@ -609,18 +609,23 @@ function summarizeClaudeUsage(sink) {
 }
 
 
-// ── Scene-by-scene length edit (Nov 12, 2026, Sam; development only, 60-second Reels) ─────────────────────────────────────────────────
+const EDITOR_DURATIONS = [45, 60]; // Nov 12, 2026 (Sam): the scene-by-scene editor serves 45- and 60-second Reels; 30 seconds is unchanged
+// ── Scene-by-scene length edit (Nov 12, 2026, Sam; development only, 45- and 60-second Reels) ─────────────────────────────────────────────────
 // A script over the top of its word range is edited IN CONTEXT, scene by scene: the editor sees every scene (role, purpose, message, words, text) and how
 // many words must go, and returns each scene's shortened narration. The continuous narration is rebuilt from those scenes, so scenes and narration stay
 // exactly in step. Scene count, order, roles, visuals, sources and the CTA are never touched. No new plan, no new storyboard.
-const LENGTH_EDIT_SYSTEM = [
-  "You are the editor of a finished 60-second first-person Realtor Reel script. Shorten it; do not re-plan it or change its argument.",
+function lengthEditSystem(seconds, withRange) {
+  return [
+  "You are the editor of a finished " + seconds + "-second first-person Realtor Reel script. Shorten it; do not re-plan it or change its argument.",
   "You get every scene: its role, purpose, intended message, source role, current word count and narration. Read the WHOLE script first, as one argument, then return the narration of EVERY scene, in the same order, with the SAME scene indexes.",
   "Edit each scene in the context of the whole. Keep each scene's specific job (its intended message), its essential facts and figures exactly as written, its attribution when its source_role is \"article\", and its place in the Realtor's position. But do not keep wording just because it sits in a different scene: once an earlier scene has established a conclusion or interpretation, a later scene should add its evidence or what it means for the homeowner, not say the conclusion again in new words. Where two scenes say the same thing, keep it where it does the most work and cut the repeat down to what is new.",
   "Cut first: an interpretation already stated, an explanation of something already clear, a sentence that only restates the one before it or an earlier scene, secondary explanation, connective padding, filler, hedging added for its own sake. Do not cut equally: take more from a scene with more to spare and little or nothing from a scene that is already tight. Every scene keeps at least 8 spoken words.",
   "Do not add any fact, number, claim, caveat, qualification or new sentence of substance. Do not merge, split, drop, reorder or add scenes. Keep the hook sentence (the opening question) word for word, and keep the Realtor's answer to it (editorial_angle) and the homeowner implication; cut redundant language and secondary evidence first. Keep first person, contractions and a spoken, unhurried voice. Plain text only: no audio tags, no brackets.",
+  ...(withRange ? ["The recommended range for this Reel is in recommended_words. It is guidance, not a floor: cut toward target_words and stop once the script is inside the range; never add words, filler or new content to reach the lower end."] : []),
   "Reply with JSON only: {\"scenes\":[{\"index\":0,\"narration\":\"...\"}, ...]}"
-].join("\n");
+  ].join("\n");
+}
+const LENGTH_EDIT_SYSTEM = lengthEditSystem(60, false);
 
 function sentencesOf(text) { return String(text || "").split(/(?<=[.!?…])\s+/).filter(Boolean); }
 
@@ -651,16 +656,18 @@ function retagScenes(tagged, scenes, newTexts) {
  * editLengthByScene({ project, narrative, call, key, sink, opts, max }) → { narrative } with the shortened script, or { narrative: null, reason } when the
  * edit cannot be used (the caller then keeps the original draft). One model call.
  */
-async function editLengthByScene({ project, narrative, call, anthropicKey, sink, opts, max }) {
+async function editLengthByScene({ project, narrative, call, anthropicKey, sink, opts, max, range }) {
   const scenes = narrative.scenes || [];
   const total = narrative.wordCount, target = Math.max(1, max - 4);
+  const seconds = (project && project.duration_sec) || 60;
   const payload = {
     total_words: total, max_words: max, target_words: target, words_to_remove: total - target,
+    ...(seconds !== 60 && Array.isArray(range) ? { recommended_words: range } : {}),
     editorial_angle: narrative.editorialAngle || "", hook: narrative.hook || "",
     scenes: scenes.map((sc, i) => ({ index: i, role: sc.role, purpose: sc.purpose || "", intended_message: (sc.director && sc.director.objective) || "", source_role: sc.sourceRole || "", words: am.countWords(sc.narrationExcerpt), narration: sc.narrationExcerpt })),
   };
   let raw;
-  try { raw = extractJsonObject(await call(LENGTH_EDIT_SYSTEM, JSON.stringify(payload), anthropicKey, sink, opts)); }
+  try { raw = extractJsonObject(await call(seconds === 60 ? LENGTH_EDIT_SYSTEM : lengthEditSystem(seconds, true), JSON.stringify(payload), anthropicKey, sink, opts)); }
   catch (e) { return { narrative: null, reason: `edit call failed: ${String(e && e.message).slice(0, 160)}` }; }
   const out = Array.isArray(raw && raw.scenes) ? raw.scenes : null;
   if (!out || out.length !== scenes.length) return { narrative: null, reason: "edit returned the wrong number of scenes", returned: { sceneCount: Array.isArray(out) ? out.length : null } };
@@ -730,10 +737,10 @@ async function generatePlan({ project, anthropicKey, callFn }) {
   // scene balance are held to, not just warned about: one rewrite is asked for, and it is used only if it passes the gate and is closer to the target.
   const fit = lengthProblems(narrative, project.duration_sec);
   const [, whi] = am.wordTargets(project.duration_sec);
-  if (b1.enabled() && project.duration_sec === 60 && narrative.wordCount > whi) {
-    // Development, 60-second Reel over the top of its range: ONE scene-by-scene editing pass (replaces the length rewrite; no extra call).
+  if (b1.enabled() && EDITOR_DURATIONS.includes(project.duration_sec) && narrative.wordCount > whi) {
+    // Development, 45- or 60-second Reel over the top of its range: ONE scene-by-scene editing pass (replaces the length rewrite; no extra call).
     console.error("[agent-marketing-plan] over length:", fit.join("; "));
-    const ed = await editLengthByScene({ project, narrative, call, anthropicKey, sink, opts: { maxTokens: 3000 }, max: whi });
+    const ed = await editLengthByScene({ project, narrative, call, anthropicKey, sink, opts: { maxTokens: 3000 }, max: whi, range: am.wordTargets(project.duration_sec) });
     let outcome, reason = null;
     if (ed.narrative) {
       if (ed.narrative.wordCount < narrative.wordCount) { narrative = ed.narrative; g = ed.gate; outcome = "accepted"; }
@@ -747,7 +754,7 @@ async function generatePlan({ project, anthropicKey, callFn }) {
       narrative.lengthOver = { words: narrative.wordCount, max: whi, over };
       warnings = warnings.filter((w) => !/^The script is about \d+ spoken words/.test(w));
       // Nov 12, 2026 (Sam): a nonblocking advisory. The subscriber may edit the script or approve it as written.
-      warnings.unshift(`${narrative.wordCount} spoken words. The recommended range for a 60-second Reel is ${am.wordTargets(60)[0]}–${whi} words. Actual narration duration depends on delivery. You may edit the script or approve it as written.`);
+      warnings.unshift(`${narrative.wordCount} spoken words. The recommended range for a ${project.duration_sec}-second Reel is ${am.wordTargets(project.duration_sec)[0]}–${whi} words. Actual narration duration depends on delivery. You may edit the script or approve it as written.`);
     }
   } else if (fit.length) {
     // Oct 28, 2026 (Sam): one rewrite is asked for, and it is used only if it passes the gate and is closer to the target.
@@ -762,7 +769,7 @@ async function generatePlan({ project, anthropicKey, callFn }) {
     } catch (e) { console.error("[agent-marketing-plan] length rewrite skipped:", String(e && e.message).slice(0, 200)); }
   }
   if (diag) {
-    if (!diag.edit.ran && fit.length) diag.edit = { ran: false, outcome: "not_applicable", reason: "not over the top of the word range (or not a 60-second Reel); the original single length rewrite handled: " + fit.join(" ").slice(0, 160) };
+    if (!diag.edit.ran && fit.length) diag.edit = { ran: false, outcome: "not_applicable", reason: "not over the top of the word range (or not a 45- or 60-second Reel); the original single length rewrite handled: " + fit.join(" ").slice(0, 160) };
     diag.final = { words: narrative.wordCount, sceneSum: sceneWords(narrative).reduce((a, b) => a + b, 0), scenes: sceneWords(narrative), overLimit: !!narrative.lengthOver };
     narrative.lengthDiagnostics = diag;
   }
@@ -815,6 +822,49 @@ function competingNameBlocks(project, narrative) {
 
 // Attach the required notice by code, then hold the draft to the strict "Claude wrote it" rules. Visual briefs and image prompts are checked
 // only for property-sale content (they legitimately contain things like "9:16").
+// Nov 12, 2026 (Sam): rule 2g in code, Test only. A scene labeled "article" must not present figures that exist only in the subscriber's report, and a scene
+// labeled "data" must not present figures that exist only in the article. Conservative: only market-sized numbers count (no years, no single digits without
+// a percent sign); a number that is in both sources, or that could be either after rounding, is never flagged; topics with area_context or without a report
+// or without article numbers are skipped. A violation is a content block, so it goes through the existing correction (one rewrite) and roles are never altered.
+function roleNumbers(text) {
+  const out = [], t = String(text == null ? "" : text).replace(/\([^)]*\)/g, " ");
+  const re = /\$?\d[\d,]*(?:\.\d+)?/g; let m;
+  while ((m = re.exec(t))) {
+    const raw = m[0].replace(/[$,]/g, ""), n = Number(raw), dec = (raw.split(".")[1] || "").length;
+    if (!Number.isFinite(n) || /^(?:19|20)\d\d$/.test(raw)) continue;
+    if (dec === 0 && n < 10 && !/^\s?%/.test(t.slice(m.index + m[0].length, m.index + m[0].length + 2))) continue;
+    out.push({ n, dec, raw });
+  }
+  return out;
+}
+const sameFigure = (tok, ref) => tok.n === ref.n || (tok.dec < ref.dec && Number(ref.n.toFixed(tok.dec)) === tok.n);
+function sourceRoleBlocks(project, narrative) {
+  const t = project && project.selected_topic;
+  if (!b1.enabled() || !t || typeof t !== "object") return [];
+  if ((Array.isArray(t.areaContext) && t.areaContext.length) || (Array.isArray(t.answeredBy) && t.answeredBy.length)) return [];
+  const rf = Array.isArray(t.reportFigures) ? t.reportFigures.filter((f) => f && typeof f.text === "string") : [];
+  const view = b1.viewForTopic(t);
+  const articleText = [t.question, ...(Array.isArray(t.trendSignals) ? t.trendSignals : []), ...(view ? b1.verifiedQuotes(view) : [])].filter((x) => typeof x === "string");
+  const report = rf.map((f) => f.text).concat((Array.isArray(t.reportPrecedence) ? t.reportPrecedence : []).map((p) => p && p.reportText).filter(Boolean)).flatMap(roleNumbers);
+  const article = articleText.flatMap(roleNumbers);
+  if (!report.length || !article.length) return [];
+  const out = [];
+  (narrative.scenes || []).forEach((sc, i) => {
+    if (sc.sourceRole !== "article" && sc.sourceRole !== "data") return;
+    const bad = [];
+    roleNumbers(sc.narrationExcerpt).forEach((tok) => {
+      const inReport = report.some((r) => sameFigure(tok, r)), inArticle = article.some((a) => sameFigure(tok, a));
+      if (sc.sourceRole === "article" && inReport && !inArticle) bad.push(tok.raw);
+      if (sc.sourceRole === "data" && inArticle && !inReport) bad.push(tok.raw);
+    });
+    if (bad.length) out.push({ rule: "source_role_numbers", field: `sceneText[${i}]`, match: bad.join(", "),
+      message: sc.sourceRole === "article"
+        ? `This scene is labeled source_role "article" but states ${bad.join(", ")}, which come only from the subscriber's report. A scene states figures from its own source role only (rule 2g): keep those figures in a scene labeled "data", and let an "article" scene carry only what the article reports.`
+        : `This scene is labeled source_role "data" but states ${bad.join(", ")}, which come only from the article. A scene states figures from its own source role only (rule 2g): keep those figures in a scene labeled "article", with the article attributed.` });
+  });
+  return out;
+}
+
 function gateNarrative(project, narrative) {
   am.attachNotice(project, narrative);
   const visualText = {};
@@ -825,11 +875,11 @@ function gateNarrative(project, narrative) {
     if (sc.photoRequest) visualText[`photoRequest[${i}]`] = [sc.photoRequest.bestImage, sc.photoRequest.shouldContain].join(" ");
   });
   const g = gate.evaluate({ ...am.gateInputFor(project, narrative, "claude"), userText: visualText });
-  const names = competingNameBlocks(project, narrative);
-  return names.length ? { ...g, ok: false, blocks: (g.blocks || []).concat(names) } : g;
+  const extra = competingNameBlocks(project, narrative).concat(sourceRoleBlocks(project, narrative));
+  return extra.length ? { ...g, ok: false, blocks: (g.blocks || []).concat(extra) } : g;
 }
 
 module.exports = { topicBrief, blockLines, sourceNameVariants, competingNameBlocks,
   MODEL, stripNotice, SCENE_RANGE, GPT_RANGE, NEW_IMAGE_SOURCES, VISUAL_SOURCES, SOURCE_MAX, MAX_ATTEMPTS, STALE_PLANNING_MS, ALLOWED_TAGS,
-  intakeHash, ctaAngleFor, ctaAngleIndex, CTA_ANGLES, VISUAL_LOOKS, visualLookFor, visualLookIndex, buildSystemPrompt, buildUserMessage, lengthProblems, lengthDistance, callClaudeText, summarizeClaudeUsage, editLengthByScene, retagScenes, alignHook, extractJsonObject, sanitizeTags, normalizePlan, generatePlan,
+  intakeHash, ctaAngleFor, ctaAngleIndex, CTA_ANGLES, VISUAL_LOOKS, visualLookFor, visualLookIndex, buildSystemPrompt, buildUserMessage, lengthProblems, lengthDistance, callClaudeText, summarizeClaudeUsage, editLengthByScene, sourceRoleBlocks, lengthEditSystem, retagScenes, alignHook, extractJsonObject, sanitizeTags, normalizePlan, generatePlan,
 };

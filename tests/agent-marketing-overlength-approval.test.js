@@ -41,12 +41,12 @@ const intake = { angle: "neighborhood", market: "Roseville, CA", audience: "Home
 const base = "[conversational] Is new construction helping or hurting your resale home? [thoughtful] Nearby new communities can bring more interested buyers, but also more competition. [emphasis] Builders may offer incentives or rate buydowns that change the comparison.";
 const EXTRA = [" Buyers compare your home with the ones down the street, and they notice the small things first.", " Walk the neighborhood the way a buyer would, and be honest about what you see on the way in.", " A well prepared home still earns attention, even when a new community opens nearby and draws the crowds.", " I would rather you hear that from me now than from a buyer later, so ask me what I see in your area."];
 const pad = (n) => { let t = base, i = 0; while (am.countWords(t) < n) t += EXTRA[i++ % EXTRA.length]; return t; };
-async function approveWith(words) {
+async function approveWith(words, dur = 60) {
   process.env.AGENT_MARKETING_ENABLED = "true";
   process.env.AGENT_MARKETING_B1_EVIDENCE = "dev";
   try {
     const id = (await call("POST", { action: "create" })).json.project.id;
-    rows.find((r) => r.id === id).duration_sec = 60;
+    rows.find((r) => r.id === id).duration_sec = dur;
     await call("POST", { action: "save_intake", id, intake });
     const text = pad(words);
     const sv = await call("POST", { action: "save_narrative", id, narrative: { narrationTagged: text, cta: { text: "Understand your home's competition.", source: "user_edited" } } });
@@ -80,3 +80,14 @@ test("content checks stay active on an overlength script: the compliance gate st
     assert.ok(!/script_too_long/.test(JSON.stringify(a.json)));
   } finally { delete process.env.AGENT_MARKETING_B1_EVIDENCE; }
 });
+
+for (const target of [148, 171]) {
+  test(`a ${target}-word 45-second Test script can be approved too: the word count only advises (recommended 105–125)`, async () => {
+    const { n, a, saveWarnings } = await approveWith(target, 45);
+    assert.ok(n > 125, "fixture is over the 45-second range: " + n);
+    assert.strictEqual(a.status, 200, JSON.stringify(a.json).slice(0, 300));
+    assert.strictEqual(a.json.project.status, "narrative_approved");
+    assert.ok(!/script_too_long/.test(JSON.stringify(a.json)));
+    assert.ok(saveWarnings.some((w) => new RegExp("About " + n + " spoken words").test(w)), "the word count is still shown as a warning");
+  });
+}

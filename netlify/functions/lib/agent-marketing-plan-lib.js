@@ -647,11 +647,12 @@ const EDITOR_DURATIONS = [45, 60]; // Nov 12, 2026 (Sam): the scene-by-scene edi
 function lengthEditSystem(seconds, withRange) {
   return [
   "You are the editor of a finished " + seconds + "-second first-person Realtor Reel script. Shorten it; do not re-plan it or change its argument.",
-  "You get every scene: its role, purpose, intended message, source role, current word count and narration. Read the WHOLE script first, as one argument, then return the narration of EVERY scene, in the same order, with the SAME scene indexes.",
-  "Edit each scene in the context of the whole. Keep each scene's specific job (its intended message), its essential facts and figures exactly as written, its attribution when its source_role is \"article\", and its place in the Realtor's position. But do not keep wording just because it sits in a different scene: once an earlier scene has established a conclusion or interpretation, a later scene should add its evidence or what it means for the homeowner, not say the conclusion again in new words. Where two scenes say the same thing, keep it where it does the most work and cut the repeat down to what is new.",
-  "Cut first: an interpretation already stated, an explanation of something already clear, a sentence that only restates the one before it or an earlier scene, secondary explanation, connective padding, filler, hedging added for its own sake. Do not cut equally: take more from a scene with more to spare and little or nothing from a scene that is already tight. Every scene keeps at least 8 spoken words.",
-  "Do not add any fact, number, claim, caveat, qualification or new sentence of substance. Do not merge, split, drop, reorder or add scenes. Keep the hook sentence (the opening question) word for word, and keep the Realtor's answer to it (editorial_angle) and the homeowner implication; cut redundant language and secondary evidence first. Keep first person, contractions and a spoken, unhurried voice. Plain text only: no audio tags, no brackets.",
-  ...(withRange ? ["The recommended range for this Reel is in recommended_words. It is guidance, not a floor: cut toward target_words and stop once the script is inside the range; never add words, filler or new content to reach the lower end."] : []),
+  "You get every scene: its role, purpose, intended message, source role, current word count and narration, plus the editorial_angle, the hook and the cta_angle. Read the WHOLE script first, as one argument, then return the narration of EVERY scene, in the same order, with the SAME scene indexes.",
+  "The Realtor's argument decides what is essential, not the scene a sentence sits in. Essential: the editorial_angle (the Realtor's answer to the hook), the decisive evidence that supports it together with its attribution (the article is named whenever its facts are used), the specific consequence for the homeowner, and the closing invitation. Everything else is secondary. Secondary statistics, comparisons and supporting sentences may be removed entirely, even when a scene's purpose mentions them: a purpose says what a scene was for, it does not oblige you to keep every fact it carries. Any figure you keep must keep its correct value, period, measure, qualifier and attribution; do not keep a number while dropping what makes it accurate. On repetition: once an earlier scene has established a conclusion, a later scene should add its evidence or what it means for the homeowner, not say the conclusion again in new words. Where two scenes say the same thing, keep it where it does the most work and cut the repeat down to what is new.",
+  "Protect, word for word where it is a sentence: the question-led hook; the Realtor's interpretation; the decisive evidence and its attribution; the specific homeowner consequence; and a genuine closing invitation. The last scene must still invite the viewer to engage with the Realtor (cta_angle says how), not merely end on an observation.",
+  "words_to_remove and target_words are your objective: work toward target_words and do not stop after a small reduction. When substantial compression is needed, remove whole secondary statements, statistics or sentences in preference to trimming a few words from every sentence. Cut first: an interpretation already stated, an explanation of something already clear, a sentence that only restates the one before it or an earlier scene, a secondary statistic or comparison, connective padding, filler, hedging added for its own sake. Do not cut equally: take more from a scene with more to spare, and little or nothing from a scene that already holds only essential content. Every scene keeps at least 8 spoken words.",
+  "Do not add any fact, number, claim, caveat, qualification or new sentence of substance. Do not merge, split, drop, reorder or add scenes. Keep first person, contractions and a spoken, unhurried voice. Plain text only: no audio tags, no brackets.",
+  ...(withRange ? ["The recommended range for this Reel is in recommended_words. It is guidance, not a floor, and a script above it is never blocked: still work toward target_words, and never add words, filler or new content to reach the lower end."] : []),
   "Reply with JSON only: {\"scenes\":[{\"index\":0,\"narration\":\"...\"}, ...]}"
   ].join("\n");
 }
@@ -693,7 +694,7 @@ async function editLengthByScene({ project, narrative, call, anthropicKey, sink,
   const payload = {
     total_words: total, max_words: max, target_words: target, words_to_remove: total - target,
     ...(Array.isArray(range) ? { recommended_words: range } : {}),
-    editorial_angle: narrative.editorialAngle || "", hook: narrative.hook || "",
+    editorial_angle: narrative.editorialAngle || "", hook: narrative.hook || "", cta_angle: peopleEvent(project) ? eventCta(project) : ctaAngleFor(project),
     scenes: scenes.map((sc, i) => ({ index: i, role: sc.role, purpose: sc.purpose || "", intended_message: (sc.director && sc.director.objective) || "", source_role: sc.sourceRole || "", words: am.countWords(sc.narrationExcerpt), narration: sc.narrationExcerpt })),
   };
   let raw;
@@ -739,7 +740,7 @@ function anchoredRewriteMessage({ user, narrative, blocks, problems, duration, r
     : `Your draft does not fit the requested length or scene balance:\n${(problems || []).map((p) => `- ${p}`).join("\n")}`;
   const tail = gate
     ? `Rewrite the complete JSON. Correct the violations listed above and keep the existing story, hook, scenes and wording wherever possible. Do not make the narration longer than this draft: where a correction needs words, make room by cutting lower-priority supporting detail${aim ? ", and bring the script toward the writing aim" : ""}. A shorter script never overrides factual accuracy, source attribution, or any other mandatory requirement. Take every number from the topic or the agent's report.`
-    : `Rewrite the complete JSON. Correct only the problems listed above and keep the existing story, hook, scenes and wording wherever possible. Do not add words to reach the lower end of the range: a complete script shorter than the range is acceptable. A shorter script never overrides factual accuracy, source attribution, or any other mandatory requirement. Keep every number you state exactly as the topic gives it.`;
+    : `Rewrite the complete JSON. Correct the problems listed above and keep the existing story, hook, scenes and wording wherever possible. When the draft is too long, remove secondary content: secondary statistics, comparisons and supporting sentences may go entirely, and removing a whole secondary statement is better than trimming a few words from every sentence. The Realtor's argument decides what is essential, so keep the question-led hook, the Realtor's interpretation, the decisive evidence with its attribution, the specific homeowner consequence, and a closing that is a genuine invitation to engage with the Realtor, not merely a concluding observation. Any figure you keep must keep its correct value, period, measure, qualifier and attribution. Do not add words to reach the lower end of the range: a complete script shorter than the range is acceptable. A shorter script never overrides factual accuracy, source attribution, or any other mandatory requirement. Keep every number you state exactly as the topic gives it.`;
   return `${user}\n\n${head}\n\n`
     + `Your ${gate ? "rejected " : ""}draft, for a ${duration}-second Reel (recommended range ${range[0]}-${range[1]} spoken words${aimPart}), is ${narrative.wordCount} spoken words:\n${JSON.stringify(draft)}\n\n`
     + tail;
@@ -829,11 +830,24 @@ async function generatePlan({ project, anthropicKey, callFn }) {
       if (diag) (diag.revisions = diag.revisions || []).push({ path: "scene_balance_rewrite", anchored: b1.enabled(), draftWords: narrative.wordCount, problems: fit.length });
       const again = normalizePlan(extractJsonObject(await call(buildSystemPrompt(undefined, { scoped: hasReportScope(project) }), fix, anthropicKey, sink, planOpts)), project);
       const g2 = gateNarrative(project, again.narrative);
-      if (g2.ok && lengthProblems(again.narrative, project.duration_sec).length <= fit.length && lengthDistance(again.narrative, project.duration_sec) < lengthDistance(narrative, project.duration_sec)) {
+      const problems2 = lengthProblems(again.narrative, project.duration_sec), distBefore = lengthDistance(narrative, project.duration_sec), distAfter = lengthDistance(again.narrative, project.duration_sec);
+      const fewerOrEqual = problems2.length <= fit.length, closer = distAfter < distBefore; // the same three conditions as before, named only so a rejection can say which failed
+      if (g2.ok && fewerOrEqual && closer) {
         narrative = again.narrative; warnings = again.warnings; g = g2;
         if (diag && diag.revisions) diag.revisions[diag.revisions.length - 1].accepted = true;
+      } else if (diag && diag.revisions) {
+        // Test only (Nov 13, Sam): why the revision was not used. Short reasons and counts; no script text, no research.
+        const rej = { reasons: [] };
+        if (!g2.ok) { rej.reasons.push("content_gate"); rej.gateBlocks = (g2.blocks || []).slice(0, 3).map((b) => ({ rule: String(b.rule || "").slice(0, 60), field: String(b.field || "").slice(0, 40), message: String(b.message || "").slice(0, 120) })); }
+        if (!fewerOrEqual) { rej.reasons.push("more_problems"); rej.problemsBefore = fit.length; rej.problemsAfter = problems2.length; rej.problemsAfterList = problems2.slice(0, 4).map((x) => String(x).slice(0, 120)); }
+        if (!closer) { rej.reasons.push("no_score_improvement"); rej.distanceBefore = distBefore; rej.distanceAfter = distAfter; }
+        rej.wordsBefore = narrative.wordCount; rej.wordsAfter = again.narrative.wordCount;
+        Object.assign(diag.revisions[diag.revisions.length - 1], { accepted: false, rejected: rej });
       }
-    } catch (e) { console.error("[agent-marketing-plan] length rewrite skipped:", String(e && e.message).slice(0, 200)); }
+    } catch (e) {
+      console.error("[agent-marketing-plan] length rewrite skipped:", String(e && e.message).slice(0, 200));
+      if (diag && diag.revisions && diag.revisions.length) Object.assign(diag.revisions[diag.revisions.length - 1], { accepted: false, rejected: { reasons: ["normalization_or_parse_failure"], detail: String(e && e.message).slice(0, 160) } });
+    }
   }
   if (diag) {
     if (!diag.edit.ran && fit.length) diag.edit = { ran: false, outcome: "not_applicable", reason: "not over the top of the word range (or not a 45- or 60-second Reel); the original single length rewrite handled: " + fit.join(" ").slice(0, 160) };

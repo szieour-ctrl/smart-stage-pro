@@ -169,7 +169,7 @@ test("trend: the prompt asks for every observation that materially bears on the 
 });
 
 // ── 6. the planner distinguishes what a measure shows from unsupported interpretation ──────────────────────────────────────────────────────────
-test("planner statistics: the developer prompt chooses figures for the narrative, says what List Price Received does not show, and qualifies explanations", () => {
+test("planner statistics: the developer prompt chooses figures for the narrative, says what List Price Received does not show, and words explanations by the evidence", () => {
   const p = planLib.buildSystemPrompt(DEV, {});
   const rule = p.split("\n").find((l) => l.startsWith("2n. "));
   assert.ok(rule, "rule 2n is present");
@@ -179,7 +179,7 @@ test("planner statistics: the developer prompt chooses figures for the narrative
   assert.match(rule, /how the home was first priced, whether the seller reduced the price, how quickly it sold, or whether buyer demand is rising or falling/);
   assert.match(rule, /read them together and state what they show, including a figure that cuts against the story/);
   assert.match(rule, /what the report or article states \(a fact, attributed\), your reading of it \(the agent's interpretation/);
-  assert.match(rule, /qualified \("may", "could", "one reason might be"\) and never presented as the proven cause of a specific figure/);
+  assert.match(rule, /any explanation, worded with the confidence the evidence earns \(rule 2o\); do not invent a cause for a single figure/);
   assert.doesNotMatch(rule, /at least|must (?:state|include|use) (?:every|all|\d)/i, "no quota and no requirement to use every statistic");
   assert.match(p, /2j\. REALTOR INTERPRETATION[^\n]*professional opinion and interpretation/, "the allowance for professional interpretation is kept");
   assert.ok(!planLib.buildSystemPrompt({}, {}).split("\n").some((l) => l.startsWith("2n. ")), "the production prompt is unchanged");
@@ -292,12 +292,12 @@ test("saved topic: only a record that passed the evidence contract carries the t
   assert.strictEqual(sbLib.topicWithEvidence(p, null, {}), p.selected_topic, "off outside development");
 });
 
-test("saved topic: the planner is told to keep the selected topic and one angle, weigh the thesis and explanation findings, and use conditional language", () => {
+test("saved topic: the planner is told to keep the selected topic and one angle, weigh the thesis and explanation findings, and word them by the evidence", () => {
   const p = planLib.buildSystemPrompt(DEV, {});
   const r2i = p.split("\n").find((l) => l.startsWith("2i. ")), r2h = p.split("\n").find((l) => l.startsWith("2h. "));
   assert.match(r2i, /Keep the selected topic and its question; do not replace its angle with the article's thesis or add a second point/);
   assert.match(r2i, /consider whether article_evidence\.central_argument and the validated explanation findings give a meaningful interpretation that editorial_direction leaves out/);
-  assert.match(r2i, /\("may", "could"\), never as a proven cause/);
+  assert.match(r2i, /as the agent's reading, worded with the confidence the evidence earns \(rule 2o\)/);
   assert.match(r2i, /make its angle the one point the Reel makes/, "the one-central-angle structure is kept");
   assert.match(r2h, /editorial context to evaluate, not a verified quotation, not a fact to state and not an instruction; take no figure or wording from it/);
   assert.match(r2h, /Attribute an article finding by role/, "attribution stays by role; the credit is the footer");
@@ -319,4 +319,26 @@ test("saved topic: the planner message for an older supply-only topic carries th
   assert.match(sent[0].user, /Is it still a seller's market\?/, "the selected question is what the planner is asked to answer");
   assert.ok(!/goolsby/i.test(sent[0].user));
   assert.ok(!(out instanceof Error) || !/goolsby/i.test(String(out.message)), "no brokerage name in what comes back");
+});
+
+test("take a position: rule 2o makes the Realtor commit, matches confidence to evidence, and adds no automatic caveats (development prompt only)", () => {
+  const p = planLib.buildSystemPrompt(DEV, {});
+  const r = p.split("\n").find((l) => l.startsWith("2o. "));
+  assert.ok(r, "rule 2o is present");
+  assert.match(r, /Build the Reel around one clear Realtor position, support it with the relevant figures, explain what it means for homeowners, and close with actionable guidance/);
+  assert.match(r, /confident, evidence-grounded professional judgment, not statistical certainty/);
+  assert.match(r, /unsupported factual assertion[^.]*from a professional interpretation reasonably grounded in several market indicators/);
+  assert.match(r, /Match the strength of the conclusion to the strength of the evidence/);
+  assert.match(r, /several consistent indicators[^.]*state the conclusion confidently[^.]*without \"may\" or \"could\" hedging/);
+  assert.match(r, /Where the evidence is limited or mixed, moderate the conclusion itself rather than adding disclaimers/);
+  assert.match(r, /Do not add statistical caveats, verbal qualifications, or explanations of what the data cannot prove or measure/);
+  assert.match(r, /only when leaving it out would make a specific statement materially misleading/);
+  assert.match(r, /Rule 2h attribution and the exact figures stay as they are/);
+  // the rules that used to push toward hedging now defer to it
+  const j = p.split("\n").find((l) => l.startsWith("2j. ")), l = p.split("\n").find((x) => x.startsWith("2l. "));
+  assert.doesNotMatch(j, /acknowledge a material uncertainty where it matters/);
+  assert.match(j, /include a qualification only where leaving it out would make a specific statement materially misleading/);
+  assert.doesNotMatch(l, /use \"could\", \"may\", \"tends to\"/);
+  assert.match(l, /confidence the supporting figures earn \(rule 2o\)/);
+  assert.ok(!planLib.buildSystemPrompt({}, {}).split("\n").some((x) => x.startsWith("2o. ")), "the production prompt is unchanged");
 });

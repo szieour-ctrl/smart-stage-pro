@@ -311,6 +311,7 @@ function eventCta(project) {
 }
 
 function buildUserMessage(project) {
+  const aim = writingAimFor(project.duration_sec);
   const intake = project.intake || {};
   const schema = intakeLib.schemaFor(project.template);
   const angle = schema && schema.angles[intake.angle];
@@ -332,6 +333,7 @@ function buildUserMessage(project) {
     agents_firsthand_observation: intake.observation || null,
     duration_seconds: dur,
     spoken_word_range: am.wordTargets(dur),
+    ...(aim ? { spoken_word_aim: aimText(aim) } : {}),
     scene_count_range: SCENE_RANGE[dur],
     gpt_image_2_scene_count: GPT_RANGE[dur],
     generated_images_allowed_total: GPT_RANGE[dur][1], // GPT_IMAGE_2_CONCEPT + AGENT_SCENE combined, never more
@@ -609,6 +611,15 @@ function summarizeClaudeUsage(sink) {
 }
 
 
+// Nov 12, 2026 (Sam, Test only): an editorial AIM inside the recommended range, for 45-second Reels only. 105-110 words at the measured ElevenLabs pace
+// of about 151 words a minute is roughly 42-44 seconds; that pace is the basis for the aim, not a guaranteed rate. The range and the nonblocking
+// approval are unchanged. The aim travels in the user message (the system prompt, and its hash, do not change).
+const WRITING_AIM = { 45: [105, 110] };
+const writingAimFor = (dur) => (b1.enabled() && WRITING_AIM[dur]) || null;
+function aimText(aim) {
+  return `${aim[0]}-${aim[1]} spoken words. This is an editorial aim inside the recommended range, based on a measured narration pace of about 151 words a minute (not a guaranteed rate). Write the first draft toward it: spend the words on the Realtor's central interpretation, the decisive supporting evidence, the homeowner consequence and a natural invitation. It is not a per-scene quota, and it never replaces a required attribution.`;
+}
+
 const EDITOR_DURATIONS = [45, 60]; // Nov 12, 2026 (Sam): the scene-by-scene editor serves 45- and 60-second Reels; 30 seconds is unchanged
 // ── Scene-by-scene length edit (Nov 12, 2026, Sam; development only, 45- and 60-second Reels) ─────────────────────────────────────────────────
 // A script over the top of its word range is edited IN CONTEXT, scene by scene: the editor sees every scene (role, purpose, message, words, text) and how
@@ -689,6 +700,23 @@ async function editLengthByScene({ project, narrative, call, anthropicKey, sink,
   return { narrative: candidate, gate: g, returned };
 }
 
+
+// Nov 12, 2026 (Sam, Test only, 45-second Reels): the single gate rewrite is anchored to the rejected draft. The writer gets the rejected narration with its
+// scene context, the actual rejection reasons, the draft's word count, the duration, the recommended range and the writing aim, and is told to correct the
+// listed violations while keeping the story, not to grow the script, and never to let brevity override accuracy, attribution or a mandatory requirement.
+function anchoredRewriteMessage({ user, narrative, blocks, duration, range, aim }) {
+  const draft = {
+    spoken_words: narrative.wordCount,
+    editorial_angle: narrative.editorialAngle || "",
+    hook: narrative.hook || "",
+    narration: narrative.narrationTagged,
+    scenes: (narrative.scenes || []).map((sc, i) => ({ index: i, role: sc.role, source_role: sc.sourceRole || "", purpose: sc.purpose || "", words: am.countWords(sc.narrationExcerpt), narration_excerpt: sc.narrationExcerpt })),
+  };
+  return `${user}\n\nYour draft was rejected by the compliance check for these specific reasons:\n${blockLines(blocks)}\n\n`
+    + `Your rejected draft, for a ${duration}-second Reel (recommended range ${range[0]}-${range[1]} spoken words; writing aim ${aim[0]}-${aim[1]}), is ${narrative.wordCount} spoken words:\n${JSON.stringify(draft)}\n\n`
+    + `Rewrite the complete JSON. Correct the violations listed above and keep the existing story, hook, scenes and wording wherever possible. Do not make the narration longer than this draft: where a correction needs words, make room by cutting lower-priority supporting detail, and bring the script toward the writing aim. A shorter script never overrides factual accuracy, source attribution, or any other mandatory requirement. Take every number from the topic or the agent's report.`;
+}
+
 /**
  * generatePlan({ project, anthropicKey, callFn }) → { narrative, warnings, gate }  (throws Error with a user-safe message)
  */
@@ -721,7 +749,11 @@ async function generatePlan({ project, anthropicKey, callFn }) {
     // The first draft was blocked. Instead of failing (and using up one of the project's planning attempts), tell the writer exactly what was
     // wrong and ask for one rewrite. Only a second block reaches the agent, and then with the rule and the reason.
     console.error("[agent-marketing-plan] gate blocked the first draft:", JSON.stringify(g.blocks).slice(0, 500));
-    const fix = `${user}\n\nYour draft was rejected by the compliance check for these specific reasons:\n${blockLines(g.blocks)}\nRewrite the complete JSON so none of these happen. Keep the same topic, hook and facts; change only what is listed, and take every number from the topic or the agent's report.`;
+    if (diag) diag.gateBlocks = g.blocks.slice(0, 6).map((b) => ({ rule: String(b.rule || "").slice(0, 60), field: String(b.field || "").slice(0, 40), message: String(b.message || "").slice(0, 160) }));
+    const aim = writingAimFor(project.duration_sec);
+    const fix = aim ? anchoredRewriteMessage({ user, narrative, blocks: g.blocks, duration: project.duration_sec, range: am.wordTargets(project.duration_sec), aim })
+      : `${user}\n\nYour draft was rejected by the compliance check for these specific reasons:\n${blockLines(g.blocks)}\nRewrite the complete JSON so none of these happen. Keep the same topic, hook and facts; change only what is listed, and take every number from the topic or the agent's report.`;
+    if (diag) diag.rewriteAnchored = !!aim;
     normalized = normalizePlan(extractJsonObject(await call(buildSystemPrompt(undefined, { scoped: hasReportScope(project) }), fix, anthropicKey, sink, planOpts)), project);
     narrative = normalized.narrative; warnings = normalized.warnings;
     if (diag) { diag.gateRewrite = true; diag.afterGateRewrite = { words: narrative.wordCount, scenes: sceneWords(narrative) }; }
@@ -881,5 +913,5 @@ function gateNarrative(project, narrative) {
 
 module.exports = { topicBrief, blockLines, sourceNameVariants, competingNameBlocks,
   MODEL, stripNotice, SCENE_RANGE, GPT_RANGE, NEW_IMAGE_SOURCES, VISUAL_SOURCES, SOURCE_MAX, MAX_ATTEMPTS, STALE_PLANNING_MS, ALLOWED_TAGS,
-  intakeHash, ctaAngleFor, ctaAngleIndex, CTA_ANGLES, VISUAL_LOOKS, visualLookFor, visualLookIndex, buildSystemPrompt, buildUserMessage, lengthProblems, lengthDistance, callClaudeText, summarizeClaudeUsage, editLengthByScene, sourceRoleBlocks, lengthEditSystem, retagScenes, alignHook, extractJsonObject, sanitizeTags, normalizePlan, generatePlan,
+  intakeHash, ctaAngleFor, ctaAngleIndex, CTA_ANGLES, VISUAL_LOOKS, visualLookFor, visualLookIndex, buildSystemPrompt, buildUserMessage, lengthProblems, lengthDistance, callClaudeText, summarizeClaudeUsage, editLengthByScene, sourceRoleBlocks, lengthEditSystem, anchoredRewriteMessage, writingAimFor, retagScenes, alignHook, extractJsonObject, sanitizeTags, normalizePlan, generatePlan,
 };

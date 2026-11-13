@@ -28,11 +28,12 @@ test("aim: a 45-second Test user message carries spoken_word_aim 105-110 beside 
   });
 });
 
-test("aim: 30 and 60 seconds in Test, and every duration outside Test, carry no aim (messages are byte-identical to before)", async () => {
+test("aim: 30 seconds in Test (no aim) and every duration outside Test carry no aim; 60 seconds in Test carries the Phase B 140–146 aim", async () => {
   await withDev(true, async () => {
-    for (const d of [30, 60]) assert.ok(!("spoken_word_aim" in JSON.parse(planLib.buildUserMessage(proj(d)))), `${d}s`);
+    assert.ok(!("spoken_word_aim" in JSON.parse(planLib.buildUserMessage(proj(30)))), "30s");
     assert.strictEqual(planLib.writingAimFor(30), null);
-    assert.strictEqual(planLib.writingAimFor(60), null);
+    assert.deepStrictEqual(planLib.writingAimFor(60), [140, 146]);
+    assert.match(JSON.parse(planLib.buildUserMessage(proj(60))).spoken_word_aim, /^140-146 spoken words\./);
   });
   await withDev(false, async () => {
     for (const d of [30, 45, 60]) assert.ok(!("spoken_word_aim" in JSON.parse(planLib.buildUserMessage(proj(d)))), `prod ${d}s`);
@@ -124,15 +125,15 @@ test("diagnostics: a draft that passes the first time records no blocks and no r
   });
 });
 
-test("rewrite: 60 seconds in Test keeps the original rewrite message (not anchored) and records blocks only where a rewrite happens", async () => {
+test("rewrite (Phase B): 60 seconds in Test is anchored to the rejected draft with the 133–151 range and the 140–146 aim", async () => {
   await withDev(true, async () => {
     const users = [];
     const B6 = BAD.concat(["And one more thing."]), G6 = GOOD.concat(["And one more thing."]), R6 = ROLES.concat(["data"]);
     const { e } = await run(proj(60, { selected_topic: TOPIC }), async (sys, user) => { users.push(user); return users.length === 1 ? mk(B6, R6) : mk(G6, R6); });
     assert.ok(users.length >= 2);
-    assert.match(users[1], /Rewrite the complete JSON so none of these happen\. Keep the same topic, hook and facts; change only what is listed/);
-    assert.ok(!/Your rejected draft, for a/.test(users[1]), "60 seconds is not anchored");
-    assert.ok(!/spoken_word_aim/.test(users[0]));
+    assert.match(users[1], /Your rejected draft, for a 60-second Reel \(recommended range 133-151 spoken words; writing aim 140-146\)/);
+    assert.ok(!/Rewrite the complete JSON so none of these happen/.test(users[1]));
+    assert.match(users[0], /spoken_word_aim/);
   });
 });
 

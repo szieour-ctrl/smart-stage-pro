@@ -1,5 +1,5 @@
 "use strict";
-// Development, 60-second Reel over 155 spoken words: ONE scene-by-scene editing pass; scenes and narration stay in step; a draft that is still too
+// Development, 60-second Reel over 151 spoken words: ONE scene-by-scene editing pass; scenes and narration stay in step; a draft that is still too
 // long is kept (editable) with a clear warning and cannot be approved. Production and other lengths keep the original single rewrite.
 const test = require("node:test");
 const assert = require("node:assert");
@@ -44,9 +44,9 @@ async function withDev(on, fn) {
 }
 const run = (callFn) => planLib.generatePlan({ project: { ...project }, anthropicKey: "k", callFn }).then((r) => ({ r }), (e) => ({ e }));
 
-test("the fixture draft really is over 155 words", () => { assert.ok(am.countWords(taggedOf(LONG)) > 155); });
+test("the fixture draft really is over 151 words", () => { assert.ok(am.countWords(taggedOf(LONG)) > 151); });
 
-test("over 155: one editing call sees every scene, edits scene by scene, and narration and scenes stay exactly in step", async () => {
+test("over 151: one editing call sees every scene, edits scene by scene, and narration and scenes stay exactly in step", async () => {
   await withDev(true, async () => {
     const calls = [];
     const callFn = async (sys, user) => {
@@ -60,11 +60,11 @@ test("over 155: one editing call sees every scene, edits scene by scene, and nar
     assert.strictEqual(calls.length, 2, "the planner call and ONE editing call");
     const sent = JSON.parse(calls[1].user);
     assert.strictEqual(sent.scenes.length, 6);
-    assert.ok(sent.words_to_remove > 0 && sent.max_words === 155);
+    assert.ok(sent.words_to_remove > 0 && sent.max_words === 151);
     sent.scenes.forEach((s, i) => { assert.strictEqual(s.index, i); assert.ok(s.role && s.purpose && "intended_message" in s && typeof s.words === "number" && s.narration); });
     assert.ok(!("equal_limit" in sent) && !/per scene/i.test(calls[1].sys), "no equal per-scene limit");
     const n = r.narrative;
-    assert.ok(n.wordCount <= 155 && !n.lengthOver);
+    assert.ok(n.wordCount <= 151 && !n.lengthOver);
     assert.strictEqual(n.wordCount, am.countWords(n.narrationTagged));
     assert.strictEqual(n.scenes.length, 6);
     assert.deepStrictEqual(n.scenes.map((s) => s.role), ["local_hook", "tension", "insight", "comparison", "advice", "cta"]);
@@ -79,14 +79,14 @@ test("over 155: one editing call sees every scene, edits scene by scene, and nar
   });
 });
 
-test("edit still over 155: the draft is kept with a nonblocking advisory, and no further model call is made", async () => {
+test("edit still over 151: the draft is kept with a nonblocking advisory, and no further model call is made", async () => {
   await withDev(true, async () => {
     let calls = 0;
     const { r, e } = await run(async (sys, user) => { calls++; return calls === 1 ? planJson() : JSON.stringify({ scenes: JSON.parse(user).scenes.map((s) => ({ index: s.index, narration: s.narration })) }); });
     assert.ifError(e);
     assert.strictEqual(calls, 2);
-    assert.ok(r.narrative.lengthOver && r.narrative.lengthOver.max === 155 && r.narrative.lengthOver.words > 155);
-    assert.match(r.warnings[0], /^\d+ spoken words\. The recommended range for a 60-second Reel is 140–155 words\. Actual narration duration depends on delivery\. You may edit the script or approve it as written\.$/);
+    assert.ok(r.narrative.lengthOver && r.narrative.lengthOver.max === 151 && r.narrative.lengthOver.words > 151);
+    assert.match(r.warnings[0], /^\d+ spoken words\. The recommended range for a 60-second Reel is 133–151 words\. Actual narration duration depends on delivery\. You may edit the script or approve it as written\.$/);
     assert.ok(!/before approving|Cut about/.test(r.warnings.join(" ")), "an advisory, not a demand");
     assert.strictEqual(r.narrative.scenes.length, 6);
   });
@@ -147,7 +147,7 @@ test("diagnostics: an accepted edit records initial, returned and final counts p
     let calls = 0;
     const { r } = await run(async (sys, user) => { calls++; return calls === 1 ? planJson() : JSON.stringify({ scenes: JSON.parse(user).scenes.map((s) => ({ index: s.index, narration: CORE[s.index] })) }); });
     const d = r.narrative.lengthDiagnostics;
-    assert.deepStrictEqual(d.target, [140, 155]);
+    assert.deepStrictEqual(d.target, [133, 151]);
     assert.strictEqual(d.initial.words, am.countWords(taggedOf(LONG)));
     assert.deepStrictEqual(d.initial.scenes, LONG.map(am.countWords));
     assert.strictEqual(d.initial.sceneSum, d.initial.scenes.reduce((a, b) => a + b, 0));
@@ -200,14 +200,14 @@ test("diagnostics: discarded edits say why; an edit that is shorter but still ov
     const some = await run(async (sys, user) => (++half.n === 1 ? planJson() : JSON.stringify({ scenes: JSON.parse(user).scenes.map((s) => ({ index: s.index, narration: s.index === 1 ? LONG[1].split(" ").slice(0, 20).join(" ") + "." : s.narration })) })));
     d = some.r.narrative.lengthDiagnostics;
     assert.strictEqual(d.edit.outcome, "accepted_still_over");
-    assert.ok(d.final.words < d.initial.words && d.final.words > 155 && d.final.overLimit);
+    assert.ok(d.final.words < d.initial.words && d.final.words > 151 && d.final.overLimit);
   });
 });
 
 test("diagnostics: a draft inside the range records no edit, and nothing is recorded outside development", async () => {
   await withDev(true, async () => {
     const inRange = CORE.map((c, i) => (i === 2 || i === 3 ? c + PAD[i] : c));
-    assert.ok(am.countWords(taggedOf(inRange)) >= 140 && am.countWords(taggedOf(inRange)) <= 155, "fixture is inside the range");
+    assert.ok(am.countWords(taggedOf(inRange)) >= 133 && am.countWords(taggedOf(inRange)) <= 151, "fixture is inside the range");
     const okPlan = JSON.parse(planJson()); okPlan.scenes.forEach((sc, i) => { sc.narration_excerpt = inRange[i]; }); okPlan.narration_with_audio_tags = taggedOf(inRange);
     const { r } = await run(async () => JSON.stringify(okPlan));
     const d = r.narrative.lengthDiagnostics;

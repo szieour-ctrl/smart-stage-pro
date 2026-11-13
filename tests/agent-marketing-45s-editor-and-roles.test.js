@@ -59,7 +59,7 @@ test("45 seconds over 125: ONE scene-by-scene editing call replaces the full re-
     const sent = JSON.parse(calls[1].user);
     assert.strictEqual(sent.scenes.length, 5);
     assert.strictEqual(sent.max_words, 125);
-    assert.strictEqual(sent.target_words, 121);
+    assert.strictEqual(sent.target_words, 110, "the editor cuts toward the shared contract's 45-second target");
     assert.deepStrictEqual(sent.recommended_words, [105, 125], "the minimum goes in as guidance");
     assert.match(calls[1].sys, /finished 45-second first-person Realtor Reel script/);
     assert.match(calls[1].sys, /guidance, not a floor[^"]*never add words, filler or new content to reach the lower end/);
@@ -119,9 +119,8 @@ test("45 seconds inside its range: no editor, no extra call", async () => {
 });
 
 // ── 2. 60 seconds unchanged ─────────────────────────────────────────────────────────────────────────────────────────────────────────
-test("60 seconds: the editor prompt is byte for byte what it was, the payload has no recommended_words, and the advisory text is unchanged", async () => {
-  assert.strictEqual(sha(planLib.lengthEditSystem(60, false)), "9d0e6776f077e91b82dc3ab0cfb101e42e34b9ca4c44afcf41c6d7762222226f");
-  assert.ok(!/recommended_words|guidance, not a floor/.test(planLib.lengthEditSystem(60, false)));
+test("60 seconds (Phase B): the editor gets the range guidance, cuts toward 146 above 151, and the advisory reads 133–151", async () => {
+  assert.strictEqual(sha(planLib.lengthEditSystem(60, false)), "9d0e6776f077e91b82dc3ab0cfb101e42e34b9ca4c44afcf41c6d7762222226f", "the prompt function without a range is unchanged");
   await withDev(true, async () => {
     const six = [...CORE5.slice(0, 4), "Compare the full picture before you decide anything at all.", ...CORE5.slice(4)];
     const LONG6 = six.map((c, i) => c + (i === 1 || i === 2 || i === 3 || i === 4 ? PAD5[Math.min(i, 3)] + PAD5[2] : ""));
@@ -131,12 +130,15 @@ test("60 seconds: the editor prompt is byte for byte what it was, the payload ha
       cta_suggestion: "Ask me for a local perspective.", claims_to_verify: [], missing_agent_inputs: [] });
     const { r, e } = await run(proj(60), async (sys, user) => { calls.push({ sys, user }); return calls.length === 1 ? six6(LONG6) : JSON.stringify({ scenes: JSON.parse(user).scenes.map((s) => ({ index: s.index, narration: s.narration })) }); });
     assert.ifError(e);
-    assert.strictEqual(calls.length, 2, "the 60-second fixture is over 155 words and uses the editor");
+    assert.strictEqual(calls.length, 2, "the 60-second fixture is over 151 words and uses the editor");
     {
-      assert.strictEqual(sha(calls[1].sys), "9d0e6776f077e91b82dc3ab0cfb101e42e34b9ca4c44afcf41c6d7762222226f");
-      assert.ok(!("recommended_words" in JSON.parse(calls[1].user)));
-      assert.strictEqual(JSON.parse(calls[1].user).max_words, 155);
-      if (r.narrative.lengthOver) assert.match(r.warnings[0], /^\d+ spoken words\. The recommended range for a 60-second Reel is 140–155 words\./);
+      assert.strictEqual(calls[1].sys, planLib.lengthEditSystem(60, true));
+      assert.match(calls[1].sys, /guidance, not a floor[^"]*never add words, filler or new content to reach the lower end/);
+      const sent6 = JSON.parse(calls[1].user);
+      assert.deepStrictEqual(sent6.recommended_words, [133, 151]);
+      assert.strictEqual(sent6.max_words, 151);
+      assert.strictEqual(sent6.target_words, 146);
+      if (r.narrative.lengthOver) assert.match(r.warnings[0], /^\d+ spoken words\. The recommended range for a 60-second Reel is 133–151 words\./);
     }
   });
 });

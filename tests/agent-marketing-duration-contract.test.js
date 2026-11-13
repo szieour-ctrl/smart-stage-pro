@@ -1,5 +1,6 @@
 "use strict";
-// Phase A (Nov 12, 2026): the shared duration contract reproduces the values that were already in force. Behavior-preserving; nothing here changes a number.
+// The shared duration contract (Phase A, Nov 12, 2026: reproduced the values then in force; Phase B, Nov 13, 2026: 60-second Test aim 140-146, advisory 133-151,
+// editor targets 110 (45 s) and 146 (60 s)). Production values and the unknown-duration fallback are unchanged.
 const test = require("node:test");
 const assert = require("node:assert");
 const crypto = require("crypto");
@@ -13,13 +14,13 @@ const withEnv = (v, fn) => { const was = process.env.AGENT_MARKETING_B1_EVIDENCE
 test("the contract holds the existing 30-, 45- and 60-second values", () => {
   assert.deepStrictEqual(Object.keys(am.DURATION_CONTRACT), ["30", "45", "60"]);
   assert.deepStrictEqual(am.DURATION_CONTRACT[30], { range: [55, 70], scenes: [4, 4], images: [2, 3] });
-  assert.deepStrictEqual(am.DURATION_CONTRACT[45], { range: [105, 125], aim: [105, 110], scenes: [5, 6], images: [3, 4] });
-  assert.deepStrictEqual(am.DURATION_CONTRACT[60], { range: [110, 130], devRange: [140, 155], scenes: [6, 8], images: [4, 6] });
+  assert.deepStrictEqual(am.DURATION_CONTRACT[45], { range: [105, 125], aim: [105, 110], editorTarget: 110, scenes: [5, 6], images: [3, 4] });
+  assert.deepStrictEqual(am.DURATION_CONTRACT[60], { range: [110, 130], devRange: [133, 151], aim: [140, 146], editorTarget: 146, scenes: [6, 8], images: [4, 6] });
 });
 
 test("the word tables derived from the contract equal the previous tables", () => {
   assert.deepStrictEqual(am.WORD_TARGETS, { 30: [55, 70], 45: [105, 125], 60: [110, 130] });
-  assert.deepStrictEqual(am.DEV_WORD_TARGETS, { 30: [55, 70], 45: [105, 125], 60: [140, 155] });
+  assert.deepStrictEqual(am.DEV_WORD_TARGETS, { 30: [55, 70], 45: [105, 125], 60: [133, 151] });
 });
 
 test("wordTargets keeps production and Test values and the unknown-duration fallback to the 45-second range", () => {
@@ -28,7 +29,7 @@ test("wordTargets keeps production and Test values and the unknown-duration fall
     [0, 15, 90, undefined].forEach((d) => assert.deepStrictEqual(am.wordTargets(d), [105, 125]));
   });
   withEnv("dev", () => {
-    assert.deepStrictEqual([30, 45, 60].map((d) => am.wordTargets(d)), [[55, 70], [105, 125], [140, 155]]);
+    assert.deepStrictEqual([30, 45, 60].map((d) => am.wordTargets(d)), [[55, 70], [105, 125], [133, 151]]);
     [0, 15, 90, undefined].forEach((d) => assert.deepStrictEqual(am.wordTargets(d), [105, 125]));
   });
 });
@@ -42,20 +43,21 @@ test("scene and image ranges come from the contract and are unchanged, with no e
   assert.deepStrictEqual(am.IMAGE_RANGES, planLib.GPT_RANGE);
 });
 
-test("the 45-second writing aim is Test only and absent at 30 and 60 seconds", () => {
+test("the writing aims (45 s: 105-110, 60 s: 140-146) are Test only and absent at 30 seconds", () => {
   withEnv(undefined, () => [30, 45, 60].forEach((d) => assert.strictEqual(planLib.writingAimFor(d), null)));
   withEnv("dev", () => {
     assert.strictEqual(planLib.writingAimFor(30), null);
     assert.deepStrictEqual(planLib.writingAimFor(45), [105, 110]);
-    assert.strictEqual(planLib.writingAimFor(60), null);
+    assert.deepStrictEqual(planLib.writingAimFor(60), [140, 146]);
   });
-  assert.deepStrictEqual(am.WRITING_AIMS, { 45: [105, 110] });
+  assert.deepStrictEqual(am.WRITING_AIMS, { 45: [105, 110], 60: [140, 146] });
+  assert.deepStrictEqual(am.EDITOR_TARGETS, { 45: 110, 60: 146 });
 });
 
 test("the user message carries the same ranges, scene counts and image budget as before", () => {
   withEnv("dev", () => {
     const base = { template: "local_market_insider", intake: { market: "Roseville", observation: "x" }, selected_topic: null };
-    [[30, [55, 70], [4, 4], [2, 3]], [45, [105, 125], [5, 6], [3, 4]], [60, [140, 155], [6, 8], [4, 6]]].forEach(([dur, words, scenes, gpt]) => {
+    [[30, [55, 70], [4, 4], [2, 3]], [45, [105, 125], [5, 6], [3, 4]], [60, [133, 151], [6, 8], [4, 6]]].forEach(([dur, words, scenes, gpt]) => {
       const u = JSON.parse(planLib.buildUserMessage({ ...base, duration_sec: dur, formats: ["9x16"], voice: "ssp_male", user_id: "u" }));
       assert.deepStrictEqual(u.spoken_word_range, words);
       assert.deepStrictEqual(u.scene_count_range, scenes);

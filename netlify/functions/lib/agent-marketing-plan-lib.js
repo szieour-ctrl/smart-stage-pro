@@ -591,12 +591,13 @@ function lengthDistance(narrative, dur) {
   const [lo, hi] = am.wordTargets(dur);
   const n = narrative.wordCount;
   const tiny = (narrative.scenes || []).filter((sc) => am.countWords(sc.narrationExcerpt) < MIN_SCENE_WORDS).length;
-  return (n < lo ? lo - n : n > hi ? n - hi : 0) + tiny * 5;
+  // Test (Phase B, Sam, Nov 13): a script under the range is advisory only, so it is not a distance to close; production is unchanged.
+  return (n < lo ? (b1.enabled() ? 0 : lo - n) : n > hi ? n - hi : 0) + tiny * 5;
 }
 function lengthProblems(narrative, dur) {
   const [lo, hi] = am.wordTargets(dur), n = narrative.wordCount, out = [];
   if (n > hi) out.push(`The narration is ${n} spoken words; a ${dur}-second video needs ${lo}-${hi}, so cut at least ${n - hi}.`);
-  else if (n < lo) out.push(`The narration is ${n} spoken words; a ${dur}-second video needs ${lo}-${hi}, so add about ${lo - n}.`);
+  else if (n < lo && !b1.enabled()) out.push(`The narration is ${n} spoken words; a ${dur}-second video needs ${lo}-${hi}, so add about ${lo - n}.`); // Test: advisory only, never padded
   (narrative.scenes || []).forEach((sc, i) => {
     const w = am.countWords(sc.narrationExcerpt);
     if (w < MIN_SCENE_WORDS) out.push(`Scene ${i + 1} has only ${w} spoken words; every scene needs at least ${MIN_SCENE_WORDS}.`);
@@ -637,7 +638,6 @@ function lengthEditSystem(seconds, withRange) {
   "Reply with JSON only: {\"scenes\":[{\"index\":0,\"narration\":\"...\"}, ...]}"
   ].join("\n");
 }
-const LENGTH_EDIT_SYSTEM = lengthEditSystem(60, false);
 
 function sentencesOf(text) { return String(text || "").split(/(?<=[.!?…])\s+/).filter(Boolean); }
 
@@ -670,16 +670,17 @@ function retagScenes(tagged, scenes, newTexts) {
  */
 async function editLengthByScene({ project, narrative, call, anthropicKey, sink, opts, max, range }) {
   const scenes = narrative.scenes || [];
-  const total = narrative.wordCount, target = Math.max(1, max - 4);
+  const total = narrative.wordCount;
   const seconds = (project && project.duration_sec) || 60;
+  const target = am.EDITOR_TARGETS[seconds] || Math.max(1, max - 4); // the shared duration contract's editor target
   const payload = {
     total_words: total, max_words: max, target_words: target, words_to_remove: total - target,
-    ...(seconds !== 60 && Array.isArray(range) ? { recommended_words: range } : {}),
+    ...(Array.isArray(range) ? { recommended_words: range } : {}),
     editorial_angle: narrative.editorialAngle || "", hook: narrative.hook || "",
     scenes: scenes.map((sc, i) => ({ index: i, role: sc.role, purpose: sc.purpose || "", intended_message: (sc.director && sc.director.objective) || "", source_role: sc.sourceRole || "", words: am.countWords(sc.narrationExcerpt), narration: sc.narrationExcerpt })),
   };
   let raw;
-  try { raw = extractJsonObject(await call(seconds === 60 ? LENGTH_EDIT_SYSTEM : lengthEditSystem(seconds, true), JSON.stringify(payload), anthropicKey, sink, opts)); }
+  try { raw = extractJsonObject(await call(lengthEditSystem(seconds, true), JSON.stringify(payload), anthropicKey, sink, opts)); }
   catch (e) { return { narrative: null, reason: `edit call failed: ${String(e && e.message).slice(0, 160)}` }; }
   const out = Array.isArray(raw && raw.scenes) ? raw.scenes : null;
   if (!out || out.length !== scenes.length) return { narrative: null, reason: "edit returned the wrong number of scenes", returned: { sceneCount: Array.isArray(out) ? out.length : null } };
@@ -702,10 +703,11 @@ async function editLengthByScene({ project, narrative, call, anthropicKey, sink,
 }
 
 
-// Nov 12, 2026 (Sam, Test only, 45-second Reels): the single gate rewrite is anchored to the rejected draft. The writer gets the rejected narration with its
-// scene context, the actual rejection reasons, the draft's word count, the duration, the recommended range and the writing aim, and is told to correct the
-// listed violations while keeping the story, not to grow the script, and never to let brevity override accuracy, attribution or a mandatory requirement.
-function anchoredRewriteMessage({ user, narrative, blocks, duration, range, aim }) {
+// Nov 12-13, 2026 (Sam, Test only): a genuine revision is anchored to the draft it corrects. The writer gets the draft with its scene context, the actual
+// problem (the compliance check's reasons, or the length / scene-balance problems), the draft's word count, the duration, the recommended range and, where the
+// duration has one, the writing aim. It is told to correct what is listed while keeping the story, not to grow the script, and never to let brevity override
+// accuracy, attribution or a mandatory requirement. Gate rewrites serve every Test duration; the scene-balance rewrite uses the same message (`problems`).
+function anchoredRewriteMessage({ user, narrative, blocks, problems, duration, range, aim }) {
   const draft = {
     spoken_words: narrative.wordCount,
     editorial_angle: narrative.editorialAngle || "",
@@ -713,9 +715,17 @@ function anchoredRewriteMessage({ user, narrative, blocks, duration, range, aim 
     narration: narrative.narrationTagged,
     scenes: (narrative.scenes || []).map((sc, i) => ({ index: i, role: sc.role, source_role: sc.sourceRole || "", purpose: sc.purpose || "", words: am.countWords(sc.narrationExcerpt), narration_excerpt: sc.narrationExcerpt })),
   };
-  return `${user}\n\nYour draft was rejected by the compliance check for these specific reasons:\n${blockLines(blocks)}\n\n`
-    + `Your rejected draft, for a ${duration}-second Reel (recommended range ${range[0]}-${range[1]} spoken words; writing aim ${aim[0]}-${aim[1]}), is ${narrative.wordCount} spoken words:\n${JSON.stringify(draft)}\n\n`
-    + `Rewrite the complete JSON. Correct the violations listed above and keep the existing story, hook, scenes and wording wherever possible. Do not make the narration longer than this draft: where a correction needs words, make room by cutting lower-priority supporting detail, and bring the script toward the writing aim. A shorter script never overrides factual accuracy, source attribution, or any other mandatory requirement. Take every number from the topic or the agent's report.`;
+  const aimPart = aim ? `; writing aim ${aim[0]}-${aim[1]}` : "";
+  const gate = Array.isArray(blocks) && blocks.length > 0;
+  const head = gate
+    ? `Your draft was rejected by the compliance check for these specific reasons:\n${blockLines(blocks)}`
+    : `Your draft does not fit the requested length or scene balance:\n${(problems || []).map((p) => `- ${p}`).join("\n")}`;
+  const tail = gate
+    ? `Rewrite the complete JSON. Correct the violations listed above and keep the existing story, hook, scenes and wording wherever possible. Do not make the narration longer than this draft: where a correction needs words, make room by cutting lower-priority supporting detail${aim ? ", and bring the script toward the writing aim" : ""}. A shorter script never overrides factual accuracy, source attribution, or any other mandatory requirement. Take every number from the topic or the agent's report.`
+    : `Rewrite the complete JSON. Correct only the problems listed above and keep the existing story, hook, scenes and wording wherever possible. Do not add words to reach the lower end of the range: a complete script shorter than the range is acceptable. A shorter script never overrides factual accuracy, source attribution, or any other mandatory requirement. Keep every number you state exactly as the topic gives it.`;
+  return `${user}\n\n${head}\n\n`
+    + `Your ${gate ? "rejected " : ""}draft, for a ${duration}-second Reel (recommended range ${range[0]}-${range[1]} spoken words${aimPart}), is ${narrative.wordCount} spoken words:\n${JSON.stringify(draft)}\n\n`
+    + tail;
 }
 
 /**
@@ -752,9 +762,10 @@ async function generatePlan({ project, anthropicKey, callFn }) {
     console.error("[agent-marketing-plan] gate blocked the first draft:", JSON.stringify(g.blocks).slice(0, 500));
     if (diag) diag.gateBlocks = g.blocks.slice(0, 6).map((b) => ({ rule: String(b.rule || "").slice(0, 60), field: String(b.field || "").slice(0, 40), message: String(b.message || "").slice(0, 160) }));
     const aim = writingAimFor(project.duration_sec);
-    const fix = aim ? anchoredRewriteMessage({ user, narrative, blocks: g.blocks, duration: project.duration_sec, range: am.wordTargets(project.duration_sec), aim })
+    const anchored = b1.enabled(); // Test: every duration's gate rewrite is anchored to the rejected draft; production keeps the original message
+    const fix = anchored ? anchoredRewriteMessage({ user, narrative, blocks: g.blocks, duration: project.duration_sec, range: am.wordTargets(project.duration_sec), aim })
       : `${user}\n\nYour draft was rejected by the compliance check for these specific reasons:\n${blockLines(g.blocks)}\nRewrite the complete JSON so none of these happen. Keep the same topic, hook and facts; change only what is listed, and take every number from the topic or the agent's report.`;
-    if (diag) diag.rewriteAnchored = !!aim;
+    if (diag) { diag.rewriteAnchored = anchored; diag.revisions = [{ path: "gate_rewrite", anchored, draftWords: narrative.wordCount }]; }
     normalized = normalizePlan(extractJsonObject(await call(buildSystemPrompt(undefined, { scoped: hasReportScope(project) }), fix, anthropicKey, sink, planOpts)), project);
     narrative = normalized.narrative; warnings = normalized.warnings;
     if (diag) { diag.gateRewrite = true; diag.afterGateRewrite = { words: narrative.wordCount, scenes: sceneWords(narrative) }; }
@@ -773,6 +784,7 @@ async function generatePlan({ project, anthropicKey, callFn }) {
   if (b1.enabled() && EDITOR_DURATIONS.includes(project.duration_sec) && narrative.wordCount > whi) {
     // Development, 45- or 60-second Reel over the top of its range: ONE scene-by-scene editing pass (replaces the length rewrite; no extra call).
     console.error("[agent-marketing-plan] over length:", fit.join("; "));
+    const inWords = narrative.wordCount;
     const ed = await editLengthByScene({ project, narrative, call, anthropicKey, sink, opts: { maxTokens: 3000 }, max: whi, range: am.wordTargets(project.duration_sec) });
     let outcome, reason = null;
     if (ed.narrative) {
@@ -781,6 +793,7 @@ async function generatePlan({ project, anthropicKey, callFn }) {
       warnings = warnings.filter((w) => !/^The script is about \d+ spoken words/.test(w));
     } else { outcome = "discarded"; reason = ed.reason; console.error("[agent-marketing-plan] length edit not used:", ed.reason); }
     if (diag) diag.edit = { ran: true, outcome, reason, returned: ed.returned || null };
+    if (diag) (diag.revisions = diag.revisions || []).push({ path: "scene_editor", inputWords: inWords, outputWords: (ed.returned && ed.returned.words) || null, target: am.EDITOR_TARGETS[project.duration_sec] || null, outcome });
     if (narrative.wordCount > whi) {
       if (diag && diag.edit.outcome === "accepted") diag.edit.outcome = "accepted_still_over";
       const over = narrative.wordCount - whi;
@@ -793,11 +806,15 @@ async function generatePlan({ project, anthropicKey, callFn }) {
     // Oct 28, 2026 (Sam): one rewrite is asked for, and it is used only if it passes the gate and is closer to the target.
     console.error("[agent-marketing-plan] length/balance outside the target:", fit.join("; "));
     try {
-      const fix = `${user}\n\nYour draft does not fit the requested length: ${fit.join(" ")} Rewrite the complete JSON, keeping the same topic, hook, facts and tone. Keep every number you state exactly as the topic gives it, and drop the least important sentence or clause to get inside the limits.`;
+      const fix = b1.enabled()
+        ? anchoredRewriteMessage({ user, narrative, problems: fit, duration: project.duration_sec, range: am.wordTargets(project.duration_sec), aim: writingAimFor(project.duration_sec) })
+        : `${user}\n\nYour draft does not fit the requested length: ${fit.join(" ")} Rewrite the complete JSON, keeping the same topic, hook, facts and tone. Keep every number you state exactly as the topic gives it, and drop the least important sentence or clause to get inside the limits.`;
+      if (diag) (diag.revisions = diag.revisions || []).push({ path: "scene_balance_rewrite", anchored: b1.enabled(), draftWords: narrative.wordCount, problems: fit.length });
       const again = normalizePlan(extractJsonObject(await call(buildSystemPrompt(undefined, { scoped: hasReportScope(project) }), fix, anthropicKey, sink, planOpts)), project);
       const g2 = gateNarrative(project, again.narrative);
       if (g2.ok && lengthProblems(again.narrative, project.duration_sec).length <= fit.length && lengthDistance(again.narrative, project.duration_sec) < lengthDistance(narrative, project.duration_sec)) {
         narrative = again.narrative; warnings = again.warnings; g = g2;
+        if (diag && diag.revisions) diag.revisions[diag.revisions.length - 1].accepted = true;
       }
     } catch (e) { console.error("[agent-marketing-plan] length rewrite skipped:", String(e && e.message).slice(0, 200)); }
   }

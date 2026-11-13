@@ -590,8 +590,9 @@ async function generatePlan({ project, anthropicKey, callFn }) {
   }
   // Oct 28, 2026 (Sam): a 45-second Reel ran 57 seconds (136 words for what should be about 118) and one scene got 3 seconds. The word range and the
   // scene balance are held to, not just warned about: one rewrite is asked for, and it is used only if it passes the gate and is closer to the target.
-  const fit = lengthProblems(narrative, project.duration_sec);
-  if (fit.length) {
+  let fit = lengthProblems(narrative, project.duration_sec);
+  // Up to two rewrites, and a length problem that remains is tried again with what the last attempt missed (Nov 12, Sam: 60 seconds is a ceiling).
+  for (let round = 0; fit.length && round < 2; round++) {
     console.error("[agent-marketing-plan] length/balance outside the target:", fit.join("; "));
     try {
       const fix = `${user}\n\nYour draft does not fit the requested length: ${fit.join(" ")} Rewrite the complete JSON, keeping the same topic, hook, facts and tone. Keep every number you state exactly as the topic gives it, and drop the least important sentence or clause to get inside the limits.`;
@@ -600,7 +601,8 @@ async function generatePlan({ project, anthropicKey, callFn }) {
       if (g2.ok && lengthProblems(again.narrative, project.duration_sec).length <= fit.length && lengthDistance(again.narrative, project.duration_sec) < lengthDistance(narrative, project.duration_sec)) {
         narrative = again.narrative; warnings = again.warnings; g = g2;
       }
-    } catch (e) { console.error("[agent-marketing-plan] length rewrite skipped:", String(e && e.message).slice(0, 200)); }
+    } catch (e) { console.error("[agent-marketing-plan] length rewrite skipped:", String(e && e.message).slice(0, 200)); break; }
+    fit = lengthProblems(narrative, project.duration_sec);
   }
   // The gate has seen the planner's own words; now no sign of any kind survives into anything that reaches the image model (Sam, Oct 27).
   (narrative.scenes || []).forEach((sc) => {

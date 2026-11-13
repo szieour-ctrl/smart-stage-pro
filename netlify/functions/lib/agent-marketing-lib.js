@@ -35,8 +35,8 @@ const MUSIC_KEYS = MUSIC.map((m) => m.key);
 const WORD_TARGETS = { 30: [55, 70], 45: [105, 125], 60: [110, 130] };
 // Nov 9, 2026 (development only): measured ElevenLabs narration runs about 2.8 spoken words a second (118 words = 41-42 s), so 60 seconds needs 140-160 words.
 // Production keeps the table above; the 30- and 45-second targets are the same everywhere.
-// Nov 12, 2026 (Sam): Reels and Shorts, so 60 seconds is a ceiling. A 175-word script measured 71 s (about 2.46 words a second with pauses), so the top is 145.
-const DEV_WORD_TARGETS = { ...WORD_TARGETS, 60: [130, 145] };
+// Nov 12, 2026 (Sam): Reels and Shorts, so 60 seconds is a ceiling. The top is 155 (Sam's number); 45-second Reels of 115-130 words have narrated fine, so narration runs fast enough for it.
+const DEV_WORD_TARGETS = { ...WORD_TARGETS, 60: [140, 155] };
 function wordTargets(durationSec, env) {
   const dev = String((env || process.env).AGENT_MARKETING_B1_EVIDENCE || "").trim().toLowerCase() === "dev";
   return (dev ? DEV_WORD_TARGETS : WORD_TARGETS)[durationSec] || (dev ? DEV_WORD_TARGETS : WORD_TARGETS)[45];

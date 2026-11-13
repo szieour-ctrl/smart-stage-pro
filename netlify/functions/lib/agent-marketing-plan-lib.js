@@ -15,6 +15,7 @@ const b1 = require("./agent-marketing-b1-evidence-lib"); // DEVELOPMENT ONLY: in
 
 const MODEL = "claude-sonnet-4-6"; // same model family the other planners use
 const MAX_TOKENS = 4000;
+const B1_PLAN_MAX_TOKENS = 6000; // development Article-Led planning calls only
 const CALL_TIMEOUT_MS = 120000; // the planner default; opts.timeoutMs lets one caller (the Article-Led editorial writer) wait longer
 const WPM = 130; // pipeline's planning rate (narrationGen.js); real timing comes from the generated audio
 const MAX_ATTEMPTS = 4;
@@ -559,15 +560,18 @@ async function generatePlan({ project, anthropicKey, callFn }) {
   if (project && project.template === "local_market_insider") b1.assertNotBlocked(project.selected_topic);
   const user = buildUserMessage(project);
   const sink = [];
+  // Development Article-Led prompt only (AGENT_MARKETING_B1_EVIDENCE=dev): its longer rules and evidence produce longer replies that hit the 4,000-token
+  // default and were cut off. Production and every other caller keep the default.
+  const planOpts = b1.enabled() && project && project.selected_topic && typeof project.selected_topic === "object" && "b1Evidence" in project.selected_topic ? { maxTokens: B1_PLAN_MAX_TOKENS } : undefined;
   let normalized;
   try {
-    normalized = normalizePlan(extractJsonObject(await call(buildSystemPrompt(undefined, { scoped: hasReportScope(project) }), user, anthropicKey, sink)), project);
+    normalized = normalizePlan(extractJsonObject(await call(buildSystemPrompt(undefined, { scoped: hasReportScope(project) }), user, anthropicKey, sink, planOpts)), project);
   } catch (err) {
     // A structurally unusable plan (a missing narration excerpt, the wrong scene or image count, no JSON) gets ONE corrective retry inside the
     // same attempt, so it does not use up one of the project's planning attempts. Anything else (a gate block, a cut-off reply) is not retried.
     if (!/narration excerpt|scenes are needed|concept images?|unusable plan|no narration|JSON/i.test(String(err && err.message))) throw err;
     const fix = `${user}\n\nYour previous reply could not be used: ${String(err.message).slice(0, 200)}. Return the complete JSON again. Every scene MUST have a non-empty narration_excerpt taken from your narration, in order, and the scenes together must cover the whole narration.`;
-    normalized = normalizePlan(extractJsonObject(await call(buildSystemPrompt(undefined, { scoped: hasReportScope(project) }), fix, anthropicKey, sink)), project);
+    normalized = normalizePlan(extractJsonObject(await call(buildSystemPrompt(undefined, { scoped: hasReportScope(project) }), fix, anthropicKey, sink, planOpts)), project);
   }
   let { narrative, warnings } = normalized;
   let g = gateNarrative(project, narrative);
@@ -576,7 +580,7 @@ async function generatePlan({ project, anthropicKey, callFn }) {
     // wrong and ask for one rewrite. Only a second block reaches the agent, and then with the rule and the reason.
     console.error("[agent-marketing-plan] gate blocked the first draft:", JSON.stringify(g.blocks).slice(0, 500));
     const fix = `${user}\n\nYour draft was rejected by the compliance check for these specific reasons:\n${blockLines(g.blocks)}\nRewrite the complete JSON so none of these happen. Keep the same topic, hook and facts; change only what is listed, and take every number from the topic or the agent's report.`;
-    normalized = normalizePlan(extractJsonObject(await call(buildSystemPrompt(undefined, { scoped: hasReportScope(project) }), fix, anthropicKey, sink)), project);
+    normalized = normalizePlan(extractJsonObject(await call(buildSystemPrompt(undefined, { scoped: hasReportScope(project) }), fix, anthropicKey, sink, planOpts)), project);
     narrative = normalized.narrative; warnings = normalized.warnings;
     g = gateNarrative(project, narrative);
   }
@@ -593,7 +597,7 @@ async function generatePlan({ project, anthropicKey, callFn }) {
     console.error("[agent-marketing-plan] length/balance outside the target:", fit.join("; "));
     try {
       const fix = `${user}\n\nYour draft does not fit the requested length: ${fit.join(" ")} Rewrite the complete JSON, keeping the same topic, hook, facts and tone. Keep every number you state exactly as the topic gives it, and drop the least important sentence or clause to get inside the limits.`;
-      const again = normalizePlan(extractJsonObject(await call(buildSystemPrompt(undefined, { scoped: hasReportScope(project) }), fix, anthropicKey, sink)), project);
+      const again = normalizePlan(extractJsonObject(await call(buildSystemPrompt(undefined, { scoped: hasReportScope(project) }), fix, anthropicKey, sink, planOpts)), project);
       const g2 = gateNarrative(project, again.narrative);
       if (g2.ok && lengthProblems(again.narrative, project.duration_sec).length <= fit.length && lengthDistance(again.narrative, project.duration_sec) < lengthDistance(narrative, project.duration_sec)) {
         narrative = again.narrative; warnings = again.warnings; g = g2;

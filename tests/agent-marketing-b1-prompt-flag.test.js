@@ -10,7 +10,7 @@ const sha = (s) => crypto.createHash("sha256").update(s, "utf8").digest("hex");
 // sha256 of buildSystemPrompt() on production main (622f96e), and of the B1 development prompt (rules 2b, 2g, 2h as approved in commit 83fb916, plus
 // rule 2i, the B2 editorial direction, Nov 8, 2026).
 const PRODUCTION_SHA256 = "25f3118fed1b9726fc4dc78b16dcc92233cef785d3c074ef89a6ee7aaf7b0495";
-const B1_DEV_SHA256 = "b0efb37c0f9687786aea714f7a01cee6c7ea0a5ccacee627291a2f6106085da4";   // Nov 12, 2026: + rule 2q (one governing editorial premise)
+const B1_DEV_SHA256 = "78641c52e33c3deb2f749099a251841a26861fb9dccd1b32db6f540dc08be596";   // Nov 12, 2026: rule 2q is the question-led hook version
 const rule = (prompt, id) => prompt.split("\n").filter((l) => l.startsWith(`${id}. `));
 const withEnv = async (value, fn) => {
   const old = process.env.AGENT_MARKETING_B1_EVIDENCE;
@@ -45,7 +45,7 @@ test("prompt flag: AGENT_MARKETING_B1_EVIDENCE=dev gives the B1 prompt, which di
   assert.strictEqual(d.indexOf(rule(dev, "2o")[0]), d.indexOf(rule(dev, "2n")[0]) + 1);
   assert.strictEqual(d.indexOf(rule(dev, "2p")[0]), d.indexOf(rule(dev, "2o")[0]) + 1);
   assert.strictEqual(d.indexOf(rule(dev, "2q")[0]), d.indexOf(rule(dev, "2p")[0]) + 1);
-  assert.match(rule(dev, "2q")[0], /first spoken sentence of `narration_with_audio_tags`, word for word/); assert.match(rule(dev, "2q")[0], /hook` field must repeat that sentence exactly/);
+  assert.match(rule(dev, "2q")[0], /QUESTION-LED HOOK\. The hook must take the form of a compelling, specific question/); assert.match(rule(dev, "2q")[0], /Do not answer the question in the hook/); assert.match(rule(dev, "2q")[0], /first spoken sentence of `narration_with_audio_tags`, word for word/); assert.match(rule(dev, "2q")[0], /hook` field must repeat that sentence exactly/);
   assert.ok(!/^2q\. /m.test(prod), "production has no 2q");
   assert.match(rule(dev, "2p")[0], /SYNTHESIZE BEFORE NARRATING/); assert.match(rule(dev, "2p")[0], /Preserve Rule 2o's standards/);
   assert.ok(!/^2p\. /m.test(prod), "production has no 2p");

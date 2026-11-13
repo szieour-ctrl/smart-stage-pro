@@ -72,13 +72,9 @@ async function prepareNarration(job, project, tagged, pronunciations) {
     if (!same) throw new Error("The narration timings do not match the approved words.");
     words = same;
   }
-  const durationSec = Math.round(Math.max(lastEnd + 0.4, (audio.length * 8) / 128000) * 100) / 100; // default output is 128 kbps mp3
-  // Development only (Nov 12, Sam): a Reel never runs past its length. Stops here, before any image is made, with the words to cut.
-  if (String(process.env.AGENT_MARKETING_B1_EVIDENCE || "").trim().toLowerCase() === "dev" && project.duration_sec && durationSec > project.duration_sec) {
-    throw new Error(`The narration runs ${durationSec.toFixed(1)} seconds, over the ${project.duration_sec}-second limit. Shorten the script by about ${Math.ceil((durationSec - project.duration_sec) * 2.5)} words and try again.`);
-  }
   const key = `agent-marketing-assets/${job.user_id}/${job.project_id}/${job.id}/narration.mp3`;
   await put(key, audio, "audio/mpeg");
+  const durationSec = Math.round(Math.max(lastEnd + 0.4, (audio.length * 8) / 128000) * 100) / 100; // default output is 128 kbps mp3
   const rec = { key, duration_sec: durationSec, words: words.map((w) => ({ text: w.text, start: w.start, end: w.end })), voice_id: voiceId, model_id: TTS_MODEL, characters: sent.length, pronunciations_applied: sent !== tagged ? timing.cleanPronunciations(pronunciations).length : 0 };
   const usage = { ...(job.usage || {}), narration_characters: sent.length };
   job.assets = { ...(job.assets || {}), audio: rec }; job.usage = usage;

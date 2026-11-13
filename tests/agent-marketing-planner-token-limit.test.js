@@ -12,11 +12,3 @@ test("planner token limit: generatePlan asks for 6000 on every path", async () =
     assert.deepStrictEqual(opts[0], { maxTokens: 6000 }, template);
   }
 });
-
-test("a narration longer than its Reel stops the development job before any image is made", () => {
-  const src = require("fs").readFileSync(require("path").join(__dirname, "../netlify/functions/agent-marketing-prepare-background.js"), "utf8");
-  const guard = src.indexOf("over the ${project.duration_sec}-second limit");
-  assert.ok(guard > 0, "guard present");
-  assert.ok(guard < src.indexOf("await put(key, audio"), "checked before the narration is stored");
-  assert.match(src, /AGENT_MARKETING_B1_EVIDENCE[^\n]*\|\| ""\)\.trim\(\)\.toLowerCase\(\) === "dev" && project\.duration_sec/);
-});

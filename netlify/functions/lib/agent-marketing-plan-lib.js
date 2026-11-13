@@ -15,7 +15,7 @@ const b1 = require("./agent-marketing-b1-evidence-lib"); // DEVELOPMENT ONLY: in
 
 const MODEL = "claude-sonnet-4-6"; // same model family the other planners use
 const MAX_TOKENS = 4000;
-const B1_PLAN_MAX_TOKENS = 6000; // development Article-Led planning calls only
+const PLAN_MAX_TOKENS = 6000; // script-writing calls: 4,000 cut longer replies off, which the agent saw as an error and had to retry
 const CALL_TIMEOUT_MS = 120000; // the planner default; opts.timeoutMs lets one caller (the Article-Led editorial writer) wait longer
 const WPM = 130; // pipeline's planning rate (narrationGen.js); real timing comes from the generated audio
 const MAX_ATTEMPTS = 4;
@@ -560,9 +560,7 @@ async function generatePlan({ project, anthropicKey, callFn }) {
   if (project && project.template === "local_market_insider") b1.assertNotBlocked(project.selected_topic);
   const user = buildUserMessage(project);
   const sink = [];
-  // Development Article-Led prompt only (AGENT_MARKETING_B1_EVIDENCE=dev): its longer rules and evidence produce longer replies that hit the 4,000-token
-  // default and were cut off. Production and every other caller keep the default.
-  const planOpts = b1.enabled() && project && project.selected_topic && typeof project.selected_topic === "object" && "b1Evidence" in project.selected_topic ? { maxTokens: B1_PLAN_MAX_TOKENS } : undefined;
+  const planOpts = { maxTokens: PLAN_MAX_TOKENS }; // only a ceiling: replies that fit cost the same as before
   let normalized;
   try {
     normalized = normalizePlan(extractJsonObject(await call(buildSystemPrompt(undefined, { scoped: hasReportScope(project) }), user, anthropicKey, sink, planOpts)), project);

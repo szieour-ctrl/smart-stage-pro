@@ -612,10 +612,11 @@ async function editLengthByScene({ project, narrative, call, anthropicKey, sink,
   try { raw = extractJsonObject(await call(LENGTH_EDIT_SYSTEM, JSON.stringify(payload), anthropicKey, sink, opts)); }
   catch (e) { return { narrative: null, reason: `edit call failed: ${String(e && e.message).slice(0, 160)}` }; }
   const out = Array.isArray(raw && raw.scenes) ? raw.scenes : null;
-  if (!out || out.length !== scenes.length) return { narrative: null, reason: "edit returned the wrong number of scenes" };
+  if (!out || out.length !== scenes.length) return { narrative: null, reason: "edit returned the wrong number of scenes", returned: { sceneCount: Array.isArray(out) ? out.length : null } };
   const byIndex = new Map(out.map((x) => [Number(x && x.index), String(x && x.narration || "").replace(/\[[A-Za-z ]+\]/g, " ").replace(/\s+/g, " ").trim()]));
   const texts = scenes.map((_, i) => byIndex.get(i));
-  if (texts.some((t) => !t)) return { narrative: null, reason: "edit left a scene empty or out of order" };
+  const returned = { words: texts.reduce((a, t) => a + (t ? am.countWords(t) : 0), 0), scenes: texts.map((t) => (t ? am.countWords(t) : 0)) };
+  if (texts.some((t) => !t)) return { narrative: null, reason: "edit left a scene empty or out of order", returned };
   const tagged = retagScenes(narrative.narrationTagged, scenes, texts).join(" ").replace(/\s+/g, " ").trim();
   const candidate = {
     ...narrative,
@@ -624,8 +625,9 @@ async function editLengthByScene({ project, narrative, call, anthropicKey, sink,
   };
   setProvisionalSeconds(candidate.scenes, project.duration_sec);
   const g = gateNarrative(project, candidate);
-  if (!g.ok) return { narrative: null, reason: `edited script failed the content check: ${(g.blocks || []).slice(0, 2).map((b) => b.message).join("; ").slice(0, 200)}` };
-  return { narrative: candidate, gate: g };
+  returned.words = candidate.wordCount; // the rebuilt narration's count (tags removed), the number the rest of the app uses
+  if (!g.ok) return { narrative: null, reason: `edited script failed the content check: ${(g.blocks || []).slice(0, 2).map((b) => b.message).join("; ").slice(0, 200)}`, returned };
+  return { narrative: candidate, gate: g, returned };
 }
 
 /**
@@ -638,17 +640,23 @@ async function generatePlan({ project, anthropicKey, callFn }) {
   const user = buildUserMessage(project);
   const sink = [];
   const planOpts = { maxTokens: PLAN_MAX_TOKENS }; // only a ceiling: replies that fit cost the same as before
-  let normalized;
+  let normalized, structuralRetry = false;
   try {
     normalized = normalizePlan(extractJsonObject(await call(buildSystemPrompt(undefined, { scoped: hasReportScope(project) }), user, anthropicKey, sink, planOpts)), project);
   } catch (err) {
     // A structurally unusable plan (a missing narration excerpt, the wrong scene or image count, no JSON) gets ONE corrective retry inside the
     // same attempt, so it does not use up one of the project's planning attempts. Anything else (a gate block, a cut-off reply) is not retried.
     if (!/narration excerpt|scenes are needed|concept images?|unusable plan|no narration|JSON/i.test(String(err && err.message))) throw err;
+    structuralRetry = true;
     const fix = `${user}\n\nYour previous reply could not be used: ${String(err.message).slice(0, 200)}. Return the complete JSON again. Every scene MUST have a non-empty narration_excerpt taken from your narration, in order, and the scenes together must cover the whole narration.`;
     normalized = normalizePlan(extractJsonObject(await call(buildSystemPrompt(undefined, { scoped: hasReportScope(project) }), fix, anthropicKey, sink, planOpts)), project);
   }
   let { narrative, warnings } = normalized;
+  // Development only (Nov 12, Sam): counts that show where a length problem starts. Numbers and one short reason; no scripts, no model replies.
+  const sceneWords = (n) => (n.scenes || []).map((sc) => am.countWords(sc.narrationExcerpt));
+  const diag = b1.enabled() ? { target: am.wordTargets(project.duration_sec), duration_sec: project.duration_sec, structuralRetry,
+    initial: { words: narrative.wordCount, sceneSum: sceneWords(narrative).reduce((a, b) => a + b, 0), scenes: sceneWords(narrative) },
+    gateRewrite: false, edit: { ran: false, outcome: "not_needed" }, at: new Date().toISOString() } : null;
   let g = gateNarrative(project, narrative);
   if (!g.ok) {
     // The first draft was blocked. Instead of failing (and using up one of the project's planning attempts), tell the writer exactly what was
@@ -657,6 +665,7 @@ async function generatePlan({ project, anthropicKey, callFn }) {
     const fix = `${user}\n\nYour draft was rejected by the compliance check for these specific reasons:\n${blockLines(g.blocks)}\nRewrite the complete JSON so none of these happen. Keep the same topic, hook and facts; change only what is listed, and take every number from the topic or the agent's report.`;
     normalized = normalizePlan(extractJsonObject(await call(buildSystemPrompt(undefined, { scoped: hasReportScope(project) }), fix, anthropicKey, sink, planOpts)), project);
     narrative = normalized.narrative; warnings = normalized.warnings;
+    if (diag) { diag.gateRewrite = true; diag.afterGateRewrite = { words: narrative.wordCount, scenes: sceneWords(narrative) }; }
     g = gateNarrative(project, narrative);
   }
   if (!g.ok) {
@@ -673,11 +682,15 @@ async function generatePlan({ project, anthropicKey, callFn }) {
     // Development, 60-second Reel over the top of its range: ONE scene-by-scene editing pass (replaces the length rewrite; no extra call).
     console.error("[agent-marketing-plan] over length:", fit.join("; "));
     const ed = await editLengthByScene({ project, narrative, call, anthropicKey, sink, opts: { maxTokens: 3000 }, max: whi });
+    let outcome, reason = null;
     if (ed.narrative) {
-      if (ed.narrative.wordCount < narrative.wordCount) { narrative = ed.narrative; g = ed.gate; }
+      if (ed.narrative.wordCount < narrative.wordCount) { narrative = ed.narrative; g = ed.gate; outcome = "accepted"; }
+      else { outcome = "discarded"; reason = `edited script not shorter (${ed.narrative.wordCount} vs ${narrative.wordCount})`; }
       warnings = warnings.filter((w) => !/^The script is about \d+ spoken words/.test(w));
-    } else console.error("[agent-marketing-plan] length edit not used:", ed.reason);
+    } else { outcome = "discarded"; reason = ed.reason; console.error("[agent-marketing-plan] length edit not used:", ed.reason); }
+    if (diag) diag.edit = { ran: true, outcome, reason, returned: ed.returned || null };
     if (narrative.wordCount > whi) {
+      if (diag && diag.edit.outcome === "accepted") diag.edit.outcome = "accepted_still_over";
       const over = narrative.wordCount - whi;
       narrative.lengthOver = { words: narrative.wordCount, max: whi, over };
       warnings = warnings.filter((w) => !/^The script is about \d+ spoken words/.test(w));
@@ -694,6 +707,11 @@ async function generatePlan({ project, anthropicKey, callFn }) {
         narrative = again.narrative; warnings = again.warnings; g = g2;
       }
     } catch (e) { console.error("[agent-marketing-plan] length rewrite skipped:", String(e && e.message).slice(0, 200)); }
+  }
+  if (diag) {
+    if (!diag.edit.ran && fit.length) diag.edit = { ran: false, outcome: "not_applicable", reason: "not over the top of the word range (or not a 60-second Reel); the original single length rewrite handled: " + fit.join(" ").slice(0, 160) };
+    diag.final = { words: narrative.wordCount, sceneSum: sceneWords(narrative).reduce((a, b) => a + b, 0), scenes: sceneWords(narrative), overLimit: !!narrative.lengthOver };
+    narrative.lengthDiagnostics = diag;
   }
   // The gate has seen the planner's own words; now no sign of any kind survives into anything that reaches the image model (Sam, Oct 27).
   (narrative.scenes || []).forEach((sc) => {

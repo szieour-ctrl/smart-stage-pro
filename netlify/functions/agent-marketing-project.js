@@ -186,7 +186,7 @@ exports.handler = async (event) => {
       clientScenes = aligned.scenes;
       const narrative = {
         editorialAngle: prev.editorialAngle, hook: prev.hook, claimsToVerify: prev.claimsToVerify, missingAgentInputs: prev.missingAgentInputs,
-        attempts: prev.attempts, intakeHash: prev.intakeHash,
+        attempts: prev.attempts, intakeHash: prev.intakeHash, lengthDiagnostics: prev.lengthDiagnostics,
         ...v.narrative, scenes: clientScenes,
         pronunciations: Array.isArray(b.narrative && b.narrative.pronunciations) ? require("./lib/agent-marketing-timing-lib").cleanPronunciations(b.narrative.pronunciations) : (prev.pronunciations || []), cta: v.narrative.cta || prev.cta || null,
         scenesStale: false,

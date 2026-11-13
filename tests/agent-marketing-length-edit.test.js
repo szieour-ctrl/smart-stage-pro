@@ -139,3 +139,88 @@ test("approval of a 60-second script over 155 words is refused in development on
   assert.ok(i > 0 && i < src.indexOf("narrative_approved: {"), "checked before approval is written");
   assert.match(src.slice(i - 400, i), /agent-marketing-b1-evidence-lib"\)\.enabled\(\) && project\.duration_sec === 60/);
 });
+
+// ── Diagnostics (Nov 12, Sam): counts and one short reason in the project record; nothing else ───────────────────────────────────────
+test("diagnostics: an accepted edit records initial, returned and final counts per scene, with the outcome", async () => {
+  await withDev(true, async () => {
+    let calls = 0;
+    const { r } = await run(async (sys, user) => { calls++; return calls === 1 ? planJson() : JSON.stringify({ scenes: JSON.parse(user).scenes.map((s) => ({ index: s.index, narration: CORE[s.index] })) }); });
+    const d = r.narrative.lengthDiagnostics;
+    assert.deepStrictEqual(d.target, [140, 155]);
+    assert.strictEqual(d.initial.words, am.countWords(taggedOf(LONG)));
+    assert.deepStrictEqual(d.initial.scenes, LONG.map(am.countWords));
+    assert.strictEqual(d.initial.sceneSum, d.initial.scenes.reduce((a, b) => a + b, 0));
+    assert.strictEqual(d.structuralRetry, false);
+    assert.strictEqual(d.gateRewrite, false);
+    assert.strictEqual(d.edit.ran, true);
+    assert.strictEqual(d.edit.outcome, "accepted");
+    assert.strictEqual(d.edit.reason, null);
+    assert.strictEqual(d.edit.returned.words, am.countWords(taggedOf(CORE)));
+    assert.deepStrictEqual(d.edit.returned.scenes, CORE.map(am.countWords));
+    assert.strictEqual(d.final.words, r.narrative.wordCount);
+    assert.deepStrictEqual(d.final.scenes, CORE.map(am.countWords));
+    assert.strictEqual(d.final.overLimit, false);
+    const text = JSON.stringify(d);
+    CORE.concat(LONG).forEach((line) => assert.ok(!text.includes(line.slice(0, 30)), "no script text in the diagnostics"));
+    assert.ok(text.length < 1500, "concise");
+  });
+});
+
+test("diagnostics: discarded edits say why; an edit that is shorter but still over is 'accepted_still_over'", async () => {
+  await withDev(true, async () => {
+    const first = { n: 0 };
+    const fail = await run(async () => { if (!first.n++) return planJson(); throw new Error("Planner call timed out"); });
+    let d = fail.r.narrative.lengthDiagnostics;
+    assert.deepStrictEqual([d.edit.ran, d.edit.outcome, d.edit.returned], [true, "discarded", null]);
+    assert.match(d.edit.reason, /^edit call failed: Planner call timed out/);
+    assert.strictEqual(d.final.words, d.initial.words); assert.strictEqual(d.final.overLimit, true);
+
+    const same = { n: 0 };
+    const unchanged = await run(async (sys, user) => (++same.n === 1 ? planJson() : JSON.stringify({ scenes: JSON.parse(user).scenes.map((s) => ({ index: s.index, narration: s.narration })) })));
+    d = unchanged.r.narrative.lengthDiagnostics;
+    assert.strictEqual(d.edit.outcome, "discarded");
+    assert.match(d.edit.reason, /^edited script not shorter \(\d+ vs \d+\)/);
+    assert.strictEqual(d.edit.returned.words, d.initial.words);
+
+    const gate = { n: 0 };
+    const invented = await run(async (sys, user) => (++gate.n === 1 ? planJson() : JSON.stringify({ scenes: JSON.parse(user).scenes.map((s) => ({ index: s.index, narration: s.index === 1 ? CORE[1] + " Prices rose 14% last year." : CORE[s.index] })) })));
+    d = invented.r.narrative.lengthDiagnostics;
+    assert.strictEqual(d.edit.outcome, "discarded");
+    assert.match(d.edit.reason, /^edited script failed the content check/);
+    assert.ok(d.edit.returned.words > 0 && d.edit.returned.scenes.length === 6);
+
+    const missing = { n: 0 };
+    const dropped = await run(async (sys, user) => (++missing.n === 1 ? planJson() : JSON.stringify({ scenes: JSON.parse(user).scenes.slice(1).map((s) => ({ index: s.index, narration: CORE[s.index] })) })));
+    d = dropped.r.narrative.lengthDiagnostics;
+    assert.strictEqual(d.edit.reason, "edit returned the wrong number of scenes");
+    assert.deepStrictEqual(d.edit.returned, { sceneCount: 5 });
+
+    const half = { n: 0 };
+    const some = await run(async (sys, user) => (++half.n === 1 ? planJson() : JSON.stringify({ scenes: JSON.parse(user).scenes.map((s) => ({ index: s.index, narration: s.index === 1 ? LONG[1].split(" ").slice(0, 20).join(" ") + "." : s.narration })) })));
+    d = some.r.narrative.lengthDiagnostics;
+    assert.strictEqual(d.edit.outcome, "accepted_still_over");
+    assert.ok(d.final.words < d.initial.words && d.final.words > 155 && d.final.overLimit);
+  });
+});
+
+test("diagnostics: a draft inside the range records no edit, and nothing is recorded outside development", async () => {
+  await withDev(true, async () => {
+    const inRange = CORE.map((c, i) => (i === 2 || i === 3 ? c + PAD[i] : c));
+    assert.ok(am.countWords(taggedOf(inRange)) >= 140 && am.countWords(taggedOf(inRange)) <= 155, "fixture is inside the range");
+    const okPlan = JSON.parse(planJson()); okPlan.scenes.forEach((sc, i) => { sc.narration_excerpt = inRange[i]; }); okPlan.narration_with_audio_tags = taggedOf(inRange);
+    const { r } = await run(async () => JSON.stringify(okPlan));
+    const d = r.narrative.lengthDiagnostics;
+    assert.deepStrictEqual([d.edit.ran, d.edit.outcome], [false, "not_needed"]);
+    assert.strictEqual(d.initial.words, d.final.words);
+    assert.strictEqual(d.final.overLimit, false);
+  });
+  await withDev(false, async () => {
+    const { r } = await run(async () => planJson());
+    assert.strictEqual(r.narrative.lengthDiagnostics, undefined);
+  });
+});
+
+test("diagnostics survive the agent's own script edits (carried over, not rewritten)", () => {
+  const src = fs.readFileSync(path.join(__dirname, "../netlify/functions/agent-marketing-project.js"), "utf8");
+  assert.match(src, /intakeHash: prev\.intakeHash, lengthDiagnostics: prev\.lengthDiagnostics,/);
+});

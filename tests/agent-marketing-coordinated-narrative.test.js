@@ -21,9 +21,9 @@ test("production prompt is byte-for-byte unchanged", () => {
   assert.ok(!p.some((l) => /^2[hijklnopq]\. /.test(l)), "no Test rule leaks into production");
 });
 
-test("rules the corrections must not touch are pinned word for word: 2g, 2h, 2j, 2k, 2o, 2p", () => {
+test("rules the corrections must not touch are pinned word for word: 2h, 2j, 2k, 2o, 2p (2g was deliberately corrected in Phase C, Nov 13: pathway wording, tested in agent-marketing-pathway-instructions)", () => {
   const pins = {
-    "2g": "5b83c6e60e912f594395e2453badc7010357152ed29cc63ee1bd67c95e5c666d", "2h": "9f74dd63826e49b26b5c4329e1cc0442579dfc55ae78786e003b736dc9405ae2",
+    "2h": "9f74dd63826e49b26b5c4329e1cc0442579dfc55ae78786e003b736dc9405ae2",
     "2j": "aaf6f1ea54c5720056c38d680839eea6bc8e974c932b97036ef7c76bbb4182b8", "2k": "5ac72dcd79ae60bf5a8a1403bee0490fb9de6b7dd0e8dbfafaf5e82e912884c2",
     "2o": "94e674ff1baeb206af1ba0a78d149518a1d7170e31485be8f0948ad5622fe2a6", "2p": "5ac912ad449e17fa119006604e03166b55f1a10b4b15eccde33baae4a6972408", // Nov 12: only the two "60-second" references were made duration-neutral
   };
@@ -76,7 +76,7 @@ test("change 6 (rule 2n): the figures that carry the finding are named with thei
   assert.match(r, /read them together, then state the one thing they show together, naming the one or two figures that carry it with their comparison and leaving the rest out/);
   assert.match(r, /A figure that cuts against the story is stated only where leaving it out would make the answer misleading \(rule 2o\)/);
   assert.ok(!/closed sales, months of inventory, days on market and price/.test(r), "the four-figure bundle is no longer suggested");
-  assert.match(r, /the report's whole menu, not a list to cover/, "the existing menu rule stays");
+  assert.match(r, /its whole menu, not a list to cover/, "the existing menu rule stays (Phase C: when a report is present)");
 });
 
 test("change 7 (rule 2i): the implication becomes the specific consequence the evidence supports for the seller", () => {
@@ -98,7 +98,7 @@ const userFor = (topic, env) => { const prev = process.env.AGENT_MARKETING_B1_EV
   finally { if (prev === undefined) delete process.env.AGENT_MARKETING_B1_EVIDENCE; else process.env.AGENT_MARKETING_B1_EVIDENCE = prev; } };
 
 test("change 1: the narrative architecture is question, answer from the evidence, specific meaning, next step; the other architectures are unchanged", () => {
-  const b2 = { mode: "article_editorial", mechanism: "m", homeownerImplication: "i", editorialAngle: "a", audienceJourney: "j", sourceRefs: [] };
+  const b2 = { mode: "article_report", mechanism: "m", homeownerImplication: "i", editorialAngle: "a", audienceJourney: "j", sourceRefs: [] }; // Option 2 keeps the article-plus-report architecture (Phase C: Option 3 has its own, tested in agent-marketing-pathway-instructions)
   const withDir = userFor(topicWith(b2), true).narrative_architecture;
   assert.strictEqual(withDir, "A question naming what is at stake → the Realtor's answer, built from the evidence that establishes it (the article's facts and the report's figures, each in the scene where it does its work) → what that answer means for the seller, specifically → low-pressure next step");
   assert.ok(!/different points in their decision/.test(withDir), "no longer invites a stage-by-stage close (rule 2k)");

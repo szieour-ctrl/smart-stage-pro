@@ -10,7 +10,7 @@ const sha = (s) => crypto.createHash("sha256").update(s, "utf8").digest("hex");
 // sha256 of buildSystemPrompt() on production main (622f96e), and of the B1 development prompt (rules 2b, 2g, 2h as approved in commit 83fb916, plus
 // rule 2i, the B2 editorial direction, Nov 8, 2026).
 const PRODUCTION_SHA256 = "25f3118fed1b9726fc4dc78b16dcc92233cef785d3c074ef89a6ee7aaf7b0495";
-const B1_DEV_SHA256 = "02755a0d6b50ba72b2b1827012b8a675c08be3525f113381491028460e35f787";   // Nov 12, 2026: seven coordinated story-construction corrections (2f, 5b, 7 Test variants; 2i, 2l, 2n; architecture)
+const B1_DEV_SHA256 = "b4b0cc7aa9d82bff1a21f17f2cb88a07f2ee5319fad514135608ec22c28c0a05";   // Nov 12, 2026: progressive-answer corrections (2q, 2i, 5a Test variant, 7)
 const rule = (prompt, id) => prompt.split("\n").filter((l) => l.startsWith(`${id}. `));
 const withEnv = async (value, fn) => {
   const old = process.env.AGENT_MARKETING_B1_EVIDENCE;
@@ -33,10 +33,10 @@ test("prompt flag: AGENT_MARKETING_B1_EVIDENCE=dev gives the B1 prompt, which di
   assert.strictEqual(sha(dev), B1_DEV_SHA256);
   await withEnv("dev", () => assert.strictEqual(sha(planLib.buildSystemPrompt()), B1_DEV_SHA256));
   const d = dev.split("\n"), q = prod.split("\n");
-  assert.deepStrictEqual(d.filter((l) => !q.includes(l)).map((l) => l.slice(0, 3)), ["2b.", "2f.", "2g.", "2h.", "2i.", "2j.", "2k.", "2l.", "2n.", "2o.", "2p.", "2q.", "5b.", "7. "], "only 2b, 2g and the new 2h, 2i, 2j, 2k, 2l, 2n, 2o, 2p and 2q are new");
-  assert.deepStrictEqual(q.filter((l) => !d.includes(l)).map((l) => l.slice(0, 3)), ["2b.", "2f.", "2g.", "5b.", "7. "], "only production's 2b, 2f, 2g, 5b and 7 are replaced");
+  assert.deepStrictEqual(d.filter((l) => !q.includes(l)).map((l) => l.slice(0, 3)), ["2b.", "2f.", "2g.", "2h.", "2i.", "2j.", "2k.", "2l.", "2n.", "2o.", "2p.", "2q.", "5a.", "5b.", "7. "], "only 2b, 2g and the new 2h, 2i, 2j, 2k, 2l, 2n, 2o, 2p and 2q are new");
+  assert.deepStrictEqual(q.filter((l) => !d.includes(l)).map((l) => l.slice(0, 3)), ["2b.", "2f.", "2g.", "5a.", "5b.", "7. "], "only production's 2b, 2f, 2g, 5a, 5b and 7 are replaced");
   // same order otherwise; 2h sits right after 2g
-  const strip = (lines) => lines.filter((l) => !/^(2[bfghijklnopq]|5b|7)\. /.test(l));
+  const strip = (lines) => lines.filter((l) => !/^(2[bfghijklnopq]|5a|5b|7)\. /.test(l));
   assert.deepStrictEqual(strip(d), strip(q));
   assert.strictEqual(d.indexOf(rule(dev, "2h")[0]), d.indexOf(rule(dev, "2g")[0]) + 1);
   assert.strictEqual(d.indexOf(rule(dev, "2i")[0]), d.indexOf(rule(dev, "2h")[0]) + 1);

@@ -295,7 +295,7 @@ test("saved topic: only a record that passed the evidence contract carries the t
 test("saved topic: the planner is told to keep the selected topic and one angle, weigh the thesis and explanation findings, and word them by the evidence", () => {
   const p = planLib.buildSystemPrompt(DEV, {});
   const r2i = p.split("\n").find((l) => l.startsWith("2i. ")), r2h = p.split("\n").find((l) => l.startsWith("2h. "));
-  assert.match(r2i, /Keep the selected topic and its question; do not replace its angle with the article's thesis or add a second point/);
+  assert.match(r2i, /defines the subject, not the final hook[\s\S]*Do not replace its angle with the article's thesis or add a second point/);
   assert.match(r2i, /consider whether article_evidence\.central_argument and the validated explanation findings give a meaningful interpretation that editorial_direction leaves out/);
   assert.match(r2i, /as the agent's reading, worded with the confidence the evidence earns \(rule 2o\)/);
   assert.match(r2i, /make its angle the one point the Reel makes/, "the one-central-angle structure is kept");

@@ -21,12 +21,11 @@ test("production prompt is byte-for-byte unchanged", () => {
   assert.ok(!p.some((l) => /^2[hijklnopq]\. /.test(l)), "no Test rule leaks into production");
 });
 
-test("rules the corrections must not touch are pinned word for word: 2g, 2h, 2j, 2k, 2o, 2p, 2q", () => {
+test("rules the corrections must not touch are pinned word for word: 2g, 2h, 2j, 2k, 2o, 2p", () => {
   const pins = {
     "2g": "5b83c6e60e912f594395e2453badc7010357152ed29cc63ee1bd67c95e5c666d", "2h": "9f74dd63826e49b26b5c4329e1cc0442579dfc55ae78786e003b736dc9405ae2",
     "2j": "aaf6f1ea54c5720056c38d680839eea6bc8e974c932b97036ef7c76bbb4182b8", "2k": "5ac72dcd79ae60bf5a8a1403bee0490fb9de6b7dd0e8dbfafaf5e82e912884c2",
     "2o": "94e674ff1baeb206af1ba0a78d149518a1d7170e31485be8f0948ad5622fe2a6", "2p": "d3f63971769d9513bab7bb19162f19ca8931fc2c9a68b3028c9232b12c83a67e",
-    "2q": "2b98db95cc6380c8ca5bec4131f3ac7fb382962239f1db8f8d62b3be5a77caa3",
   };
   Object.entries(pins).forEach(([id, h]) => assert.strictEqual(sha(rule(DEV, id)), h, `rule ${id} changed`));
 });
@@ -59,7 +58,7 @@ test("change 2 (rule 2l, Sam's wording): complementary evidence, one interpretat
 
 test("change 4 (rule 7, Test): the story is the question, the evidence and answer, the homeowner meaning, then the call to action; slice rules unchanged", () => {
   const r = rule(DEV, "7");
-  assert.match(r, /in story order: the opening question, the evidence and the answer developed across the middle scenes, what the answer means for the homeowner, then the branded call to action \(add comparison\/context scenes between them for longer pieces\)/);
+  assert.match(r, /in story order: the opening question, then middle scenes that advance one connected argument/);
   assert.ok(!/tension or misconception/.test(r));
   assert.match(r, /Every scene has a narration_excerpt that is an exact consecutive slice of your narration/);
 });
@@ -89,7 +88,7 @@ test("change 7 (rule 2i): the implication becomes the specific consequence the e
 test("the corrections reconcile existing rules: no new rule (no 2r), same rule labels as before plus nothing", () => {
   const labels = lines(DEV).map((l) => (l.match(/^(\d+[a-z]?)\. /) || [])[1]).filter(Boolean);
   assert.ok(!labels.includes("2r"));
-  ["2f", "2g", "2h", "2i", "2j", "2k", "2l", "2n", "2o", "2p", "2q", "5b", "7"].forEach((id) => assert.strictEqual(labels.filter((x) => x === id).length, 1, id));
+  ["2f", "2g", "2h", "2i", "2j", "2k", "2l", "2n", "2o", "2p", "2q", "5a", "5b", "7"].forEach((id) => assert.strictEqual(labels.filter((x) => x === id).length, 1, id));
 });
 
 const topicWith = (b2) => ({ id: "t1", question: "Is supply changing?", whyItMatters: "w", scope: "selected", origin: "web", reportFirst: false, trendSignals: [], reportFigures: [],
@@ -115,4 +114,52 @@ test("the hook stays the first spoken sentence: a question hook the narration op
   const other = planLib.alignHook({ ...raw, hook: "Is Roseville still a seller's market, or did that just change?" });
   assert.strictEqual(other.how, "inserted");
   assert.match(other.raw.narration_with_audio_tags, /^\[conversational\] Is Roseville still a seller's market, or did that just change\? Roseville is at 3\.2/);
+});
+
+// Nov 12, 2026 (Sam): progressive revelation. Curiosity sustained by interpretation that begins early and deepens; not a question followed by a statistics lecture,
+// and not a question followed at once by the full answer.
+test("2q: the answer begins developing within a few sentences after the hook, is not given in the hook, and is not saved for a final scene", () => {
+  const r = rule(DEV, "2q");
+  assert.match(r, /begins developing the Realtor's answer/);
+  assert.match(r, /deepens, substantiates, or clarifies that interpretation/);
+  assert.match(r, /Do not follow the hook with a complete answer/);
+  assert.match(r, /do not hold the interpretation back for a final scene/);
+  assert.match(r, /EVIDENCE AND PROGRESSIVE ANSWER\./);
+  assert.ok(!/EVIDENCE AND PAYOFF/.test(r) && !/must investigate it/.test(r));
+  assert.match(r, /Do not answer the question in the hook/, "the question-led hook is kept");
+  assert.match(r, /first spoken sentence of `narration_with_audio_tags`, word for word/);
+});
+
+test("7: Test storyboard advances one connected argument; scene count, roles and continuity language are unchanged", () => {
+  const r = rule(DEV, "7");
+  assert.match(r, /advance one connected argument/);
+  assert.match(r, /never a statistical recital alone/);
+  assert.match(r, /scenes need not share one function/);
+  assert.match(r, /exact consecutive slice of your narration/);
+  assert.match(r, /the number of scenes you are given/);
+});
+
+test("2i: the topic defines the subject, not the hook", () => {
+  const r = rule(DEV, "2i");
+  assert.match(r, /defines the subject, not the final hook/);
+  assert.match(r, /instead of paraphrasing the topic's question/);
+  assert.ok(!/Keep the selected topic and its question/.test(r));
+});
+
+test("5a Test variant: example is generic, shows early interpretation, connected evidence, conclusion, homeowner consequence and a warm close; production 5a unchanged", () => {
+  const d = rule(DEV, "5a"), p = rule({}, "5a");
+  assert.ok(p.includes("Buyers have more choices right now") && p.includes("This means condition and pricing precision matter"), "production example untouched");
+  assert.ok(!d.includes("Buyers have more choices") && !d.includes("condition and pricing precision") && !d.includes("Active listings are sitting a median"), "old template gone from Test");
+  assert.ok(!/Roseville|2\.8|3\.2|31 days|99\.2/.test(d.split("Style example only")[1]), "no Roseville statistics or wording in the example");
+  const ex = d.split("Style example only")[1];
+  assert.match(ex, /\[conversational\] Everyone says <the common belief>/);
+  assert.match(ex, /\? \[thoughtful\] Here's how I read it\./, "unanswered question, then interpretation begins at once");
+  assert.match(ex, /which tells me <what it means>/, "evidence tied to its meaning");
+  assert.match(ex, /So the honest answer is <clear professional conclusion>/);
+  assert.match(ex, /For you as a seller, that means <specific consequence/);
+  assert.match(ex, /\[warm\] Want to talk through where your home fits\?/);
+  assert.match(d, /\(d\) Contractions always/, "voice rules kept");
+  assert.match(d, /\(b\) Use an ellipsis/, "delivery rules kept");
+  ["[pause]", "[thoughtful]", "[emphasis]", "[warm]", "[conversational]"].forEach((t) => assert.ok(ex.includes(t), t));
+  assert.match(d, /Say what each figure means in the same breath/);
 });

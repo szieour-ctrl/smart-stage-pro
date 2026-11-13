@@ -10,7 +10,7 @@ const sha = (s) => crypto.createHash("sha256").update(s, "utf8").digest("hex");
 // sha256 of buildSystemPrompt() on production main (622f96e), and of the B1 development prompt (rules 2b, 2g, 2h as approved in commit 83fb916, plus
 // rule 2i, the B2 editorial direction, Nov 8, 2026).
 const PRODUCTION_SHA256 = "25f3118fed1b9726fc4dc78b16dcc92233cef785d3c074ef89a6ee7aaf7b0495";
-const B1_DEV_SHA256 = "bb13779926eb7d480b97ae60101848e1a97bc634ec65a3b4d063fbaceb98f718";   // Nov 12, 2026: + rule 2o (take a position; confidence matches the evidence), 2i/2j/2l/2n no longer push hedging
+const B1_DEV_SHA256 = "1dc61b5987b8518cec8d365e130353cfd64e134de9d3f00515a2d39c16c76bae";   // Nov 12, 2026: + rule 2o (take a position; confidence matches the evidence), 2i/2j/2l/2n no longer push hedging
 const rule = (prompt, id) => prompt.split("\n").filter((l) => l.startsWith(`${id}. `));
 const withEnv = async (value, fn) => {
   const old = process.env.AGENT_MARKETING_B1_EVIDENCE;

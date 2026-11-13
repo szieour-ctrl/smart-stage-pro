@@ -321,24 +321,30 @@ test("saved topic: the planner message for an older supply-only topic carries th
   assert.ok(!(out instanceof Error) || !/goolsby/i.test(String(out.message)), "no brokerage name in what comes back");
 });
 
-test("take a position: rule 2o makes the Realtor commit, matches confidence to evidence, and adds no automatic caveats (development prompt only)", () => {
+test("take a position: rule 2o organizes the Reel around the conclusion, separates material from nonmaterial limitations, and keeps may/could for real uncertainty (development prompt only)", () => {
   const p = planLib.buildSystemPrompt(DEV, {});
-  const r = p.split("\n").find((l) => l.startsWith("2o. "));
+  const line = (n) => p.split("\n").find((l) => l.startsWith(n + ". "));
+  const r = line("2o");
   assert.ok(r, "rule 2o is present");
-  assert.match(r, /Build the Reel around one clear Realtor position, support it with the relevant figures, explain what it means for homeowners, and close with actionable guidance/);
-  assert.match(r, /confident, evidence-grounded professional judgment, not statistical certainty/);
-  assert.match(r, /unsupported factual assertion[^.]*from a professional interpretation reasonably grounded in several market indicators/);
+  assert.match(r, /Organize the Reel around the Realtor's professional conclusion, not around the limits of the supporting data/);
+  assert.match(r, /one clear position, support it with the relevant figures, explain what it means for homeowners, and close with actionable guidance/);
+  assert.match(r, /Prioritize what the evidence reasonably supports, not an inventory of what it cannot prove/);
   assert.match(r, /Match the strength of the conclusion to the strength of the evidence/);
-  assert.match(r, /several consistent indicators[^.]*state the conclusion confidently[^.]*without \"may\" or \"could\" hedging/);
-  assert.match(r, /Where the evidence is limited or mixed, moderate the conclusion itself rather than adding disclaimers/);
-  assert.match(r, /Do not add statistical caveats, verbal qualifications, or explanations of what the data cannot prove or measure/);
-  assert.match(r, /only when leaving it out would make a specific statement materially misleading/);
+  assert.match(r, /unsupported factual assertion[^.]*which is not allowed[^.]*professional interpretation reasonably grounded in several indicators/);
+  assert.match(r, /A material limitation is one whose omission would make a specific factual statement or the Realtor's conclusion misleading: respect it, and put it in the narration/);
+  assert.match(r, /A nonmaterial limitation is any other gap in the evidence: it does not belong in the narration just because it exists/);
+  assert.match(r, /Do not replace professional interpretation with methodological commentary, and do not add statements about what the data cannot establish, prove or measure/);
+  assert.match(r, /ask whether leaving it out would materially misrepresent the market evidence or the Realtor's conclusion; if not, leave it out/);
+  assert.match(r, /Where the evidence is limited or mixed, moderate the conclusion itself/);
+  assert.match(r, /\"may\" and \"could\" are right for a genuinely uncertain contributing factor, and are not to be added or stripped by habit/);
+  assert.doesNotMatch(r, /without \"may\" or \"could\" hedging/, "may/could are not banned");
   assert.match(r, /Rule 2h attribution and the exact figures stay as they are/);
-  // the rules that used to push toward hedging now defer to it
-  const j = p.split("\n").find((l) => l.startsWith("2j. ")), l = p.split("\n").find((x) => x.startsWith("2l. "));
-  assert.doesNotMatch(j, /acknowledge a material uncertainty where it matters/);
-  assert.match(j, /include a qualification only where leaving it out would make a specific statement materially misleading/);
-  assert.doesNotMatch(l, /use \"could\", \"may\", \"tends to\"/);
-  assert.match(l, /confidence the supporting figures earn \(rule 2o\)/);
+  // the other rules do not reintroduce methodological commentary
+  assert.match(line("2n"), /not material for the narration, and you do not explain what a figure does not show unless rule 2o's material test is met/);
+  assert.match(line("2l"), /its caveats are honored where they are material under rule 2o and are otherwise not narrated/);
+  assert.doesNotMatch(line("2l"), /caveats must be honored/);
+  assert.match(line("2j"), /include a qualification only where leaving it out would make a specific statement materially misleading/);
+  assert.doesNotMatch(line("2j"), /acknowledge a material uncertainty/);
+  assert.match(line("2i"), /worded with the confidence the evidence earns \(rule 2o\)/);
   assert.ok(!planLib.buildSystemPrompt({}, {}).split("\n").some((x) => x.startsWith("2o. ")), "the production prompt is unchanged");
 });

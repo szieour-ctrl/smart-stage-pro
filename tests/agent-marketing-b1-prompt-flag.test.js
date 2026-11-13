@@ -45,7 +45,7 @@ test("prompt flag: AGENT_MARKETING_B1_EVIDENCE=dev gives the B1 prompt, which di
   assert.strictEqual(d.indexOf(rule(dev, "2o")[0]), d.indexOf(rule(dev, "2n")[0]) + 1);
   assert.strictEqual(d.indexOf(rule(dev, "2p")[0]), d.indexOf(rule(dev, "2o")[0]) + 1);
   assert.strictEqual(d.indexOf(rule(dev, "2q")[0]), d.indexOf(rule(dev, "2p")[0]) + 1);
-  assert.match(rule(dev, "2q")[0], /QUESTION-LED HOOK\. The hook must take the form of a compelling, specific question/); assert.match(rule(dev, "2q")[0], /Do not answer the question in the hook/); assert.match(rule(dev, "2q")[0], /first spoken sentence of `narration_with_audio_tags`, word for word/); assert.match(rule(dev, "2q")[0], /hook` field must repeat that sentence exactly/);
+  assert.match(rule(dev, "2q")[0], /QUESTION-LED HOOK\. The hook must take the form of a compelling, specific question/); assert.match(rule(dev, "2q")[0], /Do not answer the question in the hook/); assert.match(rule(dev, "2q")[0], /first spoken sentence of `narration_with_audio_tags`, word for word/); assert.match(rule(dev, "2q")[0], /hook` field must repeat it exactly/);
   assert.ok(!/^2q\. /m.test(prod), "production has no 2q");
   assert.match(rule(dev, "2p")[0], /SYNTHESIZE BEFORE NARRATING/); assert.match(rule(dev, "2p")[0], /Preserve Rule 2o's standards/);
   assert.ok(!/^2p\. /m.test(prod), "production has no 2p");

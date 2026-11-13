@@ -31,12 +31,29 @@ const MUSIC = [
   { key: "none", label: "No music (silent)" },
 ];
 const MUSIC_KEYS = MUSIC.map((m) => m.key);
+// One shared duration contract (Nov 12, 2026, Phase A: behavior-preserving; every value below is the value that was already in force).
+//   range      recommended spoken words (production and Test); advisory, never blocks approval
+//   devRange   recommended spoken words in the development Test environment, only where it differs from `range`
+//   aim        editorial writing aim inside the range (Test only); none where absent
+//   scenes     scene count range (addendum A2)
+//   images     generated-image range: GPT_IMAGE_2_CONCEPT + AGENT_SCENE combined. Since Oct 23 ONE wide 16:9 image is generated per scene (the 9:16
+//              version is cropped from it), so the same budget that used to buy 2 images x 2 formats now buys up to 4 different images.
 // Spoken words per duration (addendum A2). Guidance only; the audio length decides final timing.
-const WORD_TARGETS = { 30: [55, 70], 45: [105, 125], 60: [110, 130] };
 // Nov 9, 2026 (development only): measured ElevenLabs narration runs about 2.8 spoken words a second (118 words = 41-42 s), so 60 seconds needs 140-160 words.
-// Production keeps the table above; the 30- and 45-second targets are the same everywhere.
+// Production keeps `range`; the 30- and 45-second targets are the same everywhere.
 // Nov 12, 2026 (Sam): Reels and Shorts, so 60 seconds is a ceiling. The top is 155 (Sam's number); 45-second Reels of 115-130 words have narrated fine, so narration runs fast enough for it.
-const DEV_WORD_TARGETS = { ...WORD_TARGETS, 60: [140, 155] };
+// Nov 12, 2026 (Sam, Test only): the 45-second aim is 105-110 words, about 42-44 seconds at the measured pace of about 151 words a minute (not a guaranteed rate).
+const DURATION_CONTRACT = {
+  30: { range: [55, 70], scenes: [4, 4], images: [2, 3] },
+  45: { range: [105, 125], aim: [105, 110], scenes: [5, 6], images: [3, 4] },
+  60: { range: [110, 130], devRange: [140, 155], scenes: [6, 8], images: [4, 6] },
+};
+const fromContract = (pick) => Object.fromEntries(Object.entries(DURATION_CONTRACT).filter(([, c]) => pick(c) !== undefined).map(([d, c]) => [d, pick(c)]));
+const WORD_TARGETS = fromContract((c) => c.range);
+const DEV_WORD_TARGETS = fromContract((c) => c.devRange || c.range);
+const SCENE_RANGES = fromContract((c) => c.scenes);
+const IMAGE_RANGES = fromContract((c) => c.images);
+const WRITING_AIMS = fromContract((c) => c.aim);
 function wordTargets(durationSec, env) {
   const dev = String((env || process.env).AGENT_MARKETING_B1_EVIDENCE || "").trim().toLowerCase() === "dev";
   return (dev ? DEV_WORD_TARGETS : WORD_TARGETS)[durationSec] || (dev ? DEV_WORD_TARGETS : WORD_TARGETS)[45];
@@ -168,6 +185,6 @@ const NOT_EDITABLE_AFTER = ["rendering", "rendered", "published"];
 
 module.exports = {
   marketReviewEnabled,
-  DURATIONS, FORMATS, VOICES, MUSIC, WORD_TARGETS, DEV_WORD_TARGETS, wordTargets, UUID_RE, NOT_EDITABLE_AFTER,
+  DURATIONS, FORMATS, VOICES, MUSIC, DURATION_CONTRACT, WORD_TARGETS, DEV_WORD_TARGETS, SCENE_RANGES, IMAGE_RANGES, WRITING_AIMS, wordTargets, UUID_RE, NOT_EDITABLE_AFTER,
   isEnabledFor, validateCreate, stripAudioTags, countWords, validateNarrative, gateInputFor, topicNotice, noticeOverlayFor, sourceCreditFor, attachNotice,
 };

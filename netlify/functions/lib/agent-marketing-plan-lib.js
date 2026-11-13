@@ -23,8 +23,9 @@ const STALE_PLANNING_MS = 5 * 60 * 1000;
 
 // Addendum A2: scene counts by duration. Since Oct 23 ONE wide 16:9 image is generated per scene (the 9:16 version is cropped from it),
 // so the same budget that used to buy 2 images x 2 formats now buys up to 4 different images.
-const SCENE_RANGE = { 30: [4, 4], 45: [5, 6], 60: [6, 8] };
-const GPT_RANGE = { 30: [2, 3], 45: [3, 4], 60: [4, 6] };
+// Both tables now come from the shared duration contract (agent-marketing-lib DURATION_CONTRACT); the values are unchanged.
+const SCENE_RANGE = am.SCENE_RANGES;
+const GPT_RANGE = am.IMAGE_RANGES;
 // Most agents have no on-point photos, so a Reel must be finishable with none. Scenes are one of:
 //   GPT_IMAGE_2_CONCEPT  new concept image (the included allowance)
 //   CONCEPT_REUSE        an earlier generated image re-framed (a different crop of what is visible in it) with different motion
@@ -614,7 +615,7 @@ function summarizeClaudeUsage(sink) {
 // Nov 12, 2026 (Sam, Test only): an editorial AIM inside the recommended range, for 45-second Reels only. 105-110 words at the measured ElevenLabs pace
 // of about 151 words a minute is roughly 42-44 seconds; that pace is the basis for the aim, not a guaranteed rate. The range and the nonblocking
 // approval are unchanged. The aim travels in the user message (the system prompt, and its hash, do not change).
-const WRITING_AIM = { 45: [105, 110] };
+const WRITING_AIM = am.WRITING_AIMS; // from the shared duration contract; the values are unchanged
 const writingAimFor = (dur) => (b1.enabled() && WRITING_AIM[dur]) || null;
 function aimText(aim) {
   return `${aim[0]}-${aim[1]} spoken words. This is an editorial aim inside the recommended range, based on a measured narration pace of about 151 words a minute (not a guaranteed rate). Write the first draft toward it: spend the words on the Realtor's central interpretation, the decisive supporting evidence, the homeowner consequence and a natural invitation. It is not a per-scene quota, and it never replaces a required attribution.`;

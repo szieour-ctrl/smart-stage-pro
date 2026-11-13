@@ -10,7 +10,7 @@ const sha = (s) => crypto.createHash("sha256").update(s, "utf8").digest("hex");
 // sha256 of buildSystemPrompt() on production main (622f96e), and of the B1 development prompt (rules 2b, 2g, 2h as approved in commit 83fb916, plus
 // rule 2i, the B2 editorial direction, Nov 8, 2026).
 const PRODUCTION_SHA256 = "25f3118fed1b9726fc4dc78b16dcc92233cef785d3c074ef89a6ee7aaf7b0495";
-const B1_DEV_SHA256 = "e516197925c2b62edd1ad1d87a80adb1525ae4ba4c05c5eaa20ed33b035b1c7d";   // Nov 12, 2026: + rule 2p (editorial synthesis and prioritization for a 60-second Reel)
+const B1_DEV_SHA256 = "b0efb37c0f9687786aea714f7a01cee6c7ea0a5ccacee627291a2f6106085da4";   // Nov 12, 2026: + rule 2q (one governing editorial premise)
 const rule = (prompt, id) => prompt.split("\n").filter((l) => l.startsWith(`${id}. `));
 const withEnv = async (value, fn) => {
   const old = process.env.AGENT_MARKETING_B1_EVIDENCE;
@@ -28,15 +28,15 @@ test("prompt flag: unset (or any value but dev), the whole system prompt is byte
   assert.ok(!/article_evidence/.test(p), "production never mentions article_evidence");
 });
 
-test("prompt flag: AGENT_MARKETING_B1_EVIDENCE=dev gives the B1 prompt, which differs only in rules 2b, 2g, 2h, 2i, 2j, 2k, 2l, 2n, 2o and 2p", async () => {
+test("prompt flag: AGENT_MARKETING_B1_EVIDENCE=dev gives the B1 prompt, which differs only in rules 2b, 2g, 2h, 2i, 2j, 2k, 2l, 2n, 2o, 2p and 2q", async () => {
   const dev = planLib.buildSystemPrompt({ AGENT_MARKETING_B1_EVIDENCE: "dev" }), prod = planLib.buildSystemPrompt({});
   assert.strictEqual(sha(dev), B1_DEV_SHA256);
   await withEnv("dev", () => assert.strictEqual(sha(planLib.buildSystemPrompt()), B1_DEV_SHA256));
   const d = dev.split("\n"), q = prod.split("\n");
-  assert.deepStrictEqual(d.filter((l) => !q.includes(l)).map((l) => l.slice(0, 3)), ["2b.", "2g.", "2h.", "2i.", "2j.", "2k.", "2l.", "2n.", "2o.", "2p."], "only 2b, 2g and the new 2h, 2i, 2j, 2k, 2l, 2n, 2o and 2p are new");
+  assert.deepStrictEqual(d.filter((l) => !q.includes(l)).map((l) => l.slice(0, 3)), ["2b.", "2g.", "2h.", "2i.", "2j.", "2k.", "2l.", "2n.", "2o.", "2p.", "2q."], "only 2b, 2g and the new 2h, 2i, 2j, 2k, 2l, 2n, 2o, 2p and 2q are new");
   assert.deepStrictEqual(q.filter((l) => !d.includes(l)).map((l) => l.slice(0, 3)), ["2b.", "2g."], "only production's 2b and 2g are replaced");
   // same order otherwise; 2h sits right after 2g
-  const strip = (lines) => lines.filter((l) => !/^2[bghijklnop]\. /.test(l));
+  const strip = (lines) => lines.filter((l) => !/^2[bghijklnopq]\. /.test(l));
   assert.deepStrictEqual(strip(d), strip(q));
   assert.strictEqual(d.indexOf(rule(dev, "2h")[0]), d.indexOf(rule(dev, "2g")[0]) + 1);
   assert.strictEqual(d.indexOf(rule(dev, "2i")[0]), d.indexOf(rule(dev, "2h")[0]) + 1);
@@ -44,6 +44,9 @@ test("prompt flag: AGENT_MARKETING_B1_EVIDENCE=dev gives the B1 prompt, which di
   assert.strictEqual(d.indexOf(rule(dev, "2n")[0]), d.indexOf(rule(dev, "2l")[0]) + 1);
   assert.strictEqual(d.indexOf(rule(dev, "2o")[0]), d.indexOf(rule(dev, "2n")[0]) + 1);
   assert.strictEqual(d.indexOf(rule(dev, "2p")[0]), d.indexOf(rule(dev, "2o")[0]) + 1);
+  assert.strictEqual(d.indexOf(rule(dev, "2q")[0]), d.indexOf(rule(dev, "2p")[0]) + 1);
+  assert.match(rule(dev, "2q")[0], /first spoken sentence of `narration_with_audio_tags`, word for word/); assert.match(rule(dev, "2q")[0], /hook` field must repeat that sentence exactly/);
+  assert.ok(!/^2q\. /m.test(prod), "production has no 2q");
   assert.match(rule(dev, "2p")[0], /SYNTHESIZE BEFORE NARRATING/); assert.match(rule(dev, "2p")[0], /Preserve Rule 2o's standards/);
   assert.ok(!/^2p\. /m.test(prod), "production has no 2p");
   assert.match(rule(dev, "2j")[0], /not the boundary of the agent's professional interpretation/);

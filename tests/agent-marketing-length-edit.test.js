@@ -79,14 +79,15 @@ test("over 155: one editing call sees every scene, edits scene by scene, and nar
   });
 });
 
-test("edit still over 155: the draft is kept with a clear warning, flagged too long, and no further model call is made", async () => {
+test("edit still over 155: the draft is kept with a nonblocking advisory, and no further model call is made", async () => {
   await withDev(true, async () => {
     let calls = 0;
     const { r, e } = await run(async (sys, user) => { calls++; return calls === 1 ? planJson() : JSON.stringify({ scenes: JSON.parse(user).scenes.map((s) => ({ index: s.index, narration: s.narration })) }); });
     assert.ifError(e);
     assert.strictEqual(calls, 2);
     assert.ok(r.narrative.lengthOver && r.narrative.lengthOver.max === 155 && r.narrative.lengthOver.words > 155);
-    assert.match(r.warnings[0], /^Too long for a 60-second Reel: \d+ spoken words, maximum 155\. Cut about \d+ words .*draft is kept/);
+    assert.match(r.warnings[0], /^\d+ spoken words\. The recommended range for a 60-second Reel is 140–155 words\. Actual narration duration depends on delivery\. You may edit the script or approve it as written\.$/);
+    assert.ok(!/before approving|Cut about/.test(r.warnings.join(" ")), "an advisory, not a demand");
     assert.strictEqual(r.narrative.scenes.length, 6);
   });
 });
@@ -133,11 +134,11 @@ test("retagScenes puts mid-scene tags before the same sentence", () => {
   assert.strictEqual(planLib.retagScenes(tagged, scenes, ["One two. Four five."])[0], "[conversational] One two. [pause] Four five.");
 });
 
-test("approval of a 60-second script over 155 words is refused in development only", () => {
-  const src = fs.readFileSync(path.join(__dirname, "../netlify/functions/agent-marketing-project.js"), "utf8");
-  const i = src.indexOf('code: "script_too_long"');
-  assert.ok(i > 0 && i < src.indexOf("narrative_approved: {"), "checked before approval is written");
-  assert.match(src.slice(i - 400, i), /agent-marketing-b1-evidence-lib"\)\.enabled\(\) && project\.duration_sec === 60/);
+test("approval is no longer refused for word count (source check): no script_too_long anywhere", () => {
+  const dir = path.join(__dirname, "../netlify/functions");
+  const files = fs.readdirSync(dir).filter((f) => f.endsWith(".js")).map((f) => path.join(dir, f)).concat(fs.readdirSync(path.join(dir, "lib")).filter((f) => f.endsWith(".js")).map((f) => path.join(dir, "lib", f)));
+  files.forEach((f) => assert.ok(!/script_too_long/.test(fs.readFileSync(f, "utf8")), f + " has no word-count refusal"));
+  assert.ok(!/script_too_long/.test(fs.readFileSync(path.join(__dirname, "../agent-marketing.html"), "utf8")));
 });
 
 // ── Diagnostics (Nov 12, Sam): counts and one short reason in the project record; nothing else ───────────────────────────────────────
@@ -223,4 +224,89 @@ test("diagnostics: a draft inside the range records no edit, and nothing is reco
 test("diagnostics survive the agent's own script edits (carried over, not rewritten)", () => {
   const src = fs.readFileSync(path.join(__dirname, "../netlify/functions/agent-marketing-project.js"), "utf8");
   assert.match(src, /intakeHash: prev\.intakeHash, lengthDiagnostics: prev\.lengthDiagnostics,/);
+});
+
+// ── Opening hook, and cross-scene compression (Nov 12, 2026, Sam) ────────────────────────────────────────────────────────────────────
+const MISMATCH_HOOK = "New homes next door change what your resale home is worth.";
+const planWithHook = (hook) => JSON.stringify({ ...JSON.parse(planJson()), hook });
+const norm = (t) => String(t).replace(/\s+/g, " ").trim();
+
+test("hook: a hook the narration does not open with is spoken first, in the narration and in scene 1, and the field matches", async () => {
+  await withDev(true, async () => {
+    let calls = 0;
+    const { r, e } = await run(async (sys, user) => { calls++; return calls === 1 ? planWithHook(MISMATCH_HOOK) : JSON.stringify({ scenes: JSON.parse(user).scenes.map((s) => ({ index: s.index, narration: s.narration })) }); });
+    assert.ifError(e);
+    const n = r.narrative;
+    assert.strictEqual(am.stripAudioTags(n.narrationTagged).split(/(?<=[.!?])\s+/)[0], MISMATCH_HOOK, "first spoken sentence is the hook");
+    assert.strictEqual(n.hook, MISMATCH_HOOK, "the hook field is that sentence");
+    assert.ok(n.scenes[0].narrationExcerpt.startsWith(MISMATCH_HOOK), "scene 1 uses the corresponding narration");
+    assert.strictEqual(norm(n.scenes.map((s) => s.narrationExcerpt).join(" ")), norm(n.captionText), "scene excerpts and continuous narration stay in step");
+    assert.strictEqual(n.hookSync, "inserted");
+    assert.strictEqual(calls, 2, "no model call was spent on the hook (planner + the length editor only)");
+  });
+});
+
+test("hook: when the narration already opens with it, nothing is inserted and the field takes the spoken sentence", () => {
+  const raw = JSON.parse(planJson());
+  const a = planLib.alignHook({ ...raw, hook: CORE[0].replace(/\?$/, "") });
+  assert.strictEqual(a.how, "matched");
+  assert.strictEqual(a.raw.hook, CORE[0]);
+  assert.strictEqual(a.raw.narration_with_audio_tags, raw.narration_with_audio_tags, "narration untouched");
+  assert.strictEqual(planLib.alignHook({ ...raw, hook: "" }).raw.hook, CORE[0], "an empty hook is filled from the narration");
+  const ins = planLib.alignHook({ ...raw, hook: "New homes next door change what your resale home is worth" });
+  assert.match(ins.raw.narration_with_audio_tags, /^\[conversational\] New homes next door change what your resale home is worth\. Is new construction/, "leading tag stays first; a missing full stop is added");
+});
+
+test("hook: the editor keeps the opening, and the field still equals the first spoken sentence after editing", async () => {
+  await withDev(true, async () => {
+    let calls = 0;
+    const { r } = await run(async (sys, user) => { calls++; return calls === 1 ? planWithHook(MISMATCH_HOOK) : JSON.stringify({ scenes: JSON.parse(user).scenes.map((s) => ({ index: s.index, narration: s.index === 0 ? s.narration : CORE[s.index] })) }); });
+    const n = r.narrative;
+    assert.strictEqual(n.hook, am.stripAudioTags(n.narrationTagged).split(/(?<=[.!?])\s+/)[0]);
+    assert.strictEqual(n.hook, MISMATCH_HOOK);
+    assert.strictEqual(norm(n.scenes.map((s) => s.narrationExcerpt).join(" ")), norm(n.captionText));
+  });
+});
+
+test("hook: production and non-dev paths are not changed", async () => {
+  await withDev(false, async () => {
+    const { r } = await run(async () => planWithHook(MISMATCH_HOOK));
+    assert.strictEqual(r.narrative.hook, MISMATCH_HOOK);
+    assert.ok(!r.narrative.hookSync);
+    assert.ok(!r.narrative.captionText.startsWith(MISMATCH_HOOK), "narration was not rewritten");
+  });
+});
+
+test("editor: sees the whole script and is told to cut a conclusion that later scenes only restate", async () => {
+  await withDev(true, async () => {
+    const seen = [];
+    let calls = 0;
+    await run(async (sys, user) => { calls++; if (calls === 1) return planJson(); seen.push({ sys, user: JSON.parse(user) }); return JSON.stringify({ scenes: JSON.parse(user).scenes.map((s) => ({ index: s.index, narration: CORE[s.index] })) }); });
+    const { sys, user } = seen[0];
+    assert.match(sys, /Read the WHOLE script first, as one argument/);
+    assert.match(sys, /once an earlier scene has established a conclusion[^.]*not say the conclusion again/);
+    assert.match(sys, /Where two scenes say the same thing, keep it where it does the most work/);
+    assert.match(sys, /Cut first: an interpretation already stated/);
+    assert.match(sys, /Do not cut equally/);
+    assert.strictEqual(user.scenes.length, 6, "every scene, with its message and text, in one call");
+    user.scenes.forEach((s) => assert.ok(s.narration && s.purpose && "intended_message" in s && s.words > 0));
+    assert.ok(user.editorial_angle && user.hook);
+  });
+});
+
+test("editor: a repeated conclusion is cut from a later scene, each scene keeps its job, scenes stay aligned and the script is accepted", async () => {
+  await withDev(true, async () => {
+    const REPEAT = " The point is that new construction cuts both ways, and that is exactly the conclusion I stated at the start.";
+    const withRepeat = LONG.map((t, i) => (i === 3 ? t + REPEAT : t));
+    const plan = JSON.stringify({ ...JSON.parse(planJson()), narration_with_audio_tags: taggedOf(withRepeat), scenes: JSON.parse(planJson()).scenes.map((s, i) => ({ ...s, narration_excerpt: withRepeat[i] })) });
+    let calls = 0;
+    const { r, e } = await run(async (sys, user) => { calls++; return calls === 1 ? plan : JSON.stringify({ scenes: JSON.parse(user).scenes.map((s) => ({ index: s.index, narration: CORE[s.index] })) }); });
+    assert.ifError(e);
+    const n = r.narrative;
+    assert.ok(!/exactly the conclusion I stated/.test(n.narrationTagged), "the repeat is gone");
+    assert.strictEqual(n.scenes.length, 6);
+    n.scenes.forEach((s, i) => { assert.strictEqual(s.narrationExcerpt, CORE[i]); assert.strictEqual(s.role, ["local_hook", "tension", "insight", "comparison", "advice", "cta"][i], "role kept"); assert.strictEqual(s.purpose, "purpose " + i, "purpose kept"); });
+    assert.strictEqual(norm(n.scenes.map((s) => s.narrationExcerpt).join(" ")), norm(n.captionText));
+    assert.strictEqual(r.narrative.lengthDiagnostics.edit.outcome, "accepted");
+  });
 });

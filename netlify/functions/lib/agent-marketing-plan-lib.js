@@ -424,6 +424,29 @@ function repairExcerpts(scenes, captionText, minScenes, warnings) {
 }
 
 
+// ── Opening hook (Nov 12, 2026, Sam; development only) ──────────────────────────────────────────────────────────────────────────────────
+// Rule 5b says the first spoken sentence IS the hook, and the hook field repeats it. When the writer returns a hook that its narration does not open
+// with, the hook is spoken first (in the narration and in scene 1's excerpt, so they stay in step); when the narration already opens with it, the
+// field simply takes the spoken sentence. No model call.
+const hookKey = (t) => String(t || "").toLowerCase().replace(/[^a-z0-9%$.\s]/g, " ").replace(/\s+/g, " ").trim();
+function firstSpoken(text) { return sentencesOf(am.stripAudioTags(String(text || "")).replace(/\s+/g, " ").trim())[0] || ""; }
+const LEAD_TAGS = /^(\s*\[[A-Za-z ]+\]\s*)*/;
+function putHookFirst(text, hook) { const lead = (String(text || "").match(LEAD_TAGS) || [""])[0]; return `${lead}${hook} ${String(text || "").slice(lead.length).trimStart()}`.replace(/\s+/g, " ").trim(); }
+/** → { raw, how } with how = "matched" | "filled" | "inserted" | "none". Never mutates its input. */
+function alignHook(raw) {
+  const narr = raw && raw.narration_with_audio_tags;
+  if (!narr || typeof narr !== "string") return { raw, how: "none" };
+  const first = firstSpoken(narr);
+  let hook = String(raw.hook || "").trim();
+  if (!first) return { raw, how: "none" };
+  if (!hook) return { raw: { ...raw, hook: first }, how: "filled" };
+  const a = hookKey(hook), b = hookKey(first);
+  if (a === b || ((b.includes(a) || a.includes(b)) && Math.min(a.length, b.length) / Math.max(a.length, b.length) >= 0.6)) return { raw: { ...raw, hook: first }, how: "matched" };
+  if (!/[.!?…]$/.test(hook)) hook += ".";
+  const scenes = Array.isArray(raw.scenes) ? raw.scenes.map((sc, i) => (i === 0 && sc && typeof sc === "object" ? { ...sc, narration_excerpt: putHookFirst(sc.narration_excerpt, hook) } : sc)) : raw.scenes;
+  return { raw: { ...raw, hook, narration_with_audio_tags: putHookFirst(narr, hook), scenes }, how: "inserted" };
+}
+
 // Provisional shot lengths from each excerpt's share of the words, scaled to the chosen duration.
 function setProvisionalSeconds(scenes, dur) {
   const wordsPer = scenes.map((s) => Math.max(1, am.countWords(s.narrationExcerpt)));
@@ -437,6 +460,8 @@ function setProvisionalSeconds(scenes, dur) {
  */
 function normalizePlan(raw, project) {
   if (!raw || typeof raw !== "object") throw new Error("The planner returned an unusable plan");
+  let hookHow = null;
+  if (b1.enabled()) { const al = alignHook(raw); raw = al.raw; hookHow = al.how; }
   const dur = project.duration_sec;
   const tagged = stripNotice(sanitizeTags(raw.narration_with_audio_tags));
   if (!tagged) throw new Error("The planner returned no narration");
@@ -519,7 +544,7 @@ function normalizePlan(raw, project) {
   return {
     narrative: {
       source: "claude", status: "ready", model: MODEL,
-      editorialAngle: str(raw.editorial_angle, 400), hook: str(raw.hook, 200),
+      editorialAngle: str(raw.editorial_angle, 400), hook: str(raw.hook, 200), ...(hookHow ? { hookSync: hookHow } : {}),
       narrationTagged: tagged, captionText, wordCount,
       cta: cta ? { text: cta, source: "claude" } : null,
       ctaAngle: ctaAngleIndex(project),
@@ -564,11 +589,11 @@ function summarizeClaudeUsage(sink) {
 // many words must go, and returns each scene's shortened narration. The continuous narration is rebuilt from those scenes, so scenes and narration stay
 // exactly in step. Scene count, order, roles, visuals, sources and the CTA are never touched. No new plan, no new storyboard.
 const LENGTH_EDIT_SYSTEM = [
-  "You are the editor of a finished 60-second first-person Realtor Reel script. Shorten it; do not rewrite it, re-plan it or change its argument.",
-  "You get every scene: its role, purpose, intended message, source role, current word count and narration. Return the narration of EVERY scene, in the same order, with the SAME scene indexes.",
-  "Each scene must say the same thing in fewer words: keep its specific message, its essential facts and figures exactly as written, its attribution when its source_role is \"article\", and its place in the Realtor's position.",
-  "Cut where the words earn the least: a point stated twice, an explanation of something already clear, a sentence that only restates the one before it, filler, hedging added for its own sake, connective padding. Do not cut equally: take more from a scene with more to spare and little or nothing from a scene that is already tight. Every scene keeps at least 8 spoken words.",
-  "Do not add any fact, number, claim, caveat, qualification or new sentence of substance. Do not merge, split, drop, reorder or add scenes. Keep the hook sentence word for word if it appears. Keep first person, contractions and a spoken, unhurried voice. Plain text only: no audio tags, no brackets.",
+  "You are the editor of a finished 60-second first-person Realtor Reel script. Shorten it; do not re-plan it or change its argument.",
+  "You get every scene: its role, purpose, intended message, source role, current word count and narration. Read the WHOLE script first, as one argument, then return the narration of EVERY scene, in the same order, with the SAME scene indexes.",
+  "Edit each scene in the context of the whole. Keep each scene's specific job (its intended message), its essential facts and figures exactly as written, its attribution when its source_role is \"article\", and its place in the Realtor's position. But do not keep wording just because it sits in a different scene: once an earlier scene has established a conclusion or interpretation, a later scene should add its evidence or what it means for the homeowner, not say the conclusion again in new words. Where two scenes say the same thing, keep it where it does the most work and cut the repeat down to what is new.",
+  "Cut first: an interpretation already stated, an explanation of something already clear, a sentence that only restates the one before it or an earlier scene, secondary explanation, connective padding, filler, hedging added for its own sake. Do not cut equally: take more from a scene with more to spare and little or nothing from a scene that is already tight. Every scene keeps at least 8 spoken words.",
+  "Do not add any fact, number, claim, caveat, qualification or new sentence of substance. Do not merge, split, drop, reorder or add scenes. Keep the hook sentence word for word. Keep first person, contractions and a spoken, unhurried voice. Plain text only: no audio tags, no brackets.",
   "Reply with JSON only: {\"scenes\":[{\"index\":0,\"narration\":\"...\"}, ...]}"
 ].join("\n");
 
@@ -621,6 +646,7 @@ async function editLengthByScene({ project, narrative, call, anthropicKey, sink,
   const tagged = retagScenes(narrative.narrationTagged, scenes, texts).join(" ").replace(/\s+/g, " ").trim();
   const candidate = {
     ...narrative,
+    hook: firstSpoken(tagged) || narrative.hook,   // the hook field always mirrors the first spoken sentence
     narrationTagged: tagged, captionText: am.stripAudioTags(tagged), wordCount: am.countWords(tagged),
     scenes: scenes.map((sc, i) => ({ ...sc, narrationExcerpt: texts[i] })),
   };
@@ -695,7 +721,8 @@ async function generatePlan({ project, anthropicKey, callFn }) {
       const over = narrative.wordCount - whi;
       narrative.lengthOver = { words: narrative.wordCount, max: whi, over };
       warnings = warnings.filter((w) => !/^The script is about \d+ spoken words/.test(w));
-      warnings.unshift(`Too long for a 60-second Reel: ${narrative.wordCount} spoken words, maximum ${whi}. Cut about ${over} words (or try again) before approving. Your draft is kept so you can edit it.`);
+      // Nov 12, 2026 (Sam): a nonblocking advisory. The subscriber may edit the script or approve it as written.
+      warnings.unshift(`${narrative.wordCount} spoken words. The recommended range for a 60-second Reel is ${am.wordTargets(60)[0]}–${whi} words. Actual narration duration depends on delivery. You may edit the script or approve it as written.`);
     }
   } else if (fit.length) {
     // Oct 28, 2026 (Sam): one rewrite is asked for, and it is used only if it passes the gate and is closer to the target.
@@ -779,5 +806,5 @@ function gateNarrative(project, narrative) {
 
 module.exports = { topicBrief, blockLines, sourceNameVariants, competingNameBlocks,
   MODEL, stripNotice, SCENE_RANGE, GPT_RANGE, NEW_IMAGE_SOURCES, VISUAL_SOURCES, SOURCE_MAX, MAX_ATTEMPTS, STALE_PLANNING_MS, ALLOWED_TAGS,
-  intakeHash, ctaAngleFor, ctaAngleIndex, CTA_ANGLES, VISUAL_LOOKS, visualLookFor, visualLookIndex, buildSystemPrompt, buildUserMessage, lengthProblems, lengthDistance, callClaudeText, summarizeClaudeUsage, editLengthByScene, retagScenes, extractJsonObject, sanitizeTags, normalizePlan, generatePlan,
+  intakeHash, ctaAngleFor, ctaAngleIndex, CTA_ANGLES, VISUAL_LOOKS, visualLookFor, visualLookIndex, buildSystemPrompt, buildUserMessage, lengthProblems, lengthDistance, callClaudeText, summarizeClaudeUsage, editLengthByScene, retagScenes, alignHook, extractJsonObject, sanitizeTags, normalizePlan, generatePlan,
 };

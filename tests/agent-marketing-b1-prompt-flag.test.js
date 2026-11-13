@@ -10,7 +10,7 @@ const sha = (s) => crypto.createHash("sha256").update(s, "utf8").digest("hex");
 // sha256 of buildSystemPrompt() on production main (622f96e), and of the B1 development prompt (rules 2b, 2g, 2h as approved in commit 83fb916, plus
 // rule 2i, the B2 editorial direction, Nov 8, 2026).
 const PRODUCTION_SHA256 = "25f3118fed1b9726fc4dc78b16dcc92233cef785d3c074ef89a6ee7aaf7b0495";
-const B1_DEV_SHA256 = "78641c52e33c3deb2f749099a251841a26861fb9dccd1b32db6f540dc08be596";   // Nov 12, 2026: rule 2q is the question-led hook version
+const B1_DEV_SHA256 = "02755a0d6b50ba72b2b1827012b8a675c08be3525f113381491028460e35f787";   // Nov 12, 2026: seven coordinated story-construction corrections (2f, 5b, 7 Test variants; 2i, 2l, 2n; architecture)
 const rule = (prompt, id) => prompt.split("\n").filter((l) => l.startsWith(`${id}. `));
 const withEnv = async (value, fn) => {
   const old = process.env.AGENT_MARKETING_B1_EVIDENCE;
@@ -28,15 +28,15 @@ test("prompt flag: unset (or any value but dev), the whole system prompt is byte
   assert.ok(!/article_evidence/.test(p), "production never mentions article_evidence");
 });
 
-test("prompt flag: AGENT_MARKETING_B1_EVIDENCE=dev gives the B1 prompt, which differs only in rules 2b, 2g, 2h, 2i, 2j, 2k, 2l, 2n, 2o, 2p and 2q", async () => {
+test("prompt flag: AGENT_MARKETING_B1_EVIDENCE=dev gives the B1 prompt, which differs only in rules 2b, 2f, 2g, 2h, 2i, 2j, 2k, 2l, 2n, 2o, 2p, 2q, 5b and 7", async () => {
   const dev = planLib.buildSystemPrompt({ AGENT_MARKETING_B1_EVIDENCE: "dev" }), prod = planLib.buildSystemPrompt({});
   assert.strictEqual(sha(dev), B1_DEV_SHA256);
   await withEnv("dev", () => assert.strictEqual(sha(planLib.buildSystemPrompt()), B1_DEV_SHA256));
   const d = dev.split("\n"), q = prod.split("\n");
-  assert.deepStrictEqual(d.filter((l) => !q.includes(l)).map((l) => l.slice(0, 3)), ["2b.", "2g.", "2h.", "2i.", "2j.", "2k.", "2l.", "2n.", "2o.", "2p.", "2q."], "only 2b, 2g and the new 2h, 2i, 2j, 2k, 2l, 2n, 2o, 2p and 2q are new");
-  assert.deepStrictEqual(q.filter((l) => !d.includes(l)).map((l) => l.slice(0, 3)), ["2b.", "2g."], "only production's 2b and 2g are replaced");
+  assert.deepStrictEqual(d.filter((l) => !q.includes(l)).map((l) => l.slice(0, 3)), ["2b.", "2f.", "2g.", "2h.", "2i.", "2j.", "2k.", "2l.", "2n.", "2o.", "2p.", "2q.", "5b.", "7. "], "only 2b, 2g and the new 2h, 2i, 2j, 2k, 2l, 2n, 2o, 2p and 2q are new");
+  assert.deepStrictEqual(q.filter((l) => !d.includes(l)).map((l) => l.slice(0, 3)), ["2b.", "2f.", "2g.", "5b.", "7. "], "only production's 2b, 2f, 2g, 5b and 7 are replaced");
   // same order otherwise; 2h sits right after 2g
-  const strip = (lines) => lines.filter((l) => !/^2[bghijklnopq]\. /.test(l));
+  const strip = (lines) => lines.filter((l) => !/^(2[bfghijklnopq]|5b|7)\. /.test(l));
   assert.deepStrictEqual(strip(d), strip(q));
   assert.strictEqual(d.indexOf(rule(dev, "2h")[0]), d.indexOf(rule(dev, "2g")[0]) + 1);
   assert.strictEqual(d.indexOf(rule(dev, "2i")[0]), d.indexOf(rule(dev, "2h")[0]) + 1);
@@ -53,10 +53,14 @@ test("prompt flag: AGENT_MARKETING_B1_EVIDENCE=dev gives the B1 prompt, which di
   assert.match(rule(dev, "2k")[0], /2 to 5 years/); assert.match(rule(dev, "2k")[0], /do not enumerate the stages/);
 });
 
-test("prompt flag: rule 2f (market-number priority) is identical in both", () => {
+test("prompt flag: rule 2f (market-number priority) differs only in the article/report scene-order sentence", () => {
   const dev = planLib.buildSystemPrompt({ AGENT_MARKETING_B1_EVIDENCE: "dev" }), prod = planLib.buildSystemPrompt({});
   assert.strictEqual(rule(prod, "2f").length, 1);
-  assert.deepStrictEqual(rule(dev, "2f"), rule(prod, "2f"));
+  // Nov 12, 2026: the Test variant changes ONE sentence (the article/report scene order); the rest of rule 2f is production's word for word.
+  assert.notDeepStrictEqual(rule(dev, "2f"), rule(prod, "2f"));
+  const [pf, df] = [rule(prod, "2f")[0], rule(dev, "2f")[0]];
+  const cut = (t) => [t.slice(0, t.indexOf("The Reel is ABOUT")), t.slice(t.indexOf("If selected_topic has area_context"))];
+  assert.deepStrictEqual(cut(df), cut(pf), "everything before and after the changed sentence is identical");
   assert.match(rule(dev, "2h")[0], /rule 2f decides every measure that figures_you_may_state contains/);
 });
 

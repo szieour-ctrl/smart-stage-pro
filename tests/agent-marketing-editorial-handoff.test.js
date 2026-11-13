@@ -177,7 +177,7 @@ test("planner statistics: the developer prompt chooses figures for the narrative
   assert.match(rule, /do not pick a figure because it is favorable or reassuring/);
   assert.match(rule, /sold price as a percent of list price compares the closing price with the last list price/);
   assert.match(rule, /how the home was first priced, whether the seller reduced the price, how quickly it sold, or whether buyer demand is rising or falling/);
-  assert.match(rule, /read them together and state what they show, including a figure that cuts against the story/);
+  assert.match(rule, /read them together, then state the one thing they show together, naming the one or two figures that carry it with their comparison/); assert.match(rule, /A figure that cuts against the story is stated only where leaving it out would make the answer misleading \(rule 2o\)/);
   assert.match(rule, /what the report or article states \(a fact, attributed\), your reading of it \(the agent's interpretation/);
   assert.match(rule, /any explanation, worded with the confidence the evidence earns \(rule 2o\); do not invent a cause for a single figure/);
   assert.doesNotMatch(rule, /at least|must (?:state|include|use) (?:every|all|\d)/i, "no quota and no requirement to use every statistic");
@@ -193,7 +193,7 @@ test("attribution: the planner is no longer told to name the publisher, and is n
   const p = planLib.buildSystemPrompt(DEV, {});
   assert.doesNotMatch(p, /name the publisher in natural speech/);
   assert.doesNotMatch(p, /say who reported it/);
-  assert.match(p, /do not name the article's publisher, brokerage, team, agent or website anywhere in the narration, captions or scene copy/);
+  assert.match(p, /Do not name the article's publisher, brokerage, team, agent or website anywhere in the narration, captions or scene copy/);
   assert.match(p, /Attribute an article finding by role/);
   assert.match(p, /A data source the finding cites \(for example Freddie Mac or MetroList TrendVision\) may be named/);
   const brief = planLib.topicBrief({ ...topic7, question: "q", whyItMatters: "w", b2: { ...topic7.b2, editorialAngle: "a", mechanism: "m", homeownerImplication: "h", sourceRefs: [] } }, DEV);

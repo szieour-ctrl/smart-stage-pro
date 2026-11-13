@@ -171,7 +171,7 @@ test("script writer handoff (development): a B2 topic gets the interpretation-an
       sources: [{ url: "https://example.org/a", kind: "article", role: "primary", title: "t" }],
       b2: { mode: "article_editorial", mechanism: "Design review is not lot creation", homeownerImplication: "Plan with the real timeline", editorialAngle: "Design review is an early step", audienceJourney: "Matters whether you sell this year or later.", sourceRefs: [{ finding: "A2-F1", quote: "the city held a design review" }] } };
     const u = JSON.parse(planLib.buildUserMessage({ template: "local_market_insider", duration_sec: 45, formats: ["9x16"], intake: { market: "Lincoln, CA", audience: "Home sellers", action: "Ask for a local perspective" }, selected_topic: topic }));
-    assert.match(u.narrative_architecture, /what is still unresolved/); assert.match(u.narrative_architecture, /different points in their decision/);
+    assert.match(u.narrative_architecture, /^A question naming what is at stake → the Realtor's answer, built from the evidence that establishes it/); assert.match(u.narrative_architecture, /what that answer means for the seller, specifically/); assert.ok(!/different points in their decision|what is still unresolved/.test(u.narrative_architecture));
     assert.deepStrictEqual(Object.keys(u.selected_topic.editorial_direction).slice(0, 4), ["angle", "mechanism", "homeowner_implication", "audience_journey"]);
     const sp = planLib.buildSystemPrompt();
     assert.ok(sp.includes("\n2j. REALTOR INTERPRETATION.") && sp.includes("\n2k. AUDIENCE."));

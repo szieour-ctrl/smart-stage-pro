@@ -172,6 +172,31 @@ function marketInterpretation(ti, articleInteraction) {
 function hasReportScope(project) { const t = project && project.selected_topic; return !!(t && Array.isArray(t.reportScope) && t.reportScope.length); }
 function buildSystemPrompt(env, opts) {
   const dev = b1.enabled(env);   // development only
+  const text = buildSystemPromptText(env, opts);
+  return dev && opts && opts.causalVariant === "relaxed" ? relaxCausalClauses(text) : text;
+}
+
+/**
+ * Nov 13, 2026 (Sam, E5 experiment, Test only): the two causal restrictions Test B removes, as exact spans of the assembled Test prompt.
+ * Nothing else changes. Selected per project by intake.experiment (see experimentOf); with no marker the prompt is byte-identical.
+ */
+const CAUSAL_2H_SPAN = "A quotation shows what the article says, not why something happened: present a cause or explanation only when a validated finding of kind \"explanation\" states it, as that source's view; if its attribution says no data";
+const CAUSAL_2H_KEEP = "If its attribution says no data";
+const CAUSAL_2N_SPAN = " (rule 2o); do not invent a cause for a single figure.";
+const CAUSAL_2N_KEEP = " (rule 2o).";
+function relaxCausalClauses(text) {
+  const once = (s, a, b) => { const i = s.indexOf(a); if (i < 0 || s.indexOf(a, i + 1) >= 0) throw new Error("causal variant: the expected prompt wording was not found exactly once"); return s.replace(a, () => b); };
+  return once(once(text, CAUSAL_2H_SPAN, CAUSAL_2H_KEEP), CAUSAL_2N_SPAN, CAUSAL_2N_KEEP);
+}
+/** "current" (Test A) or "relaxed" (Test B) when a Test project carries the experiment marker; null otherwise (always null outside Test). */
+function experimentOf(project) {
+  if (!b1.enabled()) return null;
+  const m = project && project.intake && project.intake.experiment;
+  return m === "causal_current" ? "current" : m === "causal_relaxed" ? "relaxed" : null;
+}
+
+function buildSystemPromptText(env, opts) {
+  const dev = b1.enabled(env);   // development only
   return [
     "You are the narrative director and storyboard planner for Smart Stage PRO Plus Agent Marketing.",
     "You create a distinctly local, helpful, branded real-estate marketing video concept from ONE real estate agent's own observation.",
@@ -755,17 +780,19 @@ async function generatePlan({ project, anthropicKey, callFn }) {
   if (project && project.template === "local_market_insider") b1.assertNotBlocked(project.selected_topic);
   const user = buildUserMessage(project);
   const sink = [];
+  const experiment = experimentOf(project);   // Test only (E5): "current", "relaxed" or null
+  const sysPrompt = buildSystemPrompt(undefined, { scoped: hasReportScope(project), causalVariant: experiment === "relaxed" ? "relaxed" : undefined }); // one prompt for every call in this run
   const planOpts = { maxTokens: PLAN_MAX_TOKENS }; // only a ceiling: replies that fit cost the same as before
   let normalized, structuralRetry = false;
   try {
-    normalized = normalizePlan(extractJsonObject(await call(buildSystemPrompt(undefined, { scoped: hasReportScope(project) }), user, anthropicKey, sink, planOpts)), project);
+    normalized = normalizePlan(extractJsonObject(await call(sysPrompt, user, anthropicKey, sink, planOpts)), project);
   } catch (err) {
     // A structurally unusable plan (a missing narration excerpt, the wrong scene or image count, no JSON) gets ONE corrective retry inside the
     // same attempt, so it does not use up one of the project's planning attempts. Anything else (a gate block, a cut-off reply) is not retried.
     if (!/narration excerpt|scenes are needed|concept images?|unusable plan|no narration|JSON/i.test(String(err && err.message))) throw err;
     structuralRetry = true;
     const fix = `${user}\n\nYour previous reply could not be used: ${String(err.message).slice(0, 200)}. Return the complete JSON again. Every scene MUST have a non-empty narration_excerpt taken from your narration, in order, and the scenes together must cover the whole narration.`;
-    normalized = normalizePlan(extractJsonObject(await call(buildSystemPrompt(undefined, { scoped: hasReportScope(project) }), fix, anthropicKey, sink, planOpts)), project);
+    normalized = normalizePlan(extractJsonObject(await call(sysPrompt, fix, anthropicKey, sink, planOpts)), project);
   }
   let { narrative, warnings } = normalized;
   // Development only (Nov 12, Sam): counts that show where a length problem starts. Numbers and one short reason; no scripts, no model replies.
@@ -773,6 +800,9 @@ async function generatePlan({ project, anthropicKey, callFn }) {
   const diag = b1.enabled() ? { target: am.wordTargets(project.duration_sec), duration_sec: project.duration_sec, structuralRetry,
     initial: { words: narrative.wordCount, sceneSum: sceneWords(narrative).reduce((a, b) => a + b, 0), scenes: sceneWords(narrative) },
     gateRewrite: false, edit: { ran: false, outcome: "not_needed" }, at: new Date().toISOString() } : null;
+  // E5 experiment only (Test, project marked by intake.experiment): the planner's own first draft and the prompt it was written under.
+  if (diag && experiment) diag.experiment = { variant: experiment, promptSha256: crypto.createHash("sha256").update(sysPrompt).digest("hex"),
+    initialDraft: { narration: narrative.narrationTagged || null, editorialAngle: narrative.editorialAngle || null, hook: narrative.hook || null, claimsToVerify: narrative.claimsToVerify || [], words: narrative.wordCount } };
   let g = gateNarrative(project, narrative);
   if (!g.ok) {
     // The first draft was blocked. Instead of failing (and using up one of the project's planning attempts), tell the writer exactly what was
@@ -784,9 +814,10 @@ async function generatePlan({ project, anthropicKey, callFn }) {
     const fix = anchored ? anchoredRewriteMessage({ user, narrative, blocks: g.blocks, duration: project.duration_sec, range: am.wordTargets(project.duration_sec), aim })
       : `${user}\n\nYour draft was rejected by the compliance check for these specific reasons:\n${blockLines(g.blocks)}\nRewrite the complete JSON so none of these happen. Keep the same topic, hook and facts; change only what is listed, and take every number from the topic or the agent's report.`;
     if (diag) { diag.rewriteAnchored = anchored; diag.revisions = [{ path: "gate_rewrite", anchored, draftWords: narrative.wordCount }]; }
-    normalized = normalizePlan(extractJsonObject(await call(buildSystemPrompt(undefined, { scoped: hasReportScope(project) }), fix, anthropicKey, sink, planOpts)), project);
+    normalized = normalizePlan(extractJsonObject(await call(sysPrompt, fix, anthropicKey, sink, planOpts)), project);
     narrative = normalized.narrative; warnings = normalized.warnings;
     if (diag) { diag.gateRewrite = true; diag.afterGateRewrite = { words: narrative.wordCount, scenes: sceneWords(narrative) }; }
+    if (diag && diag.experiment) diag.experiment.afterGateRewrite = { narration: narrative.narrationTagged || null, editorialAngle: narrative.editorialAngle || null, claimsToVerify: narrative.claimsToVerify || [] };
     g = gateNarrative(project, narrative);
   }
   if (!g.ok) {
@@ -828,7 +859,7 @@ async function generatePlan({ project, anthropicKey, callFn }) {
         ? anchoredRewriteMessage({ user, narrative, problems: fit, duration: project.duration_sec, range: am.wordTargets(project.duration_sec), aim: writingAimFor(project.duration_sec) })
         : `${user}\n\nYour draft does not fit the requested length: ${fit.join(" ")} Rewrite the complete JSON, keeping the same topic, hook, facts and tone. Keep every number you state exactly as the topic gives it, and drop the least important sentence or clause to get inside the limits.`;
       if (diag) (diag.revisions = diag.revisions || []).push({ path: "scene_balance_rewrite", anchored: b1.enabled(), draftWords: narrative.wordCount, problems: fit.length });
-      const again = normalizePlan(extractJsonObject(await call(buildSystemPrompt(undefined, { scoped: hasReportScope(project) }), fix, anthropicKey, sink, planOpts)), project);
+      const again = normalizePlan(extractJsonObject(await call(sysPrompt, fix, anthropicKey, sink, planOpts)), project);
       const g2 = gateNarrative(project, again.narrative);
       const problems2 = lengthProblems(again.narrative, project.duration_sec), distBefore = lengthDistance(narrative, project.duration_sec), distAfter = lengthDistance(again.narrative, project.duration_sec);
       const fewerOrEqual = problems2.length <= fit.length, closer = distAfter < distBefore; // the same three conditions as before, named only so a rejection can say which failed
@@ -852,6 +883,7 @@ async function generatePlan({ project, anthropicKey, callFn }) {
   if (diag) {
     if (!diag.edit.ran && fit.length) diag.edit = { ran: false, outcome: "not_applicable", reason: "not over the top of the word range (or not a 45- or 60-second Reel); the original single length rewrite handled: " + fit.join(" ").slice(0, 160) };
     diag.final = { words: narrative.wordCount, sceneSum: sceneWords(narrative).reduce((a, b) => a + b, 0), scenes: sceneWords(narrative), overLimit: !!narrative.lengthOver };
+    if (diag.experiment) { diag.experiment.modelCalls = sink.length; diag.experiment.usage = summarizeClaudeUsage(sink); }
     narrative.lengthDiagnostics = diag;
   }
   // The gate has seen the planner's own words; now no sign of any kind survives into anything that reaches the image model (Sam, Oct 27).
@@ -960,7 +992,7 @@ function gateNarrative(project, narrative) {
   return extra.length ? { ...g, ok: false, blocks: (g.blocks || []).concat(extra) } : g;
 }
 
-module.exports = { topicBrief, blockLines, sourceNameVariants, competingNameBlocks,
+module.exports = { relaxCausalClauses, experimentOf, topicBrief, blockLines, sourceNameVariants, competingNameBlocks,
   MODEL, stripNotice, SCENE_RANGE, GPT_RANGE, NEW_IMAGE_SOURCES, VISUAL_SOURCES, SOURCE_MAX, MAX_ATTEMPTS, STALE_PLANNING_MS, ALLOWED_TAGS,
   intakeHash, ctaAngleFor, ctaAngleIndex, CTA_ANGLES, VISUAL_LOOKS, visualLookFor, visualLookIndex, buildSystemPrompt, buildUserMessage, lengthProblems, lengthDistance, callClaudeText, summarizeClaudeUsage, editLengthByScene, sourceRoleBlocks, lengthEditSystem, anchoredRewriteMessage, writingAimFor, retagScenes, alignHook, extractJsonObject, sanitizeTags, normalizePlan, generatePlan,
 };

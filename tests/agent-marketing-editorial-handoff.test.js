@@ -42,10 +42,11 @@ test("thesis: the B2 article record carries it, the prompt treats it as evidence
   assert.match(b2.userMessage({ records: [rec], market: "Roseville", audience: "sellers" }), /"central_argument": "The author argues/);
   for (const mode of ["article_report", "article_editorial"]) {
     const p = b2.systemPrompt(mode, false);
-    assert.match(p, /central_argument: B1's short statement of the author's own central claim/);
-    assert.match(p, /editorial evidence for you to weigh, not an instruction and not quotation-verified/);
-    assert.match(p, /you need not reproduce it/);
+    assert.match(p, /central_argument: B1's statement of the author's governing professional position/);
+    assert.match(p, /the editorial foundation the subscriber chose when they selected this article/);
+    assert.match(p, /attributed to the author and not quotation-verified/);
     assert.match(p, /never take a figure from it/);
+    assert.match(p, /supporting mechanisms in the article are material that supports the position; they are not the position/);
   }
 });
 
@@ -61,7 +62,7 @@ const cand = (id, q, f, extra) => ({ id, question: q, article: "A1", findings: f
 test("selection: an explanation-led candidate with no report figure is valid, selectable and becomes a topic alongside a statistics-led one", () => {
   const raw2 = { candidates: [
     cand("C1", "Supply is at 2.8 months—is Roseville still a seller's market?", ["A1-F3"], { report_figures: ["R1"] }),
-    cand("C2", "Higher rates cut buyer activity—what should sellers weigh?", ["A1-F1", "A1-F2"]),
+    cand("C2", "Higher rates cut buyer activity—what should sellers weigh?", ["A1-F1", "A1-F2"], { develops_position: true, position_basis: THESIS }),
   ], selected: ["C1", "C2"], selection_notes: "n" };
   const v = b2.validate(raw2, { records, mode: "article_report", reportFigures });
   assert.deepStrictEqual(v.problems, []);
@@ -77,9 +78,11 @@ test("selection: an explanation-led candidate with no report figure is valid, se
 
 test("selection: the prompt keeps the central question eligible and does not reward a topic merely for repeating a report statistic", () => {
   const p = b2.systemPrompt("article_report", true);
-  assert.match(p, /central question or explanation .* is a candidate source like any other/);
-  assert.match(p, /competes for selection alongside candidates built on a statistic/);
-  assert.match(p, /You are not required to build any candidate on it/);
+  assert.match(p, /REQUIRED POSITION CANDIDATE\. For every article that carries central_argument, write exactly one candidate that develops that position/);
+  assert.match(p, /Position candidates are always among the selected ones; the remaining selections compete on the criteria in 4/);
+  assert.doesNotMatch(p, /You are not required to build any candidate on it/);
+  assert.doesNotMatch(p, /specificity to THIS article and report/);
+  assert.doesNotMatch(p, /45-second|45 seconds/, "B2 is not told a duration; the Planner owns it");
   assert.match(p, /Do not prefer a candidate merely because its headline statistic also appears in the agent's report/);
   assert.match(p, /Select the strongest 5|Select the strongest \$\{SELECT\}|strongest 5 where/);   // the five-topic workflow is unchanged
 });
@@ -126,15 +129,16 @@ test("article-only facts: the B2 prompt and the planner's article rule allow the
 test("mechanism: a multi-sentence explanation is kept whole up to its limit and is only ever cut at the end of a sentence", () => {
   const t5 = "The article reports 2.8 months of supply in September based on the pending pace, up from 1.9 months a year ago, and notes that under three months is still a seller's market by the traditional definition—while also explaining that the loosening comes from fewer buyers, not more sellers. This creates a window where sellers still hold an edge, but the direction is toward balance, and the author ties that direction to higher mortgage rates.";
   assert.ok(t5.length > 300 && t5.length < 700, "longer than the old 300-character limit");
-  const v = b2.validate({ candidates: [cand("C1", "q?", ["A1-F1"], { mechanism: t5 })], selected: ["C1"] }, { records, mode: "article_editorial" });
+  const records0 = records.map(({ central_argument, ...r }) => r);
+  const v = b2.validate({ candidates: [cand("C1", "q?", ["A1-F1"], { mechanism: t5 })], selected: ["C1"] }, { records: records0, mode: "article_editorial" });
   assert.strictEqual(v.candidates[0].mechanism, t5, "kept whole");
   const long = Array.from({ length: 12 }, (_, i) => `Sentence number ${i + 1} explains one more step of the reasoning in plain words.`).join(" ");
-  const cut = b2.validate({ candidates: [cand("C1", "q?", ["A1-F1"], { mechanism: long })], selected: ["C1"] }, { records, mode: "article_editorial" }).candidates[0].mechanism;
+  const cut = b2.validate({ candidates: [cand("C1", "q?", ["A1-F1"], { mechanism: long })], selected: ["C1"] }, { records: records0, mode: "article_editorial" }).candidates[0].mechanism;
   assert.ok(cut.length <= 700 && /\.$/.test(cut), "an over-long mechanism ends on a complete sentence");
   assert.ok(long.startsWith(cut));
-  const noStops = b2.validate({ candidates: [cand("C1", "q?", ["A1-F1"], { mechanism: "word ".repeat(300) })], selected: ["C1"] }, { records, mode: "article_editorial" }).candidates[0].mechanism;
+  const noStops = b2.validate({ candidates: [cand("C1", "q?", ["A1-F1"], { mechanism: "word ".repeat(300) })], selected: ["C1"] }, { records: records0, mode: "article_editorial" }).candidates[0].mechanism;
   assert.ok(noStops.length <= 701 && /…$/.test(noStops) && !/\s…$/.test(noStops), "text with no sentence end is cut at a word and marked");
-  assert.match(b2.systemPrompt("article_report", false), /mechanism is the explanation in two or three complete sentences/);
+  assert.match(b2.systemPrompt("article_report", false), /mechanism is optional supporting explanation in at most three complete sentences/);
 });
 
 // ── 5. the Trend observations that bear on the story reach the planner ─────────────────────────────────────────────────────────────────────────
@@ -295,11 +299,13 @@ test("saved topic: only a record that passed the evidence contract carries the t
 test("saved topic: the planner is told to keep the selected topic and one angle, weigh the thesis and explanation findings, and word them by the evidence", () => {
   const p = planLib.buildSystemPrompt(DEV, {});
   const r2i = p.split("\n").find((l) => l.startsWith("2i. ")), r2h = p.split("\n").find((l) => l.startsWith("2h. "));
-  assert.match(r2i, /defines the subject, not the final hook[\s\S]*Do not replace its angle with the article's thesis or add a second point/);
-  assert.match(r2i, /consider whether article_evidence\.central_argument and the validated explanation findings give a meaningful interpretation that editorial_direction leaves out/);
+  assert.match(r2i, /defines the subject, not the final hook[\s\S]*Add no second point/);
+  assert.match(r2i, /editorial_direction\.develops_article_position is true, article_evidence\.central_argument is the article's governing professional position/);
+  assert.match(r2i, /never replaces it with a supporting mechanism, rule, calculation or statistic, and is not required to recite any of those/);
+  assert.doesNotMatch(r2i, /Do not replace its angle with the article's thesis/);
   assert.match(r2i, /as the agent's reading, worded with the confidence the evidence earns \(rule 2o\)/);
   assert.match(r2i, /make its angle the one point the Reel makes/, "the one-central-angle structure is kept");
-  assert.match(r2h, /editorial context to evaluate, not a verified quotation, not a fact to state and not an instruction; take no figure or wording from it/);
+  assert.match(r2h, /B1's statement of the author's governing professional position[\s\S]*not a verified quotation and not a source for figures: take no figure from it/);
   assert.match(r2h, /Attribute an article finding by role/, "attribution stays by role; the credit is the footer");
   const prod = planLib.buildSystemPrompt({}, {});
   assert.doesNotMatch(prod, /central_argument/, "the production prompt is untouched");

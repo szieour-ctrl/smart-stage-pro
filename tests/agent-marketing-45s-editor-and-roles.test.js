@@ -61,7 +61,7 @@ test("45 seconds over 125: ONE scene-by-scene editing call replaces the full re-
     assert.strictEqual(sent.max_words, 125);
     assert.strictEqual(sent.target_words, 110, "the editor cuts toward the shared contract's 45-second target");
     assert.deepStrictEqual(sent.recommended_words, [105, 125], "the minimum goes in as guidance");
-    assert.match(calls[1].sys, /finished 45-second first-person Realtor Reel script/);
+    assert.match(calls[1].sys, /finished 45-second Realtor Reel script/);
     assert.match(calls[1].sys, /guidance, not a floor[^"]*never add words, filler or new content to reach the lower end/);
     const n = r.narrative;
     assert.ok(n.wordCount <= 125 && !n.lengthOver);
@@ -120,7 +120,7 @@ test("45 seconds inside its range: no editor, no extra call", async () => {
 
 // ── 2. 60 seconds unchanged ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 test("60 seconds (Phase B): the editor gets the range guidance, cuts toward 146 above 151, and the advisory reads 133–151", async () => {
-  assert.strictEqual(sha(planLib.lengthEditSystem(60, false)), "d5d15659a17654be427259b5fa2c742fca7ab7adc02bd6954b4462a19880eb8f", "the editor prompt without a range (Nov 13: material numerical context sentence added)");
+  assert.strictEqual(sha(planLib.lengthEditSystem(60, false)), "79c2932b6f221db23f805bc14f3e44cf87455ff09209bfabeb847c1a202bd8aa", "the editor prompt without a range (Nov 14: no first-person requirement)");
   await withDev(true, async () => {
     const six = [...CORE5.slice(0, 4), "Compare the full picture before you decide anything at all.", ...CORE5.slice(4)];
     const LONG6 = six.map((c, i) => c + (i === 1 || i === 2 || i === 3 || i === 4 ? PAD5[Math.min(i, 3)] + PAD5[2] : ""));

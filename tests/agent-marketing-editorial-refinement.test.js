@@ -48,9 +48,12 @@ test("Option 1 selects three to five and names the selection criteria; Option 2 
   assert.match(OPTION_1, /Select the strongest 3 to 5/);
   assert.match(OPTION_2, /Select the strongest 5 where the evidence supports them/);
   for (const p of [OPTION_1, OPTION_2]) {
-    ["strength of the market interpretation", "relevance to (this|the) audience", "specificity to THIS", "distinctness from the other selected", "practical Realtor insight", "decision journey", "Never select near-duplicates"]
+    ["strength of the market interpretation", "relevance to (this|the) audience", "distinctness from the other selected", "practical Realtor insight", "decision journey", "Never select near-duplicates"]
       .forEach((x) => assert.match(p, new RegExp(x), x));
   }
+  assert.match(OPTION_1, /specificity to THIS/);
+  assert.match(OPTION_2, /fidelity to the article's governing position/);
+  assert.doesNotMatch(OPTION_2, /specificity to THIS/, "Nov 14, 2026: Option 2 no longer ranks topics by specificity to the article and report");
   assert.match(OPTION_1, /perspectives, not recaps/);
 });
 

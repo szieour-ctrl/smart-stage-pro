@@ -7,11 +7,11 @@
 //   1. held_quote: a held or excluded B1 quotation restored word for word is blocked, unless a validated quotation contains it too
 //      (independently authorized). Only quotations of MIN_HELD_WORDS words or more are matched, so a validated statement that merely shares
 //      common words with a held one is never blocked.
-//   2. claim context: a matching number does not authorize a claim. Every market figure in a sentence that appears anywhere in the B1 evidence
-//      (validated, held or excluded) must be authorized by ONE applicable validated claim finding: its quotations contain every such figure in
-//      the sentence, and every geography, period or comparison basis, measurement, direction and proper name the sentence states appears in
-//      that finding's own quotations or attribution. A hedge the quotation puts on the figure ("a slight", "around") must be kept, and a
-//      measurement basis it states (median, average) must not be dropped. Held and excluded findings are never support.
+//   2. figure accuracy (Nov 14, 2026, Sam): every market figure in a sentence that appears anywhere in the B1 evidence (validated, held or
+//      excluded) must come from ONE applicable validated claim finding (its quotations contain every such figure in the sentence). The rest of the
+//      sentence is the Realtor's own: it is blocked only when it CONTRADICTS the finding (a different period, geography, statistical basis such as
+//      median versus average, or direction) or drops a qualifier the source puts on the figure ("a slight", "around"). Added interpretation, names
+//      and context are never blocked here. Held and excluded findings are never support.
 //      Figures the agent supplied (intake, uploaded report, report-derived calculations) are not checked here: rule 2f and the legacy gate own them.
 //      If the bundle is BLOCKED, no figure outside the agent's own numbers is authorized.
 "use strict";
@@ -104,21 +104,23 @@ function descriptors(sentence) {
   return d;
 }
 
-/** Why `finding` does not authorize the sentence's descriptors for the figure(s) (empty = authorized). */
+/**
+ * Nov 14, 2026 (Sam): why `finding` CONTRADICTS the sentence about the figure(s) (empty = no contradiction). The sentence may add its own
+ * professional interpretation, names and context; it is blocked only when it states a period, geography, statistical basis (median or average) or
+ * direction that conflicts with what the finding itself states, or drops a qualifier the source puts on the figure.
+ */
 function unsupported(d, finding, figures, sentence) {
   const s = finding.support, why = [];
-  const sp = phraseText(sentence);
-  const named = (x) => has(s, x) || finding.attrNames.some((a) => has(` ${a} `, x) && has(sp, a));
   const stem = (x) => x.replace(/s$/, "");
-  d.period.forEach((x) => { if (!has(s, x)) why.push(`period "${x}"`); });
-  d.geography.forEach((x) => { if (!has(s, x) && !has(s, stem(x))) why.push(`geography "${x}"`); });
-  d.names.forEach((x) => { if (!named(x)) why.push(`"${x}"`); });
-  d.measurement.forEach((x) => { if (!has(s, x) && !s.includes(` ${stem(x)}`)) why.push(`measurement "${x}"`); });
-  d.stat.forEach((x) => { if (!has(s, x)) why.push(`measurement "${x}"`); });
-  const fStat = STAT_WORDS.filter((x) => has(s, x));
-  if (fStat.length && !d.stat.some((x) => fStat.includes(x))) why.push(`the measurement basis (${fStat.join("/")}) is dropped`);
-  const fDir = [UP.some((x) => has(s, x)) && "up", DOWN.some((x) => has(s, x)) && "down"].filter(Boolean);
-  d.direction.forEach((x) => { if (!fDir.includes(x)) why.push(`direction "${x}"`); });
+  const inS = (x) => has(s, x);
+  const fPeriods = [...MONTHS.filter(inS), ...PERIOD_PHRASES.filter(inS), ...(s.match(/\b(?:19|20)\d{2}\b/g) || [])];
+  if (d.period.length && fPeriods.length && !d.period.some(inS)) why.push(`period "${d.period.join("/")}" (the source says ${fPeriods.slice(0, 3).join("/")})`);
+  const fGeo = GEO_WORDS.filter((x) => inS(x) || inS(stem(x)));
+  if (d.geography.length && fGeo.length && !d.geography.some((x) => inS(x) || inS(stem(x)))) why.push(`geography "${d.geography.join("/")}" (the source says ${fGeo.slice(0, 3).join("/")})`);
+  const fStat = STAT_WORDS.filter(inS);
+  if (d.stat.length && fStat.length && !d.stat.some((x) => fStat.includes(x))) why.push(`measurement "${d.stat.join("/")}" (the source says ${fStat.join("/")})`);
+  const fDir = [UP.some(inS) && "up", DOWN.some(inS) && "down"].filter(Boolean);
+  if (d.direction.length && fDir.length && !d.direction.some((x) => fDir.includes(x))) why.push(`direction "${d.direction.join("/")}" (the source says ${fDir.join("/")})`);
   // A hedge the source puts on the figure itself ("a slight 3%", "around 9,000") must be kept.
   const hedged = finding.quotes.some((q) => [...figures].some((n) => {
     const t = norm(q).replace(/(\d),(\d)/g, "$1$2"); const i = t.indexOf(n); if (i < 0) return false;
@@ -157,7 +159,7 @@ function scan(text, field, ctx, opts, blocks, sourcedFacts) {
     if (reasons.some((r) => r.length === 0)) { figures.forEach((n) => sourcedFacts.push(`${field}: ${n} (B1 validated)`)); continue; }
     const best = reasons.reduce((a, b) => (b.length < a.length ? b : a));
     blocks.push({ rule: "b1_claim_context", field, match: sentence.slice(0, 80),
-      message: `No verified article statement supports ${figures.join(", ")} as written here (unsupported: ${best.join("; ")}). State it the way the verified article statement does.` });
+      message: `This states ${figures.join(", ")} differently from the verified article statement (${best.join("; ")}). Keep the figure's own period, place, basis and direction as the article gives them; the interpretation around it is yours.` });
   }
 }
 

@@ -10,7 +10,7 @@ const sha = (s) => crypto.createHash("sha256").update(s, "utf8").digest("hex");
 // sha256 of buildSystemPrompt() on production main (622f96e), and of the B1 development prompt (rules 2b, 2g, 2h as approved in commit 83fb916, plus
 // rule 2i, the B2 editorial direction, Nov 8, 2026).
 const PRODUCTION_SHA256 = "25f3118fed1b9726fc4dc78b16dcc92233cef785d3c074ef89a6ee7aaf7b0495";
-const B1_DEV_SHA256 = "0a0561cfe4644048a46d2e81865b21256bc18022242d0b019e9a2965c45ff54f";   // Nov 13, 2026 (Phase C): rules 2g, 2i and 2n apply report instructions only when a report is present (before: a53eab11..., Nov 12, rule 2p made duration-neutral)  // Nov 13, 2026 (Sam): previous Test hash 15f2c938… before the rule 2g source-role correction and the 2h stated-assumption sentence; production hash unchanged. Nov 13 (later): 4428a770… before the 2h metric-identity clause.
+const B1_DEV_SHA256 = "5416105d6b6e771309153db0e8c06acb474ff1df096cfed5a7aba42f02407643";   // Nov 13, 2026 (Phase C): rules 2g, 2i and 2n apply report instructions only when a report is present (before: a53eab11..., Nov 12, rule 2p made duration-neutral)  // Nov 13, 2026 (Sam): previous Test hash 15f2c938… before the rule 2g source-role correction and the 2h stated-assumption sentence; production hash unchanged. Nov 13 (later): 4428a770… before the 2h metric-identity clause.
 const rule = (prompt, id) => prompt.split("\n").filter((l) => l.startsWith(`${id}. `));
 const withEnv = async (value, fn) => {
   const old = process.env.AGENT_MARKETING_B1_EVIDENCE;
@@ -28,15 +28,15 @@ test("prompt flag: unset (or any value but dev), the whole system prompt is byte
   assert.ok(!/article_evidence/.test(p), "production never mentions article_evidence");
 });
 
-test("prompt flag: AGENT_MARKETING_B1_EVIDENCE=dev gives the B1 prompt, which differs only in rules 2b, 2f, 2g, 2h, 2i, 2j, 2k, 2l, 2n, 2o, 2p, 2q, 5b and 7", async () => {
+test("prompt flag: AGENT_MARKETING_B1_EVIDENCE=dev gives the B1 prompt, which differs only in rules 1, 2b, 2f, 2g, 2h, 2i, 2j, 2k, 2l, 2n, 2o, 2p, 2q, 5b and 7", async () => {
   const dev = planLib.buildSystemPrompt({ AGENT_MARKETING_B1_EVIDENCE: "dev" }), prod = planLib.buildSystemPrompt({});
   assert.strictEqual(sha(dev), B1_DEV_SHA256);
   await withEnv("dev", () => assert.strictEqual(sha(planLib.buildSystemPrompt()), B1_DEV_SHA256));
   const d = dev.split("\n"), q = prod.split("\n");
-  assert.deepStrictEqual(d.filter((l) => !q.includes(l)).map((l) => l.slice(0, 3)), ["2b.", "2f.", "2g.", "2h.", "2i.", "2j.", "2k.", "2l.", "2n.", "2o.", "2p.", "2q.", "5a.", "5b.", "7. "], "only 2b, 2g and the new 2h, 2i, 2j, 2k, 2l, 2n, 2o, 2p and 2q are new");
-  assert.deepStrictEqual(q.filter((l) => !d.includes(l)).map((l) => l.slice(0, 3)), ["2b.", "2f.", "2g.", "5a.", "5b.", "7. "], "only production's 2b, 2f, 2g, 5a, 5b and 7 are replaced");
+  assert.deepStrictEqual(d.filter((l) => !q.includes(l)).map((l) => l.slice(0, 3)), ["1. ", "2b.", "2f.", "2g.", "2h.", "2i.", "2j.", "2k.", "2l.", "2n.", "2o.", "2p.", "2q.", "5a.", "5b.", "7. "], "only rule 1 (voice), 2b, 2g and the new 2h, 2i, 2j, 2k, 2l, 2n, 2o, 2p and 2q are new");
+  assert.deepStrictEqual(q.filter((l) => !d.includes(l)).map((l) => l.slice(0, 3)), ["1. ", "2b.", "2f.", "2g.", "5a.", "5b.", "7. "], "only production's 1, 2b, 2f, 2g, 5a, 5b and 7 are replaced");
   // same order otherwise; 2h sits right after 2g
-  const strip = (lines) => lines.filter((l) => !/^(2[bfghijklnopq]|5a|5b|7)\. /.test(l));
+  const strip = (lines) => lines.filter((l) => !/^(1|2[bfghijklnopq]|5a|5b|7)\. /.test(l));
   assert.deepStrictEqual(strip(d), strip(q));
   assert.strictEqual(d.indexOf(rule(dev, "2h")[0]), d.indexOf(rule(dev, "2g")[0]) + 1);
   assert.strictEqual(d.indexOf(rule(dev, "2i")[0]), d.indexOf(rule(dev, "2h")[0]) + 1);

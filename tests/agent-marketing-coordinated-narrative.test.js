@@ -23,8 +23,8 @@ test("production prompt is byte-for-byte unchanged", () => {
 
 test("rules the corrections must not touch are pinned word for word: 2h, 2j, 2k, 2o, 2p (2g was deliberately corrected in Phase C, Nov 13: pathway wording, tested in agent-marketing-pathway-instructions)", () => {
   const pins = {
-    "2h": "ca6421901cf577d569b559947ac3e047340e6e2529e0b8480fd123023e8c2a48",
-    "2j": "aaf6f1ea54c5720056c38d680839eea6bc8e974c932b97036ef7c76bbb4182b8", "2k": "5ac72dcd79ae60bf5a8a1403bee0490fb9de6b7dd0e8dbfafaf5e82e912884c2",
+    "2h": "2b962b41a8b9078f9dee95099bfcbd2318346cdf9a244e91adea40e4323b86bd", // Nov 14: central_argument is the author's governing position
+    "2j": "7ebba8e9389bb8fce660a74e2c71432593af4e0847e420126889747eaad8a627", // Nov 14: judgment stated directly; specific representations kept apart "2k": "5ac72dcd79ae60bf5a8a1403bee0490fb9de6b7dd0e8dbfafaf5e82e912884c2",
     "2o": "94e674ff1baeb206af1ba0a78d149518a1d7170e31485be8f0948ad5622fe2a6", "2p": "5ac912ad449e17fa119006604e03166b55f1a10b4b15eccde33baae4a6972408", // Nov 12: only the two "60-second" references were made duration-neutral
   };
   Object.entries(pins).forEach(([id, h]) => assert.strictEqual(sha(rule(DEV, id)), h, `rule ${id} changed`));
@@ -33,7 +33,7 @@ test("rules the corrections must not touch are pinned word for word: 2h, 2j, 2k,
 test("source roles (Nov 13 correction): position does not decide the source; sources are never combined into one comparison; 2h attribution intact", () => {
   assert.ok(!/The FIRST and the LAST scene are always/.test(rule(DEV, "2g")), "no position rule in Test");
   assert.match(rule(DEV, "2g"), /says what evidence it may contain, not where it sits in the Reel: any scene, the first and the last included/);
-  assert.match(rule(DEV, "2g"), /never combine an article figure and a report figure into one calculation or comparison/);
+  assert.match(rule(DEV, "2g"), /an article figure and a report figure may stand in the same scene or comparison when each keeps its own source, period, measure and geography/);
   assert.match(rule(DEV, "2g"), /where both cover the same measure the report's figure is the one stated/);
   assert.match(rule(DEV, "2h"), /When a numerical example depends on a material stated assumption \(for example the down payment behind a monthly payment\), state that assumption with the example, and say what the figure measures \(a monthly payment difference is a payment difference, never a rate\)\./);
   assert.match(rule(DEV, "2h"), /Attribute an article finding by role/);
@@ -156,10 +156,10 @@ test("5a Test variant: example is generic, shows early interpretation, connected
   assert.ok(!/Roseville|2\.8|3\.2|31 days|99\.2/.test(d.split("Style example only")[1]), "no Roseville statistics or wording in the example");
   const ex = d.split("Style example only")[1];
   assert.match(ex, /\[conversational\] Everyone says <the common belief>/);
-  assert.match(ex, /\? \[thoughtful\] Here's how I read it\./, "unanswered question, then interpretation begins at once");
-  assert.match(ex, /which tells me <what it means>/, "evidence tied to its meaning");
-  assert.match(ex, /So the honest answer is <clear professional conclusion>/);
-  assert.match(ex, /For you as a seller, that means <specific consequence/);
+  assert.match(ex, /\? \[thoughtful\] The honest answer starts with <the clear professional conclusion>/, "unanswered question, then interpretation begins at once, in the second or third person");
+  assert.match(ex, /points to <what it means>/, "evidence tied to its meaning");
+  assert.doesNotMatch(ex, /\bI\b|I'm|\bmy\b/, "the example is not in the first person");
+  assert.match(ex, /For a seller, that means <specific consequence/);
   assert.match(ex, /\[warm\] Want to talk through where your home fits\?/);
   assert.match(d, /\(d\) Contractions always/, "voice rules kept");
   assert.match(d, /\(b\) Use an ellipsis/, "delivery rules kept");

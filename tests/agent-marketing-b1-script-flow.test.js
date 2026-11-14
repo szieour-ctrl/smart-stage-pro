@@ -485,7 +485,7 @@ const b2Stub = async (system, user) => {
   const u = JSON.parse(user);
   const candidates = [];
   u.articles.forEach((a) => a.findings.slice(0, 3).forEach((f, i) => candidates.push({ id: `C${candidates.length + 1}`, question: `What does this ${a.id === "A1" ? "inventory" : "price"} story mean for sellers here, ${["first", "second", "third"][i]} point?`,
-    article: a.id, findings: [f.id], mechanism: f.finding.slice(0, 120), homeowner_implication: "Plan the sale around it.", editorial_angle: "One practical point for sellers.", why_it_matters: "It changes how a seller prepares." })));
+    article: a.id, findings: [f.id], mechanism: f.finding.slice(0, 120), homeowner_implication: "Plan the sale around it.", editorial_angle: "One practical point for sellers.", why_it_matters: "It changes how a seller prepares.", ...(i === 0 && a.central_argument ? { develops_position: true, position_basis: a.central_argument } : {}) })));
   return JSON.stringify({ candidates, selected: candidates.slice(0, 5).map((c) => c.id), selection_notes: "first five" });
 };
 function researchRow(p, mode, dataSource, uploads) {
@@ -597,7 +597,7 @@ test("fewer than five qualified Article-Led topics: the valid ones are shown wit
   const p = project(UA);
   const row = researchRow(p, "article_editorial", "web");
   const two = async (system, user) => { const u = JSON.parse(user); const f = u.articles[0].findings; return JSON.stringify({ candidates: [
-    { id: "C1", question: "What should sellers here make of this?", article: "A1", findings: [f[0].id], mechanism: "m", homeowner_implication: "h", editorial_angle: "a", why_it_matters: "w" },
+    { id: "C1", question: "What should sellers here make of this?", article: "A1", findings: [f[0].id], mechanism: "m", homeowner_implication: "h", editorial_angle: "a", why_it_matters: "w", ...(u.articles[0].central_argument ? { develops_position: true, position_basis: u.articles[0].central_argument } : {}) },
     { id: "C2", question: "How should a seller prepare for this?", article: "A1", findings: [f[1].id], mechanism: "mm", homeowner_implication: "hh", editorial_angle: "aa", why_it_matters: "ww" }], selected: ["C1", "C2"] }); };
   const out = await b2lib.enrich({ row, fields: { status: "ready", topics: discovery(), usage: {}, charged_at: "2026-11-08T00:00:00Z" }, userId: UA, env: env(), deps: { store: st.createStore({ env: env(), request: supabase }), fetchFn, provider, callFn: two } });
   assert.deepStrictEqual([out.status, out.topics.length, out.charged_at, out.usage.b1b2.state], ["ready", 2, null, "partial"], JSON.stringify(out.usage.b1b2.problems));

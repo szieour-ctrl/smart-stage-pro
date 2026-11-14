@@ -48,14 +48,14 @@ test("rule 2g (Nov 13 correction): no first/last data rule in Test; without a re
   assert.ok(!/The FIRST and the LAST scene are always/.test(r), "position no longer decides the source");
   assert.match(r, /\(no agent report; source_pathway says "article_only"\), there are no data figures and no scene states a report figure: any scene, the first and the last included, may state the article's facts with the article attributed as rule 2h requires/);
   assert.match(r, /the hook may lead with one\./);
-  assert.match(r, /never combine an article figure and a report figure into one calculation or comparison/, "article and report figures are still never combined");
+  assert.match(r, /an article figure and a report figure may stand in the same scene or comparison when each keeps its own source, period, measure and geography/, "article and report figures may be compared when each keeps its own source, period, measure and geography");
 });
 
 
 test("rule 2i: report figures are a source only when a report is present; without one every claim comes from article_evidence", () => {
   const r = rule("2i");
   assert.match(r, /from the article findings, and the report figures when a report is present, where rule 2g permits them/);
-  assert.match(r, /or, when a report is present, from figures_you_may_state \(source_role "data"\); without a report it comes from article_evidence alone;/);
+  assert.match(r, /or, when a report is present, from figures_you_may_state \(source_role "data"\); without a report it comes from article_evidence alone\./);
   assert.ok(!/from the article and report findings/.test(r));
 });
 

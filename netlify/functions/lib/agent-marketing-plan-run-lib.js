@@ -81,7 +81,7 @@ async function runPlan({ id, userId, deps }) {
   } catch (err) {
     console.error(`[agent-marketing-plan] project ${id || "unknown"} failed:`, err.message);
     if (id && userId) {
-      try { await writeNarrative(supabase, id, userId, errorNarrative(prev, err.message, err.gate && err.gate.blocks ? { blocked: err.gate.blocks.slice(0, 6).map((b) => ({ rule: b.rule, field: b.field, match: b.match, message: b.message })) } : null)); }
+      try { await writeNarrative(supabase, id, userId, errorNarrative(prev, err.message, { ...(err.gate && err.gate.blocks ? { blocked: err.gate.blocks.slice(0, 6).map((b) => ({ rule: b.rule, field: b.field, match: b.match, message: b.message })) } : {}), ...(err.experiment ? { experiment: err.experiment } : {}) })); }
       catch (e) { console.error("[agent-marketing-plan] could not write error status:", e.message); }
     }
     return { state: "error", code: err.code || "plan_error" };

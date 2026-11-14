@@ -108,3 +108,14 @@ test("a marked Test project records variant, prompt hash, first draft and call c
     assert.ok(!r.narrative.lengthDiagnostics);
   });
 });
+
+test("a marked project that ends blocked keeps its first draft, rewrite and block reasons in the error record", async () => {
+  await withDevAsync(true, async () => {
+    const bad = JSON.parse(reply(TEXTS)); bad.scenes[1].narration_excerpt += " Inventory is 3.2 months."; bad.scenes[1].source_role = "article";
+    // a report-less topic cannot allow this number in an article scene: use a competing-name block instead via a brokerage name the gate rejects is project-specific; so force the failure through the model reply being structurally blocked twice
+    let n = 0;
+    const callFn = async (sys, u, k, sink) => { n++; sink.push({ model: "m", input_tokens: 1, output_tokens: 1 }); return JSON.stringify({ ...JSON.parse(reply(TEXTS)), narration_with_audio_tags: "[conversational] Call me at 555-123-4567 for a sure thing guaranteed.", scenes: JSON.parse(reply(TEXTS)).scenes.map((s, i) => (i === 1 ? { ...s, narration_excerpt: "Call me at 555-123-4567 for a sure thing guaranteed." } : s)) }); };
+    const { e } = await planLib.generatePlan({ project: proj("causal_current"), anthropicKey: "k", callFn }).then((r) => ({ r }), (e) => ({ e }));
+    assert.ok(e && e.gate, "the fake reply is blocked by the gate twice"); { assert.ok(e.experiment, "the experiment record rides on the error"); assert.strictEqual(e.experiment.variant, "current"); assert.ok(e.experiment.initialDraft && e.experiment.afterGateRewrite && e.experiment.blockedAfterRewrite.length); assert.strictEqual(e.experiment.modelCalls, n); }
+  });
+});

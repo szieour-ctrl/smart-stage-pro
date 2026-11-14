@@ -824,6 +824,7 @@ async function generatePlan({ project, anthropicKey, callFn }) {
     console.error("[agent-marketing-plan] gate blocked the rewrite:", JSON.stringify(g.blocks).slice(0, 500));
     const err = new Error(`The script was blocked by Agent Marketing's check:\n${blockLines(g.blocks, 3)}`);
     err.gate = g;
+    if (diag && diag.experiment) { diag.experiment.blockedAfterRewrite = (g.blocks || []).slice(0, 6).map((b) => ({ rule: String(b.rule || "").slice(0, 60), field: String(b.field || "").slice(0, 40), message: String(b.message || "").slice(0, 200) })); diag.experiment.modelCalls = sink.length; diag.experiment.usage = summarizeClaudeUsage(sink); err.experiment = diag.experiment; } // E5 experiment only: keep the draft and rewrite when the plan ends blocked
     throw err;
   }
   // Oct 28, 2026 (Sam): a 45-second Reel ran 57 seconds (136 words for what should be about 118) and one scene got 3 seconds. The word range and the

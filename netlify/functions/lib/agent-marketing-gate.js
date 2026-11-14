@@ -327,13 +327,20 @@ function scanReportScope(text, field, scope, blocks) {
 }
 
 // Rule 2. The agent's own report is the source of truth. A web figure for a measure the report also covers, and that disagrees with it,
-// was recorded on the topic (reportPrecedence) when the topics were built; using it in the script blocks.
+// was recorded on the topic (reportPrecedence) when the topics were built; stating it as the market's figure blocks. Nov 14, 2026 (Sam): a sentence that
+// attributes the figure to the article or its author ("the article put supply at 2.8 months in September") is accurate context, not a misstatement of the
+// agent's own market data, and passes; so does the same sentence in the subscriber's own text.
+const ARTICLE_ATTRIBUTION = /\b(?:the|that|this)\s+(?:article|author|blog|post|write-?up)\b|\ba\s+local\s+(?:market\s+)?(?:update|article|blog|agent)\b|\baccording\s+to\s+(?:the\s+)?(?:article|author)\b/i;
 function scanReportPriority(text, field, precedence, blocks) {
   if (!precedence.length) return;
-  const nums = numberTokens(text);
-  for (const p of precedence) {
-    for (const n of p.supersededNumbers) {
-      if (nums.has(n)) blocks.push({ rule: "report_priority", field, match: n, message: `Your uploaded report is the source of truth for ${p.label} (${p.reportText}). Use that figure, not ${n}.` });
+  const seen = new Set();
+  for (const sent of norm(text).split(/(?<=[.!?])\s+/)) {
+    if (ARTICLE_ATTRIBUTION.test(sent)) continue;
+    const nums = numberTokens(sent);
+    for (const p of precedence) {
+      for (const n of p.supersededNumbers) {
+        if (nums.has(n) && !seen.has(n)) { seen.add(n); blocks.push({ rule: "report_priority", field, match: n, message: `Your uploaded report is the source of truth for ${p.label} (${p.reportText}). Use that figure, not ${n}.` }); }
+      }
     }
   }
 }
@@ -463,7 +470,8 @@ function evaluate(input) {
       scanMarketClaims(text, field, ctx, blocks, sourcedFacts, agentSuppliedClaims, editorial ? warnings : null);
       // Deterministic geographic-attribution and partial-year checks are not creative editorial checks: they run in the development Test environment too.
       scanReportScope(text, field, reportScope, blocks);
-      if (editorial) { scanReportPriority(text, field, precedence, blocks); b1Scan(text, field); }
+      // Nov 14, 2026 (Sam): subscriber-authored text is the subscriber's own statement; the report-priority block applies to generated text only.
+      if (editorial) b1Scan(text, field);
     }
   }
 

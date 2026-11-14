@@ -109,10 +109,11 @@ function descriptors(sentence) {
  * professional interpretation, names and context; it is blocked only when it states a period, geography, statistical basis (median or average) or
  * direction that conflicts with what the finding itself states, or drops a qualifier the source puts on the figure.
  */
-function unsupported(d, finding, figures, sentence) {
+function unsupported(d, finding, figures, sentence, hedgeOnly) {
   const s = finding.support, why = [];
   const stem = (x) => x.replace(/s$/, "");
   const inS = (x) => has(s, x);
+  if (!hedgeOnly) {
   const fPeriods = [...MONTHS.filter(inS), ...PERIOD_PHRASES.filter(inS), ...(s.match(/\b(?:19|20)\d{2}\b/g) || [])];
   if (d.period.length && fPeriods.length && !d.period.some(inS)) why.push(`period "${d.period.join("/")}" (the source says ${fPeriods.slice(0, 3).join("/")})`);
   const fGeo = GEO_WORDS.filter((x) => inS(x) || inS(stem(x)));
@@ -121,6 +122,7 @@ function unsupported(d, finding, figures, sentence) {
   if (d.stat.length && fStat.length && !d.stat.some((x) => fStat.includes(x))) why.push(`measurement "${d.stat.join("/")}" (the source says ${fStat.join("/")})`);
   const fDir = [UP.some(inS) && "up", DOWN.some(inS) && "down"].filter(Boolean);
   if (d.direction.length && fDir.length && !d.direction.some((x) => fDir.includes(x))) why.push(`direction "${d.direction.join("/")}" (the source says ${fDir.join("/")})`);
+  }
   // A hedge the source puts on the figure itself ("a slight 3%", "around 9,000") must be kept.
   const hedged = finding.quotes.some((q) => [...figures].some((n) => {
     const t = norm(q).replace(/(\d),(\d)/g, "$1$2"); const i = t.indexOf(n); if (i < 0) return false;
@@ -150,8 +152,13 @@ function scan(text, field, ctx, opts, blocks, sourcedFacts) {
       const one = figures.filter((n) => !ctx.validated.some((f) => f.numbers.has(n)));
       if (one.length) one.forEach((n) => blocks.push({ rule: "b1_unsupported_figure", field, match: n,
         message: `${n} comes only from article statements that are held for review or excluded. Leave it out.` }));
-      else blocks.push({ rule: "b1_unsupported_figure", field, match: figures.join(" + "),
-        message: `${figures.join(" and ")} come from different verified article statements. State each in its own sentence, as the article gives it.` });
+      else {
+        // Nov 14, 2026 (Sam): figures from different verified statements may share a sentence. Each is verified on its own; the sentence's period, place
+        // and direction cannot be pinned to one statement, so only the qualifier the source puts on each figure is checked.
+        const dropped = figures.filter((n) => { const f = ctx.validated.find((v) => v.numbers.has(n)); return f && unsupported(descriptors(sentence), f, [n], sentence, true).length; });
+        if (dropped.length) dropped.forEach((n) => blocks.push({ rule: "b1_claim_context", field, match: n, message: `The source puts a qualifier on ${n} ("about", "slightly" and the like). Keep it.` }));
+        else figures.forEach((n) => sourcedFacts.push(`${field}: ${n} (B1 validated)`));
+      }
       continue;
     }
     const d = descriptors(sentence);

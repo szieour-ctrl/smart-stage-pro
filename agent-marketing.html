@@ -1005,7 +1005,7 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
   function renderBoard() {
     var n = (state.project && (state.project.narrative)) || {}, scenes = n.scenes || [];
     $("boardWarn").classList.toggle("hidden", !n.scenesStale);
-    if (n.scenesStale) $("boardWarn").textContent = "You edited the script after the scene plan was written, so the scene text below may no longer match your wording. We'll re-match it in the next step.";
+    if (n.scenesStale) $("boardWarn").textContent = "You edited the script after the scene plan was written, so the scenes below are the earlier plan and will be rebuilt from your approved script when your Reel is made. Your script is not changed.";
     $("scenes").innerHTML = scenes.map(function (s, i) {
       var vs = s.visualSource, real = vs === "AUTHENTIC_AGENT_ASSET", pr = s.photoRequest || {};
       var label = { GPT_IMAGE_2_CONCEPT: "Concept image", AGENT_SCENE: "Image of you", CONCEPT_REUSE: "Concept image (re-framed)", AGENT_PROFILE: "Your profile photo", BRAND_CARD: "Brand card", AUTHENTIC_AGENT_ASSET: "Optional real photo" }[vs] || "Scene";

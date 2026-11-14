@@ -105,9 +105,9 @@ test("C1: the article credit footer lands on an opening article scene (Test)", a
 });
 
 // ---- C3: manifest build ----
-test("C3: the manifest keeps source_role article on the first and last scene in Test and demotes it in production", async () => {
+test("C3 (Nov 14): the manifest keeps source_role article on the first and last scene when the article-led switch is on, in Test and in production, and demotes it only with the switch off", async () => {
   const src = require("fs").readFileSync(require.resolve("../netlify/functions/lib/agent-marketing-assets-lib"), "utf8");
   assert.match(src, /source_role: v\.sourceRole === "article" && \(testRoles \|\| \(i > 0 && i < pl\.scenes\.length - 1\)\) \? "article" : "data"/);
-  assert.match(src, /const testRoles = require\("\.\/agent-marketing-gate"\)\.testEvaluation\(\);/);
+  assert.match(src, /const testRoles = require\("\.\/agent-marketing-b1-evidence-lib"\)\.enabled\(\);/);
   assert.ok(assets, "module loads");
 });

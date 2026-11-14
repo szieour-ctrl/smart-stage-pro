@@ -197,10 +197,23 @@ function gateInputFor(project, narrative, source) {
   return { ...base, fullPiece: true, userText: { narration: n.captionText || stripAudioTags(n.narrationTagged), ...Object.fromEntries(sceneTexts.map((t, i) => [`sceneText[${i}]`, t])), ...(n.notice ? { notice: n.notice } : {}) }, cta: n.cta || null };
 }
 
+// Nov 14, 2026 (Sam, Option 2 beta): a storyboard belongs to the narration it was planned for. narrationKey identifies a narration by its spoken words
+// only (case, punctuation, spacing and audio tags do not count), and storyboardNeeded says whether an edited script no longer matches the scenes it carries.
+function narrationKey(text) {
+  const words = stripAudioTags(String(text == null ? "" : text)).toLowerCase().replace(/[^a-z0-9$%']+/g, " ").trim();
+  return require("crypto").createHash("sha256").update(words).digest("hex").slice(0, 32);
+}
+/** True when the script was edited and its scenes were not planned for these exact words (a script saved before this field existed counts as not matching). */
+function storyboardNeeded(narrative) {
+  const n = narrative || {};
+  if (n.source !== "edited" || !n.narrationTagged) return false;
+  return narrationKey(n.narrationTagged) !== n.scenesFor;
+}
+
 const NOT_EDITABLE_AFTER = ["rendering", "rendered", "published"];
 
 module.exports = {
   marketReviewEnabled,
-  PACE_WORDS_PER_SECOND, narrationEstimate, durationAdvisory, DURATIONS, FORMATS, VOICES, MUSIC, DURATION_CONTRACT, WORD_TARGETS, DEV_WORD_TARGETS, SCENE_RANGES, IMAGE_RANGES, WRITING_AIMS, EDITOR_TARGETS, wordTargets, UUID_RE, NOT_EDITABLE_AFTER,
+  PACE_WORDS_PER_SECOND, narrationEstimate, durationAdvisory, narrationKey, storyboardNeeded, DURATIONS, FORMATS, VOICES, MUSIC, DURATION_CONTRACT, WORD_TARGETS, DEV_WORD_TARGETS, SCENE_RANGES, IMAGE_RANGES, WRITING_AIMS, EDITOR_TARGETS, wordTargets, UUID_RE, NOT_EDITABLE_AFTER,
   isEnabledFor, validateCreate, stripAudioTags, countWords, validateNarrative, gateInputFor, topicNotice, noticeOverlayFor, sourceCreditFor, attachNotice,
 };

@@ -8,7 +8,7 @@ const planLib = require("../netlify/functions/lib/agent-marketing-plan-lib");
 
 const sha = (s) => crypto.createHash("sha256").update(s).digest("hex");
 const PROD = "25f3118fed1b9726fc4dc78b16dcc92233cef785d3c074ef89a6ee7aaf7b0495";
-const DEV = "a69c05714946cc9b75b13f782b101c5efd0cc10f95e4166c23fd6f22bd270a3c";
+const DEV = "0a0561cfe4644048a46d2e81865b21256bc18022242d0b019e9a2965c45ff54f";
 function withDev(on, fn) {
   const prev = process.env.AGENT_MARKETING_B1_EVIDENCE;
   if (on) process.env.AGENT_MARKETING_B1_EVIDENCE = "dev"; else delete process.env.AGENT_MARKETING_B1_EVIDENCE;

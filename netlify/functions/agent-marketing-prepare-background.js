@@ -254,8 +254,22 @@ exports.handler = async (event) => {
     if (!project) return await fail(job, "The project was not found."), { statusCode: 200, body: "" };
     let narrative = project.narrative_approved;
     if (!narrative || !project.narrative_approved_at || !Array.isArray(narrative.scenes) || !narrative.narrationTagged) return await fail(job, "The narration has not been approved yet."), { statusCode: 200, body: "" };
-    // A script approved before its scene text was re-matched to an edited narration is re-matched here (the words and their order are the narration's own).
-    narrative = { ...narrative, scenes: require("./lib/agent-marketing-timing-lib").realignScenes(narrative.scenes, narrative.narrationTagged).scenes };
+    // Nov 14, 2026 (Sam, Option 2 beta; article-led switch only): an approved script that no longer matches the scenes it carries gets its storyboard rebuilt from the
+    // approved words, with ONE planning call. The narration is never changed. If the storyboard cannot be built the job stops with an explicit, retryable error and
+    // the earlier scenes are NOT used. An unchanged script keeps its storyboard and makes no call.
+    if (require("./lib/agent-marketing-b1-evidence-lib").enabled() && am.storyboardNeeded(narrative)) {
+      await patchJob(job.id, { step: "Planning the scenes from your script" });
+      let rebuilt;
+      try { rebuilt = await planLib.rebuildApprovedStoryboard({ project, narrative, anthropicKey: process.env.ANTHROPIC_API_KEY }); }
+      catch (e) { return await fail(job, e && e.code === "storyboard_failed" ? e.message : "We couldn't build the scene plan from your approved script. Your script is unchanged. Please try again."), { statusCode: 200, body: "" }; }
+      let kept = null;
+      try { kept = await supabase("PATCH", "agent_marketing_projects", { narrative_approved: rebuilt }, `?id=eq.${project.id}&user_id=eq.${job.user_id}`); } catch (e) { kept = null; }
+      if (!kept || kept.status < 200 || kept.status >= 300) return await fail(job, "The scene plan could not be saved. Your script is unchanged. Please try again."), { statusCode: 200, body: "" };
+      narrative = rebuilt;
+    } else {
+      // A script approved before its scene text was re-matched to an edited narration is re-matched here (the words and their order are the narration's own).
+      narrative = { ...narrative, scenes: require("./lib/agent-marketing-timing-lib").realignScenes(narrative.scenes, narrative.narrationTagged).scenes };
+    }
     const topic = project.selected_topic || {};
     if (project.selected_topic && narrative.intakeHash && narrative.intakeHash !== planLib.intakeHash(project.intake, project.selected_topic)) return await fail(job, "Your approved script was written for a different topic or different answers than the ones now on this project. Go back to the Script step, write a new script for your topic, approve it, and make the Reel again."), { statusCode: 200, body: "" };
     const reportFigures = topic.reportFigures;

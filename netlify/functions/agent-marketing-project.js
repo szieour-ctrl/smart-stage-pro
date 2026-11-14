@@ -184,12 +184,18 @@ exports.handler = async (event) => {
       // The scene text follows the agent's wording: re-matched here, so an edited script never leaves the scenes one word off.
       const aligned = require("./lib/agent-marketing-timing-lib").realignScenes(clientScenes, v.narrative.narrationTagged);
       clientScenes = aligned.scenes;
+      // Nov 14, 2026 (Sam, Option 2 beta; article-led switch only): the scenes belong to the narration they were planned for. When the words no longer match,
+      // the AI plan's angle, claims and hook are dropped (they describe the discarded script) and the scenes are rebuilt from the approved words at render time.
+      const articleLed = require("./lib/agent-marketing-b1-evidence-lib").enabled() && project.template === "local_market_insider";
+      const scenesFor = prev.scenesFor || (articleLed && prev.narrationTagged && Array.isArray(prev.scenes) && prev.scenes.length ? am.narrationKey(prev.narrationTagged) : undefined);
+      const changed = articleLed && !!scenesFor && am.narrationKey(v.narrative.narrationTagged) !== scenesFor;
       const narrative = {
-        editorialAngle: prev.editorialAngle, hook: prev.hook, claimsToVerify: prev.claimsToVerify, missingAgentInputs: prev.missingAgentInputs,
+        editorialAngle: changed ? "" : prev.editorialAngle, hook: changed ? (v.narrative.captionText.split(/(?<=[.!?\u2026])\s+/)[0] || "") : prev.hook, claimsToVerify: changed ? [] : prev.claimsToVerify, missingAgentInputs: prev.missingAgentInputs,
         attempts: prev.attempts, intakeHash: prev.intakeHash, lengthDiagnostics: prev.lengthDiagnostics,
+        ...(articleLed && scenesFor ? { scenesFor } : {}),
         ...v.narrative, scenes: clientScenes,
         pronunciations: Array.isArray(b.narrative && b.narrative.pronunciations) ? require("./lib/agent-marketing-timing-lib").cleanPronunciations(b.narrative.pronunciations) : (prev.pronunciations || []), cta: v.narrative.cta || prev.cta || null,
-        scenesStale: false,
+        scenesStale: changed,
         source: "edited", status: "ready", savedAt: new Date().toISOString(),
       };
       am.attachNotice(project, narrative); // again, now that the scenes are in place: the notice bars (opening and closing) and the article credit follow the scenes, never the client

@@ -296,11 +296,12 @@ function validateManifest(manifest) {
   }
   // Development Test environment only (Nov 9, 2026, product-owner directive): the editorial claim checks are not applied at render either
   // (numbers on screen tracing to a source, small-sample trend wording, article in the opening or closing scene). Production is unchanged.
-  if (require("./agent-marketing-gate").testEvaluation()) {
-    const kept = errors.filter((e) => !EDITORIAL_CODES.includes(e.code) && !(e.code === "source_role" && /^Opening and closing/.test(e.message)));
-    return { ok: kept.length === 0, errors: kept, warnings };
-  }
-  return { ok: errors.length === 0, errors, warnings };
+  // Nov 14, 2026 (Sam, Option 2 beta): the article-led switch alone decides that position does not fix a scene's source (so an opening or closing scene may carry the article);
+  // the editorial claim checks above stay Test-only. With neither switch on, production is unchanged.
+  const articleLed = require("./agent-marketing-b1-evidence-lib").enabled();
+  const test = require("./agent-marketing-gate").testEvaluation();
+  const kept = errors.filter((e) => !(test && EDITORIAL_CODES.includes(e.code)) && !(articleLed && e.code === "source_role" && /^Opening and closing/.test(e.message)));
+  return { ok: kept.length === 0, errors: kept, warnings };
 }
 
 module.exports = { AI_DISCLOSURES, MANIFEST_VERSION, FORMATS, SMALL_SAMPLE_BELOW, parseNumber, metroListNotice, metroListDisclosureNotice, verifyDerived, qualifySmallSample, applySmallSampleQualifiers, validateManifest, sceneStrings };

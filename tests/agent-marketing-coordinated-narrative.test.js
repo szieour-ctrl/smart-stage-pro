@@ -23,16 +23,19 @@ test("production prompt is byte-for-byte unchanged", () => {
 
 test("rules the corrections must not touch are pinned word for word: 2h, 2j, 2k, 2o, 2p (2g was deliberately corrected in Phase C, Nov 13: pathway wording, tested in agent-marketing-pathway-instructions)", () => {
   const pins = {
-    "2h": "9f74dd63826e49b26b5c4329e1cc0442579dfc55ae78786e003b736dc9405ae2",
+    "2h": "499728e5b24d87024e13558c42baf52ce94f83a2ced2282b07491236659fdc3f",
     "2j": "aaf6f1ea54c5720056c38d680839eea6bc8e974c932b97036ef7c76bbb4182b8", "2k": "5ac72dcd79ae60bf5a8a1403bee0490fb9de6b7dd0e8dbfafaf5e82e912884c2",
     "2o": "94e674ff1baeb206af1ba0a78d149518a1d7170e31485be8f0948ad5622fe2a6", "2p": "5ac912ad449e17fa119006604e03166b55f1a10b4b15eccde33baae4a6972408", // Nov 12: only the two "60-second" references were made duration-neutral
   };
   Object.entries(pins).forEach(([id, h]) => assert.strictEqual(sha(rule(DEV, id)), h, `rule ${id} changed`));
 });
 
-test("source roles stay separate: 2g still fixes first/last scenes to data and keeps article and data numbers apart; 2h attribution intact", () => {
-  assert.match(rule(DEV, "2g"), /The FIRST and the LAST scene are always \"data\"/);
-  assert.match(rule(DEV, "2g"), /never put an article number and a data number in the same scene/);
+test("source roles (Nov 13 correction): position does not decide the source; sources are never combined into one comparison; 2h attribution intact", () => {
+  assert.ok(!/The FIRST and the LAST scene are always/.test(rule(DEV, "2g")), "no position rule in Test");
+  assert.match(rule(DEV, "2g"), /says what evidence it may contain, not where it sits in the Reel: any scene, the first and the last included/);
+  assert.match(rule(DEV, "2g"), /never combine an article figure and a report figure into one calculation or comparison/);
+  assert.match(rule(DEV, "2g"), /where both cover the same measure the report's figure is the one stated/);
+  assert.match(rule(DEV, "2h"), /When a numerical example depends on a material stated assumption \(for example the down payment behind a monthly payment\), state that assumption with the example\./);
   assert.match(rule(DEV, "2h"), /Attribute an article finding by role/);
   assert.match(rule(DEV, "2f"), /at least one middle scene must have source_role \"article\"/, "an article scene is still required (Test variant of 2f)");
   assert.match(rule(DEV, "2f"), /Where the article and the report disagree about the same area, the report wins/);

@@ -124,12 +124,14 @@ function buildManifest(input) {
     const t = Math.round(Math.max(w.start, hit.start - 0.6) * 100) / 100;
     return t - w.start >= 0.8 ? t : undefined;
   };
+  // Test only (Nov 13, 2026, Sam): the stored scene role stands at any position; production keeps the first and last scene as "data".
+  const testRoles = require("./agent-marketing-gate").testEvaluation();
   const scenes = pl.scenes.map((s, i) => {
     const v = s.visual || {};
     const owner = v.visualSource === "CONCEPT_REUSE" && Number.isInteger(v.reuseOfScene) ? v.reuseOfScene : i;
     const keys = (input.imageKeys && input.imageKeys[owner]) || {};
     return {
-      n: i + 1, composition: s.composition, narrative_role: s.narrative_role, branding: s.branding, source_role: v.sourceRole === "article" && i > 0 && i < pl.scenes.length - 1 ? "article" : "data",
+      n: i + 1, composition: s.composition, narrative_role: s.narrative_role, branding: s.branding, source_role: v.sourceRole === "article" && (testRoles || (i > 0 && i < pl.scenes.length - 1)) ? "article" : "data",
       narration_excerpt: s.narration_excerpt, window: tw.windows[i], ...(cardStart(s, tw.windows[i]) !== undefined ? { card_start_sec: cardStart(s, tw.windows[i]) } : {}),
       visual: { research_visual_context: [v.purpose, v.visualBrief].filter(Boolean).join(" — "), image_keys: keys, motion: s.camera_motion || "static_hold", source: v.visualSource, ...(input.imageProvenance && input.imageProvenance[owner] ? { image_provenance: input.imageProvenance[owner] } : {}) },
       claims: s.claims, data: s.data, reason: s.reason,

@@ -43,13 +43,14 @@ test("outside the two pathways and outside Test, nothing changes: no source_path
   assert.strictEqual(user(topic(null), false).narrative_architecture, "Hook on the topic's question → what the sourced facts show (only those) → what it means for the audience → low-pressure next step");
 });
 
-test("rule 2g: the opening/closing label stays; without a report there are no data figures and article facts may stand in any scene, attributed", () => {
+test("rule 2g (Nov 13 correction): no first/last data rule in Test; without a report article facts may stand in any scene, attributed", () => {
   const r = rule("2g");
-  assert.match(r, /The FIRST and the LAST scene are always \\?"data\\?"\./, "the first and last scene data label is preserved");
-  assert.match(r, /\(no agent report; source_pathway says "article_only"\), there are no data figures: the first and last scenes keep the label "data" but state no report figure/);
-  assert.match(r, /may state them with the article attributed as rule 2h requires, and the hook may lead with one\./);
-  assert.match(r, /never put an article number and a data number in the same scene/, "the one-source-per-scene restriction is intact");
+  assert.ok(!/The FIRST and the LAST scene are always/.test(r), "position no longer decides the source");
+  assert.match(r, /\(no agent report; source_pathway says "article_only"\), there are no data figures and no scene states a report figure: any scene, the first and the last included, may state the article's facts with the article attributed as rule 2h requires/);
+  assert.match(r, /the hook may lead with one\./);
+  assert.match(r, /never combine an article figure and a report figure into one calculation or comparison/, "article and report figures are still never combined");
 });
+
 
 test("rule 2i: report figures are a source only when a report is present; without one every claim comes from article_evidence", () => {
   const r = rule("2i");

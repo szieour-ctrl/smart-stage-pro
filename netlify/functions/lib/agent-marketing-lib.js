@@ -61,6 +61,18 @@ function wordTargets(durationSec, env) {
   const dev = String((env || process.env).AGENT_MARKETING_B1_EVIDENCE || "").trim().toLowerCase() === "dev";
   return (dev ? DEV_WORD_TARGETS : WORD_TARGETS)[durationSec] || (dev ? DEV_WORD_TARGETS : WORD_TARGETS)[45];
 }
+// Nov 13, 2026 (Sam, Test only): a nonblocking estimate of the narration length from the word count, using the delivery range seen across stored renders
+// (2.3 to 2.8 words a second). Advisory text only: it never changes the narration, the voice speed or any timing.
+const PACE_WORDS_PER_SECOND = [2.3, 2.8];
+function narrationEstimate(words) {
+  const n = Math.max(0, Number(words) || 0);
+  return [Math.round(n / PACE_WORDS_PER_SECOND[1]), Math.round(n / PACE_WORDS_PER_SECOND[0])];
+}
+function durationAdvisory(words, durationSec) {
+  const [lo, hi] = narrationEstimate(words);
+  return `${words} words · Estimated narration ${lo}–${hi} seconds · Target ${durationSec} seconds.`;
+}
+function devAdvisory(env) { return String((env || process.env).AGENT_MARKETING_B1_EVIDENCE || "").trim().toLowerCase() === "dev"; }
 // Development only: AGENT_MARKETING_MARKET_REVIEW=dev routes supported Domus Market Review PDFs to the deterministic reader. Server environment only; no request field turns it on.
 function marketReviewEnabled(env) { return String((env || process.env).AGENT_MARKETING_MARKET_REVIEW || "").trim().toLowerCase() === "dev"; }
 const CTA_SOURCES_FROM_CLIENT = ["user_edited", "user_inserted"];
@@ -120,6 +132,7 @@ function validateNarrative(body, durationSec) {
   const warnings = [];
   if (words < lo) warnings.push(`About ${words} spoken words; a ${durationSec}-second piece usually runs ${lo}–${hi}. It may feel short.`);
   if (words > hi) warnings.push(`About ${words} spoken words; a ${durationSec}-second piece usually runs ${lo}–${hi}. Speech may run long.`);
+  if (devAdvisory()) warnings.push(durationAdvisory(words, durationSec)); // Test only (Nov 13, Sam): nonblocking estimate
   const ctaText = intakeLib.cleanText(b.cta && b.cta.text, 80);
   const ctaSource = CTA_SOURCES_FROM_CLIENT.includes(b.cta && b.cta.source) ? b.cta.source : "user_edited";
   const scenes = Array.isArray(b.scenes) ? b.scenes.slice(0, 12).map((s, i) => ({
@@ -188,6 +201,6 @@ const NOT_EDITABLE_AFTER = ["rendering", "rendered", "published"];
 
 module.exports = {
   marketReviewEnabled,
-  DURATIONS, FORMATS, VOICES, MUSIC, DURATION_CONTRACT, WORD_TARGETS, DEV_WORD_TARGETS, SCENE_RANGES, IMAGE_RANGES, WRITING_AIMS, EDITOR_TARGETS, wordTargets, UUID_RE, NOT_EDITABLE_AFTER,
+  PACE_WORDS_PER_SECOND, narrationEstimate, durationAdvisory, DURATIONS, FORMATS, VOICES, MUSIC, DURATION_CONTRACT, WORD_TARGETS, DEV_WORD_TARGETS, SCENE_RANGES, IMAGE_RANGES, WRITING_AIMS, EDITOR_TARGETS, wordTargets, UUID_RE, NOT_EDITABLE_AFTER,
   isEnabledFor, validateCreate, stripAudioTags, countWords, validateNarrative, gateInputFor, topicNotice, noticeOverlayFor, sourceCreditFor, attachNotice,
 };

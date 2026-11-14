@@ -76,7 +76,7 @@ test("editor: a drop of a whole secondary sentence is accepted; a still-over res
     assert.strictEqual(d.edit.outcome, "accepted_still_over");
     assert.strictEqual(r.narrative.wordCount, total(cut));
     assert.deepStrictEqual(r.narrative.lengthOver, { words: total(cut), max: 151, over: total(cut) - 151 });
-    assert.match(r.warnings[0], new RegExp(`^${total(cut)} spoken words\\. The recommended range for a 60-second Reel is 133–151 words\\.`));
+    assert.match(r.warnings[0], new RegExp(`^${total(cut)} words · Estimated narration \\d+–\\d+ seconds · Target 60 seconds\\. The recommended range for a 60-second Reel is 133–151 words\\.`));
   });
 });
 

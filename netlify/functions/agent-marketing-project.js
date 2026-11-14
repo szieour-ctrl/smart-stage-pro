@@ -99,7 +99,7 @@ exports.handler = async (event) => {
         return reply(200, {
           templates: gate.ENABLED_TEMPLATES.map((t) => ({ key: t, ...intakeLib.schemaFor(t) })),
           audiences: intakeLib.AUDIENCES, actions: intakeLib.ACTIONS, eventActions: intakeLib.EVENT_ACTIONS, limits: intakeLib.LIMITS,
-          durations: am.DURATIONS, formats: am.FORMATS, voices: am.VOICES, music: am.MUSIC, wordTargets: Object.fromEntries(Object.keys(am.WORD_TARGETS).map((d) => [d, am.wordTargets(Number(d))])),
+          durations: am.DURATIONS, formats: am.FORMATS, voices: am.VOICES, music: am.MUSIC, wordTargets: Object.fromEntries(Object.keys(am.WORD_TARGETS).map((d) => [d, am.wordTargets(Number(d))])), ...(String(process.env.AGENT_MARKETING_B1_EVIDENCE || "").trim().toLowerCase() === "dev" ? { paceWordsPerSecond: am.PACE_WORDS_PER_SECOND } : {}),
           attestation: { version: gate.ATTESTATION_VERSION, text: gate.ATTESTATION_TEXT },
           uploadAttestation: { version: mediaLib.UPLOAD_ATTESTATION_VERSION, text: mediaLib.UPLOAD_ATTESTATION_TEXT },
         });

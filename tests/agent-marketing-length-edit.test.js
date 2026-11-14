@@ -86,7 +86,7 @@ test("edit still over 151: the draft is kept with a nonblocking advisory, and no
     assert.ifError(e);
     assert.strictEqual(calls, 2);
     assert.ok(r.narrative.lengthOver && r.narrative.lengthOver.max === 151 && r.narrative.lengthOver.words > 151);
-    assert.match(r.warnings[0], /^\d+ spoken words\. The recommended range for a 60-second Reel is 133–151 words\. Actual narration duration depends on delivery\. You may edit the script or approve it as written\.$/);
+    assert.match(r.warnings[0], /^\d+ words · Estimated narration \d+–\d+ seconds · Target \d+ seconds\. The recommended range for a 60-second Reel is 133–151 words\. Actual narration duration depends on delivery\. You may edit the script or approve it as written\.$/);
     assert.ok(!/before approving|Cut about/.test(r.warnings.join(" ")), "an advisory, not a demand");
     assert.strictEqual(r.narrative.scenes.length, 6);
   });

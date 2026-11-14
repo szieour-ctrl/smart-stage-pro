@@ -10,7 +10,7 @@ const sha = (s) => crypto.createHash("sha256").update(s, "utf8").digest("hex");
 // sha256 of buildSystemPrompt() on production main (622f96e), and of the B1 development prompt (rules 2b, 2g, 2h as approved in commit 83fb916, plus
 // rule 2i, the B2 editorial direction, Nov 8, 2026).
 const PRODUCTION_SHA256 = "25f3118fed1b9726fc4dc78b16dcc92233cef785d3c074ef89a6ee7aaf7b0495";
-const B1_DEV_SHA256 = "4428a770fc0458ab42da5ba0d5a71f24fdbce99140adc9f031e09aae11e107af";   // Nov 13, 2026 (Phase C): rules 2g, 2i and 2n apply report instructions only when a report is present (before: a53eab11..., Nov 12, rule 2p made duration-neutral)  // Nov 13, 2026 (Sam): previous Test hash 15f2c938… before the rule 2g source-role correction and the 2h stated-assumption sentence; production hash unchanged.
+const B1_DEV_SHA256 = "a69c05714946cc9b75b13f782b101c5efd0cc10f95e4166c23fd6f22bd270a3c";   // Nov 13, 2026 (Phase C): rules 2g, 2i and 2n apply report instructions only when a report is present (before: a53eab11..., Nov 12, rule 2p made duration-neutral)  // Nov 13, 2026 (Sam): previous Test hash 15f2c938… before the rule 2g source-role correction and the 2h stated-assumption sentence; production hash unchanged. Nov 13 (later): 4428a770… before the 2h metric-identity clause.
 const rule = (prompt, id) => prompt.split("\n").filter((l) => l.startsWith(`${id}. `));
 const withEnv = async (value, fn) => {
   const old = process.env.AGENT_MARKETING_B1_EVIDENCE;

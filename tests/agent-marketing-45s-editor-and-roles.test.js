@@ -91,7 +91,7 @@ test("45 seconds: the editor never rejects a short result for being under 105 (n
     assert.ifError(b.e);
     assert.strictEqual(calls, 2, "no further model call");
     assert.ok(b.r.narrative.lengthOver && b.r.narrative.lengthOver.max === 125);
-    assert.match(b.r.warnings[0], /^\d+ spoken words\. The recommended range for a 45-second Reel is 105–125 words\. Actual narration duration depends on delivery\. You may edit the script or approve it as written\.$/);
+    assert.match(b.r.warnings[0], /^\d+ words · Estimated narration \d+–\d+ seconds · Target \d+ seconds\. The recommended range for a 45-second Reel is 105–125 words\. Actual narration duration depends on delivery\. You may edit the script or approve it as written\.$/);
     assert.ok(!/140|155/.test(b.r.warnings[0]), "no 60-second numbers in a 45-second advisory");
   });
 });
@@ -120,7 +120,7 @@ test("45 seconds inside its range: no editor, no extra call", async () => {
 
 // ── 2. 60 seconds unchanged ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 test("60 seconds (Phase B): the editor gets the range guidance, cuts toward 146 above 151, and the advisory reads 133–151", async () => {
-  assert.strictEqual(sha(planLib.lengthEditSystem(60, false)), "ba5b7256134d9014cb52b63bf67cbc316cffacea37b1b179098aea0b721e9431", "the prompt function without a range is unchanged");
+  assert.strictEqual(sha(planLib.lengthEditSystem(60, false)), "b54dfa1b1b8bdf30013bf229061f057f5b3ec9c6330940b462e289b6a1fde79b", "the editor prompt without a range (Nov 13: material numerical context sentence added)");
   await withDev(true, async () => {
     const six = [...CORE5.slice(0, 4), "Compare the full picture before you decide anything at all.", ...CORE5.slice(4)];
     const LONG6 = six.map((c, i) => c + (i === 1 || i === 2 || i === 3 || i === 4 ? PAD5[Math.min(i, 3)] + PAD5[2] : ""));
@@ -138,7 +138,7 @@ test("60 seconds (Phase B): the editor gets the range guidance, cuts toward 146 
       assert.deepStrictEqual(sent6.recommended_words, [133, 151]);
       assert.strictEqual(sent6.max_words, 151);
       assert.strictEqual(sent6.target_words, 146);
-      if (r.narrative.lengthOver) assert.match(r.warnings[0], /^\d+ spoken words\. The recommended range for a 60-second Reel is 133–151 words\./);
+      if (r.narrative.lengthOver) assert.match(r.warnings[0], /^\d+ words · Estimated narration \d+–\d+ seconds · Target \d+ seconds\. The recommended range for a 60-second Reel is 133–151 words\./);
     }
   });
 });
@@ -186,7 +186,7 @@ test("source roles: an article scene stating report-only figures is a violation;
 });
 
 test("source roles: a data scene stating article-only figures is a violation", async () => {
-  const b = await roleBlocks([sc("data", "The article counted 130 pending sales, and closed sales were 139.")]);
+  const b = await roleBlocks([sc("data", "Pending sales were 130, and closed sales were 139.")]);
   assert.strictEqual(b.length, 1);
   assert.strictEqual(b[0].field, "sceneText[0]");
   assert.strictEqual(b[0].match, "130");

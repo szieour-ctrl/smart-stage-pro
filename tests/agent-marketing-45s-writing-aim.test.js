@@ -21,9 +21,9 @@ test("aim: a 45-second Test user message carries spoken_word_aim 105-110 beside 
     const u = JSON.parse(planLib.buildUserMessage(proj(45)));
     assert.deepStrictEqual(u.spoken_word_range, [105, 125]);
     assert.match(u.spoken_word_aim, /^105-110 spoken words\./);
-    assert.match(u.spoken_word_aim, /about 151 words a minute \(not a guaranteed rate\)/);
-    assert.match(u.spoken_word_aim, /not a per-scene quota/);
-    assert.match(u.spoken_word_aim, /never replaces a required attribution/);
+    assert.match(u.spoken_word_aim, /Write to the specified duration from the first draft\. Treat the target word count as a production constraint, not a suggestion\./);
+    assert.match(u.spoken_word_aim, /Prioritize the hook, central Realtor interpretation, decisive supporting evidence, and homeowner takeaway\. Use only the numerical examples necessary to communicate that argument\. Preserve material assumptions and source attribution\. Do not depend on the length editor to remove an oversized first draft\./);
+    assert.ok(!/four spoken words|151 words a minute/.test(u.spoken_word_aim), "no per-figure word assumption");
     assert.deepStrictEqual(planLib.writingAimFor(45), [105, 110]);
   });
 });

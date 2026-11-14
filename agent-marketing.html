@@ -887,6 +887,9 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
     var t = $("narration").value, target = state.schema.wordTargets[state.project.durationSec] || [0, 0], w = words(t);
     $("captionPreview").textContent = stripTags(t) || " ";
     $("wordInfo").textContent = "About " + w + " spoken words (a " + state.project.durationSec + "-second piece usually runs " + target[0] + "–" + target[1] + ").";
+    // Test only: the server offers the observed pace range only in the development environment; production never receives it, so nothing changes there.
+    var pace = state.schema.paceWordsPerSecond;
+    if (pace && pace.length === 2 && w > 0) $("wordInfo").textContent += " " + w + " words · Estimated narration " + Math.round(w / pace[1]) + "–" + Math.round(w / pace[0]) + " seconds · Target " + state.project.durationSec + " seconds.";
   }
   async function plan() {
     $("planBtn").disabled = true; say("scriptMsg", "");

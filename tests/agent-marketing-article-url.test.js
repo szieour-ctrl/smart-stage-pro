@@ -230,3 +230,12 @@ test("the submitted text is stored with the request but not sent back with every
   assert.match(src, /focus: focusForClient\(row\.focus\)/);
   assert.match(src, /articleTextChars/);
 });
+
+test("evidence this project already holds for the article from an earlier research run is found for a later run (Option 3 text, then Option 2)", () => {
+  const src = fs.readFileSync(__dirname + "/../netlify/functions/lib/agent-marketing-b1-stageb-run-lib.js", "utf8");
+  const i = src.indexOf("async function articleEvidence");
+  const body = src.slice(i, i + 3200);
+  assert.match(body, /findForProject\(projectId, articleKey, researchId\)/);
+  assert.match(body, /if \(!row\) row = await store\.findForProject\(projectId, articleKey\);/);
+  assert.match(body, /checkRecord\(row, project\)\.length\) row = null/, "the same contract check still applies to the record found");
+});

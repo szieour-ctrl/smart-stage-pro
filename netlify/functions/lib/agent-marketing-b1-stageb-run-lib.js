@@ -396,7 +396,14 @@ async function articleEvidence({ userId, projectId, researchId, art, store, fetc
   const noAttach = Object.assign(Object.create(Object.getPrototypeOf(store)), store, { attach: async () => null });
   const res = await startJob({ userId, projectId, store: noAttach, loadProject: async (id, uid) => (id === projectId && uid === userId ? project : null), fetchFn, provider, env, now });
   let row = null;
-  if (res.state === "ready") { try { row = await store.findForProject(projectId, articleKey, researchId); } catch (x) { row = null; } }
+  if (res.state === "ready") {
+    try {
+      row = await store.findForProject(projectId, articleKey, researchId);
+      // A project that already holds checked evidence for this article from an EARLIER research run is reused (startJob answers "ready"); that record carries the earlier run's
+      // research id, so look for it by article too. checkRecord below accepts it for an article-keyed topic, exactly as at planning time (Nov 14, 2026).
+      if (!row) row = await store.findForProject(projectId, articleKey);
+    } catch (x) { row = null; }
+  }
   if (row && sbLib.checkRecord(row, project).length) row = null;   // the same contract as at planning time
   return { articleKey, state: row ? "ready" : res.state, code: row ? undefined : res.code || (res.state === "ready" ? "evidence_unreadable" : undefined), providerAttempted: !!res.providerAttempted, row };
 }

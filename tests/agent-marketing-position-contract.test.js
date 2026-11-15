@@ -150,3 +150,43 @@ test("claim check: a figure stated with a different period, statistical basis, d
   assert.deepStrictEqual(scanOne(hedged, "130 homes went pending in September."), ["b1_claim_context"], "a qualifier the source puts on the figure is kept");
   assert.deepStrictEqual(scanOne(hedged, "About 130 homes went pending in September, which should shape your price."), []);
 });
+
+// ── Nov 14, 2026 (Lincoln script acceptance, evening): the Planner followed a regulation-led angle instead of the stored position ───────────────
+// The fixture is the stored Lincoln Topic 1 as B2 produced it (its angle, mechanism and implication all lead with the Fannie Mae cap), with B1's stored central_argument.
+const LINCOLN_CENTRAL = "The authors (Rich & Kat Farless, a real estate team) argue that Lincoln, CA sellers cannot match builder incentives because seller contributions are capped under Fannie Mae rules while builder forward-commitment buydowns are generally outside the cap. They argue sellers should price against the builder's net price rather than its sticker, and sell what builders cannot deliver.";
+const LINCOLN_T1 = { id: "t1", question: "Can a resale seller ever match what a builder is offering buyers right now?", whyItMatters: "w", scope: "selected", origin: "web", candidate: {},
+  sources: [{ title: "Selling a Lincoln, CA Home Against New Construction", url: "https://richandkatsoldthat.com/blog/selling-home-against-new-construction-lincoln-ca", role: "primary", kind: "article", submitted: true }],
+  b1CentralArgument: LINCOLN_CENTRAL,
+  b2: { mode: "article_editorial", developsPosition: true, positionBasis: LINCOLN_CENTRAL.slice(0, 200),
+    editorialAngle: "Fannie Mae caps what a resale seller can contribute at closing, while a builder's rate buydown generally sits outside that cap—so the article argues the winning move is to stop trying to match the builder and start competing differently.",
+    mechanism: "Under Fannie Mae guidelines, seller contributions count as interested-party concessions capped at 3% to 9% of the sale price depending on the buyer's down payment.",
+    homeownerImplication: "Sellers who try to out-incentivize builders by piling on concessions may hit a financing ceiling before they move the needle.", sourceRefs: [] } };
+
+test("Lincoln Topic 1 (stored data): the position and the regulation-led angle both reach the Planner, and the prompt now ranks the position above the angle", () => {
+  const brief = planLib.topicBrief(LINCOLN_T1, DEV);
+  assert.strictEqual(brief.editorial_direction.develops_article_position, true);
+  assert.match(brief.editorial_direction.angle, /Fannie Mae caps/, "the stored angle is passed unchanged: no research is repeated");
+  assert.strictEqual(brief.article_evidence && brief.article_evidence.central_argument, undefined, "no evidence bundle in this unit fixture; the position rides on the topic at plan time");
+  const dev = planLib.buildSystemPrompt(DEV, {});
+  const r = dev.split("\n").find((l) => l.startsWith("2i. "));
+  assert.match(r, /central_argument is the authoritative premise and the angle is only a draft of its seller-facing wording/);
+  assert.match(r, /lead with a rule, limit, percentage, calculation or process more than with the position, follow the position/);
+  assert.match(r, /question-led hook from the position, the position stated plainly as the Realtor's own professional judgment/);
+  assert.match(r, /why it matters to a seller who is pricing or thinking about selling, and a clear takeaway/);
+  assert.match(r, /do not introduce or repeat it with \\?"the article says\\?" or \\?"the article argues\\?"/);
+  assert.match(r, /Attribute only a specific figure, rate, program or other fact the article reports, once/);
+  assert.match(r, /Spend most of the narration on the position and what it means for the seller/);
+  assert.doesNotMatch(r, /the angle is its seller-facing wording/, "the old rule that made the angle the position's wording is gone");
+  assert.match(r, /is not required to recite any of those/, "no rule, percentage, calculation or appraisal statement is required");
+});
+
+test("B2 prompt: the position candidate's angle is the position in seller terms, not led by a rule or calculation, and its mechanism is optional", () => {
+  const src = require("fs").readFileSync(__dirname + "/../netlify/functions/lib/agent-marketing-b2-lib.js", "utf8");
+  assert.match(src, /editorial_angle must not lead with a rule, limit, percentage or calculation/);
+  assert.match(src, /homeowner_implication is the seller consequence of the position, not of a supporting rule/);
+  assert.match(src, /Its mechanism is optional and may be left empty/);
+});
+
+test("the production Planner prompt is byte-identical after the correction", () => {
+  assert.strictEqual(sha(planLib.buildSystemPrompt({})), "25f3118fed1b9726fc4dc78b16dcc92233cef785d3c074ef89a6ee7aaf7b0495");
+});

@@ -87,10 +87,13 @@ function outdatedRef(row) {
   return r ? r.outdated : null;
 }
 
+// The article text the subscriber submitted is stored with the request (the run reads it from there); it is not sent back with every poll.
+const submittedFocus = (r) => ({ articleText: r.articleText, articleTitle: r.articleTitle, articlePermission: true, ...(r.articleSourceUrl ? { articleSourceUrl: r.articleSourceUrl } : {}) });
+const focusForClient = (f) => { if (!f || !f.articleText) return f || {}; const { articleText, ...rest } = f; return { ...rest, articleTextChars: String(articleText).length }; };
 function forClient(row) {
   if (!row) return null;
   const out = {
-    id: row.id, projectId: row.project_id, mode: row.mode, geography: row.geography, audience: row.audience, focus: row.focus || {},
+    id: row.id, projectId: row.project_id, mode: row.mode, geography: row.geography, audience: row.audience, focus: focusForClient(row.focus),
     dataSource: row.data_source || "web", note: (row.usage && (row.usage.reportNote || (row.usage.b1b2 && row.usage.b1b2.state === "partial" && row.usage.b1b2.message))) || null,
     marketUpdateMode: (row.focus && row.focus.marketUpdateMode) || null,
     status: row.status, model: (row.usage && row.usage.pathway === "article_led") ? null : (row.model || null), topics: row.status === "ready" ? (row.topics || []).map(articleLed.clientTopic) : [], researchDate: row.research_date || null,
@@ -150,7 +153,7 @@ const who = (session) => (session.pool === "brokerage" ? "Your brokerage has" : 
 // The same request, rebuilt from a saved row, so "same request on the same project" is recognised without a second purchase.
 function keyOfRow(row) {
   const refs = Array.isArray(row.upload_refs) ? row.upload_refs : [];
-  return rl.requestKey({ mode: row.mode, audience: row.audience, geography: row.geography, focus: row.focus || {}, keywords: (row.focus && row.focus.keywords) || "", dataFocus: (row.focus && row.focus.dataFocus) || "all", period: (row.focus && row.focus.period) || null, dataSource: row.data_source || "web", uploadIds: refs.map((x) => x && x.id).filter(Boolean), articleUrl: (row.focus && row.focus.articleUrl) || undefined });
+  return rl.requestKey({ mode: row.mode, audience: row.audience, geography: row.geography, focus: row.focus || {}, keywords: (row.focus && row.focus.keywords) || "", dataFocus: (row.focus && row.focus.dataFocus) || "all", period: (row.focus && row.focus.period) || null, dataSource: row.data_source || "web", uploadIds: refs.map((x) => x && x.id).filter(Boolean), articleUrl: (row.focus && row.focus.articleUrl) || undefined, articleText: (row.focus && row.focus.articleText) || undefined });
 }
 
 exports.handler = async (event) => {
@@ -293,9 +296,9 @@ exports.handler = async (event) => {
     }
 
     const ins = await supabase("POST", "agent_marketing_research", {
-      project_id: project.id, user_id: userId, pool_user_id: pool.poolUserId, mode: v.request.mode, geography: v.request.geography, audience: v.request.audience, focus: { ...v.request.focus, keywords: v.request.keywords, dataFocus: v.request.dataFocus, period: v.request.period, ...(v.request.articleUrl ? { articleUrl: v.request.articleUrl } : {}) },
+      project_id: project.id, user_id: userId, pool_user_id: pool.poolUserId, mode: v.request.mode, geography: v.request.geography, audience: v.request.audience, focus: { ...v.request.focus, keywords: v.request.keywords, dataFocus: v.request.dataFocus, period: v.request.period, ...(v.request.articleUrl ? { articleUrl: v.request.articleUrl } : {}), ...(v.request.articleText ? submittedFocus(v.request) : {}) },
       data_source: v.request.dataSource, upload_refs: refs, status: "running",
-      ...(v.request.marketUpdateMode ? { focus: { ...v.request.focus, keywords: v.request.keywords, dataFocus: v.request.dataFocus, period: v.request.period, marketUpdateMode: v.request.marketUpdateMode, ...(v.request.articleUrl ? { articleUrl: v.request.articleUrl } : {}) } } : {}), model: rl.researchModel(), ...(alOn ? { usage: { pathway: "article_led" } } : {}),
+      ...(v.request.marketUpdateMode ? { focus: { ...v.request.focus, keywords: v.request.keywords, dataFocus: v.request.dataFocus, period: v.request.period, marketUpdateMode: v.request.marketUpdateMode, ...(v.request.articleUrl ? { articleUrl: v.request.articleUrl } : {}), ...(v.request.articleText ? submittedFocus(v.request) : {}) } } : {}), model: rl.researchModel(), ...(alOn ? { usage: { pathway: "article_led" } } : {}),
     });
     const row = Array.isArray(ins.data) ? ins.data[0] : null;
     if (v.request.marketUpdateMode && project.market_update_mode !== v.request.marketUpdateMode) {

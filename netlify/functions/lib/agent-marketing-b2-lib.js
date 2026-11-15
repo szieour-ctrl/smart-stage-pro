@@ -15,6 +15,12 @@ const b1 = require("./agent-marketing-b1-evidence-lib");
 const ti = require("./agent-marketing-trend-intelligence-lib");   // Nov 9, 2026: the same Trend Intelligence Option 1 uses
 
 const MAX_CANDIDATES = 10, SELECT = 5, MAX_ARTICLES = 3;
+/** The subscriber's text as a plain page: the title, then one paragraph per line, inside an <article> so the existing extractor reads it as the article. */
+function submittedArticleHtml(title, text) {
+  const esc = (x) => String(x).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const paras = String(text).split(/\n+/).map((x) => x.trim()).filter(Boolean).map((x) => `<p>${esc(x)}</p>`).join("\n");
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(title)}</title></head><body><article><h1>${esc(title)}</h1>\n${paras}\n</article></body></html>`;
+}
 const hostOf = (u) => { try { return new URL(String(u)).hostname.toLowerCase().replace(/^www\./, ""); } catch (e) { return null; } };
 const B2_TIMEOUT_MS = 210000; // the editorial reply is not streamed, so a long answer needs more than the planner's default 120 s
 // A research run still "running" after 6 minutes is marked failed (agent-marketing-research.js STALE_RUNNING_MS). The editorial call is only
@@ -221,7 +227,7 @@ function toTopics({ result, records, articles, evidence, mode, reportSource, tre
     const from = art.fromTopic || {};
     const cited = rec.findings.filter((f) => c.findings.includes(f.id));
     const sourceRefs = cited.map((f) => ({ finding: f.id, kind: f.kind, quote: (f.source_quotes || [])[0] || "", attribution: f.attribution || null }));
-    const sources = [{ title: art.title, url: art.url, domain: art.domain, published: art.published, role: "primary", kind: "article" }].concat(reportSource ? [reportSource] : []);
+    const sources = [{ title: art.title, url: art.url, domain: art.domain, published: art.published, role: "primary", kind: "article", ...(art.submitted ? { submitted: true, sourceUrl: art.sourceUrl || null } : {}) }].concat(reportSource ? [reportSource] : []);
     return {
       id: `t${i + 1}`, origin: "web", kind: "market_update", question: c.question, whyItMatters: c.whyItMatters || c.homeownerImplication,
       trendSignals: [], localIntent: true, scope: from.scope === "broader_context" ? "broader_context" : "selected", scopeNote: from.scope === "broader_context" ? String(from.scopeNote || "") : "",
@@ -235,7 +241,7 @@ function toTopics({ result, records, articles, evidence, mode, reportSource, tre
       b2: { mechanism: c.mechanism, ...(c.developsPosition ? { developsPosition: true, positionBasis: c.positionBasis } : {}), homeownerImplication: c.homeownerImplication, editorialAngle: c.editorialAngle, audienceJourney: c.audienceJourney || "", sourceRefs, reportFigureRefs: c.reportFigureRefs, mode,
         ...(c.trendRefs && c.trendRefs.length ? { trendObservationRefs: c.trendRefs, trendInterpretation: c.trendInterpretation || "", trendIntelligence: ti.editorialInput(trend, c.trendRefs) } : {}),
         article: { title: art.title, url: art.url, domain: art.domain || null, published: art.published || null, sourceGeography: art.sourceGeography || null, reportingPeriod: art.reportingPeriod || null,
-          completeness: rec.completeness, heldFindingsNotUsed: rec.held_findings_not_used } },
+          completeness: rec.completeness, heldFindingsNotUsed: rec.held_findings_not_used, ...(art.submitted ? { submitted: true } : {}) } },
     };
   });
 }
@@ -282,7 +288,10 @@ const modeOf = (row) => ((row.focus && row.focus.marketUpdateMode) || (row.data_
  */
 async function enrich({ row, fields, uploads, userId, env, deps }) {
   const e = env || process.env, d = deps || {};
-  const chosen = row && row.focus && typeof row.focus.articleUrl === "string" && row.focus.articleUrl ? row.focus.articleUrl : null;   // the subscriber's own article (Nov 14, 2026)
+  const focus = (row && row.focus) || {};
+  const chosenUrl = typeof focus.articleUrl === "string" && focus.articleUrl ? focus.articleUrl : null;   // the subscriber's own article (Nov 14, 2026)
+  const submittedText = !chosenUrl && typeof focus.articleText === "string" && focus.articleText && typeof focus.articleTitle === "string" && focus.articleTitle && focus.articlePermission === true ? focus : null;
+  const chosen = chosenUrl || (submittedText ? "submitted_text" : null);
   if (!fields || fields.status !== "ready" || !Array.isArray(fields.topics) || (!fields.topics.length && !chosen) || !applies(row, e)) return fields;
   const run = require("./agent-marketing-b1-stageb-run-lib");
   const log = { state: "started", mode: modeOf(row), articles: [] };
@@ -297,8 +306,18 @@ async function enrich({ row, fields, uploads, userId, env, deps }) {
   try { provider = d.provider !== undefined ? d.provider : require("./agent-marketing-b1-provider-lib").createProvider({ env: e }); } catch (x) { provider = null; }
   if (!fetchFn) { try { fetchFn = require("./agent-marketing-b1-bridge-lib").fixtureSource(e) || undefined; } catch (x) { const err = x; fetchFn = async () => { throw err; }; } }
   // A chosen article is the only source: discovery's articles are never read in its place, and if it cannot be read the research says so.
-  const articles = chosen ? [{ url: chosen, title: "", domain: hostOf(chosen), published: null, sourceGeography: null, reportingPeriod: null, fromTopic: null }]
-    : articlesFrom(fields.topics, Number(e.B2_MAX_ARTICLES) || MAX_ARTICLES);
+  let articles;
+  if (submittedText) {
+    // The subscriber's own text goes through the same capture, snapshot, B1 and B2 path as a fetched page: it is served to the reader as the page for one address
+    // (their original address if given, otherwise a label under our own domain), so no website is contacted and nothing else is read.
+    const sourceUrl = submittedText.articleSourceUrl || null;
+    const url = sourceUrl || `https://submitted.smartstagepro.com/article/${require("crypto").createHash("sha256").update(submittedText.articleText).digest("hex").slice(0, 32)}`;
+    const html = submittedArticleHtml(submittedText.articleTitle, submittedText.articleText);
+    fetchFn = async (u) => (u === url ? new Response(html, { status: 200, headers: { "content-type": "text/html; charset=utf-8" } }) : new Response("", { status: 404 }));
+    articles = [{ url, title: submittedText.articleTitle, domain: sourceUrl ? hostOf(sourceUrl) : null, published: null, sourceGeography: null, reportingPeriod: null, fromTopic: null, submitted: true, sourceUrl }];
+    log.articleSource = "submitted_text";
+  } else if (chosenUrl) articles = [{ url: chosenUrl, title: "", domain: hostOf(chosenUrl), published: null, sourceGeography: null, reportingPeriod: null, fromTopic: null }];
+  else articles = articlesFrom(fields.topics, Number(e.B2_MAX_ARTICLES) || MAX_ARTICLES);
   const records = [], used = [], evidence = new Map();
   for (const art of articles) {   // one at a time: each run takes the next ledger sequence
     let r;
@@ -313,8 +332,10 @@ async function enrich({ row, fields, uploads, userId, env, deps }) {
   }
   if (!records.length && chosen) {
     const a = log.articles[0] || {};
-    const why = a.code ? run.failureReason(a.code) : "it could not be read and understood";
-    return failOut("chosen_article_unavailable", `The article you chose could not be used: ${why}. No other article was used in its place, and this did not use a session. Check the address, or choose another article, or clear the field to let the research find articles.`);
+    const why = submittedText && a.code === "incomplete" ? "it is too short to read and understand, so paste the full article" : a.code ? run.failureReason(a.code) : "it could not be read and understood";
+    return failOut("chosen_article_unavailable", submittedText
+      ? `The article text you provided could not be used: ${why}. No other article was used in its place, and this did not use a session. Check the text, or clear it to let the research find articles.`
+      : `The article you chose could not be used: ${why}. No other article was used in its place, and this did not use a session. Check the address, or choose another article, or clear the field to let the research find articles.`);
   }
   if (!records.length) return failOut("no_article_evidence", `The research found ${articles.length} article${articles.length === 1 ? "" : "s"}, but none could be read and understood, so no Article-Led topics were written. This did not use a session. Start new research to try again, or change your request.`);
   const mode = modeOf(row);
@@ -350,4 +371,4 @@ async function enrich({ row, fields, uploads, userId, env, deps }) {
     selected: out.selected, notes: out.notes, problems: out.problems.slice(0, 8), b2Usage: out.usage, discoveryTopics: fields.topics.length } } };
 }
 
-module.exports = { applies, enrich, articleFigureRules, failureDiagnostics, timeLeft, B2_MAX_OUTPUT_TOKENS, B2_TIMEOUT_MS, B2_RUN_WINDOW_MS, B2_RESULT_MARGIN_MS, MAX_CANDIDATES, SELECT, MAX_ARTICLES, articleKey, articlesFrom, comprehensionOf, systemPrompt, userMessage, validate, toTopics, generate };
+module.exports = { submittedArticleHtml, applies, enrich, articleFigureRules, failureDiagnostics, timeLeft, B2_MAX_OUTPUT_TOKENS, B2_TIMEOUT_MS, B2_RUN_WINDOW_MS, B2_RESULT_MARGIN_MS, MAX_CANDIDATES, SELECT, MAX_ARTICLES, articleKey, articlesFrom, comprehensionOf, systemPrompt, userMessage, validate, toTopics, generate };

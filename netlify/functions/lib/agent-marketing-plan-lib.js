@@ -47,7 +47,7 @@ function topicBrief(topic, env) {
   const out = {
     topic_question: String(t.question || ""), why_it_matters: String(t.whyItMatters || ""),
     data_covers: t.scope === "selected" ? "the agent's exact market" : String(t.scopeNote || "a broader area than the agent's market"),
-    origin: t.origin === "report" ? "the agent's own MLS report" : "web research",
+    origin: t.origin === "report" ? "the agent's own MLS report" : (t.sources[0] && t.sources[0].submitted ? "an article the agent submitted (their own source material, not independently verified)" : "web research"),
   };
   if (t.scope === "selected" && t.origin === "report" && t.scopeNote) out.note = String(t.scopeNote);
   if (t.reportFirst === true) {

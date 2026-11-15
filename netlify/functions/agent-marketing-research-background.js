@@ -47,7 +47,7 @@ exports.handler = async (event) => {
     if (!row) return { statusCode: 404, body: "" };
     if (row.status !== "running") return { statusCode: 200, body: "" }; // a duplicate dispatch does nothing
     const source = row.data_source || "web";
-    const chosenUrl = row.focus && typeof row.focus.articleUrl === "string" && row.focus.articleUrl ? row.focus.articleUrl : null;   // the subscriber chose the article: no discovery (Nov 14, 2026)
+    const chosenUrl = row.focus && ((typeof row.focus.articleUrl === "string" && row.focus.articleUrl) || (typeof row.focus.articleText === "string" && row.focus.articleText)) ? "chosen" : null;   // the subscriber chose the article (a link or its text): no discovery (Nov 14, 2026)
     if ((source !== "upload" && !chosenUrl && !process.env.PERPLEXITY_API_KEY) || (source !== "web" && !process.env.ANTHROPIC_API_KEY)) {
       await writeRow(id, userId, { status: "failed", error: "Research is not set up yet.", charged_at: null, updated_at: new Date().toISOString() });
       return { statusCode: 200, body: "" };

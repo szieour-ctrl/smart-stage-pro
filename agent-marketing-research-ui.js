@@ -86,6 +86,11 @@
   }
   // The subscriber's own article: used only by the two Article-Led types (Nov 14, 2026).
   function articleUrlValue() { var m = picked("muMode"), el = $("articleUrl"); return el && (m === "article_report" || m === "article_editorial") ? el.value.trim() : ""; }
+  // The article's text, pasted by the subscriber instead of a link (Nov 14, 2026).
+  function submittedArticle() {
+    var m = picked("muMode"), t = $("articleText"); if (!t || !(m === "article_report" || m === "article_editorial") || !t.value.trim()) return {};
+    return { articleText: t.value, articleTitle: $("articleTitle").value, articleSourceUrl: $("articleSourceUrl").value.trim() || undefined, articlePermission: !!$("articlePermission").checked };
+  }
   function collect() {
     var type = $("geoType").value;
     return {
@@ -95,6 +100,7 @@
       dataSource: state.mlsTrend ? "upload" : reportSource().dataSource, uploadIds: reportSource().uploadIds,
       marketUpdateMode: picked("mode") !== "local_events" ? (state.mlsTrend ? "trend_report" : picked("muMode")) || undefined : undefined,
       articleUrl: articleUrlValue() || undefined,
+      ...submittedArticle(),
     };
   }
   // A report is used only once the agent has confirmed "This report covers\u2026 Correct?". Attached and confirmed = both (report figures win); otherwise web only.
@@ -168,6 +174,7 @@
     if (focus) bits.push(esc(focus));
     if ((q.keywords || "").trim()) bits.push("keywords: " + esc(q.keywords.trim()));
     if (q.articleUrl) bits.push("article: " + esc(q.articleUrl));
+    if (q.articleText) bits.push("article text: " + esc(q.articleTitle || ""));
     return bits.filter(Boolean).join(" · ");
   }
   function reportPeriodText(u) {
@@ -339,6 +346,7 @@
   }
   function srcLine(s) {
     if (s.type === "report") return '<div class="src"><b>Your MLS report</b>' + (s.published ? " <span>\u00b7 through " + esc(s.published) + "</span>" : "") + "</div>";
+    if (s.submitted) return '<div class="src">' + (s.sourceUrl ? '<a href="' + esc(s.sourceUrl) + '" target="_blank" rel="noopener noreferrer">' + esc(s.title) + '</a>' : '<b>' + esc(s.title) + '</b>') + ' <span>\u00b7 article text you provided</span></div>';
     return '<div class="src"><a href="' + esc(s.url) + '" target="_blank" rel="noopener noreferrer">' + esc(s.title) + '</a> <span>· ' + esc(s.domain) + (s.published ? " · " + esc(s.published) : "") + "</span></div>";
   }
   // Everything beyond the hook, the reason and the sources sits behind one closed "Details". Figures from the agent's report are listed only
@@ -438,7 +446,7 @@
     $("geoType").value = g.type || "city"; applyGeo();
     $("geoName").value = g.name || ""; $("geoCity").value = g.city || ""; $("geoZip").value = g.zip || ""; applyZip();
     $("audience").value = r.audience || $("audience").value;
-    $("f55").checked = !!f.active_adult_55; $("fNew").checked = !!f.new_construction; $("keywords").value = f.keywords || ""; if ($("articleUrl")) $("articleUrl").value = f.articleUrl || "";
+    $("f55").checked = !!f.active_adult_55; $("fNew").checked = !!f.new_construction; $("keywords").value = f.keywords || ""; if ($("articleUrl")) $("articleUrl").value = f.articleUrl || ""; if ($("articleTitle")) { $("articleTitle").value = f.articleTitle || ""; $("articleSourceUrl").value = f.articleSourceUrl || ""; }
     $("dataFocus").value = f.dataFocus || "all";
     var p = f.period || { days: 30 };
     if (p.start) { $("period").value = "custom"; $("periodFrom").value = p.start; $("periodTo").value = p.end; } else { $("period").value = String(p.days || 30); $("periodFrom").value = ""; $("periodTo").value = ""; }
@@ -853,6 +861,7 @@
     if (mdl) data = mdl.key === "trend_report" ? "Your confirmed Trend/CMA report only: topics and script from its figures" : mdl.key === "article_report" ? "Local articles for the story; your confirmed report (" + (win ? "closed sales limited to " + win.label + "; " : "") + "its figures are the only market statistics)" : "Local articles and your perspective; the article's figures are attributed to it. No report";
     var rows = [["Content", mode + (mdl ? ": " + mdl.label : "")], ["Area", area], ["Audience", aud], ["Focus", focus || "None"], ["Keywords", (q.keywords || "").trim() || "None"], ["Data", data]];
     if (q.articleUrl) rows.splice(5, 0, ["Article", q.articleUrl + " (the research uses only this article)"]);
+    if (q.articleText) rows.splice(5, 0, ["Article", (q.articleTitle || "Your article") + " (text you provided; you confirmed you own it or may submit it; the research uses only this article)"]);
     if (reportConfirmed() && reportPeriodText(state.upload)) rows.push(["Report period", reportPeriodText(state.upload) + " (from your report; separate from the web lookback)"]);
     if (q.mode !== "local_events") rows.splice(5, 0, ["Optional data", focusLabel(q)]);
     return rows.map(function (r) { return "<div><b>" + esc(r[0]) + ":</b> " + esc(r[1]) + "</div>"; }).join("");
@@ -940,7 +949,7 @@
       }
       if (!wired) { wired = true; buildForm(); $("startBtn").addEventListener("click", review); $("confirmBtn").addEventListener("click", start); $("confirmEdit").addEventListener("click", hideConfirm);
         // an edit makes the shown summary stale, so it closes
-        ["geoType", "geoName", "geoCity", "geoZip", "audience", "f55", "fNew", "keywords", "articleUrl", "upFile", "dataFocus", "period", "periodFrom", "periodTo"].forEach(function (id) { $(id).addEventListener("input", hideConfirm); $(id).addEventListener("change", hideConfirm); }); wireIntakeExtras(); if (RS()) wireRS(); }
+        ["geoType", "geoName", "geoCity", "geoZip", "audience", "f55", "fNew", "keywords", "articleUrl", "articleTitle", "articleSourceUrl", "articleText", "articlePermission", "upFile", "dataFocus", "period", "periodFrom", "periodTo"].forEach(function (id) { $(id).addEventListener("input", hideConfirm); $(id).addEventListener("change", hideConfirm); }); wireIntakeExtras(); if (RS()) wireRS(); }
       $("resultPanel").classList.add("hidden");
       var list = await refreshSaved();
       if (state.restoreUpload) await state.restoreUpload();

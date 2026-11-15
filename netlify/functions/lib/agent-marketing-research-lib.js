@@ -48,6 +48,8 @@ const PAYWALLED_DOMAINS = ["wsj.com", "ft.com", "bloomberg.com", "nytimes.com", 
 
 const clean = (v, n) => intakeLib.cleanWords(v, n);
 const MAX_KEYWORDS_CHARS = 120;
+// Submitted article text: the same minimum B1's snapshot applies (1,500 characters), and a ceiling well inside one page's size cap.
+const MIN_ARTICLE_TEXT = 1500, MAX_ARTICLE_TEXT = 60000;
 
 // ── Optional data (Sam's original flow, Oct 25): what kind of market data the web research should include, and for which period ─────
 const DATA_FOCUS = [
@@ -176,15 +178,36 @@ function validateResearchRequest(body) {
     else if (!u || rawArticleUrl.length > 500) errors.push({ field: "articleUrl", message: "Enter the article's full web address, starting with https://" });
     else articleUrlValue = u.href;
   }
+  // Nov 14, 2026: the subscriber may instead give the article's text (a site that blocks automated readers). The same B1 -> B2 -> Planner path reads it; it is
+  // the subscriber's own source material, not verified fact. Title and the owns-or-may-submit confirmation are required; the original address is optional.
+  let submitted = null;
+  const rawText = b.articleText == null ? "" : String(b.articleText).replace(/\r\n?/g, "\n").trim();
+  if (rawText) {
+    const isAL = marketUpdateMode === "article_report" || marketUpdateMode === "article_editorial";
+    const title = clean(String(b.articleTitle == null ? "" : b.articleTitle).replace(/\s+/g, " "), 200);
+    const srcRaw = b.articleSourceUrl == null ? "" : String(b.articleSourceUrl).trim();
+    const srcUrl = srcRaw ? require("./agent-marketing-b1-bridge-lib").articleUrl(srcRaw) : null;
+    if (!isAL) errors.push({ field: "articleText", message: "Article text is used by the two Article-Led Market Update types only." });
+    else if (rawText.length < MIN_ARTICLE_TEXT) errors.push({ field: "articleText", message: "Paste the full article. This is too short to read and understand." });
+    else if (rawText.length > MAX_ARTICLE_TEXT) errors.push({ field: "articleText", message: `The article text is longer than ${MAX_ARTICLE_TEXT.toLocaleString("en-US")} characters.` });
+    if (articleUrlValue) errors.push({ field: "articleText", message: "Give either the article's link or its text, not both." });
+    if (!title) errors.push({ field: "articleTitle", message: "Enter the article's title." });
+    if (srcRaw && !srcUrl) errors.push({ field: "articleSourceUrl", message: "The original address must be a full web address starting with https://" });
+    if (b.articlePermission !== true && b.articlePermission !== "true") errors.push({ field: "articlePermission", message: "Confirm that you own this article or have permission to submit it." });
+    if (!errors.some((e) => /^article(Text|Title|SourceUrl|Permission)$/.test(e.field))) submitted = { articleText: rawText, articleTitle: title, articlePermission: true, ...(srcUrl ? { articleSourceUrl: srcUrl.href } : {}) };
+  } else if (b.articleTitle || b.articleSourceUrl) {
+    // Nothing to read: the title or address alone is not an article.
+    if (String(b.articleTitle || "").trim() || String(b.articleSourceUrl || "").trim()) errors.push({ field: "articleText", message: "Paste the article text, or clear the title and address." });
+  }
   if (errors.length) return { ok: false, errors, request: null };
-  return { ok: true, errors: [], request: { mode, audience, geography: geo.geography, focus, keywords, dataFocus, period, dataSource, uploadIds: dataSource === "web" ? [] : uploadIds, ...(marketUpdateMode ? { marketUpdateMode } : {}), ...(articleUrlValue ? { articleUrl: articleUrlValue } : {}) } };
+  return { ok: true, errors: [], request: { mode, audience, geography: geo.geography, focus, keywords, dataFocus, period, dataSource, uploadIds: dataSource === "web" ? [] : uploadIds, ...(marketUpdateMode ? { marketUpdateMode } : {}), ...(articleUrlValue ? { articleUrl: articleUrlValue } : {}), ...(submitted || {}) } };
 }
 
 // A short, stable fingerprint of a request, so the same request is recognised (reuse saved results, never re-buy).
 function requestKey(request) {
   const r = request || {};
   const g = r.geography || {};
-  return JSON.stringify([r.mode, r.audience, g.type, String(g.name || "").toLowerCase(), String(g.city || "").toLowerCase(), String(g.zip || ""), !!(r.focus && r.focus.active_adult_55), !!(r.focus && r.focus.new_construction), String(r.keywords || "").toLowerCase(), r.dataFocus || "all", JSON.stringify(r.period || null), (r.uploadIds || []).slice().sort(), r.dataSource || "web"].concat(r.articleUrl ? [String(r.articleUrl).toLowerCase().replace(/\/+$/, "")] : []));
+  return JSON.stringify([r.mode, r.audience, g.type, String(g.name || "").toLowerCase(), String(g.city || "").toLowerCase(), String(g.zip || ""), !!(r.focus && r.focus.active_adult_55), !!(r.focus && r.focus.new_construction), String(r.keywords || "").toLowerCase(), r.dataFocus || "all", JSON.stringify(r.period || null), (r.uploadIds || []).slice().sort(), r.dataSource || "web"].concat(r.articleUrl ? [String(r.articleUrl).toLowerCase().replace(/\/+$/, "")] : [], r.articleText ? ["text", require("crypto").createHash("sha256").update(String(r.articleText)).digest("hex").slice(0, 32)] : []));
 }
 
 // ── Provider request (Perplexity Agent API, POST /v1/agent) ────────────────────────────────────────────────────────

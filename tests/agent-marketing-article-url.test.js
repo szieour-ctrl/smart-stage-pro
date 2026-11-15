@@ -154,3 +154,79 @@ test("the research run skips discovery only when a chosen article is present and
   assert.match(src, /skipDiscovery \? \{ fields: [^}]*chosenArticleFields\(row\)[^}]*\} : await runLib\.runResearch\(/);
   assert.match(src, /source !== "upload" && !chosenUrl && !process\.env\.PERPLEXITY_API_KEY/, "no discovery key is needed for a chosen article");
 });
+
+// ── Subscriber-supplied article text (Nov 14, 2026): a site that blocks automated readers; the same B1 -> B2 -> Planner path, no discovery, no site contact ──
+const BODY = Array.from({ length: 14 }, (_, i) => `Paragraph ${i + 1}: Lincoln resale sellers compete against builder financing advantages that affect buyer affordability, so lowering the asking price alone may overlook an important competitive factor.`).join("\n\n");
+const TXT = { articleText: BODY, articleTitle: "Selling Against New Construction in Lincoln", articlePermission: true };
+
+test("article text needs a title, the permission confirmation and enough text; the original address is optional and must be https", () => {
+  const ok = req(TXT);
+  assert.ok(ok.ok, JSON.stringify(ok.errors));
+  assert.strictEqual(ok.request.articleText, BODY);
+  assert.ok(!("articleSourceUrl" in ok.request));
+  assert.strictEqual(req({ ...TXT, articleSourceUrl: URL1 }).request.articleSourceUrl, URL1);
+  const f = (x) => req({ ...TXT, ...x }).errors.map((e) => e.field);
+  assert.ok(f({ articleTitle: "  " }).includes("articleTitle"));
+  assert.ok(f({ articlePermission: false }).includes("articlePermission"));
+  assert.ok(f({ articlePermission: undefined }).includes("articlePermission"));
+  assert.ok(f({ articleText: "too short" }).includes("articleText"));
+  assert.ok(f({ articleText: "x".repeat(60001) }).includes("articleText"));
+  assert.ok(f({ articleSourceUrl: "http://example.com/a" }).includes("articleSourceUrl"));
+  assert.ok(f({ articleUrl: URL1 }).includes("articleText"), "a link and text together are refused");
+});
+
+test("article text is for the two Article-Led types only, and a title alone is not an article", () => {
+  const t = rl.validateResearchRequest({ ...base, marketUpdateMode: "trend_report", dataSource: "upload", dataFocus: "all", period: { days: 30 }, uploadIds: ["11111111-1111-4111-8111-111111111111"], ...TXT });
+  assert.ok(!t.ok && t.errors.some((e) => e.field === "articleText"));
+  assert.ok(!req({ articleTitle: "A title" }).ok);
+});
+
+test("different text is a different request; the same text is the same request", () => {
+  const k = (r) => rl.requestKey(r.request);
+  assert.strictEqual(k(req(TXT)), k(req({ ...TXT })));
+  assert.notStrictEqual(k(req(TXT)), k(req({})));
+  assert.notStrictEqual(k(req(TXT)), k(req({ ...TXT, articleText: BODY + "\n\nOne more paragraph that changes the article." })));
+});
+
+test("submitted text goes through the B1 capture path, never contacts a website, and discovery is not needed", async () => {
+  const fetched = [];
+  const out = await b2.enrich({ row: row({ marketUpdateMode: "article_editorial", ...TXT, articleSourceUrl: URL1 }), fields: { status: "ready", topics: [], usage: {} }, uploads: [], userId: U, env: ENV,
+    deps: { store: anyStore(), provider: null, fetchFn: async (u) => { fetched.push(u); return resp(200, "<html>the real site</html>"); } } });
+  assert.deepStrictEqual(fetched, [], "the caller's fetch (the website) is never used for submitted text");
+  const a = out.usage.b1b2.articles[0];
+  assert.strictEqual(a.url, URL1);
+  assert.notStrictEqual(a.code, "http_error");
+  assert.notStrictEqual(a.code, "page_identity");
+  assert.notStrictEqual(a.code, "incomplete", "a full-length article is not refused as too short");
+});
+
+test("submitted text that is too short to understand fails visibly, uncharged, with no other article used", async () => {
+  const out = await b2.enrich({ row: row({ marketUpdateMode: "article_editorial", ...TXT, articleText: "Short. ".repeat(60) }), fields: { status: "ready", topics: discovered, usage: {} }, uploads: [], userId: U, env: ENV,
+    deps: { store: anyStore(), provider: null, fetchFn: async () => resp(200, "x") } });
+  assert.strictEqual(out.status, "failed");
+  assert.strictEqual(out.charged_at, null);
+  assert.strictEqual(out.usage.b1b2.state, "chosen_article_unavailable");
+  assert.match(out.error, /article text you provided/);
+  assert.match(out.error, /No other article was used/);
+  assert.strictEqual(out.usage.b1b2.articles.length, 1);
+});
+
+test("the synthetic page escapes the subscriber's text and keeps their paragraphs", () => {
+  const h = b2.submittedArticleHtml("A <b>title</b>", "One & two\n\n<script>x</script>\nThree");
+  assert.ok(!/<script>/.test(h) && !/<b>/.test(h));
+  assert.strictEqual((h.match(/<p>/g) || []).length, 3);
+});
+
+test("the form takes a title, an optional original address, the text and the permission confirmation, and they are sent with the request", () => {
+  const html = fs.readFileSync(__dirname + "/../agent-marketing.html", "utf8");
+  const ui = fs.readFileSync(__dirname + "/../agent-marketing-research-ui.js", "utf8");
+  for (const id of ["articleTitle", "articleSourceUrl", "articleText", "articlePermission"]) { assert.ok(html.includes(`id="${id}"`), id); assert.ok(ui.includes(id), id); }
+  assert.match(html, /own this article or have permission/);
+  assert.match(ui, /articleText: t\.value/);
+});
+
+test("the submitted text is stored with the request but not sent back with every poll", () => {
+  const src = fs.readFileSync(__dirname + "/../netlify/functions/agent-marketing-research.js", "utf8");
+  assert.match(src, /focus: focusForClient\(row\.focus\)/);
+  assert.match(src, /articleTextChars/);
+});

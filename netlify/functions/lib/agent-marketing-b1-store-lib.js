@@ -130,7 +130,7 @@ function createStore({ env, request } = {}) {
         outcome: String(a.outcome || "").toLowerCase().replace(/[^a-z_]/g, "_").replace(/^[^a-z]+/, "").slice(0, 40) || "unknown_error",
         http_status: intOr(a.httpStatus, 100, 599), content_type: str(a.contentType, 200), bytes: intOr(a.bytes, 0, 2147483647),
         source_url: str(a.sourceUrl, 2048), final_url: str(a.finalUrl, 2048), observed_title: str(a.observedTitle, 500),
-        raw_html_sha256: hex(a.rawHtmlSha256), snapshot_sha256: hex(a.snapshotSha256), compared_to: a.comparedTo || null };
+        raw_html_sha256: hex(a.rawHtmlSha256), snapshot_sha256: hex(a.snapshotSha256), compared_to: a.comparedTo || null, ...(a.responseSample ? { response_sample: str(a.responseSample, 300) } : {}) };
       if (body.outcome.length < 2) body.outcome = "unknown_error";
       const r = one(check(await rq("POST", ATTEMPTS, body, ""), "insertAttempt"));
       if (!r) throw new StoreError("store_error", "insertAttempt returned no row");

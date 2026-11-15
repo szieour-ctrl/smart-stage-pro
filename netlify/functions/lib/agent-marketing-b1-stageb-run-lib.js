@@ -208,7 +208,7 @@ async function recordAttempt(store, { userId, project, topic, mode, code, detail
   try {
     return await store.insertAttempt({ userId, projectId: project.id, topicId: keyOf(topic), mode, stage: d.stage, outcome: code, httpStatus: d.httpStatus,
       contentType: d.contentType, bytes: d.bytes, sourceUrl: art.url, finalUrl: d.finalUrl, observedTitle: d.observedTitle, rawHtmlSha256: d.rawHtmlSha256,
-      snapshotSha256: d.snapshotSha256, comparedTo: d.stage === "compare" ? d.comparedTo || null : null });
+      snapshotSha256: d.snapshotSha256, responseSample: d.responseSample, comparedTo: d.stage === "compare" ? d.comparedTo || null : null });
   } catch (x) { console.error("stageb attempt log:", x.code || x.message); return null; }
 }
 

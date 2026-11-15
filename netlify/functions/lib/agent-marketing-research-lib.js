@@ -614,6 +614,14 @@ function sessionStatus({ rows, planKey, now, env } = {}) {
   return { used, allowance, remaining, canStart: remaining > 0 };
 }
 
+// Nov 14, 2026: a subscriber-selected article needs no discovery. This is the same "ready" shape discovery returns, with no topics of its own; the
+// article step (B1/B2) fills them in or ends the run uncharged. The charge time is set here and cleared by every failed or partial ending, as before.
+function chosenArticleFields(row, now) {
+  const stamp = (now ? new Date(now) : new Date()).toISOString();
+  const today = new Date(now || Date.now()).toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
+  return { status: "ready", topics: [], research_date: today, model: null, usage: { ...((row && row.usage) || {}), discovery: "skipped_chosen_article" }, error: null, charged_at: stamp, updated_at: stamp };
+}
+
 // What to store when a run ends. A session is charged only for a validated five-topic set.
 function outcomeFields({ validation, usage, model, today, now, error, charge }) {
   const stamp = (now ? new Date(now) : new Date()).toISOString();
@@ -625,6 +633,7 @@ function outcomeFields({ validation, usage, model, today, now, error, charge }) 
 }
 
 module.exports = {
+  chosenArticleFields,
   MARKET_UPDATE_MODES, MODE_SOURCE,
   cleanVisualCues, MODES, MODE_LABELS, DATA_SOURCES, GEO_TYPES, AUDIENCES, AUDIENCE_KEYS, TOPIC_COUNT, MAX_UPLOADS, FRESH_DAYS, ALLOWANCE_BY_PLAN, PAYWALLED_DOMAINS, DEFAULT_MODEL, DEFAULT_COST_TARGET_USD,
   DATA_FOCUS, DATA_FOCUS_KEYS, validatePeriod, periodDates, validateGeography, geoLabel, validateResearchRequest, requestKey, researchModel, researchSettings, systemPrompt, buildResearchPayload,

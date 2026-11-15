@@ -139,6 +139,8 @@ function articleOf(topic) {
 
 // Live fetch limits (live-fetch milestone, Nov 8, 2026).
 const MAX_REDIRECTS = 5;
+// Nov 14, 2026: the article reader says who it is and sends the ordinary content-negotiation headers. It does not present itself as a consumer browser.
+const FETCH_HEADERS = { "user-agent": "SmartStagePRO-ArticleReader/1.0 (+https://smartstagepro.com)", accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.5", "accept-language": "en-US,en;q=0.9" };
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 const siteOf = (u) => { try { return new URL(u).hostname.toLowerCase().replace(/^www\./, ""); } catch (e) { return ""; } };
 
@@ -196,7 +198,7 @@ async function fetchArticle(url, { fetchFn, now, timeoutMs, maxBytes } = {}) {
   try {
     let current = start.href, r = null;
     for (let hop = 0; ; hop++) {
-      try { r = await f(current, { redirect: "manual", signal: ac.signal, headers: { accept: "text/html,application/xhtml+xml" } }); }
+      try { r = await f(current, { redirect: "manual", signal: ac.signal, headers: FETCH_HEADERS }); }
       catch (e) {
         d.finalUrl = current;
         if (ac.signal.aborted) fail("fetch_timeout", "the article did not answer in time", d);
@@ -281,6 +283,17 @@ function checkGate(g, record, responseText) {
   return g.bundle;
 }
 
+/**
+ * A short, sanitized look at what a refused page said, for the access-controlled attempt log only: scripts, styles and tags removed, whitespace collapsed,
+ * e-mail addresses and long token-like strings redacted, at most 300 characters. Kept only when a page is refused as incomplete or blocked; never the article.
+ */
+function responseSample(html) {
+  const t = String(Buffer.isBuffer(html) ? html.subarray(0, 65536).toString("utf8") : html || "").slice(0, 65536)
+    .replace(/<(script|style|noscript)[\s\S]*?<\/\1>/gi, " ").replace(/<[^>]*>/g, " ").replace(/&nbsp;|&#160;/g, " ")
+    .replace(/[\w.+-]+@[\w-]+\.[\w.-]+/g, "[email]").replace(/\b[A-Za-z0-9_-]{24,}\b/g, "[redacted]").replace(/\s+/g, " ").trim();
+  return t.slice(0, 300);
+}
+
 /** The attempt-log detail of a capture (hashes, URL, status, type, size, observed title). Never HTML or text. */
 function captureDetail(page, snap, stage) {
   return { stage, httpStatus: page ? page.httpStatus || null : null, contentType: page ? page.contentType || null : null, bytes: page ? page.bytes || null : null,
@@ -302,7 +315,8 @@ async function capture({ art, fetchFn, env, now }) {
     snap = checkSnapshot(await callBridge("snapshot", { url: page.finalUrl, title: art.title || page.observedTitle || "", html_b64: page.html.toString("base64"), retrieved_at: page.retrievedAt, extractor }, env), extractor);
   } catch (e) {
     const err = e instanceof StageBError ? e : new StageBError("bridge_error", "the snapshot could not be taken");
-    err.detail = { ...captureDetail(page, null, "snapshot"), ...(err.detail && err.detail.rawHtmlSha256 ? { rawHtmlSha256: err.detail.rawHtmlSha256 } : {}) };
+    err.detail = { ...captureDetail(page, null, "snapshot"), ...(err.detail && err.detail.rawHtmlSha256 ? { rawHtmlSha256: err.detail.rawHtmlSha256 } : {}),
+      ...(err.code === "incomplete" || err.code === "capture_blocked" ? { responseSample: responseSample(page.html) } : {}) };
     throw err;
   }
   return { page, snap, key: sb.approvedKey(snap.snapshot_sha256, snap.extractor) };
@@ -358,5 +372,5 @@ async function complete({ record, responseText, store, env }) {
     finished_at: new Date().toISOString() }, record.status);
 }
 
-module.exports = { StageBError, callBridge, callWorker, fixtureSource, signRequest, replySignature, articleOf, articleUrl, observedTitle, fetchArticle, capture, captureDetail,
+module.exports = { StageBError, callBridge, callWorker, fixtureSource, signRequest, replySignature, articleOf, articleUrl, observedTitle, responseSample, FETCH_HEADERS, fetchArticle, capture, captureDetail,
   checkSnapshot, checkGate, prepare, complete, config, MAX_REDIRECTS };

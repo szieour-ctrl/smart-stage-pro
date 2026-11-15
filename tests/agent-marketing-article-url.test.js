@@ -113,3 +113,44 @@ test("the Article link field is on the form, shown only for the Article-Led type
   assert.match(ui, /articleUrl: articleUrlValue\(\) \|\| undefined/);
   assert.match(ui, /m === "article_report" \|\| m === "article_editorial"/);
 });
+
+// ── Nov 14, 2026 (round 2): identified request headers, a sanitized diagnostic sample, and no discovery for a chosen article ──────
+test("the article fetch identifies Smart Stage PRO and sends ordinary content-negotiation headers, not a browser's", async () => {
+  let sent = null;
+  await br.fetchArticle(URL1, { fetchFn: async (u, o) => { sent = o.headers; return resp(200, PAGE); } });
+  assert.match(sent["user-agent"], /^SmartStagePRO-ArticleReader\/1\.0 \(\+https:\/\/smartstagepro\.com\)$/);
+  assert.match(sent.accept, /text\/html/);
+  assert.match(sent["accept-language"], /^en-US/);
+  assert.ok(!/mozilla|chrome|safari|firefox/i.test(sent["user-agent"]), "never a consumer browser");
+});
+
+test("the diagnostic sample is short, tag-free and redacted, and holds no article body", () => {
+  const stub = "<html><head><title>x</title><style>.a{}</style><script>var token='abcdefghijklmnopqrstuvwxyz0123456789'</script></head><body><p>Please verify you are human. Contact help@example.com ref ABCDEFGHIJKLMNOPQRSTUVWXYZ12</p>" + "<p>filler </p>".repeat(100) + "</body></html>";
+  const s = br.responseSample(Buffer.from(stub));
+  assert.ok(s.length <= 300);
+  assert.ok(!/[<>]/.test(s) && !/var token/.test(s) && !/example\.com/.test(s) && !/ABCDEFGHIJKLMNOPQRSTUVWXYZ12/.test(s));
+  assert.match(s, /verify you are human/);
+});
+
+test("the sample is stored only when there is one, as a short text field", () => {
+  const src = fs.readFileSync(require("path").join(__dirname, "..", "netlify/functions/lib/agent-marketing-b1-store-lib.js"), "utf8");
+  assert.match(src, /a\.responseSample \? \{ response_sample: str\(a\.responseSample, 300\) \} : \{\}/);
+  assert.ok(fs.existsSync(require("path").join(__dirname, "..", "supabase/migrations/20261114_agent_marketing_article_capture_response_sample.sql")));
+});
+
+test("a chosen article skips discovery: the compatible 'ready' result carries no topics, and a failed read still ends uncharged", async () => {
+  const f = rl.chosenArticleFields({ usage: { pathway: "article_led" }, focus: { articleUrl: URL1 } });
+  assert.strictEqual(f.status, "ready"); assert.deepStrictEqual(f.topics, []); assert.strictEqual(f.error, null);
+  assert.strictEqual(f.usage.pathway, "article_led"); assert.strictEqual(f.usage.discovery, "skipped_chosen_article");
+  assert.match(f.research_date, /^\d{4}-\d{2}-\d{2}$/);
+  const out = await b2.enrich({ row: row({ marketUpdateMode: "article_editorial", articleUrl: URL1 }), fields: f, uploads: [], userId: U, env: ENV, deps: { store: anyStore(), provider: null, fetchFn: async () => resp(404, "x") } });
+  assert.strictEqual(out.status, "failed"); assert.strictEqual(out.charged_at, null);
+  assert.strictEqual(out.usage.discovery, "skipped_chosen_article");
+});
+
+test("the research run skips discovery only when a chosen article is present and Article-Led is on; otherwise discovery is unchanged", () => {
+  const src = fs.readFileSync(require("path").join(__dirname, "..", "netlify/functions/agent-marketing-research-background.js"), "utf8");
+  assert.match(src, /const skipDiscovery = !!chosenUrl && require\(".\/lib\/agent-marketing-b2-lib"\)\.applies\(row, process\.env\);/);
+  assert.match(src, /skipDiscovery \? \{ fields: [^}]*chosenArticleFields\(row\)[^}]*\} : await runLib\.runResearch\(/);
+  assert.match(src, /source !== "upload" && !chosenUrl && !process\.env\.PERPLEXITY_API_KEY/, "no discovery key is needed for a chosen article");
+});

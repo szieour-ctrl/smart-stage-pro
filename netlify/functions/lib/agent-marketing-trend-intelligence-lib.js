@@ -274,7 +274,7 @@ const READINGS = {
     neutral: { realtor: "Sold prices landing close to list says pricing is working when it is realistic.", homeowner: "A small gap between list and sold price rewards pricing at the market from the beginning.", buyer: "Little gap between list and sold price means little room to negotiate, but little overpricing to worry about." },
   },
   asking_vs_sold: {
-    buyer_favoring: { realtor: "A gap between today's asking prices and what recently sold is the usual place where listings stall.", homeowner: "Asking prices are not sold prices; an owner is better served by what homes actually closed for.", buyer: "Sold prices, not asking prices, show what the market is paying." },
+    buyer_favoring: { realtor: "Asking prices of the homes for sale now sit above the prices of homes that closed; these are different homes, so the difference is context for pricing, not a measure of what any seller gave up.", homeowner: "Asking prices are not sold prices; an owner is better served by what homes actually closed for.", buyer: "Sold prices, not asking prices, show what the market is paying." },
     seller_favoring: { realtor: "Recent sold prices running above current asking prices suggest new listings are priced conservatively.", homeowner: "Recent sold prices are a better guide to value than a few current listings.", buyer: "Recent sold prices running above asking prices mean list price alone understates what homes may fetch." },
   },
   pending_vs_active: {
@@ -353,6 +353,7 @@ function analyze(ctx, opts) {
     if (r.facts.period && r.facts.period.partial) caveats.push(`The report covers only part of the period (${r.facts.period.label}): never describe it as a completed ${r.facts.period.kind === "year" ? "year" : "period"}, and never compare its counts with a full prior period.`);
   });
   const usable = obs.length >= 2;
+  if (obs.some((o) => o.kind === "asking_vs_sold")) caveats.push("Homes for sale now and homes that closed are different homes: never describe the difference between their asking and sold prices as a discount, a concession or what sellers gave up, and never imply they describe the same homes.");
   return { version: VERSION, usable, reports: view, character: usable ? characterOf(obs) : null, observations: obs, contrasts, interpretations, caveats: [...new Set(caveats)] };
 }
 
@@ -386,7 +387,9 @@ function promptBlock(a) {
 function editorialInput(a, observationIds) {
   const ids = new Set((observationIds || []).map(String));
   if (!a || !a.usable) return null;
-  const obs = a.observations.filter((o) => ids.has(o.id));
+  // The order the caller cited is kept: the first id is the observation the story rests on, so it is not re-sorted into analysis order.
+  const order = (observationIds || []).map(String);
+  const obs = a.observations.filter((o) => ids.has(o.id)).sort((x, y) => order.indexOf(x.id) - order.indexOf(y.id));
   if (!obs.length) return null;
   const refs = new Set(obs.map((o) => o.id));
   return {

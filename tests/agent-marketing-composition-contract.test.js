@@ -157,7 +157,7 @@ const BASE = "buyers have more choices now and that changes how a prepared home 
 const words = (n) => { const w = BASE.split(" "); const out = []; for (let i = 0; out.length < n; i++) out.push(w[i % w.length]); return out.join(" ") + "."; };
 const sized = (sizes) => sizes.map((n, i) => (i === 0 ? "Is that really what is happening in this market? " + words(n - 9) : words(n)));
 const total = (t) => t.reduce((a, x) => a + am.countWords(x), 0);
-const PLAN = { central_tension: "Builders can lower a buyer's payment in ways a resale seller cannot match", realtor_conclusion: "Price against what the buyer really pays, not the sign", essential_findings: ["A1-F3", "R10", "R11"],
+const PLAN = { central_tension: "Builders can lower a buyer's payment in ways a resale seller cannot match", realtor_conclusion: "Price against what the buyer really pays, not the sign", market_relationship: "The ratio of closings to original list shows how much negotiating room sales used on average; some sellers might direct part of it to a financing lever, depending on the buyer and the lender. ".repeat(4), essential_findings: ["A1-F3", "R10", "R11"],
   sentences: [{ beat: "hook", words: 20, purpose: "question" }, { beat: "setup", words: 30, purpose: "what is changing" }, { beat: "evidence", words: 35, purpose: "two findings" }, { beat: "interpretation", words: 50, purpose: "resolve" }, { beat: "cta", words: 15, purpose: "next step" }, { beat: "nonsense", words: "x", purpose: "p".repeat(500) }],
   beat_words: { hook: 20, setup: 30, evidence: 35, interpretation: 50, cta: 15 } };
 const mk = (texts, plan) => JSON.stringify({ ...(plan ? { composition_plan: plan } : {}), editorial_angle: "Buyers have more choices, so preparation matters.", hook: "Is that really what is happening in this market?", narration_with_audio_tags: texts.map((x, i) => `${TAGS[i]} ${x}`).join(" "),
@@ -177,6 +177,7 @@ test("composition_plan is kept as sanitized Test diagnostic metadata beside the 
     assert.ok(cp, "the plan is preserved");
     assert.strictEqual(cp.centralTension, PLAN.central_tension);
     assert.strictEqual(cp.realtorConclusion, PLAN.realtor_conclusion);
+    assert.ok(cp.marketRelationship.startsWith("The ratio of closings") && cp.marketRelationship.length <= 400, "market_relationship is kept, clipped, as optional metadata");
     assert.deepStrictEqual(cp.essentialFindings, PLAN.essential_findings);
     assert.deepStrictEqual(cp.beatWords, PLAN.beat_words);
     assert.strictEqual(cp.sentences.length, 6);

@@ -185,11 +185,11 @@ test("a topic that does not develop the position, or has no stored position, is 
   assert.strictEqual(noPos.angle, LINCOLN_T1.b2.editorialAngle, "without a stored position nothing is substituted");
 });
 
-test("B2 prompt: the position candidate's angle is the position in seller terms, not led by a rule or calculation, and its mechanism is optional", () => {
+test("B2 prompt: the position candidate's angle is the position in seller terms, not led by a rule or calculation, and its mechanism is the lever in plain terms", () => {
   const src = require("fs").readFileSync(__dirname + "/../netlify/functions/lib/agent-marketing-b2-lib.js", "utf8");
   assert.match(src, /editorial_angle must not lead with a rule, limit, percentage or calculation/);
   assert.match(src, /homeowner_implication is the seller consequence of the position, not of a supporting rule/);
-  assert.match(src, /Its mechanism is optional and may be left empty/);
+  assert.match(src, /Its mechanism states, in two or three plain homeowner sentences, the competitive lever/);
 });
 
 test("the production Planner prompt is byte-identical after the correction", () => {

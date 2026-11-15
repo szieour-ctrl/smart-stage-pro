@@ -177,10 +177,10 @@ test("planner statistics: the developer prompt chooses figures for the narrative
   const p = planLib.buildSystemPrompt(DEV, {});
   const rule = p.split("\n").find((l) => l.startsWith("2n. "));
   assert.ok(rule, "rule 2n is present");
-  assert.match(rule, /Choose the ones that bear on the central narrative of editorial_direction/);
+  assert.match(rule, /Choose the ones that measure what the central narrative of editorial_direction acts on/);
   assert.match(rule, /do not pick a figure because it is favorable or reassuring/);
-  assert.match(rule, /sold price as a percent of list price compares the closing price with the last list price/);
-  assert.match(rule, /how the home was first priced, whether the seller reduced the price, how quickly it sold, or whether buyer demand is rising or falling/);
+  assert.match(rule, /the figure's own label says what it measures, so read the label: sold price as a percent of list price compares the closing price with the list price the label names/);
+  assert.match(rule, /neither shows what any one seller did, how quickly it sold, or whether buyer demand is rising or falling/);
   assert.match(rule, /read them together, then state the one thing they show together, naming the one or two figures that carry it with their comparison/); assert.match(rule, /A figure that cuts against the story is stated only where leaving it out would make the answer misleading \(rule 2o\)/);
   assert.match(rule, /what the report or article states \(a fact, attributed\), your reading of it \(the agent's interpretation/);
   assert.match(rule, /any explanation, worded with the confidence the evidence earns \(rule 2o\); do not invent a cause for a single figure/);

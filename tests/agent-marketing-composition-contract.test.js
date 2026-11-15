@@ -30,9 +30,9 @@ test("60 seconds in Test drafts to 150 words inside 140-155; 45, 30 and producti
   assert.deepStrictEqual(am.EDITOR_TARGETS, { 45: 110, 60: 150 });
 });
 
-test("beat budgets: 20/30/35/50/15 at 150 words; scaled whole words that sum to the aim at 45 seconds; none at 30", async () => {
+test("beat budgets: 20/30/35/50/15 at 150 words (Options 1 and 3; Option 2 at 60 s uses component budgets); scaled whole words that sum to the aim at 45 seconds; none at 30", async () => {
   await withDev(true, async () => {
-    const u60 = userOf(lincoln(60)).narrative_contract;
+    const u60 = userOf(lincoln(60, { mode: "article_editorial" })).narrative_contract;
     assert.deepStrictEqual(u60.beats.map((b) => [b.beat, b.words]), [["hook", 20], ["setup", 30], ["evidence", 35], ["interpretation", 50], ["cta", 15]]);
     assert.strictEqual(u60.beats.reduce((a, b) => a + b.words, 0), 150);
     assert.strictEqual(u60.target_words, 150);
@@ -47,25 +47,42 @@ test("beat budgets: 20/30/35/50/15 at 150 words; scaled whole words that sum to 
 });
 
 // ── the user-message contract ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
-test("Lincoln Option 2: the contract carries the sequence, the hook rule, the 40% article ceiling and the report protection", async () => {
+test("Lincoln Option 2 (60 s): the contract carries the sequence, the hook rule, the absolute component budgets and the report protection (no 40% ceiling)", async () => {
   await withDev(true, async () => {
     const u = userOf(lincoln(60));
     const c = u.narrative_contract;
-    assert.match(c.composition_order, /^STORY, then SELECT ESSENTIAL EVIDENCE, then ALLOCATE WORDS, then WRITE NARRATION/);
-    assert.match(c.beats[0].job, /14 words or fewer/);
-    assert.match(c.beats[0].job, /exact opening sentence of the narration/);
-    assert.match(c.beats[0].job, /up to 6 more words of immediate setup or tension/);
-    assert.match(c.beat_rules, /not storyboard scenes/);
-    assert.match(c.beat_rules, /rely on the length editor/);
+    assert.match(c.composition_order, /^STORY, then SELECT ESSENTIAL EVIDENCE, then COMPOSE EACH COMPONENT INSIDE ITS WORD BUDGET, then JOIN THEM IN ORDER/);
+    assert.ok(!("beats" in c) && !("beat_rules" in c), "Option 2 at 60 s is written from components, not beats");
+    assert.deepStrictEqual(c.components.map((x) => x.component), ["opening", "article", "trend", "synthesis", "cta"]);
+    assert.deepStrictEqual(c.components.map((x) => x.words || x.max_words), [20, 33, 35, 50, 15]);
+    assert.strictEqual(c.components[3].min_words, 47);
+    assert.match(c.components[0].job, /14 words or fewer/);
+    assert.match(c.components[0].job, /exact opening sentence of the narration/);
+    assert.match(c.components[0].job, /up to 6 more words of immediate setup or tension/);
+    assert.match(c.component_rules, /absolute and are met on the first draft/);
+    assert.match(c.component_rules, /rely on the length editor/);
     assert.match(c.source_controls, /^Option 2, article plus Market Trend Report/);
-    assert.match(c.source_controls, /at most 40% of the spoken narration, 60 words or fewer/);
-    assert.match(c.source_controls, /Market Trend evidence .* and the Realtor's synthesis must not be crowded out/);
+    assert.match(c.source_controls, /absolute spoken-word counts, not percentages/);
+    assert.match(c.source_controls, /ARTICLE NARRATIVE \(at most 33 spoken words\)/);
+    assert.match(c.source_controls, /MARKET TREND NARRATIVE \(at most 35 spoken words\)/);
+    assert.match(c.source_controls, /REALTOR EDITORIAL SYNTHESIS \(47 to 50 spoken words\)/);
+    assert.match(c.source_controls, /not a repeat of the article summary, not another recap of the statistics and not generic advice/);
+    assert.match(c.source_controls, /do not re-label article recommendations as the Realtor's synthesis/);
+    assert.match(c.source_controls, /selected topic stays authoritative/);
     assert.match(c.source_controls, /never presented as proof of causation/);
-    assert.match(c.source_controls, /not another article summary and not another list of figures/);
+    assert.doesNotMatch(c.source_controls, /40%/);
     assert.match(c.sentence_test, /only repeats a fact, qualifier or explanation without changing the viewer's understanding is removed before drafting/);
     assert.match(c.sentence_test, /Do not force unrelated findings into a causal relationship/);
     assert.deepStrictEqual(u.spoken_word_range, [140, 155]);
     assert.match(u.spoken_word_aim, /^about 150 spoken words\./);
+  });
+});
+
+test("Option 2 at 45 seconds keeps the beat contract and its 40% article ceiling (the component budgets are defined for 60 seconds)", async () => {
+  await withDev(true, async () => {
+    const c = userOf(lincoln(45)).narrative_contract;
+    assert.ok(c.beats && !c.components);
+    assert.match(c.source_controls, /at most 40% of the spoken narration, \d+ words or fewer/);
   });
 });
 
@@ -222,7 +239,7 @@ test("the plan reaches no gate input and is not fed to any later call (the edito
 });
 
 // ── the length editor ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-test("editor: minor overruns and pacing only; article explanation goes first; the article is named once; the payload carries the beat budgets for Option 2", async () => {
+test("editor: minor overruns and pacing only; article explanation goes first; the article is named once; the payload carries the component budgets for Option 2 at 60 s", async () => {
   const sys = planLib.lengthEditSystem(60, true);
   assert.match(sys, /You handle minor overruns and pacing; you do not re-select the story/);
   assert.match(sys, /take words first from article explanation that exceeds its ceiling or its beat, then from secondary evidence, and never from the Realtor's interpretation/);
@@ -238,7 +255,8 @@ test("editor: minor overruns and pacing only; article explanation goes first; th
     assert.ifError(e);
     assert.strictEqual(calls.length, 2, "the stored Lincoln topic reaches the existing single editor call");
     const sent = JSON.parse(calls[1].user);
-    assert.deepStrictEqual(sent.composition, { beat_words: { hook: 20, setup: 30, evidence: 35, interpretation: 50, cta: 15 }, article_explanation_ceiling_words: 60 });
+    assert.deepStrictEqual(sent.composition.components.map((x) => [x.component, x.min_words || null, x.max_words]), [["opening", null, 20], ["article", null, 33], ["trend", null, 35], ["synthesis", 47, 50], ["cta", null, 15]]);
+    assert.ok(!("beat_words" in sent.composition) && !("article_explanation_ceiling_words" in sent.composition));
     assert.strictEqual(sent.target_words, 150);
     assert.strictEqual(sent.max_words, 155);
   });

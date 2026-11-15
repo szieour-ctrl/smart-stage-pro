@@ -10,7 +10,7 @@ const sha = (s) => crypto.createHash("sha256").update(s, "utf8").digest("hex");
 // sha256 of buildSystemPrompt() on production main (622f96e), and of the B1 development prompt (rules 2b, 2g, 2h as approved in commit 83fb916, plus
 // rule 2i, the B2 editorial direction, Nov 8, 2026).
 const PRODUCTION_SHA256 = "25f3118fed1b9726fc4dc78b16dcc92233cef785d3c074ef89a6ee7aaf7b0495";
-const B1_DEV_SHA256 = "cbdb8c51804bbc157d9bc52f48653e456a7c5c093e1fee7d0a6ce7b849bd8e9f"; // Nov 14, 2026 (Sam, story-first composition): new rule 2r, the optional composition_plan key in the reply schema, one clause each in 2h and 2f.
+const B1_DEV_SHA256 = "f2fbce88bbc62e2b4662cb6a9f8fa7a5724665097796042bd7d35bb13212bfd8"; // Nov 14, 2026 (Sam, story-first composition): new rule 2r, the optional composition_plan key in the reply schema, one clause each in 2h and 2f.
 // previous Test hash: "5416105d6b6e771309153db0e8c06acb474ff1df096cfed5a7aba42f02407643";   // Nov 13, 2026 (Phase C): rules 2g, 2i and 2n apply report instructions only when a report is present (before: a53eab11..., Nov 12, rule 2p made duration-neutral)  // Nov 13, 2026 (Sam): previous Test hash 15f2c938… before the rule 2g source-role correction and the 2h stated-assumption sentence; production hash unchanged. Nov 13 (later): 4428a770… before the 2h metric-identity clause.
 const rule = (prompt, id) => prompt.split("\n").filter((l) => l.startsWith(`${id}. `));
 const withEnv = async (value, fn) => {

@@ -104,10 +104,10 @@ test("Planner schema (Nov 15): market_relationship is gone; composition_plan sta
   assert.ok(!planLib.buildSystemPrompt({}, {}).includes("composition_plan"), "production prompt untouched");
 });
 
-test("stored Lincoln T1: the Planner message keeps B2's cited order and both observations, with the existing five-beat contract", () => {
+test("stored Lincoln T1: the Planner message keeps B2's cited order and both observations, with the Option 2 component contract", () => {
   const prev = process.env.AGENT_MARKETING_B1_EVIDENCE; process.env.AGENT_MARKETING_B1_EVIDENCE = "dev";
   let u; try { u = userOf(); } finally { if (prev === undefined) delete process.env.AGENT_MARKETING_B1_EVIDENCE; else process.env.AGENT_MARKETING_B1_EVIDENCE = prev; }
-  assert.deepStrictEqual(u.narrative_contract.beats.map((b) => b.beat), ["hook", "setup", "evidence", "interpretation", "cta"]);
+  assert.deepStrictEqual(u.narrative_contract.components.map((c) => c.component), ["opening", "article", "trend", "synthesis", "cta"]);
   assert.strictEqual(u.narrative_contract.target_words, 150);
   const refs = FX.topic.b2.trendObservationRefs;
   assert.deepStrictEqual(refs, ["TI4", "TI3"]);

@@ -8,7 +8,7 @@ const planLib = require("../netlify/functions/lib/agent-marketing-plan-lib");
 
 const sha = (s) => crypto.createHash("sha256").update(s).digest("hex");
 const PROD = "25f3118fed1b9726fc4dc78b16dcc92233cef785d3c074ef89a6ee7aaf7b0495";
-const DEV = "cbdb8c51804bbc157d9bc52f48653e456a7c5c093e1fee7d0a6ce7b849bd8e9f"; // Nov 14, 2026 (Sam, story-first composition; previous 5416105d…)
+const DEV = "f2fbce88bbc62e2b4662cb6a9f8fa7a5724665097796042bd7d35bb13212bfd8"; // Nov 15, 2026 (Sam, Option 2 component budgets: composition_plan.components in the reply schema; previous cbdb8c51…)
 // // Nov 14, 2026 (evening): the position is the authoritative premise; the angle only drafts its wording. Earlier: voice default, position governs, specific-vs-general factual claims (rules 1, 2g, 2h, 2i, 2j, 5a)
 function withDev(on, fn) {
   const prev = process.env.AGENT_MARKETING_B1_EVIDENCE;

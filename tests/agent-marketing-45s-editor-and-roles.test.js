@@ -147,7 +147,7 @@ test("60 seconds (Phase B): the editor gets the range guidance, cuts toward 150 
 test("30 seconds: an overlength draft still goes through the original single rewrite, not the scene editor", () => {
   const src = require("fs").readFileSync(require("path").join(__dirname, "../netlify/functions/lib/agent-marketing-plan-lib.js"), "utf8");
   assert.match(src, /const EDITOR_DURATIONS = \[45, 60\];/);
-  assert.match(src, /b1\.enabled\(\) && EDITOR_DURATIONS\.includes\(project\.duration_sec\) && narrative\.wordCount > whi/);
+  assert.match(src, /b1\.enabled\(\) && EDITOR_DURATIONS\.includes\(project\.duration_sec\) && \(narrative\.wordCount > whi \|\| compOver\)/);
   assert.ok(![30].some((d) => [45, 60].includes(d)));
 });
 

@@ -56,16 +56,23 @@ test("every evaluation message is well formed: one selected direction, the five 
   for (const [name, s] of Object.entries(SUBJECTS)) {
     const u = userOf(topicFor(s), s.audience);
     const nc = u.narrative_contract;
-    assert.deepStrictEqual(nc.beats.map((b) => b.beat), ["hook", "setup", "evidence", "interpretation", "cta"], name);
-    assert.deepStrictEqual(nc.beats.map((b) => b.words), [20, 30, 35, 50, 15], name);
+    if (s.mode === "article_report") {
+      // Nov 15, 2026 (Sam): Option 2 at 60 seconds is written from absolute component budgets instead of the five beats and the 40% ceiling.
+      assert.deepStrictEqual(nc.components.map((c) => c.component), ["opening", "article", "trend", "synthesis", "cta"], name);
+      assert.deepStrictEqual(nc.components.map((c) => c.words || c.max_words), [20, 33, 35, 50, 15], name);
+      assert.strictEqual(nc.components[3].min_words, 47, name);
+    } else {
+      assert.deepStrictEqual(nc.beats.map((b) => b.beat), ["hook", "setup", "evidence", "interpretation", "cta"], name);
+      assert.deepStrictEqual(nc.beats.map((b) => b.words), [20, 30, 35, 50, 15], name);
+    }
     assert.strictEqual(nc.target_words, 150, name);
     assert.deepStrictEqual(nc.drafting_range, [140, 155], name);
-    if (s.mode === "article_report") assert.match(nc.source_controls, /at most 40% of the spoken narration, 60 words or fewer/, name);
-    else assert.doesNotMatch(nc.source_controls, /40%/, name + ": Option 3 has no article ceiling");
+    if (s.mode === "article_report") assert.match(nc.source_controls, /ARTICLE NARRATIVE \(at most 33 spoken words\)/, name);
+    assert.doesNotMatch(nc.source_controls, /40%/, name + ": no percentage ceiling remains at 60 seconds");
     assert.strictEqual(u.selected_topic.editorial_direction.angle, s.mode === "article_report" || s.mode === "article_editorial" ? u.selected_topic.editorial_direction.angle : "", name);
     assert.ok(u.selected_topic.editorial_direction.angle, name + " has one angle");
     assert.doesNotMatch(JSON.stringify(u), /market_relationship/, name);
-    assert.match(nc.beats[0].job, /question or a declarative statement/, name + ": the hook allows a question or a declarative tension");
+    assert.match((nc.beats ? nc.beats[0] : nc.components[0]).job, /question or a declarative statement/, name + ": the hook allows a question or a declarative tension");
   }
 });
 
@@ -107,5 +114,5 @@ test("the hard safeguards stay in every Test prompt, and production stays byte-i
 
 test("Use My Script and the gate are untouched: no new field, call, approval step or gate in the contract", () => {
   const u = userOf(topicFor(SUBJECTS.E1_lincoln_new_construction));
-  assert.deepStrictEqual(Object.keys(u.narrative_contract).sort(), ["beat_rules", "beats", "composition_order", "drafting_range", "sentence_test", "source_controls", "target_words"]);
+  assert.deepStrictEqual(Object.keys(u.narrative_contract).sort(), ["component_rules", "components", "composition_order", "drafting_range", "sentence_test", "source_controls", "target_words"]);
 });

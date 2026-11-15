@@ -116,33 +116,34 @@ test("Lincoln handoff preserved (1b1d789): the stored position is still the angl
 });
 
 // ── the Test system prompt ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-test("Test prompt: rule 2r, the composition_plan key first in the reply, the article named once, the price comparison widened; production untouched", () => {
+test("Test prompt: the editorial contract (2i C) carries the sequence, the composition_plan key is first in the reply, the article is named once; production untouched", () => {
   const dev = planLib.buildSystemPrompt(DEV, {}), prod = planLib.buildSystemPrompt({});
   assert.strictEqual(sha(prod), PROD_SHA, "production prompt unchanged");
-  const r = rule(dev, "2r");
+  const r = rule(dev, "2i");
   assert.strictEqual(r.length, 1);
-  assert.match(r[0], /STORY, then the essential evidence, then the word allocation, then the narration/);
-  assert.match(r[0], /never write a longer draft expecting the length editor to shorten it/);
-  assert.match(r[0], /up to 6 more words of immediate setup or tension/);
-  assert.match(r[0], /not scenes/);
-  assert.match(r[0], /an article limit is a ceiling, not a target/);
-  assert.ok(!/^2r\. /m.test(prod));
+  assert.match(r[0], /PLAN BEFORE YOU WRITE/);
+  assert.match(r[0], /never write long and rely on the length editor/);
+  assert.match(r[0], /beat budgets and source controls on the first draft/);
+  assert.match(r[0], /not scenes and not conclusions/);
+  assert.ok(!/^2r\. /m.test(dev) && !/^2r\. /m.test(prod), "the separate sequence rule is gone");
   assert.match(dev, /composition_plan is the FIRST key and is written only when the input has narrative_contract/);
   const schema = dev.split("\n").find((l) => l.startsWith('{ "composition_plan"'));
   assert.ok(schema && schema.indexOf("composition_plan") < schema.indexOf("editorial_angle") && schema.indexOf("editorial_angle") < schema.indexOf("narration_with_audio_tags"));
   assert.match(schema, /central_tension.*realtor_conclusion.*essential_findings.*sentences.*beat_words/);
+  assert.doesNotMatch(schema, /market_relationship/);
   assert.doesNotMatch(prod, /composition_plan/);
   assert.match(rule(dev, "2h")[0], /Name the article once, where its first fact is introduced; after that state later facts and the Realtor's interpretation directly/);
   assert.doesNotMatch(rule(prod, "2h").join(""), /Name the article once/);
-  assert.match(rule(dev, "2f")[0], /never set an asking or for-sale price of active listings \(average or median\) against a sold price \(average or median\), describe the difference as a discount, concession or gap/);
-  assert.match(rule(dev, "2f")[0], /any reading in market_interpretation too/);
+  assert.match(r[0], /the prices of homes for sale and the prices of homes that sold describe different homes/);
 });
 
-test("rules 2i, 2o, 2p and 2q are untouched, so the editorial handoff and the hook rule stand", () => {
+test("the editorial contract keeps the subscriber's direction authoritative and the hook open to a question or a declarative tension", () => {
   const dev = planLib.buildSystemPrompt(DEV, {});
-  assert.match(rule(dev, "2q")[0], /The hook must be the first spoken sentence of `narration_with_audio_tags`, word for word/);
-  assert.match(rule(dev, "5b")[0], /a question of 14 words or fewer/);
-  assert.match(rule(dev, "2i")[0], /article_evidence\.central_argument is the article's governing professional position/);
+  assert.match(rule(dev, "2i")[0], /that angle is the one point the Reel makes, and editorial_angle restates it/);
+  assert.match(rule(dev, "2i")[0], /add no second point/);
+  assert.match(rule(dev, "5b")[0], /a question or a declarative statement/);
+  assert.match(rule(dev, "5b")[0], /14 words or fewer/);
+  assert.match(rule(dev, "2i")[0], /article_evidence\.central_argument|central_argument/);
 });
 
 // ── composition_plan: written first, kept as Test diagnostic metadata, never a gate, never another call ─────────────────────────────────────
@@ -157,7 +158,7 @@ const BASE = "buyers have more choices now and that changes how a prepared home 
 const words = (n) => { const w = BASE.split(" "); const out = []; for (let i = 0; out.length < n; i++) out.push(w[i % w.length]); return out.join(" ") + "."; };
 const sized = (sizes) => sizes.map((n, i) => (i === 0 ? "Is that really what is happening in this market? " + words(n - 9) : words(n)));
 const total = (t) => t.reduce((a, x) => a + am.countWords(x), 0);
-const PLAN = { central_tension: "Builders can lower a buyer's payment in ways a resale seller cannot match", realtor_conclusion: "Price against what the buyer really pays, not the sign", market_relationship: "The ratio of closings to original list shows how much negotiating room sales used on average; some sellers might direct part of it to a financing lever, depending on the buyer and the lender. ".repeat(4), essential_findings: ["A1-F3", "R10", "R11"],
+const PLAN = { central_tension: "Builders can lower a buyer's payment in ways a resale seller cannot match", realtor_conclusion: "Price against what the buyer really pays, not the sign", essential_findings: ["A1-F3", "R10", "R11"],
   sentences: [{ beat: "hook", words: 20, purpose: "question" }, { beat: "setup", words: 30, purpose: "what is changing" }, { beat: "evidence", words: 35, purpose: "two findings" }, { beat: "interpretation", words: 50, purpose: "resolve" }, { beat: "cta", words: 15, purpose: "next step" }, { beat: "nonsense", words: "x", purpose: "p".repeat(500) }],
   beat_words: { hook: 20, setup: 30, evidence: 35, interpretation: 50, cta: 15 } };
 const mk = (texts, plan) => JSON.stringify({ ...(plan ? { composition_plan: plan } : {}), editorial_angle: "Buyers have more choices, so preparation matters.", hook: "Is that really what is happening in this market?", narration_with_audio_tags: texts.map((x, i) => `${TAGS[i]} ${x}`).join(" "),
@@ -177,7 +178,7 @@ test("composition_plan is kept as sanitized Test diagnostic metadata beside the 
     assert.ok(cp, "the plan is preserved");
     assert.strictEqual(cp.centralTension, PLAN.central_tension);
     assert.strictEqual(cp.realtorConclusion, PLAN.realtor_conclusion);
-    assert.ok(cp.marketRelationship.startsWith("The ratio of closings") && cp.marketRelationship.length <= 400, "market_relationship is kept, clipped, as optional metadata");
+    assert.strictEqual(cp.marketRelationship, undefined, "market_relationship is no longer a composition_plan field");
     assert.deepStrictEqual(cp.essentialFindings, PLAN.essential_findings);
     assert.deepStrictEqual(cp.beatWords, PLAN.beat_words);
     assert.strictEqual(cp.sentences.length, 6);
@@ -255,7 +256,7 @@ test("editor trigger: at most 155 words is never edited; above 155 the existing 
 });
 
 // ── regression fixture: the failed Lincoln script ───────────────────────────────────────────────────────────────────────────────────────────
-test("regression: the failed Lincoln draft was 187 words, which the new contract treats as an overrun, and its report framing is exactly what rule 2f now names", async () => {
+test("regression: the failed Lincoln draft was 187 words, which the new contract treats as an overrun, and its report framing is what rule 2i E names", async () => {
   const f = FX.failedScript;
   assert.strictEqual(am.countWords(f.narration), f.finalWords);
   assert.ok(f.initialWords > 155 && f.finalWords > 155, "both counts were over the new top");
@@ -264,12 +265,12 @@ test("regression: the failed Lincoln draft was 187 words, which the new contract
   assert.match(f.narration, /average sold price of \$737,000 sits meaningfully below the average for-sale price of \$866,000/);
   await withDev(true, async () => {
     const u = userOf(lincoln(60));
-    // the same stored readings still reach the writer (rule 2l), so rule 2f carries the correction in the same message pair
+    // the same stored readings still reach the writer; rule 2i E tells it to read a for-sale price and a sold price as different homes
     assert.match(JSON.stringify(u.selected_topic.editorial_direction.market_interpretation), /asking prices|what recently sold/);
     const dev = planLib.buildSystemPrompt(DEV, {});
-    assert.match(rule(dev, "2f")[0], /do not repeat a reading that does so/);
+    assert.match(rule(dev, "2i")[0], /leave out any that compare different groups of homes or different measures as if they were the same/);
     assert.match(u.narrative_contract.source_controls, /never presented as proof of causation/);
-    assert.ok(u.selected_topic.figures_you_may_state.some((x) => /Sold price as a percent of original list price: 95%/.test(x)), "the comparison rule 2f points to is available");
+    assert.ok(u.selected_topic.figures_you_may_state.some((x) => /Sold price as a percent of original list price: 95%/.test(x)), "the ratio the contract reads by its own label is available");
   });
 });
 

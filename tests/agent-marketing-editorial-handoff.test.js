@@ -168,25 +168,22 @@ test("trend: every observation a candidate cites reaches its topic and the plann
 test("trend: the prompt asks for every observation that materially bears on the story, with no quota", () => {
   const p = b2.systemPrompt("article_report", true);
   assert.match(p, /every observation that materially bears on that candidate's story, including one that shows another side of it/);
-  assert.match(p, /there is no quota and an observation that does not bear on the story is left out/);
+  assert.match(p, /There is no quota: cite every observation that materially bears on that candidate.s story[^.]*, and leave out any that does not/);
   assert.doesNotMatch(p, /at least (?:two|three|\d) observations/i);
 });
 
 // ── 6. the planner distinguishes what a measure shows from unsupported interpretation ──────────────────────────────────────────────────────────
-test("planner statistics: the developer prompt chooses figures for the narrative, says what List Price Received does not show, and words explanations by the evidence", () => {
+test("planner statistics: the editorial contract chooses facts for the story, reads each figure by its own label, and words explanations by the evidence", () => {
   const p = planLib.buildSystemPrompt(DEV, {});
-  const rule = p.split("\n").find((l) => l.startsWith("2n. "));
-  assert.ok(rule, "rule 2n is present");
-  assert.match(rule, /Choose the ones that measure what the central narrative of editorial_direction acts on/);
-  assert.match(rule, /do not pick a figure because it is favorable or reassuring/);
-  assert.match(rule, /the figure's own label says what it measures, so read the label: sold price as a percent of list price compares the closing price with the list price the label names/);
-  assert.match(rule, /neither shows what any one seller did, how quickly it sold, or whether buyer demand is rising or falling/);
-  assert.match(rule, /read them together, then state the one thing they show together, naming the one or two figures that carry it with their comparison/); assert.match(rule, /A figure that cuts against the story is stated only where leaving it out would make the answer misleading \(rule 2o\)/);
-  assert.match(rule, /what the report or article states \(a fact, attributed\), your reading of it \(the agent's interpretation/);
-  assert.match(rule, /any explanation, worded with the confidence the evidence earns \(rule 2o\); do not invent a cause for a single figure/);
+  const rule = p.split("\n").find((l) => l.startsWith("2i. "));
+  assert.ok(rule, "rule 2i is present");
+  assert.match(rule, /Choose a fact by whether it changes what the viewer understands, not by how many are available/);
+  assert.match(rule, /A figure means what its own label and basis say: a median is not every home, a month-over-month change is not a trend, a ratio to original list price is not a ratio to last list price/);
+  assert.match(rule, /the prices of homes for sale and the prices of homes that sold describe different homes/);
+  assert.match(rule, /keep apart what a source states \(attributed\), your reading of it \(marked as the Realtor's view\) and any explanation \(worded with the confidence it earns\)/);
+  assert.match(rule, /invent no cause for a single figure/);
   assert.doesNotMatch(rule, /at least|must (?:state|include|use) (?:every|all|\d)/i, "no quota and no requirement to use every statistic");
-  assert.match(p, /2j\. REALTOR INTERPRETATION[^\n]*professional opinion and interpretation/, "the allowance for professional interpretation is kept");
-  assert.ok(!planLib.buildSystemPrompt({}, {}).split("\n").some((l) => l.startsWith("2n. ")), "the production prompt is unchanged");
+  assert.ok(!planLib.buildSystemPrompt({}, {}).split("\n").some((l) => l.startsWith("2i. ")), "the production prompt is unchanged");
 });
 
 // ── 7. the competing brokerage is credited in the footer, not named in the narration, captions or scene copy ──────────────────────────────────────
@@ -296,15 +293,13 @@ test("saved topic: only a record that passed the evidence contract carries the t
   assert.strictEqual(sbLib.topicWithEvidence(p, null, {}), p.selected_topic, "off outside development");
 });
 
-test("saved topic: the planner is told to keep the selected topic and one angle, weigh the thesis and explanation findings, and word them by the evidence", () => {
+test("saved topic: the planner is told to keep the selected direction as one point, weigh the thesis and explanation findings, and word them by the evidence", () => {
   const p = planLib.buildSystemPrompt(DEV, {});
   const r2i = p.split("\n").find((l) => l.startsWith("2i. ")), r2h = p.split("\n").find((l) => l.startsWith("2h. "));
-  assert.match(r2i, /defines the subject, not the final hook[\s\S]*Add no second point/);
-  assert.match(r2i, /editorial_direction\.develops_article_position is true, article_evidence\.central_argument is the article's governing professional position/);
-  assert.match(r2i, /never replaces it with a supporting mechanism, rule, calculation or statistic, and is not required to recite any of those/);
-  assert.doesNotMatch(r2i, /Do not replace its angle with the article's thesis/);
-  assert.match(r2i, /as the agent's reading, worded with the confidence the evidence earns \(rule 2o\)/);
-  assert.match(r2i, /make its angle the one point the Reel makes/, "the one-central-angle structure is kept");
+  assert.match(r2i, /Do not replace it with a premise of your own and add no second point/);
+  assert.match(r2i, /When it develops the article's central_argument, that argument is the point; a supporting rule, calculation or statistic never takes its place/);
+  assert.match(r2i, /Its mechanism, supporting figures and readings are material you may use where they advance the point and leave out where they do not/);
+  assert.match(r2i, /that angle is the one point the Reel makes/, "the one-central-angle structure is kept");
   assert.match(r2h, /B1's statement of the author's governing professional position[\s\S]*not a verified quotation and not a source for figures: take no figure from it/);
   assert.match(r2h, /Attribute an article finding by role/, "attribution stays by role; the credit is the footer");
   const prod = planLib.buildSystemPrompt({}, {});
@@ -327,30 +322,13 @@ test("saved topic: the planner message for an older supply-only topic carries th
   assert.ok(!(out instanceof Error) || !/goolsby/i.test(String(out.message)), "no brokerage name in what comes back");
 });
 
-test("take a position: rule 2o organizes the Reel around the conclusion, separates material from nonmaterial limitations, and keeps may/could for real uncertainty (development prompt only)", () => {
+test("take a position: rule 2i D takes a position, limits only a material limitation, and keeps may/could for real uncertainty (development prompt only)", () => {
   const p = planLib.buildSystemPrompt(DEV, {});
-  const line = (n) => p.split("\n").find((l) => l.startsWith(n + ". "));
-  const r = line("2o");
-  assert.ok(r, "rule 2o is present");
-  assert.match(r, /Organize the Reel around the Realtor's professional conclusion, not around the limits of the supporting data/);
-  assert.match(r, /one clear position, support it with the relevant figures, explain what it means for homeowners, and close with actionable guidance/);
-  assert.match(r, /Prioritize what the evidence reasonably supports, not an inventory of what it cannot prove/);
-  assert.match(r, /Match the strength of the conclusion to the strength of the evidence/);
-  assert.match(r, /unsupported factual assertion[^.]*which is not allowed[^.]*professional interpretation reasonably grounded in several indicators/);
-  assert.match(r, /A material limitation is one whose omission would make a specific factual statement or the Realtor's conclusion misleading: respect it, and put it in the narration/);
-  assert.match(r, /A nonmaterial limitation is any other gap in the evidence: it does not belong in the narration just because it exists/);
-  assert.match(r, /Do not replace professional interpretation with methodological commentary, and do not add statements about what the data cannot establish, prove or measure/);
-  assert.match(r, /ask whether leaving it out would materially misrepresent the market evidence or the Realtor's conclusion; if not, leave it out/);
-  assert.match(r, /Where the evidence is limited or mixed, moderate the conclusion itself/);
-  assert.match(r, /\"may\" and \"could\" are right for a genuinely uncertain contributing factor, and are not to be added or stripped by habit/);
-  assert.doesNotMatch(r, /without \"may\" or \"could\" hedging/, "may/could are not banned");
-  assert.match(r, /Rule 2h attribution and the exact figures stay as they are/);
-  // the other rules do not reintroduce methodological commentary
-  assert.match(line("2n"), /not material for the narration, and you do not explain what a figure does not show unless rule 2o's material test is met/);
-  assert.match(line("2l"), /its caveats are honored where they are material under rule 2o and are otherwise not narrated/);
-  assert.doesNotMatch(line("2l"), /caveats must be honored/);
-  assert.match(line("2j"), /include a qualification only where leaving it out would make a specific statement materially misleading/);
-  assert.doesNotMatch(line("2j"), /acknowledge a material uncertainty/);
-  assert.match(line("2i"), /worded with the confidence the evidence earns \(rule 2o\)/);
-  assert.ok(!planLib.buildSystemPrompt({}, {}).split("\n").some((x) => x.startsWith("2o. ")), "the production prompt is unchanged");
+  const r = p.split("\n").find((l) => l.startsWith("2i. "));
+  assert.ok(r, "rule 2i is present");
+  assert.match(r, /State a clear professional conclusion and what it means for the audience's decision \(rule 2k\), confident and specific, with the strength of the conclusion matched to the evidence/);
+  assert.match(r, /where the evidence is mixed, moderate the conclusion itself, and use "may" or "could" only for what is genuinely uncertain/);
+  assert.match(r, /Professional opinion, common real estate knowledge and conditional reasoning are yours to use; they need no source but are never presented as data/);
+  assert.match(r, /A limitation goes in the narration only where leaving it out would make a specific statement or the conclusion misleading; every other gap stays out, and the narration contains no commentary on what the data cannot prove/);
+  assert.doesNotMatch(r, /without "may" or "could" hedging/, "may/could are not banned");
 });

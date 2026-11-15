@@ -27,7 +27,7 @@ test("Option 3 (article_editorial): the architecture names article facts only, a
 test("Option 2 (article_report): the architecture is exactly the article-plus-report one, and source_pathway names both sources", () => {
   const fig = [{ key: "months_supply", ref: "r1.months_supply", role: "area_statistic", text: "ROSEVILLE, October 2026: Months of inventory: 3.2 months", label: "x", period: "October 2026", display: "x", areaLabel: "ROSEVILLE", scopeKind: "exact", partialPeriod: false, partialComparison: false }];
   const u = user(topic("article_report", fig));
-  assert.strictEqual(u.narrative_architecture, "A question naming what is at stake → the Realtor's answer, built from the evidence that establishes it (the article's facts and the report's figures, each in the scene where it does its work) → what that answer means for the seller, specifically → low-pressure next step");
+  assert.strictEqual(u.narrative_architecture, "A hook, a question or a declarative tension, naming what is at stake → the Realtor's answer, built from the evidence that establishes it (the article's facts and the report's figures, each in the scene where it does its work) → what that answer means for the seller, specifically → low-pressure next step");
   assert.match(u.source_pathway, /^Article plus the agent's report\./);
   assert.match(u.source_pathway, /Keep the two sources separate and attributed under rules 2f, 2g and 2h/);
   assert.ok(Array.isArray(u.selected_topic.figures_you_may_state) && u.selected_topic.report_is_source_of_truth_for_market_numbers === true, "Option 2 still gets its report fields");
@@ -52,24 +52,17 @@ test("rule 2g (Nov 13 correction): no first/last data rule in Test; without a re
 });
 
 
-test("rule 2i: report figures are a source only when a report is present; without one every claim comes from article_evidence", () => {
+test("rule 2i B: report figures are a source only when a report is present; without one every claim comes from article_evidence", () => {
   const r = rule("2i");
-  assert.match(r, /from the article findings, and the report figures when a report is present, where rule 2g permits them/);
-  assert.match(r, /or, when a report is present, from figures_you_may_state \(source_role "data"\); without a report it comes from article_evidence alone\./);
+  assert.match(r, /When a report is present, the figures in figures_you_may_state are its whole menu, used where rule 2g permits; without a report \(source_pathway "article_only"\) every fact and figure comes from article_evidence alone\./);
   assert.ok(!/from the article and report findings/.test(r));
 });
 
-test("rule 2n: the report-menu sentence applies when a report is present; without one the discipline applies to the article's validated findings", () => {
-  const r = rule("2n");
-  assert.match(r, /^2n\. CHOOSING AND READING STATISTICS\. When a report is present, the figures in figures_you_may_state are its whole menu, not a list to cover; without a report \(source_pathway "article_only"\) the same discipline applies to the figures in article_evidence's validated findings\./);
-  assert.ok(!/are the report's whole menu/.test(r));
-});
-
-test("Rules 2o, 2p and 2q, the rule count and the production system prompt are untouched", () => {
+test("the editorial rules are consolidated into 2i; the rule count and the production system prompt are untouched", () => {
   const labels = withEnv(true, () => planLib.buildSystemPrompt(undefined, { scoped: false }).split("\n").map((l) => (l.match(/^(\d+[a-z]?)\. /) || [])[1]).filter(Boolean));
-  assert.strictEqual(labels.filter((x) => x === "2r").length, 1, "the only new rule is 2r (Nov 14, story-first composition)");
   assert.ok(!labels.includes("2s"), "no other new rule");
-  ["2o", "2p", "2q"].forEach((id) => assert.strictEqual(labels.filter((x) => x === id).length, 1, id));
+  ["2j", "2l", "2n", "2o", "2p", "2q", "2r"].forEach((id) => assert.ok(!labels.includes(id), id + " is consolidated"));
+  assert.strictEqual(labels.filter((x) => x === "2i").length, 1);
   assert.strictEqual(crypto.createHash("sha256").update(withEnv(false, () => planLib.buildSystemPrompt())).digest("hex"), PROD_HASH);
 });
 

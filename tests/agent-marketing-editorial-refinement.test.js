@@ -48,9 +48,11 @@ test("Option 1 selects three to five and names the selection criteria; Option 2 
   assert.match(OPTION_1, /Select the strongest 3 to 5/);
   assert.match(OPTION_2, /Select the strongest 5 where the evidence supports them/);
   for (const p of [OPTION_1, OPTION_2]) {
-    ["strength of the market interpretation", "relevance to (this|the) audience", "distinctness from the other selected", "practical Realtor insight", "decision journey", "Never select near-duplicates"]
+    ["relevance to (this|the) audience", "distinctness from the other selected", "practical Realtor insight", "decision journey", "Never select near-duplicates"]
       .forEach((x) => assert.match(p, new RegExp(x), x));
   }
+  assert.match(OPTION_1, /strength of the market interpretation/);
+  assert.match(OPTION_2, /the strength and honesty of the relationship to the report, including none/);
   assert.match(OPTION_1, /specificity to THIS/);
   assert.match(OPTION_2, /fidelity to the article's governing position/);
   assert.doesNotMatch(OPTION_2, /specificity to THIS/, "Nov 14, 2026: Option 2 no longer ranks topics by specificity to the article and report");
@@ -68,8 +70,8 @@ test("both options carry the periods-and-comparisons rules and keep interpretati
 
 test("Option 2 keeps the article as the foundation, allows conditional Realtor interpretation, and refuses forced market connections", () => {
   assert.match(OPTION_2, /article stays the factual foundation; the report is the source of local market performance/);
-  assert.match(OPTION_2, /PRIORITIZE candidates that reveal a real relationship between the article's subject and the market conditions/);
-  assert.match(OPTION_2, /Never force a weak market connection just to use another article finding/);
+  assert.match(OPTION_2, /The relationship may be that the report reinforces the article's point, complicates or contradicts it, adds local context only, or has no real bearing on it; say which/);
+  assert.match(OPTION_2, /never force a link to make a candidate stronger/);
   assert.match(OPTION_2, /not limited to repeating the article/);
   assert.match(OPTION_2, /builder competition and incentives, special taxes or assessments, ownership costs/);
   assert.match(OPTION_2, /Never present such a possibility as a verified fact about this particular development/);

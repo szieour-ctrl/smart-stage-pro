@@ -120,7 +120,7 @@ test("45 seconds inside its range: no editor, no extra call", async () => {
 
 // ── 2. 60 seconds unchanged ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 test("60 seconds (Phase B): the editor gets the range guidance, cuts toward 150 above 155, and the advisory reads 140–155", async () => {
-  assert.strictEqual(sha(planLib.lengthEditSystem(60, false)), "c95d76ae702e479469a15d8bc2ad7c0029745b29bc3abe996e9a69695808acc1", "the editor prompt without a range (Nov 14: no first-person requirement)");
+  assert.strictEqual(sha(planLib.lengthEditSystem(60, false)), "5cab3e808df86205a134c3937af3f9a61842c9cd86de3c926f1cb1d69721ad88", "the editor prompt without a range (Nov 14: no first-person requirement)");
   await withDev(true, async () => {
     const six = [...CORE5.slice(0, 4), "Compare the full picture before you decide anything at all.", ...CORE5.slice(4)];
     const LONG6 = six.map((c, i) => c + (i === 1 || i === 2 || i === 3 || i === 4 ? PAD5[Math.min(i, 3)] + PAD5[2] : "") + (i === 4 ? PAD5[1] : ""));

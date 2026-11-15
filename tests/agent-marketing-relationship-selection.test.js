@@ -17,21 +17,21 @@ const LIB = __dirname + "/../netlify/functions/lib/";
 const analyze = (text) => ti.analyze(rr.buildContext([{ id: "u1", facts: lib.analyzePages([text], {}).facts }], { geography: { type: "zip", name: "95747", label: "ZIP 95747" } }));
 const userOf = (b2extra) => JSON.parse(planLib.buildUserMessage({ template: "local_market_insider", duration_sec: 60, formats: ["9x16"], intake: { angle: "", market: "Lincoln, CA", audience: "Home sellers", issue: "", action: "Ask", observation: "" }, selected_topic: { ...FX.topic, b2: { ...FX.topic.b2, ...(b2extra || {}) } } }));
 
-test("B2 rule 2b: relationship test is in the report prompt only, generic, and puts the measuring observation first", () => {
+test("B2 rule 2b (Nov 15): the report relationship may be reinforce, complicate, context or none; the report prompt only; the most relevant observation first", () => {
   const withTrend = b2.systemPrompt("article_report", true), plain = b2.systemPrompt("article_report", false), editorial = b2.systemPrompt("article_editorial", false);
-  assert.match(withTrend, /RELATIONSHIP TEST: state what the article's lever or mechanism changes for the buyer and for the seller/);
-  assert.match(withTrend, /cite it FIRST/);
-  assert.match(withTrend, /not thereby related/);
-  assert.match(withTrend, /never a budget every seller has/);
-  assert.match(withTrend, /Never set the asking prices of homes for sale against sold prices as a discount or concession/);
-  for (const p of [plain, editorial]) assert.doesNotMatch(p, /RELATIONSHIP TEST/, "Option 3 and non-trend prompts do not carry the relationship test");
+  assert.match(withTrend, /REPORT RELATIONSHIPS/);
+  assert.match(withTrend, /reinforces the article's point, complicates or contradicts it, adds local context only, or has no real bearing on it; say which/);
+  assert.match(withTrend, /the most relevant first/);
+  assert.match(withTrend, /never force a link to make a candidate stronger/);
+  assert.match(withTrend, /Never compare the prices of homes for sale with the prices of homes that sold as if they were the same homes/);
+  assert.match(withTrend, /The report's caveats are binding/);
+  for (const p of [plain, editorial]) assert.doesNotMatch(p, /REPORT RELATIONSHIPS/, "Option 3 and non-trend prompts do not carry the report relationships rule");
 });
 
-test("B2 rule 1b: the position candidate's mechanism is the lever in plain homeowner terms; rules and limits are brief constraints", () => {
+test("B2 rule 1b (Nov 15): the mechanism is stated in plain sentences only when a homeowner needs it to understand the position", () => {
   const p = b2.systemPrompt("article_report", true);
-  assert.match(p, /Its mechanism states, in two or three plain homeowner sentences, the competitive lever or practical step/);
-  assert.match(p, /regulatory limits, caps and calculations are mentioned only briefly as constraints and never lead it/);
-  assert.match(p, /editorial_angle must not lead with a rule, limit, percentage or calculation/);
+  assert.match(p, /when a homeowner needs it to understand the position, state it in two or three plain sentences; when they do not, leave it empty/);
+  assert.match(p, /editorial_angle does not lead with a rule, limit, percentage or calculation/);
 });
 
 test("no rule text added here carries Lincoln, a particular ratio, or a fixed figure", () => {
@@ -84,31 +84,24 @@ test("the 600-character truncation is gone: a long reading survives whole to a s
   assert.match(src, /TREND_READING_CHARS = 1200/);
 });
 
-test("Planner rule 2n: the figure's own label decides what it measures; original-list is not described as saying nothing about first pricing", () => {
-  const rule = planLib.buildSystemPrompt(DEV, {}).split("\n").find((l) => l.startsWith("2n. "));
-  assert.match(rule, /the figure's own label says what it measures, so read the label/);
-  assert.match(rule, /measured against the original list price shows, across the sales it covers, how far closings landed from where homes were first priced/);
-  assert.match(rule, /an average ratio does not give every seller that much room/);
-  assert.doesNotMatch(rule, /so it says nothing about how the home was first priced/);
-  assert.match(rule, /for the relationship it has to that lever or choice, not for resembling another figure in wording/);
+test("Planner rule 2i E: the figure's own label decides what it measures; for-sale and sold prices describe different homes", () => {
+  const rule = planLib.buildSystemPrompt(DEV, {}).split("\n").find((l) => l.startsWith("2i. "));
+  assert.match(rule, /A figure means what its own label and basis say/);
+  assert.match(rule, /a ratio to original list price is not a ratio to last list price/);
+  assert.match(rule, /the prices of homes for sale and the prices of homes that sold describe different homes/);
 });
 
-test("Planner rule 2l: B2's reading is a suggestion the writer may improve on when verified evidence supports a stronger relationship", () => {
-  const rule = planLib.buildSystemPrompt(DEV, {}).split("\n").find((l) => l.startsWith("2l. "));
-  assert.match(rule, /article_and_market text and the readings are suggestions, not instructions/);
-  assert.match(rule, /build on the stronger one and leave the weaker reading out/);
-  assert.match(rule, /never repeat a reading that compares different groups of homes as if they were the same/);
+test("Planner rule 2i B: B2's reading is one reading, not instructions; the writer may improve on it", () => {
+  const rule = planLib.buildSystemPrompt(DEV, {}).split("\n").find((l) => l.startsWith("2i. "));
+  assert.match(rule, /one reading, not instructions: build on them where the evidence holds, improve on them where it supports something better/);
+  assert.match(rule, /leave out any that compare different groups of homes or different measures as if they were the same/);
 });
 
-test("Planner rule 2r and schema: market_relationship is written first, chosen by relationship, and conditional; no extra call or gate", () => {
+test("Planner schema (Nov 15): market_relationship is gone; composition_plan stays optional diagnostic metadata with no extra call or gate", () => {
   const sys = planLib.buildSystemPrompt(DEV, {});
-  const r = sys.split("\n").find((l) => l.startsWith("2r. "));
-  assert.match(r, /MARKET RELATIONSHIP/);
-  assert.match(r, /not by wording similarity or by size/);
-  assert.match(r, /never a budget every seller has/);
-  assert.match(r, /If no figure has a real relationship to the lever, say so/);
-  assert.match(sys, /"market_relationship": string/);
-  assert.ok(!planLib.buildSystemPrompt({}, {}).includes("market_relationship"), "production prompt untouched");
+  assert.ok(!sys.includes("market_relationship"), "the field is removed");
+  assert.match(sys, /"composition_plan": \{ "central_tension": string, "realtor_conclusion": string, "essential_findings"/);
+  assert.ok(!planLib.buildSystemPrompt({}, {}).includes("composition_plan"), "production prompt untouched");
 });
 
 test("stored Lincoln T1: the Planner message keeps B2's cited order and both observations, with the existing five-beat contract", () => {

@@ -8,7 +8,7 @@ const planLib = require("../netlify/functions/lib/agent-marketing-plan-lib");
 
 const sha = (s) => crypto.createHash("sha256").update(s).digest("hex");
 const PROD = "25f3118fed1b9726fc4dc78b16dcc92233cef785d3c074ef89a6ee7aaf7b0495";
-const DEV = "a9087ae36cc508ff24c74c08459d1564861b7ac95d02a2dd914f3cd68bd8972a"; // Nov 14, 2026 (Sam, story-first composition; previous 5416105d…)
+const DEV = "cbdb8c51804bbc157d9bc52f48653e456a7c5c093e1fee7d0a6ce7b849bd8e9f"; // Nov 14, 2026 (Sam, story-first composition; previous 5416105d…)
 // // Nov 14, 2026 (evening): the position is the authoritative premise; the angle only drafts its wording. Earlier: voice default, position governs, specific-vs-general factual claims (rules 1, 2g, 2h, 2i, 2j, 5a)
 function withDev(on, fn) {
   const prev = process.env.AGENT_MARKETING_B1_EVIDENCE;
@@ -33,20 +33,20 @@ test("the relaxed variant removes exactly the two spans and nothing else", () =>
     const b = planLib.buildSystemPrompt(undefined, { scoped: false, causalVariant: "relaxed" });
     assert.notStrictEqual(a, b);
     assert.match(a, /present a cause or explanation only when a validated finding of kind "explanation" states it, as that source's view;/);
-    assert.match(a, /do not invent a cause for a single figure\./);
+    assert.match(a, /invent no cause for a single figure,/);
     assert.ok(!/present a cause or explanation only when/.test(b));
     assert.ok(!/A quotation shows what the article says, not why something happened/.test(b));
-    assert.ok(!/do not invent a cause for a single figure/.test(b));
+    assert.ok(!/invent no cause for a single figure/.test(b));
     // the attribution sentence is retained, and the rest of both rules is unchanged
     assert.match(b, /If its attribution says no data or source is given, say it is their view and do not present it as established\./);
-    assert.match(b, /worded with the confidence the evidence earns \(rule 2o\)\./);
+    assert.match(b, /worded with the confidence it earns\)/);
     const restore = b.replace("If its attribution says no data", "A quotation shows what the article says, not why something happened: present a cause or explanation only when a validated finding of kind \"explanation\" states it, as that source's view; if its attribution says no data")
-      .replace("explanation, worded with the confidence the evidence earns (rule 2o).", "explanation, worded with the confidence the evidence earns (rule 2o); do not invent a cause for a single figure.");
+      .replace("State each figure as figures_you_may_state gives it, and keep apart", "State each figure as figures_you_may_state gives it, invent no cause for a single figure, and keep apart");
     assert.strictEqual(restore, a, "the only differences are the two removed spans");
     // factual protections remain in the variant
     assert.match(b, /NEVER invent numbers/);
     assert.match(b, /do not state the finding more strongly than they allow/);
-    assert.match(b, /an unsupported factual assertion/i);
+    assert.match(b, /Do not state a figure the report does not give|NEVER invent numbers/);
   });
 });
 
@@ -95,7 +95,7 @@ test("a marked Test project records variant, prompt hash, first draft and call c
       assert.strictEqual(x.variant, variant);
       assert.strictEqual(x.promptSha256, sha(systems[0]));
       assert.ok(systems.every((s) => s === systems[0]));
-      assert.strictEqual(/do not invent a cause for a single figure/.test(systems[0]), variant === "current");
+      assert.strictEqual(/invent no cause for a single figure/.test(systems[0]), variant === "current");
       assert.match(x.initialDraft.narration, /Buyers have more choices/);
       assert.strictEqual(x.initialDraft.editorialAngle, "Higher payments narrow the buyer pool.");
       assert.deepStrictEqual(x.initialDraft.claimsToVerify, ["rate source"]);

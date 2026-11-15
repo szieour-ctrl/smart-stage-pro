@@ -38,7 +38,7 @@ test("editor instructions: the argument decides what is essential; secondary evi
   assert.match(sys, /Secondary statistics, comparisons and supporting sentences may be removed entirely/);
   assert.match(sys, /correct value, period, measure, qualifier and attribution/);
   assert.match(sys, /remove whole secondary statements, statistics or sentences in preference to trimming a few words from every sentence/);
-  assert.match(sys, /question-led hook; the Realtor's interpretation; the decisive evidence and its attribution; the specific homeowner consequence; and a genuine closing invitation/);
+  assert.match(sys, /hook; the Realtor's interpretation; the decisive evidence and its attribution; the specific homeowner consequence; and a genuine closing invitation/);
   assert.match(sys, /invite the viewer to engage with the Realtor \(cta_angle says how\), not merely end on an observation/);
   assert.match(sys, /words_to_remove and target_words are your objective: work toward target_words and do not stop after a small reduction/);
   assert.match(sys, /a script above it is never blocked/);

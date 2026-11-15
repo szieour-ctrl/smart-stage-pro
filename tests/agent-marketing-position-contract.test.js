@@ -107,13 +107,12 @@ test("Planner (development): AI scripts default to second or third person; produ
 test("Planner (development): the position governs the Reel; mechanisms, rules and calculations are optional; judgment needs no label; specifics must be accurate", () => {
   const dev = planLib.buildSystemPrompt(DEV, {});
   const rule = (id) => dev.split("\n").find((l) => l.startsWith(id + ". "));
-  assert.match(rule("2i"), /develops_article_position is true, article_evidence\.central_argument is the article's governing professional position/);
-  assert.match(rule("2i"), /is not required to recite any of those/);
-  assert.match(rule("2i"), /Market Trend figures support the position; they never substitute for it/);
-  assert.match(rule("2i"), /mechanism, when present, is optional supporting material/);
-  assert.match(rule("2i"), /A specific rule or eligibility statement must be accurate, and the narration is never required to include one/);
-  assert.match(rule("2j"), /needs no label such as "in my view" and no habitual qualifier/);
-  assert.match(rule("2j"), /guarantees, no implied results/, "the advertising safeguard stays");
+  assert.match(rule("2i"), /When it develops the article's central_argument, that argument is the point; a supporting rule, calculation or statistic never takes its place/);
+  assert.match(rule("2i"), /Its mechanism, supporting figures and readings are material you may use where they advance the point and leave out where they do not/);
+  assert.match(rule("2i"), /Do not replace it with a premise of your own and add no second point/);
+  assert.match(rule("2i"), /State judgment directly, with no label such as "in my view" and no habitual qualifier/);
+  assert.match(rule("2i"), /no guarantees or implied results/, "the advertising safeguard stays");
+  assert.match(rule("2i"), /rule 3 does not limit the piece to cautious general framing/);
   assert.match(rule("2g"), /may stand in the same scene or comparison when each keeps its own source, period, measure and geography/);
 });
 
@@ -172,7 +171,7 @@ test("Lincoln Topic 1 (stored data): the stored position is the angle the Planne
   assert.ok(!("audience_journey" in ed), "B2's cap-led journey is not passed");
   assert.match(ed.mechanism, /3% to 9%/, "the mechanism stays available as optional supporting material");
   const dev = planLib.buildSystemPrompt(DEV, {});
-  assert.match(dev.split("\n").find((l) => l.startsWith("2i. ")), /is not required to recite any of those/);
+  assert.match(dev.split("\n").find((l) => l.startsWith("2i. ")), /material you may use where they advance the point and leave out where they do not/);
 });
 
 test("a topic that does not develop the position, or has no stored position, is handed over exactly as before", () => {
@@ -187,9 +186,9 @@ test("a topic that does not develop the position, or has no stored position, is 
 
 test("B2 prompt: the position candidate's angle is the position in seller terms, not led by a rule or calculation, and its mechanism is the lever in plain terms", () => {
   const src = require("fs").readFileSync(__dirname + "/../netlify/functions/lib/agent-marketing-b2-lib.js", "utf8");
-  assert.match(src, /editorial_angle must not lead with a rule, limit, percentage or calculation/);
-  assert.match(src, /homeowner_implication is the seller consequence of the position, not of a supporting rule/);
-  assert.match(src, /Its mechanism states, in two or three plain homeowner sentences, the competitive lever/);
+  assert.match(src, /editorial_angle does not lead with a rule, limit, percentage or calculation/);
+  assert.match(src, /homeowner_implication is the consequence of the position, not of a supporting detail/);
+  assert.match(src, /when a homeowner needs it to understand the position, state it in two or three plain sentences; when they do not, leave it empty/);
 });
 
 test("the production Planner prompt is byte-identical after the correction", () => {

@@ -21,11 +21,10 @@ test("production prompt is byte-for-byte unchanged", () => {
   assert.ok(!p.some((l) => /^2[hijklnopq]\. /.test(l)), "no Test rule leaks into production");
 });
 
-test("rules the corrections must not touch are pinned word for word: 2h, 2j, 2k, 2o, 2p (2g was deliberately corrected in Phase C, Nov 13: pathway wording, tested in agent-marketing-pathway-instructions)", () => {
+test("rules the corrections must not touch are pinned word for word: 2h, 2k (2g was deliberately corrected in Phase C, Nov 13: pathway wording, tested in agent-marketing-pathway-instructions)", () => {
   const pins = {
-    "2h": "9f935f284d9f27545a22c409ad5a0237f25b308be9dc709a6894abbbddd056e8", // Nov 14: central_argument is the author's governing position; later Nov 14: the article is named once (was 2b962b41…)
-    "2j": "7ebba8e9389bb8fce660a74e2c71432593af4e0847e420126889747eaad8a627", // Nov 14: judgment stated directly; specific representations kept apart "2k": "5ac72dcd79ae60bf5a8a1403bee0490fb9de6b7dd0e8dbfafaf5e82e912884c2",
-    "2o": "94e674ff1baeb206af1ba0a78d149518a1d7170e31485be8f0948ad5622fe2a6", "2p": "5ac912ad449e17fa119006604e03166b55f1a10b4b15eccde33baae4a6972408", // Nov 12: only the two "60-second" references were made duration-neutral
+    "2h": "9f935f284d9f27545a22c409ad5a0237f25b308be9dc709a6894abbbddd056e8", // Nov 14: central_argument is the author's governing position; the article is named once
+    "2k": "5ac72dcd79ae60bf5a8a1403bee0490fb9de6b7dd0e8dbfafaf5e82e912884c2",
   };
   Object.entries(pins).forEach(([id, h]) => assert.strictEqual(sha(rule(DEV, id)), h, `rule ${id} changed`));
 });
@@ -50,13 +49,13 @@ test("change 3 (rule 2f, Test): source_role says what a scene may contain, not w
   assert.ok(!/tell what the article reports in its own terms/.test(r) && !/then give the agent's perspective/.test(r));
 });
 
-test("change 2 (rule 2l, Sam's wording): complementary evidence, one interpretation, developed throughout; restrictions kept", () => {
-  const r = rule(DEV, "2l");
-  assert.match(r, /the article's findings and the subscriber's report figures are complementary evidence supporting one Realtor interpretation\. Use each source's evidence in scenes authorized for that source, with the required attribution\. Connect their meaning across scenes so the narration develops one cohesive argument rather than separate article and report summaries\. The Realtor's interpretation should develop throughout the Reel, not be reserved for a final conclusion scene\./);
-  assert.ok(!/the article stays the central story/.test(r) && !/then, in a data scene, say how the report/.test(r));
+test("change 2 (rule 2i B, Nov 15): sources may reinforce, complicate, give context or have no relationship; nothing is forced; restrictions kept", () => {
+  const r = rule(DEV, "2i");
+  assert.match(r, /the report may reinforce the article, complicate or contradict it, give it local context only, or have no real bearing on it/);
+  assert.match(r, /Do not imply that one source caused or explains the other unless a source says so, and never link them just to make a stronger hook/);
   assert.match(r, /Do not name the article's publisher, brokerage, team, agent or website anywhere in the narration, captions or scene copy/, "competitor naming restriction kept");
-  assert.match(r, /Do not turn a reading into a number, and never present an article figure as the agent's own market data/, "unsupported-number restriction kept");
-  assert.match(r, /state each figure exactly as figures_you_may_state gives it/, "trend_commentary behavior kept");
+  assert.match(r, /every scene is source_role "data"/, "trend_commentary behavior kept");
+  assert.match(r, /leave out any that compare different groups of homes or different measures as if they were the same/);
 });
 
 test("change 4 (rule 7, Test): the story is the question, the evidence and answer, the homeowner meaning, then the call to action; slice rules unchanged", () => {
@@ -66,33 +65,34 @@ test("change 4 (rule 7, Test): the story is the question, the evidence and answe
   assert.match(r, /Every scene has a narration_excerpt that is an exact consecutive slice of your narration/);
 });
 
-test("change 5 (rule 5b, Test): the hook is a question built on the hinge of the premise; 14 words; no answer; alignment rule kept", () => {
+test("change 5 (rule 5b, Test, Nov 15): the hook is a question or a declarative tension; 14 words; no answer; alignment rule kept", () => {
   const r = rule(DEV, "5b");
-  assert.match(r, /is the hook \(rule 2q\) and must stop a scroll: a question of 14 words or fewer built on the hinge of the premise \(the specific figure, threshold, contrast or assumption the answer turns on\), not a general question about the market, and it does not give the answer/);
+  assert.match(r, /14 words or fewer, a question or a declarative statement, grounded in the selected direction and built on the hinge the answer turns on/);
+  assert.match(r, /raises a genuine uncertainty, tests a common assumption or states a surprising contrast, and it does not give the answer away/);
   assert.match(r, /Never open with a greeting/);
-  assert.match(r, /The hook field repeats that sentence\./);
+  assert.match(r, /The hook field repeats the first sentence exactly\./);
+  assert.match(r, /not held back for the last scene/);
   assert.ok(!/single most surprising or specific thing/.test(r));
 });
 
-test("change 6 (rule 2n): the figures that carry the finding are named with their comparison; the rest stay out; a counter-figure only to avoid misleading", () => {
-  const r = rule(DEV, "2n");
-  assert.match(r, /read them together, then state the one thing they show together, naming the one or two figures that carry it with their comparison and leaving the rest out/);
-  assert.match(r, /A figure that cuts against the story is stated only where leaving it out would make the answer misleading \(rule 2o\)/);
-  assert.ok(!/closed sales, months of inventory, days on market and price/.test(r), "the four-figure bundle is no longer suggested");
-  assert.match(r, /its whole menu, not a list to cover/, "the existing menu rule stays (Phase C: when a report is present)");
-});
-
-test("change 7 (rule 2i): the implication becomes the specific consequence the evidence supports for the seller", () => {
+test("change 6 (rule 2i C and E, Nov 15): facts are chosen by what changes the viewer's understanding; figures keep their own label", () => {
   const r = rule(DEV, "2i");
-  assert.match(r, /Use the market_interpretation readings when present, and turn the implication into the specific consequence the evidence supports for the seller \(leverage, pricing, expectations or timing\), not general advice/);
-  assert.match(r, /make its angle the one point the Reel makes/);
+  assert.match(r, /Choose a fact by whether it changes what the viewer understands, not by how many are available/);
+  assert.match(r, /figures that establish one condition may be stated together/);
+  assert.match(r, /A figure means what its own label and basis say/);
+  assert.match(r, /State each figure as figures_you_may_state gives it/);
 });
 
-test("the corrections reconcile existing rules: the only new rule is 2r (Nov 14 composition sequence), the same rule labels as before otherwise", () => {
+test("change 7 (rule 2i A and D): the selected direction is the one point; the conclusion is specific to the audience's decision", () => {
+  const r = rule(DEV, "2i");
+  assert.match(r, /that angle is the one point the Reel makes, and editorial_angle restates it/);
+  assert.match(r, /State a clear professional conclusion and what it means for the audience's decision \(rule 2k\), confident and specific/);
+});
+
+test("the editorial rules are consolidated: 2j, 2l, 2n, 2o, 2p, 2q and 2r no longer exist; every other rule label appears once", () => {
   const labels = lines(DEV).map((l) => (l.match(/^(\d+[a-z]?)\. /) || [])[1]).filter(Boolean);
-  assert.strictEqual(labels.filter((x) => x === "2r").length, 1, "2r is the story-first composition rule");
-  assert.ok(!labels.includes("2s"));
-  ["2f", "2g", "2h", "2i", "2j", "2k", "2l", "2n", "2o", "2p", "2q", "5a", "5b", "7"].forEach((id) => assert.strictEqual(labels.filter((x) => x === id).length, 1, id));
+  ["2j", "2l", "2n", "2o", "2p", "2q", "2r", "2s"].forEach((id) => assert.ok(!labels.includes(id), id + " is gone"));
+  ["2f", "2g", "2h", "2i", "2k", "5a", "5b", "7"].forEach((id) => assert.strictEqual(labels.filter((x) => x === id).length, 1, id));
 });
 
 const topicWith = (b2) => ({ id: "t1", question: "Is supply changing?", whyItMatters: "w", scope: "selected", origin: "web", reportFirst: false, trendSignals: [], reportFigures: [],
@@ -104,7 +104,7 @@ const userFor = (topic, env) => { const prev = process.env.AGENT_MARKETING_B1_EV
 test("change 1: the narrative architecture is question, answer from the evidence, specific meaning, next step; the other architectures are unchanged", () => {
   const b2 = { mode: "article_report", mechanism: "m", homeownerImplication: "i", editorialAngle: "a", audienceJourney: "j", sourceRefs: [] }; // Option 2 keeps the article-plus-report architecture (Phase C: Option 3 has its own, tested in agent-marketing-pathway-instructions)
   const withDir = userFor(topicWith(b2), true).narrative_architecture;
-  assert.strictEqual(withDir, "A question naming what is at stake → the Realtor's answer, built from the evidence that establishes it (the article's facts and the report's figures, each in the scene where it does its work) → what that answer means for the seller, specifically → low-pressure next step");
+  assert.strictEqual(withDir, "A hook, a question or a declarative tension, naming what is at stake → the Realtor's answer, built from the evidence that establishes it (the article's facts and the report's figures, each in the scene where it does its work) → what that answer means for the seller, specifically → low-pressure next step");
   assert.ok(!/different points in their decision/.test(withDir), "no longer invites a stage-by-stage close (rule 2k)");
   assert.strictEqual(userFor(topicWith(null), false).narrative_architecture, "Hook on the topic's question → what the sourced facts show (only those) → what it means for the audience → low-pressure next step");
 });
@@ -122,16 +122,12 @@ test("the hook stays the first spoken sentence: a question hook the narration op
 
 // Nov 12, 2026 (Sam): progressive revelation. Curiosity sustained by interpretation that begins early and deepens; not a question followed by a statistics lecture,
 // and not a question followed at once by the full answer.
-test("2q: the answer begins developing within a few sentences after the hook, is not given in the hook, and is not saved for a final scene", () => {
-  const r = rule(DEV, "2q");
-  assert.match(r, /begins developing the Realtor's answer/);
-  assert.match(r, /deepens, substantiates, or clarifies that interpretation/);
-  assert.match(r, /Do not follow the hook with a complete answer/);
-  assert.match(r, /do not hold the interpretation back for a final scene/);
-  assert.match(r, /EVIDENCE AND PROGRESSIVE ANSWER\./);
-  assert.ok(!/EVIDENCE AND PAYOFF/.test(r) && !/must investigate it/.test(r));
-  assert.match(r, /Do not answer the question in the hook/, "the question-led hook is kept");
-  assert.match(r, /first spoken sentence of `narration_with_audio_tags`, word for word/);
+test("5b and 2i: the answer begins right after the hook, is not given in the hook, and is not saved for a final scene", () => {
+  const r = rule(DEV, "5b");
+  assert.match(r, /does not give the answer away/);
+  assert.match(r, /answer starts developing straight after the hook/);
+  assert.match(r, /not held back for the last scene/);
+  assert.match(rule(DEV, "2i"), /Realtor's conclusion/);
 });
 
 test("7: Test storyboard advances one connected argument; scene count, roles and continuity language are unchanged", () => {
@@ -143,11 +139,10 @@ test("7: Test storyboard advances one connected argument; scene count, roles and
   assert.match(r, /the number of scenes you are given/);
 });
 
-test("2i: the topic defines the subject, not the hook", () => {
+test("2i: the selected direction defines the point; the topic does not decide the hook", () => {
   const r = rule(DEV, "2i");
-  assert.match(r, /defines the subject, not the final hook/);
-  assert.match(r, /instead of paraphrasing the topic's question/);
-  assert.ok(!/Keep the selected topic and its question/.test(r));
+  assert.match(r, /Do not replace it with a premise of your own and add no second point/);
+  assert.match(rule(DEV, "5b"), /grounded in the selected direction/);
 });
 
 test("5a Test variant: example is generic, shows early interpretation, connected evidence, conclusion, homeowner consequence and a warm close; production 5a unchanged", () => {

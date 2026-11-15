@@ -33,7 +33,7 @@ test("Option 2: B2 is given the shared Trend Intelligence analysis, and every to
   const { reportFigures, trend } = setup(fx.marketUpdate());
   const seen = [];
   const out = await b2.generate({ records, articles, evidence, mode: "article_report", market: "ZIP 95747", audience: "sellers", reportFigures, trend, callFn: model(seen), anthropicKey: "k", reportSource: { type: "report" } });
-  assert.match(seen[0].system, /TREND INTELLIGENCE/);
+  assert.match(seen[0].system, /REPORT RELATIONSHIPS/);
   assert.match(seen[0].user, /trend_intelligence/);
   assert.strictEqual(out.topics.length, 5);
   out.topics.forEach((t) => {
@@ -48,7 +48,7 @@ test("Option 2: B2 is given the shared Trend Intelligence analysis, and every to
 test("Option 3 (no report) and an unusable report leave B2's prompt without any Trend Intelligence", async () => {
   const seen = [];
   const out = await b2.generate({ records, articles, evidence, mode: "article_editorial", market: "ZIP 95747", audience: "sellers", reportFigures: [], trend: null, callFn: model(seen), anthropicKey: "k" });
-  assert.ok(!/TREND INTELLIGENCE|trend_intelligence/.test(seen[0].system + seen[0].user));
+  assert.ok(!/REPORT RELATIONSHIPS|trend_intelligence/.test(seen[0].system + seen[0].user));
   assert.ok(out.topics.every((t) => !t.b2.trendIntelligence && !t.b2.trendObservationRefs));
 });
 
@@ -86,7 +86,7 @@ test("script writer handoff: Option 2 carries article direction plus market inte
   assert.ok(b1brief.figures_you_may_state.length >= 2);
   // flag off: the planner sees neither
   assert.ok(!plan.topicBrief(o1.topics[0], {}).editorial_direction);
-  assert.ok(/2l\. MARKET INTERPRETATION/.test(plan.buildSystemPrompt(env)) && !/2l\. MARKET INTERPRETATION/.test(plan.buildSystemPrompt({})));
+  assert.ok(/2i\. EDITORIAL CONTRACT/.test(plan.buildSystemPrompt(env)) && !/2i\. EDITORIAL CONTRACT/.test(plan.buildSystemPrompt({})));
 });
 
 test("development only: a 60-second Reel advises 140-155 words; 30 and 45 and Production are unchanged", () => {

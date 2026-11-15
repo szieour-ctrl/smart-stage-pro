@@ -149,7 +149,7 @@ test("planner: B2 direction reaches the script writer only with the development 
   assert.deepStrictEqual(ed.source_refs.map((r) => r.finding), ["A1-F1"], "the listing statistic is the report's job");
   const ed3 = planLib.topicBrief({ ...t, reportFirst: false }, { AGENT_MARKETING_B1_EVIDENCE: "dev" }).editorial_direction;
   assert.deepStrictEqual(ed3.source_refs.map((r) => r.finding), ["A1-F2", "A1-F1"], "mode 3: attributed article figures may be used");
-  assert.match(planLib.buildSystemPrompt({ AGENT_MARKETING_B1_EVIDENCE: "dev" }), /^2i\. EDITORIAL DIRECTION/m);
+  assert.match(planLib.buildSystemPrompt({ AGENT_MARKETING_B1_EVIDENCE: "dev" }), /^2i\. EDITORIAL CONTRACT/m);
   assert.doesNotMatch(planLib.buildSystemPrompt({}), /editorial_direction/);
 });
 
@@ -164,17 +164,17 @@ test("the page offers the three types, requires the report for types 1 and 2, an
   assert.doesNotThrow(() => new Function(ui));
 });
 
-test("script writer handoff (development): a B2 topic gets the interpretation-and-audience story architecture; the system prompt carries rules 2j and 2k", () => {
+test("script writer handoff (development): a B2 topic gets the interpretation-and-audience story architecture; the system prompt carries the editorial contract 2i and rule 2k", () => {
   const old = process.env.AGENT_MARKETING_B1_EVIDENCE; process.env.AGENT_MARKETING_B1_EVIDENCE = "dev";
   try {
     const topic = { id: "t2", question: "Hidden Hills Phase 2 is going up nearby: when will those homes be for sale?", whyItMatters: "w", scope: "selected", origin: "web", reportFirst: false, trendSignals: [], reportFigures: [],
       sources: [{ url: "https://example.org/a", kind: "article", role: "primary", title: "t" }],
       b2: { mode: "article_editorial", mechanism: "Design review is not lot creation", homeownerImplication: "Plan with the real timeline", editorialAngle: "Design review is an early step", audienceJourney: "Matters whether you sell this year or later.", sourceRefs: [{ finding: "A2-F1", quote: "the city held a design review" }] } };
     const u = JSON.parse(planLib.buildUserMessage({ template: "local_market_insider", duration_sec: 45, formats: ["9x16"], intake: { market: "Lincoln, CA", audience: "Home sellers", action: "Ask for a local perspective" }, selected_topic: topic }));
-    assert.match(u.narrative_architecture, /^A question naming what is at stake → the Realtor's answer, built from the evidence that establishes it/); assert.match(u.narrative_architecture, /what that answer means for the seller, specifically/); assert.ok(!/different points in their decision|what is still unresolved/.test(u.narrative_architecture));
+    assert.match(u.narrative_architecture, /^A hook, a question or a declarative tension, naming what is at stake → the Realtor's answer, built from the evidence that establishes it/); assert.match(u.narrative_architecture, /what that answer means for the seller, specifically/); assert.ok(!/different points in their decision|what is still unresolved/.test(u.narrative_architecture));
     assert.deepStrictEqual(Object.keys(u.selected_topic.editorial_direction).slice(0, 4), ["angle", "mechanism", "homeowner_implication", "audience_journey"]);
     const sp = planLib.buildSystemPrompt();
-    assert.ok(sp.includes("\n2j. REALTOR INTERPRETATION.") && sp.includes("\n2k. AUDIENCE."));
+    assert.ok(sp.includes("\n2i. EDITORIAL CONTRACT.") && sp.includes("\n2k. AUDIENCE."));
   } finally { if (old === undefined) delete process.env.AGENT_MARKETING_B1_EVIDENCE; else process.env.AGENT_MARKETING_B1_EVIDENCE = old; }
   // without the development switch the legacy architecture and prompt are unchanged
   const u0 = JSON.parse(planLib.buildUserMessage({ template: "local_market_insider", duration_sec: 45, formats: ["9x16"], intake: { market: "Lincoln, CA", audience: "Home sellers" }, selected_topic: { question: "q", sources: [{ url: "https://example.org/a" }], b2: { editorialAngle: "a" } } }));

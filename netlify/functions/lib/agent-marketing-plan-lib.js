@@ -397,6 +397,11 @@ function option2ComponentsFor(project) {
 }
 const COMPONENT_CONTROLS = (c) => `Option 2, article plus Market Trend Report. Compose three distinct components between the hook and the CTA, in this order: the ARTICLE NARRATIVE, the MARKET TREND NARRATIVE, then the REALTOR EDITORIAL SYNTHESIS. The word budgets in components are absolute spoken-word counts, not percentages and not guidelines: write each component inside its own budget before you join them in order, and never let a long draft, or a story that needs more room, justify a longer component. Do not move article explanation or the article's recommendations into another component to stay under a cap, and do not re-label article recommendations as the Realtor's synthesis. ARTICLE NARRATIVE (at most ${c.article} spoken words): read the complete article evidence and summarize, in one cohesive narrative, the article's argument that bears on the subscriber-selected topic, attributed as rule 2h requires; do not keep summarizing the article anywhere else in the narration. MARKET TREND NARRATIVE (at most ${c.trend} spoken words): from the report's figures choose the verified findings that bear on the article and the selected topic and tell them as one cohesive narrative; do not fill it with unrelated statistics or unsupported interpretation, and keep every figure's measure, period and place as figures_you_may_state gives it. REALTOR EDITORIAL SYNTHESIS (${c.synthesis[0]} to ${c.synthesis[1]} spoken words): connect the article's argument with the selected Market Trend evidence into one coherent Realtor interpretation that answers the selected topic and says what it means for the homeowner. It must be genuine synthesis: not a repeat of the article summary, not another recap of the statistics and not generic advice. The subscriber's selected topic stays authoritative; do not substitute a different editorial angle or a preferred statistic. Market evidence informs the story and is never presented as proof of causation. Explain a mechanism in plain homeowner terms, by what it changes for the buyer's cost or choices and what that means for the seller, rather than by reciting rules, limits or calculations; include a rule or limit only when it is essential to the conclusion.`;
 /** narrative_contract for the user message, or null where it does not apply (production, other durations, event Reels, topics without an editorial direction). */
+/** Nov 15, 2026 (Sam, Test only): narration components and storyboard scenes are two separate things. Stated in the contract and repeated in the structural retry. */
+function sceneRangeText(dur) { const r = SCENE_RANGE[dur]; return r ? (r[0] === r[1] ? `${r[0]}` : `${r[0]}-${r[1]}`) : "the number of"; }
+function sceneRuleText(dur) {
+  return `The five components (opening, article narrative, Market Trend narrative, Realtor synthesis, call to action) govern the narration and its word budgets. They are NOT five scenes. Separately, the storyboard must contain ${sceneRangeText(dur)} scenes (scene_count_range). A component may span several scenes, and a scene may end where a sentence ends inside a component; scene boundaries follow natural narration and visual pacing. A reply with fewer or more scenes than scene_count_range is rejected.`;
+}
 function narrativeContractFor(project, brief) {
   if (!b1.enabled() || !brief || !brief.editorial_direction || peopleEvent(project)) return null;
   const budget = compositionBudget(project.duration_sec);
@@ -416,6 +421,7 @@ function narrativeContractFor(project, brief) {
         { component: "synthesis", min_words: comp.synthesis[0], max_words: comp.synthesis[1], job: "The Realtor's interpretation connecting the article's argument with the selected Market Trend evidence: it answers the selected topic and says what it means for the homeowner. Genuine synthesis, not an article repeat, a statistics recap or generic advice." },
         { component: "cta", words: comp.cta, job: BEAT_JOBS.cta },
       ],
+      scene_rule: sceneRuleText(project.duration_sec),
       component_rules: "The component budgets are absolute and are met on the first draft; the complete draft stays inside drafting_range. Write the three component texts into composition_plan.components exactly as they appear, word for word, in the narration, so each can be counted. Do not write a longer draft and rely on the length editor to shorten it.",
       source_controls: COMPONENT_CONTROLS(comp),
       sentence_test: "Every sentence must advance the story. A sentence that only repeats a fact, qualifier or explanation without changing the viewer's understanding is removed before drafting. Do not force unrelated findings into a causal relationship; the conclusion is as strong as the evidence.",
@@ -1091,6 +1097,44 @@ async function rebuildApprovedStoryboard({ project, narrative, anthropicKey, cal
   return rebuilt;
 }
 
+
+// ── Structural retry and failure diagnostics (Nov 15, 2026, Sam; Test only for the diagnostics) ────────────────────────────────────────────
+const RAW_REPLY_LIMIT = 16000;
+// The scene-count message is "The planner returned N scenes; X–Y are needed". The earlier pattern looked for "scenes are needed", which that text never contains,
+// so a wrong scene count was never retried (found Nov 15, 2026).
+const SCENE_COUNT_RE = /\d+ scenes?; [\d–-]+ (?:is|are) needed/i;
+const STRUCTURAL_ERROR_RE = new RegExp(`narration excerpt|${SCENE_COUNT_RE.source}|concept images?|unusable plan|no narration|JSON`, "i");
+/** The corrective message for the one structural retry. A wrong scene count restates the scene range and, for Option 2, the component budgets and the narration to keep. */
+function structuralRetryMessage({ user, err, project }) {
+  const reason = String(err && err.message).slice(0, 200);
+  const base = `${user}\n\nYour previous reply could not be used: ${reason}. Return the complete JSON again. Every scene MUST have a non-empty narration_excerpt taken from your narration, in order, and the scenes together must cover the whole narration.`;
+  if (!SCENE_COUNT_RE.test(reason)) return base;
+  const dur = project && project.duration_sec;
+  let msg = `${base} The storyboard MUST contain ${sceneRangeText(dur)} scenes (scene_count_range); your reply had the wrong number. Re-divide the narration into ${sceneRangeText(dur)} scenes at natural sentence boundaries.`;
+  const comp = option2ComponentsFor(project);
+  if (comp) msg += ` The five narration components are not five scenes: a component may span several scenes. Keep the narration and its component word budgets exactly as they are (article at most ${comp.article} words, Market Trend at most ${comp.trend}, Realtor synthesis ${comp.synthesis[0]}-${comp.synthesis[1]}, opening ${comp.opening}, call to action ${comp.cta}), keep composition_plan.components, and change only how the narration is divided into scenes.`;
+  const prior = err && err.plannerParsed && err.plannerParsed.narration_with_audio_tags;
+  if (prior && typeof prior === "string") msg += `\n\nYour previous narration, to keep unchanged:\n${prior.slice(0, 3000)}`;
+  return msg;
+}
+/** Counts, the structural error and (on the final failure only) the clipped raw reply, for the restricted Test diagnostics. */
+function failureRecord(n, err, project, withRaw) {
+  const parsed = err && err.plannerParsed, rec = { attempt: n, error: String(err && err.message).slice(0, 300) };
+  try {
+    if (parsed) {
+      const tagged = stripNotice(sanitizeTags(parsed.narration_with_audio_tags)), caption = am.stripAudioTags(tagged);
+      rec.sceneCount = Array.isArray(parsed.scenes) ? parsed.scenes.length : null;
+      rec.narrationWords = am.countWords(caption);
+      rec.sceneWords = (Array.isArray(parsed.scenes) ? parsed.scenes : []).map((sc) => am.countWords(sc && sc.narration_excerpt));
+      const cp = sanitizeCompositionPlan(parsed.composition_plan);
+      const chk = cp ? checkComponents(project, { captionText: caption, compositionPlan: cp }) : null;
+      if (chk) rec.components = componentSummary(chk);
+    }
+  } catch (e) { rec.countsError = String(e && e.message).slice(0, 120); }
+  if (withRaw) rec.rawReply = String((err && err.plannerReply) || "").slice(0, RAW_REPLY_LIMIT);
+  return rec;
+}
+
 /**
  * generatePlan({ project, anthropicKey, callFn }) → { narrative, warnings, gate }  (throws Error with a user-safe message)
  */
@@ -1104,15 +1148,32 @@ async function generatePlan({ project, anthropicKey, callFn }) {
   const sysPrompt = buildSystemPrompt(undefined, { scoped: hasReportScope(project), causalVariant: experiment === "relaxed" ? "relaxed" : undefined }); // one prompt for every call in this run
   const planOpts = { maxTokens: PLAN_MAX_TOKENS }; // only a ceiling: replies that fit cost the same as before
   let normalized, structuralRetry = false;
+  const attemptLog = [];   // Test only: counts for every structural failure, so a generation failure can be told from a normalization failure
+  const planCall = async (text) => {
+    const reply = await call(sysPrompt, text, anthropicKey, sink, planOpts);
+    let parsed = null, parseError = null;
+    try { parsed = extractJsonObject(reply); } catch (e) { parseError = e; }
+    if (parseError) { const e = parseError; e.plannerReply = reply; throw e; }
+    try { return { normalized: normalizePlan(parsed, project), parsed, reply }; }
+    catch (e) { e.plannerReply = reply; e.plannerParsed = parsed; throw e; }
+  };
   try {
-    normalized = normalizePlan(extractJsonObject(await call(sysPrompt, user, anthropicKey, sink, planOpts)), project);
+    ({ normalized } = await planCall(user));
   } catch (err) {
     // A structurally unusable plan (a missing narration excerpt, the wrong scene or image count, no JSON) gets ONE corrective retry inside the
     // same attempt, so it does not use up one of the project's planning attempts. Anything else (a gate block, a cut-off reply) is not retried.
-    if (!/narration excerpt|scenes are needed|concept images?|unusable plan|no narration|JSON/i.test(String(err && err.message))) throw err;
+    if (!STRUCTURAL_ERROR_RE.test(String(err && err.message))) throw err;
     structuralRetry = true;
-    const fix = `${user}\n\nYour previous reply could not be used: ${String(err.message).slice(0, 200)}. Return the complete JSON again. Every scene MUST have a non-empty narration_excerpt taken from your narration, in order, and the scenes together must cover the whole narration.`;
-    normalized = normalizePlan(extractJsonObject(await call(sysPrompt, fix, anthropicKey, sink, planOpts)), project);
+    if (b1.enabled()) attemptLog.push(failureRecord(1, err, project));
+    const fix = structuralRetryMessage({ user, err, project });
+    try { ({ normalized } = await planCall(fix)); }
+    catch (err2) {
+      if (b1.enabled() && err2 && err2.plannerReply != null) {
+        attemptLog.push(failureRecord(2, err2, project, true));
+        err2.plannerFailure = { at: new Date().toISOString(), duration_sec: project.duration_sec, attempts: attemptLog, firstReply: String((err && err.plannerReply) || "").slice(0, RAW_REPLY_LIMIT) };
+      }
+      throw err2;
+    }
   }
   let { narrative, warnings } = normalized;
   // Development only (Nov 12, Sam): counts that show where a length problem starts. Numbers and one short reason; no scripts, no model replies.
@@ -1343,7 +1404,7 @@ function gateNarrative(project, narrative) {
 }
 
 module.exports = { segmentNarration, sentenceUnits, buildStoryboardSystemPrompt, buildStoryboardUserMessage, generateStoryboard, rebuildApprovedStoryboard, relaxCausalClauses, experimentOf, topicBrief, blockLines, sourceNameVariants, competingNameBlocks,
-  MODEL, stripNotice, SCENE_RANGE, GPT_RANGE, NEW_IMAGE_SOURCES, VISUAL_SOURCES, SOURCE_MAX, MAX_ATTEMPTS, STALE_PLANNING_MS, ALLOWED_TAGS,
+  structuralRetryMessage, sceneRuleText, MODEL, stripNotice, SCENE_RANGE, GPT_RANGE, NEW_IMAGE_SOURCES, VISUAL_SOURCES, SOURCE_MAX, MAX_ATTEMPTS, STALE_PLANNING_MS, ALLOWED_TAGS,
   intakeHash, ctaAngleFor, ctaAngleIndex, CTA_ANGLES, VISUAL_LOOKS, visualLookFor, visualLookIndex, buildSystemPrompt, buildUserMessage, lengthProblems, lengthDistance, callClaudeText, summarizeClaudeUsage, editLengthByScene, sourceRoleBlocks, lengthEditSystem, anchoredRewriteMessage, writingAimFor, retagScenes, alignHook, extractJsonObject, sanitizeTags, normalizePlan, generatePlan,
   OPTION2_COMPONENTS, option2ComponentsFor, locateComponents, checkComponents, componentWarnings, compositionForEditor, narrativeContractFor,
 };

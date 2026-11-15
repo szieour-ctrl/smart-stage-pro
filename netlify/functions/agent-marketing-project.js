@@ -51,13 +51,20 @@ function reelTypeOf(row) {
   return t && typeof t === "object" && (t.kind === "local_events" || (t.event && typeof t.event === "object")) ? "Local Event" : "Local Market Update";
 }
 
+// Restricted Test diagnostics (raw Planner replies after a structural failure) stay in the database and are never sent to the page.
+function clientNarrative(n) {
+  if (!n || typeof n !== "object" || !("plannerFailure" in n)) return n || null;
+  const { plannerFailure, ...rest } = n;
+  return rest;
+}
+
 function forClient(row) {
   if (!row) return null;
   return {
     scriptStale: scriptStale(row),
     reelType: reelTypeOf(row),
     id: row.id, template: row.template, angle: row.angle, formats: row.formats, durationSec: row.duration_sec, voice: row.voice, music: row.music || "default",
-    intake: row.intake || {}, narrative: row.narrative || null, narrativeApprovedAt: row.narrative_approved_at || null,
+    intake: row.intake || {}, narrative: clientNarrative(row.narrative), narrativeApprovedAt: row.narrative_approved_at || null,
     storyboard: row.storyboard || null, selectedTopic: require("./lib/agent-marketing-article-led-lib").clientTopic(row.selected_topic) || null, status: row.status, gate: row.gate_result || null,
     createdAt: row.created_at, updatedAt: row.updated_at, hidden: !!row.hidden_at,
     // Development Test environment only (AGENT_MARKETING_B1_EVIDENCE=dev, scoped to b1-stageb-dev, and a non-production database): the page hides

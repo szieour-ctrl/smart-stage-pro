@@ -114,5 +114,5 @@ test("the hard safeguards stay in every Test prompt, and production stays byte-i
 
 test("Use My Script and the gate are untouched: no new field, call, approval step or gate in the contract", () => {
   const u = userOf(topicFor(SUBJECTS.E1_lincoln_new_construction));
-  assert.deepStrictEqual(Object.keys(u.narrative_contract).sort(), ["component_rules", "components", "composition_order", "drafting_range", "sentence_test", "source_controls", "target_words"]);
+  assert.deepStrictEqual(Object.keys(u.narrative_contract).sort(), ["component_rules", "components", "composition_order", "drafting_range", "scene_rule", "sentence_test", "source_controls", "target_words"]);
 });

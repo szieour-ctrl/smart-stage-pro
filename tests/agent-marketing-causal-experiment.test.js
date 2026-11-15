@@ -8,7 +8,7 @@ const planLib = require("../netlify/functions/lib/agent-marketing-plan-lib");
 
 const sha = (s) => crypto.createHash("sha256").update(s).digest("hex");
 const PROD = "25f3118fed1b9726fc4dc78b16dcc92233cef785d3c074ef89a6ee7aaf7b0495";
-const DEV = "3f6a1c3cdf84aecf647429db8a239f19437145cccb5e757403d74d4d37ebf6aa"; // Nov 14, 2026 (evening): the position is the authoritative premise; the angle only drafts its wording. Earlier: voice default, position governs, specific-vs-general factual claims (rules 1, 2g, 2h, 2i, 2j, 5a)
+const DEV = "5416105d6b6e771309153db0e8c06acb474ff1df096cfed5a7aba42f02407643"; // Nov 14, 2026 (evening): the position is the authoritative premise; the angle only drafts its wording. Earlier: voice default, position governs, specific-vs-general factual claims (rules 1, 2g, 2h, 2i, 2j, 5a)
 function withDev(on, fn) {
   const prev = process.env.AGENT_MARKETING_B1_EVIDENCE;
   if (on) process.env.AGENT_MARKETING_B1_EVIDENCE = "dev"; else delete process.env.AGENT_MARKETING_B1_EVIDENCE;

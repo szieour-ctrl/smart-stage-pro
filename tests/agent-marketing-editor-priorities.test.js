@@ -50,18 +50,18 @@ test("editor instructions: the argument decides what is essential; secondary evi
 test("editor payload carries cta_angle and the existing targets; the call count is unchanged", async () => {
   await withDev(true, async () => {
     const calls = [];
-    const texts = sized([14, 30, 30, 34, 30, 16]); // 154 words, over the 60-second top
-    assert.ok(total(texts) > 151);
+    const texts = sized([14, 30, 30, 36, 32, 16]); // 158 words, over the 60-second top
+    assert.ok(total(texts) > 155);
     const { r, e } = await run(proj(60), async (sys, user) => { calls.push({ sys, user }); return calls.length === 1 ? mk(texts) : JSON.stringify({ scenes: JSON.parse(user).scenes.map((s) => ({ index: s.index, narration: s.narration })) }); });
     assert.ifError(e);
     assert.strictEqual(calls.length, 2, "planner plus ONE editor call, no retry");
     const sent = JSON.parse(calls[1].user);
     assert.ok(typeof sent.cta_angle === "string" && sent.cta_angle.length > 10, "cta_angle passed");
     assert.strictEqual(sent.cta_angle, planLib.ctaAngleFor(proj(60)));
-    assert.strictEqual(sent.target_words, 146);
+    assert.strictEqual(sent.target_words, 150);
     assert.ok(sent.words_to_remove > 0);
     // not a hard gate: an editor that cuts little is accepted as is, the overage is reported, and the script is kept
-    assert.ok(r.narrative.lengthOver && r.narrative.lengthOver.over > 0 === (r.narrative.wordCount > 151));
+    assert.ok(r.narrative.lengthOver && r.narrative.lengthOver.over > 0 === (r.narrative.wordCount > 155));
   });
 });
 
@@ -75,8 +75,8 @@ test("editor: a drop of a whole secondary sentence is accepted; a still-over res
     const d = r.narrative.lengthDiagnostics;
     assert.strictEqual(d.edit.outcome, "accepted_still_over");
     assert.strictEqual(r.narrative.wordCount, total(cut));
-    assert.deepStrictEqual(r.narrative.lengthOver, { words: total(cut), max: 151, over: total(cut) - 151 });
-    assert.match(r.warnings[0], new RegExp(`^${total(cut)} words · Estimated narration \\d+–\\d+ seconds · Target 60 seconds\\. The recommended range for a 60-second Reel is 133–151 words\\.`));
+    assert.deepStrictEqual(r.narrative.lengthOver, { words: total(cut), max: 155, over: total(cut) - 155 });
+    assert.match(r.warnings[0], new RegExp(`^${total(cut)} words · Estimated narration \\d+–\\d+ seconds · Target 60 seconds\\. The recommended range for a 60-second Reel is 140–155 words\\.`));
   });
 });
 

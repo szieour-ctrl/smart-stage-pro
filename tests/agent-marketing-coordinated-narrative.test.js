@@ -23,7 +23,7 @@ test("production prompt is byte-for-byte unchanged", () => {
 
 test("rules the corrections must not touch are pinned word for word: 2h, 2j, 2k, 2o, 2p (2g was deliberately corrected in Phase C, Nov 13: pathway wording, tested in agent-marketing-pathway-instructions)", () => {
   const pins = {
-    "2h": "2b962b41a8b9078f9dee95099bfcbd2318346cdf9a244e91adea40e4323b86bd", // Nov 14: central_argument is the author's governing position
+    "2h": "9f935f284d9f27545a22c409ad5a0237f25b308be9dc709a6894abbbddd056e8", // Nov 14: central_argument is the author's governing position; later Nov 14: the article is named once (was 2b962b41…)
     "2j": "7ebba8e9389bb8fce660a74e2c71432593af4e0847e420126889747eaad8a627", // Nov 14: judgment stated directly; specific representations kept apart "2k": "5ac72dcd79ae60bf5a8a1403bee0490fb9de6b7dd0e8dbfafaf5e82e912884c2",
     "2o": "94e674ff1baeb206af1ba0a78d149518a1d7170e31485be8f0948ad5622fe2a6", "2p": "5ac912ad449e17fa119006604e03166b55f1a10b4b15eccde33baae4a6972408", // Nov 12: only the two "60-second" references were made duration-neutral
   };
@@ -88,9 +88,10 @@ test("change 7 (rule 2i): the implication becomes the specific consequence the e
   assert.match(r, /make its angle the one point the Reel makes/);
 });
 
-test("the corrections reconcile existing rules: no new rule (no 2r), same rule labels as before plus nothing", () => {
+test("the corrections reconcile existing rules: the only new rule is 2r (Nov 14 composition sequence), the same rule labels as before otherwise", () => {
   const labels = lines(DEV).map((l) => (l.match(/^(\d+[a-z]?)\. /) || [])[1]).filter(Boolean);
-  assert.ok(!labels.includes("2r"));
+  assert.strictEqual(labels.filter((x) => x === "2r").length, 1, "2r is the story-first composition rule");
+  assert.ok(!labels.includes("2s"));
   ["2f", "2g", "2h", "2i", "2j", "2k", "2l", "2n", "2o", "2p", "2q", "5a", "5b", "7"].forEach((id) => assert.strictEqual(labels.filter((x) => x === id).length, 1, id));
 });
 

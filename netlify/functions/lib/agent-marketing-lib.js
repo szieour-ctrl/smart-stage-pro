@@ -47,8 +47,8 @@ const MUSIC_KEYS = MUSIC.map((m) => m.key);
 const DURATION_CONTRACT = {
   30: { range: [55, 70], scenes: [4, 4], images: [2, 3] },
   45: { range: [105, 125], aim: [105, 110], editorTarget: 110, scenes: [5, 6], images: [3, 4] },
-  // Nov 13, 2026 (Sam, Phase B, Test only): 60 seconds aims at 140-146 words, advises 133-151, and the editor cuts toward 146 above 151.
-  60: { range: [110, 130], devRange: [133, 151], aim: [140, 146], editorTarget: 146, scenes: [6, 8], images: [4, 6] },
+  // Nov 14, 2026 (Sam, Test only): story-first composition. 60 seconds aims at 150 words inside a 140-155 drafting range; the editor handles overruns above 155 and cuts toward 150.
+  60: { range: [110, 130], devRange: [140, 155], aim: [150, 150], editorTarget: 150, scenes: [6, 8], images: [4, 6] },
 };
 const fromContract = (pick) => Object.fromEntries(Object.entries(DURATION_CONTRACT).filter(([, c]) => pick(c) !== undefined).map(([d, c]) => [d, pick(c)]));
 const WORD_TARGETS = fromContract((c) => c.range);

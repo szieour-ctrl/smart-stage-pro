@@ -119,26 +119,26 @@ test("45 seconds inside its range: no editor, no extra call", async () => {
 });
 
 // ── 2. 60 seconds unchanged ─────────────────────────────────────────────────────────────────────────────────────────────────────────
-test("60 seconds (Phase B): the editor gets the range guidance, cuts toward 146 above 151, and the advisory reads 133–151", async () => {
-  assert.strictEqual(sha(planLib.lengthEditSystem(60, false)), "79c2932b6f221db23f805bc14f3e44cf87455ff09209bfabeb847c1a202bd8aa", "the editor prompt without a range (Nov 14: no first-person requirement)");
+test("60 seconds (Phase B): the editor gets the range guidance, cuts toward 150 above 155, and the advisory reads 140–155", async () => {
+  assert.strictEqual(sha(planLib.lengthEditSystem(60, false)), "c95d76ae702e479469a15d8bc2ad7c0029745b29bc3abe996e9a69695808acc1", "the editor prompt without a range (Nov 14: no first-person requirement)");
   await withDev(true, async () => {
     const six = [...CORE5.slice(0, 4), "Compare the full picture before you decide anything at all.", ...CORE5.slice(4)];
-    const LONG6 = six.map((c, i) => c + (i === 1 || i === 2 || i === 3 || i === 4 ? PAD5[Math.min(i, 3)] + PAD5[2] : ""));
+    const LONG6 = six.map((c, i) => c + (i === 1 || i === 2 || i === 3 || i === 4 ? PAD5[Math.min(i, 3)] + PAD5[2] : "") + (i === 4 ? PAD5[1] : ""));
     const calls = [];
     const six6 = (texts) => JSON.stringify({ editorial_angle: "x", hook: texts[0], narration_with_audio_tags: [...texts.map((t, i) => `${["[conversational]", "[thoughtful]", "[emphasis]", "[confident]", "[calm]", "[warm]"][i]} ${t}`)].join(" "),
       scenes: texts.map((t, i) => scene(t, Math.min(i, 4), 6)).map((s, i) => ({ ...s, role: ["local_hook", "tension", "insight", "comparison", "advice", "cta"][i], visual_source: i < 4 ? "GPT_IMAGE_2_CONCEPT" : (i === 5 ? "BRAND_CARD" : "CONCEPT_REUSE"), reuse_of_scene: i < 4 || i === 5 ? null : 2, card_text: i === 5 ? "Ask me for a local view" : null, ai_generation_prompt: i < 4 ? "Photorealistic editorial tabletop with architectural home models, soft light, no people, no text, wide composition" : null })),
       cta_suggestion: "Ask me for a local perspective.", claims_to_verify: [], missing_agent_inputs: [] });
     const { r, e } = await run(proj(60), async (sys, user) => { calls.push({ sys, user }); return calls.length === 1 ? six6(LONG6) : JSON.stringify({ scenes: JSON.parse(user).scenes.map((s) => ({ index: s.index, narration: s.narration })) }); });
     assert.ifError(e);
-    assert.strictEqual(calls.length, 2, "the 60-second fixture is over 151 words and uses the editor");
+    assert.strictEqual(calls.length, 2, "the 60-second fixture is over 155 words and uses the editor");
     {
       assert.strictEqual(calls[1].sys, planLib.lengthEditSystem(60, true));
       assert.match(calls[1].sys, /guidance, not a floor[^"]*never add words, filler or new content to reach the lower end/);
       const sent6 = JSON.parse(calls[1].user);
-      assert.deepStrictEqual(sent6.recommended_words, [133, 151]);
-      assert.strictEqual(sent6.max_words, 151);
-      assert.strictEqual(sent6.target_words, 146);
-      if (r.narrative.lengthOver) assert.match(r.warnings[0], /^\d+ words · Estimated narration \d+–\d+ seconds · Target \d+ seconds\. The recommended range for a 60-second Reel is 133–151 words\./);
+      assert.deepStrictEqual(sent6.recommended_words, [140, 155]);
+      assert.strictEqual(sent6.max_words, 155);
+      assert.strictEqual(sent6.target_words, 150);
+      if (r.narrative.lengthOver) assert.match(r.warnings[0], /^\d+ words · Estimated narration \d+–\d+ seconds · Target \d+ seconds\. The recommended range for a 60-second Reel is 140–155 words\./);
     }
   });
 });

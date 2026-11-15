@@ -79,7 +79,7 @@ test("lengthProblems and lengthDistance: under-range is advisory in Test and unc
 test("scene balance (Test): the one rewrite receives the draft, scene context, the problem, the duration, the range and the aim; it is accepted when it fixes the scene", async () => {
   for (const [dur, sizes, fixed, range, aim] of [
     [45, [14, 30, 30, 34, 2], [14, 30, 30, 26, 10], "105-125", "writing aim 105-110"],
-    [60, [14, 30, 30, 30, 34, 2], [14, 30, 30, 30, 26, 10], "133-151", "writing aim 140-146"],
+    [60, [14, 30, 30, 30, 34, 2], [14, 30, 30, 30, 26, 10], "140-155", "writing aim about 150"],
     [30, [12, 22, 22, 2], [12, 22, 14, 10], "55-70", null],
   ]) {
     await withDev(true, async () => {
@@ -165,7 +165,7 @@ test("gate rewrite (production): the original message, no anchoring and no diagn
 });
 
 // ── 4. Editor targets and trigger come from the contract ────────────────────────────────────────────────────────────────────
-test("editor (Test): 45 seconds triggers above 125 and cuts toward 110; 60 seconds triggers above 151 and cuts toward 146; 30 seconds has no editor", async () => {
+test("editor (Test): 45 seconds triggers above 125 and cuts toward 110; 60 seconds triggers above 155 and cuts toward 150; 30 seconds has no editor", async () => {
   await withDev(true, async () => {
     const edit = (sizes, dur) => {
       const texts = sized(sizes); const sent = []; let n = 0;
@@ -174,9 +174,9 @@ test("editor (Test): 45 seconds triggers above 125 and cuts toward 110; 60 secon
     let o = await edit([14, 30, 30, 26, 26], 45); assert.strictEqual(total(o.texts), 126);
     assert.strictEqual(o.n, 2); assert.deepStrictEqual([o.sent[0].max_words, o.sent[0].target_words, o.sent[0].recommended_words], [125, 110, [105, 125]]);
     o = await edit([14, 30, 30, 26, 25], 45); assert.strictEqual(total(o.texts), 125); assert.strictEqual(o.n, 1, "125 is inside the range: no editor");
-    o = await edit([14, 26, 26, 30, 30, 26], 60); assert.strictEqual(total(o.texts), 152);
-    assert.strictEqual(o.n, 2); assert.deepStrictEqual([o.sent[0].max_words, o.sent[0].target_words, o.sent[0].recommended_words], [151, 146, [133, 151]]);
-    o = await edit([14, 26, 26, 30, 30, 25], 60); assert.strictEqual(total(o.texts), 151); assert.strictEqual(o.n, 1, "151 is inside the range: no editor");
+    o = await edit([14, 28, 28, 30, 30, 26], 60); assert.strictEqual(total(o.texts), 156);
+    assert.strictEqual(o.n, 2); assert.deepStrictEqual([o.sent[0].max_words, o.sent[0].target_words, o.sent[0].recommended_words], [155, 150, [140, 155]]);
+    o = await edit([14, 28, 28, 30, 30, 25], 60); assert.strictEqual(total(o.texts), 155); assert.strictEqual(o.n, 1, "155 is inside the range: no editor");
     o = await edit([20, 30, 30, 20], 30); assert.ok(total(o.texts) > 70); assert.strictEqual(o.sent.length, 0, "30 seconds never gets the scene editor");
   });
 });

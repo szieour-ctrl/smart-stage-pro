@@ -67,15 +67,16 @@ test("rule 2n: the report-menu sentence applies when a report is present; withou
 
 test("Rules 2o, 2p and 2q, the rule count and the production system prompt are untouched", () => {
   const labels = withEnv(true, () => planLib.buildSystemPrompt(undefined, { scoped: false }).split("\n").map((l) => (l.match(/^(\d+[a-z]?)\. /) || [])[1]).filter(Boolean));
-  assert.ok(!labels.includes("2r"), "no new rule");
+  assert.strictEqual(labels.filter((x) => x === "2r").length, 1, "the only new rule is 2r (Nov 14, story-first composition)");
+  assert.ok(!labels.includes("2s"), "no other new rule");
   ["2o", "2p", "2q"].forEach((id) => assert.strictEqual(labels.filter((x) => x === id).length, 1, id));
   assert.strictEqual(crypto.createHash("sha256").update(withEnv(false, () => planLib.buildSystemPrompt())).digest("hex"), PROD_HASH);
 });
 
-test("one planner serves both pathways: only the two user-message fields differ between Option 2 and Option 3 briefs", () => {
+test("one planner serves both pathways: only the user-message fields tied to the source differ between Option 2 and Option 3 briefs (narrative_contract carries each option's source controls, Nov 14)", () => {
   const a = user(topic("article_editorial")), b = user(topic("article_report"));
   const diff = Object.keys({ ...a, ...b }).filter((k) => JSON.stringify(a[k]) !== JSON.stringify(b[k])).sort();
-  assert.deepStrictEqual(diff, ["narrative_architecture", "selected_topic", "source_pathway"], "the topic itself differs (report fields); no other planner field does");
+  assert.deepStrictEqual(diff, ["narrative_architecture", "narrative_contract", "selected_topic", "source_pathway"], "the topic itself differs (report fields); no other planner field does");
   assert.deepStrictEqual(a.spoken_word_range, b.spoken_word_range);
   assert.deepStrictEqual(a.scene_count_range, b.scene_count_range);
   assert.strictEqual(a.spoken_word_aim, b.spoken_word_aim);

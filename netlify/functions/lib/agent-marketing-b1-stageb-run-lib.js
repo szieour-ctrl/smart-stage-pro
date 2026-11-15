@@ -304,7 +304,7 @@ function plannerConfig(env, durationSec) {
 
 const CAPTURE_TEXT = {
   bad_url: "the article address is not a secure public web address", fetch_timeout: "the article did not answer in time", fetch_failed: "the article could not be reached",
-  too_many_redirects: "the article redirected too many times", redirected_elsewhere: "the article redirected to another website", http_error: "the article's website answered with an error",
+  too_many_redirects: "the article redirected too many times", redirected_elsewhere: "the article redirected to another website", page_identity: "the address led to a different page than the one you chose", http_error: "the article's website answered with an error",
   not_html: "the address is not a web page", empty: "the article page was empty", too_large: "the article page is too large", capture_blocked: "the page looks like a paywall, robot check or error page",
   incomplete: "the page has too little article text to check", fixture_refused: "this article is not one of the test articles", source_changed: "the article no longer matches the snapshot this project started from",
   b1_limit_user_day: "the daily limit for article analysis is reached", b1_limit_global_day: "the daily limit for article analysis is reached", provider_not_implemented: "article analysis is not available here",
@@ -316,9 +316,12 @@ const CAPTURE_TEXT = {
  * evidenceFailureMessage(code, providerAttempted) → what the subscriber is told when no script can be written. It never says that nothing was
  * spent unless no provider request was made: providerAttempted is true once a B1 provider request was reserved for the run.
  */
-function evidenceFailureMessage(code, providerAttempted) {
+function failureReason(code) {
   const c = String(code || "");
-  const reason = CAPTURE_TEXT[c] || (/^provider_limit_/.test(c) ? "the monthly or daily limit for article analysis is reached" : `the evidence check did not finish (${c || "unknown"})`);
+  return CAPTURE_TEXT[c] || (/^provider_limit_/.test(c) ? "the monthly or daily limit for article analysis is reached" : `the evidence check did not finish (${c || "unknown"})`);
+}
+function evidenceFailureMessage(code, providerAttempted) {
+  const reason = failureReason(code);
   const cost = providerAttempted ? "An article analysis request was made, so it counts toward your usage." : "No article analysis was run, so there is no analysis cost.";
   return `Your script was not written: ${reason}. ${cost} You can try again.`;
 }
@@ -398,5 +401,5 @@ async function articleEvidence({ userId, projectId, researchId, art, store, fetc
   return { articleKey, state: row ? "ready" : res.state, code: row ? undefined : res.code || (res.state === "ready" ? "evidence_unreadable" : undefined), providerAttempted: !!res.providerAttempted, row };
 }
 
-module.exports = { STALE_MS, caps, admit, articleLedTopic, ownReadyEvidence, precheck, startRequest, startJob, runJob, reuseSavedTopic, recordAttempt, status, withPlanEvidence,
+module.exports = { failureReason, STALE_MS, caps, admit, articleLedTopic, ownReadyEvidence, precheck, startRequest, startJob, runJob, reuseSavedTopic, recordAttempt, status, withPlanEvidence,
   startScriptRequest, scriptJob, evidenceFailureMessage, plannerConfig, articleEvidence };

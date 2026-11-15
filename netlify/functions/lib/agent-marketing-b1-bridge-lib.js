@@ -185,6 +185,7 @@ async function readCapped(r, max) {
  *   bad_url, fetch_timeout, fetch_failed, too_many_redirects, redirected_elsewhere, http_error (+ httpStatus), not_html, empty, too_large.
  * Returns { html, finalUrl, retrievedAt, httpStatus, contentType, bytes, observedTitle }.
  */
+const pathDepth = (u) => { try { return new URL(u).pathname.split("/").filter(Boolean).length; } catch (e) { return 0; } };
 async function fetchArticle(url, { fetchFn, now, timeoutMs, maxBytes } = {}) {
   const f = fetchFn || fetch;
   const max = maxBytes || MAX_HTML;
@@ -220,7 +221,12 @@ async function fetchArticle(url, { fetchFn, now, timeoutMs, maxBytes } = {}) {
     d.finalUrl = finalUrl; d.httpStatus = r.status;
     const ct = String((r.headers && r.headers.get && r.headers.get("content-type")) || "");
     d.contentType = ct ? ct.slice(0, 200) : null;
-    if (r.status !== 200) fail("http_error", `the article returned HTTP ${r.status}`, d);
+    // Nov 14, 2026: any 2xx is a successful response (the Rich & Kat site answers 218). A status code alone proves nothing, so the page is also checked
+    // for identity here (it is the page that was asked for) and for completeness by the snapshot (article text, no robot-check or error page).
+    if (!(r.status >= 200 && r.status < 300)) fail("http_error", `the article returned HTTP ${r.status}`, d);
+    // A same-site redirect to a moved article is followed (LF-05); one that lands on the site's home page, or on a page with fewer path segments than
+    // the address asked for (a section or search page), is not the article that was chosen.
+    if (pathDepth(finalUrl) < Math.min(pathDepth(start.href), 2)) fail("page_identity", "the address led to a different page than the one requested", d);
     if (!/\bx?html\b/i.test(ct)) fail("not_html", `the article is not HTML (${ct || "no content type"})`, d);
     const len = Number(r.headers && r.headers.get && r.headers.get("content-length"));
     if (Number.isFinite(len) && len > max) { d.bytes = len; try { if (r.body && r.body.cancel) await r.body.cancel(); } catch (e) { /* ignore */ } fail("too_large", `the article is over ${Math.round(max / 1048576)} MB`, d); }
@@ -293,7 +299,7 @@ async function capture({ art, fetchFn, env, now }) {
   let snap;
   try {
     const extractor = sb.extractorFor(env);
-    snap = checkSnapshot(await callBridge("snapshot", { url: page.finalUrl, title: art.title, html_b64: page.html.toString("base64"), retrieved_at: page.retrievedAt, extractor }, env), extractor);
+    snap = checkSnapshot(await callBridge("snapshot", { url: page.finalUrl, title: art.title || page.observedTitle || "", html_b64: page.html.toString("base64"), retrieved_at: page.retrievedAt, extractor }, env), extractor);
   } catch (e) {
     const err = e instanceof StageBError ? e : new StageBError("bridge_error", "the snapshot could not be taken");
     err.detail = { ...captureDetail(page, null, "snapshot"), ...(err.detail && err.detail.rawHtmlSha256 ? { rawHtmlSha256: err.detail.rawHtmlSha256 } : {}) };

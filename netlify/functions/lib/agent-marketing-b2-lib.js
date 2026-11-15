@@ -15,6 +15,7 @@ const b1 = require("./agent-marketing-b1-evidence-lib");
 const ti = require("./agent-marketing-trend-intelligence-lib");   // Nov 9, 2026: the same Trend Intelligence Option 1 uses
 
 const MAX_CANDIDATES = 10, SELECT = 5, MAX_ARTICLES = 3;
+const hostOf = (u) => { try { return new URL(String(u)).hostname.toLowerCase().replace(/^www\./, ""); } catch (e) { return null; } };
 const B2_TIMEOUT_MS = 210000; // the editorial reply is not streamed, so a long answer needs more than the planner's default 120 s
 // A research run still "running" after 6 minutes is marked failed (agent-marketing-research.js STALE_RUNNING_MS). The editorial call is only
 // started when it can finish, with a little room left to write the result.
@@ -281,7 +282,8 @@ const modeOf = (row) => ((row.focus && row.focus.marketUpdateMode) || (row.data_
  */
 async function enrich({ row, fields, uploads, userId, env, deps }) {
   const e = env || process.env, d = deps || {};
-  if (!fields || fields.status !== "ready" || !Array.isArray(fields.topics) || !fields.topics.length || !applies(row, e)) return fields;
+  const chosen = row && row.focus && typeof row.focus.articleUrl === "string" && row.focus.articleUrl ? row.focus.articleUrl : null;   // the subscriber's own article (Nov 14, 2026)
+  if (!fields || fields.status !== "ready" || !Array.isArray(fields.topics) || (!fields.topics.length && !chosen) || !applies(row, e)) return fields;
   const run = require("./agent-marketing-b1-stageb-run-lib");
   const log = { state: "started", mode: modeOf(row), articles: [] };
   // Article-Led research (modes 2 and 3) shows ONLY B2 topics written from B1-read articles. When none can be made, the research ends as an
@@ -294,7 +296,9 @@ async function enrich({ row, fields, uploads, userId, env, deps }) {
   try { store = d.store || require("./agent-marketing-b1-store-lib").createStore({ env: e }); } catch (x) { return failOut("store_unavailable", "Article-Led research is not available right now. This did not use a session."); }
   try { provider = d.provider !== undefined ? d.provider : require("./agent-marketing-b1-provider-lib").createProvider({ env: e }); } catch (x) { provider = null; }
   if (!fetchFn) { try { fetchFn = require("./agent-marketing-b1-bridge-lib").fixtureSource(e) || undefined; } catch (x) { const err = x; fetchFn = async () => { throw err; }; } }
-  const articles = articlesFrom(fields.topics, Number(e.B2_MAX_ARTICLES) || MAX_ARTICLES);
+  // A chosen article is the only source: discovery's articles are never read in its place, and if it cannot be read the research says so.
+  const articles = chosen ? [{ url: chosen, title: "", domain: hostOf(chosen), published: null, sourceGeography: null, reportingPeriod: null, fromTopic: null }]
+    : articlesFrom(fields.topics, Number(e.B2_MAX_ARTICLES) || MAX_ARTICLES);
   const records = [], used = [], evidence = new Map();
   for (const art of articles) {   // one at a time: each run takes the next ledger sequence
     let r;
@@ -306,6 +310,11 @@ async function enrich({ row, fields, uploads, userId, env, deps }) {
     if (view.status === b1.BLOCKED || !view.validated.length) continue;
     used.push(art); evidence.set(art.url, r.row);
     records.push(comprehensionOf(view, used.length, art, r.row));
+  }
+  if (!records.length && chosen) {
+    const a = log.articles[0] || {};
+    const why = a.code ? run.failureReason(a.code) : "it could not be read and understood";
+    return failOut("chosen_article_unavailable", `The article you chose could not be used: ${why}. No other article was used in its place, and this did not use a session. Check the address, or choose another article, or clear the field to let the research find articles.`);
   }
   if (!records.length) return failOut("no_article_evidence", `The research found ${articles.length} article${articles.length === 1 ? "" : "s"}, but none could be read and understood, so no Article-Led topics were written. This did not use a session. Start new research to try again, or change your request.`);
   const mode = modeOf(row);

@@ -167,15 +167,24 @@ function validateResearchRequest(body) {
   if (!DATA_SOURCES.includes(dataSource)) errors.push({ field: "dataSource", message: "Choose web research, your report, or both." });
   else if (dataSource !== "web" && uploadIds.length === 0) errors.push({ field: "dataSource", message: "Attach and confirm a report to use it, or choose web research only." });
   if (mode === "local_events" && dataSource !== "web") errors.push({ field: "dataSource", message: "Local Events uses web research only." });
+  // Nov 14, 2026: the subscriber may choose the article. Optional; only the two Article-Led types use it; the same https rule B1's capture applies.
+  let articleUrlValue = null;
+  const rawArticleUrl = b.articleUrl == null ? "" : String(b.articleUrl).trim();
+  if (rawArticleUrl) {
+    const u = marketUpdateMode === "article_report" || marketUpdateMode === "article_editorial" ? require("./agent-marketing-b1-bridge-lib").articleUrl(rawArticleUrl) : null;
+    if (!(marketUpdateMode === "article_report" || marketUpdateMode === "article_editorial")) errors.push({ field: "articleUrl", message: "An article link is used by the two Article-Led Market Update types only." });
+    else if (!u || rawArticleUrl.length > 500) errors.push({ field: "articleUrl", message: "Enter the article's full web address, starting with https://" });
+    else articleUrlValue = u.href;
+  }
   if (errors.length) return { ok: false, errors, request: null };
-  return { ok: true, errors: [], request: { mode, audience, geography: geo.geography, focus, keywords, dataFocus, period, dataSource, uploadIds: dataSource === "web" ? [] : uploadIds, ...(marketUpdateMode ? { marketUpdateMode } : {}) } };
+  return { ok: true, errors: [], request: { mode, audience, geography: geo.geography, focus, keywords, dataFocus, period, dataSource, uploadIds: dataSource === "web" ? [] : uploadIds, ...(marketUpdateMode ? { marketUpdateMode } : {}), ...(articleUrlValue ? { articleUrl: articleUrlValue } : {}) } };
 }
 
 // A short, stable fingerprint of a request, so the same request is recognised (reuse saved results, never re-buy).
 function requestKey(request) {
   const r = request || {};
   const g = r.geography || {};
-  return JSON.stringify([r.mode, r.audience, g.type, String(g.name || "").toLowerCase(), String(g.city || "").toLowerCase(), String(g.zip || ""), !!(r.focus && r.focus.active_adult_55), !!(r.focus && r.focus.new_construction), String(r.keywords || "").toLowerCase(), r.dataFocus || "all", JSON.stringify(r.period || null), (r.uploadIds || []).slice().sort(), r.dataSource || "web"]);
+  return JSON.stringify([r.mode, r.audience, g.type, String(g.name || "").toLowerCase(), String(g.city || "").toLowerCase(), String(g.zip || ""), !!(r.focus && r.focus.active_adult_55), !!(r.focus && r.focus.new_construction), String(r.keywords || "").toLowerCase(), r.dataFocus || "all", JSON.stringify(r.period || null), (r.uploadIds || []).slice().sort(), r.dataSource || "web"].concat(r.articleUrl ? [String(r.articleUrl).toLowerCase().replace(/\/+$/, "")] : []));
 }
 
 // ── Provider request (Perplexity Agent API, POST /v1/agent) ────────────────────────────────────────────────────────

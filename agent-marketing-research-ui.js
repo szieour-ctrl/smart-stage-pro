@@ -43,6 +43,7 @@
     var lbl = $("upLabelNote");
     if (lbl) lbl.textContent = !market ? "(not used for Local Events)" : !m ? "(choose a Market Update type above)" : m.reportRequired ? "(required)" : "(not used: the article is the source)";
     var up = $("uploadBox"); if (up) up.classList.toggle("hidden", market && !!m && !m.reportRequired);
+    var au = $("articleUrlBox"); if (au) au.classList.toggle("hidden", !(m && (m.key === "article_report" || m.key === "article_editorial")));
     // Option 1 (Agent Market Update): one button, no choice between new research and the library. Saved analyses stay under "Saved research".
     var opt1 = option1On();
     var sb = $("startBtn"); if (sb) sb.textContent = opt1 ? "Analyze My Market Report" : (RS() ? "Find topics" : "Research this market");
@@ -83,6 +84,8 @@
     var need = picked("mode") !== "local_events" && $("geoType").value !== "zip";
     $("zipWrap").classList.toggle("hidden", !need);
   }
+  // The subscriber's own article: used only by the two Article-Led types (Nov 14, 2026).
+  function articleUrlValue() { var m = picked("muMode"), el = $("articleUrl"); return el && (m === "article_report" || m === "article_editorial") ? el.value.trim() : ""; }
   function collect() {
     var type = $("geoType").value;
     return {
@@ -91,6 +94,7 @@
       focus: { active_adult_55: $("f55").checked, new_construction: $("fNew").checked }, keywords: $("keywords").value, dataFocus: $("dataFocus").value, period: collectPeriod(),
       dataSource: state.mlsTrend ? "upload" : reportSource().dataSource, uploadIds: reportSource().uploadIds,
       marketUpdateMode: picked("mode") !== "local_events" ? (state.mlsTrend ? "trend_report" : picked("muMode")) || undefined : undefined,
+      articleUrl: articleUrlValue() || undefined,
     };
   }
   // A report is used only once the agent has confirmed "This report covers\u2026 Correct?". Attached and confirmed = both (report figures win); otherwise web only.
@@ -163,6 +167,7 @@
     var bits = ["<b>" + esc(place) + "</b>" + (g.zip && g.type !== "zip" ? " · ZIP " + esc(g.zip) : ""), esc(audLabel(q.audience)), esc(mode + (mdl ? ": " + mdl.label : ""))];
     if (focus) bits.push(esc(focus));
     if ((q.keywords || "").trim()) bits.push("keywords: " + esc(q.keywords.trim()));
+    if (q.articleUrl) bits.push("article: " + esc(q.articleUrl));
     return bits.filter(Boolean).join(" · ");
   }
   function reportPeriodText(u) {
@@ -433,7 +438,7 @@
     $("geoType").value = g.type || "city"; applyGeo();
     $("geoName").value = g.name || ""; $("geoCity").value = g.city || ""; $("geoZip").value = g.zip || ""; applyZip();
     $("audience").value = r.audience || $("audience").value;
-    $("f55").checked = !!f.active_adult_55; $("fNew").checked = !!f.new_construction; $("keywords").value = f.keywords || "";
+    $("f55").checked = !!f.active_adult_55; $("fNew").checked = !!f.new_construction; $("keywords").value = f.keywords || ""; if ($("articleUrl")) $("articleUrl").value = f.articleUrl || "";
     $("dataFocus").value = f.dataFocus || "all";
     var p = f.period || { days: 30 };
     if (p.start) { $("period").value = "custom"; $("periodFrom").value = p.start; $("periodTo").value = p.end; } else { $("period").value = String(p.days || 30); $("periodFrom").value = ""; $("periodTo").value = ""; }
@@ -847,6 +852,7 @@
     var mdl = muModeDef(q.marketUpdateMode);
     if (mdl) data = mdl.key === "trend_report" ? "Your confirmed Trend/CMA report only: topics and script from its figures" : mdl.key === "article_report" ? "Local articles for the story; your confirmed report (" + (win ? "closed sales limited to " + win.label + "; " : "") + "its figures are the only market statistics)" : "Local articles and your perspective; the article's figures are attributed to it. No report";
     var rows = [["Content", mode + (mdl ? ": " + mdl.label : "")], ["Area", area], ["Audience", aud], ["Focus", focus || "None"], ["Keywords", (q.keywords || "").trim() || "None"], ["Data", data]];
+    if (q.articleUrl) rows.splice(5, 0, ["Article", q.articleUrl + " (the research uses only this article)"]);
     if (reportConfirmed() && reportPeriodText(state.upload)) rows.push(["Report period", reportPeriodText(state.upload) + " (from your report; separate from the web lookback)"]);
     if (q.mode !== "local_events") rows.splice(5, 0, ["Optional data", focusLabel(q)]);
     return rows.map(function (r) { return "<div><b>" + esc(r[0]) + ":</b> " + esc(r[1]) + "</div>"; }).join("");
@@ -934,7 +940,7 @@
       }
       if (!wired) { wired = true; buildForm(); $("startBtn").addEventListener("click", review); $("confirmBtn").addEventListener("click", start); $("confirmEdit").addEventListener("click", hideConfirm);
         // an edit makes the shown summary stale, so it closes
-        ["geoType", "geoName", "geoCity", "geoZip", "audience", "f55", "fNew", "keywords", "upFile", "dataFocus", "period", "periodFrom", "periodTo"].forEach(function (id) { $(id).addEventListener("input", hideConfirm); $(id).addEventListener("change", hideConfirm); }); wireIntakeExtras(); if (RS()) wireRS(); }
+        ["geoType", "geoName", "geoCity", "geoZip", "audience", "f55", "fNew", "keywords", "articleUrl", "upFile", "dataFocus", "period", "periodFrom", "periodTo"].forEach(function (id) { $(id).addEventListener("input", hideConfirm); $(id).addEventListener("change", hideConfirm); }); wireIntakeExtras(); if (RS()) wireRS(); }
       $("resultPanel").classList.add("hidden");
       var list = await refreshSaved();
       if (state.restoreUpload) await state.restoreUpload();

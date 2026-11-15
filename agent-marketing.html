@@ -330,6 +330,11 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
 
           <label class="lbl" for="keywords" id="keywordsLbl"><span id="keywordsLblText">Keywords or brand names to look for</span> <span style="font-weight:400;color:var(--muted)">(optional)</span></label>
           <input type="text" id="keywords" maxlength="120" placeholder="e.g. 55+, Four Seasons, Heritage, mortgage rates">
+          <div id="articleUrlBox" class="hidden">
+            <label class="lbl" for="articleUrl">Article link <span style="font-weight:400;color:var(--muted)">(optional)</span></label>
+            <input type="url" id="articleUrl" maxlength="500" placeholder="https://">
+            <div class="hint">Paste the address of the article your script should be built on. Leave it empty and the research finds local articles for you.</div>
+          </div>
           <div class="hint" id="keywordsHint">Separate with commas. The research looks for local news and data that mention them. The market itself is never widened.</div>
 
           <div id="dataFocusBox">

@@ -14,7 +14,7 @@ const am = require("./agent-marketing-lib");
 const b1 = require("./agent-marketing-b1-evidence-lib");
 
 const ENGINE = am.WRITER_ENGINE;
-const PROMPT_VERSION = "writer/4";
+const PROMPT_VERSION = "writer/5";
 const WRITER_MAX_TOKENS = 1500;   // a ceiling only: a narration of 140-155 words needs about 250
 const sha = (t) => crypto.createHash("sha256").update(String(t)).digest("hex");
 const planLib = () => require("./agent-marketing-plan-lib");   // lazy: plan-lib is large and does not depend on this file
@@ -29,8 +29,8 @@ function applies(project, env) {
 function lengthFor(durationSec, env) { return am.wordTargets(durationSec, env); }
 
 // ── The prompt ────────────────────────────────────────────────────────────────────────────────────────────────────────────
-/** writer/4 (Sam, Nov 15, 2026): the approved system prompt, verbatim and complete. Nothing from earlier Writer versions is merged into it; the application's own safeguards (gate, Fair Housing and notice checks) run in code. */
-const SYSTEM_PROMPT = `# SSP Article-Led Script Writer — \`writer/4\`
+/** writer/5 (Sam, Nov 15, 2026): the approved system prompt, verbatim and complete. It replaces writer/4; nothing from earlier Writer versions is merged into it. The application's own safeguards (gate, Fair Housing and notice checks) run in code. */
+const SYSTEM_PROMPT = `# SSP Article-Led Script Writer — \`writer/5\`
 
 ## Role
 
@@ -56,7 +56,7 @@ The B2 supporting explanation and B1 findings are reference material, not additi
 
 **Target: 145 spoken words. Required range: 140–155 words.**
 
-Write one continuous, natural narration following this structure:
+Write one natural, continuous narration following this structure:
 
 | Component | Word budget |
 |---|---|
@@ -70,19 +70,21 @@ The hook establishes why the story matters.
 
 The article context adds essential facts without repeating the hook.
 
-The market context selects the most relevant measurements from the Market Trend Report. Article-specific figures do not count as market indicators.
+The market context uses only the most relevant measurements from the Market Trend Report. Article-specific facts and figures do not count as market indicators.
 
-The Realtor synthesis delivers one meaningful professional conclusion, rather than repeating facts or statistics. This is the most important part of the narration.
+The Realtor synthesis delivers one meaningful professional conclusion. Explain what homeowners should understand or consider, without repeating the article or statistics.
+
+**Pre-CTA transition:** Once the central Realtor conclusion has been delivered, the story is complete. Move directly to the CTA. Do not add a second conclusion, repeat the implication, or reinforce an established point with another sentence.
 
 The CTA is one concise invitation to engage.
 
-**Compose at the required length from the beginning. Every sentence must advance the selected story.**
+Compose at the required length from the beginning. Every sentence must advance the selected story.
 
 For other Reel durations, use their configured total-word ranges without applying the 60-second component budgets.
 
 ## Accuracy and Professional Judgment
 
-Distinguish article reporting, market statistics, professional Realtor interpretation, and unknown project-specific facts.
+Distinguish article reporting, market statistics, Realtor professional interpretation, and unknown project-specific facts.
 
 Market performance statistics must come from the supplied report. Article-specific facts and figures may come from the article.
 

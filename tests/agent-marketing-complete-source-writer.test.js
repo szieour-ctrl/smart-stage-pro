@@ -113,21 +113,36 @@ test("B2 (Options 2 and 3) writes questions and angles only: no trend fields, no
   }
 });
 
-test("the 60-second Writer prompt carries the Script Structure budgets, internal to one narration, with an in-call self-check", () => {
+test("the 60-second Writer prompt: 145 target, 155 upper limit, component budgets as internal guidance, one conclusion, concise composition", () => {
   const sys = writer.buildInput({ project: project(), reportRows: [], env: DEV }).system;
+  assert.match(sys, /about 145 spoken words/);
+  assert.match(sys, /155 is the upper limit, never a goal/);
   assert.match(sys, /Opening hook: at most 20 words/);
   assert.match(sys, /Article summary: at most 33 words/);
-  assert.match(sys, /Market summary: at most 35 words/);
+  assert.match(sys, /at most 35 words/);
   assert.match(sys, /Realtor synthesis: 47-50 words/);
   assert.match(sys, /Call to action: at most 15 words/);
-  assert.match(sys, /TOTAL: 140-155 spoken words/);
   assert.match(sys, /ONE cohesive narration/);
   assert.match(sys, /no headings, labels or markers/);
+  assert.match(sys, /ONE central Realtor conclusion/);
+  assert.match(sys, /stated once/);
+  assert.match(sys, /do not restate the conclusion in further sentences or add a second concluding argument/);
+  assert.match(sys, /ONE or TWO market indicators/);
+  assert.match(sys, /background details, repeated qualifications and filler/);
   assert.match(sys, /independent professional interpretation/);
-  assert.match(sys, /Do not repeat the article or the market figures/);
   assert.match(sys, /stop scrolling/);
-  assert.match(sys, /BEFORE YOU REPLY, in this same response/);
-  assert.match(sys, /tighten it/);
+  assert.match(sys, /Do not draft long and expect to trim/);
+  assert.doesNotMatch(sys, /count the words of your draft|BEFORE YOU REPLY/, "composition is concise by instruction; the model is not asked to count and trim");
+});
+
+test("the prompt separates a newly approved project from a cumulative total across projects, and the hook must be accurate", () => {
+  const sys = writer.buildInput({ project: project(), reportRows: [], env: DEV }).system;
+  assert.match(sys, /EVENTS AND TOTALS/);
+  assert.match(sys, /cumulative number across several developments/);
+  assert.match(sys, /not one new approval, and a new approval is not the whole total/);
+  assert.match(sys, /never write a hook or any sentence that presents a cumulative total as something that just happened/);
+  assert.match(sys, /it must be accurate/);
+  assert.doesNotMatch(sys, /Parkwood|Lincoln|122|508/, "the rule is general, naming no place or figure");
 });
 
 test("other durations carry only the total range, never the 60-second budgets", () => {

@@ -61,8 +61,8 @@ function wordTargets(durationSec, env) {
   const dev = String((env || process.env).AGENT_MARKETING_B1_EVIDENCE || "").trim().toLowerCase() === "dev";
   return (dev ? DEV_WORD_TARGETS : WORD_TARGETS)[durationSec] || (dev ? DEV_WORD_TARGETS : WORD_TARGETS)[45];
 }
-// Nov 15, 2026 (Sam, Test only): the Writer's 60-second composition range is 135-145 words (target 140); other durations use wordTargets.
-const WRITER_RANGE_60 = [135, 145];
+// Nov 15, 2026 (Sam, Test only): the Writer's 60-second composition range is 130-140 words (target 135); other durations use wordTargets.
+const WRITER_RANGE_60 = [130, 140];
 function writerWordTargets(durationSec, env) { return Number(durationSec) === 60 ? WRITER_RANGE_60.slice() : wordTargets(durationSec, env); }
 // Nov 13, 2026 (Sam, Test only): a nonblocking estimate of the narration length from the word count, using the delivery range seen across stored renders
 // (2.3 to 2.8 words a second). Advisory text only: it never changes the narration, the voice speed or any timing.

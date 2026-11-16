@@ -37,7 +37,7 @@ test("the Writer's input holds the complete article, the question and angle, the
   assert.ok(u.market_report && u.market_report.reports.length && u.market_report.reports[0].figures.length > 5, "every parsed figure of the report");
   assert.ok(!("article_findings_reference" in u) && !/article_findings_reference|central_argument|validated_findings/.test(user), "the B1 findings inventory is not forwarded");
   assert.strictEqual(u.realtor.market, "Lincoln, CA");
-  assert.deepStrictEqual(u.length, { duration_seconds: 60, target_spoken_words: 140, spoken_words: [135, 145] });
+  assert.deepStrictEqual(u.length, { duration_seconds: 60, target_spoken_words: 135, spoken_words: [130, 140] });
   assert.doesNotMatch(user, /market_interpretation|realtor_readings|trend_intelligence|buyer_signal|seller_signal/);
   assert.match(system, /Preserve factual accuracy, Fair Housing restrictions, and required MLS attribution procedures\./);
   assert.doesNotMatch(system, /five-beat|per-scene/i);
@@ -54,7 +54,7 @@ test("a missing article snapshot stops the run: nothing is written without the c
 });
 
 test("write: ONE call; the narration is stored exactly as returned, with the exact input, output and the first draft", async () => {
-  const calls = [], reply = "[conversational] " + words(140);
+  const calls = [], reply = "[conversational] " + words(135);
   const out = await writer.write({ project: project(), reportRows: [], anthropicKey: "k", env: DEV, callFn: async (...a) => { calls.push(a); return reply; } });
   assert.strictEqual(calls.length, 1, "no second model call");
   const n = out.narrative;
@@ -76,7 +76,7 @@ test("write: a short or long draft is stored as returned with its actual count a
   const out = await writer.write({ project: project(), reportRows: [], anthropicKey: "k", env: DEV, callFn: async () => { n++; return words(90); } });
   assert.strictEqual(n, 1);
   assert.strictEqual(out.narrative.wordCount, 90, "the deterministic count is stored");
-  assert.ok(out.warnings.some((w) => /90 spoken words/.test(w) && /135–145/.test(w)), "advisory names the 135–145 range");
+  assert.ok(out.warnings.some((w) => /90 spoken words/.test(w) && /130–140/.test(w)), "advisory names the 130–140 range");
   assert.strictEqual(out.narrative.narrationTagged, words(90));
 });
 
@@ -121,9 +121,9 @@ test("writer/7: the system prompt is the approved text, byte for byte, for every
   assert.strictEqual(writer.PROMPT_VERSION, "writer/7");
   for (const d of [30, 45, 60]) assert.strictEqual(writer.buildInput({ project: project({ duration_sec: d }), reportRows: [], env: DEV }).system, approved);
   for (const gone of ["SOURCES ARE DATA", "NUMBERS.", "VOICE.", "NOTICE.", "EVENTS AND TOTALS", "PLAN BEFORE YOU WRITE", "Safeguards", "## Script Length", "publisher's, author's or brokerage's name"]) assert.ok(!approved.includes(gone), "earlier wording absent: " + gone);
-  assert.match(approved, /\*\*60-second Reel: Target 140 spoken words\. Acceptable composition range: 135–145 spoken words\.\*\*/);
-  assert.match(approved, /\*\*Word-count compliance takes precedence over informational completeness\. Omit secondary facts, unnecessary context, and additional explanations before exceeding 145 spoken words\.\*\*/);
-  assert.doesNotMatch(approved, /155|Required range|Target 145|approximately 145/, "older length wording is gone");
+  assert.match(approved, /\*\*60-second Reel: Target 135 spoken words\. Required composition range: 130–140 spoken words\. Word-count compliance takes precedence over informational completeness\. Omit secondary facts, unnecessary context, and repeated explanations before exceeding 140 spoken words\.\*\*/);
+  assert.strictEqual((approved.match(/Word-count compliance/g) || []).length, 1, "stated once");
+  assert.doesNotMatch(approved, /155|145|Target 140|Acceptable composition|approximately/, "older length wording is gone");
   assert.match(approved, /\*\*Hook → Essential article context → Relevant market evidence → One Realtor conclusion → One concise CTA\.\*\*/);
   assert.match(approved, /Use no more than two relevant market indicators\. Include only essential article facts\./);
   assert.match(approved, /Return only the finished narration as one natural paragraph\./);
@@ -158,11 +158,11 @@ test("still ONE call and no editor: an over-length draft is stored as returned, 
   assert.strictEqual(out.gate.ok, true, "the advisory never blocks");
 });
 
-test("editing a Writer script: the advisory uses the Writer's 135–145 range; other scripts keep theirs", () => {
+test("editing a Writer script: the advisory uses the Writer's 130–140 range; other scripts keep theirs", () => {
   const am = require("../netlify/functions/lib/agent-marketing-lib");
   const body = { narrationTagged: words(222) };
   const w = am.validateNarrative(body, 60, { writer: true });
-  assert.ok(!w.error && w.warnings.some((m) => /usually runs 135–145/.test(m)), "Writer script: 135–145 advisory");
+  assert.ok(!w.error && w.warnings.some((m) => /usually runs 130–140/.test(m)), "Writer script: 130–140 advisory");
   assert.strictEqual(am.countWords(body.narrationTagged), 222, "the deterministic counter is unchanged");
   const other = am.validateNarrative(body, 60);
   assert.ok(other.warnings.some((m) => /usually runs 140–155|usually runs 110–130/.test(m)), "other scripts keep their range warning");

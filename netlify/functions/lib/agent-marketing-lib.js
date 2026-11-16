@@ -117,11 +117,11 @@ function countWords(text) {
 }
 
 /**
- * validateNarrative(body, durationSec) → { error } | { narrative, warnings }
+ * validateNarrative(body, durationSec, { writer }) → { error } | { narrative, warnings }
  * The caption text is ALWAYS derived from the tagged narration (never taken from the client), so captions are exactly the
  * spoken words with the audio tags removed.
  */
-function validateNarrative(body, durationSec) {
+function validateNarrative(body, durationSec, opts) {
   const b = body && typeof body === "object" ? body : {};
   const tagged = String(b.narrationTagged == null ? "" : b.narrationTagged).replace(/\r/g, "").trim();
   if (!tagged) return { error: "The narration is empty." };
@@ -130,8 +130,10 @@ function validateNarrative(body, durationSec) {
   const words = countWords(tagged);
   const [lo, hi] = wordTargets(durationSec);
   const warnings = [];
-  if (words < lo) warnings.push(`About ${words} spoken words; a ${durationSec}-second piece usually runs ${lo}–${hi}. It may feel short.`);
-  if (words > hi) warnings.push(`About ${words} spoken words; a ${durationSec}-second piece usually runs ${lo}–${hi}. Speech may run long.`);
+  // A Writer script (Nov 15, 2026, Sam) shows its actual count and no range-based warning; other scripts keep theirs.
+  const rangeWarnings = !(opts && opts.writer);
+  if (rangeWarnings && words < lo) warnings.push(`About ${words} spoken words; a ${durationSec}-second piece usually runs ${lo}–${hi}. It may feel short.`);
+  if (rangeWarnings && words > hi) warnings.push(`About ${words} spoken words; a ${durationSec}-second piece usually runs ${lo}–${hi}. Speech may run long.`);
   if (devAdvisory()) warnings.push(durationAdvisory(words, durationSec)); // Test only (Nov 13, Sam): nonblocking estimate
   const ctaText = intakeLib.cleanText(b.cta && b.cta.text, 80);
   const ctaSource = CTA_SOURCES_FROM_CLIENT.includes(b.cta && b.cta.source) ? b.cta.source : "user_edited";

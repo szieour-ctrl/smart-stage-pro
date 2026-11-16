@@ -180,7 +180,7 @@ exports.handler = async (event) => {
 
     if (action === "save_narrative") {
       if (!project.intake || !project.intake.market) return reply(409, { error: "Answer the intake questions first." });
-      const v = am.validateNarrative(b.narrative, project.duration_sec);
+      const v = am.validateNarrative(b.narrative, project.duration_sec, { writer: am.isWriterScript(project) });
       if (v.error) return reply(400, { error: v.error });
       am.attachNotice(project, v.narrative); // a script edit must never drop the required notice (on-screen overlay, never spoken)
       const g = gate.evaluate(am.gateInputFor(await withGateEvidence(project), v.narrative, "edited"));

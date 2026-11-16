@@ -40,7 +40,7 @@ Use the original article for supporting facts and, when provided, the Market Tre
 
 Apply independent Realtor professional judgment to explain what the information means for homeowners. Use established real estate knowledge, including new-construction competition, builder incentives, and potential special taxes or assessments when relevant. Do not treat common industry practices as verified project-specific facts.
 
-**60-second Reel: Target 145 spoken words. Required range 140–155 words.**
+**60-second Reel: Write approximately 145 spoken words. Prioritize a complete, cohesive narration without unnecessary detail or repetition.**
 
 Follow this narrative progression:
 
@@ -53,8 +53,6 @@ Before composing, identify the central Realtor conclusion and select only the ev
 Use no more than two relevant market indicators. Include only essential article facts.
 
 State the professional conclusion once. Do not repeat, reinforce, or explain it a second time.
-
-**Word-count compliance takes precedence over informational completeness. Omit secondary facts, unnecessary context, and additional explanations before exceeding 155 words.**
 
 Distinguish sourced facts from professional judgment. Do not invent market statistics, project-specific details, tax amounts, or the Realtor's personal experience. Preserve factual accuracy, Fair Housing restrictions, and required MLS attribution procedures.
 
@@ -113,7 +111,8 @@ function buildInput({ project, reportRows, env }) {
     ...(report ? {} : { market_report_note: "No market report was supplied for this piece." }),
     realtor: { market: intake.market || null, audience: intake.audience || null, insider_angle: intake.angle || null, primary_issue: intake.issue || null,
       desired_viewer_action: intake.action || null, firsthand_observation: intake.observation || null },
-    length: { duration_seconds: project.duration_sec, spoken_words: [lo, hi] },
+    // The 60-second prompt asks for approximately 145 words and carries no bounds; other durations follow the application's configured range.
+    length: project.duration_sec === 60 ? { duration_seconds: 60 } : { duration_seconds: project.duration_sec, spoken_words: [lo, hi] },
   }, null, 2);
   return { system: systemPrompt(project.duration_sec, env), user };
 }
@@ -143,7 +142,6 @@ async function write({ project, reportRows, anthropicKey, callFn, env }) {
   const captionText = am.stripAudioTags(narration).replace(/\s+/g, " ").trim();
   const wordCount = am.countWords(narration);
   const at = new Date().toISOString();
-  const [lo, hi] = lengthFor(project.duration_sec, env);
   const t = project.selected_topic, b = t.b2 || {};
   const narrative = {
     source: "claude", engine: ENGINE, status: "ready", model: planLib().MODEL, promptVersion: PROMPT_VERSION,
@@ -164,7 +162,6 @@ async function write({ project, reportRows, anthropicKey, callFn, env }) {
   const g = gate.evaluate(am.gateInputFor(project, narrative, "claude"));   // Fair Housing, specific-home rules, report scope and the notice; no editorial claim checks (am.WRITER_ENGINE)
   const warnings = [];
   if (!g.ok) warnings.push(`This draft needs a change before it can be approved: ${gate.explain(g)}`);
-  if (wordCount < lo || wordCount > hi) warnings.push(`The script is about ${wordCount} spoken words; a ${project.duration_sec}-second piece usually runs ${lo}–${hi}. You may edit the script or approve it as written.`);
   return { narrative, warnings, gate: g, usage: planLib().summarizeClaudeUsage(sink) };
 }
 const intake = (project) => project.intake || {};

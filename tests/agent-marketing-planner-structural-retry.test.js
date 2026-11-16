@@ -243,7 +243,7 @@ test("runPlan writes plannerFailure into the error narrative, and the project en
   await withDev(true, async () => {
     const id = "aaaaaaaa-aaaa-4aaa-8aaa-000000000001";
     rows.length = 0;
-    rows.push({ id, user_id: U1, template: "local_market_insider", duration_sec: 60, formats: ["9x16", "16x9"], intake, selected_topic: parkwood(60).selected_topic, status: "draft", created_at: "t", updated_at: "t",
+    rows.push({ id, user_id: U1, template: "local_market_insider", duration_sec: 60, formats: ["9x16", "16x9"], intake, selected_topic: (({ b1, ...t }) => t)(parkwood(60).selected_topic), status: "draft", created_at: "t", updated_at: "t",   // no b1 record: the legacy Planner path (the complete-source Writer needs one)
       narrative: { status: "planning", startedAt: Date.now(), attempts: 1, intakeHash: "h" } });
     const out = await runLib.runPlan({ id, userId: U1, deps: { supabase: fakeSupabase, env: process.env, anthropicKey: "k", callFn: async () => reply(PW, 5), withEvidence: async (p) => p } });
     assert.strictEqual(out.state, "error");

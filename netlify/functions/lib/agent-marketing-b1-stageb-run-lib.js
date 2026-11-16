@@ -247,7 +247,14 @@ async function withPlanEvidence(project, { env, store } = {}) {
   const sbLib = require("./agent-marketing-b1-stageb-lib");
   let row = null;
   try { row = await (store || require("./agent-marketing-b1-store-lib").createStore({ env: e })).forPlan(project); } catch (x) { row = null; }
-  return { ...project, selected_topic: sbLib.topicWithEvidence(project, row, e) };
+  // Nov 15, 2026 (Sam): the complete-source Writer reads the article itself. The evidence row's immutable snapshot (hash-checked by checkRecord, the same contract
+  // as the bundle) rides on the project beside the topic; the old planner never reads it.
+  let articleSnapshot = null;
+  if (row && typeof row.snapshot_text === "string" && !sbLib.checkRecord(row, project).length) {
+    const title = String(row.request_text || "").match(/TITLE \(as returned by the reader\): ([^\n]*)/);
+    articleSnapshot = { text: row.snapshot_text, sha256: row.snapshot_sha256 || null, evidenceId: row.id || null, url: row.source_url || null, retrievedAt: row.snapshot_retrieved_at || null, title: title ? title[1].trim() : "" };
+  }
+  return { ...project, selected_topic: sbLib.topicWithEvidence(project, row, e), ...(articleSnapshot ? { articleSnapshot } : {}) };
 }
 
 /**

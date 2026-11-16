@@ -71,10 +71,10 @@ test("failure metadata for the editorial step names the stage and, for a cut-off
   assert.match(src, /b2_failed[\s\S]{0,400}diagnostics: \{ \.\.\.failureDiagnostics\(x\)/, "the existing b2_failed metadata carries it");
 });
 
-test("other planner callers are unchanged: only the B2 call passes a larger allowance", () => {
+test("other planner callers are unchanged: only the B2 call and the Writer pass a larger allowance", () => {
   const dir = path.join(__dirname, "..", "netlify", "functions", "lib");
   const users = fs.readdirSync(dir).filter((f) => /\.js$/.test(f)).filter((f) => /\bsink, \{ maxTokens/.test(fs.readFileSync(path.join(dir, f), "utf8")));
-  assert.deepStrictEqual(users, ["agent-marketing-b2-lib.js"]);
+  assert.deepStrictEqual(users, ["agent-marketing-b2-lib.js", "agent-marketing-writer-lib.js"]);   // Nov 15: the complete-source Writer also sets its own ceiling
 });
 
 test("the request timeout: 120 s by default, 210 s only when the editorial writer asks, and a timeout is handled cleanly with diagnostics", async () => {

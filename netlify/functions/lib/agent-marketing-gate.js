@@ -412,7 +412,9 @@ function evaluate(input) {
   const warnings = [];
   const agentSuppliedClaims = [];
   const i = input || {};
-  const editorial = i.keepEditorialChecks === true || !testEvaluation();   // false only in the development Test environment
+  // skipEditorialChecks (Nov 15, 2026, Sam): the complete-source Writer's own script is the Realtor's interpretation; the editorial claim checks never run on it, in any
+  // environment. Fair Housing, the specific-home/listing rules, report scope, the required notice and the template allowlist still apply.
+  const editorial = i.skipEditorialChecks === true ? false : (i.keepEditorialChecks === true || !testEvaluation());   // false only in the development Test environment
 
   // Template allowlist
   if (!TEMPLATES.includes(i.template)) blocks.push({ rule: "template", field: "template", match: String(i.template || ""), message: "Unknown Agent Marketing template." });

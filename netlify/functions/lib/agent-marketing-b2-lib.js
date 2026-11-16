@@ -12,7 +12,6 @@
 
 const crypto = require("crypto");
 const b1 = require("./agent-marketing-b1-evidence-lib");
-const ti = require("./agent-marketing-trend-intelligence-lib");   // Nov 9, 2026: the same Trend Intelligence Option 1 uses
 
 const MAX_CANDIDATES = 10, SELECT = 5, MAX_ARTICLES = 3;
 /** The subscriber's text as a plain page: the title, then one paragraph per line, inside an <article> so the existing extractor reads it as the article. */
@@ -26,7 +25,6 @@ const B2_TIMEOUT_MS = 210000; // the editorial reply is not streamed, so a long 
 // A research run still "running" after 6 minutes is marked failed (agent-marketing-research.js STALE_RUNNING_MS). The editorial call is only
 // started when it can finish, with a little room left to write the result.
 const B2_RUN_WINDOW_MS = 6 * 60 * 1000, B2_RESULT_MARGIN_MS = 15000;
-const TREND_READING_CHARS = 1200;   // a relationship reading is finished sentences; the cut is at a sentence end, never mid-thought
 const MECHANISM_CHARS = 700;   // a mechanism is two or three sentences; cut only at a sentence end
 const B2_MAX_OUTPUT_TOKENS = 8000; // ten candidates with their evidence fields need more room than the planner default (4000)
 const clean = (s, n) => String(s == null ? "" : s).replace(/\s+/g, " ").trim().slice(0, n);
@@ -101,7 +99,7 @@ function articleFigureRules(report) {
   ];
 }
 
-function systemPrompt(mode, withTrend) {
+function systemPrompt(mode) {
   const report = mode === "article_report";
   return [
     "You are the editorial producer for a California real estate agent's short-form Market Update Reel. You think like an experienced local Realtor: what would homeowners and buyers in this market actually ask after reading these local articles, and what can the agent explain that helps them decide?",
@@ -112,7 +110,6 @@ function systemPrompt(mode, withTrend) {
     report ? `1. Explore ${MAX_CANDIDATES} meaningfully different editorial perspectives before choosing. Each is a question a homeowner or buyer in the agent's market would ask, that a short Reel can answer from the agent's perspective. Different means a different REALTOR IMPLICATION (what the agent would tell the person to weigh or do differently), not another wording of the same one. Do not pad to reach ${MAX_CANDIDATES}: if the evidence honestly supports fewer distinct perspectives, write fewer.` : `1. Write up to ${MAX_CANDIDATES} distinct candidate questions. Each question is one a homeowner or buyer in the agent's market would ask, that a short Reel can answer from the agent's perspective.`,
     "1b. REQUIRED POSITION CANDIDATE. For every article that carries central_argument, write exactly one candidate that develops that position for the selected audience, set develops_position to true on it, and copy into position_basis the words of central_argument it develops. Its question and editorial_angle state the position itself as the Realtor's point: what the audience faces and what it means for their decision. The editorial_angle does not lead with a rule, limit, percentage or calculation, and the homeowner_implication is the consequence of the position, not of a supporting detail. The mechanism is the article's own explanation of how or why the position holds: when a homeowner needs it to understand the position, state it in two or three plain sentences; when they do not, leave it empty. The candidate cites the findings that support the position. Set develops_position on no other candidate. Position candidates are always among the selected ones; the remaining selections compete on the criteria in 4.",
     "2. Ground every candidate in ONE article: name the specific narrative mechanism (how something in the article works: a builder's incentive, a planned development, a policy, a cost) or homeowner implication it rests on, and cite the finding ids that support it (only ids of that article).",
-    ...(withTrend ? ["2b. REPORT RELATIONSHIPS. The user message includes trend_intelligence: how the figures in the agent's own report relate to each other (observations, contrasts, plausible readings and caveats). The article stays the factual foundation; the report is the source of local market performance. For each candidate, judge how the report bears on the article's subject and give trend_interpretation: one to three finished sentences stating the relationship you find, in the Realtor's voice as a reading, never as established fact, a cause or a forecast. The relationship may be that the report reinforces the article's point, complicates or contradicts it, adds local context only, or has no real bearing on it; say which. Cite in trend_observations the observations that carry that relationship, the most relevant first, choosing them by what they measure and what they show about the article's subject, not by similarity of wording. There is no quota: cite every observation that materially bears on that candidate's story, including one that shows another side of it, and leave out any that does not. A candidate may rest on the article alone or on context alone, and one with no real connection leaves trend_observations and trend_interpretation empty: never force a link to make a candidate stronger. Different candidates may relate to the report differently. Never compare the prices of homes for sale with the prices of homes that sold as if they were the same homes. The report's caveats are binding on anything you say."] : []),
     "3. Give each candidate an editorial angle for a short Reel: the one point the agent makes, in one sentence.",
     "3b. homeowner_implication says what the story means for the audience across their decision journey (see AUDIENCE), not only for someone listing or buying right now. audience_journey is one sentence on how the same perspective matters to someone considering a move in the coming years and to someone acting now.",
     report ? `4. Select the strongest ${SELECT} where the evidence supports them (fewer only if fewer are genuinely distinct and grounded). Prefer: the strength and honesty of the relationship to the report, including none; relevance to the audience; fidelity to the article's governing position; distinctness from the other selected questions; practical Realtor insight; usefulness across the decision journey; and what can be explained in a short Reel. Do not prefer a candidate merely because its headline statistic also appears in the agent's report: a source-supported central question or explanation competes on the same criteria. Never select near-duplicates: two selected questions must differ in the Realtor implication, not in wording or in which finding they cite.` : `4. Select the ${SELECT} strongest candidates: relevant to this audience and market, clearly grounded, distinct from each other (no two on the same mechanism and angle), and explainable in a short Reel.`,
@@ -127,7 +124,6 @@ function systemPrompt(mode, withTrend) {
     "- An explanation the article proposes (for example that rising mortgage rates are weakening buyer activity) is a plausible contributing factor, the author's view: write it as such (\"may\", \"could\", \"the author reads this as\") and never as a proven cause or as the cause of a specific figure.",
     "- A missing date, cost, fee, forecast or outcome is not a reason to drop a story: say what is still unresolved and interpret what is known. Never invent a specific date, price, assessment or guaranteed outcome.",
     "",
-    ...(report ? [ti.COMPARISON_RULES, ""] : []),
     "RULES",
     report
       ? "- The article is the story. Its facts, project counts, dates, milestones and context may be used as the findings state them. LOCAL MARKET PERFORMANCE STATISTICS that the agent's report also measures for the same geography, period and statistical definition (prices, days on market, inventory, listings, closed sales, months of supply, price per square foot, sale-to-list) come ONLY from the agent's report: never put an article's statistic for one of those measures in a question, why_it_matters or angle. When a candidate needs such a statistic, cite the report figure ids (R...) in report_figures and use the figure exactly as written. A distinct verified article fact for which the report supplies no equivalent measure (whatever its category) may come from the article's validated findings: attribute it to the article, keep its period and qualifiers, and never present it as the agent's own market data."
@@ -140,17 +136,16 @@ function systemPrompt(mode, withTrend) {
     "",
     ...articleFigureRules(report),
     "",
-    "Return ONLY JSON: { \"candidates\": [ { \"id\": \"C1\", \"question\": string, \"article\": \"A1\", \"findings\": [\"A1-F2\"], \"mechanism\": string, \"homeowner_implication\": string, \"editorial_angle\": string, \"audience_journey\": string, \"why_it_matters\": string, \"develops_position\": boolean, \"position_basis\": string" + (report ? ", \"report_figures\": [\"R1\"]" + (withTrend ? ", \"trend_observations\": [\"TI1\"], \"trend_interpretation\": string" : "") : "") + " } ], \"selected\": [\"C3\", ...], \"selection_notes\": string }",
+    "Return ONLY JSON: { \"candidates\": [ { \"id\": \"C1\", \"question\": string, \"article\": \"A1\", \"findings\": [\"A1-F2\"], \"mechanism\": string, \"homeowner_implication\": string, \"editorial_angle\": string, \"audience_journey\": string, \"why_it_matters\": string, \"develops_position\": boolean, \"position_basis\": string" + (report ? ", \"report_figures\": [\"R1\"]" : "") + " } ], \"selected\": [\"C3\", ...], \"selection_notes\": string }",
   ].join("\n");
 }
 
-function userMessage({ records, market, audience, reportFigures, trend, correction }) {
+function userMessage({ records, market, audience, reportFigures, correction }) {
   return JSON.stringify({
     agent_market: market, audience,
     articles: records,
     ...(correction ? { correction } : {}),
     ...(reportFigures && reportFigures.length ? { agent_report_figures: reportFigures.map((f, i) => ({ id: `R${i + 1}`, figure: f.text })) } : {}),
-    ...(trend && trend.usable ? { trend_intelligence: ti.promptBlock(trend) } : {}),
   }, null, 1);
 }
 
@@ -170,7 +165,7 @@ function positionBasisOk(basis, central) {
   return b.filter((w) => c.has(w)).length / b.length >= 0.6;
 }
 
-function validate(raw, { records, mode, reportFigures, trend }) {
+function validate(raw, { records, mode, reportFigures }) {
   const problems = [];
   const byArticle = new Map((records || []).map((r) => [r.id, r]));
   const findingIds = new Map();
@@ -191,12 +186,11 @@ function validate(raw, { records, mode, reportFigures, trend }) {
     const refs = (Array.isArray(c.report_figures) ? c.report_figures : []).map((x) => clean(x, 6)).filter((x) => repNums.has(x));
     // Nov 9, 2026 (product-owner decision): the number-matching checks that dropped a candidate whose figure was not in its cited quotations
     // (mode 3) or was an article market statistic (mode 2) are retired. The prompt carries the source-of-truth guidance; code checks only structure.
-    const trendRefs = trend && trend.usable ? [...new Set((Array.isArray(c.trend_observations) ? c.trend_observations : []).map((x) => clean(x, 8)).filter((x) => trend.observations.some((o) => o.id === x)))] : [];
     seen.add(key);
     const central = byArticle.get(art).central_argument;
     const developsPosition = !!central && c.develops_position === true && !positionTaken.has(art) && positionBasisOk(c.position_basis, central);
     if (developsPosition) positionTaken.add(art);
-    out.push({ id, question, developsPosition, positionBasis: developsPosition ? clip(c.position_basis, 400) : "", trendRefs, trendInterpretation: clip(c.trend_interpretation, TREND_READING_CHARS), article: art, findings, mechanism: clip(c.mechanism, MECHANISM_CHARS), homeownerImplication: clip(c.homeowner_implication, 400),
+    out.push({ id, question, developsPosition, positionBasis: developsPosition ? clip(c.position_basis, 400) : "", article: art, findings, mechanism: clip(c.mechanism, MECHANISM_CHARS), homeownerImplication: clip(c.homeowner_implication, 400),
       editorialAngle: clip(c.editorial_angle, 300), whyItMatters: clip(c.why_it_matters, 500), audienceJourney: clip(c.audience_journey, 300), reportFigureRefs: refs });
     if (out.length >= MAX_CANDIDATES) break;
   }
@@ -218,7 +212,7 @@ function validate(raw, { records, mode, reportFigures, trend }) {
 }
 
 /** The selected candidates as research topic cards (v1-compatible fields plus b1/b2), in selection order, ids t1..t5. */
-function toTopics({ result, records, articles, evidence, mode, reportSource, trend }) {
+function toTopics({ result, records, articles, evidence, mode, reportSource }) {
   const recById = new Map(records.map((r) => [r.id, r]));
   return result.selected.map((cid, i) => {
     const c = result.candidates.find((x) => x.id === cid);
@@ -240,7 +234,6 @@ function toTopics({ result, records, articles, evidence, mode, reportSource, tre
       editorial: { headline: null, thesis: c.developsPosition ? rec.central_argument : c.mechanism, homeownerDecision: c.homeownerImplication, development: from.editorial ? from.editorial.development || null : null, angle: c.editorialAngle },
       b1: { articleKey: articleKey(art.url), evidenceId: ev ? ev.id : null, completeness: rec.completeness, findings: c.findings },
       b2: { mechanism: c.mechanism, ...(c.developsPosition ? { developsPosition: true, positionBasis: c.positionBasis } : {}), homeownerImplication: c.homeownerImplication, editorialAngle: c.editorialAngle, audienceJourney: c.audienceJourney || "", sourceRefs, reportFigureRefs: c.reportFigureRefs, mode,
-        ...(c.trendRefs && c.trendRefs.length ? { trendObservationRefs: c.trendRefs, trendInterpretation: c.trendInterpretation || "", trendIntelligence: ti.editorialInput(trend, c.trendRefs) } : {}),
         article: { title: art.title, url: art.url, domain: art.domain || null, published: art.published || null, sourceGeography: art.sourceGeography || null, reportingPeriod: art.reportingPeriod || null,
           completeness: rec.completeness, heldFindingsNotUsed: rec.held_findings_not_used, ...(art.submitted ? { submitted: true } : {}) } },
     };
@@ -256,9 +249,9 @@ async function generate(o) {
   const planLib = require("./agent-marketing-plan-lib");
   const call = o.callFn || planLib.callClaudeText;
   const sink = [];
-  const sys = systemPrompt(o.mode, !!(o.trend && o.trend.usable));
-  const ask = (correction) => call(sys, userMessage({ records: o.records, market: o.market, audience: o.audience, reportFigures: o.reportFigures, trend: o.trend, correction }), o.anthropicKey, sink, { maxTokens: B2_MAX_OUTPUT_TOKENS, timeoutMs: B2_TIMEOUT_MS });
-  const check = (text) => validate(planLib.extractJsonObject(text), { records: o.records, mode: o.mode, reportFigures: o.reportFigures, trend: o.trend });
+  const sys = systemPrompt(o.mode);
+  const ask = (correction) => call(sys, userMessage({ records: o.records, market: o.market, audience: o.audience, reportFigures: o.reportFigures, correction }), o.anthropicKey, sink, { maxTokens: B2_MAX_OUTPUT_TOKENS, timeoutMs: B2_TIMEOUT_MS });
+  const check = (text) => validate(planLib.extractJsonObject(text), { records: o.records, mode: o.mode, reportFigures: o.reportFigures });
   let result = check(await ask());
   // Nov 14, 2026 (Sam): when a position candidate is missing, ONE corrected request is made (if the run still has the time); otherwise the caller ends the run visibly.
   let repaired = false;
@@ -267,7 +260,7 @@ async function generate(o) {
     const again = check(await ask(`Your previous reply had no valid position candidate for ${result.positionMissing.join(", ")}. Return the complete JSON again. For each of those articles include exactly one candidate that develops its central_argument: develops_position true, position_basis copied from the words of central_argument it develops, question and editorial_angle stating the position itself, and cited findings of that article. Keep the other candidates.`));
     if (again.positionMissing.length <= result.positionMissing.length) result = again;
   }
-  const topics = result.selected.length ? toTopics({ result, records: o.records, articles: o.articles, evidence: o.evidence, mode: o.mode, reportSource: o.reportSource, trend: o.trend }) : [];
+  const topics = result.selected.length ? toTopics({ result, records: o.records, articles: o.articles, evidence: o.evidence, mode: o.mode, reportSource: o.reportSource }) : [];
   return { topics, candidates: result.candidates, selected: result.selected, notes: result.notes, problems: result.problems, positionMissing: result.positionMissing, repaired, usage: planLib.summarizeClaudeUsage ? planLib.summarizeClaudeUsage(sink) : null };
 }
 
@@ -340,13 +333,12 @@ async function enrich({ row, fields, uploads, userId, env, deps }) {
   }
   if (!records.length) return failOut("no_article_evidence", `The research found ${articles.length} article${articles.length === 1 ? "" : "s"}, but none could be read and understood, so no Article-Led topics were written. This did not use a session. Start new research to try again, or change your request.`);
   const mode = modeOf(row);
-  let reportFigures = [], ctx = null, reportSource = null, trend = null;
+  let reportFigures = [], ctx = null, reportSource = null;
   if (mode === "article_report") {
     const reportTopics = require("./agent-marketing-research-report-lib");
-    try { ctx = reportTopics.buildContext(uploads, { geography: row.geography }); reportFigures = [...ctx.figures.values()].slice(0, 24).map((cf) => ({ ref: cf.ref, text: reportTopics.scopedFigureText(cf) }));
-      // The shared Trend Intelligence analysis names figures by the same R<n> ids B2 already uses, so a candidate cites one id space.
-      const rid = new Map(reportFigures.map((f, i) => [f.ref, `R${i + 1}`]));
-      trend = ti.analyze(ctx, { refOf: (r) => rid.get(r) || r }); } catch (x) { ctx = null; trend = null; }
+    // Nov 15, 2026 (Sam): B2 sees the report's parsed figures (R1...) and chooses which genuinely bear on each article-led question. No deterministic interpretation is computed or passed.
+    try { ctx = reportTopics.buildContext(uploads, { geography: row.geography }); reportFigures = [...ctx.figures.values()].slice(0, 24).map((cf) => ({ ref: cf.ref, text: reportTopics.scopedFigureText(cf) })); }
+    catch (x) { ctx = null; }
     reportSource = { type: "report", title: "Your MLS report", url: null, role: "data" };
   }
   // Not enough of the run's time left for the editorial call to finish: stop cleanly, uncharged, instead of starting a call that would be cut off.
@@ -359,7 +351,7 @@ async function enrich({ row, fields, uploads, userId, env, deps }) {
   const market = [geo.name, geo.type === "neighborhood" && geo.city ? geo.city : null, geo.zip ? `ZIP ${geo.zip}` : null].filter(Boolean).join(", ");
   let out;
   try {
-    out = await generate({ records, articles: used, evidence, mode, market, audience: row.audience, reportFigures, trend, canRepair: () => timeLeft(row.created_at, typeof d.now === "number" ? d.now : Date.now()).ok, callFn: d.callFn, anthropicKey: d.anthropicKey !== undefined ? d.anthropicKey : e.ANTHROPIC_API_KEY, reportSource });
+    out = await generate({ records, articles: used, evidence, mode, market, audience: row.audience, reportFigures, canRepair: () => timeLeft(row.created_at, typeof d.now === "number" ? d.now : Date.now()).ok, callFn: d.callFn, anthropicKey: d.anthropicKey !== undefined ? d.anthropicKey : e.ANTHROPIC_API_KEY, reportSource });
   } catch (x) { return failOut("b2_failed", "The articles were read, but the editorial topics could not be written this time. This did not use a session. Start new research to try again.", { error: String(x.message || x).slice(0, 200), diagnostics: { ...failureDiagnostics(x), ...(time.elapsed !== null ? { elapsed_since_start_ms: time.elapsed } : {}) } }); }
   if (!out.topics.length) return failOut("b2_no_topics", "The articles were read, but none of the editorial questions met the source rules. This did not use a session. Start new research to try again, or change your request.", { problems: out.problems.slice(0, 8) });
   if (out.positionMissing && out.positionMissing.length) return failOut("b2_position_missing", "The articles were read, but the editorial topics did not include the article's own position, so no topics were shown. This did not use a session. Start new research to try again.", { problems: out.problems.slice(0, 8), repaired: !!out.repaired });
@@ -368,7 +360,7 @@ async function enrich({ row, fields, uploads, userId, env, deps }) {
   // Fewer than five qualified topics: the valid ones are shown with a partial-results note, and the set is not charged.
   const partial = topics.length < SELECT;
   const message = partial ? `Only ${topics.length} Article-Led topic${topics.length === 1 ? "" : "s"} met the source rules (from ${records.length} article${records.length === 1 ? "" : "s"} read). This partial set did not use a session.` : null;
-  return { ...fields, topics, ...(partial ? { charged_at: null } : {}), usage: { ...(fields.usage || {}), reportNote: null, b1b2: { ...log, state: partial ? "partial" : "ready", message, trend: trend && trend.usable ? { character: trend.character.key, observations: trend.observations.length } : null, records: records.length, candidates: out.candidates.map((c) => ({ id: c.id, question: c.question, article: c.article, findings: c.findings, angle: c.editorialAngle })),
+  return { ...fields, topics, ...(partial ? { charged_at: null } : {}), usage: { ...(fields.usage || {}), reportNote: null, b1b2: { ...log, state: partial ? "partial" : "ready", message, records: records.length, candidates: out.candidates.map((c) => ({ id: c.id, question: c.question, article: c.article, findings: c.findings, angle: c.editorialAngle })),
     selected: out.selected, notes: out.notes, problems: out.problems.slice(0, 8), b2Usage: out.usage, discoveryTopics: fields.topics.length } } };
 }
 

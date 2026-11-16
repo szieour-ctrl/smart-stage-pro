@@ -150,28 +150,6 @@ const trend = { usable: true, version: 1, character: { key: "inventory_building"
     { id: "TI4", kind: "price", signal: "neutral", title: "Price is steady", statement: "Median price barely moved.", basis: { type: "year", label: "October 2025" }, evidence: [{ ref: "R4", text: "Median sold price: $606,755 up 0.3%" }] } ],
   contrasts: [], interpretations: [{ id: "TR1", text: "Slower sales beside rising supply favors buyers.", basis: ["TI1", "TI2"], status: "interpretation", audience: "realtor" }], caveats: [] };
 
-test("trend: every observation a candidate cites reaches its topic and the planner's market interpretation, not just one", () => {
-  const raw5 = { candidates: [cand("C1", "Supply is at 2.8 months—still a seller's market?", ["A1-F3"], { report_figures: ["R1"], trend_observations: ["TI1", "TI2", "TI3", "TI9"], trend_interpretation: "Rising supply with slowing sales and longer marketing times reads as a buyer-leaning shift." })], selected: ["C1"] };
-  const v = b2.validate(raw5, { records, mode: "article_report", reportFigures, trend });
-  assert.deepStrictEqual(v.candidates[0].trendRefs, ["TI1", "TI2", "TI3"], "unknown ids are dropped, the three that exist are kept");
-  const topic = b2.toTopics({ result: v, records, articles: [ARTICLE], evidence: new Map([[ARTICLE.url, { id: "ev1" }]]), mode: "article_report", reportSource: null, trend })[0];
-  assert.deepStrictEqual(topic.b2.trendIntelligence.observations.map((o) => o.id), ["TI1", "TI2", "TI3"]);
-  assert.strictEqual(topic.b2.trendIntelligence.character.label, "Supply is building while sales slow");
-  const brief = planLib.topicBrief(topic, DEV);
-  const mi = brief.editorial_direction.market_interpretation;
-  assert.strictEqual(mi.relationships.length, 3);
-  assert.ok(mi.relationships.some((r) => /Sales are slowing/.test(r.what)) && mi.relationships.some((r) => /take longer to sell/.test(r.what)));
-  assert.strictEqual(mi.market_character, "Supply is building while sales slow");
-  assert.ok(mi.realtor_readings.length >= 1 && brief.editorial_direction.kind === "article_story_with_market_interpretation");
-});
-
-test("trend: the prompt asks for every observation that materially bears on the story, with no quota", () => {
-  const p = b2.systemPrompt("article_report", true);
-  assert.match(p, /every observation that materially bears on that candidate's story, including one that shows another side of it/);
-  assert.match(p, /There is no quota: cite every observation that materially bears on that candidate.s story[^.]*, and leave out any that does not/);
-  assert.doesNotMatch(p, /at least (?:two|three|\d) observations/i);
-});
-
 // ── 6. the planner distinguishes what a measure shows from unsupported interpretation ──────────────────────────────────────────────────────────
 test("planner statistics: the editorial contract chooses facts for the story, reads each figure by its own label, and words explanations by the evidence", () => {
   const p = planLib.buildSystemPrompt(DEV, {});

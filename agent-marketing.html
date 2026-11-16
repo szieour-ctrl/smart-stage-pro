@@ -535,6 +535,19 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
         <label class="lbl" for="narration">Narration</label>
         <textarea id="narration" style="min-height:190px"></textarea>
         <div class="hint">Words in [brackets] are delivery cues for the narrator. They never appear in captions. <span id="wordInfo"></span></div>
+        <div id="writerBox" class="note hidden">
+          <strong>One Writer wrote this script</strong> from the complete article<span id="writerReport"></span>. <span id="writerWords"></span>
+          <details style="margin-top:6px"><summary style="cursor:pointer">The Writer's original draft, exactly as written</summary>
+            <div class="caption-preview" id="writerOriginal" style="white-space:pre-wrap"></div>
+            <button class="btn sm ghost" type="button" id="restoreDraftBtn">Put the original draft back in the box</button>
+          </details>
+        </div>
+        <div id="polishBox" class="hidden" style="margin:10px 0">
+          <label class="lbl" for="polishReq">Optional: ask for a revision</label>
+          <input type="text" id="polishReq" maxlength="300" placeholder="For example: tighten the closing sentence. Keep every fact.">
+          <button class="btn sm ghost" type="button" id="polishBtn">Revise with AI</button>
+          <div class="hint">Nothing is revised unless you ask. The revision goes into the box above for you to review; it is not saved or approved until you choose.</div>
+        </div>
         <details id="pronBox" style="margin:10px 0">
           <summary id="pronSum" style="cursor:pointer;font-weight:600">Pronunciation (a name said wrongly)</summary>
           <div class="hint">If the narrator says a name wrongly, type the word as it is written in your script and how it should sound. The narrator uses the sound; your captions keep the word as written. Example: Denio's &rarr; Duh-NYE-oh's.</div>
@@ -827,6 +840,7 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
       $("cta").value = (n.cta && n.cta.text) || "";
       $("angleLine").textContent = n.editorialAngle || "";
       renderEvalBox();
+      renderWriterBox(n);
       var w = n.warnings || [];
       $("warnBox").classList.toggle("hidden", !w.length); $("warnBox").innerHTML = w.map(esc).join("<br>");
       var c = n.claimsToVerify || [];
@@ -836,6 +850,44 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
       $("verifyBox").innerHTML = "<strong>Please verify before you publish:</strong><ul class='plain'>" + c.map(function (x) { return "<li>" + esc(x) + "</li>"; }).join("") + "</ul>";
       refreshPreview();
     }
+  }
+  // Complete-source Writer (Nov 15, 2026): the script is one Writer's narration; its original draft stays visible exactly as written, however the subscriber edits it.
+  function isWriterScript(n) { return !!(n && n.engine === "complete_source_writer"); }
+  function renderWriterBox(n) {
+    var on = isWriterScript(n), d = n && n.writerDraft;
+    $("writerBox").classList.toggle("hidden", !on || !d); $("polishBox").classList.toggle("hidden", !on);
+    if (!on || !d) return;
+    var t = state.project && state.project.selectedTopic;
+    $("writerReport").textContent = t && t.reportFigures && t.reportFigures.length ? " and your market report" : "";
+    $("writerWords").textContent = "Original draft: " + d.words + " spoken words.";
+    $("writerOriginal").textContent = d.narration;
+  }
+  // Plans the scenes from the approved words (one visual-planning call; the script is never rewritten), then reloads the project until they appear.
+  var boardTimer = null;
+  async function startBoard() {
+    try { await api("POST", "", { projectId: state.project.id, mode: "storyboard" }, STAGEB_BG); } catch (e) { /* the poll below reports it */ }
+    var tries = 0; clearInterval(boardTimer);
+    boardTimer = setInterval(async function () {
+      if (++tries > 60) { clearInterval(boardTimer); return; }
+      try {
+        var r = await api("GET", "?id=" + encodeURIComponent(state.project.id));
+        var p = r.json && (r.json.project || r.json);
+        if (!p || !p.narrative) return;
+        var n = p.narrative;
+        if ((n.scenes || []).length || n.storyboardStatus === "error") { clearInterval(boardTimer); setProject(p); if (n.storyboardStatus === "error") say("scriptMsg", n.storyboardError || "The scene plan could not be built.", "err"); }
+      } catch (e) { /* try again */ }
+    }, 4000);
+  }
+  async function polishScript() {
+    var req = $("polishReq").value.trim(); $("polishBtn").disabled = true; say("scriptMsg", "");
+    try {
+      var r = await api("POST", "", { action: "polish_narrative", id: state.project.id, narrationTagged: $("narration").value, request: req });
+      if (!r.ok) throw new Error(r.json.error || "Could not revise the script");
+      state.prePolish = $("narration").value;
+      $("narration").value = r.json.polished.narration; refreshPreview();
+      say("scriptMsg", "The revision is in the box above (" + r.json.polished.words + " spoken words). Review it, then save or approve. Your original draft is kept.", "ok");
+    } catch (e) { say("scriptMsg", e.message, "err"); }
+    $("polishBtn").disabled = false;
   }
   // Test environment only (Nov 9, 2026): the selected B2 topic, its editorial angle, the source article and its quotations next to the script, so the
   // script can be compared with the article. Never shown on production.
@@ -1000,6 +1052,7 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
         var a = await api("POST", "", { action: "approve_narrative", id: state.project.id });
         if (!a.ok) throw new Error(a.json.error || "Could not approve");
         setProject(a.json.project); go(4);
+        if (isWriterScript(a.json.project.narrative)) startBoard();
       } else {
         say("scriptMsg", "Saved." + (r.json.warnings && r.json.warnings.length ? " " + r.json.warnings.join(" ") : ""), "ok");
       }
@@ -1020,7 +1073,8 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
   }
   function renderBoard() {
     var n = (state.project && (state.project.narrative)) || {}, scenes = n.scenes || [];
-    $("boardWarn").classList.toggle("hidden", !n.scenesStale);
+    $("boardWarn").classList.toggle("hidden", !n.scenesStale && !(isWriterScript(n) && !scenes.length));
+    if (isWriterScript(n) && !scenes.length) $("boardWarn").textContent = "Your approved script is saved exactly as written. The scene plan is built from its words when your Reel is made.";
     if (n.scenesStale) $("boardWarn").textContent = "You edited the script after the scene plan was written, so the scenes below are the earlier plan and will be rebuilt from your approved script when your Reel is made. Your script is not changed.";
     $("scenes").innerHTML = scenes.map(function (s, i) {
       var vs = s.visualSource, real = vs === "AUTHENTIC_AGENT_ASSET", pr = s.photoRequest || {};
@@ -1687,6 +1741,8 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
     document.addEventListener("keydown", function (e) { if (e.key === "Escape") { closeModal(); $("photoView").classList.add("hidden"); $("picker").classList.add("hidden"); } });
     $("narration").addEventListener("input", refreshPreview);
     $("saveScriptBtn").addEventListener("click", function () { saveScript(false); });
+    $("polishBtn").addEventListener("click", polishScript);
+    $("restoreDraftBtn").addEventListener("click", function () { var d = narr() && narr().writerDraft; if (d) { $("narration").value = d.narration; refreshPreview(); } });
     $("approveBtn").addEventListener("click", function () { saveScript(true); });
     $("pronAdd").addEventListener("click", function () { $("pronRows").insertAdjacentHTML("beforeend", pronRow("", "")); $("pronBox").open = true; });
     $("pronRows").addEventListener("click", function (ev) {

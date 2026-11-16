@@ -33,8 +33,16 @@ exports.handler = async (event, context, deps) => {
   if (run.admit(userId, env)) return { statusCode: 404, body: "" };   // checked before reading the body: refused users learn nothing more
   let body = {}; try { body = JSON.parse(event.body || "{}"); } catch (e) { return { statusCode: 400, body: "" }; }
   if (!am.UUID_RE.test(String(body.projectId || ""))) return { statusCode: 400, body: "" };
-  const script = body.mode === "script";
-  if (body.mode !== undefined && !script) return { statusCode: 400, body: "" };
+  const script = body.mode === "script", board = body.mode === "storyboard";
+  if (body.mode !== undefined && !script && !board) return { statusCode: 400, body: "" };
+  // Nov 15, 2026: { projectId, mode: "storyboard" } plans the scenes of an APPROVED complete-source Writer script from its exact words (runStoryboard). The same user-token dispatch as "script".
+  if (board) {
+    try {
+      const r = await require("./lib/agent-marketing-plan-run-lib").runStoryboard({ id: body.projectId, userId, deps: { supabase: d.supabase, env, anthropicKey: d.anthropicKey, callFn: d.callFn, now: d.now } });
+      console.log(`agent-marketing-stageb-background storyboard ${body.projectId.slice(0, 8)} ${r.state}${r.code ? ` ${r.code}` : ""}`);
+      return { statusCode: 200, body: JSON.stringify(r) };
+    } catch (e) { console.error("agent-marketing-stageb-background storyboard error:", e.code || e.message); return { statusCode: 500, body: "" }; }
+  }
   let provider = null;
   try { provider = d.provider || pv.createProvider({ env }); } catch (e) { provider = null; }   // no provider: the run is marked failed, nothing is sent
   // Development fixture mode: B1_SNAPSHOT_SOURCE=worker-fixture takes the frozen FA/FB/FC article from the private fixture worker (no live fetch).

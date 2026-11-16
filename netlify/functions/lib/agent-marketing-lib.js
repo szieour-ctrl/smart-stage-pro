@@ -187,9 +187,12 @@ function attachNotice(project, narrative) {
 
 // Build the gate input for a stored project + narrative. Text the agent wrote or edited is checked as the agent's own;
 // text Claude wrote (source "claude") is held to the stricter rules (no invented claims or numbers).
+// Nov 15, 2026 (Sam): the complete-source Writer path. A script carrying this engine mark was written, and may be edited, without the editorial claim checks.
+const WRITER_ENGINE = "complete_source_writer";
+const isWriterScript = (project, narrative) => !!((narrative && narrative.engine === WRITER_ENGINE) || (project && project.narrative && project.narrative.engine === WRITER_ENGINE));
 function gateInputFor(project, narrative, source) {
   const n = narrative || {};
-  const base = { template: project.template, intake: project.intake || {}, verified: gate.verifiedFromProject(project) }; // verified: Local Market Insider only, from the stored research topic
+  const base = { template: project.template, intake: project.intake || {}, verified: gate.verifiedFromProject(project), ...(isWriterScript(project, n) ? { skipEditorialChecks: true } : {}) }; // verified: Local Market Insider only, from the stored research topic
   const sceneTexts = (n.scenes || []).map((s) => s.narrationExcerpt).filter(Boolean);
   if (source === "claude") {
     return { ...base, fullPiece: true, generated: { narration: n.captionText || stripAudioTags(n.narrationTagged), captions: n.captionText, sceneTexts, overlays: n.notice ? [n.notice] : [] }, cta: n.cta || null };
@@ -206,6 +209,8 @@ function narrationKey(text) {
 /** True when the script was edited and its scenes were not planned for these exact words (a script saved before this field existed counts as not matching). */
 function storyboardNeeded(narrative) {
   const n = narrative || {};
+  // The Writer's script has no scenes until it is approved: its storyboard is always built from the approved words (an unedited draft included).
+  if (n.engine === WRITER_ENGINE && n.narrationTagged) return narrationKey(n.narrationTagged) !== n.scenesFor;
   if (n.source !== "edited" || !n.narrationTagged) return false;
   return narrationKey(n.narrationTagged) !== n.scenesFor;
 }
@@ -213,6 +218,7 @@ function storyboardNeeded(narrative) {
 const NOT_EDITABLE_AFTER = ["rendering", "rendered", "published"];
 
 module.exports = {
+  WRITER_ENGINE, isWriterScript,
   marketReviewEnabled,
   PACE_WORDS_PER_SECOND, narrationEstimate, durationAdvisory, narrationKey, storyboardNeeded, DURATIONS, FORMATS, VOICES, MUSIC, DURATION_CONTRACT, WORD_TARGETS, DEV_WORD_TARGETS, SCENE_RANGES, IMAGE_RANGES, WRITING_AIMS, EDITOR_TARGETS, wordTargets, UUID_RE, NOT_EDITABLE_AFTER,
   isEnabledFor, validateCreate, stripAudioTags, countWords, validateNarrative, gateInputFor, topicNotice, noticeOverlayFor, sourceCreditFor, attachNotice,

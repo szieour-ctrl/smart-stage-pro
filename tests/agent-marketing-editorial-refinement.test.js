@@ -59,8 +59,8 @@ test("Option 1 selects three to five and names the selection criteria; Option 2 
   assert.match(OPTION_1, /perspectives, not recaps/);
 });
 
-test("both options carry the periods-and-comparisons rules and keep interpretation apart from reported statistics", () => {
-  assert.ok(OPTION_1.includes(ti.COMPARISON_RULES) && OPTION_2.includes(ti.COMPARISON_RULES));
+test("Option 1 carries the periods-and-comparisons rules and keep interpretation apart from reported statistics", () => {
+  assert.ok(OPTION_1.includes(ti.COMPARISON_RULES));   // Nov 15: Option 2 (B2) no longer carries Trend Intelligence rules
   assert.match(ti.COMPARISON_RULES, /month-over-month change: never call it year over year/);
   assert.match(ti.COMPARISON_RULES, /Never describe a measure that rose or fell as unchanged, steady or flat/);
   assert.match(ti.COMPARISON_RULES, /Do not introduce a historical comparison/);
@@ -69,9 +69,7 @@ test("both options carry the periods-and-comparisons rules and keep interpretati
 });
 
 test("Option 2 keeps the article as the foundation, allows conditional Realtor interpretation, and refuses forced market connections", () => {
-  assert.match(OPTION_2, /article stays the factual foundation; the report is the source of local market performance/);
-  assert.match(OPTION_2, /The relationship may be that the report reinforces the article's point, complicates or contradicts it, adds local context only, or has no real bearing on it; say which/);
-  assert.match(OPTION_2, /never force a link to make a candidate stronger/);
+  assert.match(OPTION_2, /The article is the factual foundation of the Reel, not the boundary of the agent's professional interpretation/);
   assert.match(OPTION_2, /not limited to repeating the article/);
   assert.match(OPTION_2, /builder competition and incentives, special taxes or assessments, ownership costs/);
   assert.match(OPTION_2, /Never present such a possibility as a verified fact about this particular development/);

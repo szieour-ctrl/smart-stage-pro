@@ -38,7 +38,6 @@ test("the correction leaves the workflow, candidate count and existing rules in 
   assert.equal(b2.SELECT, 5);
   assert.match(WITH_REPORT, /Explore 10 meaningfully different editorial perspectives/);
   assert.match(WITH_REPORT, /LOCAL MARKET PERFORMANCE STATISTICS .* come ONLY from the agent's report/s);
-  assert.match(WITH_REPORT, /PERIODS AND COMPARISONS/);
   assert.match(WITH_REPORT, /Ground every candidate in ONE article/);
   assert.match(NO_REPORT, /keeping their place, period and qualifiers/);
 });

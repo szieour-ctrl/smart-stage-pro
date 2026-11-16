@@ -73,7 +73,12 @@ async function runPlan({ id, userId, deps }) {
     // invalid row is BLOCKED and generatePlan stops before any model call. With the switch off the project is unchanged.
     const withEvidence = d.withEvidence || ((p) => require("./agent-marketing-b1-stageb-run-lib").withPlanEvidence(p, { env }));
     const planProject = await withEvidence(project);
-    const { narrative, warnings, gate, usage: planUsage } = await planLib.generatePlan({ project: ctaAngleCount == null ? planProject : { ...planProject, cta_angle_index: ctaAngleCount }, anthropicKey, ...(d.callFn ? { callFn: d.callFn } : {}) });
+    // Nov 15, 2026 (Sam, development only): an Article-Led topic is written by the ONE complete-source Writer (the stored article, the report, B1's findings, the intake):
+    // one model call, one narration, no editorial gate, no component budgets, no scenes. The storyboard is planned later from the approved words. Every other project keeps the planner.
+    const writerLib = require("./agent-marketing-writer-lib");
+    const { narrative, warnings, gate, usage: planUsage } = writerLib.applies(planProject, env)
+      ? await writerLib.write({ project: planProject, reportRows: await writerLib.loadReportRows(planProject, supabase), anthropicKey, callFn: d.callFn, env })
+      : await planLib.generatePlan({ project: ctaAngleCount == null ? planProject : { ...planProject, cta_angle_index: ctaAngleCount }, anthropicKey, ...(d.callFn ? { callFn: d.callFn } : {}) });
     const gateSummary = { ok: gate.ok, version: gate.version, blocks: gate.blocks, warnings: gate.warnings, agentSuppliedClaims: gate.agentSuppliedClaims, sourcedFacts: gate.sourcedFacts || [] };
     await writeNarrative(supabase, id, userId, { ...narrative, warnings: (d.extraWarnings || []).concat(warnings), plan_usage: planUsage, attempts: stub.attempts, intakeHash: stub.intakeHash, ...(d.narrativeExtra || {}) },
       { status: "narrative_ready", gate_version: gate.version, gate_result: gateSummary });
@@ -88,4 +93,43 @@ async function runPlan({ id, userId, deps }) {
   }
 }
 
-module.exports = { planStart, runPlan, writeNarrative, errorNarrative };
+// Fields of a rebuilt storyboard that belong on the working narrative as well as on the approved one.
+const STORYBOARD_FIELDS = ["scenes", "scenesFor", "scenesStale", "hook", "editorialAngle", "claimsToVerify", "storyboard", "notice", "noticeOverlay", "sourceCredit"];
+const STORYBOARD_STALE_MS = 6 * 60 * 1000;
+
+/**
+ * runStoryboard({ id, userId, deps }) → { state: "ready" | "error" | "skipped", code? }
+ * Nov 15, 2026 (Sam): the complete-source Writer writes narration only. Once the subscriber APPROVES it, the existing storyboard step plans the scenes from exactly
+ * those words (planLib.rebuildApprovedStoryboard: one visual-planning call; the narration is checked unchanged afterwards and is never rewritten). The scenes are
+ * written onto the approved script and onto the working script, because the visuals step reads the latter. Started by the page after approval.
+ * deps (all optional): supabase, env, anthropicKey, callFn, now.
+ */
+async function runStoryboard({ id, userId, deps }) {
+  const d = deps || {};
+  const supabase = d.supabase || defaultSupabase();
+  const env = d.env || process.env;
+  const now = d.now == null ? Date.now() : d.now;
+  const r = await supabase("GET", "agent_marketing_projects", null, `?id=eq.${id}&user_id=eq.${userId}&select=*&limit=1`);
+  const project = Array.isArray(r.data) ? r.data[0] : null;
+  if (!project) return { state: "skipped", code: "not_found" };
+  const approved = project.narrative_approved, working = project.narrative && typeof project.narrative === "object" ? project.narrative : {};
+  if (!approved || !approved.narrationTagged || approved.engine !== am.WRITER_ENGINE) return { state: "skipped", code: "not_needed" };
+  if (!am.storyboardNeeded(approved)) return { state: "skipped", code: "current" };   // scenes already planned for these exact words
+  if (working.storyboardStatus === "building" && now - Number(working.storyboardStartedAt || 0) < STORYBOARD_STALE_MS) return { state: "skipped", code: "in_progress" };
+  const patchWorking = (fields) => supabase("PATCH", "agent_marketing_projects", { narrative: { ...working, ...fields }, updated_at: new Date().toISOString() }, `?id=eq.${id}&user_id=eq.${userId}`);
+  const anthropicKey = d.anthropicKey !== undefined ? d.anthropicKey : env.ANTHROPIC_API_KEY;
+  if (!anthropicKey && !d.callFn) { await patchWorking({ storyboardStatus: "error", storyboardError: "Planning is not configured." }); return { state: "error", code: "not_configured" }; }
+  await patchWorking({ storyboardStatus: "building", storyboardStartedAt: now, storyboardError: null });
+  try {
+    const rebuilt = await planLib.rebuildApprovedStoryboard({ project, narrative: approved, anthropicKey, ...(d.callFn ? { callFn: d.callFn } : {}) });
+    const fromRebuilt = Object.fromEntries(STORYBOARD_FIELDS.filter((k) => k in rebuilt).map((k) => [k, rebuilt[k]]));
+    await supabase("PATCH", "agent_marketing_projects", { narrative_approved: rebuilt, narrative: { ...working, ...fromRebuilt, storyboardStatus: "ready", storyboardError: null }, updated_at: new Date().toISOString() }, `?id=eq.${id}&user_id=eq.${userId}`);
+    return { state: "ready" };
+  } catch (err) {
+    console.error(`[agent-marketing-storyboard] project ${id} failed:`, err.message);
+    try { await patchWorking({ storyboardStatus: "error", storyboardError: err.code === "storyboard_failed" ? err.message : "We couldn't build the scene plan from your approved script. Your script is unchanged. Please try again." }); } catch (e) { /* the page times out and offers a retry */ }
+    return { state: "error", code: err.code || "storyboard_error" };
+  }
+}
+
+module.exports = { planStart, runPlan, runStoryboard, writeNarrative, errorNarrative };

@@ -17,15 +17,8 @@ const LIB = __dirname + "/../netlify/functions/lib/";
 const analyze = (text) => ti.analyze(rr.buildContext([{ id: "u1", facts: lib.analyzePages([text], {}).facts }], { geography: { type: "zip", name: "95747", label: "ZIP 95747" } }));
 const userOf = (b2extra) => JSON.parse(planLib.buildUserMessage({ template: "local_market_insider", duration_sec: 60, formats: ["9x16"], intake: { angle: "", market: "Lincoln, CA", audience: "Home sellers", issue: "", action: "Ask", observation: "" }, selected_topic: { ...FX.topic, b2: { ...FX.topic.b2, ...(b2extra || {}) } } }));
 
-test("B2 rule 2b (Nov 15): the report relationship may be reinforce, complicate, context or none; the report prompt only; the most relevant observation first", () => {
-  const withTrend = b2.systemPrompt("article_report", true), plain = b2.systemPrompt("article_report", false), editorial = b2.systemPrompt("article_editorial", false);
-  assert.match(withTrend, /REPORT RELATIONSHIPS/);
-  assert.match(withTrend, /reinforces the article's point, complicates or contradicts it, adds local context only, or has no real bearing on it; say which/);
-  assert.match(withTrend, /the most relevant first/);
-  assert.match(withTrend, /never force a link to make a candidate stronger/);
-  assert.match(withTrend, /Never compare the prices of homes for sale with the prices of homes that sold as if they were the same homes/);
-  assert.match(withTrend, /The report's caveats are binding/);
-  for (const p of [plain, editorial]) assert.doesNotMatch(p, /REPORT RELATIONSHIPS/, "Option 3 and non-trend prompts do not carry the report relationships rule");
+test("B2 (Nov 15 replacement): no prompt carries the report-relationship rule or any prewritten trend reading", () => {
+  for (const mode of ["article_report", "article_editorial"]) assert.doesNotMatch(b2.systemPrompt(mode), /REPORT RELATIONSHIPS|trend_observations|trend_interpretation/);
 });
 
 test("B2 rule 1b (Nov 15): the mechanism is stated in plain sentences only when a homeowner needs it to understand the position", () => {
@@ -77,11 +70,9 @@ test("the caveat reaches the Planner through the existing caveats array and no n
   assert.ok(withGap.caveats.some((c) => /different homes/.test(c)));
 });
 
-test("the 600-character truncation is gone: a long reading survives whole to a sentence end, with a higher limit", () => {
+test("B2 no longer reads or clips a trend interpretation", () => {
   const src = fs.readFileSync(LIB + "agent-marketing-b2-lib.js", "utf8");
-  assert.doesNotMatch(src, /clip\(c\.trend_interpretation, 600\)/);
-  assert.match(src, /clip\(c\.trend_interpretation, TREND_READING_CHARS\)/);
-  assert.match(src, /TREND_READING_CHARS = 1200/);
+  assert.doesNotMatch(src, /trend_interpretation|TREND_READING_CHARS/);
 });
 
 test("Planner rule 2i E: the figure's own label decides what it measures; for-sale and sold prices describe different homes", () => {

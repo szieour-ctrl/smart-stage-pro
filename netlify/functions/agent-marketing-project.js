@@ -35,6 +35,7 @@ const evidenceBlocked = (project) => {
   const v = project && project.template === "local_market_insider" ? b1.viewForTopic(project.selected_topic) : null;
   return v && v.status === b1.BLOCKED ? v.blockedReason : null;
 };
+const MAX_POLISHES = 10;   // cost protection only: revision requests per script
 const PUBLIC_COLS = "id,template,angle,formats,duration_sec,voice,music,intake,narrative,narrative_approved_at,storyboard,selected_topic,status,gate_version,gate_result,created_at,updated_at,hidden_at";
 
 // A saved script written for another topic or other answers is kept for the agent to see, but the page must offer "Write my script" again (Sam, Oct 29, 2026).
@@ -53,8 +54,8 @@ function reelTypeOf(row) {
 
 // Restricted Test diagnostics (raw Planner replies after a structural failure) stay in the database and are never sent to the page.
 function clientNarrative(n) {
-  if (!n || typeof n !== "object" || !("plannerFailure" in n)) return n || null;
-  const { plannerFailure, ...rest } = n;
+  if (!n || typeof n !== "object" || !("plannerFailure" in n || "writerRecord" in n || "polishRecords" in n)) return n || null;
+  const { plannerFailure, writerRecord, polishRecords, ...rest } = n;   // the Writer's exact input and replies stay in the database too (Nov 15, 2026)
   return rest;
 }
 
@@ -156,7 +157,7 @@ exports.handler = async (event) => {
       return reply(200, { ok: true, hidden: Array.isArray(saved.data) ? saved.data.length : null });
     }
 
-    if (!["save_intake", "save_narrative", "approve_narrative", "plan"].includes(action)) return reply(400, { error: "Unknown action" });
+    if (!["save_intake", "save_narrative", "approve_narrative", "plan", "polish_narrative"].includes(action)) return reply(400, { error: "Unknown action" });
     const o = await loadOwned(b.id, userId);
     if (o.error) return o.error;
     const project = o.row;
@@ -199,6 +200,8 @@ exports.handler = async (event) => {
       const narrative = {
         editorialAngle: changed ? "" : prev.editorialAngle, hook: changed ? (v.narrative.captionText.split(/(?<=[.!?\u2026])\s+/)[0] || "") : prev.hook, claimsToVerify: changed ? [] : prev.claimsToVerify, missingAgentInputs: prev.missingAgentInputs,
         attempts: prev.attempts, intakeHash: prev.intakeHash, lengthDiagnostics: prev.lengthDiagnostics,
+        // Nov 15, 2026: the complete-source Writer's mark, its untouched first draft and its stored input/output survive every edit of the script.
+        ...(prev.engine ? { engine: prev.engine, model: prev.model, promptVersion: prev.promptVersion, writerDraft: prev.writerDraft, writerRecord: prev.writerRecord, polishRecords: prev.polishRecords } : {}),
         ...(articleLed && scenesFor ? { scenesFor } : {}),
         ...v.narrative, scenes: clientScenes,
         pronunciations: Array.isArray(b.narrative && b.narrative.pronunciations) ? require("./lib/agent-marketing-timing-lib").cleanPronunciations(b.narrative.pronunciations) : (prev.pronunciations || []), cta: v.narrative.cta || prev.cta || null,
@@ -233,6 +236,23 @@ exports.handler = async (event) => {
         return reply(502, { error: "Planning failed to start. Please try again." });
       }
       return reply(202, { project: forClient(saved) });
+    }
+
+    if (action === "polish_narrative") {
+      // Nov 15, 2026 (Sam): the OPTIONAL revision call, made only when the subscriber asks for it. It returns a proposal; nothing is saved or approved until the subscriber saves it.
+      const prevN = project.narrative && typeof project.narrative === "object" ? project.narrative : null;
+      if (!prevN || prevN.engine !== am.WRITER_ENGINE || !prevN.narrationTagged) return reply(409, { error: "There is no script to revise yet." });
+      if (!process.env.ANTHROPIC_API_KEY) return reply(500, { error: "Revising is not configured." });
+      const done = Array.isArray(prevN.polishRecords) ? prevN.polishRecords : [];
+      if (done.length >= MAX_POLISHES) return reply(429, { error: "This script has used all of its revision requests. You can still edit it yourself.", code: "polish_limit" });
+      const current = typeof (b.narrationTagged) === "string" && b.narrationTagged.trim() ? b.narrationTagged : prevN.narrationTagged;
+      const writerLib = require("./lib/agent-marketing-writer-lib");
+      let out;
+      try { out = await writerLib.polish({ project, narration: current, request: b.request, anthropicKey: process.env.ANTHROPIC_API_KEY, env: process.env }); }
+      catch (e) { console.error("agent-marketing polish failed:", e.message); return reply(502, { error: "The revision could not be written. Your script is unchanged. Please try again." }); }
+      const rec = { at: new Date().toISOString(), request: String(b.request || "").slice(0, 600), system: out.input.system, user: out.input.user, reply: out.reply, usage: out.usage };
+      await patch(project.id, userId, { narrative: { ...prevN, polishRecords: done.concat(rec) } });
+      return reply(200, { polished: { narration: out.narration, words: out.words } });
     }
 
     // approve_narrative

@@ -29,20 +29,14 @@ const model = (seen) => async (system, user) => {
   return JSON.stringify({ candidates, selected: candidates.map((c) => c.id) });
 };
 
-test("Option 2: B2 is given the shared Trend Intelligence analysis, and every topic keeps the article, the interpretation and the report figures", async () => {
-  const { reportFigures, trend } = setup(fx.marketUpdate());
+test("Option 2 (Nov 15 replacement): B2 gets the report's figures but no Trend Intelligence, and no topic carries a trend reading", async () => {
   const seen = [];
+  const { reportFigures, trend } = setup(fx.marketUpdate());
   const out = await b2.generate({ records, articles, evidence, mode: "article_report", market: "ZIP 95747", audience: "sellers", reportFigures, trend, callFn: model(seen), anthropicKey: "k", reportSource: { type: "report" } });
-  assert.match(seen[0].system, /REPORT RELATIONSHIPS/);
-  assert.match(seen[0].user, /trend_intelligence/);
-  assert.strictEqual(out.topics.length, 5);
-  out.topics.forEach((t) => {
-    assert.strictEqual(t.b2.article.url, "https://news.example.org/a");           // the article stays the central story
-    assert.ok(t.b2.sourceRefs.length >= 1);
-    assert.ok(t.b2.trendObservationRefs.length >= 1 && t.b2.trendInterpretation);
-    assert.ok(t.b2.trendIntelligence.observations[0].evidence.every((e) => /^R\d+$/.test(e.ref)));
-    assert.ok(t.b2.homeownerImplication && t.b2.audienceJourney && t.b2.editorialAngle && t.b2.reportFigureRefs.length);
-  });
+  assert.ok(!/REPORT RELATIONSHIPS|trend_intelligence|TREND_READING/.test(seen[0].system + seen[0].user), "B2 is not handed any prewritten market interpretation");
+  assert.ok(out.topics.length === 5);
+  assert.ok(out.topics.every((t) => !t.b2.trendIntelligence && !t.b2.trendObservationRefs && !t.b2.trendInterpretation), "no topic carries buyer/seller signals or a Realtor reading from code");
+  assert.ok(out.topics.every((t) => t.b2.mechanism && t.b2.homeownerImplication), "the five article-led questions and angles remain");
 });
 
 test("Option 3 (no report) and an unusable report leave B2's prompt without any Trend Intelligence", async () => {
@@ -52,25 +46,15 @@ test("Option 3 (no report) and an unusable report leave B2's prompt without any 
   assert.ok(out.topics.every((t) => !t.b2.trendIntelligence && !t.b2.trendObservationRefs));
 });
 
-test("Option 1 and Option 2 use the same Trend Intelligence implementation", () => {
+test("Option 1 still uses Trend Intelligence; B2 (Options 2 and 3) no longer does", () => {
   const ed = require("../netlify/functions/lib/agent-marketing-report-editorial-lib");
-  const tiPath = require.resolve("../netlify/functions/lib/agent-marketing-trend-intelligence-lib");
-  assert.ok(require.cache[tiPath]);
-  assert.strictEqual(require("../netlify/functions/lib/agent-marketing-trend-intelligence-lib"), ti);
-  assert.ok(/ti\.analyze/.test(ed.generate.toString()) && /ti\.analyze/.test(require("fs").readFileSync(require.resolve("../netlify/functions/lib/agent-marketing-b2-lib"), "utf8")));
+  assert.ok(/ti\.analyze/.test(ed.generate.toString()));
+  assert.ok(!/trend-intelligence-lib|ti\.analyze/.test(require("fs").readFileSync(require.resolve("../netlify/functions/lib/agent-marketing-b2-lib"), "utf8")));
 });
 
-test("script writer handoff: Option 2 carries article direction plus market interpretation; Option 1 carries trend commentary", async () => {
-  const { reportFigures, trend, ctx } = setup(fx.marketUpdate());
-  const out = await b2.generate({ records, articles, evidence, mode: "article_report", market: "ZIP 95747", audience: "sellers", reportFigures, trend, callFn: model([]), anthropicKey: "k", reportSource: { type: "report" } });
-  const t2 = { ...out.topics[0], reportFigures: [...ctx.figures.values()].map((cf) => ({ text: rr.figureText(cf) })) };
+test("script writer handoff: Option 1 (trend report only) still carries trend commentary", async () => {
+  const { ctx } = setup(fx.marketUpdate());
   const env = { AGENT_MARKETING_B1_EVIDENCE: "dev" };
-  const b2brief = plan.topicBrief(t2, env);
-  assert.strictEqual(b2brief.editorial_direction.kind, "article_story_with_market_interpretation");
-  assert.ok(b2brief.editorial_direction.article.title && b2brief.editorial_direction.homeowner_implication);
-  const mi = b2brief.editorial_direction.market_interpretation;
-  assert.ok(mi.relationships[0].evidence.length >= 1 && mi.realtor_readings.length && mi.reporting_area_and_period[0].period === "October 2026");
-  assert.ok(b2brief.figures_you_may_state.length > 0);
   // Option 1 topic (built by the report-only generator)
   const ed = require("../netlify/functions/lib/agent-marketing-report-editorial-lib");
   const o1 = await ed.generate({ ctx, market: "ZIP 95747", audience: "sellers", today: "2026-11-09", anthropicKey: "k", callFn: async (s, user) => {

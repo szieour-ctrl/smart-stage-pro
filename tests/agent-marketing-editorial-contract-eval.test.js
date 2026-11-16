@@ -95,9 +95,8 @@ test("a small-sample or one-week report keeps its own caveats and still analyzes
 });
 
 test("an article with no real link to the report is a valid candidate: B2 may leave the report fields empty", () => {
-  const p = b2.systemPrompt("article_report", true);
-  assert.match(p, /one with no real connection leaves trend_observations and trend_interpretation empty/);
-  assert.match(p, /A candidate may rest on the article alone or on context alone/);
+  const p = b2.systemPrompt("article_report");
+  assert.doesNotMatch(p, /trend_observations|trend_interpretation/);
   const none = topicFor(SUBJECTS.E8_school_bond_no_link);
   const u = userOf({ ...none, b2: { ...none.b2, trendInterpretation: "", trendObservationRefs: [], trendIntelligence: null } });
   assert.ok(u.selected_topic.editorial_direction.angle, "the Planner still receives the selected direction");

@@ -61,6 +61,9 @@ function wordTargets(durationSec, env) {
   const dev = String((env || process.env).AGENT_MARKETING_B1_EVIDENCE || "").trim().toLowerCase() === "dev";
   return (dev ? DEV_WORD_TARGETS : WORD_TARGETS)[durationSec] || (dev ? DEV_WORD_TARGETS : WORD_TARGETS)[45];
 }
+// Nov 15, 2026 (Sam, Test only): the Writer's 60-second composition range is 135-145 words (target 140); other durations use wordTargets.
+const WRITER_RANGE_60 = [135, 145];
+function writerWordTargets(durationSec, env) { return Number(durationSec) === 60 ? WRITER_RANGE_60.slice() : wordTargets(durationSec, env); }
 // Nov 13, 2026 (Sam, Test only): a nonblocking estimate of the narration length from the word count, using the delivery range seen across stored renders
 // (2.3 to 2.8 words a second). Advisory text only: it never changes the narration, the voice speed or any timing.
 const PACE_WORDS_PER_SECOND = [2.3, 2.8];
@@ -128,12 +131,10 @@ function validateNarrative(body, durationSec, opts) {
   if (tagged.length > 2500) return { error: "The narration is too long." };
   const captionText = stripAudioTags(tagged);
   const words = countWords(tagged);
-  const [lo, hi] = wordTargets(durationSec);
+  const [lo, hi] = opts && opts.writer ? writerWordTargets(durationSec) : wordTargets(durationSec);
   const warnings = [];
-  // A Writer script (Nov 15, 2026, Sam) shows its actual count and no range-based warning; other scripts keep theirs.
-  const rangeWarnings = !(opts && opts.writer);
-  if (rangeWarnings && words < lo) warnings.push(`About ${words} spoken words; a ${durationSec}-second piece usually runs ${lo}–${hi}. It may feel short.`);
-  if (rangeWarnings && words > hi) warnings.push(`About ${words} spoken words; a ${durationSec}-second piece usually runs ${lo}–${hi}. Speech may run long.`);
+  if (words < lo) warnings.push(`About ${words} spoken words; a ${durationSec}-second piece usually runs ${lo}–${hi}. It may feel short.`);
+  if (words > hi) warnings.push(`About ${words} spoken words; a ${durationSec}-second piece usually runs ${lo}–${hi}. Speech may run long.`);
   if (devAdvisory()) warnings.push(durationAdvisory(words, durationSec)); // Test only (Nov 13, Sam): nonblocking estimate
   const ctaText = intakeLib.cleanText(b.cta && b.cta.text, 80);
   const ctaSource = CTA_SOURCES_FROM_CLIENT.includes(b.cta && b.cta.source) ? b.cta.source : "user_edited";
@@ -220,7 +221,7 @@ function storyboardNeeded(narrative) {
 const NOT_EDITABLE_AFTER = ["rendering", "rendered", "published"];
 
 module.exports = {
-  WRITER_ENGINE, isWriterScript,
+  WRITER_ENGINE, isWriterScript, writerWordTargets,
   marketReviewEnabled,
   PACE_WORDS_PER_SECOND, narrationEstimate, durationAdvisory, narrationKey, storyboardNeeded, DURATIONS, FORMATS, VOICES, MUSIC, DURATION_CONTRACT, WORD_TARGETS, DEV_WORD_TARGETS, SCENE_RANGES, IMAGE_RANGES, WRITING_AIMS, EDITOR_TARGETS, wordTargets, UUID_RE, NOT_EDITABLE_AFTER,
   isEnabledFor, validateCreate, stripAudioTags, countWords, validateNarrative, gateInputFor, topicNotice, noticeOverlayFor, sourceCreditFor, attachNotice,

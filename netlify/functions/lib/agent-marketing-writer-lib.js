@@ -29,7 +29,25 @@ function applies(project, env) {
 function lengthFor(durationSec, env) { return am.wordTargets(durationSec, env); }
 
 // ── The prompt ────────────────────────────────────────────────────────────────────────────────────────────────────────────
-function systemPrompt() {
+/** The 60-second Script Structure (Sam, Nov 15, 2026): internal budgets for ONE cohesive narration. Other lengths carry only the total range. */
+const BUDGETS_60 = { hook: 20, article: 33, market: 35, synthesis: [47, 50], cta: 15, total: [140, 155] };
+function budgetLines(durationSec, env) {
+  const [lo, hi] = lengthFor(durationSec, env);
+  if (Number(durationSec) !== 60) return [`LENGTH. The whole narration runs ${lo}-${hi} spoken words.`];
+  const b = BUDGETS_60;
+  return [
+    "SCRIPT STRUCTURE AND WORD BUDGETS (spoken words). Compose ONE cohesive narration that follows this order and these internal budgets. They are budgets for your own planning, not sections: write flowing narration with no headings, labels or markers.",
+    `1. Opening hook: at most ${b.hook} words. The first sentence or two is the Reel's hook: it must make a homeowner stop scrolling.`,
+    `2. Article summary: at most ${b.article} words. What happened and why it matters, as the article reports it.`,
+    `3. Market summary: at most ${b.market} words. Only the report's local conditions that bear on this story (none when no report is supplied; then use the words elsewhere within the total).`,
+    `4. Realtor synthesis: ${b.synthesis[0]}-${b.synthesis[1]} words. Your own independent professional interpretation of what this means for the homeowner. Do not repeat the article or the market figures here; add judgment they do not contain.`,
+    `5. Call to action: at most ${b.cta} words.`,
+    `TOTAL: ${b.total[0]}-${b.total[1]} spoken words (the parts above add up to roughly this).`,
+    "BEFORE YOU REPLY, in this same response and without showing your work: count the words of your draft part by part, and if any part is over its budget or the total is outside the range, tighten it (cut words, never facts you need) until it fits. Return only the final narration.",
+  ];
+}
+
+function systemPrompt(durationSec, env) {
   return [
     "You write the narration of one short market-update Reel for a Realtor (the subscriber). You are the only editorial author: you decide what the Reel says and how it argues it.",
     "",
@@ -49,7 +67,8 @@ function systemPrompt() {
     "FAIR HOUSING. No steering: no \"perfect for\" a kind of person, and no claims about safety or school quality of an area.",
     "NOTICE. Do not speak MetroList's required notice; it is added on screen separately.",
     "",
-    "FORMAT. Return ONLY the narration: plain spoken sentences in one paragraph. No title, no headings, no list, no JSON, no stage directions, no quotation marks around it. Open with a first sentence that makes a homeowner stop scrolling, and close with one short sentence that fits the Realtor's desired viewer action. Aim for the spoken-word range in the user message (count your words) and end on a complete sentence.",
+    ...budgetLines(durationSec == null ? 60 : durationSec, env), "",
+    "FORMAT. Return ONLY the narration: plain spoken sentences in one paragraph. No title, no headings, no list, no JSON, no stage directions, no quotation marks around it. Open with the hook, close with one short sentence that fits the Realtor's desired viewer action, stay within the word budgets above (the range in the user message), and end on a complete sentence.",
   ].join("\n");
 }
 
@@ -107,7 +126,7 @@ function buildInput({ project, reportRows, env }) {
   const user = JSON.stringify({
     selected_topic: { question: t.question || "", editorial_angle: b.editorialAngle || (t.editorial && t.editorial.angle) || "", why_it_matters: t.whyItMatters || "",
       homeowner_implication: b.homeownerImplication || "", supporting_explanation: b.mechanism || "", audience_journey: b.audienceJourney || "" },
-    article: { title: a.title || snap.title || "", url: snap.url || a.url || null, site: a.domain || null, published: a.published || null, text: snap.text },
+    article: { title: clip(a.title || snap.title, 300), url: snap.url || a.url || null, site: a.domain || null, published: a.published || null, text: snap.text },
     market_report: report,
     ...(report ? {} : { market_report_note: "No market report was supplied for this piece." }),
     article_findings_reference: findingsOf(project),
@@ -115,7 +134,7 @@ function buildInput({ project, reportRows, env }) {
       desired_viewer_action: intake.action || null, firsthand_observation: intake.observation || null },
     length: { duration_seconds: project.duration_sec, spoken_words: [lo, hi] },
   }, null, 2);
-  return { system: systemPrompt(), user };
+  return { system: systemPrompt(project.duration_sec, env), user };
 }
 
 /** The narration inside the model's reply, unchanged. A reply wrapped in code fences or in a JSON object (the development fixture) is unwrapped, nothing else. */
@@ -192,4 +211,4 @@ async function polish({ project, narration, request, anthropicKey, callFn, env }
   return { narration: text, words: am.countWords(text), usage: planLib().summarizeClaudeUsage(sink), input, reply: String(reply) };
 }
 
-module.exports = { ENGINE, PROMPT_VERSION, WRITER_MAX_TOKENS, applies, lengthFor, systemPrompt, buildInput, reportOf, loadReportRows, parseNarration, write, polish, polishInput, polishSystemPrompt };
+module.exports = { BUDGETS_60, budgetLines, ENGINE, PROMPT_VERSION, WRITER_MAX_TOKENS, applies, lengthFor, systemPrompt, buildInput, reportOf, loadReportRows, parseNarration, write, polish, polishInput, polishSystemPrompt };

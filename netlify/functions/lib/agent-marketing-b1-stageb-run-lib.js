@@ -235,6 +235,12 @@ async function status({ userId, projectId, store, loadProject, env }) {
     createdAt: row.created_at || null, finishedAt: row.finished_at || null, lastAttempt });
 }
 
+/** The article's title from a stored provider request: the text after the title marker up to the first line break, real or escaped ("\\n" as stored). Never the article text. */
+function titleFromRequest(requestText) {
+  const m = String(requestText || "").match(/TITLE \(as returned by the reader\): ((?:(?!\\n|\n)[\s\S])*)/);
+  return m ? m[1].trim().slice(0, 300) : "";
+}
+
 /**
  * withPlanEvidence(project, { env, store }) → the project to plan from. Switch off, or not an Article-Led Local Market Insider topic: the project
  * unchanged (production behaviour). Switch on: the selected topic carries the project's attached evidence row's bundle when it passes
@@ -251,8 +257,7 @@ async function withPlanEvidence(project, { env, store } = {}) {
   // as the bundle) rides on the project beside the topic; the old planner never reads it.
   let articleSnapshot = null;
   if (row && typeof row.snapshot_text === "string" && !sbLib.checkRecord(row, project).length) {
-    const title = String(row.request_text || "").match(/TITLE \(as returned by the reader\): ([^\n]*)/);
-    articleSnapshot = { text: row.snapshot_text, sha256: row.snapshot_sha256 || null, evidenceId: row.id || null, url: row.source_url || null, retrievedAt: row.snapshot_retrieved_at || null, title: title ? title[1].trim() : "" };
+    articleSnapshot = { text: row.snapshot_text, sha256: row.snapshot_sha256 || null, evidenceId: row.id || null, url: row.source_url || null, retrievedAt: row.snapshot_retrieved_at || null, title: titleFromRequest(row.request_text) };
   }
   return { ...project, selected_topic: sbLib.topicWithEvidence(project, row, e), ...(articleSnapshot ? { articleSnapshot } : {}) };
 }
@@ -415,5 +420,5 @@ async function articleEvidence({ userId, projectId, researchId, art, store, fetc
   return { articleKey, state: row ? "ready" : res.state, code: row ? undefined : res.code || (res.state === "ready" ? "evidence_unreadable" : undefined), providerAttempted: !!res.providerAttempted, row };
 }
 
-module.exports = { failureReason, STALE_MS, caps, admit, articleLedTopic, ownReadyEvidence, precheck, startRequest, startJob, runJob, reuseSavedTopic, recordAttempt, status, withPlanEvidence,
+module.exports = { failureReason, STALE_MS, caps, admit, articleLedTopic, ownReadyEvidence, precheck, startRequest, startJob, runJob, reuseSavedTopic, recordAttempt, status, withPlanEvidence, titleFromRequest,
   startScriptRequest, scriptJob, evidenceFailureMessage, plannerConfig, articleEvidence };

@@ -258,15 +258,22 @@ function confirmPropertyTypes(list) {
   return { ok: true, confirmed: { names: [...new Set(names)], attestedBySubscriber: true } };
 }
 /** The header's property types are shown as printed; where the report's filters cannot be reliably established (always, for these exports), the subscriber is asked to confirm. */
+// Two property-type names are the same when they differ only in case, punctuation or a generic word ("Single Family" = "Single Family Residence").
+const TYPE_FILLER = new Set(["residence", "residences", "residential", "home", "homes", "property", "properties", "type", "types"]);
+const typeKey = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9 ]+/g, " ").split(/\s+/).filter((w) => w && !TYPE_FILLER.has(w)).join(" ");
+/** Domus prints "multiple Property Subtypes" when no subtype was chosen: every property type is included, land among them. */
+const isMultipleSubtypes = (s) => /^multiple\b/i.test(String(s || "").trim());
 function propertyTypeBlock(displayed, confirmed) {
   const shown = displayed.propertyTypesRaw ? displayed.propertyTypesRaw.replace(/^all\s+/i, "All ") : null;
   const out = { displayed: shown, confirmed: confirmed || null, conflicts: [] };
   if (confirmed) {
-    const named = shown && !/^all\b/i.test(shown) ? shown.split(/\s*(?:,|&|\band\b)\s*/i).map((x) => x.trim().toLowerCase()) : [];
-    named.filter((x) => x && !confirmed.names.some((c) => c.toLowerCase() === x)).forEach((x) => out.conflicts.push({ kind: "property_type", header: x, message: `The report header names ${x}, which is not among the property types you selected.` }));
+    const multiple = isMultipleSubtypes(shown);
+    const named = shown && !/^all\b/i.test(shown) && !multiple ? shown.split(/\s*(?:,|&|\band\b)\s*/i).map((x) => x.trim().toLowerCase()) : [];
+    named.filter((x) => x && !confirmed.names.some((c) => typeKey(c) === typeKey(x))).forEach((x) => out.conflicts.push({ kind: "property_type", header: x, message: `The report header names ${x}, which is not among the property types you selected.` }));
+    if (multiple && !confirmed.names.some((c) => /^(?:all|multiple)\b/i.test(c.trim()))) out.conflicts.push({ kind: "property_type", header: shown, message: `The report header says it includes multiple property subtypes, so it covers every property type, land included, and not only ${confirmed.names.join(", ")}. Averages in a report like that can run lower than single-family figures.` });
     out.status = out.conflicts.length ? "conflict" : "ok";
   } else out.status = "needs_confirmation";
-  out.reason = !shown ? "header_missing" : /^all\b/i.test(shown) ? "header_says_all_types_on_every_export" : "header_not_proof_of_filter";
+  out.reason = !shown ? "header_missing" : /^all\b/i.test(shown) ? "header_says_all_types_on_every_export" : isMultipleSubtypes(shown) ? "header_says_multiple_subtypes_all_types" : "header_not_proof_of_filter";
   return out;
 }
 

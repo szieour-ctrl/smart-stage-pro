@@ -256,6 +256,26 @@ test("property type: the header value is shown as printed and a subscriber confi
   assert.strictEqual(h.propertyTypeScope.status, "conflict");
 });
 
+test("property type: Domus header names single family residence; \"Single Family\" and other filler differences are the same type", () => {
+  const line = (t) => ({ scopeLine: `Includes ${t} in Roseville` });
+  const run = (t, types) => { const m = fx.monthly(line(t)); return mr.readMarketReview(m.pages, { items: m.items, scope: ROSEVILLE, propertyTypes: mr.confirmPropertyTypes(types).confirmed }).facts.propertyTypeScope; };
+  ["Single Family", "single family residence", "Single-Family Residence", "Single Family Homes"].forEach((t) => assert.strictEqual(run("Single Family Residence", [t]).status, "ok", t));
+  assert.strictEqual(run("Single Family Residence", ["Condo"]).status, "conflict");
+  assert.strictEqual(run("Single Family Residence", ["Single Family", "Condo"]).status, "ok");
+  assert.strictEqual(run("Single Family Residence, Condominium", ["Single Family"]).status, "conflict");
+});
+
+test("property type: \"multiple Property Subtypes\" means every type, land included, and says so", () => {
+  const run = (types) => { const m = fx.monthly({ scopeLine: "Includes multiple Property Subtypes in Roseville" }); return mr.readMarketReview(m.pages, { items: m.items, scope: ROSEVILLE, propertyTypes: mr.confirmPropertyTypes(types).confirmed }).facts.propertyTypeScope; };
+  const c = run(["Single Family Residence"]);
+  assert.strictEqual(c.status, "conflict");
+  assert.strictEqual(c.reason, "header_says_multiple_subtypes_all_types");
+  assert.match(c.conflicts[0].message, /multiple property subtypes.*every property type, land included.*Single Family Residence/);
+  assert.doesNotMatch(c.conflicts[0].message, /not among the property types you selected/);
+  assert.strictEqual(run(["All property types"]).status, "ok");
+  assert.strictEqual(run(["Multiple Property Subtypes"]).status, "ok");
+});
+
 test("Trend Intelligence and every consumer drop a change marked likeWithLike:false, whoever produced it", () => {
   const rr = require("../netlify/functions/lib/agent-marketing-research-report-lib");
   const ti = require("../netlify/functions/lib/agent-marketing-trend-intelligence-lib");

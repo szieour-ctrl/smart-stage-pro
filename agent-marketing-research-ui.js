@@ -607,7 +607,8 @@
         else if (sug || psug) h += '<div class="hint" style="margin-top:6px">Suggested from your project. Check it, change it if needed, then confirm.</div>';
         h += '<div class="row2"><div><label class="lbl" for="rbType">Area this report covers</label><select id="rbType">' + SCOPE_TYPES.map(function (t) { return '<option value="' + t[0] + '"' + (t[0] === type ? " selected" : "") + ">" + t[1] + "</option>"; }).join("") + '</select></div>';
         h += '<div><label class="lbl" for="rbNames">Place name(s)</label><input type="text" id="rbNames" maxlength="200" placeholder="Separated by commas" value="' + esc(names.join(", ")) + '"></div></div>';
-        h += '<label class="lbl" for="rbTypes">Property types this report covers</label><input type="text" id="rbTypes" maxlength="200" placeholder="For example: Single Family, Condo" value="' + esc(((pts && pts.names) || psug || []).join(", ")) + '">';
+        if (pts && pts.source === "report_header") h += '<div class="hint" style="margin-top:8px">Property types: <b>' + listIn(pts.names) + "</b> (read from the report header, so there is nothing to type)</div>";
+        else h += '<label class="lbl" for="rbTypes">Property types this report covers</label><input type="text" id="rbTypes" maxlength="200" placeholder="For example: Single Family, Condo" value="' + esc(((pts && pts.names) || psug || []).join(", ")) + '">';
         if (need.indexOf("dataThrough") >= 0 || (editing && a.dataThrough && a.dataThrough.provenance === "subscriber_attested")) h += '<label class="lbl" for="rbThrough">Last date this report\'s data covers (required)</label><input type="date" id="rbThrough" value="' + esc(a.dataThrough ? a.dataThrough.date : "") + '"><div class="hint">The report does not say. A date you enter is recorded as yours, not verified.</div>';
         conflicts.forEach(function (c) { h += '<div class="rs-alert bad" role="alert">' + esc(c.message) + "</div>"; });
         if (need.indexOf("conflicts") >= 0 || conflicts.length) h += '<label class="choice" style="margin-top:8px"><input type="checkbox" id="rbAck"><span>I have read the differences noted above and my selection is right.</span></label>';
@@ -632,7 +633,7 @@
       if ($("rbType")) {
         if (!carried && $("rbAttest") && !$("rbAttest").checked) return { error: "Tick the box to confirm the area and property types are yours." };
         out.scope = { type: $("rbType").value, names: $("rbNames").value.split(",").map(function (x) { return x.trim(); }).filter(Boolean) };
-        out.propertyTypes = $("rbTypes").value.split(",").map(function (x) { return x.trim(); }).filter(Boolean);
+        if ($("rbTypes")) out.propertyTypes = $("rbTypes").value.split(",").map(function (x) { return x.trim(); }).filter(Boolean);
         if ($("rbThrough") && $("rbThrough").value) out.dataThrough = $("rbThrough").value;
         if ($("rbAck")) out.acknowledgeConflicts = $("rbAck").checked;
       }

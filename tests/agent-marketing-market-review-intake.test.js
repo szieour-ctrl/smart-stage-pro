@@ -128,7 +128,8 @@ test("a second report with the same header reuses the earlier attestation: no du
   assert.strictEqual(ok.status, 200, JSON.stringify(ok.json));
   // a report whose displayed header differs is not covered by that attestation
   const other = (await call({ action: "upload", projectId: p.id, fileName: "m.pdf", fileBase64: (await pdfFromItems(fx.monthly({ scopeLine: "Includes Condo in all Counties" }))).toString("base64"), permission: true })).json.upload;
-  assert.deepStrictEqual(other.summary.review.needed.sort(), ["geography", "propertyTypes"]);
+  assert.deepStrictEqual(other.summary.review.needed.sort(), ["geography"], "the area is still the subscriber's to confirm; the type is read from the header");
+  assert.deepStrictEqual(other.summary.review.attested.propertyTypes.selected.names, ["Condo"]);
 });
 
 test("a header that conflicts with the selection must be acknowledged before the report is usable", async () => {
@@ -336,7 +337,9 @@ test("carry-forward: a header that contradicts the carried selection still requi
   const first = (await upload(p, "monthly", { geography: CITY })).json.upload;
   await call({ action: "confirm", uploadId: first.id, correct: true, scope: ROSE, propertyTypes: SF });
   const cond = (await call({ action: "upload", projectId: p.id, fileName: "m.pdf", fileBase64: (await pdfFromItems(fx.monthly({ scopeLine: "Includes Condo in all Counties" }))).toString("base64"), permission: true, geography: CITY })).json.upload;
-  assert.ok(cond.summary.review.needed.includes("propertyTypes") || cond.summary.review.needed.includes("conflicts"));
+  // the property type now comes from the header, so a different header cannot contradict a carried type; the earlier area is not carried to it either
+  assert.ok(cond.summary.review.needed.includes("geography"));
+  assert.ok(!cond.summary.review.needed.includes("propertyTypes"));
   assert.strictEqual(cond.summary.review.canConfirm, false);
 });
 

@@ -101,7 +101,9 @@ test("the same validation as confirmation applies: scope and property types are 
   const none = await call({ action: "reattest", uploadId: id, propertyTypes: SF });
   assert.strictEqual(none.status, 400); assert.strictEqual(none.json.code, "scope_needed");
   const noTypes = await call({ action: "reattest", uploadId: id, scope: ROSE });
-  assert.strictEqual(noTypes.status, 400); assert.strictEqual(noTypes.json.code, "property_types_needed");
+  assert.strictEqual(noTypes.status, 200, "property types are optional: the reader takes them from the header");
+  const badTypes = await call({ action: "reattest", uploadId: id, scope: ROSE, propertyTypes: [] });
+  assert.strictEqual(badTypes.status, 400); assert.strictEqual(badTypes.json.code, "property_types_needed");
   const blank = await edit(id, { scope: { type: "city", names: [] } });
   assert.strictEqual(blank.status, 400);
   assert.deepStrictEqual(row(id).facts.attestation.scope.names, ["Roseville"], "a refused edit leaves the confirmation as it was");

@@ -276,6 +276,28 @@ test("property type: \"multiple Property Subtypes\" means every type, land inclu
   assert.strictEqual(run(["Multiple Property Subtypes"]).status, "ok");
 });
 
+test("property type: when the Domus header names it, the reader takes it from the header and the subscriber confirms only the area", () => {
+  const read = (t) => { const m = fx.monthly({ scopeLine: `Includes ${t} in Roseville` }); return mr.readMarketReview(m.pages, { items: m.items, scope: ROSEVILLE }).facts; };
+  const one = read("Single Family Residence");
+  assert.deepStrictEqual([one.propertyTypeScope.status, one.propertyTypeScope.reason, one.propertyTypeScope.confirmed.source, one.propertyTypeScope.confirmed.attestedBySubscriber], ["ok", "read_from_header", "report_header", false]);
+  assert.deepStrictEqual(one.propertyTypeScope.confirmed.names, ["Single Family Residence"]);
+  assert.deepStrictEqual(one.confirmation.needed, []);
+  assert.strictEqual(one.attestation.propertyTypes, null);
+  const all = read("multiple Property Subtypes");
+  assert.deepStrictEqual([all.propertyTypeScope.status, all.propertyTypeScope.reason, all.propertyTypeScope.confirmed.allTypes], ["ok", "read_from_header_all_types", true]);
+  assert.deepStrictEqual(all.confirmation.needed, []);
+  assert.ok(all.warnings.some((w) => /every property type, land included/.test(w)));
+  assert.ok(!all.warnings.some((w) => /not among the property types/.test(w)));
+  // the old header, which says all types on every export, still cannot be relied on
+  const old = mr.readMarketReview(fx.monthly().pages, { items: fx.monthly().items, scope: ROSEVILLE }).facts;
+  assert.deepStrictEqual([old.propertyTypeScope.status, old.confirmation.needed], ["needs_confirmation", ["propertyTypes"]]);
+  // no area: the area is still asked for
+  const m = fx.monthly({ scopeLine: "Includes Single Family Residence in all Counties" });
+  assert.deepStrictEqual(mr.readMarketReview(m.pages, { items: m.items }).facts.confirmation.needed, ["geography"]);
+  // an earlier area confirmation carries to the next report with nothing about property types
+  assert.strictEqual(mr.carryApplies({ scope: one.attestation.scope }, null), true);
+});
+
 test("Trend Intelligence and every consumer drop a change marked likeWithLike:false, whoever produced it", () => {
   const rr = require("../netlify/functions/lib/agent-marketing-research-report-lib");
   const ti = require("../netlify/functions/lib/agent-marketing-trend-intelligence-lib");

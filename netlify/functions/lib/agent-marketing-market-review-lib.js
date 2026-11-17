@@ -266,14 +266,19 @@ const isMultipleSubtypes = (s) => /^multiple\b/i.test(String(s || "").trim());
 function propertyTypeBlock(displayed, confirmed) {
   const shown = displayed.propertyTypesRaw ? displayed.propertyTypesRaw.replace(/^all\s+/i, "All ") : null;
   const out = { displayed: shown, confirmed: confirmed || null, conflicts: [] };
+  const multiple = isMultipleSubtypes(shown);
+  const specific = !!shown && !/^all\b/i.test(shown) && !multiple;     // Domus now prints what the report holds: a named type, or "multiple Property Subtypes" when none was chosen
   if (confirmed) {
-    const multiple = isMultipleSubtypes(shown);
-    const named = shown && !/^all\b/i.test(shown) && !multiple ? shown.split(/\s*(?:,|&|\band\b)\s*/i).map((x) => x.trim().toLowerCase()) : [];
+    const named = specific ? shown.split(/\s*(?:,|&|\band\b)\s*/i).map((x) => x.trim().toLowerCase()) : [];
     named.filter((x) => x && !confirmed.names.some((c) => typeKey(c) === typeKey(x))).forEach((x) => out.conflicts.push({ kind: "property_type", header: x, message: `The report header names ${x}, which is not among the property types you selected.` }));
     if (multiple && !confirmed.names.some((c) => /^(?:all|multiple)\b/i.test(c.trim()))) out.conflicts.push({ kind: "property_type", header: shown, message: `The report header says it includes multiple property subtypes, so it covers every property type, land included, and not only ${confirmed.names.join(", ")}. Averages in a report like that can run lower than single-family figures.` });
     out.status = out.conflicts.length ? "conflict" : "ok";
+  } else if (specific || multiple) {
+    // Nothing for the subscriber to type: the reader takes the property types from the header. They are the document's, never the subscriber's, statement.
+    out.confirmed = { names: multiple ? ["All property types"] : shown.split(/\s*(?:,|&|\band\b)\s*/i).map((x) => x.trim()).filter(Boolean), source: "report_header", attestedBySubscriber: false, allTypes: multiple };
+    out.status = "ok";
   } else out.status = "needs_confirmation";
-  out.reason = !shown ? "header_missing" : /^all\b/i.test(shown) ? "header_says_all_types_on_every_export" : isMultipleSubtypes(shown) ? "header_says_multiple_subtypes_all_types" : "header_not_proof_of_filter";
+  out.reason = !shown ? "header_missing" : /^all\b/i.test(shown) ? "header_says_all_types_on_every_export" : multiple ? (confirmed ? "header_says_multiple_subtypes_all_types" : "read_from_header_all_types") : (confirmed ? "header_not_proof_of_filter" : "read_from_header");
   return out;
 }
 
@@ -557,6 +562,7 @@ function finalize(f, att) {
   if (cov && cov.note) warnings.push(cov.note);
   if (cov && cov.provenance === SUBSCRIBER) warnings.push(`The data-through date (${cov.through}) is the one you entered. It is not independently verified.`);
   conflicts.forEach((c) => warnings.push(c.message));
+  if (out.propertyTypeScope.reason === "read_from_header_all_types") warnings.push("This report covers every property type, land included, so its averages can run lower than single-family figures.");
   if (out.geography.scopeKind === "combined") warnings.push(`This report's figures describe the combined ${out.geography.areaLabel.replace(/ combined$/, "")} market. They are never stated for one of those places alone.`);
   out.warnings = warnings;
   out.attestation = att.scope || att.propertyTypes || att.dataThrough ? { scope: att.scope || null, propertyTypes: att.propertyTypes || null, dataThrough: cov && !cov.error ? { date: cov.through, provenance: cov.provenance } : null, acknowledgedConflicts: acked ? conflicts.map((c) => c.message) : [], carriedFrom: att.carriedFrom || null } : null;
@@ -663,7 +669,7 @@ function attestationSummary(facts) {
 }
 /** carryApplies(prior, suggestions): an earlier attestation is reused only if the project's own current selection does not contradict it. */
 function carryApplies(priorAtt, suggestions) {
-  if (!priorAtt || !priorAtt.scope || !priorAtt.propertyTypes) return false;
+  if (!priorAtt || !priorAtt.scope) return false;
   const s = suggestions || {};
   if (s.scope && !sameScope(confirmScope(s.scope).confirmed, priorAtt.scope)) return false;
   if (s.propertyTypes && !sameTypes({ names: s.propertyTypes }, priorAtt.propertyTypes)) return false;

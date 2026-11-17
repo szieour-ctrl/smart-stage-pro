@@ -150,7 +150,7 @@ exports.handler = async (event) => {
       if (up.status !== "confirmed") return reply(409, { error: "Confirm the report first." });
       if (!up.facts || up.facts.layout !== "market_review") return reply(409, { error: "Only a Market Review's confirmation can be edited. Replace the report instead.", code: "not_editable" });
       const sc = mr.confirmScope(b.scope); if (!sc.ok) return reply(400, { error: sc.question, code: "scope_needed" });
-      const pt = mr.confirmPropertyTypes(b.propertyTypes); if (!pt.ok) return reply(400, { error: pt.question, code: "property_types_needed" });
+      const pt = b.propertyTypes == null ? { ok: true, confirmed: null } : mr.confirmPropertyTypes(b.propertyTypes); if (!pt.ok) return reply(400, { error: pt.question, code: "property_types_needed" });   // none sent: the reader took them from the header
       const extra = { scope: sc.confirmed, propertyTypes: pt.confirmed, acknowledgeConflicts: b.acknowledgeConflicts === true };   // an acknowledgement is never carried over: conflicts are re-read against the new selection
       if (b.dataThrough != null && b.dataThrough !== "") extra.dataThrough = String(b.dataThrough).slice(0, 10);
       extra.companions = await companionReports(p.row.id, userId, up.id);
@@ -229,7 +229,7 @@ exports.handler = async (event) => {
       // Not a second confirmation: when this project already holds a confirmed Market Review with the same displayed header, its area and
       // property-type attestation is reused and marked as carried forward. Companion reports can also support a partial year's date.
       const sibs = await supabase("GET", "agent_marketing_uploads", null, `?project_id=eq.${project.id}&user_id=eq.${userId}&status=eq.confirmed&select=id,facts&limit=10`);
-      const prior = (Array.isArray(sibs.data) ? sibs.data : []).find((x) => x.facts && x.facts.layout === "market_review" && x.facts.attestation && x.facts.attestation.scope && x.facts.attestation.propertyTypes && mr.carryApplies(x.facts.attestation, read.facts.suggestions) && ((x.facts.geography || {}).displayed || {}).raw === ((read.facts.geography || {}).displayed || {}).raw && (x.facts.propertyTypeScope || {}).displayed === (read.facts.propertyTypeScope || {}).displayed);
+      const prior = (Array.isArray(sibs.data) ? sibs.data : []).find((x) => x.facts && x.facts.layout === "market_review" && x.facts.attestation && x.facts.attestation.scope && mr.carryApplies(x.facts.attestation, read.facts.suggestions) && ((x.facts.geography || {}).displayed || {}).raw === ((read.facts.geography || {}).displayed || {}).raw && (x.facts.propertyTypeScope || {}).displayed === (read.facts.propertyTypeScope || {}).displayed);
       const comps = await companionReports(project.id, userId, null);
       const re = mr.reapply(read.facts, { scope: prior && prior.facts.attestation.scope, propertyTypes: prior && prior.facts.attestation.propertyTypes, companions: comps, carriedFrom: prior ? "an earlier confirmed report in this piece" : null });
       if (re.facts) read.facts = re.facts;

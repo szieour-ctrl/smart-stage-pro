@@ -49,9 +49,9 @@ test("Write my script: with Stage B offered → one script check + one backgroun
   assert.ok(!/setTimeout\(plan|setInterval\(plan|planWithEvidence\(state\.project\);\s*\}\s*catch/.test(html), "never retried by itself");
 });
 
-test("never asked on production; the status is only metadata for the progress line", () => {
+test("asked on production too (Nov 25, 2026); the status is only metadata for the progress line", () => {
   const es = fnBody("evidenceStatus");
-  assert.match(es, /SSP_CFG\.env === "production"\) return null/);
+  assert.ok(!/SSP_CFG\.env === "production"/.test(es), "the page no longer skips the evidence status on production");
   assert.match(es, /api\("GET", "\?projectId=/);
   const watch = fnBody("watchEvidenceFlow");
   assert.match(watch, /scriptWaitText\(/);

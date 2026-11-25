@@ -891,11 +891,11 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
     } catch (e) { say("scriptMsg", e.message, "err"); }
     $("polishBtn").disabled = false;
   }
-  // Test environment only (Nov 9, 2026): the selected B2 topic, its editorial angle, the source article and its quotations next to the script, so the
-  // script can be compared with the article. Never shown on production.
+  // The selected B2 topic, its editorial angle, the source article and its quotations next to the script, so the script can be compared with the
+  // article. Nov 25, 2026 (Sam): the beta runs on production for the allowlisted user, so this is shown there too (it only appears for an Article-Led project).
   function renderEvalBox() {
     var t = state.project && state.project.selectedTopic, b = t && t.b2, box = $("evalBox");
-    if (!b || SSP_CFG.env === "production") { box.classList.add("hidden"); box.innerHTML = ""; return; }
+    if (!b) { box.classList.add("hidden"); box.innerHTML = ""; return; }
     var a = b.article || {}, parts = ["<strong>Test evaluation: what this script was written from</strong>"];
     if (t.question) parts.push("<b>Topic:</b> " + esc(t.question));
     if (b.editorialAngle) parts.push("<b>B2 editorial angle:</b> " + esc(b.editorialAngle));
@@ -912,7 +912,7 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
   // then writes the script; without ready evidence no script is written and the narrative error says why (and whether an analysis was run).
   var STAGEB = "/.netlify/functions/agent-marketing-stageb", STAGEB_BG = "/.netlify/functions/agent-marketing-stageb-background";
   async function evidenceStatus() {
-    var p = state.project; if (!p || !p.id || SSP_CFG.env === "production") return null;   // never asked on production
+    var p = state.project; if (!p || !p.id) return null;   // Nov 25, 2026: asked on production too (the server admits only the allowlisted user)
     try { var r = await api("GET", "?projectId=" + encodeURIComponent(p.id), null, STAGEB); return r.ok ? r.json : null; } catch (e) { return null; }
   }
   // While a script is being written, show what the job is doing (the narrative poll in startPoll decides when it is finished).
@@ -1063,9 +1063,8 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
   }
 
   // ── Storyboard (read-only for now) ──
-  // Test environment only (Nov 9, 2026): the rest of each scene's plan, so the storyboard can be evaluated in full. Never shown on production.
+  // The rest of each scene's plan, so the storyboard can be evaluated in full. Nov 25, 2026 (Sam): shown on production too (allowlisted user only).
   function testRows(s) {
-    if (SSP_CFG.env === "production") return "";
     var d = s.director || {};
     return (s.aiGenerationPrompt ? "<dt>Image prompt</dt><dd>" + esc(s.aiGenerationPrompt) + "</dd>" : "") +
       (s.cameraMotion ? "<dt>Camera motion</dt><dd>" + esc(String(s.cameraMotion).replace(/_/g, " ")) + "</dd>" : "") +

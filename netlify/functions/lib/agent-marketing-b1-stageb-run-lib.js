@@ -19,7 +19,7 @@
 // one-in-flight-run-per-cache-key rule, immutability and "no running/ready from a call without a ledger reservation" (R11).
 // Admission (all required, checked on every request, start and background alike):
 //   AGENT_MARKETING_B1_EVIDENCE=dev; Agent Marketing enabled for the user; the user is listed in B1_STAGEB_USER_IDS (an empty or missing list
-//   denies everyone); the server's SUPABASE_URL is NOT the production project; the project belongs to the signed-in user; Local Market Insider
+//   denies everyone); a database is configured (Nov 25, 2026: the production database is allowed for the allowlisted user(s)); the project belongs to the signed-in user; Local Market Insider
 //   with a selected Article-Led topic. Refusals answer 404 (as if the endpoint did not exist) except the database check (503).
 // The paid B1 provider call is NOT implemented: lib/agent-marketing-b1-provider-lib.js offers only a mock.
 "use strict";
@@ -28,7 +28,6 @@ const b1 = require("./agent-marketing-b1-evidence-lib");
 const br = require("./agent-marketing-b1-bridge-lib");
 const am = require("./agent-marketing-lib");
 const articleLed = require("./agent-marketing-article-led-lib");
-const { PRODUCTION_REF } = require("./public-config-lib");
 const keyOf = (t) => require("./agent-marketing-b1-stageb-lib").topicKeyOf(t);
 
 const STALE_MS = 16 * 60 * 1000;   // longer than the background function's 15-minute limit
@@ -48,8 +47,9 @@ function admit(userId, env) {
   if (!am.isEnabledFor(userId, e)) return deny(404, "not_found", "Not found");
   const ids = String(e.B1_STAGEB_USER_IDS || "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
   if (!ids.length || !ids.includes(String(userId).toLowerCase())) return deny(404, "not_found", "Not found");   // explicit allowlist; empty denies
-  const db = String(e.SUPABASE_URL || "");
-  if (!db || db.includes(PRODUCTION_REF)) return deny(503, "production_database_refused", "Stage B runs only against a development database.");
+  // Nov 25, 2026 (Sam): the beta runs on the production database for the allowlisted user(s) only (B1_STAGEB_USER_IDS and AGENT_MARKETING_USER_IDS above).
+  // The earlier "development database only" refusal is removed. A database must still be configured.
+  if (!String(e.SUPABASE_URL || "")) return deny(503, "database_not_configured", "Stage B needs a configured database.");
   return null;
 }
 

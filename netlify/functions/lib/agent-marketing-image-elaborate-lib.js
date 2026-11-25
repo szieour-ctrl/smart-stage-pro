@@ -70,6 +70,9 @@ function normalize(raw) {
 /** The deterministic gate for image text: property-sale, address, Fair Housing, invented claims and numbers. */
 function checkText(project, text, asAgentText) {
   const input = { template: project.template, intake: project.intake || {}, verified: gate.verifiedFromProject(project) };
+  // Nov 25, 2026 (Sam): with the beta switch on, image notes, picture descriptions and card text get no editorial claim checks, in production as on Test.
+  // Fair Housing, specific-home and sale-content rules still apply. Switch off: unchanged.
+  if (require("./agent-marketing-b1-evidence-lib").enabled()) input.skipEditorialChecks = true;
   if (asAgentText) input.userText = { imageNote: text };
   else input.generated = { sceneTexts: [text] };
   return gate.evaluate(input);

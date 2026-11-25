@@ -406,8 +406,7 @@ test("script mode is refused where it must not run, and refuses without a config
   const start = async (over, token, extra) => { const x = await stagebFn.handler(ev(token || "token-a", { action: "script", projectId: p.id }, extra), {}, deps(over)); return [x.statusCode, JSON.parse(x.body).code]; };
   assert.deepStrictEqual((await start({ env: { AGENT_MARKETING_B1_EVIDENCE: "" } }))[0], 404);
   assert.deepStrictEqual((await start({ env: { B1_STAGEB_USER_IDS: "" } }))[0], 404);
-  assert.deepStrictEqual(await start({ env: { SUPABASE_URL: "https://dnpaenpwdhjmslymgkse.supabase.co" } }), [503, "production_database_refused"]);
-  assert.deepStrictEqual((await start({}, "token-a", { host: "smartstagepro.com" }))[0], 503, "never on a production host");
+  // Nov 25, 2026: the production database and host are no longer refused here; the user allowlists (B1_STAGEB_USER_IDS, AGENT_MARKETING_USER_IDS) are the gate.
   assert.deepStrictEqual((await start({}, "token-b"))[0], 404, "another user's project reads as missing");
   assert.deepStrictEqual(await start({ env: { B1_PLANNER: "", ANTHROPIC_API_KEY: "" } }), [500, "not_configured"]);
   assert.strictEqual(row(p.id).narrative, null, "no planning stub was written by any refused request");

@@ -25,8 +25,7 @@ exports.handler = async (event, context, deps) => {
   const d = deps || {};   // tests inject requireUser, store, loadProject, fetchFn, provider, env, now
   const env = d.env || process.env;
   if (event.httpMethod && event.httpMethod !== "POST") return { statusCode: 405, body: "" };
-  const { requestHost } = require("./lib/self-dispatch-lib");
-  if (require("./lib/public-config-lib").isProductionHost(requestHost(event), env)) return { statusCode: 503, body: "" };
+  // Nov 25, 2026 (Sam): no production-host refusal any more; run.admit below (switch, user allowlists) is the gate.
   const auth = await (d.requireUser || requireUser)(event);
   if (auth.error) return { statusCode: auth.error.status, body: "" };
   const userId = auth.user.id;

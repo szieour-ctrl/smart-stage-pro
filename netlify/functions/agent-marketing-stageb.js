@@ -8,7 +8,7 @@
 //   GET  ?projectId=                    → { state, completeness, counts, error, reused, providerAttempted, attached, createdAt, finishedAt, lastAttempt }
 //        (no evidence text)
 // Off (404 for everyone) unless AGENT_MARKETING_B1_EVIDENCE=dev, Agent Marketing is enabled for the user and the user is listed in
-// B1_STAGEB_USER_IDS; refused (503) when the server's database is the production project. See lib/agent-marketing-b1-stageb-run-lib.js.
+// B1_STAGEB_USER_IDS (Nov 25, 2026: no longer refused on the production database or host). See lib/agent-marketing-b1-stageb-run-lib.js.
 const { supabase } = require("./lib/marketing-profile-lib");
 const { requireUser } = require("./lib/reel-auth-lib");
 const run = require("./lib/agent-marketing-b1-stageb-run-lib");
@@ -46,9 +46,7 @@ exports.handler = async (event, context, deps) => {
     if (event.httpMethod !== "POST") return reply(405, { error: "Method not allowed" });
     let body = {}; try { body = JSON.parse(event.body || "{}"); } catch (e) { return reply(400, { error: "Invalid JSON" }); }
     if (body.action !== "start" && body.action !== "script") return reply(400, { error: "Unknown action", code: "bad_request" });
-    // Stage B never runs on a production host (the background function refuses it too).
-    const { requestHost } = require("./lib/self-dispatch-lib");
-    if (require("./lib/public-config-lib").isProductionHost(requestHost(event), env)) return reply(503, { error: "Stage B runs only on a development deploy.", code: "production_dispatch_refused" });
+    // Nov 25, 2026 (Sam): Stage B may run on the production host for the allowlisted user(s) only; admission (run.admit) is the gate.
     // script: checks and the planning stub only; the page then starts the background function with { projectId, mode: "script" }.
     const r = body.action === "script" ? await run.startScriptRequest({ userId, projectId: body.projectId, loadProject: load, patchNarrative: d.patchNarrative || patchNarrative, env })
       : await run.startRequest({ userId, projectId: body.projectId, store, loadProject: load, env });

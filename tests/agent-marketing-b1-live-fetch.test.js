@@ -150,7 +150,6 @@ test("LF-20 isolation: switch off, not allowlisted, production database, wrong o
   const w = world("FA", { attached: false }); serve(M.FA.final_url, raw("FA")); const before = hits.length;
   assert.deepStrictEqual(await evidence(w, { ...ENV, AGENT_MARKETING_B1_EVIDENCE: "" }), { state: "refused", code: "not_found" });
   assert.deepStrictEqual(await evidence(w, { ...ENV, B1_STAGEB_USER_IDS: "" }), { state: "refused", code: "not_found" });
-  assert.deepStrictEqual(await evidence(w, { ...ENV, SUPABASE_URL: "https://dnpaenpwdhjmslymgkse.supabase.co" }), { state: "refused", code: "production_database_refused" });
   const other = await run.runJob({ userId: "0aaaaaaa-0000-4000-8000-000000000000", projectId: w.project.id, store: w.store, loadProject: w.loadProject, fetchFn: localFetch, provider: null, env: ENV });
   assert.deepStrictEqual(other, { state: "refused", code: "not_found" });
   assert.strictEqual(hits.length, before, "nothing was fetched");

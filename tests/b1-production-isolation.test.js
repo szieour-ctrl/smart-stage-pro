@@ -43,7 +43,7 @@ test("self-dispatch: every background dispatcher in the repository goes through 
   }
 });
 
-test("Stage B dispatch: the start never calls another function; production hosts are refused at the start and in the background job", async () => {
+test("Stage B dispatch: the start never calls another function; on production hosts only an allowlisted user is admitted, at the start and in the background job", async () => {
   const U = "aaaaaaaa-0000-4000-8000-000000000001", P = "22222222-0000-4000-8000-0000000000a1";
   const project = { id: P, user_id: U, template: "local_market_insider", selected_research_id: "11111111-0000-4000-8000-000000000001",
     selected_topic: { id: "t", researchId: "11111111-0000-4000-8000-000000000001", candidate: { id: "c" }, sources: [] } };
@@ -52,19 +52,22 @@ test("Stage B dispatch: the start never calls another function; production hosts
   const store = { async findForProject() { return null; } };
   const calls = []; const keep = global.fetch;
   global.fetch = async (url) => { calls.push(url); return { ok: true, status: 202 }; };
-  const requireUser = async (event) => ((event.headers || {}).authorization === "Bearer t" ? { user: { id: U } } : { error: { status: 401, body: {} } });
+  const O = "bbbbbbbb-0000-4000-8000-000000000002";   // signed in, but not on the allowlist
+  const requireUser = async (event) => { const a = (event.headers || {}).authorization; return a === "Bearer t" ? { user: { id: U } } : a === "Bearer o" ? { user: { id: O } } : { error: { status: 401, body: {} } }; };
   const bgFn = require("../netlify/functions/agent-marketing-stageb-background");
   try {
-    const call = (host) => stagebFn.handler({ httpMethod: "POST", headers: { host, authorization: "Bearer t" }, body: JSON.stringify({ action: "start", projectId: P }) }, {},
+    const call = (host, tok) => stagebFn.handler({ httpMethod: "POST", headers: { host, authorization: tok || "Bearer t" }, body: JSON.stringify({ action: "start", projectId: P }) }, {},
       { env, store, loadProject: async () => project, requireUser });
     const ok = await call(BRANCH);
     assert.deepStrictEqual([ok.statusCode, JSON.parse(ok.body).state], [202, "dispatch"], "the page is told to start the job itself");
     for (const h of ["smartstagepro.com", "smart-stage-pro.netlify.app", "main--smart-stage-pro.netlify.app"]) {
       const r = await call(h);
-      assert.deepStrictEqual([r.statusCode, JSON.parse(r.body).code], [503, "production_dispatch_refused"], h);
-      const b = await bgFn.handler({ httpMethod: "POST", headers: { host: h, authorization: "Bearer t" }, body: JSON.stringify({ projectId: P }) }, {},
+      assert.deepStrictEqual([r.statusCode, JSON.parse(r.body).state], [202, "dispatch"], `${h}: the allowlisted user is admitted`);
+      const r2 = await call(h, "Bearer o");
+      assert.strictEqual(r2.statusCode, 404, `${h}: a signed-in user outside the allowlist reads as not found`);
+      const b = await bgFn.handler({ httpMethod: "POST", headers: { host: h, authorization: "Bearer o" }, body: JSON.stringify({ projectId: P }) }, {},
         { env, store, loadProject: async () => project, requireUser, provider: { calls: 0, async call() { throw new Error("must not run"); } } });
-      assert.strictEqual(b.statusCode, 503, `background on ${h}`);
+      assert.strictEqual(b.statusCode, 404, `background on ${h}: outside the allowlist`);
     }
     assert.deepStrictEqual(calls, [], "no function ever calls another function in the Stage B path");
   } finally { global.fetch = keep; }
@@ -74,8 +77,9 @@ test("fail closed: missing development configuration stops Stage B before anythi
   const U = "aaaaaaaa-0000-4000-8000-000000000001";
   const base = { AGENT_MARKETING_B1_EVIDENCE: "dev", AGENT_MARKETING_ENABLED: "true", B1_STAGEB_USER_IDS: U, SUPABASE_URL: "https://abcdefghijklmnopqrst.supabase.co" };
   assert.strictEqual(run.admit(U, base), null);
-  assert.strictEqual(run.admit(U, { ...base, SUPABASE_URL: "" }).code, "production_database_refused", "no database configured");
-  assert.strictEqual(run.admit(U, { ...base, SUPABASE_URL: `https://${L.PRODUCTION_REF}.supabase.co` }).status, 503, "never the production database");
+  assert.strictEqual(run.admit(U, { ...base, SUPABASE_URL: "" }).code, "database_not_configured", "no database configured");
+  assert.strictEqual(run.admit(U, { ...base, SUPABASE_URL: `https://${L.PRODUCTION_REF}.supabase.co` }), null, "the production database is allowed for an allowlisted user (Nov 25, 2026)");
+  assert.strictEqual(run.admit("bbbbbbbb-0000-4000-8000-000000000002", { ...base, SUPABASE_URL: `https://${L.PRODUCTION_REF}.supabase.co` }).status, 404, "a user outside the allowlist is still refused on the production database");
   assert.strictEqual(run.admit(U, { ...base, B1_STAGEB_USER_IDS: undefined }).status, 404, "a missing allowlist denies");
   assert.strictEqual(run.admit(U, { ...base, B1_STAGEB_USER_IDS: "" }).status, 404, "an empty allowlist denies");
   assert.strictEqual(run.admit(U, { ...base, AGENT_MARKETING_B1_EVIDENCE: undefined }).status, 404, "the flag is off by default");

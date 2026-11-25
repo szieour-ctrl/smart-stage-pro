@@ -173,12 +173,12 @@ function world(over) {
 }
 const json = (r) => JSON.parse(r.body);
 
-test("stageb: admission: flag, explicit allowlist (empty denies), Agent Marketing, sign-in, never the production database", { skip: SKIP }, async () => {
+test("stageb: admission: flag, explicit allowlist (empty denies), Agent Marketing, sign-in", { skip: SKIP }, async () => {
   const w = world();
   const pid = w.P.FA.id;
   assert.strictEqual((await w.start("nobody", pid)).statusCode, 401);
   for (const [over, status] of [[{ AGENT_MARKETING_B1_EVIDENCE: "" }, 404], [{ AGENT_MARKETING_B1_EVIDENCE: "true" }, 404], [{ B1_STAGEB_USER_IDS: "" }, 404], [{ B1_STAGEB_USER_IDS: " , " }, 404],
-    [{ B1_STAGEB_USER_IDS: U.B }, 404], [{ AGENT_MARKETING_ENABLED: "" }, 404], [{ SUPABASE_URL: `https://${PRODUCTION_REF}.supabase.co` }, 503], [{ SUPABASE_URL: "" }, 503]]) {
+    [{ B1_STAGEB_USER_IDS: U.B }, 404], [{ AGENT_MARKETING_ENABLED: "" }, 404], [{ SUPABASE_URL: "" }, 503]]) {
     const r = await w.start("token-a", pid, { env: baseEnv(over) });
     assert.strictEqual(r.statusCode, status, JSON.stringify(over));
     assert.strictEqual((await w.get("token-a", pid, { env: baseEnv(over) })).statusCode, status, `GET ${JSON.stringify(over)}`);
@@ -192,8 +192,6 @@ test("stageb: admission: flag, explicit allowlist (empty denies), Agent Marketin
   assert.strictEqual((await bg({ authorization: "Bearer forged" }, { projectId: pid, userId: U.A })).statusCode, 401, "an unverified token, whatever userId the body names");
   assert.strictEqual((await bg({ "x-internal-key": "anything" }, { projectId: pid, userId: U.A })).statusCode, 401, "no internal-key path");
   assert.strictEqual((await bg({ authorization: "Bearer token-a" }, { projectId: pid }, baseEnv({ AGENT_MARKETING_B1_EVIDENCE: "" }))).statusCode, 404, "flag off");
-  assert.strictEqual((await bg({ authorization: "Bearer token-a" }, { projectId: pid }, baseEnv({ SUPABASE_URL: `https://${PRODUCTION_REF}.supabase.co` }))).statusCode, 404, "production database");
-  assert.strictEqual((await bg({ authorization: "Bearer token-a", host: "smartstagepro.com" }, { projectId: pid })).statusCode, 503, "production host");
   assert.strictEqual((await bgFn.handler({ httpMethod: "GET", headers: { authorization: "Bearer token-a" } }, {}, { env: w.env, requireUser: w.requireUser })).statusCode, 405);
   assert.strictEqual(w.db.T.agent_marketing_article_evidence.length, 0); assert.strictEqual(w.provider.calls, 0); assert.strictEqual(w.db.T.ledger.length, 0);
 });

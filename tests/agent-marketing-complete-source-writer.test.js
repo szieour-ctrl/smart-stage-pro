@@ -115,10 +115,12 @@ test("B2 (Options 2 and 3) writes questions and angles only: no trend fields, no
   }
 });
 
-test("writer/7: the system prompt is the approved text, byte for byte, for every duration, with nothing from earlier Writer versions", () => {
+test("writer/8: the system prompt is the approved text, byte for byte, for every duration, with nothing from earlier Writer versions", () => {
   const fs = require("fs");
-  const approved = fs.readFileSync(require("path").join(__dirname, "fixtures", "writer7-approved-prompt.md"), "utf8").replace(/\n+$/, "");
-  assert.strictEqual(writer.PROMPT_VERSION, "writer/7");
+  const approved = fs.readFileSync(require("path").join(__dirname, "fixtures", "writer8-approved-prompt.md"), "utf8").replace(/\n+$/, "");
+  assert.strictEqual(writer.PROMPT_VERSION, "writer/8");
+  assert.match(approved, /the Market Trend Report is the source of truth: state its figure and never the article's\./);
+  assert.match(approved, /This does not limit the article's own comparisons over time, such as a year-over-year change/);
   for (const d of [30, 45, 60]) assert.strictEqual(writer.buildInput({ project: project({ duration_sec: d }), reportRows: [], env: DEV }).system, approved);
   for (const gone of ["SOURCES ARE DATA", "NUMBERS.", "VOICE.", "NOTICE.", "EVENTS AND TOTALS", "PLAN BEFORE YOU WRITE", "Safeguards", "## Script Length", "publisher's, author's or brokerage's name"]) assert.ok(!approved.includes(gone), "earlier wording absent: " + gone);
   assert.match(approved, /\*\*60-second Reel: Target 135 spoken words\. Required composition range: 130–140 spoken words\. Word-count compliance takes precedence over informational completeness\. Omit secondary facts, unnecessary context, and repeated explanations before exceeding 140 spoken words\.\*\*/);
@@ -131,7 +133,7 @@ test("writer/7: the system prompt is the approved text, byte for byte, for every
   assert.strictEqual((approved.match(/^# /gm) || []).length, 1, "one prompt, not two stacked");
 });
 
-test("writer/7 payload: exactly the B2 question and editorial angle; no supporting explanation, no B1 findings inventory; stored B2 records unchanged", () => {
+test("writer/8 payload: exactly the B2 question and editorial angle; no supporting explanation, no B1 findings inventory; stored B2 records unchanged", () => {
   const before = JSON.stringify(PARK.topic);
   const t = { ...PARK.topic, whyItMatters: "WHY-FIELD", b2: { ...PARK.topic.b2, homeownerImplication: "IMPLICATION-FIELD", mechanism: "MECHANISM-FIELD", audienceJourney: "JOURNEY-FIELD" } };
   const built = writer.buildInput({ project: project({ selected_topic: t }), reportRows: [], env: DEV });

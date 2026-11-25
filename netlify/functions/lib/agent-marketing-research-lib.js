@@ -308,6 +308,13 @@ function searchAfter(today) {
   return `${p(d.getUTCMonth() + 1)}/${p(d.getUTCDate())}/${d.getUTCFullYear()}`;
 }
 
+// Nov 25, 2026 (Sam): the 55+ focus on Local Events was narrowing the whole search to one 55+ newsletter, which gave one usable event. The focus still means
+// events that suit 55+ residents, but the search goes WIDE: every active adult community in or beside the market has its own website and clubhouse
+// calendar, and the city, library, parks, chamber and venue calendars list events those residents attend. A newsletter is a lead, never the only source.
+const ACTIVE_ADULT_EVENTS_SWEEP = "55+ focus for Local Events means events that residents of the market's 55+ active adult communities would attend. Search WIDE, not inside one document: first identify EVERY 55+ active adult community in or next to this market (by name), then search each community's own website and clubhouse or events calendar; then also search the city's, county's, library's, parks and recreation, chamber of commerce and venue calendars for public events those residents attend. A newsletter, a PDF or a news roundup is only a lead: confirm each event on the organizer's or community's own page, and do not build the list from a single document or a single community.";
+// A retry for Local Events says what to widen, so the second pass does not return to the same page.
+const EVENTS_RETRY_WIDEN = "Search wider this time: do not use the page or document you used before as your main source. Look at each community's, city's, library's, parks department's, chamber's and venue's own events page, and at nearby towns, and return up to eight candidates, each with its full event details.";
+
 function buildResearchPayload({ request, today, uploadContext, env }) {
   const r = request;
   const focus = [r.focus && r.focus.active_adult_55 ? "55+ active adult communities" : null, r.focus && r.focus.new_construction ? "new construction" : null].filter(Boolean);
@@ -317,6 +324,7 @@ function buildResearchPayload({ request, today, uploadContext, env }) {
     `Market (exact, do not broaden): ${r.geography.label}.`,
     `Audience: ${aud}.`,
     focus.length ? `Narrow the research to: ${focus.join(" and ")}.` : null,
+    r.mode === "local_events" && r.focus && r.focus.active_adult_55 ? ACTIVE_ADULT_EVENTS_SWEEP : null,
     dataFocusLine(r, today),
     r.keywords && r.mode === "local_events" ? `Keywords from the agent (search for events matching these in this exact market and nearby towns FIRST, such as events named for, themed on or hosted by them; add them to your searches alongside the broad event sweep; then fill the rest of the five with other confirmed events; they never change the market): ${clean(r.keywords, MAX_KEYWORDS_CHARS)}.` : null,
     r.keywords && r.mode !== "local_events" ? `Keywords from the agent (search for articles about these in this exact market FIRST; at least two topics must rest on an article that discusses them; they never change the market): ${clean(r.keywords, MAX_KEYWORDS_CHARS)}.` : null,
@@ -660,7 +668,7 @@ module.exports = {
   MARKET_UPDATE_MODES, MODE_SOURCE,
   cleanVisualCues, MODES, MODE_LABELS, DATA_SOURCES, GEO_TYPES, AUDIENCES, AUDIENCE_KEYS, TOPIC_COUNT, MAX_UPLOADS, FRESH_DAYS, ALLOWANCE_BY_PLAN, PAYWALLED_DOMAINS, DEFAULT_MODEL, DEFAULT_COST_TARGET_USD,
   DATA_FOCUS, DATA_FOCUS_KEYS, validatePeriod, periodDates, validateGeography, geoLabel, validateResearchRequest, requestKey, researchModel, researchSettings, systemPrompt, buildResearchPayload,
-  extractTopics, extractRecommendation, validateTopics, similar, articleKey, usageSummary, monthKeyPT, allowanceFor, sessionStatus, outcomeFields,
+  ACTIVE_ADULT_EVENTS_SWEEP, EVENTS_RETRY_WIDEN, extractTopics, extractRecommendation, validateTopics, similar, articleKey, usageSummary, monthKeyPT, allowanceFor, sessionStatus, outcomeFields,
   // helpers shared with the Article-Led discovery lib (PR 2); exporting them changes nothing here
   AUDIENCES, LIMITS, MAX_KEYWORDS_CHARS, TREND_WORDS, clean, dayNumber, hostOf, isNotArticle, isPaywalled, cleanRecommendation,
 };

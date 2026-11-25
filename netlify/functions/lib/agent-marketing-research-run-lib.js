@@ -418,7 +418,7 @@ async function runResearch({ row, apiKey, uploads, anthropicKey, claudeFn, callF
           const tools = alOn ? payload.tools : (tool ? [{ ...tool, max_results: Math.max(tool.max_results || 0, 20), max_tokens: Math.max(tool.max_tokens || 0, 10000) }] : payload.tools);
           if (cmp) payload = { ...payload, tools, input: compact.retryInstructionCompact(why, baseInput) };
           else if (alOn) payload = { ...payload, tools, input: articleLed.retryInstructionV2(why, baseInput) };
-          else payload = { ...payload, tools, input: `${baseInput}\n\nYour previous answer was ${validation.ok ? "usable but needs work" : "rejected"}: ${why.slice(0, 6).join("; ").slice(0, 600)}. ${b2Mode ? "Return the JSON again with topics that each rest on a real, readable local news article about this exact market (several different articles if they exist; never a wider area)" : "Return the JSON again with exactly 5 topics that fix this"}. Do not invent sources, dates or events.` };
+          else payload = { ...payload, tools, input: `${baseInput}\n\nYour previous answer was ${validation.ok ? "usable but needs work" : "rejected"}: ${why.slice(0, 6).join("; ").slice(0, 600)}. ${b2Mode ? "Return the JSON again with topics that each rest on a real, readable local news article about this exact market (several different articles if they exist; never a wider area)" : "Return the JSON again with exactly 5 topics that fix this"}. Do not invent sources, dates or events.${request.mode === "local_events" ? ` ${rl.EVENTS_RETRY_WIDEN}` : ""}` };
         }
       }
       // Keep the strongest usable answer: an earlier one when a later answer is weaker or unusable (never the reverse).

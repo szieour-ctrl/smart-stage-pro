@@ -3,6 +3,7 @@
 //   GET  ?jobId=...  → { status: "pending" } | { status: "done", plan } | { status: "error", error }
 // The Claude call itself runs in reel-plan-background.js (same pattern as autoSelect).
 const { getStore } = require("@netlify/blobs");
+const { selfBase } = require("./lib/self-dispatch-lib");   // Nov 5, 2026: background jobs stay on the deploy that received the request
 const { validateRequest } = require("./lib/reel-plan-lib");
 const { requireUser, canAccessListing, UUID_RE } = require("./lib/reel-auth-lib");
 const { supabase } = require("./lib/marketing-profile-lib");
@@ -48,7 +49,7 @@ exports.handler = async (event) => {
   if (!process.env.ANTHROPIC_API_KEY) return reply(500, { error: "Reel planning is not configured (missing ANTHROPIC_API_KEY)" });
 
   const jobId = `rp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const siteUrl = process.env.URL || `https://${event.headers.host}`;
+  const siteUrl = selfBase(event, process.env.URL || `https://${event.headers.host}`);
   try {
     await fetch(`${siteUrl}/.netlify/functions/reel-plan-background`, {
       method: "POST", headers: { "Content-Type": "application/json" },

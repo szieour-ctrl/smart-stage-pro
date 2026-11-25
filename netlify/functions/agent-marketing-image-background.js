@@ -59,11 +59,16 @@ async function markError(asset, message, userId) {
 exports.handler = async (event) => {
   const h = event.headers || {};
   const key = process.env.INTERNAL_API_KEY || "";
-  if (!key || h["x-internal-key"] !== key) return { statusCode: 401, body: "" };
+  // Development deploys only: the page starts this job with the subscriber's own login token (see self-dispatch-lib pageDispatch).
+  let pageUser = null;
+  if (!key || h["x-internal-key"] !== key) {
+    pageUser = await require("./lib/self-dispatch-lib").pageDispatchUser(event);
+    if (!pageUser) return { statusCode: 401, body: "" };
+  }
   let asset = null, userId = null;
   try {
     const body = JSON.parse(event.body || "{}");
-    userId = body.owner;
+    userId = pageUser || body.owner;
     if (!am.UUID_RE.test(String(body.assetId || "")) || !am.UUID_RE.test(String(userId || ""))) return { statusCode: 400, body: "" };
     if (!am.isEnabledFor(userId)) return { statusCode: 404, body: "" };
     const r = await supabase("GET", "agent_marketing_assets", null, `?id=eq.${body.assetId}&user_id=eq.${userId}&select=*&limit=1`);

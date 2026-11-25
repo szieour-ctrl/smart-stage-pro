@@ -325,7 +325,8 @@ test("the agent's uploaded report wins over a conflicting web figure", () => {
   assert.ok(bad.blocks.some((b) => b.rule === "report_priority" && b.match === "130"));
   assert.match(bad.blocks.find((b) => b.rule === "report_priority").message, /146/);
   assert.strictEqual(review(p, "Pending sales were 146 in September 2026.").ok, true); // the report's figure is verified text
-  assert.ok(review(p, "Pending sales were 130 in September 2026.", "edited").blocks.some((b) => b.rule === "report_priority")); // approve/save path too
+  assert.ok(!review(p, "Pending sales were 130 in September 2026.", "edited").blocks.some((b) => b.rule === "report_priority")); // subscriber-authored text is not re-litigated (Nov 14)
+  assert.ok(!review(p, "The article put pending sales at 130 in September, and your report shows 146.").blocks.some((b) => b.rule === "report_priority")); // attributed article figure is accurate context
 });
 
 test("applyReportPrecedence records the agent's figure and the web number it replaces, and attaches the report's notice", () => {

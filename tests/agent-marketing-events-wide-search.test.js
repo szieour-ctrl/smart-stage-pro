@@ -20,3 +20,10 @@ test("without the 55+ focus, or for Market Update, the sweep line is absent", ()
 test("the Events retry says what to widen", () => {
   assert.match(rl.EVENTS_RETRY_WIDEN, /Search wider/);
 });
+
+test("Local Events asks for a spread of dates, with events from the next 7 days when any can be confirmed", () => {
+  const t = input({ active_adult_55: false, new_construction: false });
+  assert.match(t, /include events happening in the next 7 days \(through 2026-12-02\)/);
+  assert.match(t, /do not all fall in the same week/);
+  assert.match(t, /Do not include events that start after 2026-12-25/);
+});

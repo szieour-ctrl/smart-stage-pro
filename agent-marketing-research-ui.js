@@ -196,6 +196,8 @@
   }
   function outdatedFor(r) { return (r && r.reportOutdated) || (r && state.selected && state.selected.researchId === r.id && state.selected.reportOutdated) || null; }
   // Would this request be answered by a saved set, or does it need a new session because the matching set is out of date? (The server decides; this only words the notice.)
+  // Nov 25, 2026 (Sam): research takes longer than a minute; say so, so nobody reloads while it is working.
+  function waitNote(mode) { return (mode === "local_events" ? "This usually takes 1 to 3 minutes" : "This usually takes 2 to 3 minutes") + ". Please be patient."; }
   function sameReq(r, q) { var g = r.geography || {}, n = function (v) { return String(v || "").trim().toLowerCase(); }; return r.status === "ready" && r.mode === q.mode && r.audience === q.audience && n(g.name || g.label) === n(q.geography && q.geography.name); }
   function staleForRequest(q) {
     var l = (state.saved || []).filter(function (r) { return sameReq(r, q); });
@@ -275,7 +277,7 @@
       if (confirmOpen) { text = "<b>Confirm to research.</b> This is the only action that uses a research session." + (stale ? " <b>A new session will be used</b> because your earlier topics are out of date." : ""); vis.confirmBtn = true; vis.confirmEdit = true; }
       else {
         vis.startBtn = true; vis.libBtn = !option1On();
-        text = cur && cur.status === "running" ? "<b>Researching…</b> This usually takes under a minute." : cur && cur.status === "ready" && outdatedFor(cur) ? "<b>These topics are out of date.</b> Your report confirmation changed. They are kept for reference and cannot be chosen. Finding topics again uses a new research session. You will see that and confirm before anything runs." : cur && cur.status === "ready" ? "<b>Topics ready.</b> Choose one below, or run a new request." : "<b>Next: find topics.</b> " + (reportConfirmed() ? "Your confirmed report's figures come first. " : "") + (stale ? "Your earlier topics are out of date, so a new research session will be used. " : "") + "You will review the request before anything is researched.";
+        text = cur && cur.status === "running" ? "<b>Researching…</b> " + waitNote(cur.mode) : cur && cur.status === "ready" && outdatedFor(cur) ? "<b>These topics are out of date.</b> Your report confirmation changed. They are kept for reference and cannot be chosen. Finding topics again uses a new research session. You will see that and confirm before anything runs." : cur && cur.status === "ready" ? "<b>Topics ready.</b> Choose one below, or run a new request." : "<b>Next: find topics.</b> " + (reportConfirmed() ? "Your confirmed report's figures come first. " : "") + (stale ? "Your earlier topics are out of date, so a new research session will be used. " : "") + "You will review the request before anything is researched.";
       }
     }
     ["rsBack", "libBtn", "upNo", "rsEdit", "rsSave", "rsCancelEdit", "confirmEdit", "rsNext", "upYes", "startBtn", "confirmBtn"].forEach(function (id) { if ($(id)) $(id).classList.toggle("hidden", !vis[id]); });
@@ -418,6 +420,7 @@
     $("resEyebrow").textContent = (r.mode === "local_events" ? "Local Events" : "Local Market Update") + " · " + (r.geography && r.geography.label || "");
     $("resTitle").textContent = r.status === "ready" && outdatedFor(r) ? "Earlier topics (out of date)" + (r.researchDate ? " from " + r.researchDate : "") : r.status === "ready" ? (r.pathway === "article_led" && r.delivered < 5 ? r.delivered + " of 5 opportunities" : r.marketUpdateMode === "trend_report" && (r.topics || []).some(function (t) { return t.b2 && t.b2.mode === "trend_report"; }) ? r.topics.length + " perspectives from your report" : "Five topics") + (r.researchDate ? " from " + r.researchDate : "") : r.status === "failed" ? "No topics this time" : "Researching…";
     $("resWait").classList.toggle("hidden", r.status !== "running");
+    if ($("resWaitText")) $("resWaitText").textContent = "Researching… " + waitNote(r.mode);
     $("resError").classList.toggle("hidden", r.status !== "failed");
     if (r.status === "failed") $("resError").textContent = (r.error || "The research could not be completed.") + (/did not use a session/.test(r.error || "") ? "" : " This did not use a session.");
     renderFailOptions(r);

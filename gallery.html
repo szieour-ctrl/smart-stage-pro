@@ -220,10 +220,12 @@ button{font-family:inherit;}
 
 <div class="toast" id="toast"></div>
 
+<script src="/ssp-public-config.js"></script>
 <script>
 const FN = '/.netlify/functions/media-gallery';
-const SUPABASE_URL = 'https://dnpaenpwdhjmslymgkse.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRucGFlbnB3ZGhqbXNseW1na3NlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA4NjczNTIsImV4cCI6MjA5NjQ0MzM1Mn0.pEdH1YgINYjj8sAutsJJoO8x4VUxTCfIzVbjSu_yBTY';
+const SSP_CFG = window.sspPublicConfig();   // Nov 5, 2026: per-deployment config (ssp-public-config.js)
+const SUPABASE_URL = SSP_CFG.supabaseUrl;
+const SUPABASE_ANON_KEY = SSP_CFG.supabaseAnonKey;
 
 let searchTimer = null;
 
@@ -251,7 +253,7 @@ const galleryArea = document.getElementById('galleryArea');
 // and it is always on exactly the account the app is on. While the app is
 // open, the app keeps the token fresh; if the app signs out (or the token
 // lapses with the app closed), this page shows "Open Smart Stage PRO".
-const APP_AUTH_KEY = 'sb-dnpaenpwdhjmslymgkse-auth-token';
+const APP_AUTH_KEY = 'sb-' + SSP_CFG.projectRef + '-auth-token';
 window.name = 'ssp-gallery';
 try { localStorage.removeItem('gallery-sb-auth-token'); } catch (e) {} // old separate Gallery login
 

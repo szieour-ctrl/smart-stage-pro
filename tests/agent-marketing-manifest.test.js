@@ -107,6 +107,26 @@ test("technical errors: notice, headshot, assets, planned compositions, timing, 
   m = natomas(); m.formats = ["9x16"]; delete m.scenes[0].visual.image_keys["16x9"]; assert.deepStrictEqual(M.validateManifest(m).errors, [], "a 9:16-only order needs no 16:9 images");
 });
 
+test("Nov 14 reconciliation: the article-led switch alone lets the opening or closing scene carry the article, in production as in Test; the editorial claim checks stay Test-only", () => {
+  const keep = { b: process.env.AGENT_MARKETING_B1_EVIDENCE, u: process.env.SUPABASE_URL };
+  const PROD = "https://dnpaenpwdhjmslymgkse.supabase.co", TESTDB = "https://test-ref.supabase.co";
+  const opening = () => { const m = natomas(); m.scenes[0].source_role = "article"; return m; };
+  const openingErr = (r) => r.errors.some((e) => e.code === "source_role" && /Opening and closing/.test(e.message));
+  try {
+    delete process.env.AGENT_MARKETING_B1_EVIDENCE; process.env.SUPABASE_URL = PROD;
+    assert.ok(openingErr(M.validateManifest(opening())), "production without the switch is unchanged");
+    process.env.AGENT_MARKETING_B1_EVIDENCE = "dev";
+    assert.ok(!openingErr(M.validateManifest(opening())), "production with the switch accepts an article opening");
+    process.env.SUPABASE_URL = TESTDB;
+    assert.ok(!openingErr(M.validateManifest(opening())), "Test is unchanged");
+    const gate = require("../netlify/functions/lib/agent-marketing-gate");
+    process.env.SUPABASE_URL = PROD; assert.strictEqual(gate.testEvaluation(), false, "the editorial claim checks remain off outside Test");
+  } finally {
+    if (keep.b === undefined) delete process.env.AGENT_MARKETING_B1_EVIDENCE; else process.env.AGENT_MARKETING_B1_EVIDENCE = keep.b;
+    if (keep.u === undefined) delete process.env.SUPABASE_URL; else process.env.SUPABASE_URL = keep.u;
+  }
+});
+
 test("the notice is the same sentence Railway draws", () => {
   assert.strictEqual(M.metroListNotice(period), "Based on information from MetroList Services, Inc. for the period September 1, 2026 through September 30, 2026.");
   assert.strictEqual(M.metroListNotice({ start: "", end: "" }), null);

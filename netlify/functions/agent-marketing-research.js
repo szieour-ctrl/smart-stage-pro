@@ -16,6 +16,7 @@
 // A session is charged only when five validated topics are delivered (see agent-marketing-research-lib.js outcomeFields).
 // Failures, timeouts and unusable results are never charged. The Perplexity key stays on the server.
 const { supabase } = require("./lib/marketing-profile-lib");
+const { selfBase } = require("./lib/self-dispatch-lib");   // Nov 5, 2026: background jobs stay on the deploy that received the request
 const { requireUser } = require("./lib/reel-auth-lib");
 const am = require("./lib/agent-marketing-lib");
 const rl = require("./lib/agent-marketing-research-lib");
@@ -25,7 +26,8 @@ const quota = require("./lib/reel-quota-lib");
 
 const headers = { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json", "Cache-Control": "no-store" };
 const reply = (statusCode, obj) => ({ statusCode, headers, body: JSON.stringify(obj) });
-const STALE_RUNNING_MS = 6 * 60 * 1000;      // a run that never reported back is treated as failed (and was never charged)
+const STALE_RUNNING_MS = 6 * 60 * 1000;
+const DISPATCH_FAILED = "Research could not start. This did not use a session. Please try again.";      // a run that never reported back is treated as failed (and was never charged)
 const CHARGE_LOOKBACK_MS = 40 * 24 * 60 * 60 * 1000;
 
 // A saved set opened from another project points at that project's report. The report is the agent's own, so, once the agent says "use", it is copied into THIS project
@@ -70,14 +72,34 @@ async function attachReports(row, project, userId) {
   return up.status < 300 && out ? out : row;
 }
 
+/** Development only: the page dispatches the research job (see agent-marketing-research-background.js pageDispatchUser). */
+function pageDispatch(event) {
+  const env = process.env;
+  if (!require("./lib/agent-marketing-b1-evidence-lib").enabled(env)) return false;
+  const pc = require("./lib/public-config-lib");
+  const { requestHost } = require("./lib/self-dispatch-lib");
+  return !pc.isProductionHost(requestHost(event), env) && !!env.SUPABASE_URL && !String(env.SUPABASE_URL).includes(pc.PRODUCTION_REF);
+}
+
+// A report this set used was re-confirmed with a different area, property types or data-through date after the set was made (set by agent-marketing-report.js).
+function outdatedRef(row) {
+  const r = (Array.isArray(row && row.upload_refs) ? row.upload_refs : []).find((x) => x && x.outdated);
+  return r ? r.outdated : null;
+}
+
+// The article text the subscriber submitted is stored with the request (the run reads it from there); it is not sent back with every poll.
+const submittedFocus = (r) => ({ articleText: r.articleText, articleTitle: r.articleTitle, articlePermission: true, ...(r.articleSourceUrl ? { articleSourceUrl: r.articleSourceUrl } : {}) });
+const focusForClient = (f) => { if (!f || !f.articleText) return f || {}; const { articleText, ...rest } = f; return { ...rest, articleTextChars: String(articleText).length }; };
 function forClient(row) {
   if (!row) return null;
   const out = {
-    id: row.id, projectId: row.project_id, mode: row.mode, geography: row.geography, audience: row.audience, focus: row.focus || {},
-    dataSource: row.data_source || "web", note: (row.usage && row.usage.reportNote) || null,
+    id: row.id, projectId: row.project_id, mode: row.mode, geography: row.geography, audience: row.audience, focus: focusForClient(row.focus),
+    dataSource: row.data_source || "web", note: (row.usage && (row.usage.reportNote || (row.usage.b1b2 && row.usage.b1b2.state === "partial" && row.usage.b1b2.message))) || null,
+    marketUpdateMode: (row.focus && row.focus.marketUpdateMode) || null,
     status: row.status, model: (row.usage && row.usage.pathway === "article_led") ? null : (row.model || null), topics: row.status === "ready" ? (row.topics || []).map(articleLed.clientTopic) : [], researchDate: row.research_date || null,
     error: row.status === "failed" ? (row.error || "The research could not be completed.") : null,
     charged: !!row.charged_at, createdAt: row.created_at,
+    reportOutdated: outdatedRef(row),
   };
   // Article-Led (PR 2): how many opportunities were delivered, why fewer than five, and whether the MLS Market Trend option is offered.
   const al = row.usage && row.usage.pathway === "article_led" ? row.usage.articleLed || {} : null;
@@ -131,7 +153,7 @@ const who = (session) => (session.pool === "brokerage" ? "Your brokerage has" : 
 // The same request, rebuilt from a saved row, so "same request on the same project" is recognised without a second purchase.
 function keyOfRow(row) {
   const refs = Array.isArray(row.upload_refs) ? row.upload_refs : [];
-  return rl.requestKey({ mode: row.mode, audience: row.audience, geography: row.geography, focus: row.focus || {}, keywords: (row.focus && row.focus.keywords) || "", dataFocus: (row.focus && row.focus.dataFocus) || "all", period: (row.focus && row.focus.period) || null, dataSource: row.data_source || "web", uploadIds: refs.map((x) => x && x.id).filter(Boolean) });
+  return rl.requestKey({ mode: row.mode, audience: row.audience, geography: row.geography, focus: row.focus || {}, keywords: (row.focus && row.focus.keywords) || "", dataFocus: (row.focus && row.focus.dataFocus) || "all", period: (row.focus && row.focus.period) || null, dataSource: row.data_source || "web", uploadIds: refs.map((x) => x && x.id).filter(Boolean), articleUrl: (row.focus && row.focus.articleUrl) || undefined, articleText: (row.focus && row.focus.articleText) || undefined });
 }
 
 exports.handler = async (event) => {
@@ -151,6 +173,8 @@ exports.handler = async (event) => {
           dataFocus: rl.DATA_FOCUS, modes: rl.MODES.map((k) => ({ key: k, label: rl.MODE_LABELS[k] })), audiences: rl.AUDIENCES,
           geoTypes: rl.GEO_TYPES.map((k) => ({ key: k, label: GEO[k] })), topicCount: rl.TOPIC_COUNT, maxUploads: rl.MAX_UPLOADS,
           articleLed: articleLed.articleLedEnabled(process.env),
+          reportAnalysis: require("./lib/agent-marketing-b1-evidence-lib").enabled(process.env),   // Option 1 "Analyze My Market Report" (development switch)
+          marketUpdateModes: rl.MARKET_UPDATE_MODES.map((m) => ({ key: m.key, label: m.label, hint: m.hint, reportRequired: m.reportRequired })),
         });
       }
       if (qs.id) {
@@ -170,20 +194,29 @@ exports.handler = async (event) => {
         const er = await supabase("GET", "agent_marketing_research", null, `?user_id=eq.${userId}&project_id=neq.${p.row.id}&status=eq.ready&select=*&order=created_at.desc&limit=20`);
         earlier = (Array.isArray(er.data) ? er.data : []).filter((x) => !(x.usage && x.usage.copiedFrom)).map(forClient); // copies are hidden: the original is listed
       } catch (e) { /* the library still shows this project's own sets */ }
-      return reply(200, { earlier, research: rows.map(forClient), selectedResearchId: p.row.selected_research_id || null, selectedTopic: articleLed.clientTopic(p.row.selected_topic) || null, session: await sessionFor(await poolFor(userId)) });
+      return reply(200, { earlier, research: rows.map(forClient), selectedResearchId: p.row.selected_research_id || null, selectedTopic: articleLed.clientTopic(p.row.selected_topic) || null, marketUpdateMode: p.row.market_update_mode || null, session: await sessionFor(await poolFor(userId)) });
     }
 
     if (event.httpMethod !== "POST") return reply(405, { error: "Method not allowed" });
     let b;
     try { b = JSON.parse(event.body || "{}"); } catch { return reply(400, { error: "Invalid JSON" }); }
     const action = String(b.action || "");
-    if (!["start", "select"].includes(action)) return reply(400, { error: "Unknown action" });
+    if (!["start", "select", "set_mode"].includes(action)) return reply(400, { error: "Unknown action" });
 
     const p = await loadProject(b.projectId, userId);
     if (p.error) return p.error;
     const project = p.row;
     if (project.template !== "local_market_insider") return reply(409, { error: "Research is only used by Local Market Insider." });
     if (am.NOT_EDITABLE_AFTER.includes(project.status)) return reply(409, { error: "This piece is already rendering or finished. Start a new one to change it." });
+
+    // The Market Update type the agent chose (Nov 8, 2026), kept with the project so it is there when they return.
+    if (action === "set_mode") {
+      const m = String(b.marketUpdateMode || "");
+      if (!rl.MODE_SOURCE[m]) return reply(400, { error: "Choose one of the three Market Update types." });
+      const saved = await supabase("PATCH", "agent_marketing_projects", { market_update_mode: m, updated_at: new Date().toISOString() }, `?id=eq.${project.id}&user_id=eq.${userId}`);
+      if (saved.status >= 300) return reply(500, { error: "Could not save your choice" });
+      return reply(200, { marketUpdateMode: m });
+    }
 
     if (action === "select") {
       if (!am.UUID_RE.test(String(b.researchId || ""))) return reply(400, { error: "Missing or invalid research id" });
@@ -206,6 +239,7 @@ exports.handler = async (event) => {
       }
       if (!row || row.status !== "ready") return reply(404, { error: "That research set was not found." });
       if (pending.length) { try { row = await attachReports(row, project, userId); } catch (e) { console.error("agent-marketing-research attachReports failed:", e.message); } }
+      if (outdatedRef(row)) return reply(409, { error: "You changed this report's confirmation after these topics were made, so they can't be used. Find topics again to get a set that matches it.", code: "report_changed" });
       const topic = (row.topics || []).find((t) => t && t.id === String(b.topicId || ""));
       if (!topic) return reply(400, { error: "Choose one of the five topics." });
       const frozen = { ...topic, researchId: row.id, researchDate: row.research_date, mode: row.mode, audience: row.audience, focus: row.focus || {}, geography: row.geography };
@@ -227,7 +261,7 @@ exports.handler = async (event) => {
     const existing = await settleStale((await supabase("GET", "agent_marketing_research", null, `?project_id=eq.${project.id}&user_id=eq.${userId}&select=*&order=created_at.desc&limit=10`)).data || []);
     const wantKey = rl.requestKey(v.request);
     // Saved results are reused, never re-bought. The agent asks for a NEW set with a different request (or "New Topics", below).
-    const reuse = !b.newTopics && existing.find((r) => r.status === "ready" && keyOfRow(r) === wantKey);
+    const reuse = !b.newTopics && existing.find((r) => r.status === "ready" && !outdatedRef(r) && keyOfRow(r) === wantKey);   // a set made under an outdated report scope is never reopened as "the same request"
     const pool = await poolFor(userId);
     if (reuse) return reply(200, { research: forClient(reuse), reused: true, session: await sessionFor(pool) });
     const mine = await supabase("GET", "agent_marketing_research", null, `?user_id=eq.${userId}&status=eq.running&created_at=gte.${encodeURIComponent(new Date(Date.now() - STALE_RUNNING_MS).toISOString())}&select=id&limit=1`);
@@ -262,10 +296,14 @@ exports.handler = async (event) => {
     }
 
     const ins = await supabase("POST", "agent_marketing_research", {
-      project_id: project.id, user_id: userId, pool_user_id: pool.poolUserId, mode: v.request.mode, geography: v.request.geography, audience: v.request.audience, focus: { ...v.request.focus, keywords: v.request.keywords, dataFocus: v.request.dataFocus, period: v.request.period },
-      data_source: v.request.dataSource, upload_refs: refs, status: "running", model: rl.researchModel(), ...(alOn ? { usage: { pathway: "article_led" } } : {}),
+      project_id: project.id, user_id: userId, pool_user_id: pool.poolUserId, mode: v.request.mode, geography: v.request.geography, audience: v.request.audience, focus: { ...v.request.focus, keywords: v.request.keywords, dataFocus: v.request.dataFocus, period: v.request.period, ...(v.request.articleUrl ? { articleUrl: v.request.articleUrl } : {}), ...(v.request.articleText ? submittedFocus(v.request) : {}) },
+      data_source: v.request.dataSource, upload_refs: refs, status: "running",
+      ...(v.request.marketUpdateMode ? { focus: { ...v.request.focus, keywords: v.request.keywords, dataFocus: v.request.dataFocus, period: v.request.period, marketUpdateMode: v.request.marketUpdateMode, ...(v.request.articleUrl ? { articleUrl: v.request.articleUrl } : {}), ...(v.request.articleText ? submittedFocus(v.request) : {}) } } : {}), model: rl.researchModel(), ...(alOn ? { usage: { pathway: "article_led" } } : {}),
     });
     const row = Array.isArray(ins.data) ? ins.data[0] : null;
+    if (v.request.marketUpdateMode && project.market_update_mode !== v.request.marketUpdateMode) {
+      try { await supabase("PATCH", "agent_marketing_projects", { market_update_mode: v.request.marketUpdateMode }, `?id=eq.${project.id}&user_id=eq.${userId}`); } catch (e) { /* the research row keeps the mode too */ }
+    }
     if (ins.status >= 300 || !row) { console.error("agent-marketing-research insert failed:", ins.status, JSON.stringify(ins.data).slice(0, 200)); return reply(500, { error: "Could not start the research" }); }
     if (alOn) {
       // Checked again now that the row exists: only rows ordered before this one count, so of two racing requests the earlier stays and this one is withdrawn.
@@ -276,16 +314,20 @@ exports.handler = async (event) => {
         return reply(adm.status, { error: adm.message, code: adm.code, scope: adm.scope, mlsTrendAvailable: adm.code === "partial_limit" });
       }
     }
-    const siteUrl = process.env.URL || `https://${event.headers && event.headers.host}`;
+    // Development deploys (behind team login) cannot call their own functions: the page starts the background job with its own login token.
+    if (pageDispatch(event)) return reply(202, { research: forClient(row), session, dispatch: true });
+    const siteUrl = selfBase(event, process.env.URL || `https://${event.headers && event.headers.host}`);
     try {
-      await fetch(`${siteUrl}/.netlify/functions/agent-marketing-research-background`, {
+      const res = await fetch(`${siteUrl}/.netlify/functions/agent-marketing-research-background`, {
         method: "POST", headers: { "Content-Type": "application/json", "x-internal-key": process.env.INTERNAL_API_KEY },
         body: JSON.stringify({ researchId: row.id, owner: userId }),
       });
+      // A refused dispatch (e.g. 401 from a deploy behind team login) never starts the job: fail now instead of leaving the row "running".
+      if (!res.ok) { const e = new Error(`HTTP ${res.status}`); throw e; }
     } catch (e) {
       console.error("agent-marketing research dispatch failed:", e.message);
-      await supabase("PATCH", "agent_marketing_research", { status: "failed", error: "Research failed to start.", charged_at: null, updated_at: new Date().toISOString() }, `?id=eq.${row.id}`);
-      return reply(502, { error: "Research failed to start. Please try again. This did not use a session." });
+      await supabase("PATCH", "agent_marketing_research", { status: "failed", error: DISPATCH_FAILED, charged_at: null, updated_at: new Date().toISOString() }, `?id=eq.${row.id}&status=eq.running`);
+      return reply(502, { error: DISPATCH_FAILED });
     }
     return reply(202, { research: forClient(row), session });
   } catch (e) {

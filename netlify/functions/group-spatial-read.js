@@ -10,6 +10,7 @@
 //   Returns promptText ready for GPT Image 2.
 
 const https = require("https");
+const { selfBase } = require("./lib/self-dispatch-lib");   // Nov 5, 2026: background jobs stay on the deploy that received the request
 const sharp = require("sharp");
 
 function httpsRequest(options, body) {
@@ -126,7 +127,7 @@ exports.handler = async (event) => {
       console.log('✅ Extracted images count:', images?.length || 'undefined');
       if (images.length > 5)            return { statusCode: 400, headers, body: JSON.stringify({ error: "Maximum 5 images" }) };
 
-      const siteUrl = process.env.URL || process.env.DEPLOY_URL;
+      const siteUrl = selfBase(event, process.env.URL || process.env.DEPLOY_URL);
       if (!siteUrl) return { statusCode: 500, headers, body: JSON.stringify({ error: "Site URL not configured" }) };
 
       const readyImages = await Promise.all(images.map(async (img) => ({

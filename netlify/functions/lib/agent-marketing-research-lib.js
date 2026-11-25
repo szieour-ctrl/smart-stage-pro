@@ -27,6 +27,13 @@ const AUDIENCES = [
 ];
 const AUDIENCE_KEYS = AUDIENCES.map((a) => a.key);
 const DATA_SOURCES = ["web", "upload", "both"];
+// The three Market Update modes the agent chooses (Nov 8, 2026), each with the one data source it allows. Persisted on the project.
+const MARKET_UPDATE_MODES = [
+  { key: "trend_report", label: "Agent Market Update", hint: "Your uploaded Trend or CMA report only: the Realtor perspectives your market figures support, then your script.", dataSource: "upload", reportRequired: true },
+  { key: "article_report", label: "Article-Led Market Update + Trend/CMA", hint: "A local article is the story; your uploaded report supplies every market statistic.", dataSource: "both", reportRequired: true },
+  { key: "article_editorial", label: "Article-Led Market Update: Realtor Editorial Perspective", hint: "A local article and your perspective. No report needed; the article's figures are attributed to it.", dataSource: "web", reportRequired: false },
+];
+const MODE_SOURCE = Object.fromEntries(MARKET_UPDATE_MODES.map((m) => [m.key, m.dataSource]));
 const TOPIC_COUNT = 5;
 const MAX_UPLOADS = 3;
 const FRESH_DAYS = 60;            // an ARTICLE for a market update may be at most this old (Sam, Oct 27: the 30-day window belongs to the uploaded trend data, not to articles)
@@ -41,6 +48,8 @@ const PAYWALLED_DOMAINS = ["wsj.com", "ft.com", "bloomberg.com", "nytimes.com", 
 
 const clean = (v, n) => intakeLib.cleanWords(v, n);
 const MAX_KEYWORDS_CHARS = 120;
+// Submitted article text: the same minimum B1's snapshot applies (1,500 characters), and a ceiling well inside one page's size cap.
+const MIN_ARTICLE_TEXT = 1500, MAX_ARTICLE_TEXT = 60000;
 
 // ── Optional data (Sam's original flow, Oct 25): what kind of market data the web research should include, and for which period ─────
 const DATA_FOCUS = [
@@ -150,20 +159,55 @@ function validateResearchRequest(body) {
   if (ids.length > MAX_UPLOADS) errors.push({ field: "uploadIds", message: `Attach at most ${MAX_UPLOADS} reports.` });
   const uploadIds = [...new Set(ids)].filter((id) => am.UUID_RE.test(id));
   if (uploadIds.length !== new Set(ids).size) errors.push({ field: "uploadIds", message: "One of the attached reports is not valid." });
-  // Where the topics come from. No choice made: a report that is attached is used together with web research, otherwise web only.
-  let dataSource = b.dataSource == null || b.dataSource === "" ? (uploadIds.length ? "both" : "web") : String(b.dataSource);
+  // Where the topics come from. A Market Update mode (Nov 8, 2026) decides it; with no mode, a report that is attached is used together with web
+  // research, otherwise web only (the earlier behaviour).
+  const marketUpdateMode = mode === "market_update" && b.marketUpdateMode != null && b.marketUpdateMode !== "" ? String(b.marketUpdateMode) : null;
+  if (marketUpdateMode && !MODE_SOURCE[marketUpdateMode]) errors.push({ field: "marketUpdateMode", message: "Choose one of the three Market Update types." });
+  let dataSource = marketUpdateMode && MODE_SOURCE[marketUpdateMode] ? MODE_SOURCE[marketUpdateMode]
+    : b.dataSource == null || b.dataSource === "" ? (uploadIds.length ? "both" : "web") : String(b.dataSource);
+  if (marketUpdateMode && MODE_SOURCE[marketUpdateMode] !== "web" && uploadIds.length === 0) errors.push({ field: "uploadIds", message: "This Market Update type needs your uploaded Trend or CMA report. Attach it and confirm it first." });
   if (!DATA_SOURCES.includes(dataSource)) errors.push({ field: "dataSource", message: "Choose web research, your report, or both." });
   else if (dataSource !== "web" && uploadIds.length === 0) errors.push({ field: "dataSource", message: "Attach and confirm a report to use it, or choose web research only." });
   if (mode === "local_events" && dataSource !== "web") errors.push({ field: "dataSource", message: "Local Events uses web research only." });
+  // Nov 14, 2026: the subscriber may choose the article. Optional; only the two Article-Led types use it; the same https rule B1's capture applies.
+  let articleUrlValue = null;
+  const rawArticleUrl = b.articleUrl == null ? "" : String(b.articleUrl).trim();
+  if (rawArticleUrl) {
+    const u = marketUpdateMode === "article_report" || marketUpdateMode === "article_editorial" ? require("./agent-marketing-b1-bridge-lib").articleUrl(rawArticleUrl) : null;
+    if (!(marketUpdateMode === "article_report" || marketUpdateMode === "article_editorial")) errors.push({ field: "articleUrl", message: "An article link is used by the two Article-Led Market Update types only." });
+    else if (!u || rawArticleUrl.length > 500) errors.push({ field: "articleUrl", message: "Enter the article's full web address, starting with https://" });
+    else articleUrlValue = u.href;
+  }
+  // Nov 14, 2026: the subscriber may instead give the article's text (a site that blocks automated readers). The same B1 -> B2 -> Planner path reads it; it is
+  // the subscriber's own source material, not verified fact. Title and the owns-or-may-submit confirmation are required; the original address is optional.
+  let submitted = null;
+  const rawText = b.articleText == null ? "" : String(b.articleText).replace(/\r\n?/g, "\n").trim();
+  if (rawText) {
+    const isAL = marketUpdateMode === "article_report" || marketUpdateMode === "article_editorial";
+    const title = clean(String(b.articleTitle == null ? "" : b.articleTitle).replace(/\s+/g, " "), 200);
+    const srcRaw = b.articleSourceUrl == null ? "" : String(b.articleSourceUrl).trim();
+    const srcUrl = srcRaw ? require("./agent-marketing-b1-bridge-lib").articleUrl(srcRaw) : null;
+    if (!isAL) errors.push({ field: "articleText", message: "Article text is used by the two Article-Led Market Update types only." });
+    else if (rawText.length < MIN_ARTICLE_TEXT) errors.push({ field: "articleText", message: "Paste the full article. This is too short to read and understand." });
+    else if (rawText.length > MAX_ARTICLE_TEXT) errors.push({ field: "articleText", message: `The article text is longer than ${MAX_ARTICLE_TEXT.toLocaleString("en-US")} characters.` });
+    if (articleUrlValue) errors.push({ field: "articleText", message: "Give either the article's link or its text, not both." });
+    if (!title) errors.push({ field: "articleTitle", message: "Enter the article's title." });
+    if (srcRaw && !srcUrl) errors.push({ field: "articleSourceUrl", message: "The original address must be a full web address starting with https://" });
+    if (b.articlePermission !== true && b.articlePermission !== "true") errors.push({ field: "articlePermission", message: "Confirm that you own this article or have permission to submit it." });
+    if (!errors.some((e) => /^article(Text|Title|SourceUrl|Permission)$/.test(e.field))) submitted = { articleText: rawText, articleTitle: title, articlePermission: true, ...(srcUrl ? { articleSourceUrl: srcUrl.href } : {}) };
+  } else if (b.articleTitle || b.articleSourceUrl) {
+    // Nothing to read: the title or address alone is not an article.
+    if (String(b.articleTitle || "").trim() || String(b.articleSourceUrl || "").trim()) errors.push({ field: "articleText", message: "Paste the article text, or clear the title and address." });
+  }
   if (errors.length) return { ok: false, errors, request: null };
-  return { ok: true, errors: [], request: { mode, audience, geography: geo.geography, focus, keywords, dataFocus, period, dataSource, uploadIds: dataSource === "web" ? [] : uploadIds } };
+  return { ok: true, errors: [], request: { mode, audience, geography: geo.geography, focus, keywords, dataFocus, period, dataSource, uploadIds: dataSource === "web" ? [] : uploadIds, ...(marketUpdateMode ? { marketUpdateMode } : {}), ...(articleUrlValue ? { articleUrl: articleUrlValue } : {}), ...(submitted || {}) } };
 }
 
 // A short, stable fingerprint of a request, so the same request is recognised (reuse saved results, never re-buy).
 function requestKey(request) {
   const r = request || {};
   const g = r.geography || {};
-  return JSON.stringify([r.mode, r.audience, g.type, String(g.name || "").toLowerCase(), String(g.city || "").toLowerCase(), String(g.zip || ""), !!(r.focus && r.focus.active_adult_55), !!(r.focus && r.focus.new_construction), String(r.keywords || "").toLowerCase(), r.dataFocus || "all", JSON.stringify(r.period || null), (r.uploadIds || []).slice().sort(), r.dataSource || "web"]);
+  return JSON.stringify([r.mode, r.audience, g.type, String(g.name || "").toLowerCase(), String(g.city || "").toLowerCase(), String(g.zip || ""), !!(r.focus && r.focus.active_adult_55), !!(r.focus && r.focus.new_construction), String(r.keywords || "").toLowerCase(), r.dataFocus || "all", JSON.stringify(r.period || null), (r.uploadIds || []).slice().sort(), r.dataSource || "web"].concat(r.articleUrl ? [String(r.articleUrl).toLowerCase().replace(/\/+$/, "")] : [], r.articleText ? ["text", require("crypto").createHash("sha256").update(String(r.articleText)).digest("hex").slice(0, 32)] : []));
 }
 
 // ── Provider request (Perplexity Agent API, POST /v1/agent) ────────────────────────────────────────────────────────
@@ -593,6 +637,14 @@ function sessionStatus({ rows, planKey, now, env } = {}) {
   return { used, allowance, remaining, canStart: remaining > 0 };
 }
 
+// Nov 14, 2026: a subscriber-selected article needs no discovery. This is the same "ready" shape discovery returns, with no topics of its own; the
+// article step (B1/B2) fills them in or ends the run uncharged. The charge time is set here and cleared by every failed or partial ending, as before.
+function chosenArticleFields(row, now) {
+  const stamp = (now ? new Date(now) : new Date()).toISOString();
+  const today = new Date(now || Date.now()).toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
+  return { status: "ready", topics: [], research_date: today, model: null, usage: { ...((row && row.usage) || {}), discovery: "skipped_chosen_article" }, error: null, charged_at: stamp, updated_at: stamp };
+}
+
 // What to store when a run ends. A session is charged only for a validated five-topic set.
 function outcomeFields({ validation, usage, model, today, now, error, charge }) {
   const stamp = (now ? new Date(now) : new Date()).toISOString();
@@ -604,6 +656,8 @@ function outcomeFields({ validation, usage, model, today, now, error, charge }) 
 }
 
 module.exports = {
+  chosenArticleFields,
+  MARKET_UPDATE_MODES, MODE_SOURCE,
   cleanVisualCues, MODES, MODE_LABELS, DATA_SOURCES, GEO_TYPES, AUDIENCES, AUDIENCE_KEYS, TOPIC_COUNT, MAX_UPLOADS, FRESH_DAYS, ALLOWANCE_BY_PLAN, PAYWALLED_DOMAINS, DEFAULT_MODEL, DEFAULT_COST_TARGET_USD,
   DATA_FOCUS, DATA_FOCUS_KEYS, validatePeriod, periodDates, validateGeography, geoLabel, validateResearchRequest, requestKey, researchModel, researchSettings, systemPrompt, buildResearchPayload,
   extractTopics, extractRecommendation, validateTopics, similar, articleKey, usageSummary, monthKeyPT, allowanceFor, sessionStatus, outcomeFields,

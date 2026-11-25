@@ -18,6 +18,7 @@ const { FONTS } = require("./brand-themes");
 const sourcesLib = require("./agent-marketing-sources-lib");
 const MANIFEST_VERSION = "am-manifest-2";
 const FORMATS = ["9x16", "16x9"];
+const EDITORIAL_CODES = ["claim", "number", "small_sample"]; // not applied in the development Test environment (validateManifest)
 const SMALL_SAMPLE_BELOW = 10; // Sam, Oct 25: fewer than 10 listings is a count, never a trend on its own
 // The automatic AI-image disclosure (Sam, Oct 29, 2026). The words are fixed here, never written by Claude and never placed in a GPT Image 2 prompt;
 // the renderer draws them in the bottom source area of every scene whose visible image is AI-generated (per the image's recorded provenance).
@@ -210,6 +211,17 @@ function validateManifest(manifest) {
   if (scenes.some((sc) => Object.values((sc.visual || {}).image_provenance || {}).includes("ai")) && !(m.disclosure && Object.values(AI_DISCLOSURES).includes(m.disclosure.text))) {
     err("disclosure", "disclosure.text", "A Reel with AI-generated images needs the approved AI image disclosure, built by code.");
   }
+  // Article credit (Nov 12, 2026): on a Reel that carries the MetroList notice, the approved article is credited on the scene(s) that draw on it. The text
+  // is rebuilt here from the checked source, and only article-sourced middle scenes may carry it.
+  if (m.source_credit !== undefined) {
+    const sc0 = m.source_credit || {};
+    const want = sourcesLib.sourceLine(sc0.sources, "");
+    const nums = Array.isArray(sc0.scenes) ? sc0.scenes : [];
+    if (!noticeNeeded) err("source_credit", "source_credit", "A Reel with a source line does not take a separate article credit.");
+    else if (!want) err("source_credit", "source_credit", "An article credit needs a checked, dated article source.");
+    else if (sc0.text !== want) err("source_credit", "source_credit.text", "The article credit must be built from the checked source, not typed.");
+    if (!nums.length || !nums.every((n) => Number.isInteger(n) && scenes[n - 1] && scenes[n - 1].source_role === "article")) err("source_credit", "source_credit.scenes", "The article credit belongs only on scenes that draw on the article.");
+  }
   if (scenes.length < 3) err("scenes", "scenes", "A Reel needs at least three scenes.");
   const audio = m.audio || {};
   let prevEnd = 0;
@@ -282,7 +294,14 @@ function validateManifest(manifest) {
     const have = caps.map((c) => c.text).join(" ").split(/\s+/).filter(Boolean);
     if (want.length !== have.length || want.some((w, i) => w !== have[i])) err("captions", "captions", "The captions are not the approved narration, word for word.");
   }
-  return { ok: errors.length === 0, errors, warnings };
+  // Development Test environment only (Nov 9, 2026, product-owner directive): the editorial claim checks are not applied at render either
+  // (numbers on screen tracing to a source, small-sample trend wording, article in the opening or closing scene). Production is unchanged.
+  // Nov 14, 2026 (Sam, Option 2 beta): the article-led switch alone decides that position does not fix a scene's source (so an opening or closing scene may carry the article);
+  // the editorial claim checks above stay Test-only. With neither switch on, production is unchanged.
+  const articleLed = require("./agent-marketing-b1-evidence-lib").enabled();
+  const test = require("./agent-marketing-gate").testEvaluation();
+  const kept = errors.filter((e) => !(test && EDITORIAL_CODES.includes(e.code)) && !(articleLed && e.code === "source_role" && /^Opening and closing/.test(e.message)));
+  return { ok: kept.length === 0, errors: kept, warnings };
 }
 
 module.exports = { AI_DISCLOSURES, MANIFEST_VERSION, FORMATS, SMALL_SAMPLE_BELOW, parseNumber, metroListNotice, metroListDisclosureNotice, verifyDerived, qualifySmallSample, applySmallSampleQualifiers, validateManifest, sceneStrings };

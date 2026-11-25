@@ -42,10 +42,14 @@ function buildContext(uploads, request) {
   (Array.isArray(uploads) ? uploads : []).forEach((u, i) => {
     const facts = u && u.facts;
     if (!facts || !Array.isArray(facts.figures)) return;
+    // A Market Review enters Trend Intelligence only after the subscriber has attested the area and property types (and, for a partial year, its date).
+    if (facts.layout === "market_review" && (!facts.geography || !facts.geography.confirmed || !facts.propertyTypeScope || !facts.propertyTypeScope.confirmed || ((facts.confirmation || {}).needed || []).length)) return;
     const key = `r${i + 1}`;
     const geo = reportLib.geographyCheck(facts, request && request.geography);
     const places = [...((facts.geography && facts.geography.cities) || []), ...(((facts.geography && facts.geography.zips) || []).map((z) => `ZIP ${z}`))];
-    const rep = { key, uploadId: u.id, facts, geoStatus: geo.status, geoMessage: geo.message, notice: reportLib.attributionNotice(facts), places, scopeSentence: reportLib.scopeSentence(facts) };
+    const mrv = facts.layout === "market_review";
+    const rep = { key, uploadId: u.id, facts, geoStatus: geo.status, geoMessage: geo.message, notice: reportLib.attributionNotice(facts), places, scopeSentence: reportLib.scopeSentence(facts),
+      ...(mrv ? { areaLabel: facts.geography.areaLabel, scopeKind: facts.geography.scopeKind, periodLabel: facts.period.label, periodKind: facts.period.kind, partial: facts.period.partial === true, coverage: facts.period.coverage || null } : {}) };
     reports.push(rep);
     facts.figures.forEach((f) => figures.set(`${key}.${f.id}`, { ref: `${key}.${f.id}`, report: rep, fig: f }));
   });
@@ -57,6 +61,25 @@ function figureText(ctxFig) {
   const cmp = reportLib.compareText ? reportLib.compareText(report.facts, fig) : "";
   const win = fig.window ? ` (${reportLib.windowText(fig.window)})` : "";
   return `${fig.label}: ${reportLib.formatFigure(fig)}${cmp ? ` ${cmp}` : ""}${win}`;
+}
+
+/**
+ * scopedFigureText(ctxFig, { development }) → the figure text with its area and period attached. For a Market Review every statistic keeps its
+ * geographic scope: a combined-market, county or (for a development topic) city figure is labelled broader-market context and is never worded as
+ * a statistic for one place inside it. Other report layouts are unchanged.
+ */
+function scopedFigureText(ctxFig, opts) {
+  const base = figureText(ctxFig);
+  const r = ctxFig.report || {};
+  if (!r.facts || r.facts.layout !== "market_review") return base;
+  const dev = !!(opts && opts.development);
+  const broader = r.scopeKind !== "exact" || dev;
+  const tag = dev ? " (broader-market context, not the development's own statistic)" : r.scopeKind !== "exact" ? " (broader-market context)" : "";
+  return `${r.areaLabel}${tag}, ${r.periodLabel}${r.partial && r.periodKind === "year" ? " (not a completed year)" : ""}: ${base}`;
+}
+function developmentOf(t) {
+  const d = t && t.editorial && t.editorial.development;
+  return d ? (typeof d === "string" ? d : d.name || d.title || "") : "";
 }
 
 function systemPrompt(want) {
@@ -83,6 +106,7 @@ function userMessage(ctx, want, today) {
     lines.push(`REPORT ${r.key}: ${r.scopeSentence}`);
     if (r.geoMessage) lines.push(`Note: ${r.geoMessage}`);
     if (r.facts.sample && r.facts.sample.small) lines.push("Note: a small sample. No trend claims.");
+    if (r.facts.period && r.facts.period.partial) lines.push(`Note: the report covers only part of the period (${r.facts.period.label}). Never describe it as a completed ${r.facts.period.kind === "year" ? "year" : "period"}; a count is not compared with a full prior period.`);
     if (r.facts.period && r.facts.period.weekly) lines.push("Note: one week of data. Describe the week and the changes listed against the earlier weeks; never call it a trend.");
     if (r.facts.sample && r.facts.sample.broadWindow) lines.push(`Note: the closed sales span about ${Math.round(r.facts.sample.windowDays / 30)} months. Never call them this month, recent or current.`);
     ctx.figures.forEach((cf) => { if (cf.report === r) lines.push(`${cf.ref} | ${figureText(cf)}`); });
@@ -127,13 +151,13 @@ function validateReportTopics(raw, ctx, opts) {
     // 2. trend and time-frame claims
     const reports = [...new Set(cited.map((c) => c.report))];
     const small = reports.some((r) => r.facts.sample && r.facts.sample.small) || cited.some((c) => c.fig.small);
-    const hasComparison = cited.some((c) => c.fig.prior != null || c.fig.yearAgo != null || (Array.isArray(c.fig.changes) && c.fig.changes.length > 0));
+    const hasComparison = cited.some((c) => c.fig.prior != null || c.fig.yearAgo != null || reportLib.eligibleChanges(c.fig).length > 0);
     if (TREND_CLAIM.test(text) && (small || !hasComparison)) return problems.push(`topic ${n}: describes a change or trend that the cited figures do not support`);
     if (/\btrend/i.test(text) && reports.some((r) => r.facts.period && r.facts.period.weekly)) return problems.push(`topic ${n}: calls one week of data a trend`);
     if (NOW_WORDS.test(text) && reports.some((r) => r.facts.sample && r.facts.sample.broadWindow)) return problems.push(`topic ${n}: calls a long window "this month", "recent" or "now"`);
     // 3. the content gate (addresses, listings, sale advertising, Fair Housing)
     const verifiedTexts = cited.map(figureText).concat(reports.map((r) => r.scopeSentence));
-    const g = gate.evaluate({ template: "local_market_insider", intake: {}, verified: { texts: verifiedTexts, addresses: [] }, generated: { narration: question, captions: why } });
+    const g = gate.evaluate({ keepEditorialChecks: true, template: "local_market_insider", intake: {}, verified: { texts: verifiedTexts, addresses: [] }, generated: { narration: question, captions: why } });
     if (!g.ok) return problems.push(`topic ${n}: ${g.blocks[0].message}`);
     // 4. scope, set by code
     const different = reports.filter((r) => r.geoStatus === "different");
@@ -237,9 +261,20 @@ function applyReportPrecedence(topics, ctx) {
   const allReportNums = new Set();
   figs.forEach((cf) => numbersIn(figureText(cf)).forEach((n) => allReportNums.add(n)));
   const allNotices = [...new Set(figs.map((cf) => cf.report && cf.report.notice).filter(Boolean))];
-  const reportFigures = figs.slice(0, MAX_REPORT_FIGURES_ON_WEB_TOPIC).map((cf) => ({ ref: cf.ref, uploadId: cf.report.uploadId, key: cf.fig.key, label: cf.fig.label, display: reportLib.formatFigure(cf.fig), text: figureText(cf) }));
+  const reportsUsed = [...new Map(figs.map((cf) => [cf.report.uploadId, cf.report])).values()];
   return (topics || []).map((t) => {
     if (!t || t.origin !== "web") return t;
+    const development = developmentOf(t);
+    const reportFigures = figs.slice(0, MAX_REPORT_FIGURES_ON_WEB_TOPIC).map((cf) => {
+      const r = cf.report, mrv = r.facts && r.facts.layout === "market_review";
+      return { ref: cf.ref, uploadId: r.uploadId, key: cf.fig.key, label: cf.fig.label, display: reportLib.formatFigure(cf.fig), text: scopedFigureText(cf, { development: !!development }),
+        ...(mrv ? { areaLabel: r.areaLabel, scopeKind: r.scopeKind, role: r.scopeKind !== "exact" || development ? "broader_market_context" : "area_statistic", period: r.periodLabel, partialPeriod: r.partial === true, partialComparison: (cf.fig.comparisons || []).some((c) => c.likeWithLike === false) } : {}) };
+    });
+    const mrReports = reportsUsed.filter((r) => r.facts && r.facts.layout === "market_review");
+    const scopeInfo = mrReports.length ? {
+      reportScope: mrReports.map((r) => ({ uploadId: r.uploadId, areaLabel: r.areaLabel, scopeKind: r.scopeKind, places: (r.facts.geography.confirmed || {}).names || [], role: r.scopeKind !== "exact" || development ? "broader_market_context" : "area_statistic", ...(development ? { development } : {}) })),
+      reportPeriods: mrReports.map((r) => ({ uploadId: r.uploadId, label: r.periodLabel, kind: r.periodKind, partial: r.partial, coverage: r.coverage, comparisons: (r.facts.period.comparisons || []).map((c) => ({ printed: c.printed, kind: c.kind })) })),
+    } : {};
     const text = [t.question, t.whyItMatters, ...(Array.isArray(t.trendSignals) ? t.trendSignals : [])].filter(Boolean).join(" . ").toLowerCase();
     const precedence = [];
     // A topic about a WIDER area than the agent's market (a county article, a city report) does not conflict with the agent's report: its figures
@@ -262,8 +297,8 @@ function applyReportPrecedence(topics, ctx) {
       const superseded = [...near].filter((n) => !mineNums.has(n) && !allReportNums.has(n) && !(n >= 2020 && n <= 2035)).map(String);
       if (superseded.length) precedence.push({ key: m.key, label: mine[0].fig.label, reportText: mine.map(figureText).join("; "), supersededNumbers: superseded });
     }
-    return { ...t, reportFirst: true, reportFigures, reportPrecedence: precedence, reportNotice: allNotices.join(" ") };
+    return { ...t, reportFirst: true, reportFigures, reportPrecedence: precedence, reportNotice: allNotices.join(" "), ...scopeInfo };
   });
 }
 
-module.exports = { numbersIn, LIMITS, applyReportPrecedence, MEASURES, REPORT_TOPICS_WHEN_BOTH, MAX_FIGS_PER_TOPIC, buildContext, figureText, systemPrompt, userMessage, validateReportTopics, generateReportTopics, combineTopics, TREND_CLAIM, NOW_WORDS };
+module.exports = { scopedFigureText, developmentOf, numbersIn, LIMITS, applyReportPrecedence, MEASURES, REPORT_TOPICS_WHEN_BOTH, MAX_FIGS_PER_TOPIC, buildContext, figureText, systemPrompt, userMessage, validateReportTopics, generateReportTopics, combineTopics, TREND_CLAIM, NOW_WORDS };

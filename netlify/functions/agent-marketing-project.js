@@ -15,7 +15,6 @@
 // The user always comes from the login token. A project is only visible to its owner. No listing, address, price or MLS
 // field is accepted anywhere (the gate rejects them structurally).
 const { supabase } = require("./lib/marketing-profile-lib");
-const { selfBase } = require("./lib/self-dispatch-lib");   // Nov 5, 2026: background jobs stay on the deploy that received the request
 const { requireUser } = require("./lib/reel-auth-lib");
 const gate = require("./lib/agent-marketing-gate");
 const intakeLib = require("./lib/agent-marketing-intake");
@@ -25,23 +24,11 @@ const mediaLib = require("./lib/agent-marketing-media-lib");
 
 const headers = { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json", "Cache-Control": "no-store" };
 const reply = (statusCode, obj) => ({ statusCode, headers, body: JSON.stringify(obj) });
-// B1 article evidence (development only, AGENT_MARKETING_B1_EVIDENCE=dev; Nov 8, 2026): script edits and approval are checked with the same evidence
-// the script was written from, so validated article figures stay allowed and held findings stay blocked. With the switch off the project is unchanged.
-async function withGateEvidence(project) {
-  return require("./lib/agent-marketing-b1-stageb-run-lib").withPlanEvidence(project);
-}
-const evidenceBlocked = (project) => {
-  const b1 = require("./lib/agent-marketing-b1-evidence-lib");
-  const v = project && project.template === "local_market_insider" ? b1.viewForTopic(project.selected_topic) : null;
-  return v && v.status === b1.BLOCKED ? v.blockedReason : null;
-};
-const MAX_POLISHES = 10;   // cost protection only: revision requests per script
 const PUBLIC_COLS = "id,template,angle,formats,duration_sec,voice,music,intake,narrative,narrative_approved_at,storyboard,selected_topic,status,gate_version,gate_result,created_at,updated_at,hidden_at";
 
 // A saved script written for another topic or other answers is kept for the agent to see, but the page must offer "Write my script" again (Sam, Oct 29, 2026).
 function scriptStale(row) {
   const n = row && row.narrative;
-  if (n && n.narrationTagged && row.selected_topic && row.selected_topic.reportOutdated) return true;   // the report's confirmation changed after the topic (and so the script) was made
   if (!n || !n.narrationTagged || !n.intakeHash || !row.selected_topic) return false;
   try { return n.intakeHash !== planLib.intakeHash(row.intake || {}, row.selected_topic); } catch (e) { return false; }
 }
@@ -52,25 +39,15 @@ function reelTypeOf(row) {
   return t && typeof t === "object" && (t.kind === "local_events" || (t.event && typeof t.event === "object")) ? "Local Event" : "Local Market Update";
 }
 
-// Restricted Test diagnostics (raw Planner replies after a structural failure) stay in the database and are never sent to the page.
-function clientNarrative(n) {
-  if (!n || typeof n !== "object" || !("plannerFailure" in n || "writerRecord" in n || "polishRecords" in n)) return n || null;
-  const { plannerFailure, writerRecord, polishRecords, ...rest } = n;   // the Writer's exact input and replies stay in the database too (Nov 15, 2026)
-  return rest;
-}
-
 function forClient(row) {
   if (!row) return null;
   return {
     scriptStale: scriptStale(row),
     reelType: reelTypeOf(row),
     id: row.id, template: row.template, angle: row.angle, formats: row.formats, durationSec: row.duration_sec, voice: row.voice, music: row.music || "default",
-    intake: row.intake || {}, narrative: clientNarrative(row.narrative), narrativeApprovedAt: row.narrative_approved_at || null,
+    intake: row.intake || {}, narrative: row.narrative || null, narrativeApprovedAt: row.narrative_approved_at || null,
     storyboard: row.storyboard || null, selectedTopic: require("./lib/agent-marketing-article-led-lib").clientTopic(row.selected_topic) || null, status: row.status, gate: row.gate_result || null,
     createdAt: row.created_at, updatedAt: row.updated_at, hidden: !!row.hidden_at,
-    // Development Test environment only (AGENT_MARKETING_B1_EVIDENCE=dev, scoped to b1-stageb-dev, and a non-production database): the page hides
-    // the "Please verify before you publish" panel there. Never set on production or on other deploys.
-    ...(gate.testEvaluation() ? { testEvaluation: true } : {}),
   };
 }
 
@@ -107,8 +84,7 @@ exports.handler = async (event) => {
         return reply(200, {
           templates: gate.ENABLED_TEMPLATES.map((t) => ({ key: t, ...intakeLib.schemaFor(t) })),
           audiences: intakeLib.AUDIENCES, actions: intakeLib.ACTIONS, eventActions: intakeLib.EVENT_ACTIONS, limits: intakeLib.LIMITS,
-          durations: am.DURATIONS, formats: am.FORMATS, voices: am.VOICES, music: am.MUSIC, wordTargets: Object.fromEntries(Object.keys(am.WORD_TARGETS).map((d) => [d, am.wordTargets(Number(d))])), ...(String(process.env.AGENT_MARKETING_B1_EVIDENCE || "").trim().toLowerCase() === "dev" ? { paceWordsPerSecond: am.PACE_WORDS_PER_SECOND } : {}),
-          ...(String(process.env.AGENT_MARKETING_B1_EVIDENCE || "").trim().toLowerCase() === "dev" ? { writerWordTargets: Object.fromEntries(Object.keys(am.WORD_TARGETS).map((d) => [d, am.writerWordTargets(Number(d))])) } : {}),
+          durations: am.DURATIONS, formats: am.FORMATS, voices: am.VOICES, music: am.MUSIC, wordTargets: am.WORD_TARGETS,
           attestation: { version: gate.ATTESTATION_VERSION, text: gate.ATTESTATION_TEXT },
           uploadAttestation: { version: mediaLib.UPLOAD_ATTESTATION_VERSION, text: mediaLib.UPLOAD_ATTESTATION_TEXT },
         });
@@ -158,13 +134,11 @@ exports.handler = async (event) => {
       return reply(200, { ok: true, hidden: Array.isArray(saved.data) ? saved.data.length : null });
     }
 
-    if (!["save_intake", "save_narrative", "approve_narrative", "plan", "polish_narrative"].includes(action)) return reply(400, { error: "Unknown action" });
+    if (!["save_intake", "save_narrative", "approve_narrative", "plan"].includes(action)) return reply(400, { error: "Unknown action" });
     const o = await loadOwned(b.id, userId);
     if (o.error) return o.error;
     const project = o.row;
     if (am.NOT_EDITABLE_AFTER.includes(project.status)) return reply(409, { error: "This piece is already rendering or finished. Start a new one to change it." });
-    // The report behind the selected topic was re-confirmed with a different scope: nothing moves forward under the old one.
-    if (project.selected_topic && project.selected_topic.reportOutdated) return reply(409, { error: "You changed the report's confirmation after this topic was chosen. Find topics again and choose one that matches it.", code: "report_changed" });
 
     if (action === "save_intake") {
       // Local Market Insider starts from one of the five researched topics; its figures and sources are on the project, never from the browser.
@@ -181,10 +155,10 @@ exports.handler = async (event) => {
 
     if (action === "save_narrative") {
       if (!project.intake || !project.intake.market) return reply(409, { error: "Answer the intake questions first." });
-      const v = am.validateNarrative(b.narrative, project.duration_sec, { writer: am.isWriterScript(project) });
+      const v = am.validateNarrative(b.narrative, project.duration_sec);
       if (v.error) return reply(400, { error: v.error });
       am.attachNotice(project, v.narrative); // a script edit must never drop the required notice (on-screen overlay, never spoken)
-      const g = gate.evaluate(am.gateInputFor(await withGateEvidence(project), v.narrative, "edited"));
+      const g = gate.evaluate(am.gateInputFor(project, v.narrative, "edited"));
       if (!g.ok) return reply(422, { error: gate.explain(g), gate: gateSummary(g) });
       // Keep what the planner produced (scene plan, photo shopping list, claims to verify, planning counters) and replace only
       // what the agent edited. If the words changed, the scene excerpts no longer match them: flag that for the next step.
@@ -193,39 +167,34 @@ exports.handler = async (event) => {
       // The scene text follows the agent's wording: re-matched here, so an edited script never leaves the scenes one word off.
       const aligned = require("./lib/agent-marketing-timing-lib").realignScenes(clientScenes, v.narrative.narrationTagged);
       clientScenes = aligned.scenes;
-      // Nov 14, 2026 (Sam, Option 2 beta; article-led switch only): the scenes belong to the narration they were planned for. When the words no longer match,
-      // the AI plan's angle, claims and hook are dropped (they describe the discarded script) and the scenes are rebuilt from the approved words at render time.
-      const articleLed = require("./lib/agent-marketing-b1-evidence-lib").enabled() && project.template === "local_market_insider";
-      const scenesFor = prev.scenesFor || (articleLed && prev.narrationTagged && Array.isArray(prev.scenes) && prev.scenes.length ? am.narrationKey(prev.narrationTagged) : undefined);
-      const changed = articleLed && !!scenesFor && am.narrationKey(v.narrative.narrationTagged) !== scenesFor;
       const narrative = {
-        editorialAngle: changed ? "" : prev.editorialAngle, hook: changed ? (v.narrative.captionText.split(/(?<=[.!?\u2026])\s+/)[0] || "") : prev.hook, claimsToVerify: changed ? [] : prev.claimsToVerify, missingAgentInputs: prev.missingAgentInputs,
-        attempts: prev.attempts, intakeHash: prev.intakeHash, lengthDiagnostics: prev.lengthDiagnostics,
-        // Nov 15, 2026: the complete-source Writer's mark, its untouched first draft and its stored input/output survive every edit of the script.
-        ...(prev.engine ? { engine: prev.engine, model: prev.model, promptVersion: prev.promptVersion, writerDraft: prev.writerDraft, writerRecord: prev.writerRecord, polishRecords: prev.polishRecords } : {}),
-        ...(articleLed && scenesFor ? { scenesFor } : {}),
+        editorialAngle: prev.editorialAngle, hook: prev.hook, claimsToVerify: prev.claimsToVerify, missingAgentInputs: prev.missingAgentInputs,
+        attempts: prev.attempts, intakeHash: prev.intakeHash,
         ...v.narrative, scenes: clientScenes,
         pronunciations: Array.isArray(b.narrative && b.narrative.pronunciations) ? require("./lib/agent-marketing-timing-lib").cleanPronunciations(b.narrative.pronunciations) : (prev.pronunciations || []), cta: v.narrative.cta || prev.cta || null,
-        scenesStale: changed,
+        scenesStale: false,
         source: "edited", status: "ready", savedAt: new Date().toISOString(),
       };
-      am.attachNotice(project, narrative); // again, now that the scenes are in place: the notice bars (opening and closing) and the article credit follow the scenes, never the client
       const saved = await patch(project.id, userId, { narrative, status: "narrative_ready", gate_version: g.version, gate_result: gateSummary(g) });
       if (!saved) return reply(500, { error: "Could not save the script" });
       return reply(200, { project: forClient(saved), warnings: v.warnings, gate: gateSummary(g) });
     }
 
     if (action === "plan") {
-      // The pre-planning checks (intake, topic, one call per set of answers, attempts) are shared with the development script mode.
       if (!project.intake || !project.intake.market) return reply(409, { error: "Answer the intake questions first." });
       if (project.template === "local_market_insider" && !project.selected_topic) return reply(409, { error: "Choose one of the five topics first." });
       if (!process.env.ANTHROPIC_API_KEY || !process.env.INTERNAL_API_KEY) return reply(500, { error: "Planning is not configured." });
-      const ps = require("./lib/agent-marketing-plan-run-lib").planStart(project);
-      if (ps.error) return reply(ps.error.status, { error: ps.error.message });
-      const { stub, hash } = ps;
+      const n = project.narrative;
+      const hash = planLib.intakeHash(project.intake, project.selected_topic);
+      const attempts = (n && Number(n.attempts)) || 0;
+      if (n && n.status === "planning" && Date.now() - Number(n.startedAt || 0) < planLib.STALE_PLANNING_MS) return reply(409, { error: "Your script is already being written." });
+      // One planning call per distinct set of answers: a ready script for the same answers is reused, not re-bought.
+      if (n && n.narrationTagged && n.intakeHash === hash) return reply(409, { error: "A script already exists for these answers. Edit it, or change your answers to plan again." });
+      if (attempts >= planLib.MAX_ATTEMPTS) return reply(429, { error: "This project has used all of its planning attempts. Start a new one." });
+      const stub = { status: "planning", startedAt: Date.now(), attempts: attempts + 1, intakeHash: hash };
       const saved = await patch(project.id, userId, { narrative: stub });
       if (!saved) return reply(500, { error: "Could not start planning" });
-      const siteUrl = selfBase(event, process.env.URL || `https://${event.headers && event.headers.host}`);
+      const siteUrl = process.env.URL || `https://${event.headers && event.headers.host}`;
       try {
         await fetch(`${siteUrl}/.netlify/functions/agent-marketing-plan-background`, {
           method: "POST", headers: { "Content-Type": "application/json", "x-internal-key": process.env.INTERNAL_API_KEY },
@@ -239,23 +208,6 @@ exports.handler = async (event) => {
       return reply(202, { project: forClient(saved) });
     }
 
-    if (action === "polish_narrative") {
-      // Nov 15, 2026 (Sam): the OPTIONAL revision call, made only when the subscriber asks for it. It returns a proposal; nothing is saved or approved until the subscriber saves it.
-      const prevN = project.narrative && typeof project.narrative === "object" ? project.narrative : null;
-      if (!prevN || prevN.engine !== am.WRITER_ENGINE || !prevN.narrationTagged) return reply(409, { error: "There is no script to revise yet." });
-      if (!process.env.ANTHROPIC_API_KEY) return reply(500, { error: "Revising is not configured." });
-      const done = Array.isArray(prevN.polishRecords) ? prevN.polishRecords : [];
-      if (done.length >= MAX_POLISHES) return reply(429, { error: "This script has used all of its revision requests. You can still edit it yourself.", code: "polish_limit" });
-      const current = typeof (b.narrationTagged) === "string" && b.narrationTagged.trim() ? b.narrationTagged : prevN.narrationTagged;
-      const writerLib = require("./lib/agent-marketing-writer-lib");
-      let out;
-      try { out = await writerLib.polish({ project, narration: current, request: b.request, anthropicKey: process.env.ANTHROPIC_API_KEY, env: process.env }); }
-      catch (e) { console.error("agent-marketing polish failed:", e.message); return reply(502, { error: "The revision could not be written. Your script is unchanged. Please try again." }); }
-      const rec = { at: new Date().toISOString(), request: String(b.request || "").slice(0, 600), system: out.input.system, user: out.input.user, reply: out.reply, usage: out.usage };
-      await patch(project.id, userId, { narrative: { ...prevN, polishRecords: done.concat(rec) } });
-      return reply(200, { polished: { narration: out.narration, words: out.words } });
-    }
-
     // approve_narrative
     const n = project.narrative;
     if (!n || !n.narrationTagged) return reply(409, { error: "There is no script to approve yet." });
@@ -264,12 +216,7 @@ exports.handler = async (event) => {
       return reply(409, { error: "This script was written for a different topic or different answers. Write a new script for the topic you chose, then approve it.", code: "script_stale" });
     }
     am.attachNotice(project, n); // scripts saved before the notice was kept still carry it
-    // Nov 12, 2026 (Sam): word count guides the writer; it never blocks approval. A script over its recommended range is approved as written (the page shows an advisory).
-    // Development only: an Article-Led script is approved only while its topic's checked evidence is attached and valid.
-    const gateProject = await withGateEvidence(project);
-    const blockedWhy = evidenceBlocked(gateProject);
-    if (blockedWhy) return reply(409, { error: "This script can't be approved because the article evidence for this topic is missing or no longer valid. Write the script again.", code: "evidence_blocked" });
-    const g = gate.evaluate(am.gateInputFor(gateProject, n, n.source === "claude" ? "claude" : "edited"));
+    const g = gate.evaluate(am.gateInputFor(project, n, n.source === "claude" ? "claude" : "edited"));
     if (!g.ok) return reply(422, { error: gate.explain(g), gate: gateSummary(g) });
     const now = new Date().toISOString();
     const saved = await patch(project.id, userId, { narrative_approved: { ...n, approvedAt: now, gateVersion: g.version }, narrative_approved_at: now, status: "narrative_approved", gate_version: g.version, gate_result: gateSummary(g) });

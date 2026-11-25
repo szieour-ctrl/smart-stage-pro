@@ -26,18 +26,6 @@
 "use strict";
 
 const GATE_VERSION = "2026-10-25.1";
-// (Report scope/period checks, scanReportScope, are deterministic and stay on in the Test environment.)
-// Creative evaluation in the development Test environment (Nov 9, 2026, product-owner directive): the editorial claim checks are not run at all
-// (no block, no warning): b1_claim_context, b1_held_quote, b1_unsupported_figure, invented_number, report_priority, and the "opinion with no
-// figure" note. Only when AGENT_MARKETING_B1_EVIDENCE=dev AND the server's database is not the production project; Production is unchanged.
-// Fair Housing, the specific-home/listing rules, the required notice, the template allowlist and fabricated testimonials/results still apply.
-// Research-time callers that build topics (reframe, report topics) pass keepEditorialChecks: true and are unchanged.
-function testEvaluation(env) {
-  const e = env || process.env;
-  if (!require("./agent-marketing-b1-evidence-lib").enabled(e)) return false;
-  const db = String(e.SUPABASE_URL || "");
-  return !!db && !db.includes(require("./public-config-lib").PRODUCTION_REF);
-}
 
 // One checkbox, extending the existing Reel advertising-accuracy confirmation. Store the version with the timestamp.
 const ATTESTATION_VERSION = "agent-marketing-1";
@@ -157,7 +145,7 @@ const VERIFIED_TEMPLATE = "local_market_insider";
  * `topic` is the frozen selected_topic saved by agent-marketing-research.js (question, whyItMatters, trendSignals,
  * scopeNote, sources, event). Only fields the research validator already checked are used.
  */
-function verifiedFromTopic(topic, env) {
+function verifiedFromTopic(topic) {
   const t = topic && typeof topic === "object" ? topic : null;
   if (!t || !Array.isArray(t.sources) || t.sources.length === 0) return null; // no validated source, nothing is verified
   // reportFirst (a web topic when the agent chose "Both"): the agent's uploaded report is the only source of numbers. The web topic's own
@@ -182,14 +170,6 @@ function verifiedFromTopic(topic, env) {
     supersededNumbers: (Array.isArray(p && p.supersededNumbers) ? p.supersededNumbers : []).map(String).filter(Boolean),
   })).filter((p) => p.reportText);
   precedence.forEach((p) => texts.push(p.reportText));
-  // B1 article evidence (development only, AGENT_MARKETING_B1_EVIDENCE=dev): the exact source quotations of VALIDATED B1 findings are verified text.
-  // Held and excluded findings never are, and a BLOCKED bundle contributes nothing. On a "Both" topic the article's market statistics stay out.
-  const b1v = require("./agent-marketing-b1-evidence-lib").viewForTopic(t, env);
-  if (b1v) require("./agent-marketing-b1-evidence-lib").verifiedQuotes(b1v).forEach((q) => texts.push(reportFirst ? require("./agent-marketing-article-lib").withoutMarketStats(q, require("./agent-marketing-article-lib").measuredKeysOf(t)) : q));
-  // D1 (development only): with B1 evidence present, article figures must be authorized by an applicable validated finding, and held quotations
-  // may not be restored (lib/agent-marketing-b1-claims-lib.js). The agent's own report figures stay with rule 2f and are not checked there.
-  const b1Claims = b1v ? require("./agent-marketing-b1-claims-lib").contextFromView(b1v) : null;
-  if (b1Claims) b1Claims.reportNumbers = numberTokens([...(Array.isArray(t.reportFigures) ? t.reportFigures.map((f) => f && f.text) : []), ...precedence.map((p) => p.reportText)].filter(Boolean).join(" \n "));
   const addresses = [];
   const e = t.event && typeof t.event === "object" ? t.event : null;
   if (e) {
@@ -198,15 +178,7 @@ function verifiedFromTopic(topic, env) {
     if (e.location) addresses.push(e.location);
   }
   const clean = texts.filter((x) => typeof x === "string" && x.trim()).map(norm);
-  // Scope the agent's Market Review figures were frozen with (area, combined or not, partial period, development). See scanReportScope.
-  const scopedFigs = (Array.isArray(t.reportFigures) ? t.reportFigures : []).filter((f) => f && f.areaLabel && typeof f.text === "string");
-  const scope = scopedFigs.length ? {
-    figures: scopedFigs.map((f) => ({ areaLabel: String(f.areaLabel), scopeKind: String(f.scopeKind || ""), role: String(f.role || ""), nums: [...numberTokens(String(f.display || ""))].filter((n) => !/^(?:19|20)\d\d$/.test(n)), partial: f.partialPeriod === true, partialComparison: f.partialComparison === true })),
-    places: [...new Set((Array.isArray(t.reportScope) ? t.reportScope : []).flatMap((r) => (Array.isArray(r.places) ? r.places : [])).map(String))],
-    combined: (Array.isArray(t.reportScope) ? t.reportScope : []).some((r) => r.scopeKind !== "exact"),
-    development: String((Array.isArray(t.reportScope) ? t.reportScope : []).map((r) => r.development).filter(Boolean)[0] || ""),
-  } : null;
-  return clean.length ? { texts: clean, addresses: addresses.map(norm), reportNotice, precedence, reportFirst, ...(scope ? { scope } : {}), ...(b1Claims ? { b1: b1Claims } : {}) } : null;
+  return clean.length ? { texts: clean, addresses: addresses.map(norm), reportNotice, precedence, reportFirst } : null;
 }
 
 /** verifiedFromProject(project) → verified facts for a stored project row, or null (any other template, no topic). */
@@ -297,50 +269,14 @@ function scanSpecificHome(text, field, addresses, blocks, sourcedFacts) {
   }
 }
 
-// Phase 2 (development switch): a Market Review's statistic keeps its geographic scope and reporting period. The topic was frozen with each figure's
-// area, whether it is a combined/county (broader-market) figure and whether its period is partial. This check is structural: it looks only at
-// sentences that state one of those figures. It does not forbid comparisons the report supports, only the three misstatements below.
-const COMBINED_WORDS = /\b(combined|together|across|overall|region(?:al)?|market[- ]wide|countywide|county|area[- ]wide|both|all of)\b/i;
-const FULL_YEAR_WORDS = /\b(?:full|whole|entire|complete|completed)\s+year\b|\byear[- ]end\b|\bfor\s+the\s+year\b|\bthe\s+year\s+(?:ended|closed|finished)\b/i;
-const YOY_WORDS = /\byear[- ]over[- ]year\b|\byoy\b|\bcompared\s+(?:to|with)\s+(?:last\s+year|the\s+(?:previous|prior)\s+year|20\d\d)\b|\bvs\.?\s+(?:last\s+year|20\d\d)\b|\bfrom\s+last\s+year\b/i;
-function scanReportScope(text, field, scope, blocks) {
-  if (!scope || !scope.figures.length) return;
-  const sentences = norm(text).split(/(?<=[.!?])\s+/);
-  const esc = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  for (const sent of sentences) {
-    const nums = numberTokens(sent);
-    const hit = scope.figures.filter((f) => f.nums.some((n) => nums.has(n)));
-    if (!hit.length) continue;
-    const low = sent.toLowerCase();
-    if (scope.development && low.includes(scope.development.toLowerCase()) && !COMBINED_WORDS.test(sent) && !/\b(market|area|citywide|city[- ]wide)\b/i.test(sent))
-      blocks.push({ rule: "report_scope_development", field, match: snippet([sent.slice(0, 80)]), message: `${hit[0].areaLabel} is a broader market. Its figures are not statistics for ${scope.development}. Name the market as the source of the figure, not the development.` });
-    else if (scope.combined && scope.places.length > 1) {
-      const named = scope.places.filter((pl) => new RegExp(`\\b${esc(pl.toLowerCase())}\\b`).test(low));
-      if (named.length === 1 && !COMBINED_WORDS.test(sent))
-        blocks.push({ rule: "report_scope_constituent", field, match: snippet([sent.slice(0, 80)]), message: `This figure covers ${hit[0].areaLabel}, not ${named[0]} alone. Say it describes the combined market.` });
-    }
-    if (hit.some((f) => f.partial) && FULL_YEAR_WORDS.test(sent))
-      blocks.push({ rule: "report_partial_year", field, match: snippet([sent.slice(0, 80)]), message: "This report covers only part of the year. Do not describe its figures as a full year." });
-    else if (hit.some((f) => f.partial && f.partialComparison) && YOY_WORDS.test(sent))
-      blocks.push({ rule: "report_partial_year", field, match: snippet([sent.slice(0, 80)]), message: "This figure's year is still in progress, so its count is not comparable with a full prior year. Describe only the comparison the report itself supports." });
-  }
-}
-
 // Rule 2. The agent's own report is the source of truth. A web figure for a measure the report also covers, and that disagrees with it,
-// was recorded on the topic (reportPrecedence) when the topics were built; stating it as the market's figure blocks. Nov 14, 2026 (Sam): a sentence that
-// attributes the figure to the article or its author ("the article put supply at 2.8 months in September") is accurate context, not a misstatement of the
-// agent's own market data, and passes; so does the same sentence in the subscriber's own text.
-const ARTICLE_ATTRIBUTION = /\b(?:the|that|this)\s+(?:article|author|blog|post|write-?up)\b|\ba\s+local\s+(?:market\s+)?(?:update|article|blog|agent)\b|\baccording\s+to\s+(?:the\s+)?(?:article|author)\b/i;
+// was recorded on the topic (reportPrecedence) when the topics were built; using it in the script blocks.
 function scanReportPriority(text, field, precedence, blocks) {
   if (!precedence.length) return;
-  const seen = new Set();
-  for (const sent of norm(text).split(/(?<=[.!?])\s+/)) {
-    if (ARTICLE_ATTRIBUTION.test(sent)) continue;
-    const nums = numberTokens(sent);
-    for (const p of precedence) {
-      for (const n of p.supersededNumbers) {
-        if (nums.has(n) && !seen.has(n)) { seen.add(n); blocks.push({ rule: "report_priority", field, match: n, message: `Your uploaded report is the source of truth for ${p.label} (${p.reportText}). Use that figure, not ${n}.` }); }
-      }
+  const nums = numberTokens(text);
+  for (const p of precedence) {
+    for (const n of p.supersededNumbers) {
+      if (nums.has(n)) blocks.push({ rule: "report_priority", field, match: n, message: `Your uploaded report is the source of truth for ${p.label} (${p.reportText}). Use that figure, not ${n}.` });
     }
   }
 }
@@ -412,9 +348,6 @@ function evaluate(input) {
   const warnings = [];
   const agentSuppliedClaims = [];
   const i = input || {};
-  // skipEditorialChecks (Nov 15, 2026, Sam): the complete-source Writer's own script is the Realtor's interpretation; the editorial claim checks never run on it, in any
-  // environment. Fair Housing, the specific-home/listing rules, report scope, the required notice and the template allowlist still apply.
-  const editorial = i.skipEditorialChecks === true ? false : (i.keepEditorialChecks === true || !testEvaluation());   // false only in the development Test environment
 
   // Template allowlist
   if (!TEMPLATES.includes(i.template)) blocks.push({ rule: "template", field: "template", match: String(i.template || ""), message: "Unknown Agent Marketing template." });
@@ -435,7 +368,6 @@ function evaluate(input) {
   const vIn = i.template === VERIFIED_TEMPLATE && i.verified && typeof i.verified === "object" ? i.verified : null;
   const vTexts = vIn && Array.isArray(vIn.texts) ? vIn.texts.filter((x) => typeof x === "string" && x.trim()).map(norm) : [];
   const vAddresses = vIn && Array.isArray(vIn.addresses) ? vIn.addresses.filter((x) => typeof x === "string" && x.trim()).map(norm) : [];
-  const reportScope = vIn && vIn.scope ? vIn.scope : null;
   const precedence = vIn && Array.isArray(vIn.precedence) ? vIn.precedence.filter((p) => p && Array.isArray(p.supersededNumbers)) : [];
   const verifiedText = vTexts.join(" \n ");
   const verifiedLower = verifiedText.toLowerCase();
@@ -446,11 +378,6 @@ function evaluate(input) {
   // are as good as a figure written in the research. Callers pass the results as input.derivedNumbers; nothing is accepted without them.
   if (market && Array.isArray(i.derivedNumbers)) i.derivedNumbers.forEach((n) => { if (n !== null && n !== undefined && n !== "") verifiedNumbers.add(String(n).replace(/,/g, "").replace(/\.0+$/, "")); });
   const ctx = { intakeLower, verifiedLower, verifiedNumbers };
-  // D1, B1 evidence only (absent on the legacy path): the figures the agent supplied are exempt from the B1 claim checks.
-  const b1Ctx = market && vIn && vIn.b1 && typeof vIn.b1 === "object" ? vIn.b1 : null;
-  const b1Opts = b1Ctx ? { figureTokens: marketFigureTokens, agentNumbers: new Set([...intakeNumbers, ...(b1Ctx.reportNumbers || []),
-    ...(Array.isArray(i.derivedNumbers) ? i.derivedNumbers.filter((n) => n !== null && n !== undefined && n !== "").map((n) => String(n).replace(/,/g, "").replace(/\.0+$/, "")) : [])]) } : null;
-  const b1Scan = (text, field) => { if (b1Ctx) require("./agent-marketing-b1-claims-lib").scan(text, field, b1Ctx, b1Opts, blocks, sourcedFacts); };
 
   // Everything the AGENT typed: property-sale rules block; Fair Housing only warns; claims pass through.
   const userFields = { ...(i.userText || {}) };
@@ -469,11 +396,8 @@ function evaluate(input) {
     // Approving or saving a script sends Claude's words back as the agent's own text. On a sourced piece the same context rules apply to it
     // (the agent's own intake answers are theirs and are not held to them).
     if (market && !field.startsWith("intake.") && field !== "cta") {
-      scanMarketClaims(text, field, ctx, blocks, sourcedFacts, agentSuppliedClaims, editorial ? warnings : null);
-      // Deterministic geographic-attribution and partial-year checks are not creative editorial checks: they run in the development Test environment too.
-      scanReportScope(text, field, reportScope, blocks);
-      // Nov 14, 2026 (Sam): subscriber-authored text is the subscriber's own statement; the report-priority block applies to generated text only.
-      if (editorial) b1Scan(text, field);
+      scanMarketClaims(text, field, ctx, blocks, sourcedFacts, agentSuppliedClaims, warnings);
+      scanReportPriority(text, field, precedence, blocks);
     }
   }
 
@@ -494,10 +418,8 @@ function evaluate(input) {
     scan(text, field, FAIR_HOUSING, blocks);
     scan(text, field, FAIR_HOUSING_SOFT, warnings);
     if (market) {
-      scanMarketClaims(text, field, ctx, blocks, sourcedFacts, agentSuppliedClaims, editorial ? warnings : null);
-      // Deterministic geographic-attribution and partial-year checks are not creative editorial checks: they run in the development Test environment too.
-      scanReportScope(text, field, reportScope, blocks);
-      if (editorial) { scanReportPriority(text, field, precedence, blocks); b1Scan(text, field); }
+      scanMarketClaims(text, field, ctx, blocks, sourcedFacts, agentSuppliedClaims, warnings);
+      scanReportPriority(text, field, precedence, blocks);
     } else {
       for (const r of CLAIM_RULES) {
         const t = norm(text);
@@ -510,7 +432,7 @@ function evaluate(input) {
         }
       }
     }
-    if (editorial) for (const n of (market ? marketFigureTokens(text) : numberTokens(text))) {
+    for (const n of (market ? marketFigureTokens(text) : numberTokens(text))) {
       if (intakeNumbers.has(n)) continue;
       if (market && verifiedNumbers.has(n)) sourcedFacts.push(`${field}: ${n}`); // the figure is in the validated source topic
       else blocks.push({ rule: "invented_number", field, match: n, message: market ? (vIn && vIn.reportFirst ? `The number ${n} is not in your uploaded report. You chose to use your report with web research, so your report is the source of truth: use only its figures.` : `The number ${n} is not in your research topic, your uploaded report or your answers. Use only figures from those sources.`) : "Contains a number the agent did not provide." });
@@ -547,4 +469,4 @@ function explain(result) {
   return `${first.message}${where}${first.match ? ` — “${first.match}”` : ""}${more}. Agent Marketing is for your expertise and services; use a Listing Reel to advertise a specific home.`;
 }
 
-module.exports = { scanReportScope, testEvaluation, GATE_VERSION, ATTESTATION_VERSION, ATTESTATION_TEXT, TEMPLATES, ENABLED_TEMPLATES, evaluate, explain, verifiedFromTopic, verifiedFromProject };
+module.exports = { GATE_VERSION, ATTESTATION_VERSION, ATTESTATION_TEXT, TEMPLATES, ENABLED_TEMPLATES, evaluate, explain, verifiedFromTopic, verifiedFromProject };

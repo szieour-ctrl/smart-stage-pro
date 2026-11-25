@@ -31,53 +31,8 @@ const MUSIC = [
   { key: "none", label: "No music (silent)" },
 ];
 const MUSIC_KEYS = MUSIC.map((m) => m.key);
-// One shared duration contract (Nov 12, 2026, Phase A: behavior-preserving; every value below is the value that was already in force).
-//   range      recommended spoken words (production and Test); advisory, never blocks approval
-//   devRange   recommended spoken words in the development Test environment, only where it differs from `range`
-//   aim        editorial writing aim inside the range (Test only); none where absent
-//   editorTarget  words the Test scene editor cuts toward (it runs only above the top of the range); none where the editor does not serve the duration
-//   scenes     scene count range (addendum A2)
-//   images     generated-image range: GPT_IMAGE_2_CONCEPT + AGENT_SCENE combined. Since Oct 23 ONE wide 16:9 image is generated per scene (the 9:16
-//              version is cropped from it), so the same budget that used to buy 2 images x 2 formats now buys up to 4 different images.
 // Spoken words per duration (addendum A2). Guidance only; the audio length decides final timing.
-// Nov 9, 2026 (development only): measured ElevenLabs narration runs about 2.8 spoken words a second (118 words = 41-42 s), so 60 seconds needs 140-160 words.
-// Production keeps `range`; the 30- and 45-second targets are the same everywhere.
-// Nov 12, 2026 (Sam): Reels and Shorts, so 60 seconds is a ceiling (the Test top was 155; Phase B, Nov 13, sets it to 151).
-// Nov 12, 2026 (Sam, Test only): the 45-second aim is 105-110 words, about 42-44 seconds at the measured pace of about 151 words a minute (not a guaranteed rate).
-const DURATION_CONTRACT = {
-  30: { range: [55, 70], scenes: [4, 4], images: [2, 3] },
-  45: { range: [105, 125], aim: [105, 110], editorTarget: 110, scenes: [5, 6], images: [3, 4] },
-  // Nov 14, 2026 (Sam, Test only): story-first composition. 60 seconds aims at 150 words inside a 140-155 drafting range; the editor handles overruns above 155 and cuts toward 150.
-  60: { range: [110, 130], devRange: [140, 155], aim: [150, 150], editorTarget: 150, scenes: [6, 8], images: [4, 6] },
-};
-const fromContract = (pick) => Object.fromEntries(Object.entries(DURATION_CONTRACT).filter(([, c]) => pick(c) !== undefined).map(([d, c]) => [d, pick(c)]));
-const WORD_TARGETS = fromContract((c) => c.range);
-const DEV_WORD_TARGETS = fromContract((c) => c.devRange || c.range);
-const SCENE_RANGES = fromContract((c) => c.scenes);
-const IMAGE_RANGES = fromContract((c) => c.images);
-const WRITING_AIMS = fromContract((c) => c.aim);
-const EDITOR_TARGETS = fromContract((c) => c.editorTarget);
-function wordTargets(durationSec, env) {
-  const dev = String((env || process.env).AGENT_MARKETING_B1_EVIDENCE || "").trim().toLowerCase() === "dev";
-  return (dev ? DEV_WORD_TARGETS : WORD_TARGETS)[durationSec] || (dev ? DEV_WORD_TARGETS : WORD_TARGETS)[45];
-}
-// Nov 15, 2026 (Sam, Test only): the Writer's 60-second composition range is 130-140 words (target 135); other durations use wordTargets.
-const WRITER_RANGE_60 = [130, 140];
-function writerWordTargets(durationSec, env) { return Number(durationSec) === 60 ? WRITER_RANGE_60.slice() : wordTargets(durationSec, env); }
-// Nov 13, 2026 (Sam, Test only): a nonblocking estimate of the narration length from the word count, using the delivery range seen across stored renders
-// (2.3 to 2.8 words a second). Advisory text only: it never changes the narration, the voice speed or any timing.
-const PACE_WORDS_PER_SECOND = [2.3, 2.8];
-function narrationEstimate(words) {
-  const n = Math.max(0, Number(words) || 0);
-  return [Math.round(n / PACE_WORDS_PER_SECOND[1]), Math.round(n / PACE_WORDS_PER_SECOND[0])];
-}
-function durationAdvisory(words, durationSec) {
-  const [lo, hi] = narrationEstimate(words);
-  return `${words} words · Estimated narration ${lo}–${hi} seconds · Target ${durationSec} seconds.`;
-}
-function devAdvisory(env) { return String((env || process.env).AGENT_MARKETING_B1_EVIDENCE || "").trim().toLowerCase() === "dev"; }
-// Development only: AGENT_MARKETING_MARKET_REVIEW=dev routes supported Domus Market Review PDFs to the deterministic reader. Server environment only; no request field turns it on.
-function marketReviewEnabled(env) { return String((env || process.env).AGENT_MARKETING_MARKET_REVIEW || "").trim().toLowerCase() === "dev"; }
+const WORD_TARGETS = { 30: [55, 70], 45: [105, 125], 60: [110, 130] };
 const CTA_SOURCES_FROM_CLIENT = ["user_edited", "user_inserted"];
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -120,22 +75,21 @@ function countWords(text) {
 }
 
 /**
- * validateNarrative(body, durationSec, { writer }) → { error } | { narrative, warnings }
+ * validateNarrative(body, durationSec) → { error } | { narrative, warnings }
  * The caption text is ALWAYS derived from the tagged narration (never taken from the client), so captions are exactly the
  * spoken words with the audio tags removed.
  */
-function validateNarrative(body, durationSec, opts) {
+function validateNarrative(body, durationSec) {
   const b = body && typeof body === "object" ? body : {};
   const tagged = String(b.narrationTagged == null ? "" : b.narrationTagged).replace(/\r/g, "").trim();
   if (!tagged) return { error: "The narration is empty." };
   if (tagged.length > 2500) return { error: "The narration is too long." };
   const captionText = stripAudioTags(tagged);
   const words = countWords(tagged);
-  const [lo, hi] = opts && opts.writer ? writerWordTargets(durationSec) : wordTargets(durationSec);
+  const [lo, hi] = WORD_TARGETS[durationSec] || WORD_TARGETS[45];
   const warnings = [];
   if (words < lo) warnings.push(`About ${words} spoken words; a ${durationSec}-second piece usually runs ${lo}–${hi}. It may feel short.`);
   if (words > hi) warnings.push(`About ${words} spoken words; a ${durationSec}-second piece usually runs ${lo}–${hi}. Speech may run long.`);
-  if (devAdvisory()) warnings.push(durationAdvisory(words, durationSec)); // Test only (Nov 13, Sam): nonblocking estimate
   const ctaText = intakeLib.cleanText(b.cta && b.cta.text, 80);
   const ctaSource = CTA_SOURCES_FROM_CLIENT.includes(b.cta && b.cta.source) ? b.cta.source : "user_edited";
   const scenes = Array.isArray(b.scenes) ? b.scenes.slice(0, 12).map((s, i) => ({
@@ -165,37 +119,20 @@ function noticeOverlayFor(project, narrative) {
   const count = Array.isArray(narrative && narrative.scenes) ? narrative.scenes.length : 0;
   return { text, position: "bottom", scenes: count > 1 ? [0, count - 1] : [0], showHeadshot: true, headshotSource: "marketing_profile" };
 }
-// Nov 12, 2026 (Sam): the article is credited in the on-screen source footer, never in the narration, captions or scene copy, and only when a scene
-// actually draws on the article (source_role "article"). A Reel built only on the subscriber's confirmed report needs no article credit. The text is built
-// by code from the checked source (title, site and date), like the source line of a web-research Reel. This is the contract field for the renderer.
-function sourceCreditFor(project, narrative) {
-  const t = project && project.template === "local_market_insider" && project.selected_topic;
-  if (!t || !t.b2 || !t.b2.article) return null;
-  const scenes = (Array.isArray(narrative && narrative.scenes) ? narrative.scenes : []).map((s, i) => (s && s.sourceRole === "article" ? i : -1)).filter((i) => i >= 0);
-  if (!scenes.length) return null;
-  const articles = (Array.isArray(t.sources) ? t.sources : []).filter((x) => x && x.kind === "article");
-  const text = require("./agent-marketing-sources-lib").sourceLine(articles.slice(0, 1), "");
-  return text ? { text, position: "bottom", scenes } : null;
-}
-// Sets (or removes) narrative.notice, narrative.noticeOverlay and narrative.sourceCredit from the stored topic. A script edit can never drop or change the notice.
+// Sets (or removes) narrative.notice and narrative.noticeOverlay from the stored topic. A script edit can never drop or change the notice.
 function attachNotice(project, narrative) {
   const n = narrative || {};
   const overlay = noticeOverlayFor(project, n);
   if (overlay) { n.notice = overlay.text; n.noticeOverlay = overlay; }
   else { delete n.notice; delete n.noticeOverlay; }
-  const credit = sourceCreditFor(project, n);
-  if (credit) n.sourceCredit = credit; else delete n.sourceCredit;
   return n;
 }
 
 // Build the gate input for a stored project + narrative. Text the agent wrote or edited is checked as the agent's own;
 // text Claude wrote (source "claude") is held to the stricter rules (no invented claims or numbers).
-// Nov 15, 2026 (Sam): the complete-source Writer path. A script carrying this engine mark was written, and may be edited, without the editorial claim checks.
-const WRITER_ENGINE = "complete_source_writer";
-const isWriterScript = (project, narrative) => !!((narrative && narrative.engine === WRITER_ENGINE) || (project && project.narrative && project.narrative.engine === WRITER_ENGINE));
 function gateInputFor(project, narrative, source) {
   const n = narrative || {};
-  const base = { template: project.template, intake: project.intake || {}, verified: gate.verifiedFromProject(project), ...(isWriterScript(project, n) ? { skipEditorialChecks: true } : {}) }; // verified: Local Market Insider only, from the stored research topic
+  const base = { template: project.template, intake: project.intake || {}, verified: gate.verifiedFromProject(project) }; // verified: Local Market Insider only, from the stored research topic
   const sceneTexts = (n.scenes || []).map((s) => s.narrationExcerpt).filter(Boolean);
   if (source === "claude") {
     return { ...base, fullPiece: true, generated: { narration: n.captionText || stripAudioTags(n.narrationTagged), captions: n.captionText, sceneTexts, overlays: n.notice ? [n.notice] : [] }, cta: n.cta || null };
@@ -203,26 +140,9 @@ function gateInputFor(project, narrative, source) {
   return { ...base, fullPiece: true, userText: { narration: n.captionText || stripAudioTags(n.narrationTagged), ...Object.fromEntries(sceneTexts.map((t, i) => [`sceneText[${i}]`, t])), ...(n.notice ? { notice: n.notice } : {}) }, cta: n.cta || null };
 }
 
-// Nov 14, 2026 (Sam, Option 2 beta): a storyboard belongs to the narration it was planned for. narrationKey identifies a narration by its spoken words
-// only (case, punctuation, spacing and audio tags do not count), and storyboardNeeded says whether an edited script no longer matches the scenes it carries.
-function narrationKey(text) {
-  const words = stripAudioTags(String(text == null ? "" : text)).toLowerCase().replace(/[^a-z0-9$%']+/g, " ").trim();
-  return require("crypto").createHash("sha256").update(words).digest("hex").slice(0, 32);
-}
-/** True when the script was edited and its scenes were not planned for these exact words (a script saved before this field existed counts as not matching). */
-function storyboardNeeded(narrative) {
-  const n = narrative || {};
-  // The Writer's script has no scenes until it is approved: its storyboard is always built from the approved words (an unedited draft included).
-  if (n.engine === WRITER_ENGINE && n.narrationTagged) return narrationKey(n.narrationTagged) !== n.scenesFor;
-  if (n.source !== "edited" || !n.narrationTagged) return false;
-  return narrationKey(n.narrationTagged) !== n.scenesFor;
-}
-
 const NOT_EDITABLE_AFTER = ["rendering", "rendered", "published"];
 
 module.exports = {
-  WRITER_ENGINE, isWriterScript, writerWordTargets,
-  marketReviewEnabled,
-  PACE_WORDS_PER_SECOND, narrationEstimate, durationAdvisory, narrationKey, storyboardNeeded, DURATIONS, FORMATS, VOICES, MUSIC, DURATION_CONTRACT, WORD_TARGETS, DEV_WORD_TARGETS, SCENE_RANGES, IMAGE_RANGES, WRITING_AIMS, EDITOR_TARGETS, wordTargets, UUID_RE, NOT_EDITABLE_AFTER,
-  isEnabledFor, validateCreate, stripAudioTags, countWords, validateNarrative, gateInputFor, topicNotice, noticeOverlayFor, sourceCreditFor, attachNotice,
+  DURATIONS, FORMATS, VOICES, MUSIC, WORD_TARGETS, UUID_RE, NOT_EDITABLE_AFTER,
+  isEnabledFor, validateCreate, stripAudioTags, countWords, validateNarrative, gateInputFor, topicNotice, noticeOverlayFor, attachNotice,
 };

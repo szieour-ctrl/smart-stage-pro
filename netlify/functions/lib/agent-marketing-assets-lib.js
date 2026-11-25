@@ -89,19 +89,6 @@ function disclosureKind(project) {
   return project && project.template === "local_market_insider" ? "market" : "default";
 }
 
-// Nov 12, 2026 (Sam): a Reel built from the subscriber's MetroList report AND an approved article keeps the MetroList notice on the opening and closing
-// bars and credits the article on the scene(s) that draw on it. The credit is built by code from the checked article source (never typed, never spoken,
-// never in the captions) and travels in the manifest for the renderer. A web-research Reel already carries its source_line and needs no credit.
-function sourceCreditFor(input, scenes) {
-  if (input.webTopic || !input.articleTopic) return null;
-  const articles = (Array.isArray(input.articleTopic.sources) ? input.articleTopic.sources : []).filter((x) => x && x.kind === "article");
-  const first = sourcesLib.usableSources(articles).slice(0, 1);
-  const text = sourcesLib.sourceLine(first, "");
-  const credited = (scenes || []).filter((s) => s.source_role === "article").map((s) => s.n);
-  if (!text || !credited.length) return null;
-  return { sources: first.map((x) => ({ title: x.title, url: x.url, published: x.published })), text, scenes: credited };
-}
-
 /**
  * buildManifest(input) → { manifest, edits, plan, validation }
  *   input: { cardCopy (optional, { [sceneIndex]: { headline, statement, support } } from the card copy writer), projectId, formats, narrative (approved), intake, reportFigures, notice:{period}, brand:{primary,secondary,border,font,agent,headshot_key},
@@ -124,14 +111,12 @@ function buildManifest(input) {
     const t = Math.round(Math.max(w.start, hit.start - 0.6) * 100) / 100;
     return t - w.start >= 0.8 ? t : undefined;
   };
-  // Article-led switch (Nov 13, 2026 Test; Nov 14 Option 2 beta, Sam): the stored scene role stands at any position; without the switch the first and last scene stay "data".
-  const testRoles = require("./agent-marketing-b1-evidence-lib").enabled();
   const scenes = pl.scenes.map((s, i) => {
     const v = s.visual || {};
     const owner = v.visualSource === "CONCEPT_REUSE" && Number.isInteger(v.reuseOfScene) ? v.reuseOfScene : i;
     const keys = (input.imageKeys && input.imageKeys[owner]) || {};
     return {
-      n: i + 1, composition: s.composition, narrative_role: s.narrative_role, branding: s.branding, source_role: v.sourceRole === "article" && (testRoles || (i > 0 && i < pl.scenes.length - 1)) ? "article" : "data",
+      n: i + 1, composition: s.composition, narrative_role: s.narrative_role, branding: s.branding, source_role: v.sourceRole === "article" && i > 0 && i < pl.scenes.length - 1 ? "article" : "data",
       narration_excerpt: s.narration_excerpt, window: tw.windows[i], ...(cardStart(s, tw.windows[i]) !== undefined ? { card_start_sec: cardStart(s, tw.windows[i]) } : {}),
       visual: { research_visual_context: [v.purpose, v.visualBrief].filter(Boolean).join(" — "), image_keys: keys, motion: s.camera_motion || "static_hold", source: v.visualSource, ...(input.imageProvenance && input.imageProvenance[owner] ? { image_provenance: input.imageProvenance[owner] } : {}) },
       claims: s.claims, data: s.data, reason: s.reason,
@@ -147,8 +132,6 @@ function buildManifest(input) {
     audio: { narration_key: input.audio.narration_key, duration_sec: input.audio.duration_sec, ...(input.voiceShape ? { voice_shape: input.voiceShape } : {}) },
     captions, scenes,
   };
-  const credit = sourceCreditFor(input, scenes);
-  if (credit) manifest.source_credit = credit;
   if (scenes.some((sc) => Object.values((sc.visual || {}).image_provenance || {}).includes("ai"))) manifest.disclosure = { kind: input.disclosureKind || "default", text: manifestLib.AI_DISCLOSURES[input.disclosureKind] || manifestLib.AI_DISCLOSURES.default };
   const q = manifestLib.applySmallSampleQualifiers(manifest);
   manifest = q.manifest;

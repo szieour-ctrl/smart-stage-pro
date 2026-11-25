@@ -208,44 +208,27 @@ function railwayPost(pathname, payload) {
     req.on("error", reject); req.write(body); req.end();
   });
 }
-// The branding the Reel carries, from the subscriber's default Marketing Profile. The logo is optional (Nov 9, 2026): it is passed only when the profile has one.
-function brandFromProfile(profile) {
-  return { primary: profile.brand_primary, secondary: profile.brand_secondary, border: profile.brand_border, font: profile.brand_font || undefined, headshot_key: profile.headshot_key, ...(profile.logo_key ? { logo_key: profile.logo_key } : {}), agent: { name: profile.licensed_name, brokerage: profile.brokerage_name || "" } };
-}
-// Every storage key the renderer needs a download link for.
-function dispatchKeys(manifest, headshotKey) {
+async function dispatchRender(job, manifest, headshotKey) {
   const keys = new Set([manifest.audio.narration_key]);
   if (headshotKey) keys.add(headshotKey);
-  if (manifest.brand && manifest.brand.logo_key) keys.add(manifest.brand.logo_key);
   manifest.scenes.forEach((s) => Object.values(s.visual.image_keys || {}).forEach((k) => keys.add(k)));
-  return keys;
-}
-async function dispatchRender(job, manifest, headshotKey) {
-  const keys = dispatchKeys(manifest, headshotKey);
   const assets = {};
   for (const k of keys) assets[k] = await presign(k, 12 * 3600);
   const r = await railwayPost("/render-agent-marketing", { jobId: job.id, manifest, assets, musicStyle: job.music || "default" });
   return r;
 }
 
-exports.brandFromProfile = brandFromProfile;
-exports.dispatchKeys = dispatchKeys;
 exports.handler = async (event) => {
   const h = event.headers || {};
   const key = process.env.INTERNAL_API_KEY || "";
-  // Development deploys only: the page starts this job with the subscriber's own login token (see self-dispatch-lib pageDispatch).
-  let pageUser = null;
-  if (!key || h["x-internal-key"] !== key) {
-    pageUser = await require("./lib/self-dispatch-lib").pageDispatchUser(event);
-    if (!pageUser) return { statusCode: 401, body: "" };
-  }
+  if (!key || h["x-internal-key"] !== key) return { statusCode: 401, body: "" };
   let job = null;
   try {
     const body = JSON.parse(event.body || "{}");
     if (!/^[\w-]{6,80}$/.test(String(body.jobId || ""))) return { statusCode: 400, body: "" };
     const jr = await supabase("GET", "agent_marketing_jobs", null, `?id=eq.${encodeURIComponent(body.jobId)}&select=*&limit=1`);
     job = Array.isArray(jr.data) ? jr.data[0] : null;
-    if (!job || !am.isEnabledFor(job.user_id) || (pageUser && job.user_id !== pageUser)) return { statusCode: 404, body: "" };
+    if (!job || !am.isEnabledFor(job.user_id)) return { statusCode: 404, body: "" };
     if (!["queued", "error"].includes(job.status) || (job.status === "error" && !body.retry)) return { statusCode: 200, body: "" }; // late or duplicate call
     await patchJob(job.id, { status: "preparing", error: null, step: "Starting", attempt: body.retry ? job.attempt + 1 : job.attempt });
 
@@ -254,22 +237,8 @@ exports.handler = async (event) => {
     if (!project) return await fail(job, "The project was not found."), { statusCode: 200, body: "" };
     let narrative = project.narrative_approved;
     if (!narrative || !project.narrative_approved_at || !Array.isArray(narrative.scenes) || !narrative.narrationTagged) return await fail(job, "The narration has not been approved yet."), { statusCode: 200, body: "" };
-    // Nov 14, 2026 (Sam, Option 2 beta; article-led switch only): an approved script that no longer matches the scenes it carries gets its storyboard rebuilt from the
-    // approved words, with ONE planning call. The narration is never changed. If the storyboard cannot be built the job stops with an explicit, retryable error and
-    // the earlier scenes are NOT used. An unchanged script keeps its storyboard and makes no call.
-    if (require("./lib/agent-marketing-b1-evidence-lib").enabled() && am.storyboardNeeded(narrative)) {
-      await patchJob(job.id, { step: "Planning the scenes from your script" });
-      let rebuilt;
-      try { rebuilt = await planLib.rebuildApprovedStoryboard({ project, narrative, anthropicKey: process.env.ANTHROPIC_API_KEY }); }
-      catch (e) { return await fail(job, e && e.code === "storyboard_failed" ? e.message : "We couldn't build the scene plan from your approved script. Your script is unchanged. Please try again."), { statusCode: 200, body: "" }; }
-      let kept = null;
-      try { kept = await supabase("PATCH", "agent_marketing_projects", { narrative_approved: rebuilt }, `?id=eq.${project.id}&user_id=eq.${job.user_id}`); } catch (e) { kept = null; }
-      if (!kept || kept.status < 200 || kept.status >= 300) return await fail(job, "The scene plan could not be saved. Your script is unchanged. Please try again."), { statusCode: 200, body: "" };
-      narrative = rebuilt;
-    } else {
-      // A script approved before its scene text was re-matched to an edited narration is re-matched here (the words and their order are the narration's own).
-      narrative = { ...narrative, scenes: require("./lib/agent-marketing-timing-lib").realignScenes(narrative.scenes, narrative.narrationTagged).scenes };
-    }
+    // A script approved before its scene text was re-matched to an edited narration is re-matched here (the words and their order are the narration's own).
+    narrative = { ...narrative, scenes: require("./lib/agent-marketing-timing-lib").realignScenes(narrative.scenes, narrative.narrationTagged).scenes };
     const topic = project.selected_topic || {};
     if (project.selected_topic && narrative.intakeHash && narrative.intakeHash !== planLib.intakeHash(project.intake, project.selected_topic)) return await fail(job, "Your approved script was written for a different topic or different answers than the ones now on this project. Go back to the Script step, write a new script for your topic, approve it, and make the Reel again."), { statusCode: 200, body: "" };
     const reportFigures = topic.reportFigures;
@@ -281,7 +250,7 @@ exports.handler = async (event) => {
     if (!fromReport && !sourcesLib.sourceLine(topic.sources, topic.scopeNote)) return await fail(job, sourcesLib.usableSources(topic.sources).length ? "The source note for this topic is too long to show on screen. Run the research again to get a shorter one." : "This Reel needs either your uploaded report or at least one checked, dated research source."), { statusCode: 200, body: "" };
     const profile = await getProfileRow(job.user_id);
     if (!profile || !profile.licensed_name || !profile.headshot_key) return await fail(job, "Your Agent Profile needs your name and headshot before a Reel can be made."), { statusCode: 200, body: "" };
-    const brand = brandFromProfile(profile);
+    const brand = { primary: profile.brand_primary, secondary: profile.brand_secondary, border: profile.brand_border, font: profile.brand_font || undefined, headshot_key: profile.headshot_key, agent: { name: profile.licensed_name, brokerage: profile.brokerage_name || "" } };
     const formats = job.formats;
     job.music = project.music || "default";
 

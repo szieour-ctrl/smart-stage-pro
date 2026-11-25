@@ -298,9 +298,11 @@ function validateManifest(manifest) {
   // (numbers on screen tracing to a source, small-sample trend wording, article in the opening or closing scene). Production is unchanged.
   // Nov 14, 2026 (Sam, Option 2 beta): the article-led switch alone decides that position does not fix a scene's source (so an opening or closing scene may carry the article);
   // the editorial claim checks above stay Test-only. With neither switch on, production is unchanged.
+  // Nov 24, 2026 (Sam): the three editorial render checks (claim, number, small_sample) follow the same switch in production: they flagged nearly every Reel, so with
+  // AGENT_MARKETING_B1_EVIDENCE on they are not applied at render. With the switch off, production is unchanged. Fair Housing and the other render rules still apply.
   const articleLed = require("./agent-marketing-b1-evidence-lib").enabled();
   const test = require("./agent-marketing-gate").testEvaluation();
-  const kept = errors.filter((e) => !(test && EDITORIAL_CODES.includes(e.code)) && !(articleLed && e.code === "source_role" && /^Opening and closing/.test(e.message)));
+  const kept = errors.filter((e) => !((test || articleLed) && EDITORIAL_CODES.includes(e.code)) && !(articleLed && e.code === "source_role" && /^Opening and closing/.test(e.message)));
   return { ok: kept.length === 0, errors: kept, warnings };
 }
 

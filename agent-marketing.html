@@ -535,6 +535,7 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
         <label class="lbl" for="narration">Narration</label>
         <textarea id="narration" style="min-height:190px"></textarea>
         <div class="hint">Words in [brackets] are delivery cues for the narrator. They never appear in captions. <span id="wordInfo"></span></div>
+        <div class="hint" id="editLengthNote">Editing the script changes the Reel's length. Times shown are approximate; the real length is known only after the narration is made.</div>
         <div id="writerBox" class="note hidden">
           <strong>One Writer wrote this script</strong> from the complete article<span id="writerReport"></span>. <span id="writerWords"></span>
           <details style="margin-top:6px"><summary style="cursor:pointer">The Writer's original draft, exactly as written</summary>
@@ -588,6 +589,7 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
       <div class="panel-title">Create and approve your concept images</div>
       <div class="panel-sub" id="imagesSub">Review each image and approve the ones you want. Nothing is used in your Reel until you accept it.</div>
       <div class="note" id="imagesCount"></div>
+      <div class="note hidden" id="imagesKeptNote">You edited the script. Your approved images stay with their scene numbers. If an edit changed what a scene says, choose Remove image on that scene and generate a new one.</div>
       <div id="imageSlots"></div>
       <div id="imagesDone" class="note hidden"></div>
       <div class="reel" id="reelPanel">
@@ -1217,6 +1219,9 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
     $("imageSlots").innerHTML = '<span class="spinner"></span>Loading your images…';
     try { await loadSelected(); } catch (e) { /* photos are optional; keep going */ }
     await loadImages();
+    // Nov 24, 2026 (Sam): a script edit keeps the approved images; the note shows only when the script was edited and at least one image is approved.
+    var kn = state.project && state.project.narrative;
+    $("imagesKeptNote").classList.toggle("hidden", !(kn && kn.source === "edited" && im.slots.some(function (x) { return x.approved; })));
     renderReel();
   }
   async function loadImages() {

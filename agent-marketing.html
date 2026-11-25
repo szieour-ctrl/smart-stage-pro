@@ -867,16 +867,20 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
   // Plans the scenes from the approved words (one visual-planning call; the script is never rewritten), then reloads the project until they appear.
   var boardTimer = null;
   async function startBoard() {
+    // Nov 25, 2026: the Storyboard screen is redrawn when the scenes arrive (it used to stay on "No scene plan yet" until the page was reloaded), and
+    // "Continue to visuals" waits only while the scene plan is being built.
+    state.boardBuilding = true; if (!$("stepBoard").classList.contains("hidden")) renderBoard();
+    function boardDone() { state.boardBuilding = false; if (!$("stepBoard").classList.contains("hidden")) renderBoard(); }
     try { await api("POST", "", { projectId: state.project.id, mode: "storyboard" }, STAGEB_BG); } catch (e) { /* the poll below reports it */ }
     var tries = 0; clearInterval(boardTimer);
     boardTimer = setInterval(async function () {
-      if (++tries > 60) { clearInterval(boardTimer); return; }
+      if (++tries > 60) { clearInterval(boardTimer); boardDone(); return; }
       try {
         var r = await api("GET", "?id=" + encodeURIComponent(state.project.id));
         var p = r.json && (r.json.project || r.json);
         if (!p || !p.narrative) return;
         var n = p.narrative;
-        if ((n.scenes || []).length || n.storyboardStatus === "error") { clearInterval(boardTimer); setProject(p); if (n.storyboardStatus === "error") say("scriptMsg", n.storyboardError || "The scene plan could not be built.", "err"); }
+        if ((n.scenes || []).length || n.storyboardStatus === "error") { clearInterval(boardTimer); setProject(p); boardDone(); if (n.storyboardStatus === "error") say("scriptMsg", n.storyboardError || "The scene plan could not be built.", "err"); }
       } catch (e) { /* try again */ }
     }, 4000);
   }
@@ -1092,7 +1096,8 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
       return '<div class="scene"><h4>Scene ' + (i + 1) + ' · ' + esc(String(s.role || "").replace(/_/g, " ")) + ' <span class="pill ' + (real || vs === "AGENT_PROFILE" ? "real" : "concept") + '">' + label + '</span><span class="pill">about ' + esc(s.provisionalSeconds) + 's</span></h4>' +
         '<div class="q">“' + esc(s.narrationExcerpt) + '”</div><dl>' + rows + dirRows +
         (fr["9x16"] ? "<dt>Vertical crop</dt><dd>" + esc(fr["9x16"]) + "</dd>" : "") + (fr["16x9"] ? "<dt>Wide frame</dt><dd>" + esc(fr["16x9"]) + "</dd>" : "") + testRows(s) + "</dl>" + (real ? '<div class="pick" id="pick' + i + '"></div>' : "") + "</div>";
-    }).join("") || '<div class="hint">No scene plan yet.</div>';
+    }).join("") || '<div class="hint">' + (state.boardBuilding ? "Building your scene plan… this takes a minute or two." : "No scene plan yet.") + '</div>';
+    $("toImagesBtn").disabled = !!state.boardBuilding && !scenes.length;
     var m = n.missingAgentInputs || [];
     $("missingBox").classList.toggle("hidden", !m.length);
     $("missingBox").innerHTML = "<strong>Still needed from you:</strong><ul class='plain'>" + m.map(function (x) { return "<li>" + esc(x) + "</li>"; }).join("") + "</ul>";

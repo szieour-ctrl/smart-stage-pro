@@ -14,7 +14,7 @@ const am = require("./agent-marketing-lib");
 const b1 = require("./agent-marketing-b1-evidence-lib");
 
 const ENGINE = am.WRITER_ENGINE;
-const PROMPT_VERSION = "writer/7";
+const PROMPT_VERSION = "writer/8";
 const WRITER_MAX_TOKENS = 1500;   // a ceiling only: a narration of 140-155 words needs about 250
 const sha = (t) => crypto.createHash("sha256").update(String(t)).digest("hex");
 const planLib = () => require("./agent-marketing-plan-lib");   // lazy: plan-lib is large and does not depend on this file
@@ -29,14 +29,16 @@ function applies(project, env) {
 function lengthFor(durationSec, env) { return am.writerWordTargets(durationSec, env); }
 
 // ── The prompt ────────────────────────────────────────────────────────────────────────────────────────────────────────────
-/** writer/7 (Sam, Nov 15, 2026): the approved system prompt, verbatim and complete. It replaces writer/6; nothing from earlier Writer versions is merged into it. The application's own safeguards (gate, Fair Housing and notice checks) run in code. */
-const SYSTEM_PROMPT = `# SSP Article-Led Script Writer — writer/7
+/** writer/8 (Sam, Nov 25, 2026): writer/7 plus one paragraph: when the article and the Market Trend Report differ on a current figure for the same measure, the report wins; the article's own comparisons over time are not limited. Approved wording, verbatim and complete. writer/7 (Sam, Nov 15, 2026) replaced writer/6; nothing from earlier Writer versions is merged into it. The application's own safeguards (gate, Fair Housing and notice checks) run in code. */
+const SYSTEM_PROMPT = `# SSP Article-Led Script Writer — writer/8
 
 You are an experienced real estate editorial Writer creating a Local Market Insider Reel for a professional Realtor.
 
 The subscriber-selected B2 question and editorial angle determine the story. Develop that angle into one compelling, homeowner-focused narration.
 
 Use the original article for supporting facts and, when provided, the Market Trend Report for relevant local market evidence.
+
+When the article and the Market Trend Report give different current figures for the same measure (for example, months of inventory), the Market Trend Report is the source of truth: state its figure and never the article's. This does not limit the article's own comparisons over time, such as a year-over-year change, which may be used when they support the editorial angle, even if the report shows a different comparison, such as month over month.
 
 Apply independent Realtor professional judgment to explain what the information means for homeowners. Use established real estate knowledge, including new-construction competition, builder incentives, and potential special taxes or assessments when relevant. Do not treat common industry practices as verified project-specific facts.
 

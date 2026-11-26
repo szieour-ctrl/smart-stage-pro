@@ -598,6 +598,7 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
         <div class="panel-sub">We create the narration, add any images still needed, and put it together with your captions, your headshot and name, music, and either the MetroList notice (report data) or your research source line. It takes a few minutes and you can leave this page; your Reel will be here when you come back. Nothing is charged during the beta.</div>
         <div class="reel-formats" id="reelFormats" role="group" aria-label="Reel formats"></div>
         <div class="note hidden" id="reelNote"></div>
+        <label class="reel-ok"><input type="checkbox" id="reelLip"> <span>Lip sync (optional, off by default): animate my headshot in the opening and closing so it speaks those lines. Adds a few minutes to your Reel.</span></label>
         <label class="reel-ok"><input type="checkbox" id="reelOk"> <span>I confirm the market statistics and claims in this Reel are accurate and comply with applicable advertising requirements.</span></label>
         <div class="actions"><button class="btn gold" type="button" id="reelGo">Make my Reel</button><button class="btn ghost hidden" type="button" id="reelRetry">Retry</button></div>
         <div class="msg" id="reelMsg" role="status"></div>
@@ -1394,10 +1395,20 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
     note.classList.toggle("hidden", !missing.length);
     if (missing.length) note.textContent = "No approved image yet for " + missing.join(", ") + ". Approve one above, or the Reel will create its own for " + (missing.length > 1 ? "them." : "it.");
   }
-  function reelBusyUi(on) { reel.busy = on; $("reelGo").disabled = on; Array.prototype.forEach.call($("reelFormats").querySelectorAll("input"), function (c) { c.disabled = on; }); $("reelOk").disabled = on; }
+  function reelBusyUi(on) { reel.busy = on; $("reelGo").disabled = on; Array.prototype.forEach.call($("reelFormats").querySelectorAll("input"), function (c) { c.disabled = on; }); $("reelOk").disabled = on; $("reelLip").disabled = on; }
+  // Lip sync is optional. When it was asked for, say which scenes were animated and which kept the still headshot (and why).
+  function lipNote(j) {
+    var rows = j && j.usage && j.usage.lipsync; if (!rows || !rows.length) return "";
+    var used = [], fell = [];
+    rows.forEach(function (x) { (x.status === "used" ? used : fell).push(x); });
+    var txt = "";
+    if (used.length) txt += " Lip sync: " + used.map(function (x) { return x.role; }).join(" and ") + " animated.";
+    fell.forEach(function (x) { txt += " Lip sync: your " + x.role + " shows the still headshot" + (x.reason ? " (" + x.reason + ")" : "") + "."; });
+    return txt;
+  }
   function showReel(j) {
     reelBusyUi(false);
-    say("reelMsg", "Your Reel is ready" + (j.durationSec ? " (" + Math.round(j.durationSec) + " seconds)" : "") + ".", "ok");
+    say("reelMsg", "Your Reel is ready" + (j.durationSec ? " (" + Math.round(j.durationSec) + " seconds)" : "") + "." + lipNote(j), "ok");
     var out = $("reelOut"); out.innerHTML = ""; out.classList.remove("hidden");
     Object.keys(j.videos || {}).forEach(function (f) {
       if (!j.videos[f]) return;
@@ -1447,7 +1458,7 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
     if (!$("reelOk").checked) return say("reelMsg", "Please tick the confirmation first.", "err");
     reelBusyUi(true); $("reelRetry").classList.add("hidden"); $("reelOut").classList.add("hidden"); say("reelMsg", "Starting …");
     try {
-      var r = await rapi("POST", "", { projectId: state.project.id, formats: formats, advertisingConfirmed: true });
+      var r = await rapi("POST", "", { projectId: state.project.id, formats: formats, advertisingConfirmed: true, lipSync: !!$("reelLip").checked });
       if (r.status === 409 && r.json.jobId) { reel.job = r.json.jobId; say("reelMsg", "A Reel is already being made for this project; following it …"); return pollReel(); }
       if (!r.ok) { reelBusyUi(false); return say("reelMsg", r.json.error || "Could not start your Reel.", "err"); }
       reel.job = r.json.jobId;

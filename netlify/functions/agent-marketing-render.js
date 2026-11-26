@@ -112,7 +112,7 @@ exports.handler = async (event) => {
   const live = await supabase("GET", "agent_marketing_jobs", null, `?project_id=eq.${project.id}&status=in.(queued,preparing,ready,rendering)&select=id&limit=1`);
   if (Array.isArray(live.data) && live.data[0]) return reply(409, { error: "A render for this project is already running.", jobId: live.data[0].id });
   const jobId = `amj-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const ins = await supabase("POST", "agent_marketing_jobs", { id: jobId, project_id: project.id, user_id: userId, formats, status: "queued", step: "Queued" });
+  const ins = await supabase("POST", "agent_marketing_jobs", { id: jobId, project_id: project.id, user_id: userId, formats, status: "queued", step: "Queued", ...(b.lipSync === true ? { assets: { lipsync: { requested: true } } } : {}) });
   if (ins.status >= 300) { console.error("agent_marketing_jobs insert failed:", ins.status, JSON.stringify(ins.data).slice(0, 200)); return reply(500, { error: "Could not start the render" }); }
   let page = false;
   try { page = await dispatchPrepare(jobId, false, event); } catch (e) { console.error("agent-marketing dispatch failed:", e.message); await patchJob(jobId, { status: "error", error: "Could not start preparation", step: "Stopped" }); return reply(502, { error: "Could not start the render" }); }

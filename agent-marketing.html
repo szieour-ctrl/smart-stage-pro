@@ -600,7 +600,7 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
         <div class="note hidden" id="reelNote"></div>
         <label class="reel-ok"><input type="checkbox" id="reelLip"> <span>Lip sync (optional, off by default): animate my headshot in the opening and closing so it speaks those lines. Adds a few minutes to your Reel.</span></label>
         <label class="reel-ok"><input type="checkbox" id="reelOk"> <span>I confirm the market statistics and claims in this Reel are accurate and comply with applicable advertising requirements.</span></label>
-        <div class="actions"><button class="btn gold" type="button" id="reelGo">Make my Reel</button><button class="btn ghost hidden" type="button" id="reelRetry">Retry</button></div>
+        <div class="actions"><button class="btn gold" type="button" id="reelGo">Make my Reel</button><button class="btn ghost hidden" type="button" id="reelRetry">Retry</button><button class="btn ghost hidden" type="button" id="reelRerender">Re-render</button></div>
         <div class="msg" id="reelMsg" role="status"></div>
         <div id="reelOut" class="reel-out hidden"></div>
       </div>
@@ -1407,7 +1407,7 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
     return txt;
   }
   function showReel(j) {
-    reelBusyUi(false);
+    reelBusyUi(false); $("reelRerender").classList.remove("hidden");
     say("reelMsg", "Your Reel is ready" + (j.durationSec ? " (" + Math.round(j.durationSec) + " seconds)" : "") + "." + lipNote(j), "ok");
     var out = $("reelOut"); out.innerHTML = ""; out.classList.remove("hidden");
     Object.keys(j.videos || {}).forEach(function (f) {
@@ -1430,7 +1430,7 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
         reelBusyUi(false); $("reelRetry").classList.remove("hidden");
         return say("reelMsg", "We could not finish your Reel: " + (j.error || "an unknown problem") + " Your images and narration are saved, so Retry will not make them again.", "err");
       }
-      reelBusyUi(true); $("reelRetry").classList.add("hidden");
+      reelBusyUi(true); $("reelRetry").classList.add("hidden"); $("reelRerender").classList.add("hidden");
       say("reelMsg", (j.step || "Working") + " … this takes a few minutes.");
       reel.timer = setTimeout(pollReel, 5000);
     }).catch(function (e) { say("reelMsg", e.message, "err"); reel.timer = setTimeout(pollReel, 8000); });
@@ -1446,8 +1446,8 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
     } catch (e) { /* the panel still works for a new Reel */ }
   }
   // Development deploys: the page starts the Reel's preparation job itself, with its own login (the server cannot call its own functions there).
-  async function startPrepare(jobId, retry) {
-    var bg = await api("POST", "", { jobId: jobId, retry: !!retry }, "/.netlify/functions/agent-marketing-prepare-background");
+  async function startPrepare(jobId, retry, rerender) {
+    var bg = await api("POST", "", Object.assign({ jobId: jobId, retry: !!retry }, rerender ? { rerender: true } : {}), "/.netlify/functions/agent-marketing-prepare-background");
     if (bg.status === 202 || bg.ok) return true;
     reelBusyUi(false); $("reelRetry").classList.remove("hidden"); say("reelMsg", "Your Reel could not be started (error " + bg.status + "). Please try again.", "err");
     return false;
@@ -1465,6 +1465,11 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
       if (r.json.dispatch && !(await startPrepare(reel.job, false))) return;
       pollReel();
     } catch (e) { reelBusyUi(false); say("reelMsg", e.message, "err"); }
+  }
+  async function rerenderReel() {
+    $("reelRerender").classList.add("hidden"); $("reelOut").classList.add("hidden"); reelBusyUi(true); say("reelMsg", "Re-rendering. Images, narration and lip sync clips already made are reused, so nothing is charged again …");
+    try { var r = await rapi("POST", "", { jobId: reel.job, retry: true, rerender: true }); if (!r.ok) { reelBusyUi(false); $("reelRerender").classList.remove("hidden"); $("reelOut").classList.remove("hidden"); return say("reelMsg", r.json.error || "Could not re-render.", "err"); } if (r.json.dispatch && !(await startPrepare(reel.job, true, true))) return; pollReel(); }
+    catch (e) { reelBusyUi(false); $("reelRerender").classList.remove("hidden"); say("reelMsg", e.message, "err"); }
   }
   async function retryReel() {
     $("reelRetry").classList.add("hidden"); reelBusyUi(true); say("reelMsg", "Retrying. Images and narration already made are reused …");
@@ -1750,7 +1755,7 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
     $("toImagesBtn").addEventListener("click", function () { go(5); });
     $("backToBoardBtn").addEventListener("click", function () { go(4); });
     $("reelGo").addEventListener("click", startReel);
-    $("reelRetry").addEventListener("click", retryReel);
+    $("reelRetry").addEventListener("click", retryReel); $("reelRerender").addEventListener("click", rerenderReel);
     $("imageSlots").addEventListener("click", onImageClick);
     $("imgModal").addEventListener("click", onModalClick);
     $("imgModal").addEventListener("change", function (ev) { var t = ev.target; if (t && t.id === "imgmAlso" && im.modal) im.also[im.modal.scene] = !!t.checked; });

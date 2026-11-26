@@ -285,7 +285,7 @@ exports.handler = async (event) => {
     const jr = await supabase("GET", "agent_marketing_jobs", null, `?id=eq.${encodeURIComponent(body.jobId)}&select=*&limit=1`);
     job = Array.isArray(jr.data) ? jr.data[0] : null;
     if (!job || !am.isEnabledFor(job.user_id) || (pageUser && job.user_id !== pageUser)) return { statusCode: 404, body: "" };
-    if (!["queued", "error"].includes(job.status) || (job.status === "error" && !body.retry)) return { statusCode: 200, body: "" }; // late or duplicate call
+    if (!["queued", "error"].includes(job.status) && !(job.status === "done" && body.rerender === true && body.retry) || (job.status === "error" && !body.retry)) return { statusCode: 200, body: "" }; // late or duplicate call
     await patchJob(job.id, { status: "preparing", error: null, step: "Starting", attempt: body.retry ? job.attempt + 1 : job.attempt });
 
     const pr = await supabase("GET", "agent_marketing_projects", null, `?id=eq.${job.project_id}&user_id=eq.${job.user_id}&select=*&limit=1`);

@@ -34,10 +34,10 @@ function railwayGet(pathname) {
 async function patchJob(id, fields) { await supabase("PATCH", "agent_marketing_jobs", { ...fields, updated_at: new Date().toISOString() }, `?id=eq.${encodeURIComponent(id)}`); }
 // Development deploys (behind team login) cannot call their own functions: there the page starts the preparation job with the subscriber's
 // own login token (same pattern as research, script mode and images). Returns true when the page must start it.
-async function dispatchPrepare(jobId, retry, event) {
+async function dispatchPrepare(jobId, retry, event, rerender) {
   if (require("./lib/self-dispatch-lib").pageDispatch(event)) return true;
   const siteUrl = selfBase(event, (process.env.SITE_URL || process.env.URL || "https://smartstagepro.com").replace(/\/+$/, ""));
-  await fetch(`${siteUrl}/.netlify/functions/agent-marketing-prepare-background`, { method: "POST", headers: { "Content-Type": "application/json", "x-internal-key": process.env.INTERNAL_API_KEY }, body: JSON.stringify({ jobId, retry: !!retry }) });
+  await fetch(`${siteUrl}/.netlify/functions/agent-marketing-prepare-background`, { method: "POST", headers: { "Content-Type": "application/json", "x-internal-key": process.env.INTERNAL_API_KEY }, body: JSON.stringify({ jobId, retry: !!retry, ...(rerender ? { rerender: true } : {}) }) });
 }
 
 exports.handler = async (event) => {
@@ -93,9 +93,10 @@ exports.handler = async (event) => {
     if (err) return err;
     // Development deploys: a job whose page-started preparation never began stays "queued"; it can be started again from the page.
     const pageQueued = job.status === "queued" && require("./lib/self-dispatch-lib").pageDispatch(event);
-    if (job.status !== "error" && !pageQueued) return reply(409, { error: "Only a stopped render can be retried." });
+    const rerun = b.rerender === true && job.status === "done"; // re-render a finished Reel from its saved images, narration and lip sync clips (nothing paid is made again)
+    if (job.status !== "error" && !pageQueued && !rerun) return reply(409, { error: "Only a stopped render can be retried." });
     let page = false;
-    try { page = await dispatchPrepare(job.id, true, event); } catch (e) { console.error("agent-marketing retry dispatch failed:", e.message); return reply(502, { error: "Could not restart the render" }); }
+    try { page = await dispatchPrepare(job.id, true, event, rerun); } catch (e) { console.error("agent-marketing retry dispatch failed:", e.message); return reply(502, { error: "Could not restart the render" }); }
     return reply(200, { jobId: job.id, ...(page ? { dispatch: true } : {}) });
   }
 

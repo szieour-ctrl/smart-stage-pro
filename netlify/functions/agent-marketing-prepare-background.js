@@ -208,6 +208,44 @@ function railwayPost(pathname, payload) {
     req.on("error", reject); req.write(body); req.end();
   });
 }
+// Railway returns the exact narration seconds for one scene as an mp3 (the optional lip-sync step sends them to HeyGen).
+function railwayExcerpt(narrationUrl, start, end) {
+  return new Promise((resolve, reject) => {
+    const url = new URL(`${process.env.RAILWAY_RENDER_URL}/agent-marketing-excerpt`);
+    const body = JSON.stringify({ url: narrationUrl, start, end });
+    const req = https.request({ hostname: url.hostname, path: url.pathname, method: "POST", headers: { "x-railway-secret": process.env.RAILWAY_SECRET, "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) } }, (res) => {
+      const chunks = []; res.on("data", (c) => chunks.push(c));
+      res.on("end", () => (res.statusCode === 200 ? resolve(Buffer.concat(chunks)) : reject(new Error(`The excerpt service returned ${res.statusCode}`))));
+    });
+    req.setTimeout(60000, () => req.destroy(new Error("The excerpt request timed out")));
+    req.on("error", reject); req.write(body); req.end();
+  });
+}
+// Optional Lip sync (off unless the job asked for it). Never stops the Reel: anything that goes wrong leaves the still headshot and is reported.
+async function runLipSync(job, manifest, audio, profile) {
+  const lip = require("./lib/agent-marketing-lipsync-lib");
+  if (!lip.requested(job)) return { manifest, report: null };
+  await patchJob(job.id, { step: "Animating your headshot" });
+  try {
+    const hg = lip.live(process.env) ? require("./lib/heygen-lib").client({ apiKey: process.env.HEYGEN_API_KEY }) : null;
+    const r = await lip.prepareLipSync({
+      job, manifest, audio, headshotKey: profile.headshot_key, env: process.env,
+      deps: {
+        cutExcerpt: railwayExcerpt, put, presign, heygen: hg,
+        saveState: async (state) => { job.assets = { ...(job.assets || {}), lipsync: state }; await patchJob(job.id, { assets: job.assets }); },
+      },
+    });
+    job.usage = { ...(job.usage || {}), lipsync: r.report };
+    await patchJob(job.id, { usage: job.usage });
+    return { manifest: r.manifest, report: r.report };
+  } catch (e) {
+    console.error("[agent-marketing-lipsync] failed, using still headshots:", e.message);
+    const report = lip.targets(manifest).map((t) => ({ n: t.n, role: t.role, status: "fallback", reason: String(e.message).slice(0, 120) }));
+    job.usage = { ...(job.usage || {}), lipsync: report };
+    try { await patchJob(job.id, { usage: job.usage }); } catch (pe) { /* the Reel goes on */ }
+    return { manifest, report };
+  }
+}
 // The branding the Reel carries, from the subscriber's default Marketing Profile. The logo is optional (Nov 9, 2026): it is passed only when the profile has one.
 function brandFromProfile(profile) {
   return { primary: profile.brand_primary, secondary: profile.brand_secondary, border: profile.brand_border, font: profile.brand_font || undefined, headshot_key: profile.headshot_key, ...(profile.logo_key ? { logo_key: profile.logo_key } : {}), agent: { name: profile.licensed_name, brokerage: profile.brokerage_name || "" } };
@@ -218,6 +256,7 @@ function dispatchKeys(manifest, headshotKey) {
   if (headshotKey) keys.add(headshotKey);
   if (manifest.brand && manifest.brand.logo_key) keys.add(manifest.brand.logo_key);
   manifest.scenes.forEach((s) => Object.values(s.visual.image_keys || {}).forEach((k) => keys.add(k)));
+  manifest.scenes.forEach((s) => { if (s.lipsync && s.lipsync.clip_key) keys.add(s.lipsync.clip_key); });
   return keys;
 }
 async function dispatchRender(job, manifest, headshotKey) {
@@ -319,8 +358,10 @@ exports.handler = async (event) => {
     await patchJob(job.id, { validation: built.validation, manifest: built.manifest });
     if (!built.validation.ok) return await fail(job, "The Reel did not pass its checks: " + built.validation.errors.map((e) => e.message).join(" | ")), { statusCode: 200, body: "" };
 
+    const withLip = await runLipSync(job, built.manifest, audio, profile);
+    if (withLip.manifest !== built.manifest) await patchJob(job.id, { manifest: withLip.manifest });
     await patchJob(job.id, { status: "ready", step: "Sending to the renderer" });
-    const r = await dispatchRender(job, built.manifest, profile.headshot_key);
+    const r = await dispatchRender(job, withLip.manifest, profile.headshot_key);
     if (r.status !== 202) return await fail(job, r.status === 429 ? "The renderer is busy. Please try again in a few minutes." : `The renderer did not accept the job (${r.status}).`), { statusCode: 200, body: "" };
     await patchJob(job.id, { status: "rendering", step: "Rendering" });
   } catch (err) {

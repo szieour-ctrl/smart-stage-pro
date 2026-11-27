@@ -1772,7 +1772,7 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
     $("phConsent").checked = s.sheet.consented; $("phConsent").disabled = s.sheet.consented || ph.busy;
     $("phUpload").classList.toggle("hidden", !s.sheet.consented);
     var h = "";
-    if (s.approved) h += '<div class="note" style="background:#eaf3ee"><b>Your headshot</b>' + (s.profileReady ? " is saved to your Marketing Profile and is now used in your Reels." : " is approved. Save your Branding in Smart Stage PRO (name, DRE number, brokerage) and approve it again so it can be used in your Reels.") + "<div style='margin-top:10px'>" + phThumb(s.approved.url, "Your approved headshot", s.approved.fullUrl) + "</div></div>";
+    if (s.approved) h += '<div class="note" style="background:#eaf3ee"><b>Your headshot</b>' + (s.profileReady ? " is saved to your Marketing Profile and is now used in your Reels." : " is approved. Save your Branding in Smart Stage PRO (name, DRE number, brokerage) and approve it again so it can be used in your Reels.") + "<div style='margin-top:10px'>" + phThumb(s.approved.url, "Your approved headshot", s.approved.fullUrl) + "</div>" + (s.profileCopyHeavy ? '<div class="actions" style="margin-top:10px"><button class="btn ghost" type="button" data-ph="resave" data-id="' + esc(s.approved.assetId) + '">Save a lighter copy for my Reels</button></div><div class="hint">Your saved headshot is the full-size file. This swaps in a lighter copy that is the right size for Reels. It costs nothing.</div>' : "") + "</div>";
     if (!s.original && s.lastCheck && !s.lastCheck.ok) h += '<div class="note" style="background:#fbeeee"><b>Your last photo could not be used.</b> ' + esc(s.lastCheck.message) + "</div>";
     if (s.original) {
       h += "<div style='margin-top:14px'><b>Your photo</b>" + (s.original.check ? ' <span class="pst ' + (s.original.check.ok ? "ok" : "bad") + '">' + esc(s.original.check.message) + "</span>" : "") + "<div style='margin-top:8px'>" + phThumb(s.original.url, "Your uploaded photo") + "</div></div>";
@@ -1844,8 +1844,10 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
     $("phBody").addEventListener("click", async function (ev) {
       var b = ev.target.closest && ev.target.closest("button[data-ph]"); if (!b || b.disabled) return;
       var a = b.getAttribute("data-ph"), id = b.getAttribute("data-id");
+      if (a === "approve" || a === "reject" || a === "resave") b.disabled = true;   // one press only: a second press used to show a false error
       if (a === "enhance") return phEnhance();
       if (a === "approve") { var r = await phPost({ action: "approve", assetId: id }); if (r.ok) say("phMsg", r.json.profileUpdated ? "Saved. This is now the headshot in your Reels." : "Approved. Add your Branding in Smart Stage PRO so it can be used in your Reels.", "ok"); return; }
+      if (a === "resave") { var rs = await phPost({ action: "approve", assetId: id }); if (rs.ok) say("phMsg", "Saved. Your headshot is now the lighter copy.", "ok"); return; }
       if (a === "reject") return phPost({ action: "reject", assetId: id });
       if (a === "refill") {
         if (!window.confirm("Continue for " + ph.s.sheet.refillImages + " Images? You get " + ph.s.sheet.poolSize + " more iterations. Any you don't use are lost.")) return;

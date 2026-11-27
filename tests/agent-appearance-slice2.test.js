@@ -179,9 +179,27 @@ test("approve copies the headshot to the profile's own folder, supersedes older 
   assert.equal(w.normalizeMax[w.normalizeMax.length - 1], 2048);   // the profile copy is a 2048 px JPEG, not the 3200 px result
   assert.ok(w.files[w.profile.headshot_key]);
   assert.equal(d2.status, "approved"); assert.equal(d1.status, "rejected"); assert.equal(w.sheet.status, "in_progress");
-  assert.equal((await R.approveEnhanced({ deps: w.deps, userId: U, assetId: d2.id, brandingPrefix: BRAND })).ok, false);
+  // approving an approved headshot again is allowed: it only saves the profile copy again
+  assert.equal((await R.approveEnhanced({ deps: w.deps, userId: U, assetId: d2.id, brandingPrefix: BRAND, now: 2000 })).ok, true);
+  assert.ok(w.profile.headshot_key.startsWith(BRAND + "headshot_2000_"));
+  assert.equal((await R.approveEnhanced({ deps: w.deps, userId: U, assetId: d1.id, brandingPrefix: BRAND })).ok, false);   // a rejected one stays rejected
   const st = await R.loadState({ deps: w.deps, userId: U });
   assert.ok(st.approved); assert.equal(st.enhanced.length, 0);
+});
+
+test("a heavy PNG profile copy (saved before the lighter copy existed) is flagged, and one re-save replaces it at no cost", async () => {
+  const w = world();
+  await R.recordConsent({ deps: w.deps, userId: U, version: H.CONSENT_VERSION }); await upload(w);
+  await R.runEnhance({ deps: w.deps, userId: U, assetId: (await R.readyToEnhance({ deps: w.deps, userId: U })).assetId });
+  const d = w.assets.find((x) => x.stage === "enhanced_headshot");
+  await R.approveEnhanced({ deps: w.deps, userId: U, assetId: d.id, brandingPrefix: BRAND, now: 1000 });
+  assert.equal((await R.loadState({ deps: w.deps, userId: U })).profileCopyHeavy, false);
+  const pool = w.sheet.pool_remaining;
+  w.profile.headshot_key = BRAND + "headshot_999_abcdef.png";
+  assert.equal((await R.loadState({ deps: w.deps, userId: U })).profileCopyHeavy, true);
+  assert.equal((await R.approveEnhanced({ deps: w.deps, userId: U, assetId: d.id, brandingPrefix: BRAND, now: 3000 })).ok, true);
+  assert.equal((await R.loadState({ deps: w.deps, userId: U })).profileCopyHeavy, false);
+  assert.equal(w.sheet.pool_remaining, pool);   // no iteration used
 });
 
 test("approve with no Marketing Profile yet still approves and says the profile was not updated", async () => {

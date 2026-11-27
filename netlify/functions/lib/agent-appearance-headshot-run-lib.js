@@ -55,6 +55,7 @@ async function loadState({ deps, userId, now = Date.now() }) {
     lastCall: last ? { id: last.id, status: last.status } : null,
     lastFailure: last && last.status === "refunded" ? "That image could not be made. Your iteration was not used. Please try again." : null,
     profileReady: !!profile,
+    profileCopyHeavy: !!(approved && profile && /\.png$/i.test(String(profile.headshot_key || ""))),   // saved before the 2048 px JPEG copy existed: offers a one-press re-save
   };
 }
 
@@ -127,7 +128,7 @@ async function runEnhance({ deps, userId, assetId }) {
 async function approveEnhanced({ deps, userId, assetId, brandingPrefix, now = Date.now() }) {
   const sheet = await deps.db.getSheet(userId);
   const a = sheet ? await deps.db.getAsset(assetId, userId) : null;
-  if (!a || a.stage !== "enhanced_headshot" || a.sheet_id !== sheet.id || a.status !== "pending") return { ok: false, status: 400, error: "That image can't be approved." };
+  if (!a || a.stage !== "enhanced_headshot" || a.sheet_id !== sheet.id || (a.status !== "pending" && a.status !== "approved")) return { ok: false, status: 400, error: "That image can't be approved." };   // approving an approved one again just saves the profile copy again, at no cost
   const profile = await deps.db.getProfile(userId);
   let profileUpdated = false;
   if (profile) {

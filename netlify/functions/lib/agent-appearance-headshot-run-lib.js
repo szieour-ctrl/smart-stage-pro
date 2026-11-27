@@ -33,7 +33,11 @@ async function loadState({ deps, userId, now = Date.now() }) {
   const calls = await reapStale(deps, sheet, now);
   const fresh = (await deps.db.getSheet(userId)) || sheet;
   const assets = await deps.db.listAssets(fresh.id);
-  const view = async (a) => ({ assetId: a.id, status: a.status, width: a.width, height: a.height, url: await deps.presign(userId, a.s3_key, 900) });
+  const view = async (a) => {
+    const full = await deps.presign(userId, a.s3_key, 900);
+    // enhanced results are large: show the small copy first (fullUrl is the fallback for results saved before previews existed)
+    return { assetId: a.id, status: a.status, width: a.width, height: a.height, url: a.stage === "enhanced_headshot" ? await deps.presign(userId, A.previewKey(a.s3_key), 900) : full, fullUrl: full };
+  };
   const original = assets.filter((a) => a.stage === "original" && a.status !== "rejected").pop();
   const enhanced = assets.filter((a) => a.stage === "enhanced_headshot" && a.status !== "rejected" && (!original || a.parent_id === original.id || a.status === "approved"));
   const approved = enhanced.filter((a) => a.status === "approved").pop();
@@ -127,9 +131,10 @@ async function approveEnhanced({ deps, userId, assetId, brandingPrefix, now = Da
   const profile = await deps.db.getProfile(userId);
   let profileUpdated = false;
   if (profile) {
-    const ext = A.extFor(a.content_type);
-    const key = `${brandingPrefix}headshot_${now}_${deps.uuid().slice(0, 6)}.${ext}`;
-    await deps.storage.put(key, await deps.storage.get(a.s3_key), a.content_type || "image/png");
+    // The profile copy is a 2048 px JPEG: plenty for the Reel circle and the lip sync source, and light enough to fetch on every render.
+    const small = await deps.normalize(await deps.storage.get(a.s3_key), H.PROFILE_MAX_SIDE);
+    const key = `${brandingPrefix}headshot_${now}_${deps.uuid().slice(0, 6)}.${A.extFor(small.contentType)}`;
+    await deps.storage.put(key, small.buffer, small.contentType);
     await deps.db.patchProfile(profile.id, { headshot_key: key });
     profileUpdated = true;
   }

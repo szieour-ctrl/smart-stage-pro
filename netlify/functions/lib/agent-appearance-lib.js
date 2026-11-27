@@ -66,6 +66,8 @@ function assetKey({ userId, sheetId, stage, assetId, ext = "png" }) {
   if (!STAGE_NAMES.includes(stage) && stage !== "original") throw new Error("unknown stage");
   return `${PRIVATE_PREFIX}${userId}/${sheetId}/${stage}/${assetId}.${String(ext).replace(/[^a-z0-9]/gi, "").toLowerCase() || "png"}`;
 }
+// A small copy of a large result for the page to show (a 3200 px PNG is far too heavy to load in a browser).
+const previewKey = (key) => String(key).replace(/\.[a-z0-9]+$/i, "") + "_preview.jpg";
 const isOwnKey = (userId, key) => UUID.test(String(userId || "")) && String(key || "").startsWith(`${PRIVATE_PREFIX}${userId}/`);
 const extFor = (contentType) => ({ "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp" })[String(contentType || "").toLowerCase()] || "png";
 
@@ -77,4 +79,4 @@ const poolText = (sheet) => {
 };
 
 module.exports = { POOL_SIZE, REFILL_IMAGES, ENDPOINTS, PROVIDER_LABEL, STAGES, STAGE_NAMES, panelCount, IMAGE_EDIT_USD, UPSCALE_MODELS, quoteImageEdit, quoteUpscale,
-  buildImageEditInput, buildUpscaleInput, firstImage, PRIVATE_PREFIX, assetKey, isOwnKey, extFor, poolEmpty, poolText };
+  buildImageEditInput, buildUpscaleInput, firstImage, PRIVATE_PREFIX, assetKey, previewKey, isOwnKey, extFor, poolEmpty, poolText };

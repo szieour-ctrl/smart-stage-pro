@@ -32,6 +32,7 @@ async function runCall(deps, a) {
     const assetId = deps.uuid();
     const key = A.assetKey({ userId, sheetId: sheet.id, stage, assetId, ext: A.extFor(contentType) });
     await deps.storage.put(key, dl.buffer, contentType);
+    if (deps.preview) { try { await deps.storage.put(A.previewKey(key), await deps.preview(dl.buffer), "image/jpeg"); } catch (e) { console.error("[appearance] preview not saved:", e.message); } }   // best effort: the page falls back to the full image
     await deps.db.insertAsset({ id: assetId, sheet_id: sheet.id, user_id: userId, stage, kind: kind || def.kind, parent_id: parentId, s3_key: key, content_type: contentType,
       width: meta.width || null, height: meta.height || null, status: "pending", call_id: callId });
     await deps.db.updateCall(callId, { status: "ok", request_id: requestId, estimated_usd: quotedUsd, output_asset_id: assetId, finished_at: new Date().toISOString() });

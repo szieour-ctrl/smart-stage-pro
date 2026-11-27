@@ -91,12 +91,15 @@ async function presignOwn(userId, key, secs = 900, env = process.env) {
   return getSignedUrl(s3, new GetObjectCommand({ Bucket: env.S3_BUCKET_NAME, Key: key }), { expiresIn: secs });
 }
 // The working copy of an upload: turned upright, shrunk to at most 1600 px on its long side, saved as JPEG.
-async function normalize(buffer) {
+async function normalize(buffer, maxSide) {
   const H = require("./agent-appearance-headshot-lib");
-  const out = await require("sharp")(buffer).rotate().resize({ width: H.WORK_MAX_SIDE, height: H.WORK_MAX_SIDE, fit: "inside", withoutEnlargement: true }).jpeg({ quality: 92 }).toBuffer({ resolveWithObject: true });
+  const m = maxSide || H.WORK_MAX_SIDE;
+  const out = await require("sharp")(buffer).rotate().resize({ width: m, height: m, fit: "inside", withoutEnlargement: true }).jpeg({ quality: 92 }).toBuffer({ resolveWithObject: true });
   return { buffer: out.data, width: out.info.width, height: out.info.height, contentType: "image/jpeg" };
 }
+const preview = (buffer) => require("sharp")(buffer).rotate().resize({ width: 1200, height: 1200, fit: "inside", withoutEnlargement: true }).jpeg({ quality: 85 }).toBuffer();
 const realDeps = (env = process.env, userId = null) => ({
+  preview,
   db: realDb(env), storage: realStorage(env), runner: falRunner(env), download, probe, uuid: () => crypto.randomUUID(), normalize,
   presign: (userId, key, secs) => presignOwn(userId, key, secs, env),
   vision: (b64, mediaType) => require("./agent-appearance-headshot-lib").callVision(b64, mediaType, env.ANTHROPIC_API_KEY),

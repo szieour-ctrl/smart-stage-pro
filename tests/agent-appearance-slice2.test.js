@@ -13,7 +13,7 @@ const GOOD = JSON.stringify({ people: 1, face_clear: true, framing: "head_should
 function world(over = {}) {
   let n = 0;
   const w = { sheet: { id: S, user_id: U, status: "setup", pool_remaining: 12, pool_refills: 0, consent_at: null, consent_version: null, vision_attributes: null }, assets: [], calls: [], files: {}, profile: { id: "p1", headshot_key: "old" },
-    charges: [], visionText: GOOD, runnerCalls: [], failRunner: false };
+    charges: [], normalizeMax: [], visionText: GOOD, runnerCalls: [], failRunner: false };
   Object.assign(w, over);
   const db = {
     getSheet: async () => w.sheet, ensureSheet: async () => w.sheet,
@@ -34,7 +34,8 @@ function world(over = {}) {
     db, uuid: () => `aaaaaaaa-aaaa-4aaa-8aaa-${String(++u).padStart(12, "0")}`,
     storage: { put: async (k, b) => { w.files[k] = b; }, get: async (k) => { if (!w.files[k]) throw new Error("missing"); return w.files[k]; } },
     presign: async (uid, k) => `https://signed.example/${k}`,
-    normalize: async () => ({ buffer: Buffer.from("work"), width: 1000, height: 1000, contentType: "image/jpeg" }),
+    normalize: async (b, max) => { w.normalizeMax.push(max || null); return { buffer: Buffer.from("work"), width: 1000, height: 1000, contentType: "image/jpeg" }; },
+    preview: async () => Buffer.from("small"),
     vision: async () => w.visionText,
     charge: async (images, reason, isRefund) => { w.charges.push({ images, reason, isRefund }); return { status: w.chargeStatus || 200 }; },
     runner: { run: async (endpoint, input) => { w.runnerCalls.push({ endpoint, input }); if (w.failRunner) throw new Error("boom"); return { requestId: "r1", data: { image: { url: "https://x/y.png" } } }; } },
@@ -128,7 +129,10 @@ test("enhance is blocked until consent and a passing photo, then runs one upscal
   assert.equal(w.calls[0].quoted_usd, 0.16);
   const st = await R.loadState({ deps: w.deps, userId: U });
   assert.equal(st.enhanced.length, 1); assert.equal(st.working, false); assert.equal(st.sheet.poolRemaining, 11);
-  assert.match(st.enhanced[0].url, /^https:\/\/signed\.example\/smart-stage-appearance\//);
+  assert.match(st.enhanced[0].fullUrl, /^https:\/\/signed\.example\/smart-stage-appearance\/.+\.png$/);
+  // the page shows the small copy; the full image is the fallback
+  assert.match(st.enhanced[0].url, /_preview\.jpg$/);
+  assert.ok(Object.keys(w.files).some((k) => /enhanced_headshot\/.+_preview\.jpg$/.test(k)));
 });
 
 test("a failed enhancement gives the iteration back and reports it plainly", async () => {
@@ -171,6 +175,8 @@ test("approve copies the headshot to the profile's own folder, supersedes older 
   const r = await R.approveEnhanced({ deps: w.deps, userId: U, assetId: d2.id, brandingPrefix: BRAND, now: 1000 });
   assert.equal(r.ok, true); assert.equal(r.profileUpdated, true);
   assert.ok(w.profile.headshot_key.startsWith(BRAND + "headshot_1000_"));
+  assert.ok(w.profile.headshot_key.endsWith(".jpg"));
+  assert.equal(w.normalizeMax[w.normalizeMax.length - 1], 2048);   // the profile copy is a 2048 px JPEG, not the 3200 px result
   assert.ok(w.files[w.profile.headshot_key]);
   assert.equal(d2.status, "approved"); assert.equal(d1.status, "rejected"); assert.equal(w.sheet.status, "in_progress");
   assert.equal((await R.approveEnhanced({ deps: w.deps, userId: U, assetId: d2.id, brandingPrefix: BRAND })).ok, false);

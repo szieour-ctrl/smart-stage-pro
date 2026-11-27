@@ -57,3 +57,12 @@ test("intake: angle-specific issues, required market, unknown keys dropped, blan
   assert.deepStrictEqual(blank.needsInput, ["observation"]);
   assert.strictEqual(intakeLib.validateIntake("nope", {}).ok, false);
 });
+
+test("custom voice stays 'coming soon' unless the beta test voice is configured", () => {
+  const am2 = require("../netlify/functions/lib/agent-marketing-lib");
+  const assets = require("../netlify/functions/lib/agent-marketing-assets-lib");
+  assert.deepEqual(am2.voicesFor({}), ["ssp_male", "ssp_female"]);
+  assert.deepEqual(am2.voicesFor({ AGENT_MARKETING_VOICE_CUSTOM_TEST: "abc" }), ["ssp_male", "ssp_female", "custom"]);
+  assert.equal(assets.voiceIdFor("custom", {}), null);
+  assert.equal(assets.voiceIdFor("custom", { AGENT_MARKETING_VOICE_CUSTOM_TEST: "abc" }), "abc");
+});

@@ -62,7 +62,9 @@ test("photo check: one clear face with no badge passes; each failure gives its o
   const bad = (o) => H.decideVision(H.parseVision(JSON.stringify({ people: 1, face_clear: true, framing: "head_shoulders", has_badge_logo_or_text: false, attributes: {}, ...o })));
   assert.equal(bad({ people: 2 }).code, "people");
   assert.equal(bad({ face_clear: false }).code, "face");
-  for (const f of ["waist_up", "three_quarter_or_full_body", "other", undefined, "nonsense"]) assert.equal(bad({ framing: f }).code, "framing", String(f));
+  for (const f of ["waist_up", "three_quarter_or_full_body"]) assert.equal(bad({ framing: f }).code, "framing", f);
+  // a tight crop, or a frame the model cannot place, is not turned away: only a clear waist-or-lower view is
+  for (const f of ["head_shoulders", "other", undefined, "nonsense"]) assert.equal(bad({ framing: f }).ok, true, String(f));
   assert.match(bad({ framing: "three_quarter_or_full_body" }).message, /more than your head and shoulders/);
   assert.match(bad({ has_badge_logo_or_text: true }).message, /badge, logo, name tag or writing/);
   assert.equal(H.decideVision(H.parseVision("not json")).code, "unreadable");

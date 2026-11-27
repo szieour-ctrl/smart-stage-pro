@@ -32,7 +32,7 @@ const VISION_SYSTEM = [
   "Fields:",
   "  people: number of people clearly visible (integer)",
   "  face_clear: true when one face is sharp, well lit, front-facing or nearly so, and not covered by sunglasses, a mask or a hand",
-  "  framing: how much of the person is in the frame. \"head_shoulders\" = head and shoulders, down to at most mid-chest. \"waist_up\" = down to the waist or hips. \"three_quarter_or_full_body\" = knees or feet are visible, or most of the body. \"other\" = anything else",
+  "  framing: judge by the LOWEST part of the body that is visible in the frame. \"head_shoulders\" = the frame ends at or above the bottom of the chest. This includes tight face close-ups and tight crops where the shoulders touch or run past the frame edge. \"waist_up\" = a belt, waist, hips, or hands and arms in front of the body are visible. \"three_quarter_or_full_body\" = thighs, knees or feet are visible. \"other\" = you cannot tell",
   "  has_badge_logo_or_text: true when any badge, lanyard, name tag, brokerage or company logo, or readable writing or sign is visible on clothing, background or props",
   "  attributes: what is visible only: { \"hair\": short phrase, \"facial_hair\": short phrase or \"none\", \"glasses\": \"yes\" or \"no\", \"shirt\": short phrase }",
   "Describe only what you can see. Do not guess age, ethnicity, health or anything not visible.",
@@ -62,7 +62,7 @@ function decideVision(v) {
   if (!v) return { ok: false, code: "unreadable", message: "We couldn't check that photo. Please try again or choose another." };
   if (v.people !== 1) return { ok: false, code: "people", message: "Use a photo with only you in it." };
   if (!v.faceClear) return { ok: false, code: "face", message: "Use a photo where your face is clear, well lit and facing the camera, with no sunglasses or mask." };
-  if (v.framing !== "head_shoulders") return { ok: false, code: "framing", message: "This photo shows more than your head and shoulders. Use a shoulders-up photo with your face filling a good part of the frame. Your three-quarter and full-length images are created for you later in your Appearance Sheet." };
+  if (v.framing === "waist_up" || v.framing === "three_quarter_or_full_body") return { ok: false, code: "framing", message: "This photo shows more than your head and shoulders. Use a shoulders-up photo with your face filling a good part of the frame. Your three-quarter and full-length images are created for you later in your Appearance Sheet." };
   if (v.hasBadgeLogoOrText) return { ok: false, code: "badge", message: "That photo shows a badge, logo, name tag or writing. Use a plain headshot without them. Your name and brokerage are added separately by Smart Stage PRO." };
   return { ok: true, code: "ok", message: "This photo works." };
 }

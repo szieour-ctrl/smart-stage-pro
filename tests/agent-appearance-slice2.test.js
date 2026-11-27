@@ -62,7 +62,9 @@ test("photo check: one clear face with no badge passes; each failure gives its o
   const bad = (o) => H.decideVision(H.parseVision(JSON.stringify({ people: 1, face_clear: true, framing: "head_shoulders", has_badge_logo_or_text: false, attributes: {}, ...o })));
   assert.equal(bad({ people: 2 }).code, "people");
   assert.equal(bad({ face_clear: false }).code, "face");
-  for (const f of ["waist_up", "three_quarter_or_full_body", "other", undefined, "nonsense"]) assert.equal(bad({ framing: f }).code, "framing", String(f));
+  for (const f of ["waist_up", "three_quarter_or_full_body"]) assert.equal(bad({ framing: f }).code, "framing", f);
+  // a tight crop, or a frame the model cannot place, is not turned away: only a clear waist-or-lower view is
+  for (const f of ["head_shoulders", "other", undefined, "nonsense"]) assert.equal(bad({ framing: f }).ok, true, String(f));
   assert.match(bad({ framing: "three_quarter_or_full_body" }).message, /more than your head and shoulders/);
   assert.match(bad({ has_badge_logo_or_text: true }).message, /badge, logo, name tag or writing/);
   assert.equal(H.decideVision(H.parseVision("not json")).code, "unreadable");
@@ -103,6 +105,11 @@ test("checkUpload refuses someone else's key, a bad type, a tiny photo and a bad
   const r = await upload(w);
   assert.equal(r.check.ok, false);
   assert.equal(w.assets.filter((x) => x.stage === "original" && x.status === "pending").length, 0);
+  // the page can still say why: the state carries the verdict for a turned-away photo, and none once a good photo replaces it
+  const st = await R.loadState({ deps: w.deps, userId: U });
+  assert.equal(st.original, null); assert.equal(st.lastCheck.ok, false); assert.match(st.lastCheck.message, /badge, logo, name tag or writing/);
+  w.visionText = GOOD; await upload(w);
+  assert.equal((await R.loadState({ deps: w.deps, userId: U })).lastCheck, null);
 });
 
 test("enhance is blocked until consent and a passing photo, then runs one upscale and shows a draft", async () => {

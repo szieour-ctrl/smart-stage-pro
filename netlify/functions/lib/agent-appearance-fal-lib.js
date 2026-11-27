@@ -54,12 +54,32 @@ function realDb(env = process.env) {
     insertCall: async (row) => { const d = ok(await supabase("POST", "agent_appearance_calls", row, env), "insert call"); return d[0].id; },
     updateCall: async (id, fields) => ok(await supabase("PATCH", `agent_appearance_calls?id=eq.${encodeURIComponent(id)}`, fields, env), "update call"),
     insertAsset: async (row) => { const d = ok(await supabase("POST", "agent_appearance_assets", row, env), "insert asset"); return d[0].id; },
+    // slice 2: sheet, asset, call and profile reads and writes
+    getSheet: async (userId) => { const d = ok(await supabase("GET", `agent_appearance_sheets?user_id=eq.${encodeURIComponent(userId)}&select=*&limit=1`, null, env), "read sheet"); return d[0] || null; },
+    ensureSheet: async function (userId) {
+      const have = await this.getSheet(userId); if (have) return have;
+      const r = await supabase("POST", "agent_appearance_sheets", { user_id: userId }, env);
+      if (r.status < 300 && r.data && r.data[0]) return r.data[0];
+      const again = await this.getSheet(userId); if (again) return again;   // two tabs created it at once: the unique index kept one
+      throw new Error(`create sheet failed (${r.status})`);
+    },
+    patchSheet: async (id, f) => ok(await supabase("PATCH", `agent_appearance_sheets?id=eq.${encodeURIComponent(id)}`, f, env), "update sheet"),
+    listAssets: async (sheetId) => ok(await supabase("GET", `agent_appearance_assets?sheet_id=eq.${encodeURIComponent(sheetId)}&select=*&order=created_at.asc&limit=500`, null, env), "list assets"),
+    getAsset: async (id, userId) => { const d = ok(await supabase("GET", `agent_appearance_assets?id=eq.${encodeURIComponent(id)}&user_id=eq.${encodeURIComponent(userId)}&select=*&limit=1`, null, env), "read asset"); return d[0] || null; },
+    patchAsset: async (id, f) => ok(await supabase("PATCH", `agent_appearance_assets?id=eq.${encodeURIComponent(id)}`, f, env), "update asset"),
+    lastCalls: async (sheetId, stage, n = 5) => ok(await supabase("GET", `agent_appearance_calls?sheet_id=eq.${encodeURIComponent(sheetId)}&stage=eq.${encodeURIComponent(stage)}&select=id,status,started_at,attempt&order=started_at.desc&limit=${Math.max(1, Math.min(100, n))}`, null, env), "list calls"),
+    getProfile: async (userId) => { const d = ok(await supabase("GET", `marketing_profiles?user_id=eq.${encodeURIComponent(userId)}&is_default=eq.true&select=id,headshot_key&limit=1`, null, env), "read profile"); return d[0] || null; },
+    patchProfile: async (id, f) => ok(await supabase("PATCH", `marketing_profiles?id=eq.${encodeURIComponent(id)}`, f, env), "update profile"),
   };
 }
 function realStorage(env = process.env) {
   const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
   const s3 = new S3Client({ region: env.S3_REGION, credentials: { accessKeyId: env.S3_ACCESS_KEY_ID, secretAccessKey: env.S3_SECRET_ACCESS_KEY } });
-  return { put: (Key, Body, ContentType) => s3.send(new PutObjectCommand({ Bucket: env.S3_BUCKET_NAME, Key, Body, ContentType })) };
+  const { GetObjectCommand } = require("@aws-sdk/client-s3");
+  return {
+    put: (Key, Body, ContentType) => s3.send(new PutObjectCommand({ Bucket: env.S3_BUCKET_NAME, Key, Body, ContentType })),
+    get: async (Key) => { const r = await s3.send(new GetObjectCommand({ Bucket: env.S3_BUCKET_NAME, Key })); const chunks = []; for await (const c of r.Body) chunks.push(c); return Buffer.concat(chunks); },
+  };
 }
 // A short-lived link for a subscriber's own private image (the browser can show it; it expires).
 async function presignOwn(userId, key, secs = 900, env = process.env) {
@@ -70,6 +90,17 @@ async function presignOwn(userId, key, secs = 900, env = process.env) {
   const s3 = new S3Client({ region: env.S3_REGION, credentials: { accessKeyId: env.S3_ACCESS_KEY_ID, secretAccessKey: env.S3_SECRET_ACCESS_KEY } });
   return getSignedUrl(s3, new GetObjectCommand({ Bucket: env.S3_BUCKET_NAME, Key: key }), { expiresIn: secs });
 }
-const realDeps = (env = process.env) => ({ db: realDb(env), storage: realStorage(env), runner: falRunner(env), download, probe, uuid: () => crypto.randomUUID() });
+// The working copy of an upload: turned upright, shrunk to at most 1600 px on its long side, saved as JPEG.
+async function normalize(buffer) {
+  const H = require("./agent-appearance-headshot-lib");
+  const out = await require("sharp")(buffer).rotate().resize({ width: H.WORK_MAX_SIDE, height: H.WORK_MAX_SIDE, fit: "inside", withoutEnlargement: true }).jpeg({ quality: 92 }).toBuffer({ resolveWithObject: true });
+  return { buffer: out.data, width: out.info.width, height: out.info.height, contentType: "image/jpeg" };
+}
+const realDeps = (env = process.env, userId = null) => ({
+  db: realDb(env), storage: realStorage(env), runner: falRunner(env), download, probe, uuid: () => crypto.randomUUID(), normalize,
+  presign: (userId, key, secs) => presignOwn(userId, key, secs, env),
+  vision: (b64, mediaType) => require("./agent-appearance-headshot-lib").callVision(b64, mediaType, env.ANTHROPIC_API_KEY),
+  charge: (images, reason, isRefund) => require("./reel-quota-lib").callDebitCredit(userId, images, reason, isRefund),
+});
 
-module.exports = { falRunner, download, probe, supabase, realDb, realStorage, presignOwn, realDeps };
+module.exports = { falRunner, download, probe, supabase, realDb, realStorage, presignOwn, normalize, realDeps };

@@ -748,7 +748,7 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
   function buildSetup() {
     radios($("durChoices"), "dur", state.schema.durations.map(function (d) { return { value: String(d), label: d + " seconds" }; }), "45");
     radios($("fmtChoices"), "fmt", [{ value: "both", label: "Both" }, { value: "9x16", label: "9:16 vertical" }, { value: "16x9", label: "16:9 horizontal" }], "both");
-    radios($("voiceChoices"), "voice", [{ value: "ssp_male", label: "SSP Male" }, { value: "ssp_female", label: "SSP Female" }], "ssp_male");
+    radios($("voiceChoices"), "voice", [{ value: "ssp_male", label: "SSP Male" }, { value: "ssp_female", label: "SSP Female" }].concat((state.schema.voices || []).indexOf("custom") >= 0 ? [{ value: "custom", label: "My voice (test)" }] : []), "ssp_male");
     $("musicSelect").innerHTML = (state.schema.music || [{ key: "default", label: "Default: Neutral Ambient" }]).map(function (m) { return '<option value="' + esc(m.key) + '">' + esc(m.label) + "</option>"; }).join("");
   }
   async function createProject() {

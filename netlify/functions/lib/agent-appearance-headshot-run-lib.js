@@ -80,14 +80,14 @@ async function checkUpload({ deps, userId, key, contentType }) {
   for (const a of await deps.db.listAssets(sheet.id)) if (a.stage === "original" && a.status !== "rejected") await deps.db.patchAsset(a.id, { status: "rejected" });
   await deps.db.insertAsset({ id: assetId, sheet_id: sheet.id, user_id: userId, stage: "original", kind: "original", s3_key: workKey, content_type: work.contentType, width: work.width, height: work.height, status: "pending" });
   let verdict;
-  let attributes = {}, framing = null;
+  let attributes = {}, framing = null, headFraction = null;
   try {
     const v = H.parseVision(await deps.vision(work.buffer.toString("base64"), work.contentType));
     verdict = H.decideVision(v);
     attributes = v ? v.attributes : {};
-    framing = v ? v.framing : null;   // kept so a wrong turn-away can be diagnosed from the sheet
+    framing = v ? v.framing : null; headFraction = v ? v.headFraction : null;   // kept so a wrong turn-away can be diagnosed from the sheet
   } catch (e) { console.error("[appearance] photo check failed:", e.message); verdict = H.decideVision(null); }
-  await deps.db.patchSheet(sheet.id, { vision_attributes: { check: { assetId, ok: verdict.ok, code: verdict.code, message: verdict.message, framing: framing }, ...(verdict.ok ? { attributes } : {}) } });
+  await deps.db.patchSheet(sheet.id, { vision_attributes: { check: { assetId, ok: verdict.ok, code: verdict.code, message: verdict.message, framing: framing, head_fraction: headFraction }, ...(verdict.ok ? { attributes } : {}) } });
   if (!verdict.ok) await deps.db.patchAsset(assetId, { status: "rejected" });
   return { ok: true, check: { ok: verdict.ok, message: verdict.message }, assetId };
 }

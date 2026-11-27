@@ -11,6 +11,7 @@ const ALLOWED_TYPES = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "
 const MIN_SIDE = 400;          // px, short side of the uploaded photo
 const WORK_MAX_SIDE = 1600;    // px: the working copy is shrunk to this before it is checked and enhanced (keeps the enhancement cost steady)
 const OUTPUT_MP_CAP = 16;      // enhancement output stays at or under about this many megapixels
+const MIN_HEAD_FRACTION = 0.3; // the head must fill at least this much of the photo's height; a missing reading never blocks
 const VISION_MODEL = process.env.APPEARANCE_VISION_MODEL || "claude-sonnet-4-6";
 
 // 4x when the result stays under the cap, else 2x. Only whole 2 or 4: the provider's allowed values are confirmed on the first live call.
@@ -32,7 +33,8 @@ const VISION_SYSTEM = [
   "Fields:",
   "  people: number of people clearly visible (integer)",
   "  face_clear: true when one face is sharp, well lit, front-facing or nearly so, and not covered by sunglasses, a mask or a hand",
-  "  framing: judge by the LOWEST part of the body that is visible in the frame. \"head_shoulders\" = the frame ends at or above the bottom of the chest. This includes tight face close-ups and tight crops where the shoulders touch or run past the frame edge. \"waist_up\" = a belt, waist, hips, or hands and arms in front of the body are visible. \"three_quarter_or_full_body\" = thighs, knees or feet are visible. \"other\" = you cannot tell",
+  "  head_fraction: a number from 0 to 1 = the height of the head (top of the hair to the bottom of the chin) divided by the height of the whole image. Measure it; do not guess a category. Typical values: tight head-and-shoulders portrait 0.45 to 0.65; chest-up portrait 0.30 to 0.45; waist-up about 0.22; knees-up about 0.15; full body about 0.12",
+  "  framing: one of \"head_shoulders\", \"waist_up\", \"three_quarter_or_full_body\", \"other\" (for the record only)",
   "  has_badge_logo_or_text: true when any badge, lanyard, name tag, brokerage or company logo, or readable writing or sign is visible on clothing, background or props",
   "  attributes: what is visible only: { \"hair\": short phrase, \"facial_hair\": short phrase or \"none\", \"glasses\": \"yes\" or \"no\", \"shirt\": short phrase }",
   "Describe only what you can see. Do not guess age, ethnicity, health or anything not visible.",
@@ -51,6 +53,7 @@ function parseVision(text) {
   return {
     people: Math.max(0, Math.floor(Number(o.people) || 0)),
     faceClear: o.face_clear === true,
+    headFraction: Number.isFinite(Number(o.head_fraction)) && o.head_fraction !== null && o.head_fraction !== "" && Number(o.head_fraction) > 0 && Number(o.head_fraction) <= 1 ? Number(o.head_fraction) : null,
     framing: ["head_shoulders", "waist_up", "three_quarter_or_full_body"].includes(o.framing) ? o.framing : "other",
     hasBadgeLogoOrText: o.has_badge_logo_or_text === true,
     attributes: { hair: s(a.hair), facial_hair: s(a.facial_hair), glasses: /^y/i.test(s(a.glasses)) ? "yes" : "no", shirt: s(a.shirt) },
@@ -62,7 +65,7 @@ function decideVision(v) {
   if (!v) return { ok: false, code: "unreadable", message: "We couldn't check that photo. Please try again or choose another." };
   if (v.people !== 1) return { ok: false, code: "people", message: "Use a photo with only you in it." };
   if (!v.faceClear) return { ok: false, code: "face", message: "Use a photo where your face is clear, well lit and facing the camera, with no sunglasses or mask." };
-  if (v.framing === "waist_up" || v.framing === "three_quarter_or_full_body") return { ok: false, code: "framing", message: "This photo shows more than your head and shoulders. Use a shoulders-up photo with your face filling a good part of the frame. Your three-quarter and full-length images are created for you later in your Appearance Sheet." };
+  if (v.headFraction != null && v.headFraction < MIN_HEAD_FRACTION) return { ok: false, code: "framing", message: "Use a closer photo: your head and shoulders should fill most of the frame. Your three-quarter and full-length images are created for you later in your Appearance Sheet." };
   if (v.hasBadgeLogoOrText) return { ok: false, code: "badge", message: "That photo shows a badge, logo, name tag or writing. Use a plain headshot without them. Your name and brokerage are added separately by Smart Stage PRO." };
   return { ok: true, code: "ok", message: "This photo works." };
 }
@@ -83,5 +86,5 @@ function callVision(base64, mediaType, anthropicKey) {
   });
 }
 
-module.exports = { CONSENT_VERSION, CONSENT_TEXT, MAX_UPLOAD_BYTES, ALLOWED_TYPES, MIN_SIDE, WORK_MAX_SIDE, OUTPUT_MP_CAP, upscaleFactorFor, validateUpload,
+module.exports = { CONSENT_VERSION, CONSENT_TEXT, MAX_UPLOAD_BYTES, ALLOWED_TYPES, MIN_SIDE, MIN_HEAD_FRACTION, WORK_MAX_SIDE, OUTPUT_MP_CAP, upscaleFactorFor, validateUpload,
   VISION_SYSTEM, visionContent, parseVision, decideVision, callVision };

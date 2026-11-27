@@ -62,10 +62,10 @@ test("photo check: one clear face with no badge passes; each failure gives its o
   const bad = (o) => H.decideVision(H.parseVision(JSON.stringify({ people: 1, face_clear: true, framing: "head_shoulders", has_badge_logo_or_text: false, attributes: {}, ...o })));
   assert.equal(bad({ people: 2 }).code, "people");
   assert.equal(bad({ face_clear: false }).code, "face");
-  for (const f of ["waist_up", "three_quarter_or_full_body"]) assert.equal(bad({ framing: f }).code, "framing", f);
-  // a tight crop, or a frame the model cannot place, is not turned away: only a clear waist-or-lower view is
-  for (const f of ["head_shoulders", "other", undefined, "nonsense"]) assert.equal(bad({ framing: f }).ok, true, String(f));
-  assert.match(bad({ framing: "three_quarter_or_full_body" }).message, /more than your head and shoulders/);
+  // the head must fill at least 30% of the photo's height (measured, not a category): Sam's tight headshots read about 0.55, his waist-up image about 0.25
+  for (const f of [0.55, 0.45, 0.3, null, undefined, "x", 0, 2]) assert.equal(bad({ head_fraction: f, framing: "waist_up" }).ok, true, "head_fraction " + f);   // the word label alone never rejects
+  for (const f of [0.25, 0.12, 0.29]) assert.equal(bad({ head_fraction: f }).code, "framing", "head_fraction " + f);
+  assert.match(bad({ head_fraction: 0.2 }).message, /closer photo/);
   assert.match(bad({ has_badge_logo_or_text: true }).message, /badge, logo, name tag or writing/);
   assert.equal(H.decideVision(H.parseVision("not json")).code, "unreadable");
   assert.equal(H.parseVision('text {"people":1,"face_clear":true,"has_badge_logo_or_text":false} text').people, 1);

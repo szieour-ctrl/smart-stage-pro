@@ -7,7 +7,7 @@ const R = require("../netlify/functions/lib/agent-appearance-headshot-run-lib");
 
 const U = "11111111-1111-4111-8111-111111111111", S = "22222222-2222-4222-8222-222222222222";
 const BRAND = `smart-stage-marketing/branding/${U}/`;
-const GOOD = JSON.stringify({ people: 1, face_clear: true, has_badge_logo_or_text: false, attributes: { hair: "short brown", facial_hair: "none", glasses: "no", shirt: "navy blazer" } });
+const GOOD = JSON.stringify({ people: 1, face_clear: true, framing: "head_shoulders", has_badge_logo_or_text: false, attributes: { hair: "short brown", facial_hair: "none", glasses: "no", shirt: "navy blazer" } });
 
 // An in-memory stand-in for the database, storage and providers.
 function world(over = {}) {
@@ -59,9 +59,11 @@ test("upload rules: type and size", () => {
 
 test("photo check: one clear face with no badge passes; each failure gives its own plain message", () => {
   assert.equal(H.decideVision(H.parseVision(GOOD)).ok, true);
-  const bad = (o) => H.decideVision(H.parseVision(JSON.stringify({ people: 1, face_clear: true, has_badge_logo_or_text: false, attributes: {}, ...o })));
+  const bad = (o) => H.decideVision(H.parseVision(JSON.stringify({ people: 1, face_clear: true, framing: "head_shoulders", has_badge_logo_or_text: false, attributes: {}, ...o })));
   assert.equal(bad({ people: 2 }).code, "people");
   assert.equal(bad({ face_clear: false }).code, "face");
+  for (const f of ["waist_up", "three_quarter_or_full_body", "other", undefined, "nonsense"]) assert.equal(bad({ framing: f }).code, "framing", String(f));
+  assert.match(bad({ framing: "three_quarter_or_full_body" }).message, /more than your head and shoulders/);
   assert.match(bad({ has_badge_logo_or_text: true }).message, /badge, logo, name tag or writing/);
   assert.equal(H.decideVision(H.parseVision("not json")).code, "unreadable");
   assert.equal(H.parseVision('text {"people":1,"face_clear":true,"has_badge_logo_or_text":false} text').people, 1);
@@ -97,7 +99,7 @@ test("checkUpload refuses someone else's key, a bad type, a tiny photo and a bad
   w.deps.normalize = async () => ({ buffer: Buffer.from("w"), width: 300, height: 300, contentType: "image/jpeg" });
   assert.match((await upload(w)).error, /too small/);
   w.deps.normalize = async () => ({ buffer: Buffer.from("w"), width: 1000, height: 1000, contentType: "image/jpeg" });
-  w.visionText = JSON.stringify({ people: 1, face_clear: true, has_badge_logo_or_text: true, attributes: {} });
+  w.visionText = JSON.stringify({ people: 1, face_clear: true, framing: "head_shoulders", has_badge_logo_or_text: true, attributes: {} });
   const r = await upload(w);
   assert.equal(r.check.ok, false);
   assert.equal(w.assets.filter((x) => x.stage === "original" && x.status === "pending").length, 0);

@@ -32,6 +32,7 @@ const VISION_SYSTEM = [
   "Fields:",
   "  people: number of people clearly visible (integer)",
   "  face_clear: true when one face is sharp, well lit, front-facing or nearly so, and not covered by sunglasses, a mask or a hand",
+  "  framing: how much of the person is in the frame. \"head_shoulders\" = head and shoulders, down to at most mid-chest. \"waist_up\" = down to the waist or hips. \"three_quarter_or_full_body\" = knees or feet are visible, or most of the body. \"other\" = anything else",
   "  has_badge_logo_or_text: true when any badge, lanyard, name tag, brokerage or company logo, or readable writing or sign is visible on clothing, background or props",
   "  attributes: what is visible only: { \"hair\": short phrase, \"facial_hair\": short phrase or \"none\", \"glasses\": \"yes\" or \"no\", \"shirt\": short phrase }",
   "Describe only what you can see. Do not guess age, ethnicity, health or anything not visible.",
@@ -50,6 +51,7 @@ function parseVision(text) {
   return {
     people: Math.max(0, Math.floor(Number(o.people) || 0)),
     faceClear: o.face_clear === true,
+    framing: ["head_shoulders", "waist_up", "three_quarter_or_full_body"].includes(o.framing) ? o.framing : "other",
     hasBadgeLogoOrText: o.has_badge_logo_or_text === true,
     attributes: { hair: s(a.hair), facial_hair: s(a.facial_hair), glasses: /^y/i.test(s(a.glasses)) ? "yes" : "no", shirt: s(a.shirt) },
   };
@@ -60,6 +62,7 @@ function decideVision(v) {
   if (!v) return { ok: false, code: "unreadable", message: "We couldn't check that photo. Please try again or choose another." };
   if (v.people !== 1) return { ok: false, code: "people", message: "Use a photo with only you in it." };
   if (!v.faceClear) return { ok: false, code: "face", message: "Use a photo where your face is clear, well lit and facing the camera, with no sunglasses or mask." };
+  if (v.framing !== "head_shoulders") return { ok: false, code: "framing", message: "This photo shows more than your head and shoulders. Use a shoulders-up photo with your face filling a good part of the frame. Your three-quarter and full-length images are created for you later in your Appearance Sheet." };
   if (v.hasBadgeLogoOrText) return { ok: false, code: "badge", message: "That photo shows a badge, logo, name tag or writing. Use a plain headshot without them. Your name and brokerage are added separately by Smart Stage PRO." };
   return { ok: true, code: "ok", message: "This photo works." };
 }

@@ -50,7 +50,8 @@ exports.handler = async (event) => {
     if (b.action === "check") {
       if (!process.env.ANTHROPIC_API_KEY) return reply(500, { error: "The photo check is not configured." });
       const r = await R.checkUpload({ deps, userId, key: b.key, contentType: b.contentType });
-      return r.ok ? reply(200, await R.loadState({ deps, userId })) : fail(r);
+      // The verdict goes back with the state: a photo that fails the check is not kept as the current photo, so the state alone cannot say why.
+      return r.ok ? reply(200, { ...(await R.loadState({ deps, userId })), check: r.check }) : fail(r);
     }
 
     if (b.action === "enhance") {

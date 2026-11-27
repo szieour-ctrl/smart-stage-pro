@@ -1773,6 +1773,7 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
     $("phUpload").classList.toggle("hidden", !s.sheet.consented);
     var h = "";
     if (s.approved) h += '<div class="note" style="background:#eaf3ee"><b>Your headshot</b>' + (s.profileReady ? " is saved to your Marketing Profile and is now used in your Reels." : " is approved. Save your Branding in Smart Stage PRO (name, DRE number, brokerage) and approve it again so it can be used in your Reels.") + "<div style='margin-top:10px'>" + phThumb(s.approved.url, "Your approved headshot") + "</div></div>";
+    if (!s.original && s.lastCheck && !s.lastCheck.ok) h += '<div class="note" style="background:#fbeeee"><b>Your last photo could not be used.</b> ' + esc(s.lastCheck.message) + "</div>";
     if (s.original) {
       h += "<div style='margin-top:14px'><b>Your photo</b>" + (s.original.check ? ' <span class="pst ' + (s.original.check.ok ? "ok" : "bad") + '">' + esc(s.original.check.message) + "</span>" : "") + "<div style='margin-top:8px'>" + phThumb(s.original.url, "Your uploaded photo") + "</div></div>";
     }
@@ -1808,7 +1809,7 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
       if (!put.ok) { say("phMsg", "The upload didn't finish. Please try again.", "err"); return; }
       var c = await api("POST", "", { action: "check", key: p.json.key, contentType: file.type }, PH);
       if (!c.ok) { say("phMsg", c.json.error || "We couldn't check that photo.", "err"); return; }
-      ph.s = c.json; say("phMsg", c.json.original && c.json.original.check ? c.json.original.check.message : "", c.json.original && c.json.original.check && c.json.original.check.ok ? "ok" : "err");
+      ph.s = c.json; phRender(); say("phMsg", c.json.check ? c.json.check.message : "", c.json.check && c.json.check.ok ? "ok" : "err");
     } catch (e) { say("phMsg", e.message, "err"); } finally { ph.busy = false; phRender(); $("phFile").value = ""; }
   }
   async function phEnhance() {

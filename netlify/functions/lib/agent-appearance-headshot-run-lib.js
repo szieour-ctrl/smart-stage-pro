@@ -44,6 +44,7 @@ async function loadState({ deps, userId, now = Date.now() }) {
     sheet: { poolRemaining: fresh.pool_remaining, poolText: A.poolText(fresh), refills: fresh.pool_refills, poolSize: A.POOL_SIZE, refillImages: A.REFILL_IMAGES, consented: !!(fresh.consent_at && fresh.consent_version === H.CONSENT_VERSION) },
     consent: { version: H.CONSENT_VERSION, text: H.CONSENT_TEXT },
     original: original ? { ...(await view(original)), check: vision && vision.assetId === original.id ? { ok: vision.ok, message: vision.message } : null } : null,
+    lastCheck: vision && !(original && vision.assetId === original.id) ? { ok: vision.ok, message: vision.message } : null,   // why the latest upload was turned away
     enhanced: await Promise.all(enhanced.filter((a) => a.status === "pending").map(view)),
     approved: approved ? await view(approved) : null,
     working: !!calls.find((c) => c.status === "started"),

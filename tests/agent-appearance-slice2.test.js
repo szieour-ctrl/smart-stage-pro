@@ -103,6 +103,11 @@ test("checkUpload refuses someone else's key, a bad type, a tiny photo and a bad
   const r = await upload(w);
   assert.equal(r.check.ok, false);
   assert.equal(w.assets.filter((x) => x.stage === "original" && x.status === "pending").length, 0);
+  // the page can still say why: the state carries the verdict for a turned-away photo, and none once a good photo replaces it
+  const st = await R.loadState({ deps: w.deps, userId: U });
+  assert.equal(st.original, null); assert.equal(st.lastCheck.ok, false); assert.match(st.lastCheck.message, /badge, logo, name tag or writing/);
+  w.visionText = GOOD; await upload(w);
+  assert.equal((await R.loadState({ deps: w.deps, userId: U })).lastCheck, null);
 });
 
 test("enhance is blocked until consent and a passing photo, then runs one upscale and shows a draft", async () => {

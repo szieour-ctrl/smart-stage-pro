@@ -16,7 +16,7 @@ const KEY_TEMPLATES = {
   avg_dom: { active: { lead: "Active Listings Have Averaged", unit: "days", trail: "On the Market" }, closed: { lead: "Homes That Sold Averaged", unit: "days", trail: "On the Market" } },
 };
 
-const titleCase = (s) => String(s || "").replace(/\w\S*/g, (w) => (/^(a|an|and|as|at|but|by|for|in|of|on|or|the|to)$/i.test(w) ? w.toLowerCase() : w[0].toUpperCase() + w.slice(1)));
+const titleCase = (s) => String(s || "").replace(/\w\S*/g, (w) => (/^(a|an|and|as|at|but|by|for|in|of|on|or|the|to)$/i.test(w) ? w.toLowerCase() : w[0].toUpperCase() + w.slice(1)).replace(/\b([AP])\.m\./g, (m, c) => c.toLowerCase() + ".m."));
 const stripTags = (s) => String(s || "").replace(/\[[^\]\n]{1,40}\]/g, " ").replace(/\s+/g, " ").trim();
 const numbersIn = (text) => (String(text || "").match(/\d[\d,]*(?:\.\d+)?/g) || []).map((t) => Number(t.replace(/,/g, "")));
 const groupOf = (label) => (/closed/i.test(label) ? "closed" : /active/i.test(label) ? "active" : /pending/i.test(label) ? "pending" : "other");
@@ -73,6 +73,12 @@ function headlineFromHook(hook, market) {
 // The opening headline comes from the planner's hook. When the agent has EDITED the script, that hook may describe the old wording (Oct 29, 2026: an edited
 // event script still opened with "Free Cars and Coffee"), so it is used only while every word of it is still in the first scene's text; otherwise the
 // headline is taken from the edited first sentence, whole and not cut off.
+// Sentence split that keeps a time's "a.m." / "p.m." inside its sentence ("from 3:30 to 5:30 p.m. at 1650 Eskaton Loop" is one sentence). The period of
+// an a.m./p.m. is a sentence end only when a capital letter follows or nothing does.
+function splitSentences(text) {
+  const kept = String(text || "").replace(/\b([apAP])\.([mM])\.(?!\s+[A-Z]|\s*$)/g, "$1\u0001$2\u0001");
+  return kept.split(/(?<=[.!?…])\s+/).map((x) => x.replace(/\u0001/g, ".")).filter(Boolean);
+}
 function openingHook(narrative, excerpt) {
   const hook = narrative && narrative.hook;
   if (hook && !(narrative.source === "edited")) return hook;
@@ -101,7 +107,7 @@ function closingHeadline(excerpt) {
   // The headline is held to the closing cap (Sam's word caps, Oct 27): a long invitation shows a clause that carries the point instead of
   // the whole sentence, so the card always fits both frames. Oct 29 (Eskaton test): it must also read as a complete thought, so when the first
   // sentence has no clause that fits, the next sentence that does is used; only when nothing fits is the first sentence shortened.
-  const sentences = q ? [q[1]] : t.split(/(?<=[.!?…])\s+/).filter(Boolean);
+  const sentences = q ? [q[1]] : splitSentences(t);
   const first = (sentences[0] || t).replace(/^want to /i, "Want to ");
   let short = null;
   for (const s of sentences) { short = wholePart(s, CARD_CAPS.closing); if (short) break; }
@@ -112,9 +118,9 @@ function closingHeadline(excerpt) {
 
 /** A support line within the support cap: the first sentence that fits whole, else its first clause that does; "" when none. */
 function capSupport(text) {
-  const sentence = stripTags(text).split(/(?<=[.!?…])\s+/).filter(Boolean).find((x) => wc(dropLead(x)) <= CARD_CAPS.support);
+  const sentence = splitSentences(stripTags(text)).find((x) => wc(dropLead(x)) <= CARD_CAPS.support);
   if (sentence) return upFirst(dropLead(sentence));
-  const first = stripTags(text).split(/(?<=[.!?…])\s+/)[0] || "";
+  const first = splitSentences(stripTags(text))[0] || "";
   const clause = first ? fitWords(first, CARD_CAPS.support) : "";
   return clause && wc(clause) <= CARD_CAPS.support ? upFirst(clause) : "";
 }
@@ -185,7 +191,7 @@ function plan(narrative, intake, figures, opts) {
 // numbers), with a long "between ..." clause folded away ("That gap between homes ... tells a real story" -> "That gap tells a real
 // story"). Returns null when no short sentence like that exists, and the card keeps its market title.
 function sceneHeadline(excerpt) {
-  const sentences = stripTags(excerpt).split(/(?<=[.!?…])\s+/).filter(Boolean);
+  const sentences = splitSentences(stripTags(excerpt));
   let last = (sentences[sentences.length - 1] || "").replace(/[.!?…]+$/, "").trim();
   if (!last || /\d/.test(last)) return null;
   const m = /^(.+?)\s+between\s+.+?\s+((?:tells|shows|means|says|reveals)\s+.+)$/i.exec(last);
@@ -198,14 +204,15 @@ function sceneHeadline(excerpt) {
 
 // Word caps for the card lines (Sam, Oct 27): headline 9, statement 7, support 8; the closing headline 8 (the closing card also carries the name lockup).
 const CARD_CAPS = { headline: 9, statement: 7, support: 8, closing: 8 };
-const wc = (t) => (String(t || "").match(/[A-Za-z0-9À-ɏ][A-Za-z0-9À-ɏ'’\-]*/g) || []).length;
+const wc = (t) => (String(t || "").match(/\d{1,2}:\d{2}|\b[apAP]\.[mM]\.|[A-Za-z0-9À-ɏ][A-Za-z0-9À-ɏ'’\-]*/g) || []).length;   // a time ("3:30") and a.m./p.m. each count as one word
 const upFirst = (t) => String(t || "").replace(/^\S/, (c) => c.toUpperCase());
 const dropLead = (t) => String(t || "").replace(/^(?:because|and|but|so)\s+/i, "");
 /** The first clause that fits the cap (a whole sentence if it fits), else the first `n` words. */
 function fitWords(sentence, n) {
   const t = dropLead(String(sentence || "").replace(/[.!?…]+$/, "").trim());
   if (wc(t) <= n) return t;
-  const clause = t.split(/\s*[,;:—–]\s*|\s+-\s+/).map((c) => c.trim()).find((c) => wc(c) >= 3 && wc(c) <= n);
+  // A colon between digits is a time ("3:30") and a comma before a digit is a thousands comma ("1,650"): neither is a clause break.
+  const clause = t.split(/\s*,(?!\d)\s*|\s*[;—–]\s*|\s*:(?!\d)\s*|\s+-\s+/).map((c) => dropLead(c.trim())).find((c) => wc(c) >= 3 && wc(c) <= n);
   if (clause) return clause;
   // no clause fits: drop a lead-in like "this means", keep the first words, and never end on a dangling joining word
   let words = t.replace(/^(?:this|that|which) means\s+/i, "").split(/\s+/).slice(0, n);
@@ -221,10 +228,10 @@ function headlineLines(text) {
 /** Statement card text. `copy` is Claude-written text that already passed its checks; without it, whole narration sentences within the caps are used. */
 function statement(scene, copy) {
   if (copy && copy.headline) return { headline: headlineLines(copy.headline), statement: upFirst(copy.statement || ""), support: upFirst(copy.support || "") };
-  const sentences = stripTags(scene.narrationExcerpt).split(/(?<=[.!?…])\s+/).filter(Boolean);
+  const sentences = splitSentences(stripTags(scene.narrationExcerpt));
   const pick = (list, n) => { const s = list.find((x) => wc(dropLead(x)) <= n); return s ? upFirst(dropLead(s)) : ""; };
   const headline = fitWords(sentences[0] || "", CARD_CAPS.headline);
   return { headline: headlineLines(headline), statement: pick(sentences.slice(1), CARD_CAPS.statement), support: pick(sentences.slice(2), CARD_CAPS.support) };
 }
 
-module.exports = { CARD_CAPS, headlineLines, sceneHeadline, figuresFrom, figuresInExcerpt, headlineFromHook, closingHeadline, eventWhen, plan, titleCase, stripTags };
+module.exports = { splitSentences, fitWords, statement, CARD_CAPS, headlineLines, sceneHeadline, figuresFrom, figuresInExcerpt, headlineFromHook, closingHeadline, eventWhen, plan, titleCase, stripTags };

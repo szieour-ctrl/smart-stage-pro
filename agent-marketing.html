@@ -1764,7 +1764,7 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
 
   // ── My photos: headshot intake (Nov 27, 2026) ──
   var PH = "/.netlify/functions/agent-appearance", ph = { s: null, busy: false };
-  function phThumb(url, label) { return '<img src="' + esc(url) + '" alt="' + esc(label) + '" style="width:100%;max-width:260px;border-radius:6px;border:1px solid var(--border);display:block">'; }
+  function phThumb(url, label, full) { return '<img src="' + esc(url) + '" alt="' + esc(label) + '"' + (full && full !== url ? ' onerror="this.onerror=null;this.src=\'' + esc(full) + '\'"' : "") + ' style="width:100%;max-width:260px;border-radius:6px;border:1px solid var(--border);display:block">'; }
   function phRender() {
     var s = ph.s; if (!s) return;
     $("phPool").textContent = s.sheet.poolText;
@@ -1772,13 +1772,13 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
     $("phConsent").checked = s.sheet.consented; $("phConsent").disabled = s.sheet.consented || ph.busy;
     $("phUpload").classList.toggle("hidden", !s.sheet.consented);
     var h = "";
-    if (s.approved) h += '<div class="note" style="background:#eaf3ee"><b>Your headshot</b>' + (s.profileReady ? " is saved to your Marketing Profile and is now used in your Reels." : " is approved. Save your Branding in Smart Stage PRO (name, DRE number, brokerage) and approve it again so it can be used in your Reels.") + "<div style='margin-top:10px'>" + phThumb(s.approved.url, "Your approved headshot") + "</div></div>";
+    if (s.approved) h += '<div class="note" style="background:#eaf3ee"><b>Your headshot</b>' + (s.profileReady ? " is saved to your Marketing Profile and is now used in your Reels." : " is approved. Save your Branding in Smart Stage PRO (name, DRE number, brokerage) and approve it again so it can be used in your Reels.") + "<div style='margin-top:10px'>" + phThumb(s.approved.url, "Your approved headshot", s.approved.fullUrl) + "</div></div>";
     if (!s.original && s.lastCheck && !s.lastCheck.ok) h += '<div class="note" style="background:#fbeeee"><b>Your last photo could not be used.</b> ' + esc(s.lastCheck.message) + "</div>";
     if (s.original) {
       h += "<div style='margin-top:14px'><b>Your photo</b>" + (s.original.check ? ' <span class="pst ' + (s.original.check.ok ? "ok" : "bad") + '">' + esc(s.original.check.message) + "</span>" : "") + "<div style='margin-top:8px'>" + phThumb(s.original.url, "Your uploaded photo") + "</div></div>";
     }
     if (s.enhanced.length) {
-      h += "<div style='margin-top:14px'><b>Enhanced</b>" + s.enhanced.map(function (e) { return "<div style='margin-top:8px'>" + phThumb(e.url, "Enhanced headshot") + '<div class="actions" style="margin-top:8px"><button class="btn gold" type="button" data-ph="approve" data-id="' + esc(e.assetId) + '">Use this headshot</button><button class="btn ghost" type="button" data-ph="reject" data-id="' + esc(e.assetId) + '">Not this one</button></div></div>'; }).join("") + "</div>";
+      h += "<div style='margin-top:14px'><b>Enhanced</b>" + s.enhanced.map(function (e) { return "<div style='margin-top:8px'>" + phThumb(e.url, "Enhanced headshot", e.fullUrl) + '<div class="actions" style="margin-top:8px"><button class="btn gold" type="button" data-ph="approve" data-id="' + esc(e.assetId) + '">Use this headshot</button><button class="btn ghost" type="button" data-ph="reject" data-id="' + esc(e.assetId) + '">Not this one</button></div></div>'; }).join("") + "</div>";
     }
     var canEnhance = s.sheet.consented && s.original && s.original.check && s.original.check.ok && !s.working && !ph.busy;
     if (s.sheet.consented && s.original && s.original.check && s.original.check.ok) {
@@ -1814,7 +1814,7 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
   }
   async function phEnhance() {
     var before = ph.s && ph.s.lastCall ? ph.s.lastCall.id : null;
-    ph.busy = true; phRender(); say("phMsg", "Enhancing your headshot. This can take a minute or two.");
+    ph.busy = true; phRender(); say("phMsg", "Enhancing your headshot. This usually takes about a minute. You can leave this page open and keep waiting.");
     var r = await api("POST", "", { action: "enhance" }, PH);
     if (!r.ok) { ph.busy = false; say("phMsg", r.json.error || "Could not start.", "err"); await phLoad(true); return; }
     if (r.json.dispatch) { try { await fetch("/.netlify/functions/agent-appearance-background", { method: "POST", headers: { Authorization: "Bearer " + token(), "Content-Type": "application/json" }, body: JSON.stringify({ assetId: r.json.assetId }) }); } catch (e) { /* the poll below reports it */ } }

@@ -10,6 +10,7 @@ const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 const ALLOWED_TYPES = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp" };
 const MIN_SIDE = 400;          // px, short side of the uploaded photo
 const WORK_MAX_SIDE = 1600;    // px: the working copy is shrunk to this before it is checked and enhanced (keeps the enhancement cost steady)
+const PROFILE_MAX_SIDE = 2048; // the approved headshot saved to the Marketing Profile
 const OUTPUT_MP_CAP = 16;      // enhancement output stays at or under about this many megapixels
 const MIN_HEAD_FRACTION = 0.3; // the head must fill at least this much of the photo's height; a missing reading never blocks
 const VISION_MODEL = process.env.APPEARANCE_VISION_MODEL || "claude-sonnet-4-6";
@@ -86,5 +87,5 @@ function callVision(base64, mediaType, anthropicKey) {
   });
 }
 
-module.exports = { CONSENT_VERSION, CONSENT_TEXT, MAX_UPLOAD_BYTES, ALLOWED_TYPES, MIN_SIDE, MIN_HEAD_FRACTION, WORK_MAX_SIDE, OUTPUT_MP_CAP, upscaleFactorFor, validateUpload,
+module.exports = { CONSENT_VERSION, CONSENT_TEXT, MAX_UPLOAD_BYTES, ALLOWED_TYPES, MIN_SIDE, MIN_HEAD_FRACTION, WORK_MAX_SIDE, PROFILE_MAX_SIDE, OUTPUT_MP_CAP, upscaleFactorFor, validateUpload,
   VISION_SYSTEM, visionContent, parseVision, decideVision, callVision };

@@ -33,7 +33,7 @@ test("self-dispatch: every background dispatcher in the repository goes through 
   const files = fs.readdirSync(FN).filter((f) => f.endsWith(".js") && !f.endsWith("-background.js"));
   const dispatchers = files.filter((f) => /\.netlify\/functions\/[A-Za-z0-9-]*(-background|\$\{functionName\})/.test(fs.readFileSync(path.join(FN, f), "utf8")));
   // Exact list, so a new dispatcher (or a vanished one) is noticed. Stage B is not here: its page starts the background job itself (Nov 7, 2026).
-  assert.deepStrictEqual(dispatchers.sort(), ["agent-marketing-images.js", "agent-marketing-project.js", "agent-marketing-render.js", "agent-marketing-research.js",
+  assert.deepStrictEqual(dispatchers.sort(), ["agent-appearance.js", "agent-marketing-images.js", "agent-marketing-project.js", "agent-marketing-render.js", "agent-marketing-research.js",
     "declutter-prompt.js", "group-spatial-read.js", "reel-plan.js", "stage-openai.js", "video-job.js"]);
   for (const f of dispatchers) {
     const src = fs.readFileSync(path.join(FN, f), "utf8");

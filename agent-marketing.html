@@ -249,8 +249,28 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
 <main class="stage">
   <header class="app-header">
     <div class="app-title">Agent <em>Marketing</em> · Local Market Insider</div>
-    <button class="link-btn hidden" id="myProjectsBtn" type="button">My projects</button>
+    <span>
+      <button class="link-btn hidden" id="myPhotosBtn" type="button">My photos</button>
+      <button class="link-btn hidden" id="myProjectsBtn" type="button">My projects</button>
+    </span>
   </header>
+
+  <!-- My photos: the headshot intake (Agent Appearance Sheet, slice 2, Nov 27, 2026) -->
+  <section class="panel hidden" id="photosPanel">
+    <div class="eyebrow">My photos</div>
+    <div class="panel-title">Your headshot</div>
+    <div class="panel-sub">This is the photo used for you in your Reels, including when your headshot speaks the opening and closing lines. Start with a clear photo of you and we enhance it.</div>
+    <div class="note" style="margin-top:0">For the best result, use a recent photo of just you, shoulders up, facing the camera, in good light, with no sunglasses or hat. Leave out badges, name tags, logos and any writing: your name and brokerage are added separately.</div>
+    <div class="note"><b id="phPool"></b><br>Each enhancement or new image you make for your Appearance Sheet uses one of your 12 iterations. If you use all 12 before your sheet is finished, you can continue for 5 Images, which gives you 12 more. Iterations you don't use don't carry over, and the images you have approved are always kept. You can come back and finish your sheet later.</div>
+    <label class="choice" style="margin-top:14px"><input type="checkbox" id="phConsent"> <span id="phConsentText"></span></label>
+    <div id="phUpload" class="hidden">
+      <label class="lbl" for="phFile">Your photo (PNG, JPG or WebP, up to 5 MB)</label>
+      <input type="file" id="phFile" accept="image/png,image/jpeg,image/webp">
+    </div>
+    <div id="phBody"></div>
+    <div class="msg" id="phMsg"></div>
+    <div class="actions"><button class="btn ghost" type="button" id="phClose">Close</button></div>
+  </section>
 
   <div id="gateMsg" class="panel hidden"></div>
 
@@ -1738,6 +1758,99 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
     show(["stepProjects"]); $("steps").innerHTML = "";
   }
 
+
+  // ── My photos: headshot intake (Nov 27, 2026) ──
+  var PH = "/.netlify/functions/agent-appearance", ph = { s: null, busy: false };
+  function phThumb(url, label) { return '<img src="' + esc(url) + '" alt="' + esc(label) + '" style="width:100%;max-width:260px;border-radius:6px;border:1px solid var(--border);display:block">'; }
+  function phRender() {
+    var s = ph.s; if (!s) return;
+    $("phPool").textContent = s.sheet.poolText;
+    $("phConsentText").textContent = s.consent.text;
+    $("phConsent").checked = s.sheet.consented; $("phConsent").disabled = s.sheet.consented || ph.busy;
+    $("phUpload").classList.toggle("hidden", !s.sheet.consented);
+    var h = "";
+    if (s.approved) h += '<div class="note" style="background:#eaf3ee"><b>Your headshot</b>' + (s.profileReady ? " is saved to your Marketing Profile and is now used in your Reels." : " is approved. Save your Branding in Smart Stage PRO (name, DRE number, brokerage) and approve it again so it can be used in your Reels.") + "<div style='margin-top:10px'>" + phThumb(s.approved.url, "Your approved headshot") + "</div></div>";
+    if (s.original) {
+      h += "<div style='margin-top:14px'><b>Your photo</b>" + (s.original.check ? ' <span class="pst ' + (s.original.check.ok ? "ok" : "bad") + '">' + esc(s.original.check.message) + "</span>" : "") + "<div style='margin-top:8px'>" + phThumb(s.original.url, "Your uploaded photo") + "</div></div>";
+    }
+    if (s.enhanced.length) {
+      h += "<div style='margin-top:14px'><b>Enhanced</b>" + s.enhanced.map(function (e) { return "<div style='margin-top:8px'>" + phThumb(e.url, "Enhanced headshot") + '<div class="actions" style="margin-top:8px"><button class="btn gold" type="button" data-ph="approve" data-id="' + esc(e.assetId) + '">Use this headshot</button><button class="btn ghost" type="button" data-ph="reject" data-id="' + esc(e.assetId) + '">Not this one</button></div></div>'; }).join("") + "</div>";
+    }
+    var canEnhance = s.sheet.consented && s.original && s.original.check && s.original.check.ok && !s.working && !ph.busy;
+    if (s.sheet.consented && s.original && s.original.check && s.original.check.ok) {
+      if (s.sheet.poolRemaining > 0) h += '<div class="actions"><button class="btn gold" type="button" data-ph="enhance"' + (canEnhance ? "" : " disabled") + ">" + (s.working || ph.busy ? '<span class="spinner"></span>Enhancing…' : (s.enhanced.length || s.approved ? "Try another enhancement" : "Enhance my headshot")) + "</button></div>";
+      else h += '<div class="actions"><button class="btn gold" type="button" data-ph="refill">Continue for ' + s.sheet.refillImages + " Images (" + s.sheet.poolSize + " more iterations)</button></div>";
+    }
+    $("phBody").innerHTML = h;
+  }
+  async function phLoad(quiet) {
+    var r = await api("GET", "", null, PH);
+    if (!r.ok) { if (!quiet) say("phMsg", r.json.error || "Could not load your photos.", "err"); return null; }
+    ph.s = r.json; phRender(); return r.json;
+  }
+  async function phPost(body, okText) {
+    var r = await api("POST", "", body, PH);
+    if (!r.ok) { say("phMsg", r.json.error || "Something went wrong. Please try again.", "err"); return r; }
+    if (r.json.sheet) { ph.s = r.json; phRender(); }
+    if (okText) say("phMsg", okText, "ok");
+    return r;
+  }
+  async function phUpload(file) {
+    if (!file) return;
+    ph.busy = true; phRender(); say("phMsg", "Checking your photo…");
+    try {
+      var p = await api("POST", "", { action: "presign", contentType: file.type }, PH);
+      if (!p.ok) { say("phMsg", p.json.error || "Could not start the upload.", "err"); return; }
+      var put = await fetch(p.json.uploadUrl, { method: "PUT", headers: { "Content-Type": file.type }, body: file });
+      if (!put.ok) { say("phMsg", "The upload didn't finish. Please try again.", "err"); return; }
+      var c = await api("POST", "", { action: "check", key: p.json.key, contentType: file.type }, PH);
+      if (!c.ok) { say("phMsg", c.json.error || "We couldn't check that photo.", "err"); return; }
+      ph.s = c.json; say("phMsg", c.json.original && c.json.original.check ? c.json.original.check.message : "", c.json.original && c.json.original.check && c.json.original.check.ok ? "ok" : "err");
+    } catch (e) { say("phMsg", e.message, "err"); } finally { ph.busy = false; phRender(); $("phFile").value = ""; }
+  }
+  async function phEnhance() {
+    var before = ph.s && ph.s.lastCall ? ph.s.lastCall.id : null;
+    ph.busy = true; phRender(); say("phMsg", "Enhancing your headshot. This can take a minute or two.");
+    var r = await api("POST", "", { action: "enhance" }, PH);
+    if (!r.ok) { ph.busy = false; say("phMsg", r.json.error || "Could not start.", "err"); await phLoad(true); return; }
+    if (r.json.dispatch) { try { await fetch("/.netlify/functions/agent-appearance-background", { method: "POST", headers: { Authorization: "Bearer " + token(), "Content-Type": "application/json" }, body: JSON.stringify({ assetId: r.json.assetId }) }); } catch (e) { /* the poll below reports it */ } }
+    var t0 = Date.now();
+    while (Date.now() - t0 < 4 * 60 * 1000) {
+      await new Promise(function (ok) { setTimeout(ok, 3000); });
+      var s = await phLoad(true); if (!s) continue;
+      if (s.lastCall && s.lastCall.id !== before && s.lastCall.status !== "started") {
+        ph.busy = false; phRender();
+        return s.lastCall.status === "ok" ? say("phMsg", "Here is your enhanced headshot. Use it, or try another enhancement.", "ok") : say("phMsg", s.lastFailure || "That image could not be made. Your iteration was not used. Please try again.", "err");
+      }
+    }
+    ph.busy = false; phRender(); say("phMsg", "This is taking longer than usual. Check back in a minute.", "err");
+  }
+  function showPhotos() {
+    $("photosPanel").classList.remove("hidden"); $("app").classList.add("hidden"); say("phMsg", "");
+    phLoad();
+  }
+  function hidePhotos() { $("photosPanel").classList.add("hidden"); $("app").classList.remove("hidden"); }
+  function wirePhotos() {
+    $("myPhotosBtn").classList.remove("hidden");
+    $("myPhotosBtn").addEventListener("click", showPhotos);
+    $("myProjectsBtn").addEventListener("click", hidePhotos);
+    $("phClose").addEventListener("click", hidePhotos);
+    $("phConsent").addEventListener("change", async function () { if (this.checked) await phPost({ action: "consent", version: ph.s.consent.version }); else phRender(); });
+    $("phFile").addEventListener("change", function () { phUpload(this.files && this.files[0]); });
+    $("phBody").addEventListener("click", async function (ev) {
+      var b = ev.target.closest && ev.target.closest("button[data-ph]"); if (!b || b.disabled) return;
+      var a = b.getAttribute("data-ph"), id = b.getAttribute("data-id");
+      if (a === "enhance") return phEnhance();
+      if (a === "approve") { var r = await phPost({ action: "approve", assetId: id }); if (r.ok) say("phMsg", r.json.profileUpdated ? "Saved. This is now the headshot in your Reels." : "Approved. Add your Branding in Smart Stage PRO so it can be used in your Reels.", "ok"); return; }
+      if (a === "reject") return phPost({ action: "reject", assetId: id });
+      if (a === "refill") {
+        if (!window.confirm("Continue for " + ph.s.sheet.refillImages + " Images? You get " + ph.s.sheet.poolSize + " more iterations. Any you don't use are lost.")) return;
+        var rr = await phPost({ action: "refill", confirmed: true }, "You have " + ph.s.sheet.poolSize + " more iterations.");
+        if (!rr.ok && rr.json.code === "insufficient_credits") say("phMsg", "You don't have enough Images for this.", "err");
+      }
+    });
+  }
+
   function block(msg) { $("gateMsg").classList.remove("hidden"); $("gateMsg").innerHTML = "<div class='panel-title'>" + esc(msg) + "</div>"; }
   async function init() {
     if (!token()) return block("Please log in at smartstagepro.com, then reopen this page.");
@@ -1747,7 +1860,7 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
     if (!r.ok) return block("Something went wrong loading Agent Marketing. Please try again.");
     state.schema = r.json; buildSetup();
     $("app").classList.remove("hidden"); $("myProjectsBtn").classList.remove("hidden");
-    $("myProjectsBtn").addEventListener("click", showProjects);
+    $("myProjectsBtn").addEventListener("click", showProjects); wirePhotos();
     $("newBtn").addEventListener("click", function () { setProject(null); try { history.replaceState(null, "", location.pathname); } catch (e) { /* ignore */ } go(1); });
     $("createBtn").addEventListener("click", createProject);
     $("planBtn").addEventListener("click", plan);

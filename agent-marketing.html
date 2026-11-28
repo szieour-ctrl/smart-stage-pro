@@ -1868,7 +1868,7 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
     var s = ph.s, el = $("apBody"); if (!s || !el) return;
     var a = s.appearance;
     Object.keys(AP_INFO).forEach(function (k) { var n = document.getElementById("apNote_" + k); if (n) ap.notes[k] = n.value; });
-    var lo = document.getElementById("apLower"), sh = document.getElementById("apShoes"); if (lo) ap.notes.lower = lo.value; if (sh) ap.notes.shoes = sh.value;
+    var lo = document.getElementById("apLower"), sh = document.getElementById("apShoes"), ht = document.getElementById("apHeight"); if (lo) ap.notes.lower = lo.value; if (sh) ap.notes.shoes = sh.value; if (ht) ap.notes.height = ht.value;
     if (!a || !s.approved) { el.innerHTML = ""; return; }
     var h = '<div style="margin-top:22px"><div class="eyebrow">Your Agent Appearance Sheet</div><div class="panel-sub">' + esc(s.sheet.poolText) + ". Every try stays on this page until you approve one, so you can compare.</div>";
     ["three_quarter", "full_body"].forEach(function (k) {
@@ -1891,6 +1891,7 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
             h += '<div class="actions" style="margin-top:6px">' + a.outfit.picks.map(function (p) { return '<button class="btn ghost" type="button" data-ap="pick" data-text="' + esc(p) + '"' + (working ? " disabled" : "") + ">" + esc(p) + "</button>"; }).join(" ") + "</div>";
             h += '<div class="hint">Be specific: name the garment and the belt if you wear one. Otherwise the image may guess.</div>';
           } else {
+            h += '<label class="lbl" for="apHeight" style="margin-top:12px">Your height (optional, recommended)</label><input type="text" id="apHeight" maxlength="' + a.outfit.heightMax + '" placeholder="For example: 5\'9&quot;" value="' + esc(ap.notes.height != null ? ap.notes.height : a.outfit.height) + '"' + (working ? " disabled" : "") + '><div class="hint">Giving your height helps keep your arms and legs in natural proportion.</div>';
             h += '<label class="lbl" for="apShoes" style="margin-top:12px">Shoes (optional)</label><input type="text" id="apShoes" maxlength="' + a.outfit.shoesMax + '" placeholder="For example: brown leather dress shoes. Leave blank for plain shoes that go with your outfit." value="' + esc(ap.notes.shoes != null ? ap.notes.shoes : a.outfit.shoes) + '"' + (working ? " disabled" : "") + ">";
           }
           if (st.drafts.length || st.attempts) h += '<label class="lbl" for="apNote_' + k + '" style="margin-top:12px">Want something changed? (optional)</label><input type="text" id="apNote_' + k + '" maxlength="' + a.noteMax + '" placeholder="For example: a lighter shirt, a warmer smile" value="' + esc(ap.notes[k] || "") + '"' + (working ? " disabled" : "") + ">";
@@ -1906,7 +1907,7 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
     var before = ph.s.appearance.stages[stage].attempts, t0 = Date.now(), seen = false;
     ap.busy = stage; apRender(); say("phMsg", "Making your image. This usually takes a minute or two. You can leave this page open and keep waiting.");
     var body = { action: "stage_generate", stage: stage, note: note };
-    if (stage === "three_quarter") body.lowerBody = $("apLower") ? $("apLower").value : ""; else body.shoes = $("apShoes") ? $("apShoes").value : "";
+    if (stage === "three_quarter") body.lowerBody = $("apLower") ? $("apLower").value : ""; else { body.shoes = $("apShoes") ? $("apShoes").value : ""; body.height = $("apHeight") ? $("apHeight").value : ""; }
     var r = await api("POST", "", body, PH);
     if (!r.ok) { ap.busy = null; say("phMsg", r.json.error || "Could not start.", "err"); await phLoad(true); return; }
     if (r.json.dispatch) { try { await fetch("/.netlify/functions/agent-appearance-background", { method: "POST", headers: { Authorization: "Bearer " + token(), "Content-Type": "application/json" }, body: JSON.stringify({ stage: stage, note: r.json.note }) }); } catch (e) { /* the poll below reports it */ } }

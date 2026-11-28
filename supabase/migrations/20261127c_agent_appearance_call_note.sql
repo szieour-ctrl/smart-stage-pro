@@ -3,3 +3,4 @@ alter table public.agent_appearance_calls add column if not exists note text;
 -- The subscriber's own words for what they wear from the waist down (asked at the three-quarter step) and for their shoes (asked at the full-length step).
 alter table public.agent_appearance_sheets add column if not exists lower_body text;
 alter table public.agent_appearance_sheets add column if not exists shoes text;
+alter table public.agent_appearance_sheets add column if not exists height_text text;   -- the subscriber's own words for their height, e.g. 5'9", given at the full-length step

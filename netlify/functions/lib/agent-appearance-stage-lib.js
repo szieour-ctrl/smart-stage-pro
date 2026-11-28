@@ -7,10 +7,11 @@ const A = require("./agent-appearance-lib");
 // The subscriber says what they wear from the waist down (asked at the three-quarter step) and, later, their shoes. The model is never left to guess a garment
 // (Sam's tests: it picked casual trousers with no belt; a style word alone added a sports coat). Quick picks only fill the box; the subscriber can type anything.
 const LOWER_PICKS = ["Dress trousers with a belt", "Chinos with a belt", "Dark jeans with a belt", "A knee-length skirt"];
-const OUTFIT_MAX = 120, SHOES_MAX = 80;
+const OUTFIT_MAX = 120, SHOES_MAX = 80, HEIGHT_MAX = 30;
 const oneLine = (raw, max) => { const t = String(raw == null ? "" : raw).replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim().slice(0, max); return t || null; };
 const cleanOutfit = (raw) => oneLine(raw, OUTFIT_MAX);
 const cleanShoes = (raw) => oneLine(raw, SHOES_MAX);
+const cleanHeight = (raw) => oneLine(raw, HEIGHT_MAX);   // the subscriber's own words, e.g. 5'9" or 175 cm; never inferred
 
 const NOTE_MAX = 300;
 /** The subscriber's own words for a retry: trimmed, one line, no control characters, capped. Empty → null. */
@@ -45,23 +46,24 @@ const TEXT = {
     "Keep ALL visible clothing unchanged, including any jacket, blazer, sweater or other layer already worn. Do not add any clothing layer that is not visible in Image 1. " +
     `Lower body, exactly as the subscriber described: ${lower}. Show it clearly, including the belt if one is named. ` +
     "Relaxed arms, natural body proportions, soft studio light, seamless neutral light-gray backdrop. Plain unbranded clothing. " + NO_BRANDING,
-  full_body: ({ shoes }) =>
+  full_body: ({ shoes, height }) =>
     "Extend the approved three-quarter portrait (Image 1) to a complete head-to-shoes standing studio photograph. Keep the face, hairstyle, facial hair, torso build and shoulder width consistent with the approved reference; Image 2 is the approved headshot for the face. " +
     "Keep everything the person is wearing in Image 1 exactly as it is, including any jacket, blazer or sweater, the trousers or skirt and the belt; do not add, remove or change a garment. " +
     `Add only the shoes: ${shoes || "plain shoes that go with the outfit"}. ` +
+    "Natural, realistic adult body proportions: arms end near mid-thigh and the legs are about half of the total height; do not elongate the limbs. " + (height ? `The person's height is ${height}. ` : "") +
     "Natural stance, arms relaxed, anatomically realistic hands. No logos, badges or name tags. Uniform soft light and neutral light-gray studio background.",
 };
 
 /** The full prompt for a stage. The retry note is added as ONE adjustment, with the likeness held fixed (spec: optional focused correction). */
-function buildPrompt(stage, { attributes, note, lowerBody, shoes } = {}) {
+function buildPrompt(stage, { attributes, note, lowerBody, shoes, height } = {}) {
   const f = TEXT[stage];
   if (!f) throw new Error("unknown stage");
   const lower = cleanOutfit(lowerBody);
   if (stage === "three_quarter" && !lower) throw new Error("the lower-body outfit is required");
-  let p = f({ attrs: describeAttributes(attributes), lower, shoes: cleanShoes(shoes) });
+  let p = f({ attrs: describeAttributes(attributes), lower, shoes: cleanShoes(shoes), height: cleanHeight(height) });
   const n = cleanNote(note);
-  if (n) p += ` Adjustment requested by the subscriber: "${n}". Apply only this adjustment. Preserve the approved facial likeness, hairstyle, facial hair, body proportions, clothing and studio lighting; do not redesign anything else.`;
+  if (n) p += ` Adjustment requested by the subscriber: "${n}". Apply only this adjustment. Preserve the approved facial likeness, hairstyle, facial hair, clothing and studio lighting; do not redesign anything else.`;
   return p;
 }
 
-module.exports = { LOWER_PICKS, OUTFIT_MAX, SHOES_MAX, cleanOutfit, cleanShoes, NOTE_MAX, cleanNote, SINGLE_STAGES, describeAttributes, buildPrompt };
+module.exports = { LOWER_PICKS, OUTFIT_MAX, SHOES_MAX, cleanOutfit, cleanShoes, cleanHeight, HEIGHT_MAX, NOTE_MAX, cleanNote, SINGLE_STAGES, describeAttributes, buildPrompt };

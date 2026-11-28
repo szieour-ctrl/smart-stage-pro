@@ -29,7 +29,8 @@ function world(over = {}) {
     storage: { put: async (k, b) => { w.files[k] = b; }, get: async (k) => { if (!w.files[k]) throw new Error("missing " + k); return w.files[k]; } },
     presign: async (uid, k) => `https://signed.example/${k}`, normalize: async () => ({ buffer: Buffer.from("ref"), width: 2048, height: 2048, contentType: "image/jpeg" }), preview: async () => Buffer.from("small"),
     runner: { run: async (endpoint, input) => { w.runnerCalls.push({ endpoint, input }); if (w.failRunner) throw new Error("boom"); return { requestId: "r1", data: { images: [{ url: "https://x/y.png" }] } }; } },
-    download: async () => ({ buffer: Buffer.from("png"), contentType: "image/png" }), probe: async () => ({ width: 1536, height: 2048 }) } });
+    download: async () => ({ buffer: Buffer.from("png"), contentType: "image/png" }), probe: async () => ({ width: 1536, height: 2048 }),
+    crop: async (buf, cols, rows) => { if (w.failCrop) throw new Error("cut"); return Array.from({ length: cols * rows }, (_, i) => ({ buffer: Buffer.from("p" + i), width: 500, height: 700, contentType: "image/png" })); } } });
 }
 const make = async (w, stage, note) => { const g = await SR.readyToGenerate({ deps: w.deps, userId: U, stage, note }); assert.ok(g.ok, JSON.stringify(g)); return SR.runStage({ deps: w.deps, userId: U, stage, note: g.note }); };
 
@@ -86,7 +87,7 @@ test("three-quarter: one iteration, reference is the approved headshot, 3:4 at 2
 test("order is enforced: full-length needs an approved three-quarter; nothing runs twice at once; no iterations → no run", async () => {
   const w = world();
   assert.equal((await SR.readyToGenerate({ deps: w.deps, userId: U, stage: "full_body" })).code, "locked");
-  assert.equal((await SR.readyToGenerate({ deps: w.deps, userId: U, stage: "poses" })).code, "stage");
+  assert.equal((await SR.readyToGenerate({ deps: w.deps, userId: U, stage: "bogus" })).code, "stage");
   w.calls.push({ id: "c0", stage: "three_quarter", status: "started", started_at: new Date().toISOString() });
   assert.equal((await SR.readyToGenerate({ deps: w.deps, userId: U, stage: "three_quarter" })).code, "busy");
   w.calls[0].started_at = new Date(Date.now() - 11 * 60 * 1000).toISOString();   // a worker that died: closed out, iteration returned
@@ -162,4 +163,81 @@ test("the outfit: required before the first three-quarter try; saved with the bu
   await SR.approveStage({ deps: w.deps, userId: U, assetId: fb.id });
   assert.equal((await SR.setOutfit({ deps: w.deps, userId: U, shoes: "boots" })).ok, false);
   assert.equal((await SR.setOutfit({ deps: w.deps, userId: U, height: "6'0\"" })).ok, false);
+});
+
+// ---- slice 4b: angles, expressions, poses ----
+const bodyReady = () => { const w = world(); const hs = w.assets[0]; w.assets.push({ id: "f0000000-0000-4000-8000-000000000002", sheet_id: SID, user_id: U, stage: "full_body", kind: "single", s3_key: `smart-stage-appearance/${U}/${SID}/full_body/f.png`, status: "approved", created_at: 1 }); w.files[w.assets[1].s3_key] = Buffer.from("fb"); return w; };
+
+test("prompts for the three multi-panel stages follow the spec: references named, no rear view, hands below frame, no branding", () => {
+  const a = S.buildPrompt("angles", { attributes: ATTRS }), e = S.buildPrompt("expressions", { attributes: ATTRS }), p = S.buildPrompt("poses", { attributes: ATTRS });
+  assert.match(a, /three-panel full-body studio contact sheet[\s\S]*45 degrees LEFT[\s\S]*45 degrees RIGHT/); assert.doesNotMatch(a, /rear|back view/i);
+  assert.match(e, /3-column x 2-row[\s\S]*CURIOUS[\s\S]*Hands and arms BELOW frame/);
+  assert.match(p, /2 x 2 professional pose[\s\S]*TOP LEFT[\s\S]*BOTTOM RIGHT/);
+  for (const t of [a, e, p]) { assert.match(t, /Image 1 is the approved headshot[\s\S]*Image 2 is the approved full-length image/); assert.match(t, /hair: short gray/); assert.doesNotMatch(t, /undefined|topaz|nano|fal\.ai|gemini/i); }
+  assert.deepEqual(Object.values(S.COMPOSITE_STAGES).map((d) => d.labels.length), [3, 6, 4]);
+  for (const d of Object.values(S.COMPOSITE_STAGES)) assert.equal(d.labels.length, d.grid.cols * d.grid.rows);
+});
+
+test("the three stages open only after the full-length image is approved, in any order", async () => {
+  const w = world();
+  for (const st of ["angles", "expressions", "poses"]) assert.equal((await SR.readyToGenerate({ deps: w.deps, userId: U, stage: st })).code, "locked");
+  const b = bodyReady();
+  for (const st of ["angles", "expressions", "poses"]) assert.ok((await SR.readyToGenerate({ deps: b.deps, userId: U, stage: st })).ok);
+  const state = await SR.loadStageState({ deps: b.deps, userId: U });
+  assert.deepEqual(["angles", "expressions", "poses"].map((k) => state.stages[k].unlocked), [true, true, true]);
+  assert.equal(state.stages.angles.composite, true); assert.equal(state.stages.full_body.composite, false);
+});
+
+test("one call makes the composite and cuts it into its panels: one iteration, both references, the right grid and aspect", async () => {
+  const w = bodyReady();
+  const r = await make(w, "expressions");
+  assert.ok(r.ok); assert.equal(w.sheet.pool_remaining, 11); assert.equal(w.runnerCalls.length, 1);
+  const call = w.runnerCalls[0];
+  assert.equal(call.input.aspect_ratio, "3:2"); assert.equal(call.input.image_urls.length, 2);
+  assert.ok(call.input.image_urls[0].includes("enhanced_headshot") && call.input.image_urls[1].includes("full_body"));
+  const comp = w.assets.find((a) => a.id === r.assetId), crops = w.assets.filter((a) => a.kind === "crop");
+  assert.equal(comp.kind, "composite"); assert.equal(comp.parent_id, w.assets[1].id);
+  assert.equal(crops.length, 6); assert.deepEqual(crops.map((c) => c.panel_index), [0, 1, 2, 3, 4, 5]);
+  assert.ok(crops.every((c) => c.parent_id === r.assetId && c.status === "pending" && c.stage === "expressions"));
+  assert.ok(Object.keys(w.files).some((k) => k.endsWith("_preview.jpg")));
+  assert.equal(w.runnerCalls.length, 1, "cutting costs no model call");
+});
+
+test("a cut that fails gives the iteration back and leaves nothing to approve", async () => {
+  const w = bodyReady(); w.failCrop = true;
+  const r = await make(w, "angles");
+  assert.equal(r.ok, false); assert.equal(w.sheet.pool_remaining, 12); assert.equal(w.calls[0].status, "refunded");
+  assert.equal(w.assets.filter((a) => a.stage === "angles" && a.status !== "rejected").length, 0);
+  assert.match((await SR.loadStageState({ deps: w.deps, userId: U })).stages.angles.lastFailure, /iteration was not used/);
+});
+
+test("attempts are compared as whole images with their panels; approving one takes its panels and puts the other away; panels can be left out", async () => {
+  const w = bodyReady();
+  const r1 = await make(w, "poses"); const r2 = await make(w, "poses", "make the first pose more relaxed");
+  let st = (await SR.loadStageState({ deps: w.deps, userId: U })).stages.poses;
+  assert.equal(st.drafts.length, 2); assert.equal(st.drafts[0].panels.length, 4); assert.equal(st.drafts[0].panels[1].label, "Seated at a desk");
+  assert.equal(st.drafts[1].note, "make the first pose more relaxed");
+  const left = st.drafts[0].panels[3].assetId;
+  assert.ok((await SR.rejectPanel({ deps: w.deps, userId: U, assetId: left })).ok);
+  assert.ok((await SR.approveStage({ deps: w.deps, userId: U, assetId: r1.assetId })).ok);
+  const by = (id) => w.assets.find((a) => a.id === id);
+  assert.equal(by(r1.assetId).status, "approved"); assert.equal(by(left).status, "rejected", "a panel left out stays out");
+  assert.equal(w.assets.filter((a) => a.parent_id === r1.assetId && a.status === "approved").length, 3);
+  assert.equal(by(r2.assetId).status, "rejected"); assert.ok(w.assets.filter((a) => a.parent_id === r2.assetId).every((a) => a.status === "rejected"));
+  st = (await SR.loadStageState({ deps: w.deps, userId: U })).stages.poses;
+  assert.ok(st.approved); assert.equal(st.drafts.length, 0); assert.equal(st.approved.panels.filter((p) => p.status === "approved").length, 3);
+  assert.equal((await SR.readyToGenerate({ deps: w.deps, userId: U, stage: "poses" })).code, "approved");
+  assert.ok((await SR.rejectPanel({ deps: w.deps, userId: U, assetId: st.approved.panels[0].assetId })).ok, "a panel can still be dropped later");
+  assert.equal((await SR.rejectPanel({ deps: w.deps, userId: U, assetId: st.approved.assetId })).ok, false, "only panels");
+  assert.equal((await SR.approveStage({ deps: w.deps, userId: U, assetId: by(w.assets.find((a) => a.parent_id === r1.assetId).id).id })).ok, false, "a panel is not approved by itself");
+});
+
+test("rejecting a whole multi-panel try takes its panels away; the earlier approved images are never touched", async () => {
+  const w = bodyReady();
+  const before = JSON.stringify(w.assets.filter((a) => a.stage !== "angles"));
+  const r1 = await make(w, "angles"); await make(w, "angles");
+  assert.ok((await SR.rejectStage({ deps: w.deps, userId: U, assetId: r1.assetId })).ok);
+  assert.ok(w.assets.filter((a) => a.parent_id === r1.assetId).every((a) => a.status === "rejected"));
+  assert.equal((await SR.loadStageState({ deps: w.deps, userId: U })).stages.angles.drafts.length, 1);
+  assert.equal(JSON.stringify(w.assets.filter((a) => a.stage !== "angles")), before);
 });

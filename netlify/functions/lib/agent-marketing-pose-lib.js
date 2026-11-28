@@ -51,6 +51,9 @@ function resolvePose({ suggested, override, approved }) {
   return { pose: null, source: "none" };
 }
 
+/** Poses apply to the series templates' supporting shots of the agent (Nov 28, 2026); other templates keep the profile photo alone. */
+const isEnabledFor = (project) => require("./agent-marketing-series-lib").isSeriesTemplate(project && project.template);
+
 /** The planner is told only about poses that exist: [{ id, label }]. */
 const forPlanner = (approved) => (approved || []).map((p) => ({ id: p.id, pose: p.label }));
 /** A planner or subscriber pose value is kept only if it is one of the four ids. */
@@ -67,4 +70,4 @@ function promptWithPose(prompt, pose) {
   ].join("\n");
 }
 
-module.exports = { POSES, POSE_IDS, REFERENCE_ORDER, byId, byPanel, approvedPoses, resolvePose, forPlanner, cleanPoseId, promptWithPose };
+module.exports = { isEnabledFor, POSES, POSE_IDS, REFERENCE_ORDER, byId, byPanel, approvedPoses, resolvePose, forPlanner, cleanPoseId, promptWithPose };

@@ -16,6 +16,7 @@ const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 const { supabase, getProfileRow } = require("./lib/marketing-profile-lib");
 const am = require("./lib/agent-marketing-lib");
 const img = require("./lib/agent-marketing-images-lib");
+const poseLib = require("./lib/agent-marketing-pose-lib");
 const timing = require("./lib/agent-marketing-timing-lib");
 const assetsLib = require("./lib/agent-marketing-assets-lib");
 const voiceLib = require("./lib/agent-marketing-voice-lib");
@@ -98,12 +99,13 @@ async function prepareNarration(job, project, tagged, pronunciations) {
 
 // ── 2. images ─────────────────────────────────────────────────────────────────────────────────────────────────
 function postEdit(prompt, refBuffer, refMime, size) {
+  const refs = Array.isArray(refBuffer) ? refBuffer : [{ buffer: refBuffer, mime: refMime }];   // Nov 28, 2026: headshot first, then the approved pose
   return new Promise((resolve, reject) => {
     const boundary = "----AMBoundary" + crypto.randomBytes(6).toString("hex");
     const field = (n, v) => `--${boundary}\r\nContent-Disposition: form-data; name="${n}"\r\n\r\n${v}`;
     const text = Buffer.from([field("model", IMAGE_MODEL), field("prompt", prompt), field("n", "1"), field("size", size), field("quality", img.settings().quality), field("output_format", "png")].join("\r\n") + "\r\n", "utf8");
-    const fileHdr = Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="image[]"; filename="reference.png"\r\nContent-Type: ${refMime}\r\n\r\n`, "utf8");
-    const body = Buffer.concat([text, fileHdr, refBuffer, Buffer.from(`\r\n--${boundary}--\r\n`, "utf8")]);
+    const files = refs.flatMap((r, n) => [Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="image[]"; filename="reference${n + 1}.png"\r\nContent-Type: ${r.mime}\r\n\r\n`, "utf8"), r.buffer, Buffer.from("\r\n", "utf8")]);
+    const body = Buffer.concat([text, ...files, Buffer.from(`--${boundary}--\r\n`, "utf8")]);
     const req = https.request({ hostname: "api.openai.com", path: "/v1/images/edits", method: "POST", headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, "Content-Type": `multipart/form-data; boundary=${boundary}`, "Content-Length": body.length } }, (res) => {
       let d = ""; res.setEncoding("utf8"); res.on("data", (c) => (d += c)); res.on("end", () => { try { resolve({ status: res.statusCode, json: JSON.parse(d) }); } catch { resolve({ status: res.statusCode, json: null }); } });
     });
@@ -114,7 +116,7 @@ function postEdit(prompt, refBuffer, refMime, size) {
 // reference: { buffer, mime } for an image of the agent (their own profile photo), else a plain concept image.
 async function generateImage(prompt, size, reference) {
   const res = reference
-    ? await postEdit(prompt, reference.buffer, reference.mime, size)
+    ? await postEdit(prompt, reference.refs || reference.buffer, reference.mime, size)
     : await postJson("api.openai.com", "/v1/images/generations", { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` }, { model: IMAGE_MODEL, prompt, n: 1, size, quality: img.settings().quality, output_format: "png" }, 240000);
   const b64 = res.json && res.json.data && res.json.data[0] && res.json.data[0].b64_json;
   if (res.status >= 300 || !b64) {
@@ -184,12 +186,22 @@ async function prepareImages(job, project, narrative, brand, formats, profile) {
       buf = await sharp(src).rotate().resize(w, h, { fit: "cover", position: t.f === "9x16" ? sharp.strategy.attention : "centre" }).png().toBuffer(); source = "own_photo";
     }
     else {
-      const prompt = img.buildFormatPrompt({ kind: t.n.imageKind, scenePrompt: t.n.prompt, format: t.f, framing: t.n.framing && t.n.framing[t.f], people: img.peopleAllowedFor(project) });
+      let prompt = img.buildFormatPrompt({ kind: t.n.imageKind, scenePrompt: t.n.prompt, format: t.f, framing: t.n.framing && t.n.framing[t.f], people: img.peopleAllowedFor(project) });
       let reference = null;
       if (t.n.imageKind === "agent_scene") {
         const refKey = img.pickReferenceKey(profile);
         if (!refKey) throw new Error("Add a headshot or full-body photo to your Marketing Profile first, so the image of you can be made.");
-        reference = { buffer: await objectBuffer(refKey), mime: /\.jpe?g$/i.test(refKey) ? "image/jpeg" : /\.webp$/i.test(refKey) ? "image/webp" : "image/png" };
+        const mimeOf = (k) => (/\.jpe?g$/i.test(k) ? "image/jpeg" : /\.webp$/i.test(k) ? "image/webp" : "image/png");
+        reference = { buffer: await objectBuffer(refKey), mime: mimeOf(refKey) };
+        // Nov 28, 2026: a series Reel's supporting shot of the agent uses the approved pose beside the headshot; with no approved pose it uses the profile photo as before.
+        if (poseLib.isEnabledFor(project) && t.n.pose) {
+          const r = poseLib.resolvePose({ suggested: t.n.pose, approved: await poseLib.approvedPoses(job.user_id, supabase) });
+          if (r.pose) {
+            const headKey = profile.headshot_key || refKey;
+            reference = { refs: [{ buffer: await objectBuffer(headKey), mime: mimeOf(headKey) }, { buffer: await objectBuffer(r.pose.key), mime: mimeOf(r.pose.key) }] };
+            prompt = poseLib.promptWithPose(prompt, r.pose);
+          }
+        }
       }
       buf = await generateImage(prompt, t.f === "9x16" ? img.tallSize() : img.SIZES[img.WIDE], reference);
       source = "gpt_image_2"; usage.images_generated = (usage.images_generated || 0) + 1; usage.image_model = "gpt-image-2"; usage.image_quality = img.settings().quality;

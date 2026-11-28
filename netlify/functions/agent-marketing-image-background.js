@@ -29,13 +29,15 @@ function openaiJson(path, bodyObj, apiKey) {
     req.on("error", reject); req.write(body); req.end();
   });
 }
+// refs: one { buffer, mime } or several (Nov 28, 2026: headshot first, then the approved pose), sent in that order as image[].
 function openaiEdit(prompt, refBuffer, refMime, size, quality, apiKey) {
+  const refs = Array.isArray(refBuffer) ? refBuffer : [{ buffer: refBuffer, mime: refMime }];
   return new Promise((resolve, reject) => {
     const boundary = "----AMBoundary" + crypto.randomBytes(6).toString("hex");
     const field = (n, v) => `--${boundary}\r\nContent-Disposition: form-data; name="${n}"\r\n\r\n${v}`;
     const text = Buffer.from([field("model", IMAGE_MODEL), field("prompt", prompt), field("n", "1"), field("size", size), field("quality", quality), field("output_format", "png")].join("\r\n") + "\r\n", "utf8");
-    const fileHdr = Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="image[]"; filename="reference.png"\r\nContent-Type: ${refMime}\r\n\r\n`, "utf8");
-    const body = Buffer.concat([text, fileHdr, refBuffer, Buffer.from(`\r\n--${boundary}--\r\n`, "utf8")]);
+    const files = refs.flatMap((r, n) => [Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="image[]"; filename="reference${n + 1}.png"\r\nContent-Type: ${r.mime}\r\n\r\n`, "utf8"), r.buffer, Buffer.from("\r\n", "utf8")]);
+    const body = Buffer.concat([text, ...files, Buffer.from(`--${boundary}--\r\n`, "utf8")]);
     const req = https.request({ hostname: "api.openai.com", path: "/v1/images/edits", method: "POST", headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": `multipart/form-data; boundary=${boundary}`, "Content-Length": body.length } }, (res) => {
       let d = ""; res.setEncoding("utf8"); res.on("data", (c) => (d += c)); res.on("end", () => { try { resolve({ status: res.statusCode, json: JSON.parse(d) }); } catch { resolve({ status: res.statusCode, json: null, raw: d.slice(0, 300) }); } });
     });
@@ -78,9 +80,13 @@ exports.handler = async (event) => {
     const gen = asset.generation;
     const size = img.sizeFor(gen.format); const quality = gen.quality || "medium";
     let res;
-    if (gen.referenceKey) {
+    const mimeOf = (k) => (/\.jpe?g$/i.test(k) ? "image/jpeg" : /\.webp$/i.test(k) ? "image/webp" : "image/png");
+    if (Array.isArray(gen.referenceKeys) && gen.referenceKeys.length > 1) {
+      const refs = []; for (const k of gen.referenceKeys) refs.push({ buffer: await s3Bytes(k), mime: mimeOf(k) });   // Image 1 = headshot, Image 2 = approved pose
+      res = await openaiEdit(gen.prompt, refs, null, size, quality, process.env.OPENAI_API_KEY);
+    } else if (gen.referenceKey) {
       const ref = await s3Bytes(gen.referenceKey);
-      res = await openaiEdit(gen.prompt, ref, /\.jpe?g$/i.test(gen.referenceKey) ? "image/jpeg" : /\.webp$/i.test(gen.referenceKey) ? "image/webp" : "image/png", size, quality, process.env.OPENAI_API_KEY);
+      res = await openaiEdit(gen.prompt, ref, mimeOf(gen.referenceKey), size, quality, process.env.OPENAI_API_KEY);
     } else {
       res = await openaiJson("/v1/images/generations", { model: IMAGE_MODEL, prompt: gen.prompt, n: 1, size, quality, output_format: "png" }, process.env.OPENAI_API_KEY);
     }

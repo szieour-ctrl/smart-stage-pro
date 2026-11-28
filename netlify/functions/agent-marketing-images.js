@@ -28,6 +28,7 @@ const am = require("./lib/agent-marketing-lib");
 const img = require("./lib/agent-marketing-images-lib");
 const elab = require("./lib/agent-marketing-image-elaborate-lib");
 const gate = require("./lib/agent-marketing-gate");
+const poseLib = require("./lib/agent-marketing-pose-lib");
 
 const headers = { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json", "Cache-Control": "no-store" };
 const reply = (statusCode, obj) => ({ statusCode, headers, body: JSON.stringify(obj) });
@@ -105,7 +106,10 @@ exports.handler = async (event) => {
           slots.push({ sceneIndex: index, kind: scene.visualSource, plannedKind: img.plannedKind(scene), format, latest: latest ? await viewOf(latest) : null, approved: approved ? await viewOf(approved) : null, used: q.used, included: q.included, nextCredits: q.credits, capReached: q.capReached });
         }
       }
-      return reply(200, { slots, projectTotal: assets.filter(img.counts).length, projectCap: st.projectCap * img.formatsOf(p.row).length, creditsPerExtra: st.credits, charging: st.charging, formats: img.formatsOf(p.row) });
+      // Nov 28, 2026: the poses the subscriber approved, and the pose the planner suggested for each supporting shot of the agent (the subscriber can override it).
+      const approvedPoses = (await poseLib.approvedPoses(userId, supabase)).map((x) => ({ id: x.id, label: x.label }));
+      slots.forEach((sl) => { const sc = (img.allScenes(p.row.narrative).find((x) => x.index === sl.sceneIndex) || {}).scene || {}; sl.pose = sc.pose || null; });
+      return reply(200, { approvedPoses, slots, projectTotal: assets.filter(img.counts).length, projectCap: st.projectCap * img.formatsOf(p.row).length, creditsPerExtra: st.credits, charging: st.charging, formats: img.formatsOf(p.row) });
     }
 
     if (event.httpMethod !== "POST") return reply(405, { error: "Method not allowed" });
@@ -183,7 +187,7 @@ exports.handler = async (event) => {
     if (q.capReached) return reply(409, { error: `This project has reached its limit of ${q.projectCap} generated images.`, code: "cap_reached" });
 
     // Reference: the agent scene uses the agent's own profile photo.
-    let referenceKey = null; const fromApproved = false;
+    let referenceKey = null, referenceKeys = null, poseUsed = null; const fromApproved = false;
     const planned = img.plannedKind(target.scene);
     let kind = b.kind || planned || (target.scene.visualSource === "AGENT_SCENE" ? "agent_scene" : "concept");
     // Revision: edit the image already made for this scene; it is the reference, so no profile photo is looked up.
@@ -194,6 +198,14 @@ exports.handler = async (event) => {
       const pr = rowsOf(await supabase("GET", "marketing_profiles", null, `?user_id=eq.${userId}&select=headshot_key,fullbody_key&limit=1`))[0];
       referenceKey = img.pickReferenceKey(pr);
       if (!referenceKey) return reply(409, { error: "Add a headshot or full-body photo to your Marketing Profile first.", code: "profile_photo_needed" });
+      // Nov 28, 2026: a supporting shot of the agent in a series Reel uses the approved headshot for likeness and the approved pose for posture, hands and clothing.
+      // The subscriber's choice (b.pose: a pose id, or "none") wins over the planner's suggestion. With no approved pose the profile photo is used exactly as before.
+      if (poseLib.isEnabledFor(project)) {
+        const approved = await poseLib.approvedPoses(userId, supabase);
+        const r = poseLib.resolvePose({ suggested: target.scene.pose, override: typeof b.pose === "string" ? b.pose : undefined, approved });
+        if (r.pose) { poseUsed = { id: r.pose.id, label: r.pose.label, source: r.source }; referenceKeys = [(pr && pr.headshot_key) || referenceKey, r.pose.key]; }
+        else if (r.source === "fallback" || r.source === "subscriber_none") poseUsed = { id: null, source: r.source };
+      }
     }
     // What the image should show. The planner's own prompt is used only when it was written for this kind of image;
     // otherwise (another kind, or a scene the planner gave no image prompt) the agent's elaborated description is needed.
@@ -210,7 +222,8 @@ exports.handler = async (event) => {
     if (q.charged && b.confirmCharge !== true) return reply(402, { error: "This image costs extra.", code: "confirm_charge", credits: q.credits });
     const st = img.settings();
     if (reviseBaseAsset && !(typeof b.description === "string" && b.description.trim())) return reply(400, { error: "Use Elaborate with AI first so we can describe the change.", code: "description_needed" });
-    const prompt = reviseBaseAsset ? img.buildRevisionPrompt({ instruction: scenePrompt }) : img.buildFormatPrompt({ kind, scenePrompt, format, framing: target.scene.framing && target.scene.framing[format], people: img.peopleAllowedFor(project) });
+    let prompt = reviseBaseAsset ? img.buildRevisionPrompt({ instruction: scenePrompt }) : img.buildFormatPrompt({ kind, scenePrompt, format, framing: target.scene.framing && target.scene.framing[format], people: img.peopleAllowedFor(project) });
+    if (referenceKeys && poseUsed && poseUsed.id) prompt = poseLib.promptWithPose(prompt, poseUsed);
 
     // Charge first (only for extras); refunded by the worker or the stale check if the image never arrives.
     let charged = null;
@@ -224,7 +237,7 @@ exports.handler = async (event) => {
     const version = Math.max(0, ...assets.filter((a) => a.scene_index === sceneIndex).map((a) => a.version || 0)) + 1;
     // A new draft replaces any unaccepted earlier draft for this slot.
     for (const o of assets) if (o.scene_index === sceneIndex && img.fmtOf(o) === format && o.status === "proposed") await supabase("PATCH", "agent_marketing_assets", { status: "rejected" }, `?id=eq.${o.id}&user_id=eq.${userId}`);
-    const generation = { state: "generating", format, kind, prompt, scenePrompt: scenePrompt || null, note: note || null, elaborated: !!(b.description && String(b.description).trim()), referenceKey, revisionOf: reviseBaseAsset ? reviseBaseAsset.id : null, basePrompt: reviseBaseAsset ? (reviseBaseAsset.generation.basePrompt || reviseBaseAsset.generation.scenePrompt || null) : null, fromApproved, quality: st.quality, size: img.sizeFor(format), charged, startedAt: new Date().toISOString(), attempt: q.used + 1 };
+    const generation = { state: "generating", format, kind, prompt, scenePrompt: scenePrompt || null, note: note || null, elaborated: !!(b.description && String(b.description).trim()), referenceKey, ...(referenceKeys ? { referenceKeys } : {}), ...(poseUsed ? { pose: poseUsed } : {}), revisionOf: reviseBaseAsset ? reviseBaseAsset.id : null, basePrompt: reviseBaseAsset ? (reviseBaseAsset.generation.basePrompt || reviseBaseAsset.generation.scenePrompt || null) : null, fromApproved, quality: st.quality, size: img.sizeFor(format), charged, startedAt: new Date().toISOString(), attempt: q.used + 1 };
     const ins = await supabase("POST", "agent_marketing_assets", { project_id: project.id, user_id: userId, scene_index: sceneIndex, version, source: "gpt_image_2", ai_generated: true, status: "proposed", asset_key: null, generation, rights: { route: "generated", aiGenerated: true } });
     const row = rowsOf(ins)[0];
     if (!ins || ins.status >= 300 || !row) {

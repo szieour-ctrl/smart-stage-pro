@@ -259,6 +259,12 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
   </header>
 
   <!-- My photos: the headshot intake (Agent Appearance Sheet, slice 2, Nov 27, 2026) -->
+  <div id="apLightbox" class="hidden" role="dialog" aria-modal="true" aria-label="Larger image">
+    <div class="imgm-inner">
+      <div class="imgm-wrap"><img id="apLbImg" alt="" src=""></div>
+      <div class="imgm-foot"><span class="hint" id="apLbCap" style="margin-right:auto"></span><button type="button" class="btn ghost" data-lb="prev">Previous</button><button type="button" class="btn ghost" data-lb="next">Next</button><button type="button" class="btn gold" data-lb="close">Close</button></div>
+    </div>
+  </div>
   <section class="panel hidden" id="photosPanel">
     <div class="eyebrow">My photos</div>
     <div class="panel-title">Your headshot and Agent Appearance Sheet Images</div>
@@ -660,12 +666,6 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
       <div class="msg" id="imagesMsg" role="status"></div>
     </section>
 
-    <div id="apLightbox" class="hidden" role="dialog" aria-modal="true" aria-label="Larger image">
-      <div class="imgm-inner">
-        <div class="imgm-wrap"><img id="apLbImg" alt="" src=""></div>
-        <div class="imgm-foot"><span class="hint" id="apLbCap" style="margin-right:auto"></span><button type="button" class="btn ghost" data-lb="prev">Previous</button><button type="button" class="btn ghost" data-lb="next">Next</button><button type="button" class="btn gold" data-lb="close">Close</button></div>
-      </div>
-    </div>
     <div id="photoView" class="hidden" role="dialog" aria-modal="true" aria-label="Your photo">
       <div class="imgm-inner">
         <div class="imgm-wrap"><img id="photoViewImg" alt="Your photo" src=""></div>

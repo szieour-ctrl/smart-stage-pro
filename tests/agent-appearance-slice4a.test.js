@@ -251,3 +251,8 @@ test("every picture on My photos opens larger in a modal (one place draws them a
   assert.match(html, /ev\.key === "Escape"\) lbClose\(\)/);
   assert.match(html, /wireLightbox\(\)/);
 });
+
+test("the enlarge modal sits outside #app, which is hidden while My photos is open", () => {
+  const html = require("fs").readFileSync(__dirname + "/../agent-marketing.html", "utf8");
+  assert.ok(html.indexOf('id="apLightbox"') < html.indexOf('id="app"'), "apLightbox must not be inside the hidden #app container");
+});

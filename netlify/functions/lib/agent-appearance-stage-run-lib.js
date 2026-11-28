@@ -51,7 +51,8 @@ async function loadStageState({ deps, userId, now = Date.now() }) {
     };
   }
   const fresh = (await deps.db.getSheet(userId)) || sheet;
-  return { style: { key: S.STYLES[fresh.style_dna] ? fresh.style_dna : S.DEFAULT_STYLE, options: Object.entries(S.STYLES).map(([key, v]) => ({ key, label: v.label })) },
+  return { outfit: { lowerBody: fresh.lower_body || "", shoes: fresh.shoes || "", picks: S.LOWER_PICKS, lowerMax: S.OUTFIT_MAX, shoesMax: S.SHOES_MAX,
+      lowerLocked: !!approvedOf(assets, "three_quarter"), shoesLocked: !!approvedOf(assets, "full_body") },
     stages, working: running ? { stage: running.stage } : null, noteMax: S.NOTE_MAX };
 }
 
@@ -67,6 +68,7 @@ async function readyToGenerate({ deps, userId, stage, note, now = Date.now() }) 
   const calls = await reapStaleAny(deps, sheet, now);
   if (calls.some((c) => c.status === "started")) return { ok: false, status: 409, code: "busy", error: msg.busy };
   const fresh = (await deps.db.getSheet(userId)) || sheet;
+  if (stage === "three_quarter" && !S.cleanOutfit(fresh.lower_body)) return { ok: false, status: 400, code: "outfit", error: "Tell us what you are wearing from the waist down first." };
   if (A.poolEmpty(fresh)) return { ok: false, status: 402, code: "pool_empty", error: A.poolText(fresh) };
   return { ok: true, sheetId: sheet.id, note: S.cleanNote(note) };
 }
@@ -91,7 +93,7 @@ async function runStage({ deps, userId, stage, note }) {
   const urls = [];
   for (const r of refs) urls.push(await referenceUrl(deps, userId, r));
   const attrs = sheet.vision_attributes && sheet.vision_attributes.attributes ? sheet.vision_attributes.attributes : null;
-  const prompt = S.buildPrompt(stage, { styleKey: sheet.style_dna, attributes: attrs, note: cleaned });
+  const prompt = S.buildPrompt(stage, { attributes: attrs, note: cleaned, lowerBody: sheet.lower_body, shoes: sheet.shoes });
   const prior = (await deps.db.lastCallsAny(sheet.id, 100)).filter((c) => c.stage === stage);
   return runCall(deps, { sheet, userId, stage, attempt: prior.length + 1, providerKey: "imageEdit", kind: "single", note: cleaned,
     input: A.buildImageEditInput({ prompt, imageUrls: urls, aspectRatio: def.aspect, resolution: "2K" }), quotedUsd: A.quoteImageEdit({ resolution: "2K" }),
@@ -118,13 +120,23 @@ async function rejectStage({ deps, userId, assetId }) {
   return { ok: true };
 }
 
-async function setStyle({ deps, userId, style }) {
-  if (!S.STYLES[style]) return { ok: false, status: 400, error: "Choose one of the styles." };
+// What the subscriber wears from the waist down (before the three-quarter image is approved) and their shoes (before the full-length image is approved).
+async function setOutfit({ deps, userId, lowerBody, shoes }) {
   const sheet = await deps.db.ensureSheet(userId);
   const assets = await deps.db.listAssets(sheet.id);
-  if (approvedOf(assets, "three_quarter")) return { ok: false, status: 400, error: "The style is locked once your three-quarter image is approved." };
-  await deps.db.patchSheet(sheet.id, { style_dna: style });
+  const patch = {};
+  if (lowerBody !== undefined) {
+    if (approvedOf(assets, "three_quarter")) return { ok: false, status: 400, error: "Your outfit is locked once your three-quarter image is approved." };
+    const v = S.cleanOutfit(lowerBody);
+    if (!v) return { ok: false, status: 400, error: "Tell us what you are wearing from the waist down." };
+    patch.lower_body = v;
+  }
+  if (shoes !== undefined) {
+    if (approvedOf(assets, "full_body")) return { ok: false, status: 400, error: "Your shoes are locked once your full-length image is approved." };
+    patch.shoes = S.cleanShoes(shoes);
+  }
+  if (Object.keys(patch).length) await deps.db.patchSheet(sheet.id, patch);
   return { ok: true };
 }
 
-module.exports = { STALE_CALL_MS, loadStageState, readyToGenerate, runStage, approveStage, rejectStage, setStyle, reapStaleAny };
+module.exports = { STALE_CALL_MS, loadStageState, readyToGenerate, runStage, approveStage, rejectStage, setOutfit, reapStaleAny };

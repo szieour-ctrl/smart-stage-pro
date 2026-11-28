@@ -4,15 +4,13 @@
 "use strict";
 const A = require("./agent-appearance-lib");
 
-// Style: concerns the LOWER body only (trousers, belt, shoes), chosen to go with whatever top is already visible and approved. It is never put in the
-// three-quarter prompt, and it never adds or changes a top layer: a style word like "professional" alone made the model add a sports coat (Sam's test, Nov 27).
-const STYLES = {
-  approachable_local_agent: { label: "Approachable Local Agent", text: "chinos or khakis with casual leather shoes" },
-  professional_consultant: { label: "Professional Consultant", text: "tailored dress trousers with dress shoes" },
-  modern_ceo: { label: "Modern CEO", text: "slim dark trousers with clean, minimal shoes" },
-};
-const DEFAULT_STYLE = "approachable_local_agent";
-const styleText = (key) => (STYLES[key] || STYLES[DEFAULT_STYLE]).text;
+// The subscriber says what they wear from the waist down (asked at the three-quarter step) and, later, their shoes. The model is never left to guess a garment
+// (Sam's tests: it picked casual trousers with no belt; a style word alone added a sports coat). Quick picks only fill the box; the subscriber can type anything.
+const LOWER_PICKS = ["Dress trousers with a belt", "Chinos with a belt", "Dark jeans with a belt", "A knee-length skirt"];
+const OUTFIT_MAX = 120, SHOES_MAX = 80;
+const oneLine = (raw, max) => { const t = String(raw == null ? "" : raw).replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim().slice(0, max); return t || null; };
+const cleanOutfit = (raw) => oneLine(raw, OUTFIT_MAX);
+const cleanShoes = (raw) => oneLine(raw, SHOES_MAX);
 
 const NOTE_MAX = 300;
 /** The subscriber's own words for a retry: trimmed, one line, no control characters, capped. Empty → null. */
@@ -42,25 +40,28 @@ function describeAttributes(attrs) {
 
 const NO_BRANDING = "No badge, name tag, logo, text, extra people or accessories.";
 const TEXT = {
-  three_quarter: ({ attrs }) =>
+  three_quarter: ({ attrs, lower }) =>
     "Create a realistic three-quarter-length studio portrait of the person in Image 1, head through upper legs. Face and grooming must match Image 1" + (attrs ? ` (${attrs})` : "") + ". " +
     "Keep ALL visible clothing unchanged, including any jacket, blazer, sweater or other layer already worn. Do not add any clothing layer that is not visible in Image 1. " +
-    "Complete unseen clothing naturally to go with the visible top, as a proposal, not a verified fact. Relaxed arms, natural body proportions, soft studio light, seamless neutral light-gray backdrop. Plain unbranded clothing. " + NO_BRANDING,
-  full_body: ({ style }) =>
+    `Lower body, exactly as the subscriber described: ${lower}. Show it clearly, including the belt if one is named. ` +
+    "Relaxed arms, natural body proportions, soft studio light, seamless neutral light-gray backdrop. Plain unbranded clothing. " + NO_BRANDING,
+  full_body: ({ shoes }) =>
     "Extend the approved three-quarter portrait (Image 1) to a complete head-to-shoes standing studio photograph. Keep the face, hairstyle, facial hair, torso build and shoulder width consistent with the approved reference; Image 2 is the approved headshot for the face. " +
-    "Keep everything the person is wearing from the waist up exactly as in Image 1, including any jacket, blazer or sweater; do not add or remove a layer. " +
-    "Complete the lower body to go with that top: " + style + ". Keep any already-approved garment unchanged. Natural stance, arms relaxed, anatomically realistic hands, belt, trousers and shoes. " +
-    "No logos, badges or name tags. Uniform soft light and neutral light-gray studio background.",
+    "Keep everything the person is wearing in Image 1 exactly as it is, including any jacket, blazer or sweater, the trousers or skirt and the belt; do not add, remove or change a garment. " +
+    `Add only the shoes: ${shoes || "plain shoes that go with the outfit"}. ` +
+    "Natural stance, arms relaxed, anatomically realistic hands. No logos, badges or name tags. Uniform soft light and neutral light-gray studio background.",
 };
 
 /** The full prompt for a stage. The retry note is added as ONE adjustment, with the likeness held fixed (spec: optional focused correction). */
-function buildPrompt(stage, { styleKey, attributes, note } = {}) {
+function buildPrompt(stage, { attributes, note, lowerBody, shoes } = {}) {
   const f = TEXT[stage];
   if (!f) throw new Error("unknown stage");
-  let p = f({ style: styleText(styleKey), attrs: describeAttributes(attributes) });   // the style only reaches the full-length prompt
+  const lower = cleanOutfit(lowerBody);
+  if (stage === "three_quarter" && !lower) throw new Error("the lower-body outfit is required");
+  let p = f({ attrs: describeAttributes(attributes), lower, shoes: cleanShoes(shoes) });
   const n = cleanNote(note);
   if (n) p += ` Adjustment requested by the subscriber: "${n}". Apply only this adjustment. Preserve the approved facial likeness, hairstyle, facial hair, body proportions, clothing and studio lighting; do not redesign anything else.`;
   return p;
 }
 
-module.exports = { STYLES, DEFAULT_STYLE, styleText, NOTE_MAX, cleanNote, SINGLE_STAGES, describeAttributes, buildPrompt };
+module.exports = { LOWER_PICKS, OUTFIT_MAX, SHOES_MAX, cleanOutfit, cleanShoes, NOTE_MAX, cleanNote, SINGLE_STAGES, describeAttributes, buildPrompt };

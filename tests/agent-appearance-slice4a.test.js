@@ -11,7 +11,7 @@ const ATTRS = { hair: "short gray", facial_hair: "none", glasses: "no", clothing
 
 function world(over = {}) {
   let n = 0, u = 0;
-  const w = { sheet: { id: SID, user_id: U, status: "in_progress", pool_remaining: 12, pool_refills: 0, consent_at: "2026-11-27T00:00:00Z", consent_version: H.CONSENT_VERSION, style_dna: null, vision_attributes: { attributes: ATTRS } },
+  const w = { sheet: { id: SID, user_id: U, status: "in_progress", pool_remaining: 12, pool_refills: 0, consent_at: "2026-11-27T00:00:00Z", consent_version: H.CONSENT_VERSION, lower_body: "dark gray dress trousers with a black belt", shoes: null, vision_attributes: { attributes: ATTRS } },
     assets: [{ id: "h0000000-0000-4000-8000-000000000001", sheet_id: SID, user_id: U, stage: "enhanced_headshot", kind: "single", s3_key: `smart-stage-appearance/${U}/${SID}/enhanced_headshot/h.png`, status: "approved", created_at: 0 }],
     calls: [], files: {}, runnerCalls: [], failRunner: false, ...over };
   const db = {
@@ -33,31 +33,34 @@ function world(over = {}) {
 }
 const make = async (w, stage, note) => { const g = await SR.readyToGenerate({ deps: w.deps, userId: U, stage, note }); assert.ok(g.ok, JSON.stringify(g)); return SR.runStage({ deps: w.deps, userId: U, stage, note: g.note }); };
 
-test("prompts: filled with only what the headshot showed; every visible garment is kept; the style reaches only the lower body of the full-length prompt", () => {
-  const p = S.buildPrompt("three_quarter", { styleKey: "modern_ceo", attributes: ATTRS });
+test("prompts: only what the headshot showed; every visible garment kept; the subscriber's own words name the lower body and the shoes", () => {
+  const lower = "dark gray dress trousers with a black belt";
+  const p = S.buildPrompt("three_quarter", { attributes: ATTRS, lowerBody: lower });
   assert.match(p, /three-quarter-length studio portrait of the person in Image 1/);
   assert.match(p, /hair: short gray; no facial hair; no glasses; clothing: navy sport coat over a light blue button-up/);
   assert.match(p, /Keep ALL visible clothing unchanged, including any jacket, blazer, sweater/);
   assert.match(p, /Do not add any clothing layer that is not visible in Image 1/);
-  assert.doesNotMatch(p, /executive|consultant|neighborhood|slim dark|chinos|dress trousers/i, "the style is not in the three-quarter prompt at all");
-  assert.equal(S.buildPrompt("three_quarter", { styleKey: "modern_ceo" }), S.buildPrompt("three_quarter", { styleKey: "professional_consultant" }));
-  assert.match(S.buildPrompt("full_body", { styleKey: "modern_ceo" }), /slim dark trousers with clean, minimal shoes/);
-  assert.match(S.buildPrompt("full_body", { styleKey: "professional_consultant" }), /tailored dress trousers with dress shoes/);
-  assert.match(S.buildPrompt("full_body", {}), /chinos or khakis/, "the default style");
-  assert.match(S.buildPrompt("full_body", {}), /from the waist up exactly as in Image 1, including any jacket, blazer or sweater; do not add or remove a layer/);
-  assert.doesNotMatch(S.buildPrompt("full_body", { styleKey: "nope" }), /undefined/);
-  assert.doesNotMatch(p + S.buildPrompt("full_body", {}), /topaz|nano|fal\.ai|gemini/i);
+  assert.match(p, /Lower body, exactly as the subscriber described: dark gray dress trousers with a black belt\. Show it clearly, including the belt/);
+  assert.throws(() => S.buildPrompt("three_quarter", { attributes: ATTRS }), /required/, "the garment is never left to chance");
+  assert.throws(() => S.buildPrompt("three_quarter", { lowerBody: "   " }), /required/);
+  const f = S.buildPrompt("full_body", { shoes: "brown leather dress shoes" });
+  assert.match(f, /Add only the shoes: brown leather dress shoes\./);
+  assert.match(f, /do not add, remove or change a garment/);
+  assert.match(S.buildPrompt("full_body", {}), /plain shoes that go with the outfit/);
+  assert.doesNotMatch(p + f, /consultant|executive|undefined|topaz|nano|fal\.ai|gemini/i);
   assert.equal(S.describeAttributes(null), "");
   assert.match(S.describeAttributes({ hair: "gray", shirt: "blue shirt" }), /clothing: blue shirt/, "sheets saved before Nov 27 only recorded a shirt");
+  assert.equal(S.cleanOutfit("  a\n skirt "), "a skirt"); assert.equal(S.cleanOutfit("x".repeat(300)).length, S.OUTFIT_MAX); assert.equal(S.cleanShoes(""), null);
+  assert.ok(S.LOWER_PICKS.every((x) => x.length < S.OUTFIT_MAX));
 });
 
 test("the retry note is cleaned, capped, and added as ONE adjustment with the likeness held fixed", () => {
   assert.equal(S.cleanNote("   "), null); assert.equal(S.cleanNote(null), null);
   assert.equal(S.cleanNote("a\n\tlighter   shirt\u0000"), "a lighter shirt");
   assert.equal(S.cleanNote("x".repeat(500)).length, S.NOTE_MAX);
-  const p = S.buildPrompt("three_quarter", { note: "a lighter shirt" });
+  const p = S.buildPrompt("three_quarter", { note: "a lighter shirt", lowerBody: "chinos with a belt" });
   assert.match(p, /Adjustment requested by the subscriber: "a lighter shirt"\. Apply only this adjustment\. Preserve the approved facial likeness/);
-  assert.doesNotMatch(S.buildPrompt("three_quarter", {}), /Adjustment requested/);
+  assert.doesNotMatch(S.buildPrompt("three_quarter", { lowerBody: "chinos" }), /Adjustment requested/);
 });
 
 test("three-quarter: one iteration, reference is the approved headshot, 3:4 at 2K, the note is kept on the call", async () => {
@@ -126,14 +129,29 @@ test("full-length: made from the approved three-quarter AND the headshot (2:3), 
   assert.equal(w.assets.find((a) => a.id === r2.assetId).parent_id, r1.assetId);
 });
 
-test("reject puts one attempt away and leaves the others; the style can change until the three-quarter is approved", async () => {
+test("reject puts one attempt away and leaves the others", async () => {
   const w = world();
-  const r1 = await make(w, "three_quarter"); const r2 = await make(w, "three_quarter");
+  const r1 = await make(w, "three_quarter"); await make(w, "three_quarter");
   assert.ok((await SR.rejectStage({ deps: w.deps, userId: U, assetId: r1.assetId })).ok);
   assert.equal((await SR.loadStageState({ deps: w.deps, userId: U })).stages.three_quarter.drafts.length, 1);
-  assert.equal((await SR.setStyle({ deps: w.deps, userId: U, style: "bogus" })).ok, false);
-  assert.ok((await SR.setStyle({ deps: w.deps, userId: U, style: "professional_consultant" })).ok);
-  assert.ok(await make(w, "three_quarter")); assert.doesNotMatch(w.runnerCalls[2].input.prompt, /consultant|dress trousers/i);   // the style never reaches this prompt
-  await SR.approveStage({ deps: w.deps, userId: U, assetId: r2.assetId });
-  assert.equal((await SR.setStyle({ deps: w.deps, userId: U, style: "modern_ceo" })).ok, false, "locked once approved");
+});
+
+test("the outfit: required before the first three-quarter try; saved with the button; locked once each image is approved; shoes are optional", async () => {
+  const w = world({}); w.sheet.lower_body = null;
+  assert.equal((await SR.readyToGenerate({ deps: w.deps, userId: U, stage: "three_quarter" })).code, "outfit");
+  assert.equal((await SR.setOutfit({ deps: w.deps, userId: U, lowerBody: "   " })).ok, false);
+  assert.ok((await SR.setOutfit({ deps: w.deps, userId: U, lowerBody: "chinos with a belt" })).ok);
+  const r1 = await make(w, "three_quarter");
+  assert.match(w.runnerCalls[0].input.prompt, /Lower body, exactly as the subscriber described: chinos with a belt/);
+  assert.ok((await SR.setOutfit({ deps: w.deps, userId: U, lowerBody: "dark jeans with a belt" })).ok, "can change it while nothing is approved");
+  await SR.approveStage({ deps: w.deps, userId: U, assetId: r1.assetId });
+  assert.equal((await SR.setOutfit({ deps: w.deps, userId: U, lowerBody: "a skirt" })).ok, false);
+  assert.ok((await SR.setOutfit({ deps: w.deps, userId: U, shoes: "brown loafers" })).ok);
+  await make(w, "full_body");
+  assert.match(w.runnerCalls[1].input.prompt, /Add only the shoes: brown loafers/);
+  let st = await SR.loadStageState({ deps: w.deps, userId: U });
+  assert.equal(st.outfit.lowerLocked, true); assert.equal(st.outfit.shoesLocked, false); assert.equal(st.outfit.lowerBody, "dark jeans with a belt");
+  const fb = w.assets.filter((a) => a.stage === "full_body").pop();
+  await SR.approveStage({ deps: w.deps, userId: U, assetId: fb.id });
+  assert.equal((await SR.setOutfit({ deps: w.deps, userId: U, shoes: "boots" })).ok, false);
 });

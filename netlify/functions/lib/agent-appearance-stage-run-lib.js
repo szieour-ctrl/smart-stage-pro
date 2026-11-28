@@ -1,6 +1,8 @@
-// lib/agent-appearance-stage-run-lib.js — the generated stages of the Agent Appearance Sheet, slice 4a: the three-quarter image and the full-length image (Nov 27, 2026).
+// lib/agent-appearance-stage-run-lib.js — the generated stages of the Agent Appearance Sheet, slice 4: the three-quarter and full-length images (4a) and the three
+// multi-panel stages, angles, expressions and poses (4b) (Nov 27, 2026). A multi-panel stage is ONE call; its image is cut into separate pictures with deps.crop.
 // Same rules as the headshot: each provider call takes one iteration from the pool, a failed call is refunded, nothing runs twice at once, approved images are never overwritten.
 // Every attempt stays on the page, side by side, until the subscriber approves one; then the others are put away. Same `deps` as agent-appearance-headshot-run-lib, plus
+//   deps.crop(buffer, cols, rows) -> [{ buffer, width, height, contentType }] (left to right, top to bottom)
 //   deps.db.lastCallsAny(sheetId, n) -> [{ id, status, started_at, stage, note, output_asset_id, attempt }]
 "use strict";
 const A = require("./agent-appearance-lib");
@@ -25,7 +27,7 @@ async function reapStaleAny(deps, sheet, now) {
   return calls;
 }
 
-const approvedOf = (assets, stage) => assets.filter((a) => a.stage === stage && a.status === "approved").pop() || null;
+const approvedOf = (assets, stage) => assets.filter((a) => a.stage === stage && a.kind !== "crop" && a.status === "approved").pop() || null;   // a panel is never "the approved image"
 
 async function loadStageState({ deps, userId, now = Date.now() }) {
   const sheet = await deps.db.ensureSheet(userId);
@@ -36,16 +38,24 @@ async function loadStageState({ deps, userId, now = Date.now() }) {
     url: await deps.presign(userId, A.previewKey(a.s3_key), 900), fullUrl: await deps.presign(userId, a.s3_key, 900) });
   const running = calls.find((c) => c.status === "started") || null;
   const stages = {};
-  for (const [stage, def] of Object.entries(S.SINGLE_STAGES)) {
+  const panelsOf = async (composite) => {
+    const rows = assets.filter((a) => a.parent_id === composite.id && a.kind === "crop").sort((x, y) => (x.panel_index || 0) - (y.panel_index || 0));
+    const labels = (S.COMPOSITE_STAGES[composite.stage] || {}).labels || [];
+    return Promise.all(rows.map(async (a) => ({ assetId: a.id, index: a.panel_index, label: labels[a.panel_index] || `Panel ${(a.panel_index || 0) + 1}`, status: a.status,
+      url: await deps.presign(userId, A.previewKey(a.s3_key), 900), fullUrl: await deps.presign(userId, a.s3_key, 900) }) ));
+  };
+  for (const [stage, def] of Object.entries(S.ALL_STAGES)) {
+    const composite = !!def.grid;
     const approved = approvedOf(assets, stage);
-    const drafts = assets.filter((a) => a.stage === stage && a.status === "pending");
+    const drafts = assets.filter((a) => a.stage === stage && a.kind !== "crop" && a.status === "pending");
     const stageCalls = calls.filter((c) => c.stage === stage);
     const last = stageCalls[0] || null;
+    const withPanels = async (a) => (composite ? { ...(await view(a)), panels: await panelsOf(a) } : view(a));
     stages[stage] = {
-      title: def.title,
-      unlocked: !!approvedOf(assets, def.needs),
-      approved: approved ? await view(approved) : null,
-      drafts: approved ? [] : await Promise.all(drafts.map(view)),
+      title: def.title, composite, intro: def.intro || null, noun: def.noun || null,
+      unlocked: !!approvedOf(assets, def.needs) && (def.refs || []).every((r) => !!approvedOf(assets, r)),
+      approved: approved ? await withPanels(approved) : null,
+      drafts: approved ? [] : await Promise.all(drafts.map(withPanels)),
       attempts: stageCalls.filter((c) => c.status === "ok").length,
       lastFailure: last && last.status === "refunded" && !approved ? FAIL_TEXT : null,
     };
@@ -58,12 +68,12 @@ async function loadStageState({ deps, userId, now = Date.now() }) {
 
 // Gate for "Make it" / "Try again": consent, the previous step approved, nothing running, an iteration left, and (for approved stages) nothing to redo.
 async function readyToGenerate({ deps, userId, stage, note, now = Date.now() }) {
-  const def = S.SINGLE_STAGES[stage];
+  const def = S.ALL_STAGES[stage];
   if (!def) return { ok: false, status: 400, code: "stage", error: msg.stage };
   const sheet = await deps.db.ensureSheet(userId);
   if (!(sheet.consent_at && sheet.consent_version === H.CONSENT_VERSION)) return { ok: false, status: 400, code: "consent", error: msg.consent };
   const assets = await deps.db.listAssets(sheet.id);
-  if (!approvedOf(assets, def.needs)) return { ok: false, status: 400, code: "locked", error: msg.locked };
+  if (!approvedOf(assets, def.needs) || (def.refs || []).some((r) => !approvedOf(assets, r))) return { ok: false, status: 400, code: "locked", error: msg.locked };
   if (approvedOf(assets, stage)) return { ok: false, status: 400, code: "approved", error: "This step is already approved." };
   const calls = await reapStaleAny(deps, sheet, now);
   if (calls.some((c) => c.status === "started")) return { ok: false, status: 409, code: "busy", error: msg.busy };
@@ -83,7 +93,7 @@ async function referenceUrl(deps, userId, asset) {
 
 // The background step: one image for the stage, made from the approved images before it.
 async function runStage({ deps, userId, stage, note }) {
-  const def = S.SINGLE_STAGES[stage];
+  const def = S.ALL_STAGES[stage];
   const sheet = def ? await deps.db.getSheet(userId) : null;
   if (!def || !sheet) return { ok: false, code: "bad_stage" };
   const assets = await deps.db.listAssets(sheet.id);
@@ -95,27 +105,64 @@ async function runStage({ deps, userId, stage, note }) {
   const attrs = sheet.vision_attributes && sheet.vision_attributes.attributes ? sheet.vision_attributes.attributes : null;
   const prompt = S.buildPrompt(stage, { attributes: attrs, note: cleaned, lowerBody: sheet.lower_body, shoes: sheet.shoes, height: sheet.height_text });
   const prior = (await deps.db.lastCallsAny(sheet.id, 100)).filter((c) => c.stage === stage);
-  return runCall(deps, { sheet, userId, stage, attempt: prior.length + 1, providerKey: "imageEdit", kind: "single", note: cleaned,
+  const r = await runCall(deps, { sheet, userId, stage, attempt: prior.length + 1, providerKey: "imageEdit", kind: def.grid ? "composite" : "single", note: cleaned,
     input: A.buildImageEditInput({ prompt, imageUrls: urls, aspectRatio: def.aspect, resolution: "2K" }), quotedUsd: A.quoteImageEdit({ resolution: "2K" }),
-    inputAssetIds: refs.map((r) => r.id), parentId: refs[0].id });
+    inputAssetIds: refs.map((x) => x.id), parentId: approvedOf(assets, def.needs).id });
+  if (!r.ok || !def.grid) return r;
+  // The composite is made; cut it into its separate pictures. If the cut fails the try is given back, like any failed call.
+  try {
+    const pieces = await deps.crop(await deps.storage.get(r.key), def.grid.cols, def.grid.rows);
+    if (!Array.isArray(pieces) || pieces.length !== def.grid.cols * def.grid.rows) throw new Error("the image could not be cut into panels");
+    for (let i = 0; i < pieces.length; i++) {
+      const id = deps.uuid(), ct = pieces[i].contentType || "image/png";
+      const key = A.assetKey({ userId, sheetId: sheet.id, stage, assetId: id, ext: A.extFor(ct) });
+      await deps.storage.put(key, pieces[i].buffer, ct);
+      if (deps.preview) { try { await deps.storage.put(A.previewKey(key), await deps.preview(pieces[i].buffer), "image/jpeg"); } catch { /* the page falls back to the full copy */ } }
+      await deps.db.insertAsset({ id, sheet_id: sheet.id, user_id: userId, stage, kind: "crop", parent_id: r.assetId, panel_index: i, s3_key: key, content_type: ct,
+        width: pieces[i].width || null, height: pieces[i].height || null, status: "pending", call_id: r.callId });
+    }
+    return r;
+  } catch (e) {
+    console.error("[appearance] cutting panels failed:", e.message);
+    try { await deps.db.patchAsset(r.assetId, { status: "rejected" }); for (const a of await deps.db.listAssets(sheet.id)) if (a.parent_id === r.assetId) await deps.db.patchAsset(a.id, { status: "rejected" }); } catch { /* best effort */ }
+    try { await deps.db.refund(sheet.id); await deps.db.updateCall(r.callId, { status: "refunded", error: "panels could not be cut", finished_at: new Date().toISOString() }); } catch { /* ledger is best effort here */ }
+    return { ok: false, code: "crop_failed", callId: r.callId, message: FAIL_TEXT };
+  }
 }
 
 async function approveStage({ deps, userId, assetId, now = Date.now() }) {
   const sheet = await deps.db.getSheet(userId);
   const a = sheet ? await deps.db.getAsset(assetId, userId) : null;
-  if (!a || !S.SINGLE_STAGES[a.stage] || a.sheet_id !== sheet.id || a.status !== "pending") return { ok: false, status: 400, error: "That image can't be approved." };
-  if (approvedOf(await deps.db.listAssets(sheet.id), a.stage)) return { ok: false, status: 400, error: "This step is already approved." };
-  for (const o of await deps.db.listAssets(sheet.id)) if (o.stage === a.stage && o.id !== a.id && o.status === "pending") await deps.db.patchAsset(o.id, { status: "rejected" });
-  await deps.db.patchAsset(a.id, { status: "approved", approved_at: new Date(now).toISOString() });
+  if (!a || !S.ALL_STAGES[a.stage] || a.kind === "crop" || a.sheet_id !== sheet.id || a.status !== "pending") return { ok: false, status: 400, error: "That image can't be approved." };
+  const all = await deps.db.listAssets(sheet.id);
+  if (approvedOf(all, a.stage)) return { ok: false, status: 400, error: "This step is already approved." };
+  const at = new Date(now).toISOString();
+  for (const o of all) {
+    if (o.stage !== a.stage) continue;
+    if (o.id === a.id) continue;
+    if (o.status === "pending" && (o.kind !== "crop" || o.parent_id !== a.id)) await deps.db.patchAsset(o.id, { status: "rejected" });   // the other tries, and their panels, are put away
+  }
+  await deps.db.patchAsset(a.id, { status: "approved", approved_at: at });
+  for (const o of all) if (o.kind === "crop" && o.parent_id === a.id && o.status === "pending") await deps.db.patchAsset(o.id, { status: "approved", approved_at: at });   // the panels come with it
   await deps.db.patchSheet(sheet.id, { status: "in_progress" });
   return { ok: true };
 }
 
-// "Not this one": put one attempt away (the others stay to compare). Allowed only while nothing is approved for the stage.
+// "Not this one": put one attempt away (the others stay to compare). A multi-panel attempt takes its panels with it.
 async function rejectStage({ deps, userId, assetId }) {
   const sheet = await deps.db.getSheet(userId);
   const a = sheet ? await deps.db.getAsset(assetId, userId) : null;
-  if (!a || !S.SINGLE_STAGES[a.stage] || a.sheet_id !== sheet.id || a.status !== "pending") return { ok: false, status: 400, error: "That image can't be changed." };
+  if (!a || !S.ALL_STAGES[a.stage] || a.kind === "crop" || a.sheet_id !== sheet.id || a.status !== "pending") return { ok: false, status: 400, error: "That image can't be changed." };
+  await deps.db.patchAsset(a.id, { status: "rejected" });
+  for (const o of await deps.db.listAssets(sheet.id)) if (o.kind === "crop" && o.parent_id === a.id) await deps.db.patchAsset(o.id, { status: "rejected" });
+  return { ok: true };
+}
+
+// "Leave this one out": one panel of a multi-panel image is not used (before or after the image is approved). Reels only see panels that are not left out.
+async function rejectPanel({ deps, userId, assetId }) {
+  const sheet = await deps.db.getSheet(userId);
+  const a = sheet ? await deps.db.getAsset(assetId, userId) : null;
+  if (!a || a.kind !== "crop" || a.sheet_id !== sheet.id || a.status === "rejected") return { ok: false, status: 400, error: "That picture can't be changed." };
   await deps.db.patchAsset(a.id, { status: "rejected" });
   return { ok: true };
 }
@@ -143,4 +190,4 @@ async function setOutfit({ deps, userId, lowerBody, shoes, height }) {
   return { ok: true };
 }
 
-module.exports = { STALE_CALL_MS, loadStageState, readyToGenerate, runStage, approveStage, rejectStage, setOutfit, reapStaleAny };
+module.exports = { STALE_CALL_MS, loadStageState, readyToGenerate, runStage, approveStage, rejectStage, rejectPanel, setOutfit, reapStaleAny };

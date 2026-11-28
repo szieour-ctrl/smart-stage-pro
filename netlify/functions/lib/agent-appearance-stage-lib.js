@@ -26,6 +26,17 @@ const SINGLE_STAGES = {
   full_body:     { needs: "three_quarter", refs: ["three_quarter", "enhanced_headshot"], aspect: "2:3", title: "Full-length image" },
 };
 
+// The multi-panel stages: ONE generation each, cut with Sharp into separately usable pictures. All three need the approved full-length image and headshot, and none needs another.
+const COMPOSITE_STAGES = {
+  angles: { needs: "full_body", refs: ["enhanced_headshot", "full_body"], aspect: "3:2", grid: { cols: 3, rows: 1 }, title: "Three angles", noun: "angles",
+    labels: ["Front", "Turned to your left", "Turned to your right"], intro: "One image with three full-length views of you: front, and turned about 45 degrees each way. There is no rear view." },
+  expressions: { needs: "full_body", refs: ["enhanced_headshot", "full_body"], aspect: "3:2", grid: { cols: 3, rows: 2 }, title: "Six expressions", noun: "expressions",
+    labels: ["Warm smile", "Neutral professional", "Curious", "Engaged and listening", "Confident and approachable", "Conversational"], intro: "One image with six head-and-shoulders expressions, cut into six separate pictures." },
+  poses: { needs: "full_body", refs: ["enhanced_headshot", "full_body"], aspect: "1:1", grid: { cols: 2, rows: 2 }, title: "Four poses", noun: "poses",
+    labels: ["Standing, presenting", "Seated at a desk", "Standing with a folder", "Seated, listening"], intro: "One image with four professional poses, cut into four separate pictures." },
+};
+const ALL_STAGES = { ...SINGLE_STAGES, ...COMPOSITE_STAGES };
+
 /** "wearing a blue shirt; short gray hair; no glasses" — only what Claude Vision saw in the headshot. */
 function describeAttributes(attrs) {
   const a = attrs && typeof attrs === "object" ? attrs : {};
@@ -40,7 +51,19 @@ function describeAttributes(attrs) {
 }
 
 const NO_BRANDING = "No badge, name tag, logo, text, extra people or accessories.";
+const FACE_AND_OUTFIT = "Image 1 is the approved headshot and controls the face, hairline, beard, eye shape, nose, mouth and apparent age; Image 2 is the approved full-length image and controls the body proportions and the exact outfit. ";
 const TEXT = {
+  angles: ({ attrs }) =>
+    "Create ONE three-panel full-body studio contact sheet showing the same approved person: panel 1 front-facing; panel 2 body turned about 45 degrees LEFT, face toward camera; panel 3 body turned about 45 degrees RIGHT, face toward camera. " + FACE_AND_OUTFIT +
+    (attrs ? `Visible features to keep: ${attrs}. ` : "") + "Every panel head-to-shoes, same scale, same exact approved outfit, hairstyle, grooming, background and soft studio lighting. No alternate wardrobe, labels, badges, logos, text, props, furniture or additional people.",
+  expressions: ({ attrs }) =>
+    "Create ONE 3-column x 2-row contact sheet of six head-and-shoulders portraits of the SAME person. " + FACE_AND_OUTFIT + (attrs ? `Visible features to keep: ${attrs}. ` : "") +
+    "Expressions left-to-right, top-to-bottom: (1) warm, welcoming smile, (2) neutral professional, (3) CURIOUS with subtle raised-brow interest, (4) engaged and listening, (5) confident and approachable, (6) conversational, as if speaking. " +
+    "Keep the exact face, clothing, shoulders, camera distance and soft studio lighting consistent. Hands and arms BELOW frame; curiosity must be expressed by the FACE, not a hand-on-chin pose. Neutral light-gray background. No logos, name tags, badges, objects, text, extra people or scene changes.",
+  poses: ({ attrs }) =>
+    "Create ONE 2 x 2 professional pose contact sheet of the SAME person. " + FACE_AND_OUTFIT + (attrs ? `Visible features to keep: ${attrs}. ` : "") +
+    "Poses: TOP LEFT standing in a three-quarter stance with a natural open-palm conversational presenting gesture; TOP RIGHT seated at a simple desk reviewing one blank document; BOTTOM LEFT standing holding one plain notebook or folder; BOTTOM RIGHT seated in a plain chair, attentive and listening. " +
+    "Natural hand anatomy, realistic body proportions, the same garments and grooming in every panel. Soft studio lighting, neutral light-gray background. Only the desk, chair or one prop strictly required by the named pose; no furnished rooms, decorative settings, extra people, branding, labels, name badges, logos or text.",
   three_quarter: ({ attrs, lower }) =>
     "Create a realistic three-quarter-length studio portrait of the person in Image 1, head through upper legs. Face and grooming must match Image 1" + (attrs ? ` (${attrs})` : "") + ". " +
     "Keep ALL visible clothing unchanged, including any jacket, blazer, sweater or other layer already worn. Do not add any clothing layer that is not visible in Image 1. " +
@@ -66,4 +89,4 @@ function buildPrompt(stage, { attributes, note, lowerBody, shoes, height } = {})
   return p;
 }
 
-module.exports = { LOWER_PICKS, OUTFIT_MAX, SHOES_MAX, cleanOutfit, cleanShoes, cleanHeight, HEIGHT_MAX, NOTE_MAX, cleanNote, SINGLE_STAGES, describeAttributes, buildPrompt };
+module.exports = { COMPOSITE_STAGES, ALL_STAGES, LOWER_PICKS, OUTFIT_MAX, SHOES_MAX, cleanOutfit, cleanShoes, cleanHeight, HEIGHT_MAX, NOTE_MAX, cleanNote, SINGLE_STAGES, describeAttributes, buildPrompt };

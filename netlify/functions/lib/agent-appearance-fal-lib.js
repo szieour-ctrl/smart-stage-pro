@@ -99,12 +99,23 @@ async function normalize(buffer, maxSide) {
   return { buffer: out.data, width: out.info.width, height: out.info.height, contentType: "image/jpeg" };
 }
 const preview = (buffer) => require("sharp")(buffer).rotate().resize({ width: 1200, height: 1200, fit: "inside", withoutEnlargement: true }).jpeg({ quality: 85 }).toBuffer();
+// Cuts a composite into cols x rows equal pictures, left to right, top to bottom. The last column and row take any leftover pixels.
+async function crop(buffer, cols, rows) {
+  const sharp = require("sharp");
+  const meta = await sharp(buffer).metadata();
+  const W = meta.width, H = meta.height, cw = Math.floor(W / cols), ch = Math.floor(H / rows), out = [];
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    const left = c * cw, top = r * ch, width = c === cols - 1 ? W - left : cw, height = r === rows - 1 ? H - top : ch;
+    out.push({ buffer: await sharp(buffer).extract({ left, top, width, height }).png().toBuffer(), width, height, contentType: "image/png" });
+  }
+  return out;
+}
 const realDeps = (env = process.env, userId = null) => ({
-  preview,
+  preview, crop,
   db: realDb(env), storage: realStorage(env), runner: falRunner(env), download, probe, uuid: () => crypto.randomUUID(), normalize,
   presign: (userId, key, secs) => presignOwn(userId, key, secs, env),
   vision: (b64, mediaType) => require("./agent-appearance-headshot-lib").callVision(b64, mediaType, env.ANTHROPIC_API_KEY),
   charge: (images, reason, isRefund) => require("./reel-quota-lib").callDebitCredit(userId, images, reason, isRefund),
 });
 
-module.exports = { falRunner, download, probe, supabase, realDb, realStorage, presignOwn, normalize, realDeps };
+module.exports = { falRunner, download, probe, supabase, realDb, realStorage, presignOwn, normalize, crop, realDeps };

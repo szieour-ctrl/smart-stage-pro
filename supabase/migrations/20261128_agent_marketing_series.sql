@@ -28,6 +28,10 @@ begin
   if new.source_project_id is null and new.series_root_project_id is null then
     return new;
   end if;
+  -- ON DELETE SET NULL clears one reference when the reel it points at is deleted; that update must be allowed to go through.
+  if tg_op = 'UPDATE' and (new.source_project_id is null or new.series_root_project_id is null) then
+    return new;
+  end if;
   if new.source_project_id is null or new.series_root_project_id is null then
     raise exception 'source_project_id and series_root_project_id must be set together';
   end if;

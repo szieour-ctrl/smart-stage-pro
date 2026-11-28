@@ -11,14 +11,14 @@
 const A = require("./agent-appearance-lib");
 
 async function runCall(deps, a) {
-  const { sheet, userId, stage, attempt = 1, providerKey, input, quotedUsd = null, inputAssetIds = [], parentId = null, kind } = a;
+  const { sheet, userId, stage, attempt = 1, providerKey, input, quotedUsd = null, inputAssetIds = [], parentId = null, kind, note = null } = a;
   const def = A.STAGES[stage];
   if (!def) return { ok: false, code: "bad_stage" };
   const remaining = await deps.db.debit(sheet.id);
   if (remaining < 0) return { ok: false, code: "pool_empty", message: A.poolText({ pool_remaining: 0 }) };
 
   const callId = await deps.db.insertCall({ sheet_id: sheet.id, user_id: userId, stage, attempt, provider: A.PROVIDER_LABEL[providerKey], endpoint: A.ENDPOINTS[providerKey],
-    status: "started", pool_counted: true, quoted_usd: quotedUsd, input_asset_ids: inputAssetIds });
+    status: "started", pool_counted: true, quoted_usd: quotedUsd, input_asset_ids: inputAssetIds, ...(note ? { note } : {}) });
   let requestId = null;
   try {
     const out = await deps.runner.run(A.ENDPOINTS[providerKey], input);

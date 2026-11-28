@@ -1971,7 +1971,7 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
       var s = await phLoad(true, true); if (!s || !s.appearance) continue;
       var a = s.appearance, st = a.stages[stage];
       if (a.working) seen = true;
-      var made = st.attempts > before && (!st.composite || st.drafts.some(function (d) { return d.panels && d.panels.length; }));   // a multi-panel try counts once its pictures are cut
+      var made = st.attempts > before && (!st.composite || st.drafts.some(function (d) { return d.panels && d.panels.length >= (st.panelCount || 1); }));   // a multi-panel try counts only once ALL its pictures are cut (they are saved one at a time; drawing after the first left the rest missing until a hard refresh)
       if (made || (seen && !a.working && !(st.attempts > before))) { ap.busy = null; phRender(); return made ? say("phMsg", "Here is your image. Use it, or try again.", "ok") : say("phMsg", st.lastFailure || "That image could not be made. Your iteration was not used. Please try again.", "err"); }
       if (!seen && Date.now() - t0 > 60000) break;
     }

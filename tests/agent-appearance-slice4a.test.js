@@ -286,3 +286,14 @@ test("the page offers Clear and start over only on a finished sheet, behind a co
   assert.match(html, /if \(finished\) h \+=[\s\S]*?data-ap="startover"/);
   assert.match(html, /a === "startover"[\s\S]*?window\.confirm[\s\S]*?action: "start_over", confirmed: true/);
 });
+
+test("Nov 27, 2026: the page stops waiting only when ALL panels of a try are cut (they are saved one at a time), and the server says how many to expect", async () => {
+  const w = bodyReady();
+  await make(w, "expressions"); await make(w, "angles"); await make(w, "poses");
+  const stages = (await SR.loadStageState({ deps: w.deps, userId: U })).stages;
+  assert.equal(stages.expressions.panelCount, 6); assert.equal(stages.poses.panelCount, 4); assert.equal(stages.angles.panelCount, 3);
+  assert.equal(stages.three_quarter.panelCount, null, "single-image steps have no panels");
+  const html = require("fs").readFileSync(__dirname + "/../agent-marketing.html", "utf8");
+  assert.match(html, /d\.panels\.length >= \(st\.panelCount \|\| 1\)/, "the wait ends only when every panel is present");
+  assert.doesNotMatch(html, /d\.panels && d\.panels\.length; \}\)\);/, "the old 'any panel' test is gone");
+});

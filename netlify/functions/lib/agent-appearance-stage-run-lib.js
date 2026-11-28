@@ -52,7 +52,7 @@ async function loadStageState({ deps, userId, now = Date.now() }) {
     const last = stageCalls[0] || null;
     const withPanels = async (a) => (composite ? { ...(await view(a)), panels: await panelsOf(a) } : view(a));
     stages[stage] = {
-      title: def.title, composite, intro: def.intro || null, noun: def.noun || null,
+      title: def.title, composite, panelCount: composite ? def.grid.cols * def.grid.rows : null, intro: def.intro || null, noun: def.noun || null,
       unlocked: !!approvedOf(assets, def.needs) && (def.refs || []).every((r) => !!approvedOf(assets, r)),
       approved: approved ? await withPanels(approved) : null,
       drafts: approved ? [] : await Promise.all(drafts.map(withPanels)),

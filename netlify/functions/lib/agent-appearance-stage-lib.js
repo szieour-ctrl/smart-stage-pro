@@ -29,7 +29,7 @@ const SINGLE_STAGES = {
 // The multi-panel stages: ONE generation each, cut with Sharp into separately usable pictures. All three need the approved full-length image and headshot, and none needs another.
 const COMPOSITE_STAGES = {
   angles: { needs: "full_body", refs: ["enhanced_headshot", "full_body"], aspect: "3:2", grid: { cols: 3, rows: 1 }, title: "Three angles", noun: "angles",
-    labels: ["Front", "Turned to your left", "Turned to your right"], intro: "One image with three full-length views of you: front, and turned about 45 degrees each way. There is no rear view." },
+    labels: ["Front", "Turned toward left", "Turned toward right"], intro: "One image with three full-length views of you: front, then turned about 45 degrees toward the left and toward the right of the picture. There is no rear view." },
   expressions: { needs: "full_body", refs: ["enhanced_headshot", "full_body"], aspect: "3:2", grid: { cols: 3, rows: 2 }, title: "Six expressions", noun: "expressions",
     labels: ["Warm smile", "Neutral professional", "Curious", "Engaged and listening", "Confident and approachable", "Conversational"], intro: "One image with six head-and-shoulders expressions, cut into six separate pictures." },
   poses: { needs: "full_body", refs: ["enhanced_headshot", "full_body"], aspect: "1:1", grid: { cols: 2, rows: 2 }, title: "Four poses", noun: "poses",
@@ -54,8 +54,10 @@ const NO_BRANDING = "No badge, name tag, logo, text, extra people or accessories
 const FACE_AND_OUTFIT = "Image 1 is the approved headshot and controls the face, hairline, beard, eye shape, nose, mouth and apparent age; Image 2 is the approved full-length image and controls the body proportions and the exact outfit. ";
 const TEXT = {
   angles: ({ attrs }) =>
-    "Create ONE three-panel full-body studio contact sheet showing the same approved person: panel 1 front-facing; panel 2 body turned about 45 degrees LEFT, face toward camera; panel 3 body turned about 45 degrees RIGHT, face toward camera. " + FACE_AND_OUTFIT +
-    (attrs ? `Visible features to keep: ${attrs}. ` : "") + "Every panel head-to-shoes, same scale, same exact approved outfit, hairstyle, grooming, background and soft studio lighting. No alternate wardrobe, labels, badges, logos, text, props, furniture or additional people.",
+    "Create ONE three-panel full-body studio contact sheet showing the same approved person. Panel 1 (left): front-facing, squared to the camera. " +
+    "Panel 2 (middle): the body rotated about 45 degrees so the person's chest and toes point toward the LEFT edge of the image, face turned toward the camera. " +
+    "Panel 3 (right): the body rotated about 45 degrees the OPPOSITE way, so the chest and toes point toward the RIGHT edge of the image, face turned toward the camera. Panels 2 and 3 must face opposite directions, like mirror images of each other's turn. " + FACE_AND_OUTFIT +
+(attrs ? `Visible features to keep: ${attrs}. ` : "") + "Every panel head-to-shoes, same scale, same exact approved outfit, hairstyle, grooming, background and soft studio lighting. No alternate wardrobe, labels, badges, logos, text, props, furniture or additional people.",
   expressions: ({ attrs }) =>
     "Create ONE 3-column x 2-row contact sheet of six head-and-shoulders portraits of the SAME person. " + FACE_AND_OUTFIT + (attrs ? `Visible features to keep: ${attrs}. ` : "") +
     "Expressions left-to-right, top-to-bottom: (1) warm, welcoming smile, (2) neutral professional, (3) CURIOUS with subtle raised-brow interest, (4) engaged and listening, (5) confident and approachable, (6) conversational, as if speaking. " +

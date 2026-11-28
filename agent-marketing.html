@@ -1866,7 +1866,7 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
   function apPanels(panels, working, title) {
     return '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;margin-top:6px">' + panels.map(function (p) {
       var out = p.status === "rejected";
-      return '<div style="' + (out ? "opacity:.45" : "") + '"><div class="hint" style="margin:0 0 4px"><b>' + esc(p.label) + "</b></div>" + phThumb(p.url, title + ": " + p.label, p.fullUrl) +
+      return '<div style="' + (out ? "opacity:.45" : "") + '"><div class="hint" style="margin:0 0 4px;min-height:2.6em"><b>' + esc(p.label) + "</b></div>" + phThumb(p.url, title + ": " + p.label, p.fullUrl) +
         (out ? '<div class="hint">Left out</div>' : '<button class="btn ghost" type="button" style="margin-top:4px;padding:4px 8px;font-size:12px" data-ap="panel" data-id="' + esc(p.assetId) + '"' + (working ? " disabled" : "") + ">Leave this one out</button>") + "</div>";
     }).join("") + "</div>";
   }
@@ -1901,7 +1901,7 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
             h += '<label class="lbl" for="apLower" style="margin-top:12px">What are you wearing from the waist down?</label><input type="text" id="apLower" maxlength="' + a.outfit.lowerMax + '" placeholder="For example: dark gray dress trousers with a black belt" value="' + esc(ap.notes.lower != null ? ap.notes.lower : a.outfit.lowerBody) + '"' + (working ? " disabled" : "") + ">";
             h += '<div class="actions" style="margin-top:6px">' + a.outfit.picks.map(function (p) { return '<button class="btn ghost" type="button" data-ap="pick" data-text="' + esc(p) + '"' + (working ? " disabled" : "") + ">" + esc(p) + "</button>"; }).join(" ") + "</div>";
             h += '<div class="hint">Be specific: name the garment and the belt if you wear one. Otherwise the image may guess.</div>';
-          } else {
+          } else if (k === "full_body") {
             h += '<label class="lbl" for="apHeight" style="margin-top:12px">Your height (optional, recommended)</label><input type="text" id="apHeight" maxlength="' + a.outfit.heightMax + '" placeholder="For example: 5\'9&quot;" value="' + esc(ap.notes.height != null ? ap.notes.height : a.outfit.height) + '"' + (working ? " disabled" : "") + '><div class="hint">Giving your height helps keep your arms and legs in natural proportion.</div>';
             h += '<label class="lbl" for="apShoes" style="margin-top:12px">Shoes (optional)</label><input type="text" id="apShoes" maxlength="' + a.outfit.shoesMax + '" placeholder="For example: brown leather dress shoes. Leave blank for plain shoes that go with your outfit." value="' + esc(ap.notes.shoes != null ? ap.notes.shoes : a.outfit.shoes) + '"' + (working ? " disabled" : "") + ">";
           }

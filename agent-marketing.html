@@ -74,8 +74,10 @@ ul.plain{margin:8px 0 0 18px;font-size:0.85rem;}
 .frame img,.frame.click{cursor:pointer;}
 .frame.busy{aspect-ratio:auto;min-height:96px;}
 .frame.empty{aspect-ratio:auto;min-height:96px;border:1px dashed var(--border);}
-#imgModal,#photoView{position:fixed;inset:0;background:rgba(10,8,6,0.92);z-index:80;display:flex;align-items:center;justify-content:center;padding:20px;}
-#imgModal.hidden,#photoView.hidden{display:none!important;}
+#imgModal,#photoView,#apLightbox{position:fixed;inset:0;background:rgba(10,8,6,0.92);z-index:80;display:flex;align-items:center;justify-content:center;padding:20px;}
+#imgModal.hidden,#photoView.hidden,#apLightbox.hidden{display:none!important;}
+#apLightbox{z-index:90;cursor:zoom-out;}#apLightbox .imgm-inner{max-width:min(96vw,1100px);cursor:default;}#apLightbox .imgm-wrap{max-height:80vh;}#apLightbox .imgm-wrap img{max-height:80vh;}
+img.ap-zoom{cursor:zoom-in;}
 .imgm-inner{background:#fff;border-radius:6px;overflow:hidden;max-width:860px;width:100%;max-height:92vh;display:flex;flex-direction:column;}
 .imgm-wrap{flex-shrink:0;display:flex;align-items:center;justify-content:center;background:#111;max-height:52vh;min-height:120px;color:#cfc7ba;font-size:0.85rem;overflow:hidden;}
 .imgm-wrap img{max-width:100%;max-height:52vh;object-fit:contain;display:block;}
@@ -658,6 +660,12 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
       <div class="msg" id="imagesMsg" role="status"></div>
     </section>
 
+    <div id="apLightbox" class="hidden" role="dialog" aria-modal="true" aria-label="Larger image">
+      <div class="imgm-inner">
+        <div class="imgm-wrap"><img id="apLbImg" alt="" src=""></div>
+        <div class="imgm-foot"><span class="hint" id="apLbCap" style="margin-right:auto"></span><button type="button" class="btn ghost" data-lb="prev">Previous</button><button type="button" class="btn ghost" data-lb="next">Next</button><button type="button" class="btn gold" data-lb="close">Close</button></div>
+      </div>
+    </div>
     <div id="photoView" class="hidden" role="dialog" aria-modal="true" aria-label="Your photo">
       <div class="imgm-inner">
         <div class="imgm-wrap"><img id="photoViewImg" alt="Your photo" src=""></div>
@@ -1791,7 +1799,39 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
 
   // ── My photos: headshot intake (Nov 27, 2026) ──
   var PH = "/.netlify/functions/agent-appearance", ph = { s: null, busy: false };
-  function phThumb(url, label, full) { return '<img src="' + esc(url) + '" alt="' + esc(label) + '"' + (full && full !== url ? ' onerror="this.onerror=null;this.src=\'' + esc(full) + '\'"' : "") + ' style="width:100%;max-width:260px;border-radius:6px;border:1px solid var(--border);display:block">'; }
+  // Every picture on My photos opens larger when clicked (a modal; Previous and Next move through the pictures of the same group, Esc or a click outside closes it).
+  function phThumb(url, label, full) { return '<img class="ap-zoom" tabindex="0" title="Click to enlarge" data-full="' + esc(full || url) + '" data-cap="' + esc(label) + '" src="' + esc(url) + '" alt="' + esc(label) + '"' + (full && full !== url ? ' onerror="if(!this.dataset.fb){this.dataset.fb=1;this.src=this.dataset.full}"' : "") + ' style="width:100%;max-width:260px;border-radius:6px;border:1px solid var(--border);display:block">'; }
+  var lb = { list: [], i: 0 };
+  function lbShow() {
+    var it = lb.list[lb.i]; if (!it) return;
+    var img = $("apLbImg"), full = it.getAttribute("data-full");
+    img.alt = it.getAttribute("data-cap") || ""; img.src = it.currentSrc || it.src;   // the small copy at once, then the full one
+    if (full && full !== img.src) { var big = new Image(); big.onload = function () { if (lb.list[lb.i] === it) img.src = full; }; big.src = full; }
+    $("apLbCap").textContent = (it.getAttribute("data-cap") || "") + (lb.list.length > 1 ? "  (" + (lb.i + 1) + " of " + lb.list.length + ")" : "");
+    var multi = lb.list.length > 1;
+    document.querySelector('#apLightbox [data-lb="prev"]').style.display = multi ? "" : "none"; document.querySelector('#apLightbox [data-lb="next"]').style.display = multi ? "" : "none";
+  }
+  function lbOpen(img) {
+    var group = img.closest("[data-zg]") || img.parentNode;
+    lb.list = Array.prototype.slice.call(group.querySelectorAll("img.ap-zoom")); if (lb.list.indexOf(img) < 0) lb.list = [img];
+    lb.i = lb.list.indexOf(img); lbShow(); $("apLightbox").classList.remove("hidden");
+  }
+  function lbClose() { $("apLightbox").classList.add("hidden"); $("apLbImg").src = ""; }
+  function lbStep(d) { if (lb.list.length > 1) { lb.i = (lb.i + d + lb.list.length) % lb.list.length; lbShow(); } }
+  function wireLightbox() {
+    var open = function (ev) { var t = ev.target; if (t && t.classList && t.classList.contains("ap-zoom")) { ev.preventDefault(); lbOpen(t); } };
+    $("photosPanel").addEventListener("click", open);
+    $("photosPanel").addEventListener("keydown", function (ev) { if (ev.key === "Enter" || ev.key === " ") open(ev); });
+    $("apLightbox").addEventListener("click", function (ev) {
+      var a = ev.target.getAttribute && ev.target.getAttribute("data-lb");
+      if (a === "prev") return lbStep(-1); if (a === "next") return lbStep(1);
+      if (a === "close" || ev.target.id === "apLightbox") lbClose();
+    });
+    document.addEventListener("keydown", function (ev) {
+      if ($("apLightbox").classList.contains("hidden")) return;
+      if (ev.key === "Escape") lbClose(); else if (ev.key === "ArrowLeft") lbStep(-1); else if (ev.key === "ArrowRight") lbStep(1);
+    });
+  }
   function phRender() {
     var s = ph.s; if (!s) return;
     $("phPool").textContent = s.sheet.poolText;
@@ -1864,7 +1904,7 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
     full_body: { intro: "Made from your approved three-quarter image: head to shoes. Everything you see in your approved image stays exactly as it is, and shoes are added." }
   };
   function apPanels(panels, working, title) {
-    return '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;margin-top:6px">' + panels.map(function (p) {
+    return '<div data-zg="1" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;margin-top:6px">' + panels.map(function (p) {
       var out = p.status === "rejected";
       return '<div style="' + (out ? "opacity:.45" : "") + '"><div class="hint" style="margin:0 0 4px;min-height:2.6em"><b>' + esc(p.label) + "</b></div>" + phThumb(p.url, title + ": " + p.label, p.fullUrl) +
         (out ? '<div class="hint">Left out</div>' : '<button class="btn ghost" type="button" style="margin-top:4px;padding:4px 8px;font-size:12px" data-ap="panel" data-id="' + esc(p.assetId) + '"' + (working ? " disabled" : "") + ">Leave this one out</button>") + "</div>";
@@ -1956,7 +1996,7 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
     $("myPhotosBtn").classList.remove("hidden");
     $("myPhotosBtn").addEventListener("click", showPhotos);
     $("myProjectsBtn").addEventListener("click", function () { hidePhotos(); hideVoice(); });
-    $("phClose").addEventListener("click", hidePhotos); wireAppearance();
+    $("phClose").addEventListener("click", hidePhotos); wireAppearance(); wireLightbox();
     $("phConsent").addEventListener("change", async function () { if (this.checked) await phPost({ action: "consent", version: ph.s.consent.version }); else phRender(); });
     $("phFile").addEventListener("change", function () { phUpload(this.files && this.files[0]); });
     $("phBody").addEventListener("click", async function (ev) {

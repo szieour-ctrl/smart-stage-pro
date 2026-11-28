@@ -329,6 +329,11 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
       <div class="eyebrow">01 / Setup</div>
       <div class="panel-title">How long, and where will it play?</div>
       <div class="panel-sub">One story. Each scene gets one wide 16:9 image, and the vertical 9:16 version is cropped from the best part of that same image, so you get both formats without paying twice.</div>
+      <div id="tplWrap" class="hidden">
+        <label class="lbl">Reel template</label>
+        <div class="choices row" id="tplChoices"></div>
+        <div class="hint" id="tplHint"></div>
+      </div>
       <label class="lbl">Length</label>
       <div class="choices row" id="durChoices"></div>
       <label class="lbl">Format</label>
@@ -340,6 +345,18 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
       <div class="hint" id="musicHint">Plays softly under the narration. You can pick "No music (silent)".</div>
       <div class="actions"><button class="btn gold" type="button" id="createBtn">Continue</button></div>
       <div class="msg" id="setupMsg" role="status"></div>
+    </section>
+
+    <!-- 2. Reel details for the series templates (Nov 28, 2026): one form built from the template's own schema -->
+    <section class="panel hidden" id="stepSeries">
+      <div class="eyebrow" id="serEyebrow">02 / Your reel</div>
+      <div class="panel-title" id="serTitle">Tell me about this reel</div>
+      <div class="panel-sub" id="serSub"></div>
+      <div class="note hidden" id="serRecap"></div>
+      <div id="serForm"></div>
+      <div class="note" id="serPhotoNote">Supporting shots of you can use your approved Appearance Sheet poses. <button class="link-btn" type="button" id="serPhotosBtn">Open My photos</button></div>
+      <div class="actions"><button class="btn gold" type="button" id="serSaveBtn">Continue to script</button></div>
+      <div class="msg" id="serMsg" role="status"></div>
     </section>
 
     <!-- 2. Research: request, five topics, select -->
@@ -775,27 +792,31 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
     return { status: res.status, ok: res.ok, json: json };
   }
   function say(id, text, kind) { var el = $(id); el.textContent = text || ""; el.className = "msg" + (kind ? " " + kind : ""); }
-  function show(ids) { ["stepProjects", "stepSetup", "stepResearch", "stepScript", "stepBoard", "stepImages"].forEach(function (s) { $(s).classList.toggle("hidden", ids.indexOf(s) < 0); }); var st = document.querySelector(".stage"); if (st) st.classList.toggle("wide", ids.indexOf("stepResearch") >= 0); }
+  function show(ids) { ["stepProjects", "stepSetup", "stepSeries", "stepResearch", "stepScript", "stepBoard", "stepImages"].forEach(function (s) { $(s).classList.toggle("hidden", ids.indexOf(s) < 0); }); var st = document.querySelector(".stage"); if (st) st.classList.toggle("wide", ids.indexOf("stepResearch") >= 0); }
 
   // ── Progress pills ──
   function stage() {
     var p = state.project;
     if (!p) return 1;
-    if (!p.selectedTopic || p.selectedTopic.reportOutdated || !p.intake || !p.intake.market) return 2;   // a topic chosen before the report confirmation changed is not a selection
+    if (isSeries(p)) { if (!(p.intake && p.intake.angle && p.intake.audience)) return 2; }
+    else if (!p.selectedTopic || p.selectedTopic.reportOutdated || !p.intake || !p.intake.market) return 2;   // a topic chosen before the report confirmation changed is not a selection
     if (p.status === "images" || p.status === "ready_to_render") return 5;
     if (p.status !== "narrative_approved") return 3;
     return 4;
   }
+  function isSeries(p) { return !!(p && p.template && p.template !== "local_market_insider"); }
+  function tplSchema(key) { var t = (state.schema && state.schema.templates) || []; for (var i = 0; i < t.length; i++) if (t[i].key === key) return t[i]; return null; }
   var STEP_NAMES = ["Setup", "Research", "Script", "Storyboard", "Visuals"], STEP_IDS = ["stepSetup", "stepResearch", "stepScript", "stepBoard", "stepImages"];
   function renderSteps(active) {
     var max = stage();
-    $("steps").innerHTML = STEP_NAMES.map(function (n, i) {
+    $("steps").innerHTML = STEP_NAMES.map(function (n0, i) {
+      var n = i === 1 && isSeries(state.project) ? "Your reel" : n0;
       var cls = i + 1 === active ? "active" : (i + 1 < max || (i + 1 <= max && i + 1 !== active) ? "done" : "");
       return '<button type="button" class="step-pill ' + cls + '" data-step="' + (i + 1) + '"' + (cls === "" ? " disabled" : "") + ">" + n + "</button>";
     }).join("");
     Array.prototype.forEach.call($("steps").querySelectorAll(".step-pill.done"), function (b) { b.addEventListener("click", function () { go(Number(b.getAttribute("data-step"))); }); });
   }
-  function go(step) { stopImgPoll(); stopReelPoll(); $("picker").classList.add("hidden"); if (typeof closeModal === "function") { closeModal(); $("photoView").classList.add("hidden"); } show([STEP_IDS[step - 1]]); renderSteps(step); if (step !== 2 && researchUI) researchUI.stop(); if (step === 2) renderResearch(); if (step === 3) renderScript(); if (step === 4) renderBoard(); if (step === 5) renderImages(); window.scrollTo({ top: 0, behavior: "smooth" }); }
+  function go(step) { stopImgPoll(); stopReelPoll(); $("picker").classList.add("hidden"); if (typeof closeModal === "function") { closeModal(); $("photoView").classList.add("hidden"); } show([step === 2 && isSeries(state.project) ? "stepSeries" : STEP_IDS[step - 1]]); renderSteps(step); if (step !== 2 && researchUI) researchUI.stop(); if (step === 2) { if (isSeries(state.project)) renderSeries(); else renderResearch(); } if (step === 3) renderScript(); if (step === 4) renderBoard(); if (step === 5) renderImages(); window.scrollTo({ top: 0, behavior: "smooth" }); }
   function setProject(p) { state.project = p; if (p) { try { history.replaceState(null, "", "#p=" + p.id); } catch (e) { /* ignore */ } } }
 
   // ── Setup ──
@@ -804,6 +825,15 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
   }
   function pickedValue(name) { var el = document.querySelector('input[name="' + name + '"]:checked'); return el ? el.value : null; }
   function buildSetup() {
+    var tpls = (state.schema.templates || []).filter(function (t) { return t.key; });
+    if (tpls.length > 1) {
+      var order = ["local_market_insider"].concat(tpls.map(function (t) { return t.key; }).filter(function (k) { return k !== "local_market_insider"; }));
+      var cur = pickedValue("tpl") || "local_market_insider";
+      radios($("tplChoices"), "tpl", order.map(function (k) { var t = tplSchema(k); return t ? { value: k, label: t.label || k } : null; }).filter(Boolean), cur);
+      $("tplWrap").classList.remove("hidden");
+      var upd = function () { var t = tplSchema(pickedValue("tpl")); $("tplHint").textContent = (t && t.purpose) || ""; };
+      $("tplChoices").addEventListener("change", upd); upd();
+    }
     radios($("durChoices"), "dur", state.schema.durations.map(function (d) { return { value: String(d), label: d + " seconds" }; }), "45");
     radios($("fmtChoices"), "fmt", [{ value: "both", label: "Both" }, { value: "9x16", label: "9:16 vertical" }, { value: "16x9", label: "16:9 horizontal" }], "both");
     radios($("voiceChoices"), "voice", [{ value: "ssp_male", label: "SSP Male" }, { value: "ssp_female", label: "SSP Female" }].concat((state.schema.voices || []).indexOf("custom") >= 0 ? [{ value: "custom", label: "My voice" }] : []), "ssp_male");
@@ -813,11 +843,92 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
     $("createBtn").disabled = true; say("setupMsg", "");
     try {
       var f = pickedValue("fmt");
-      var r = await api("POST", "", { action: "create", template: "local_market_insider", durationSec: Number(pickedValue("dur")), formats: f === "both" ? ["9x16", "16x9"] : [f], voice: pickedValue("voice"), music: $("musicSelect").value });
+      var r = await api("POST", "", { action: "create", template: pickedValue("tpl") || "local_market_insider", durationSec: Number(pickedValue("dur")), formats: f === "both" ? ["9x16", "16x9"] : [f], voice: pickedValue("voice"), music: $("musicSelect").value });
       if (!r.ok) throw new Error(r.json.error || "Could not start");
       setProject(r.json.project); go(2);
     } catch (e) { say("setupMsg", e.message, "err"); }
     $("createBtn").disabled = false;
+  }
+
+  // ── Series templates: one schema-driven intake form (Nov 28, 2026) ──
+  var serVals = {};
+  function serField(q, v) {
+    var id = "ser_" + q.key, val = v[q.key] == null ? "" : v[q.key];
+    if (q.type === "choice") return '<label class="lbl" for="' + id + '">' + esc(q.label) + '</label><select id="' + id + '" data-k="' + esc(q.key) + '"><option value="">Choose…</option>' + q.options.map(function (o) { return '<option value="' + esc(o) + '"' + (o === val ? " selected" : "") + ">" + esc(o) + "</option>"; }).join("") + "</select>";
+    if (q.type === "attest") return '<label class="reel-ok"><input type="checkbox" id="' + id + '" data-k="' + esc(q.key) + '"' + (val === true || val === "true" ? " checked" : "") + "> <span>" + esc(q.label) + "</span></label>";
+    if (q.type === "number") return '<label class="lbl" for="' + id + '">' + esc(q.label) + '</label><input type="number" id="' + id + '" data-k="' + esc(q.key) + '" min="' + (q.min || 0) + '" max="' + (q.max || 100) + '" value="' + esc(val) + '">';
+    return '<label class="lbl" for="' + id + '">' + esc(q.label) + '</label><textarea id="' + id + '" data-k="' + esc(q.key) + '" rows="3" maxlength="' + (q.max || 400) + '">' + esc(val) + "</textarea>";
+  }
+  function serRead() {
+    var out = {};
+    Array.prototype.forEach.call($("serForm").querySelectorAll("[data-k]"), function (el) {
+      var k = el.getAttribute("data-k");
+      if (el.closest(".hidden")) return;   // a question that is not showing is not sent
+      out[k] = el.type === "checkbox" ? el.checked : el.value;
+    });
+    var a = document.querySelector('input[name="serAngle"]:checked'); if (a) out.angle = a.value;
+    return out;
+  }
+  function serPaint() {
+    var p = state.project, sc = tplSchema(p.template); if (!sc) return;
+    var v = Object.assign({}, serVals, serRead()); serVals = v;
+    var ang = sc.angles[v.angle] || null, h = "";
+    h += '<label class="lbl">' + esc(sc.angleQuestion) + '</label><div class="choices" id="serAngles">' + Object.keys(sc.angles).map(function (k) { return '<label class="choice"><input type="radio" name="serAngle" value="' + esc(k) + '"' + (k === v.angle ? " checked" : "") + "><span>" + esc(sc.angles[k].label) + "</span></label>"; }).join("") + "</div>";
+    h += '<label class="lbl" for="ser_audience">' + esc(sc.audienceQuestion) + '</label><select id="ser_audience" data-k="audience">' + sc.audiences.map(function (a) { return '<option value="' + esc(a) + '"' + (a === (v.audience || sc.audiences[0]) ? " selected" : "") + ">" + esc(a) + "</option>"; }).join("") + "</select>";
+    if (ang && ang.topic && sc.topics.length) h += '<label class="lbl" for="ser_topic">' + esc(sc.topicQuestion || "Topic") + (ang.topicRequired ? "" : " (optional)") + '</label><select id="ser_topic" data-k="topic"><option value="">Choose…</option>' + sc.topics.map(function (t) { return '<option value="' + esc(t) + '"' + (t === v.topic ? " selected" : "") + ">" + esc(t) + "</option>"; }).join("") + "</select>";
+    sc.questions.forEach(function (q) {
+      var ok = !q.when || Object.keys(q.when).every(function (k) { return q.when[k].indexOf(String(v[k] == null ? "" : v[k])) >= 0; });
+      h += '<div class="' + (ok ? "" : "hidden") + '">' + serField(q, v) + "</div>";
+    });
+    if (ang && ang.firsthandPrompt) h += '<label class="lbl" for="ser_firsthand">' + esc(ang.firsthandPrompt) + (ang.firsthandRequired ? "" : " (optional)") + '</label><textarea id="ser_firsthand" data-k="firsthand" rows="4" maxlength="' + sc.limits.firsthand + '">' + esc(v.firsthand || "") + "</textarea><div class=\"hint\">Your own words. The script uses your example instead of inventing one.</div>";
+    h += '<label class="lbl" for="ser_publicTitle">Public title (you can edit it)</label><input type="text" id="ser_publicTitle" data-k="publicTitle" maxlength="' + sc.limits.title + '" value="' + esc(v.publicTitle || "") + '">';
+    $("serForm").innerHTML = h;
+  }
+  function renderSeries() {
+    var p = state.project, sc = tplSchema(p.template); say("serMsg", "");
+    if (!sc) { $("serForm").innerHTML = ""; say("serMsg", "This template is not available.", "err"); return; }
+    serVals = Object.assign({}, p.intake || {});
+    $("serTitle").textContent = sc.label; $("serSub").textContent = sc.purpose || "";
+    var rc = p.intake && p.intake.series_recap, rcEl = $("serRecap");
+    if (rc) { rcEl.innerHTML = "<b>Building on:</b> " + esc(rc.title || "your earlier reel") + (rc.takeaway ? " &mdash; " + esc(rc.takeaway) : "") + '<div class="hint">Your earlier answers are filled in. Change anything. This episode starts with a fresh script, storyboard and images.</div>'; rcEl.classList.remove("hidden"); } else rcEl.classList.add("hidden");
+    serPaint();
+    $("serForm").onchange = function (e) {
+      var t = e.target; if (t && t.getAttribute && t.getAttribute("data-k") === "publicTitle") serVals.publicTitle = t.value; 
+      var before = serVals.angle; serVals = Object.assign({}, serVals, serRead());
+      if (t.getAttribute && (t.getAttribute("data-k") === "publicTitle")) return;
+      if (before !== serVals.angle || t.name === "serAngle" || (tplSchema(p.template).questions || []).some(function (q) { return q.key === t.getAttribute("data-k"); }) || t.getAttribute("data-k") === "topic" || t.getAttribute("data-k") === "audience") { serSuggestTitle(); serPaint(); }
+    };
+  }
+  // The suggested title follows the answers until the subscriber types their own.
+  function serSuggestTitle() {
+    var sc = tplSchema(state.project.template), v = serVals, a = sc.angles[v.angle] || {}, aud = v.audience && !/^general/i.test(v.audience) ? v.audience : "";
+    if (v.publicTitleEdited) return;
+    var t = sc.label;
+    if (v.topic) t = sc.label + " · " + v.topic; else if (a.label) t = a.label;
+    if (sc.key === "your_buyer_advantage" && !v.topic && aud) t = sc.label + " for " + aud;
+    serVals.publicTitle = t;
+  }
+  async function saveSeries() {
+    $("serSaveBtn").disabled = true; say("serMsg", "");
+    try {
+      var v = Object.assign({}, serVals, serRead());
+      var keep = {}; Object.keys(v).forEach(function (k) { if (k !== "series_recap" && k !== "publicTitleEdited") keep[k] = v[k]; });
+      var r = await api("POST", "", { action: "save_intake", id: state.project.id, intake: keep });
+      if (!r.ok) throw new Error(r.json.error || "Could not save");
+      setProject(r.json.project); go(3);
+    } catch (e) { say("serMsg", e.message, "err"); }
+    $("serSaveBtn").disabled = false;
+  }
+  // One follow-up entry point (My projects). The key makes a repeated tap or a retry return the same draft instead of making another.
+  var fuKeys = {};
+  async function createFollowup(sourceId, btn) {
+    btn.disabled = true;
+    try {
+      var key = fuKeys[sourceId] || (fuKeys[sourceId] = (window.crypto && crypto.randomUUID ? crypto.randomUUID() : "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function (c) { var r = Math.random() * 16 | 0; return (c === "x" ? r : (r & 3 | 8)).toString(16); })));
+      var r = await api("POST", "", { action: "create_followup", sourceProjectId: sourceId, creationKey: key });
+      if (!r.ok) throw new Error(r.json.error || "Could not start the follow-up");
+      delete fuKeys[sourceId]; setProject(r.json.project); go(2);
+    } catch (e) { alert(e.message); btn.disabled = false; }
   }
 
   // ── Research: request, five topics, select (the shared module) ──
@@ -975,7 +1086,7 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
   // then writes the script; without ready evidence no script is written and the narrative error says why (and whether an analysis was run).
   var STAGEB = "/.netlify/functions/agent-marketing-stageb", STAGEB_BG = "/.netlify/functions/agent-marketing-stageb-background";
   async function evidenceStatus() {
-    var p = state.project; if (!p || !p.id) return null;   // Nov 25, 2026: asked on production too (the server admits only the allowlisted user)
+    var p = state.project; if (!p || !p.id) return null; if (isSeries(p)) return null;   // the series templates write their own script from the template brief   // Nov 25, 2026: asked on production too (the server admits only the allowlisted user)
     try { var r = await api("GET", "?projectId=" + encodeURIComponent(p.id), null, STAGEB); return r.ok ? r.json : null; } catch (e) { return null; }
   }
   // While a script is being written, show what the job is doing (the narrative poll in startPoll decides when it is finished).
@@ -1768,7 +1879,7 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
     if (s === "images") return { text: "Images ready. Make your Reel next", cls: "" };
     if (s === "narrative_approved") return { text: "Script approved. Images next", cls: "" };
     if (s === "narrative_ready") return { text: "Script written. Needs your approval", cls: "" };
-    return { text: (p.intake && p.intake.market) ? "Draft. Not started" : "Empty draft", cls: "dim" };
+    return { text: (p.intake && (p.intake.market || p.intake.angle)) ? "Draft. Not started" : "Empty draft", cls: "dim" };
   }
   var showHidden = false;
   async function showProjects() {
@@ -1776,10 +1887,10 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
     var all = (r.ok && r.json.projects) || [];
     var hiddenCount = all.filter(function (p) { return p.hidden; }).length;
     var list = all.filter(function (p) { return showHidden ? p.hidden : !p.hidden; });
-    var emptyDrafts = all.filter(function (p) { return !p.hidden && p.status === "draft" && !(p.intake && p.intake.market); }).length;
+    var emptyDrafts = all.filter(function (p) { return !p.hidden && p.status === "draft" && !(p.intake && (p.intake.market || p.intake.angle)); }).length;
     $("projList").innerHTML = list.length ? list.map(function (p) {
-      var t = (p.intake && p.intake.market) || "New project", d = new Date(p.createdAt).toLocaleDateString(), st = statusOf(p);
-      return '<div class="proj"><div>' + esc(t) + " · " + esc(p.durationSec) + 's<br><small><strong class="rtype ' + (p.reelType === 'Local Event' ? 'ev' : 'mu') + '">' + esc(p.reelType || 'Local Market Update') + '</strong> · <span class="pst ' + st.cls + '">' + esc(st.text) + "</span> · " + esc(d) + '</small></div><div class="projbtns"><button class="btn ghost" type="button" data-open="' + esc(p.id) + '">Open</button><button class="btn ghost" type="button" data-hide="' + esc(p.id) + '" data-to="' + (p.hidden ? "unhide" : "hide") + '">' + (p.hidden ? "Restore" : "Hide") + "</button></div></div>";
+      var t = p.title || (p.intake && p.intake.market) || "New project", d = new Date(p.createdAt).toLocaleDateString(), st = statusOf(p);
+      return '<div class="proj"><div>' + esc(t) + " · " + esc(p.durationSec) + 's<br><small><strong class="rtype ' + (p.reelType === 'Local Event' ? 'ev' : 'mu') + '">' + esc(p.reelType || 'Local Market Update') + '</strong> · <span class="pst ' + st.cls + '">' + esc(st.text) + "</span> · " + esc(d) + '</small></div><div class="projbtns"><button class="btn ghost" type="button" data-open="' + esc(p.id) + '">Open</button>' + (p.followupEligible && p.template && p.template !== "local_market_insider" ? '<button class="btn ghost" type="button" data-followup="' + esc(p.id) + '">Create a follow-up reel</button>' : "") + '<button class="btn ghost" type="button" data-hide="' + esc(p.id) + '" data-to="' + (p.hidden ? "unhide" : "hide") + '">' + (p.hidden ? "Restore" : "Hide") + "</button></div></div>";
     }).join("") : '<div class="hint">' + (showHidden ? "Nothing is hidden." : "No projects yet.") + "</div>";
     var tools = [];
     if (!showHidden && emptyDrafts > 1) tools.push('<button class="btn ghost" type="button" id="hideDrafts">Hide ' + emptyDrafts + ' empty drafts</button>');
@@ -1787,6 +1898,9 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
     $("projTools").innerHTML = tools.join(" ");
     Array.prototype.forEach.call($("projList").querySelectorAll("button[data-open]"), function (b) {
       b.addEventListener("click", async function () { var x = await api("GET", "?id=" + encodeURIComponent(b.getAttribute("data-open"))); if (x.ok) { setProject(x.json.project); go(stage()); } });
+    });
+    Array.prototype.forEach.call($("projList").querySelectorAll("button[data-followup]"), function (b) {
+      b.addEventListener("click", function () { createFollowup(b.getAttribute("data-followup"), b); });
     });
     Array.prototype.forEach.call($("projList").querySelectorAll("button[data-hide]"), function (b) {
       b.addEventListener("click", async function () { b.disabled = true; await api("POST", "", { action: b.getAttribute("data-to"), id: b.getAttribute("data-hide") }); showProjects(); });
@@ -2077,6 +2191,9 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
     $("myProjectsBtn").addEventListener("click", showProjects); wirePhotos(); wireVoice();
     $("newBtn").addEventListener("click", function () { setProject(null); try { history.replaceState(null, "", location.pathname); } catch (e) { /* ignore */ } go(1); });
     $("createBtn").addEventListener("click", createProject);
+    $("serSaveBtn").addEventListener("click", saveSeries);
+    $("serPhotosBtn").addEventListener("click", function () { $("myPhotosBtn").click(); });
+    $("serForm").addEventListener("input", function (e) { if (e.target && e.target.getAttribute && e.target.getAttribute("data-k") === "publicTitle") { serVals.publicTitle = e.target.value; serVals.publicTitleEdited = true; } });
     $("planBtn").addEventListener("click", plan);
     $("pickerClose").addEventListener("click", function () { $("picker").classList.add("hidden"); });
     $("toImagesBtn").addEventListener("click", function () { go(5); });

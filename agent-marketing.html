@@ -259,6 +259,12 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
   </header>
 
   <!-- My photos: the headshot intake (Agent Appearance Sheet, slice 2, Nov 27, 2026) -->
+  <div id="apLightbox" class="hidden" role="dialog" aria-modal="true" aria-label="Larger image">
+    <div class="imgm-inner">
+      <div class="imgm-wrap"><img id="apLbImg" alt="" src=""></div>
+      <div class="imgm-foot"><span class="hint" id="apLbCap" style="margin-right:auto"></span><button type="button" class="btn ghost" data-lb="prev">Previous</button><button type="button" class="btn ghost" data-lb="next">Next</button><button type="button" class="btn gold" data-lb="close">Close</button></div>
+    </div>
+  </div>
   <section class="panel hidden" id="photosPanel">
     <div class="eyebrow">My photos</div>
     <div class="panel-title">Your headshot and Agent Appearance Sheet Images</div>
@@ -660,12 +666,6 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
       <div class="msg" id="imagesMsg" role="status"></div>
     </section>
 
-    <div id="apLightbox" class="hidden" role="dialog" aria-modal="true" aria-label="Larger image">
-      <div class="imgm-inner">
-        <div class="imgm-wrap"><img id="apLbImg" alt="" src=""></div>
-        <div class="imgm-foot"><span class="hint" id="apLbCap" style="margin-right:auto"></span><button type="button" class="btn ghost" data-lb="prev">Previous</button><button type="button" class="btn ghost" data-lb="next">Next</button><button type="button" class="btn gold" data-lb="close">Close</button></div>
-      </div>
-    </div>
     <div id="photoView" class="hidden" role="dialog" aria-modal="true" aria-label="Your photo">
       <div class="imgm-inner">
         <div class="imgm-wrap"><img id="photoViewImg" alt="Your photo" src=""></div>
@@ -1855,10 +1855,11 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
     $("phBody").innerHTML = h;
     apRender();
   }
-  async function phLoad(quiet) {
+  // noRender: used while waiting on an image, so the page is not redrawn (and the pictures reloaded) every few seconds; the caller draws once when the wait ends.
+  async function phLoad(quiet, noRender) {
     var r = await api("GET", "", null, PH);
     if (!r.ok) { if (!quiet) say("phMsg", r.json.error || "Could not load your photos.", "err"); return null; }
-    ph.s = r.json; phRender(); return r.json;
+    ph.s = r.json; if (!noRender) phRender(); return r.json;
   }
   async function phPost(body, okText) {
     var r = await api("POST", "", body, PH);
@@ -1889,7 +1890,7 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
     var t0 = Date.now();
     while (Date.now() - t0 < 4 * 60 * 1000) {
       await new Promise(function (ok) { setTimeout(ok, 3000); });
-      var s = await phLoad(true); if (!s) continue;
+      var s = await phLoad(true, true); if (!s) continue;
       if (s.lastCall && s.lastCall.id !== before && s.lastCall.status !== "started") {
         ph.busy = false; phRender();
         return s.lastCall.status === "ok" ? say("phMsg", "Here is your enhanced headshot. Use it, or try another enhancement.", "ok") : say("phMsg", s.lastFailure || "That image could not be made. Your iteration was not used. Please try again.", "err");
@@ -1965,14 +1966,14 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
     ap.notes[stage] = "";
     while (Date.now() - t0 < 5 * 60 * 1000) {
       await new Promise(function (ok) { setTimeout(ok, 3000); });
-      var s = await phLoad(true); if (!s || !s.appearance) continue;
+      var s = await phLoad(true, true); if (!s || !s.appearance) continue;
       var a = s.appearance, st = a.stages[stage];
       if (a.working) seen = true;
       var made = st.attempts > before && (!st.composite || st.drafts.some(function (d) { return d.panels && d.panels.length; }));   // a multi-panel try counts once its pictures are cut
-      if (made || (seen && !a.working && !(st.attempts > before))) { ap.busy = null; apRender(); return made ? say("phMsg", "Here is your image. Use it, or try again.", "ok") : say("phMsg", st.lastFailure || "That image could not be made. Your iteration was not used. Please try again.", "err"); }
+      if (made || (seen && !a.working && !(st.attempts > before))) { ap.busy = null; phRender(); return made ? say("phMsg", "Here is your image. Use it, or try again.", "ok") : say("phMsg", st.lastFailure || "That image could not be made. Your iteration was not used. Please try again.", "err"); }
       if (!seen && Date.now() - t0 > 60000) break;
     }
-    ap.busy = null; apRender(); say("phMsg", "This is taking longer than usual. Check back in a minute.", "err");
+    ap.busy = null; phRender(); say("phMsg", "This is taking longer than usual. Check back in a minute.", "err");
   }
   function wireAppearance() {
     $("apBody").addEventListener("click", async function (ev) {

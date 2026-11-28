@@ -23,6 +23,11 @@ const am = require("./lib/agent-marketing-lib");
 const planLib = require("./lib/agent-marketing-plan-lib");
 const mediaLib = require("./lib/agent-marketing-media-lib");
 
+// A subscriber's own ElevenLabs voice is offered only once a key and voice id have been saved and tested (agent-marketing-voice).
+async function hasOwnVoice(userId) {
+  try { const r = await supabase("GET", "agent_marketing_voices", null, `?user_id=eq.${userId}&select=user_id&limit=1`); return Array.isArray(r.data) && r.data.length > 0; }
+  catch { return false; }
+}
 const headers = { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json", "Cache-Control": "no-store" };
 const reply = (statusCode, obj) => ({ statusCode, headers, body: JSON.stringify(obj) });
 // B1 article evidence (development only, AGENT_MARKETING_B1_EVIDENCE=dev; Nov 8, 2026): script edits and approval are checked with the same evidence
@@ -107,7 +112,7 @@ exports.handler = async (event) => {
         return reply(200, {
           templates: gate.ENABLED_TEMPLATES.map((t) => ({ key: t, ...intakeLib.schemaFor(t) })),
           audiences: intakeLib.AUDIENCES, actions: intakeLib.ACTIONS, eventActions: intakeLib.EVENT_ACTIONS, limits: intakeLib.LIMITS,
-          durations: am.DURATIONS, formats: am.FORMATS, voices: am.voicesFor(), music: am.MUSIC, wordTargets: Object.fromEntries(Object.keys(am.WORD_TARGETS).map((d) => [d, am.wordTargets(Number(d))])), ...(String(process.env.AGENT_MARKETING_B1_EVIDENCE || "").trim().toLowerCase() === "dev" ? { paceWordsPerSecond: am.PACE_WORDS_PER_SECOND } : {}),
+          durations: am.DURATIONS, formats: am.FORMATS, voices: am.voicesFor({ customVoice: await hasOwnVoice(userId) }), music: am.MUSIC, wordTargets: Object.fromEntries(Object.keys(am.WORD_TARGETS).map((d) => [d, am.wordTargets(Number(d))])), ...(String(process.env.AGENT_MARKETING_B1_EVIDENCE || "").trim().toLowerCase() === "dev" ? { paceWordsPerSecond: am.PACE_WORDS_PER_SECOND } : {}),
           ...(String(process.env.AGENT_MARKETING_B1_EVIDENCE || "").trim().toLowerCase() === "dev" ? { writerWordTargets: Object.fromEntries(Object.keys(am.WORD_TARGETS).map((d) => [d, am.writerWordTargets(Number(d))])) } : {}),
           attestation: { version: gate.ATTESTATION_VERSION, text: gate.ATTESTATION_TEXT },
           uploadAttestation: { version: mediaLib.UPLOAD_ATTESTATION_VERSION, text: mediaLib.UPLOAD_ATTESTATION_TEXT },
@@ -134,7 +139,7 @@ exports.handler = async (event) => {
     const action = String(b.action || "");
 
     if (action === "create") {
-      const v = am.validateCreate(b);
+      const v = am.validateCreate(b, { customVoice: await hasOwnVoice(userId) });
       if (v.error) return reply(400, { error: v.error });
       const g = gate.evaluate({ template: v.row.template, payload: b });
       if (!g.ok) return reply(422, { error: gate.explain(g), gate: gateSummary(g) });

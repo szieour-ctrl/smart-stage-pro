@@ -17,10 +17,10 @@ function defaultSupabase() { return require("./marketing-profile-lib").supabase;
  */
 function planStart(project, nowMs) {
   const deny = (status, message, code) => ({ error: { status, message, ...(code ? { code } : {}) } });
-  if (!project.intake || !project.intake.market) return deny(409, "Answer the intake questions first.");
+  if (!am.intakeReady(project)) return deny(409, "Answer the intake questions first.");
   if (project.template === "local_market_insider" && !project.selected_topic) return deny(409, "Choose one of the five topics first.");
   const n = project.narrative;
-  const hash = planLib.intakeHash(project.intake, project.selected_topic);
+  const hash = planLib.intakeHash(project.intake, project.selected_topic, project.template);
   const attempts = (n && Number(n.attempts)) || 0;
   const now = nowMs == null ? Date.now() : nowMs;
   if (n && n.status === "planning" && now - Number(n.startedAt || 0) < planLib.STALE_PLANNING_MS) return deny(409, "Your script is already being written.", "in_progress");
@@ -73,6 +73,8 @@ async function runPlan({ id, userId, deps }) {
     // invalid row is BLOCKED and generatePlan stops before any model call. With the switch off the project is unchanged.
     const withEvidence = d.withEvidence || ((p) => require("./agent-marketing-b1-stageb-run-lib").withPlanEvidence(p, { env }));
     const planProject = await withEvidence(project);
+    // Series templates: the poses the subscriber approved on their Appearance Sheet, so the planner can suggest one per supporting shot of the agent.
+    if (require("./agent-marketing-series-lib").isSeriesTemplate(planProject.template)) planProject.approved_poses = await require("./agent-marketing-pose-lib").approvedPoses(userId, supabase);
     // Nov 15, 2026 (Sam, development only): an Article-Led topic is written by the ONE complete-source Writer (the stored article, the report, B1's findings, the intake):
     // one model call, one narration, no editorial gate, no component budgets, no scenes. The storyboard is planned later from the approved words. Every other project keeps the planner.
     const writerLib = require("./agent-marketing-writer-lib");

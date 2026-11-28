@@ -83,7 +83,8 @@ function cleanWords(v, max) {
   return cut.replace(/[\s,;:\u2014\u2013-]+$/, "").trim();
 }
 
-function schemaFor(template) { return SCHEMAS[template] || null; }
+// The seven series templates (Nov 28, 2026) live in agent-marketing-series-lib.js as data; Local Market Insider keeps the schema above.
+function schemaFor(template) { return SCHEMAS[template] || require("./agent-marketing-series-lib").schemaFor(template); }
 
 /**
  * validateIntake(template, values) → { ok, errors: [{field, message}], clean, needsInput: [field] }
@@ -98,6 +99,7 @@ const AUDIENCE_FROM_RESEARCH = { buyers: "Home buyers", sellers: "Home sellers",
  * topic is the subject), and a blank market or audience is filled from the research request. Without one the original rules apply.
  */
 function validateIntake(template, values, opts) {
+  if (!SCHEMAS[template] && require("./agent-marketing-series-lib").isSeriesTemplate(template)) return require("./agent-marketing-series-lib").validateSeriesIntake(template, values);
   const schema = schemaFor(template);
   if (!schema) return { ok: false, errors: [{ field: "template", message: "Unknown template." }], clean: {}, needsInput: [] };
   let v = values && typeof values === "object" ? values : {};

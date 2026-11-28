@@ -92,6 +92,12 @@ function isEnabledFor(userId, env) {
   return ids.length === 0 || ids.includes(String(userId || "").toLowerCase());
 }
 
+// Nov 28, 2026: a project has answered its intake when it has what its template asks first. Local Market Insider needs its market; a series template its angle and audience.
+function intakeReady(project) {
+  const i = (project && project.intake) || {};
+  return require("./agent-marketing-series-lib").isSeriesTemplate(project && project.template) ? !!(i.angle && i.audience) : !!i.market;
+}
+
 function validateCreate(body, opts) {
   const b = body && typeof body === "object" ? body : {};
   const template = String(b.template || "local_market_insider");
@@ -226,5 +232,5 @@ module.exports = {
   WRITER_ENGINE, isWriterScript, writerWordTargets,
   marketReviewEnabled,
   PACE_WORDS_PER_SECOND, narrationEstimate, durationAdvisory, narrationKey, storyboardNeeded, DURATIONS, FORMATS, VOICES, voicesFor, MUSIC, DURATION_CONTRACT, WORD_TARGETS, DEV_WORD_TARGETS, SCENE_RANGES, IMAGE_RANGES, WRITING_AIMS, EDITOR_TARGETS, wordTargets, UUID_RE, NOT_EDITABLE_AFTER,
-  isEnabledFor, validateCreate, stripAudioTags, countWords, validateNarrative, gateInputFor, topicNotice, noticeOverlayFor, sourceCreditFor, attachNotice,
+  intakeReady, isEnabledFor, validateCreate, stripAudioTags, countWords, validateNarrative, gateInputFor, topicNotice, noticeOverlayFor, sourceCreditFor, attachNotice,
 };

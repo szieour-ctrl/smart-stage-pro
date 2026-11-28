@@ -23,6 +23,16 @@ function live(env) {
 /** Whether this job asked for lip sync. Absent means Off, including every job made before this existed. */
 function requested(job) { return !!(job && job.assets && job.assets.lipsync && job.assets.lipsync.requested === true); }
 
+/** Planning budget (Nov 28, 2026): opening + closing together are planned within 20 seconds of HeyGen, each at most 10. A target, never enforced. */
+const BUDGET_SEC = 20, SHOT_CAP_SEC = 10;
+const r1 = (n) => Math.round(n * 10) / 10;
+/** Planned seconds come from the cut windows; actual seconds come from the clips HeyGen returned. */
+function budget(manifest, report) {
+  const planned = targets(manifest).reduce((a, t) => a + Math.max(0, t.end - t.start), 0);
+  const actual = (report || []).reduce((a, r) => a + (r.status === "used" && Number(r.duration_sec) > 0 ? Number(r.duration_sec) : 0), 0);
+  return { budget_sec: BUDGET_SEC, shot_cap_sec: SHOT_CAP_SEC, planned_sec: r1(planned), actual_sec: r1(actual), planned_within_budget: planned <= BUDGET_SEC + 0.05, actual_within_budget: actual <= BUDGET_SEC + 0.05 };
+}
+
 /** The scenes that get a clip: the opening and the closing. */
 function targets(manifest) {
   const sc = (manifest && manifest.scenes) || [];
@@ -105,7 +115,7 @@ async function prepareLipSync({ job, manifest, audio, headshotKey, env, deps }) 
     const r = state.scenes[t.n];
     report.push({ n: t.n, role: t.role, status: r.status === "done" ? "used" : "fallback", ...(r.status === "done" ? { heygen_video_id: r.heygen_video_id, duration_sec: r.duration_sec } : { reason: r.error || "no clip", heygen_video_id: r.heygen_video_id || undefined }) });
   }
-  return { manifest: out, report, state, calls };
+  return { manifest: out, report, budget: budget(manifest, report), state, calls };
 }
 
-module.exports = { prepareLipSync, targets, requested, live, POLL_MS, MAX_WAIT_MS };
+module.exports = { prepareLipSync, budget, BUDGET_SEC, SHOT_CAP_SEC, targets, requested, live, POLL_MS, MAX_WAIT_MS };

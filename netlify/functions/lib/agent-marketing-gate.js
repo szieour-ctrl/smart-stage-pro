@@ -49,8 +49,9 @@ const TEMPLATES = [
   "meet_your_agent", "why_list_with_me", "your_buyer_advantage", "new_construction_specialist",
   "active_adult_55_specialist", "my_proven_process", "agent_review_highlights", "local_market_insider",
 ];
-// v1 ships Local Market Insider only (Sam, Oct 21). Widen this list as each template is built.
-const ENABLED_TEMPLATES = ["local_market_insider"];
+// Nov 28, 2026: Local Market Insider plus the seven series templates (intake schemas in agent-marketing-series-lib.js). They run in the same beta as before:
+// AGENT_MARKETING_ENABLED and AGENT_MARKETING_USER_IDS decide who sees any of them.
+const ENABLED_TEMPLATES = TEMPLATES.slice();
 
 // ── Structural control: property-sale fields are never accepted anywhere in an Agent Marketing payload ──
 const FORBIDDEN_KEYS = new Set([
@@ -430,6 +431,7 @@ function evaluate(input) {
   const intakeText = Object.values(intake).filter((v) => typeof v === "string").map(norm).join(" \n ");
   const intakeLower = intakeText.toLowerCase();
   const intakeNumbers = numberTokens(intakeText);
+  const seriesAnswered = require("./agent-marketing-series-lib").isSeriesTemplate(i.template) && !!(intake.firsthand || intake.reviewText || intake.clientStyle);
 
   // Verified facts: honored only for Local Market Insider, and only in the shape verifiedFromTopic() produces.
   const vIn = i.template === VERIFIED_TEMPLATE && i.verified && typeof i.verified === "object" ? i.verified : null;
@@ -506,6 +508,9 @@ function evaluate(input) {
         while ((m = re.exec(t))) {
           if (m[0].length === 0) { re.lastIndex++; continue; }
           if (intakeLower.includes(lower(m[0]))) agentSuppliedClaims.push(`${field}: ${snippet(m)}`); // the agent said it first
+          // Nov 28, 2026: the series templates are told from the agent's own answers about their clients (how clients describe them, a firsthand example, an attested review),
+          // so a mention of "my clients" is listed for the agent to verify instead of blocked. Results and staging outcomes the agent did not state still block.
+          else if (r.rule === "client_story" && seriesAnswered) agentSuppliedClaims.push(`${field}: ${snippet(m)}`);
           else blocks.push({ rule: r.rule, field, match: snippet(m), message: r.message });
         }
       }

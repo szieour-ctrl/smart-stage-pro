@@ -35,6 +35,9 @@ const GPT_RANGE = am.IMAGE_RANGES;
 //   AUTHENTIC_AGENT_ASSET  an optional real photo the agent may supply
 const VISUAL_SOURCES = ["GPT_IMAGE_2_CONCEPT", "AGENT_SCENE", "CONCEPT_REUSE", "AGENT_PROFILE", "BRAND_CARD", "AUTHENTIC_AGENT_ASSET"];
 const SOURCE_MAX = { AUTHENTIC_AGENT_ASSET: 1, AGENT_PROFILE: 2, BRAND_CARD: 2, AGENT_SCENE: 1 };
+const SERIES_SHOT_CAP_SEC = 10;   // Sam, Nov 28, 2026: 8 to 10 seconds is the cap for one shot
+const SERIES_SOURCE_MAX = { ...SOURCE_MAX, AGENT_SCENE: 2 };   // series templates: up to two supporting shots of the agent (rules T6)
+const sourceMaxFor = (project) => (require("./agent-marketing-series-lib").isSeriesTemplate(project && project.template) ? SERIES_SOURCE_MAX : SOURCE_MAX);
 const NEW_IMAGE_SOURCES = ["GPT_IMAGE_2_CONCEPT", "AGENT_SCENE"]; // both are generated images and count toward the included total
 const ALLOWED_TAGS = new Set(["conversational", "emphasis", "warm", "thoughtful", "confident", "pause"]);
 const MAX_TAGS = 8;
@@ -104,9 +107,11 @@ function topicBrief(topic, env) {
   return out;
 }
 
-function intakeHash(intake, topic) {
+function intakeHash(intake, topic, template) {
   const keys = ["angle", "market", "audience", "issue", "action", "observation"];
-  const stable = JSON.stringify(keys.map((k) => [k, (intake && intake[k]) || ""]).concat(topic && topic.id ? [["topic", `${topic.researchId || ""}:${topic.id}`]] : []));
+  // Series templates (Nov 28, 2026) add their own answers to the hash; Local Market Insider's hash is unchanged (no template, or its own, adds nothing).
+  const extra = template ? require("./agent-marketing-series-lib").hashExtra(template, intake) : [];
+  const stable = JSON.stringify(keys.map((k) => [k, (intake && intake[k]) || ""]).concat(topic && topic.id ? [["topic", `${topic.researchId || ""}:${topic.id}`]] : []).concat(extra));
   return crypto.createHash("sha256").update(stable).digest("hex").slice(0, 16);
 }
 
@@ -468,8 +473,13 @@ function buildUserMessage(project) {
   const dur = project.duration_sec;
   const brief = project.template === "local_market_insider" ? topicBrief(project.selected_topic) : null;
   const contract = narrativeContractFor(project, brief);
+  const seriesLib = require("./agent-marketing-series-lib");
+  const tb = seriesLib.templateBrief(project);
+  const recap = tb ? seriesLib.plannerRecap(intake) : null;
+  const poseLib = require("./agent-marketing-pose-lib");
   return JSON.stringify({
     ...(brief ? { selected_topic: brief } : {}),
+    ...(tb ? { template_brief: tb, available_poses: poseLib.forPlanner(project.approved_poses), ...(recap ? { series_recap: recap } : {}) } : {}),
     template: schema ? schema.label : project.template,
     insider_angle: angle ? angle.label : null,
     narrative_architecture: brief && brief.editorial_direction && !peopleEvent(project) ? (pathway === "article_only" ? ARCHITECTURE_ARTICLE_ONLY : ARCHITECTURE_ARTICLE_REPORT) : peopleEvent(project) ? "Invitation → essentials (event name, day, date, time, venue) → highlights (what the event offers) → community connection with one brief local Realtor perspective → warm sign-off" : angle ? angle.flow : "Hook on the topic's question → what the sourced facts show (only those) → what it means for the audience → low-pressure next step",
@@ -479,9 +489,9 @@ function buildUserMessage(project) {
     shot_plan: shotPlanFor(project),
     ...(require("./agent-marketing-images-lib").peopleAllowedFor(project) ? { event_reel: true, people_allowed: true } : {}),
     audience: intake.audience,
-    primary_issue: intake.issue,
+    primary_issue: tb ? (intake.topic || null) : intake.issue,
     desired_viewer_action: intake.action,
-    agents_firsthand_observation: intake.observation || null,
+    agents_firsthand_observation: (tb ? intake.firsthand : intake.observation) || null,
     duration_seconds: dur,
     spoken_word_range: am.wordTargets(dur),
     ...(aim ? { spoken_word_aim: aimText(aim) } : {}),
@@ -729,7 +739,7 @@ function normalizePlan(raw, project) {
   const sources = rawScenes.map((s) => {
     let src = VISUAL_SOURCES.includes(s && s.visual_source) ? s.visual_source : "CONCEPT_REUSE";
     // Over-limit optional sources fall back to re-using a concept image instead of failing the whole plan.
-    if (SOURCE_MAX[src] != null) { used[src] = (used[src] || 0) + 1; if (used[src] > SOURCE_MAX[src]) src = src === "AGENT_SCENE" ? "GPT_IMAGE_2_CONCEPT" : "CONCEPT_REUSE"; }
+    if (sourceMaxFor(project)[src] != null) { used[src] = (used[src] || 0) + 1; if (used[src] > sourceMaxFor(project)[src]) src = src === "AGENT_SCENE" ? "GPT_IMAGE_2_CONCEPT" : "CONCEPT_REUSE"; }
     // GPT_IMAGE_2_CONCEPT and AGENT_SCENE are both generated images and share ONE included allowance. If the planner
     // asks for more than that, the extras re-use an earlier concept image rather than adding a paid generation.
     if (NEW_IMAGE_SOURCES.includes(src)) { generated++; if (generated > ghi) src = "CONCEPT_REUSE"; }
@@ -755,6 +765,12 @@ function normalizePlan(raw, project) {
       // Production: first and last scenes always source the market data. Test (Nov 13, 2026, Sam): the planner's label stands for every scene; position does not decide the source.
       sourceRole: (!b1.enabled() && (i === 0 || i === rawScenes.length - 1)) ? "data" : (s && s.source_role === "article" ? "article" : "data"),
     };
+    // Nov 28, 2026: the planner's suggested pose for a supporting shot of the agent. Kept only when it is one of the subscriber's APPROVED poses; the subscriber can override it later.
+    if (src === "AGENT_SCENE") {
+      const pid = require("./agent-marketing-pose-lib").cleanPoseId(s && s.pose);
+      const okIds = Array.isArray(project.approved_poses) ? project.approved_poses.map((x) => x.id) : [];
+      out.pose = pid && okIds.includes(pid) ? pid : null;
+    }
     if (NEW_IMAGE_SOURCES.includes(src)) {
       out.aiGenerationPrompt = str(s.ai_generation_prompt, 900);
       if (!out.aiGenerationPrompt) throw new Error(`Scene ${i + 1} is a concept image but has no image prompt`);
@@ -781,10 +797,15 @@ function normalizePlan(raw, project) {
   // Provisional shot lengths from each excerpt's share of the words, scaled to the chosen duration. The generated audio
   // sets the real timing later.
   setProvisionalSeconds(scenes, dur);
+  // Series templates: a shot runs 8 to 10 seconds at most. The final cut is fitted to the synthesized audio; this is the planning check only.
+  if (require("./agent-marketing-series-lib").isSeriesTemplate(project.template)) {
+    const long = scenes.filter((sc) => sc.provisionalSeconds > SERIES_SHOT_CAP_SEC + 0.5).map((sc) => sc.index + 1);
+    if (long.length) warnings.push(`Scene ${long.join(", ")} may run longer than ${SERIES_SHOT_CAP_SEC} seconds. A long beat can be split across two shots in the storyboard.`);
+  }
 
   const cta = str(raw.cta_suggestion, 80);
   const missing = (Array.isArray(raw.missing_agent_inputs) ? raw.missing_agent_inputs : []).map((x) => str(x, 200)).filter(Boolean).slice(0, 10);
-  if (!project.intake || !project.intake.observation) missing.unshift("Your own firsthand observation. Without it this is only cautious general framing, not a personal insider perspective.");
+  if (!project.intake || !(project.intake.observation || project.intake.firsthand)) missing.unshift("Your own firsthand observation. Without it this is only cautious general framing, not a personal insider perspective.");
   missing.push("Your validated Agent Profile (name, logo and photos) for branding.");
   if (scenes.some((sc) => sc.visualSource === "AUTHENTIC_AGENT_ASSET")) missing.push("Optional: one real photo you are authorized to use. A concept image is used if you skip it.");
 
@@ -1145,7 +1166,8 @@ async function generatePlan({ project, anthropicKey, callFn }) {
   const user = buildUserMessage(project);
   const sink = [];
   const experiment = experimentOf(project);   // Test only (E5): "current", "relaxed" or null
-  const sysPrompt = buildSystemPrompt(undefined, { scoped: hasReportScope(project), causalVariant: experiment === "relaxed" ? "relaxed" : undefined }); // one prompt for every call in this run
+  const seriesRules = require("./agent-marketing-series-lib").systemRules(project.template);   // none for Local Market Insider, so its prompt stays byte-identical
+  const sysPrompt = buildSystemPrompt(undefined, { scoped: hasReportScope(project), causalVariant: experiment === "relaxed" ? "relaxed" : undefined }) + (seriesRules.length ? "\n" + seriesRules.join("\n") : ""); // one prompt for every call in this run
   const planOpts = { maxTokens: PLAN_MAX_TOKENS }; // only a ceiling: replies that fit cost the same as before
   let normalized, structuralRetry = false;
   const attemptLog = [];   // Test only: counts for every structural failure, so a generation failure can be told from a normalization failure

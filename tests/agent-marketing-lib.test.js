@@ -24,7 +24,7 @@ test("create: defaults, validation and the not-yet-available cases", () => {
   assert.strictEqual(am.validateCreate({ music: "luxury_cinematic" }).row.music, "luxury_cinematic");
   assert.strictEqual(am.validateCreate({ music: "none" }).row.music, "none");
   assert.match(am.validateCreate({ music: "dubstep" }).error, /music/);
-  assert.ok(am.validateCreate({ template: "meet_your_agent" }).error);
+  assert.strictEqual(am.validateCreate({ template: "meet_your_agent" }).row.template, "meet_your_agent");
   assert.ok(am.validateCreate({ template: "bogus" }).error);
 });
 

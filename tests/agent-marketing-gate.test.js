@@ -24,9 +24,10 @@ test("the Local Market Insider sample passes", () => {
   assert.strictEqual(r.version, gate.GATE_VERSION);
 });
 
-test("unknown and not-yet-enabled templates are blocked", () => {
+test("unknown templates are blocked; the seven series templates are enabled (Nov 28, 2026)", () => {
   assert.strictEqual(gate.evaluate(base({ template: "nope" })).ok, false);
-  assert.strictEqual(gate.evaluate(base({ template: "meet_your_agent" })).ok, false);
+  assert.strictEqual(gate.evaluate(base({ template: "meet_your_agent" })).ok, true);
+  assert.deepStrictEqual(gate.ENABLED_TEMPLATES.slice().sort(), gate.TEMPLATES.slice().sort());
 });
 
 test("property-sale keys are rejected structurally, in the payload and in the intake", () => {
@@ -189,7 +190,7 @@ test("verified facts are honored for Local Market Insider only", () => {
   assert.ok(verified);
   assert.strictEqual(gate.verifiedFromProject({ template: "meet_your_agent", selected_topic: marketTopic }), null);
   const r = gate.evaluate(base({ template: "meet_your_agent", verified, generated: { narration: "Median days on market reached 31.", captions: "" } }));
-  assert.ok(r.blocks.some((b) => b.rule === "template"));
+  assert.ok(!r.blocks.some((b) => b.rule === "template"));
   assert.ok(r.blocks.some((b) => b.rule === "invented_number" && b.match === "31"));
   assert.deepStrictEqual(r.sourcedFacts, []);
 });

@@ -22,6 +22,7 @@ const intakeLib = require("./lib/agent-marketing-intake");
 const am = require("./lib/agent-marketing-lib");
 const planLib = require("./lib/agent-marketing-plan-lib");
 const mediaLib = require("./lib/agent-marketing-media-lib");
+const seriesLib = require("./lib/agent-marketing-series-lib");
 
 // A subscriber's own ElevenLabs voice is offered only once a key and voice id have been saved and tested (agent-marketing-voice).
 async function hasOwnVoice(userId) {
@@ -41,18 +42,23 @@ const evidenceBlocked = (project) => {
   return v && v.status === b1.BLOCKED ? v.blockedReason : null;
 };
 const MAX_POLISHES = 10;   // cost protection only: revision requests per script
-const PUBLIC_COLS = "id,template,angle,formats,duration_sec,voice,music,intake,narrative,narrative_approved_at,storyboard,selected_topic,status,gate_version,gate_result,created_at,updated_at,hidden_at";
+const PUBLIC_COLS = "id,template,angle,formats,duration_sec,voice,music,intake,narrative,narrative_approved_at,storyboard,selected_topic,status,gate_version,gate_result,created_at,updated_at,hidden_at,source_project_id,series_root_project_id";
 
 // A saved script written for another topic or other answers is kept for the agent to see, but the page must offer "Write my script" again (Sam, Oct 29, 2026).
 function scriptStale(row) {
   const n = row && row.narrative;
   if (n && n.narrationTagged && row.selected_topic && row.selected_topic.reportOutdated) return true;   // the report's confirmation changed after the topic (and so the script) was made
+  if (n && n.narrationTagged && n.intakeHash && seriesLib.isSeriesTemplate(row.template)) {   // series templates: the script belongs to the answers it was written for
+    try { return n.intakeHash !== planLib.intakeHash(row.intake || {}, null, row.template); } catch (e) { return false; }
+  }
   if (!n || !n.narrationTagged || !n.intakeHash || !row.selected_topic) return false;
   try { return n.intakeHash !== planLib.intakeHash(row.intake || {}, row.selected_topic); } catch (e) { return false; }
 }
 
 // Reel Type shown in My Projects (Sam, Oct 29, 2026): a project whose selected topic is a local event is a Local Event Reel, anything else a Local Market Update.
 function reelTypeOf(row) {
+  const sc = row && seriesLib.schemaFor(row.template);
+  if (sc) return sc.label;   // series templates show their own name
   const t = row && row.selected_topic;
   return t && typeof t === "object" && (t.kind === "local_events" || (t.event && typeof t.event === "object")) ? "Local Event" : "Local Market Update";
 }
@@ -73,6 +79,8 @@ function forClient(row) {
     intake: row.intake || {}, narrative: clientNarrative(row.narrative), narrativeApprovedAt: row.narrative_approved_at || null,
     storyboard: row.storyboard || null, selectedTopic: require("./lib/agent-marketing-article-led-lib").clientTopic(row.selected_topic) || null, status: row.status, gate: row.gate_result || null,
     createdAt: row.created_at, updatedAt: row.updated_at, hidden: !!row.hidden_at,
+    title: (row.intake && row.intake.publicTitle) || null, sourceProjectId: row.source_project_id || null, seriesRootProjectId: row.series_root_project_id || null,
+    seriesRecap: (row.intake && row.intake.series_recap) || null,
     // Development Test environment only (AGENT_MARKETING_B1_EVIDENCE=dev, scoped to b1-stageb-dev, and a non-production database): the page hides
     // the "Please verify before you publish" panel there. Never set on production or on other deploys.
     ...(gate.testEvaluation() ? { testEvaluation: true } : {}),
@@ -110,7 +118,7 @@ exports.handler = async (event) => {
       const qs = event.queryStringParameters || {};
       if (qs.schema) {
         return reply(200, {
-          templates: gate.ENABLED_TEMPLATES.map((t) => ({ key: t, ...intakeLib.schemaFor(t) })),
+          templates: gate.ENABLED_TEMPLATES.map((t) => (seriesLib.isSeriesTemplate(t) ? seriesLib.clientSchema(t) : { key: t, ...intakeLib.schemaFor(t) })),
           audiences: intakeLib.AUDIENCES, actions: intakeLib.ACTIONS, eventActions: intakeLib.EVENT_ACTIONS, limits: intakeLib.LIMITS,
           durations: am.DURATIONS, formats: am.FORMATS, voices: am.voicesFor({ customVoice: await hasOwnVoice(userId) }), music: am.MUSIC, wordTargets: Object.fromEntries(Object.keys(am.WORD_TARGETS).map((d) => [d, am.wordTargets(Number(d))])), ...(String(process.env.AGENT_MARKETING_B1_EVIDENCE || "").trim().toLowerCase() === "dev" ? { paceWordsPerSecond: am.PACE_WORDS_PER_SECOND } : {}),
           ...(String(process.env.AGENT_MARKETING_B1_EVIDENCE || "").trim().toLowerCase() === "dev" ? { writerWordTargets: Object.fromEntries(Object.keys(am.WORD_TARGETS).map((d) => [d, am.writerWordTargets(Number(d))])) } : {}),
@@ -130,7 +138,10 @@ exports.handler = async (event) => {
         const j = await supabase("GET", "agent_marketing_jobs", null, `?user_id=eq.${userId}&project_id=in.(${rows.map((x) => x.id).join(",")})&select=project_id,status,created_at&order=created_at.desc&limit=200`);
         (Array.isArray(j.data) ? j.data : []).forEach((x) => { if (!reel[x.project_id]) reel[x.project_id] = x.status === "done" ? "done" : x.status === "error" ? "failed" : "making"; });
       }
-      return reply(200, { projects: rows.map((x) => ({ ...forClient(x), reel: reel[x.id] || null })) });
+      // A follow-up can start from a project whose latest Reel finished (no General Advertising Library needed). Episodes are counted per series.
+      const rootOf = (x) => x.series_root_project_id || x.id;
+      const inSeries = {}; rows.forEach((x) => { const k = rootOf(x); inSeries[k] = (inSeries[k] || 0) + 1; });
+      return reply(200, { projects: rows.map((x) => ({ ...forClient(x), reel: reel[x.id] || null, followupEligible: reel[x.id] === "done", episodeCount: inSeries[rootOf(x)] || 1 })) });
     }
 
     if (event.httpMethod !== "POST") return reply(405, { error: "Method not allowed" });
@@ -149,6 +160,39 @@ exports.handler = async (event) => {
       return reply(200, { project: forClient(row) });
     }
 
+    // "Create a follow-up reel" (Nov 28, 2026): one new draft linked to a finished reel of the same subscriber. The server loads the source by id, checks ownership
+    // (loadOwned) and that its latest Reel finished, sets the lineage itself, and makes the request safe to retry: the same creationKey returns the same draft.
+    if (action === "create_followup") {
+      const key = String(b.creationKey || "");
+      if (!seriesLib.UUID_RE.test(key)) return reply(400, { error: "Missing or invalid request key" });
+      const prior = await supabase("GET", "agent_marketing_projects", null, `?user_id=eq.${userId}&creation_key=eq.${key}&select=*&limit=1`);
+      const had = Array.isArray(prior.data) ? prior.data[0] : null;
+      if (had) return reply(200, { project: forClient(had), recap: (had.intake && had.intake.series_recap) || null, existing: true });
+      const so = await loadOwned(b.sourceId, userId);
+      if (so.error) return so.error;
+      const src = so.row;
+      const jr = await supabase("GET", "agent_marketing_jobs", null, `?user_id=eq.${userId}&project_id=eq.${src.id}&select=status&order=created_at.desc&limit=1`);
+      if (!(Array.isArray(jr.data) && jr.data[0] && jr.data[0].status === "done")) return reply(409, { error: "Finish this Reel first. A follow-up starts from a Reel that has been made.", code: "source_not_finished" });
+      const rootId = src.series_root_project_id || src.id;
+      const er = await supabase("GET", "agent_marketing_projects", null, `?user_id=eq.${userId}&or=(id.eq.${rootId},series_root_project_id.eq.${rootId})&select=id,template,intake,created_at&order=created_at.asc&limit=40`);
+      const family = Array.isArray(er.data) ? er.data : [];
+      const dj = family.length ? await supabase("GET", "agent_marketing_jobs", null, `?user_id=eq.${userId}&project_id=in.(${family.map((x) => x.id).join(",")})&status=eq.done&select=project_id`) : { data: [] };
+      const doneIds = new Set((Array.isArray(dj.data) ? dj.data : []).map((x) => x.project_id));
+      const recap = seriesLib.recapOf(src, family.filter((x) => doneIds.has(x.id)));
+      const voice = src.voice === "custom" && !(await hasOwnVoice(userId)) ? "ssp_male" : src.voice;   // the voice is checked again; a saved own voice that is gone falls back to SSP Male
+      const row = { user_id: userId, template: src.template, duration_sec: src.duration_sec, formats: src.formats, voice, music: src.music || "default", status: "draft", intake: seriesLib.carriedIntake(src.template, src.intake, recap), creation_key: key, ...seriesLib.lineageFor(src) };
+      const ins = await supabase("POST", "agent_marketing_projects", row);
+      let made = Array.isArray(ins.data) ? ins.data[0] : null;
+      if (ins.status >= 300 || !made) {
+        // A double click can lose the race to the unique key: hand back the draft the other request made.
+        const again = await supabase("GET", "agent_marketing_projects", null, `?user_id=eq.${userId}&creation_key=eq.${key}&select=*&limit=1`);
+        made = Array.isArray(again.data) ? again.data[0] : null;
+        if (!made) { console.error("agent-marketing create_followup failed:", ins.status, JSON.stringify(ins.data).slice(0, 200)); return reply(500, { error: "Could not start the follow-up" }); }
+        return reply(200, { project: forClient(made), recap: (made.intake && made.intake.series_recap) || null, existing: true });
+      }
+      return reply(200, { project: forClient(made), recap, existing: false });
+    }
+
     // Hiding only tidies the list; it never deletes anything and works on any project, even a finished one.
     if (action === "hide" || action === "unhide") {
       const h = await loadOwned(b.id, userId);
@@ -158,7 +202,7 @@ exports.handler = async (event) => {
       return reply(200, { ok: true });
     }
     if (action === "hide_drafts") { // every project that never got past an empty draft
-      const saved = await supabase("PATCH", "agent_marketing_projects", { hidden_at: new Date().toISOString() }, `?user_id=eq.${userId}&status=eq.draft&hidden_at=is.null&intake-%3E%3Emarket=is.null`);
+      const saved = await supabase("PATCH", "agent_marketing_projects", { hidden_at: new Date().toISOString() }, `?user_id=eq.${userId}&status=eq.draft&hidden_at=is.null&intake-%3E%3Emarket=is.null&intake-%3E%3Eangle=is.null&intake-%3E%3Eseries_recap=is.null`);
       if (saved.status >= 300) return reply(500, { error: "Could not update the projects" });
       return reply(200, { ok: true, hidden: Array.isArray(saved.data) ? saved.data.length : null });
     }
@@ -178,6 +222,8 @@ exports.handler = async (event) => {
       if (!v.ok) return reply(400, { error: v.errors[0].message, errors: v.errors });
       const g = gate.evaluate({ template: project.template, payload: b.intake, intake: v.clean });
       if (!g.ok) return reply(422, { error: gate.explain(g), gate: gateSummary(g) });
+      // The series recap is set by the server when a follow-up is created; the browser can neither add nor change it.
+      if (project.intake && project.intake.series_recap) v.clean.series_recap = project.intake.series_recap;
       // New facts mean any earlier script is stale: keep it as a draft, drop back to "draft", never touch narrative_approved.
       const saved = await patch(project.id, userId, { intake: v.clean, angle: v.clean.angle || null, status: "draft", gate_version: g.version, gate_result: gateSummary(g) });
       if (!saved) return reply(500, { error: "Could not save your answers" });
@@ -185,7 +231,7 @@ exports.handler = async (event) => {
     }
 
     if (action === "save_narrative") {
-      if (!project.intake || !project.intake.market) return reply(409, { error: "Answer the intake questions first." });
+      if (!am.intakeReady(project)) return reply(409, { error: "Answer the intake questions first." });
       const v = am.validateNarrative(b.narrative, project.duration_sec, { writer: am.isWriterScript(project) });
       if (v.error) return reply(400, { error: v.error });
       am.attachNotice(project, v.narrative); // a script edit must never drop the required notice (on-screen overlay, never spoken)
@@ -222,7 +268,7 @@ exports.handler = async (event) => {
 
     if (action === "plan") {
       // The pre-planning checks (intake, topic, one call per set of answers, attempts) are shared with the development script mode.
-      if (!project.intake || !project.intake.market) return reply(409, { error: "Answer the intake questions first." });
+      if (!am.intakeReady(project)) return reply(409, { error: "Answer the intake questions first." });
       if (project.template === "local_market_insider" && !project.selected_topic) return reply(409, { error: "Choose one of the five topics first." });
       if (!process.env.ANTHROPIC_API_KEY || !process.env.INTERNAL_API_KEY) return reply(500, { error: "Planning is not configured." });
       const ps = require("./lib/agent-marketing-plan-run-lib").planStart(project);
@@ -267,6 +313,9 @@ exports.handler = async (event) => {
     // A script written for another topic or other answers must not be approved for this one (its numbers would have no source here).
     if (project.template === "local_market_insider" && project.selected_topic && n.intakeHash && n.intakeHash !== planLib.intakeHash(project.intake, project.selected_topic)) {
       return reply(409, { error: "This script was written for a different topic or different answers. Write a new script for the topic you chose, then approve it.", code: "script_stale" });
+    }
+    if (seriesLib.isSeriesTemplate(project.template) && n.intakeHash && n.intakeHash !== planLib.intakeHash(project.intake, null, project.template)) {
+      return reply(409, { error: "This script was written for different answers. Write a new script for your current answers, then approve it.", code: "script_stale" });
     }
     am.attachNotice(project, n); // scripts saved before the notice was kept still carry it
     // Nov 12, 2026 (Sam): word count guides the writer; it never blocks approval. A script over its recommended range is approved as written (the page shows an advisory).

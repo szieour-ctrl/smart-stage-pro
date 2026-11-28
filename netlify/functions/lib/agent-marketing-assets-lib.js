@@ -42,7 +42,7 @@ function imageNeeds(narrative, ownScenes) {
     if (src === "CONCEPT_REUSE" && Number.isInteger(s.reuseOfScene)) return { scene: i, kind: "reuse", owner: s.reuseOfScene };
     if (own.has(i)) return { scene: i, kind: "own" };
     if (src === "GPT_IMAGE_2_CONCEPT" && s.aiGenerationPrompt) return { scene: i, kind: "generate", imageKind: "concept", prompt: s.aiGenerationPrompt, framing: s.framing || {} };
-    if (src === "AGENT_SCENE" && s.aiGenerationPrompt) return { scene: i, kind: "generate", imageKind: "agent_scene", prompt: s.aiGenerationPrompt, framing: s.framing || {} };
+    if (src === "AGENT_SCENE" && s.aiGenerationPrompt) return { scene: i, kind: "generate", imageKind: "agent_scene", prompt: s.aiGenerationPrompt, framing: s.framing || {}, pose: s.pose || null };
     if (src === "BRAND_CARD" || src === "AUTHENTIC_AGENT_ASSET") return { scene: i, kind: "plate" }; // an optional real photo the agent did not add
     return { scene: i, kind: "unsupported", source: src };
   });

@@ -261,7 +261,7 @@ async function runLipSync(job, manifest, audio, profile) {
         saveState: async (state) => { job.assets = { ...(job.assets || {}), lipsync: state }; await patchJob(job.id, { assets: job.assets }); },
       },
     });
-    job.usage = { ...(job.usage || {}), lipsync: r.report };
+    job.usage = { ...(job.usage || {}), lipsync: r.report, lipsync_budget: r.budget };
     await patchJob(job.id, { usage: job.usage });
     return { manifest: r.manifest, report: r.report };
   } catch (e) {

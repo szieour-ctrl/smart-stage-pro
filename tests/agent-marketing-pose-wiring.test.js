@@ -27,3 +27,12 @@ test("an unapproved planned pose falls back to the profile photo", () => {
   assert.strictEqual(poseLib.resolvePose({ suggested: "seated_desk", approved }).pose, null);
   assert.strictEqual(poseLib.promptWithPose("P", null), "P");
 });
+
+test("HeyGen budget: planned and actual seconds against the 20-second planning budget", () => {
+  const lip = require("../netlify/functions/lib/agent-marketing-lipsync-lib");
+  const m = { scenes: [{ n: 0, composition: "x", window: { start: 0, end: 6 } }, { n: 1, window: { start: 6, end: 38 } }, { n: 2, window: { start: 38, end: 45 } }] };
+  const b = lip.budget(m, [{ n: 0, status: "used", duration_sec: 6.4 }, { n: 2, status: "used", duration_sec: 7.1 }]);
+  assert.deepStrictEqual(b, { budget_sec: 20, shot_cap_sec: 10, planned_sec: 13, actual_sec: 13.5, planned_within_budget: true, actual_within_budget: true });
+  const over = lip.budget({ scenes: [{ n: 0, window: { start: 0, end: 16 } }, { n: 1, window: { start: 16, end: 24 } }] }, [{ n: 0, status: "used", duration_sec: 16 }, { n: 1, status: "fallback" }]);
+  assert.strictEqual(over.planned_sec, 24); assert.strictEqual(over.planned_within_budget, false); assert.strictEqual(over.actual_sec, 16);
+});

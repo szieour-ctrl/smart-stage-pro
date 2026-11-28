@@ -241,3 +241,13 @@ test("rejecting a whole multi-panel try takes its panels away; the earlier appro
   assert.equal((await SR.loadStageState({ deps: w.deps, userId: U })).stages.angles.drafts.length, 1);
   assert.equal(JSON.stringify(w.assets.filter((a) => a.stage !== "angles")), before);
 });
+
+test("every picture on My photos opens larger in a modal (one place draws them all; panels move Previous/Next within their group)", () => {
+  const html = require("fs").readFileSync(__dirname + "/../agent-marketing.html", "utf8");
+  assert.match(html, /id="apLightbox"/);
+  assert.match(html, /function phThumb[\s\S]*?class="ap-zoom"[\s\S]*?data-full=/);
+  assert.equal((html.match(/phThumb\(/g) || []).length >= 5, true, "the headshot, enhanced tries, three-quarter, full-length and panels all go through phThumb");
+  assert.match(html, /data-zg="1"/);
+  assert.match(html, /ev\.key === "Escape"\) lbClose\(\)/);
+  assert.match(html, /wireLightbox\(\)/);
+});

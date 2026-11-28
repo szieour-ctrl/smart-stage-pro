@@ -55,8 +55,9 @@ const FACE_AND_OUTFIT = "Image 1 is the approved headshot and controls the face,
 const TEXT = {
   angles: ({ attrs }) =>
     "Create ONE three-panel full-body studio contact sheet showing the same approved person. Panel 1 (left): front-facing, squared to the camera. " +
-    "Panel 2 (middle): the body rotated about 45 degrees so the person's chest and toes point toward the LEFT edge of the image, face turned toward the camera. " +
-    "Panel 3 (right): the body rotated about 45 degrees the OPPOSITE way, so the chest and toes point toward the RIGHT edge of the image, face turned toward the camera. Panels 2 and 3 must face opposite directions, like mirror images of each other's turn. " + FACE_AND_OUTFIT +
+    "Panel 2 (middle): the body rotated about 45 degrees so the chest and toes point toward the LEFT edge of the image; the person's own LEFT shoulder and LEFT eye are the ones nearest the camera, and the face is turned toward the camera. " +
+    "Panel 3 (right): the body rotated about 45 degrees the OPPOSITE way, so the chest and toes point toward the RIGHT edge of the image; the person's own RIGHT shoulder and RIGHT eye are the ones nearest the camera, and the face is turned toward the camera. " +
+    "The two side panels must not match: panel 2 and panel 3 show the person turned in opposite directions. Do not copy the body angle of Image 2 into either panel. " + FACE_AND_OUTFIT +
 (attrs ? `Visible features to keep: ${attrs}. ` : "") + "Every panel head-to-shoes, same scale, same exact approved outfit, hairstyle, grooming, background and soft studio lighting. No alternate wardrobe, labels, badges, logos, text, props, furniture or additional people.",
   expressions: ({ attrs }) =>
     "Create ONE 3-column x 2-row contact sheet of six head-and-shoulders portraits of the SAME person. " + FACE_AND_OUTFIT + (attrs ? `Visible features to keep: ${attrs}. ` : "") +

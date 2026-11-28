@@ -170,7 +170,7 @@ const bodyReady = () => { const w = world(); const hs = w.assets[0]; w.assets.pu
 
 test("prompts for the three multi-panel stages follow the spec: references named, no rear view, hands below frame, no branding", () => {
   const a = S.buildPrompt("angles", { attributes: ATTRS }), e = S.buildPrompt("expressions", { attributes: ATTRS }), p = S.buildPrompt("poses", { attributes: ATTRS });
-  assert.match(a, /three-panel full-body studio contact sheet[\s\S]*toward the LEFT edge of the image[\s\S]*OPPOSITE way[\s\S]*toward the RIGHT edge of the image[\s\S]*opposite directions/); assert.doesNotMatch(a, /rear|back view/i);
+  assert.match(a, /three-panel full-body studio contact sheet[\s\S]*toward the LEFT edge of the image[\s\S]*OPPOSITE way[\s\S]*toward the RIGHT edge of the image[\s\S]*opposite directions/); assert.doesNotMatch(a, /rear|back view/i); assert.match(a, /own LEFT shoulder and LEFT eye are the ones nearest the camera[\s\S]*own RIGHT shoulder and RIGHT eye are the ones nearest the camera[\s\S]*must not match[\s\S]*Do not copy the body angle of Image 2/);
   assert.match(e, /3-column x 2-row[\s\S]*CURIOUS[\s\S]*Hands and arms BELOW frame/);
   assert.match(p, /2 x 2 professional pose[\s\S]*TOP LEFT[\s\S]*BOTTOM RIGHT/);
   for (const t of [a, e, p]) { assert.match(t, /Image 1 is the approved headshot[\s\S]*Image 2 is the approved full-length image/); assert.match(t, /hair: short gray/); assert.doesNotMatch(t, /undefined|topaz|nano|fal\.ai|gemini/i); }

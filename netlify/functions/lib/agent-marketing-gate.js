@@ -49,8 +49,9 @@ const TEMPLATES = [
   "meet_your_agent", "why_list_with_me", "your_buyer_advantage", "new_construction_specialist",
   "active_adult_55_specialist", "my_proven_process", "agent_review_highlights", "local_market_insider",
 ];
-// v1 ships Local Market Insider only (Sam, Oct 21). Widen this list as each template is built.
-const ENABLED_TEMPLATES = ["local_market_insider"];
+// Nov 28, 2026: Local Market Insider plus the seven series templates (intake schemas in agent-marketing-series-lib.js). They run in the same beta as before:
+// AGENT_MARKETING_ENABLED and AGENT_MARKETING_USER_IDS decide who sees any of them.
+const ENABLED_TEMPLATES = TEMPLATES.slice();
 
 // ── Structural control: property-sale fields are never accepted anywhere in an Agent Marketing payload ──
 const FORBIDDEN_KEYS = new Set([

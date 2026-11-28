@@ -7,8 +7,8 @@
 //   POST { action: "check", key, contentType } → makes the working copy, runs the photo check
 //   POST { action: "enhance" }            → starts one enhancement (a background job); takes one iteration from the pool
 //   POST { action: "approve" | "reject", assetId }
-//   POST { action: "outfit", lowerBody?, shoes? } → what they wear from the waist down (three-quarter step) and their shoes (full-length step)
-//   POST { action: "stage_generate", stage, note?, lowerBody? | shoes? } → starts one image (a background job); takes one iteration; `note` is the subscriber's optional retry instruction
+//   POST { action: "outfit", lowerBody?, shoes?, height? } → what they wear from the waist down (three-quarter step) and their shoes (full-length step)
+//   POST { action: "stage_generate", stage, note?, lowerBody? | shoes? + height? } → starts one image (a background job); takes one iteration; `note` is the subscriber's optional retry instruction
 //   POST { action: "stage_approve" | "stage_reject", assetId }
 //   POST { action: "refill", confirmed }  → out of iterations: 5 Images buys 12 more
 const { PutObjectCommand, S3Client } = require("@aws-sdk/client-s3");
@@ -76,12 +76,12 @@ exports.handler = async (event) => {
     if (b.action === "reject") { const r = await R.rejectEnhanced({ deps, userId, assetId: b.assetId }); return r.ok ? reply(200, await fullState()) : fail(r); }
     if (b.action === "refill") { const r = await R.refillPool({ deps, userId, confirmed: b.confirmed }); return r.ok ? reply(200, await fullState()) : fail(r); }
 
-    if (b.action === "outfit") { const r = await SR.setOutfit({ deps, userId, lowerBody: b.lowerBody, shoes: b.shoes }); return r.ok ? reply(200, await fullState()) : fail(r); }
+    if (b.action === "outfit") { const r = await SR.setOutfit({ deps, userId, lowerBody: b.lowerBody, shoes: b.shoes, height: b.height }); return r.ok ? reply(200, await fullState()) : fail(r); }
 
     if (b.action === "stage_generate") {
       if (!process.env.FAL_KEY) return reply(500, { error: "Image creation is not configured." });
-      if (b.lowerBody !== undefined || b.shoes !== undefined) {   // the outfit boxes travel with the button
-        const o = await SR.setOutfit({ deps, userId, lowerBody: b.stage === "three_quarter" ? b.lowerBody : undefined, shoes: b.stage === "full_body" ? b.shoes : undefined });
+      if (b.lowerBody !== undefined || b.shoes !== undefined || b.height !== undefined) {   // the outfit boxes travel with the button
+        const o = await SR.setOutfit({ deps, userId, lowerBody: b.stage === "three_quarter" ? b.lowerBody : undefined, shoes: b.stage === "full_body" ? b.shoes : undefined, height: b.stage === "full_body" ? b.height : undefined });
         if (!o.ok) return fail(o);
       }
       const g = await SR.readyToGenerate({ deps, userId, stage: b.stage, note: b.note });

@@ -47,6 +47,12 @@ test("prompts: only what the headshot showed; every visible garment kept; the su
   assert.match(f, /Add only the shoes: brown leather dress shoes\./);
   assert.match(f, /do not add, remove or change a garment/);
   assert.match(S.buildPrompt("full_body", {}), /plain shoes that go with the outfit/);
+  assert.match(S.buildPrompt("full_body", {}), /arms end near mid-thigh and the legs are about half of the total height/);
+  assert.match(S.buildPrompt("full_body", { height: "5'9\"" }), /The person's height is 5'9"\./);
+  assert.doesNotMatch(S.buildPrompt("full_body", {}), /height is/, "no height is invented");
+  assert.doesNotMatch(S.buildPrompt("full_body", { height: "5'9\"" }), /\bman\b|\bwoman\b|\bhis\b|\bher\b/i, "no gender is assumed");
+  assert.doesNotMatch(S.buildPrompt("full_body", { note: "shorter legs" }), /Preserve[^.]*body proportions/, "a proportions note is not undercut");
+  assert.equal(S.cleanHeight("  5'9\"  "), "5'9\"");
   assert.doesNotMatch(p + f, /consultant|executive|undefined|topaz|nano|fal\.ai|gemini/i);
   assert.equal(S.describeAttributes(null), "");
   assert.match(S.describeAttributes({ hair: "gray", shirt: "blue shirt" }), /clothing: blue shirt/, "sheets saved before Nov 27 only recorded a shirt");
@@ -146,12 +152,14 @@ test("the outfit: required before the first three-quarter try; saved with the bu
   assert.ok((await SR.setOutfit({ deps: w.deps, userId: U, lowerBody: "dark jeans with a belt" })).ok, "can change it while nothing is approved");
   await SR.approveStage({ deps: w.deps, userId: U, assetId: r1.assetId });
   assert.equal((await SR.setOutfit({ deps: w.deps, userId: U, lowerBody: "a skirt" })).ok, false);
-  assert.ok((await SR.setOutfit({ deps: w.deps, userId: U, shoes: "brown loafers" })).ok);
+  assert.ok((await SR.setOutfit({ deps: w.deps, userId: U, shoes: "brown loafers", height: "5'9\"" })).ok);
   await make(w, "full_body");
   assert.match(w.runnerCalls[1].input.prompt, /Add only the shoes: brown loafers/);
+  assert.match(w.runnerCalls[1].input.prompt, /The person's height is 5'9"/);
   let st = await SR.loadStageState({ deps: w.deps, userId: U });
   assert.equal(st.outfit.lowerLocked, true); assert.equal(st.outfit.shoesLocked, false); assert.equal(st.outfit.lowerBody, "dark jeans with a belt");
   const fb = w.assets.filter((a) => a.stage === "full_body").pop();
   await SR.approveStage({ deps: w.deps, userId: U, assetId: fb.id });
   assert.equal((await SR.setOutfit({ deps: w.deps, userId: U, shoes: "boots" })).ok, false);
+  assert.equal((await SR.setOutfit({ deps: w.deps, userId: U, height: "6'0\"" })).ok, false);
 });

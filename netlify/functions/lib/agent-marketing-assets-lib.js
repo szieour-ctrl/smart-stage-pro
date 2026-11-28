@@ -28,7 +28,7 @@ function parseNotice(text) {
 // ssp_male defaults to the narrator Sam already uses for ssp-prospect.
 function voiceIdFor(voice, env) {
   const e = env || process.env;
-  if (voice === "custom") return e.AGENT_MARKETING_VOICE_CUSTOM_TEST || null;
+  if (voice === "custom") return null;   // the subscriber's own voice comes from their saved settings (agent-marketing-voice-lib), never from here
   if (voice === "ssp_female") return e.AGENT_MARKETING_VOICE_SSP_FEMALE || null;
   return e.AGENT_MARKETING_VOICE_SSP_MALE || "32k6j8e9sZJuuBXxDcVP";
 }

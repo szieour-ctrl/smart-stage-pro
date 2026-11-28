@@ -20,7 +20,7 @@ test("create: defaults, validation and the not-yet-available cases", () => {
   assert.deepStrictEqual(am.validateCreate({ formats: "9x16", durationSec: 30, voice: "ssp_female" }).row.formats, ["9x16"]);
   assert.ok(am.validateCreate({ durationSec: 20 }).error);
   assert.ok(am.validateCreate({ formats: ["4x3"] }).error);
-  assert.match(am.validateCreate({ voice: "custom" }).error, /coming soon/);
+  assert.match(am.validateCreate({ voice: "custom" }).error, /Marketing Profile/);
   assert.strictEqual(am.validateCreate({ music: "luxury_cinematic" }).row.music, "luxury_cinematic");
   assert.strictEqual(am.validateCreate({ music: "none" }).row.music, "none");
   assert.match(am.validateCreate({ music: "dubstep" }).error, /music/);
@@ -58,11 +58,12 @@ test("intake: angle-specific issues, required market, unknown keys dropped, blan
   assert.strictEqual(intakeLib.validateIntake("nope", {}).ok, false);
 });
 
-test("custom voice stays 'coming soon' unless the beta test voice is configured", () => {
+test("the subscriber's own voice is offered only once one is saved; the SSP ids never serve it", () => {
   const am2 = require("../netlify/functions/lib/agent-marketing-lib");
   const assets = require("../netlify/functions/lib/agent-marketing-assets-lib");
   assert.deepEqual(am2.voicesFor({}), ["ssp_male", "ssp_female"]);
-  assert.deepEqual(am2.voicesFor({ AGENT_MARKETING_VOICE_CUSTOM_TEST: "abc" }), ["ssp_male", "ssp_female", "custom"]);
-  assert.equal(assets.voiceIdFor("custom", {}), null);
-  assert.equal(assets.voiceIdFor("custom", { AGENT_MARKETING_VOICE_CUSTOM_TEST: "abc" }), "abc");
+  assert.deepEqual(am2.voicesFor({ customVoice: true }), ["ssp_male", "ssp_female", "custom"]);
+  assert.match(am2.validateCreate({ voice: "custom" }).error, /Marketing Profile/);
+  assert.strictEqual(am2.validateCreate({ voice: "custom" }, { customVoice: true }).row.voice, "custom");
+  assert.equal(assets.voiceIdFor("custom", { AGENT_MARKETING_VOICE_CUSTOM_TEST: "abc" }), null);   // the old test variable no longer does anything
 });

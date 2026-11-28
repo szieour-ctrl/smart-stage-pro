@@ -12,18 +12,19 @@ const { supabase } = require("./lib/marketing-profile-lib");
 const { requireUser } = require("./lib/reel-auth-lib");
 const am = require("./lib/agent-marketing-lib");
 const assetsLib = require("./lib/agent-marketing-assets-lib");
+const voiceLib = require("./lib/agent-marketing-voice-lib");
 const timing = require("./lib/agent-marketing-timing-lib");
 
 const headers = { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json", "Cache-Control": "no-store" };
 const reply = (statusCode, obj) => ({ statusCode, headers, body: JSON.stringify(obj) });
 const TTS_MODEL = process.env.AGENT_MARKETING_TTS_MODEL || "eleven_v4";
 
-function speak(voiceId, text) {
+function speak(voiceId, text, apiKey) {
   return new Promise((resolve, reject) => {
     const body = JSON.stringify({ text, model_id: TTS_MODEL });
     const req = https.request({
       hostname: "api.elevenlabs.io", path: `/v1/text-to-speech/${encodeURIComponent(voiceId)}?output_format=mp3_44100_64`, method: "POST",
-      headers: { "xi-api-key": process.env.ELEVENLABS_API_KEY, "Content-Type": "application/json", Accept: "audio/mpeg", "Content-Length": Buffer.byteLength(body) },
+      headers: { "xi-api-key": apiKey || process.env.ELEVENLABS_API_KEY, "Content-Type": "application/json", Accept: "audio/mpeg", "Content-Length": Buffer.byteLength(body) },
     }, (res) => {
       const chunks = [];
       res.on("data", (c) => chunks.push(c));
@@ -67,9 +68,14 @@ exports.handler = async (event) => {
         const p = await supabase("GET", "agent_marketing_projects", null, `?id=eq.${b.projectId}&user_id=eq.${userId}&select=voice&limit=1`);
         if (Array.isArray(p.data) && p.data[0] && p.data[0].voice) voice = p.data[0].voice;
       }
-      const voiceId = assetsLib.voiceIdFor(voice);
+      let voiceId = assetsLib.voiceIdFor(voice), apiKey = null;
+      if (voice === "custom") {   // the subscriber's own voice: their key, a few of their credits
+        const o = await supabase("GET", "agent_marketing_voices", null, `?user_id=eq.${userId}&select=*&limit=1`);
+        try { const c = voiceLib.credentialsFrom(Array.isArray(o.data) && o.data[0]); if (c) { voiceId = c.voiceId; apiKey = c.apiKey; } } catch { /* falls through to the message below */ }
+        if (!apiKey) return reply(422, { error: "Your own voice is not set up. Save it in Marketing Profile, or switch to an SSP voice." });
+      }
       if (!voiceId) return reply(500, { error: "This voice is not configured yet." });
-      const r = await speak(voiceId, say.say);
+      const r = await speak(voiceId, say.say, apiKey);
       if (r.status !== 200 || !r.buf.length) return reply(502, { error: "The narration service could not make the preview. Please try again." });
       return reply(200, { audio_base64: r.buf.toString("base64"), mime: "audio/mpeg" });
     }

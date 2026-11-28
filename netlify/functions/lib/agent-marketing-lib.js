@@ -11,8 +11,8 @@ const FORMATS = ["9x16", "16x9"];
 // v1 voices: SSP Male / SSP Female. "custom" (subscriber's own ElevenLabs voice) is in the table's check constraint
 // already but is rejected here until the encrypted-credential work is built.
 const VOICES = ["ssp_male", "ssp_female"];
-// Nov 27, 2026 (Sam, beta test): when AGENT_MARKETING_VOICE_CUSTOM_TEST holds an ElevenLabs voice id, "custom" is offered as "My voice (test)". Unset, it stays "coming soon".
-const voicesFor = (env) => ((env || process.env).AGENT_MARKETING_VOICE_CUSTOM_TEST ? VOICES.concat("custom") : VOICES);
+// "custom" is the subscriber's own ElevenLabs voice (slice 3). It is offered only to a subscriber who has saved a tested key and voice id (opts.customVoice).
+const voicesFor = (opts) => (opts && opts.customVoice ? VOICES.concat("custom") : VOICES);
 // Music choices. Keys MUST match MUSIC_LIBRARY in build-video-demo.html (the renderer's music library).
 const MUSIC = [
   { key: "default", label: "Default: Neutral Ambient" },
@@ -92,7 +92,7 @@ function isEnabledFor(userId, env) {
   return ids.length === 0 || ids.includes(String(userId || "").toLowerCase());
 }
 
-function validateCreate(body) {
+function validateCreate(body, opts) {
   const b = body && typeof body === "object" ? body : {};
   const template = String(b.template || "local_market_insider");
   if (!gate.TEMPLATES.includes(template)) return { error: "Unknown template." };
@@ -105,7 +105,7 @@ function validateCreate(body) {
   if (!Array.isArray(formats) || formats.length === 0 || !formats.every((f) => FORMATS.includes(f))) return { error: "Choose 9:16, 16:9 or both." };
   formats = FORMATS.filter((f) => formats.includes(f)); // stable order, no duplicates
   const voice = String(b.voice || "ssp_male");
-  if (!voicesFor().includes(voice)) return { error: voice === "custom" ? "Your own ElevenLabs voice is coming soon." : "Choose SSP Male or SSP Female." };
+  if (!voicesFor(opts).includes(voice)) return { error: voice === "custom" ? "Save your own ElevenLabs voice in Marketing Profile first, or choose SSP Male or SSP Female." : "Choose SSP Male or SSP Female." };
   const music = String(b.music == null || b.music === "" ? "default" : b.music);
   if (!MUSIC_KEYS.includes(music)) return { error: "Choose one of the music options." };
   return { row: { template, duration_sec: duration, formats, voice, music } };

@@ -18,6 +18,7 @@ const am = require("./lib/agent-marketing-lib");
 const img = require("./lib/agent-marketing-images-lib");
 const timing = require("./lib/agent-marketing-timing-lib");
 const assetsLib = require("./lib/agent-marketing-assets-lib");
+const voiceLib = require("./lib/agent-marketing-voice-lib");
 const sourcesLib = require("./lib/agent-marketing-sources-lib");
 const planLib = require("./lib/agent-marketing-plan-lib");
 const cardCopyLib = require("./lib/agent-marketing-cardcopy-lib");
@@ -52,14 +53,25 @@ async function fail(job, message) {
 }
 
 // ── 1. narration ──────────────────────────────────────────────────────────────────────────────────────────────
+async function ownVoice(userId) {
+  const r = await supabase("GET", "agent_marketing_voices", null, `?user_id=eq.${encodeURIComponent(userId)}&select=*&limit=1`);
+  const row = Array.isArray(r.data) && r.data[0];
+  if (!row) throw new Error("Your own voice is not set up. Save it in Marketing Profile, or switch to an SSP voice.");
+  try { return voiceLib.credentialsFrom(row); } catch { throw new Error("Your saved ElevenLabs key could not be read. Save it again in Marketing Profile, or switch to an SSP voice."); }
+}
+
 async function prepareNarration(job, project, tagged, pronunciations) {
   if (job.assets && job.assets.audio && job.assets.audio.key) return job.assets.audio;
-  const voiceId = assetsLib.voiceIdFor(project.voice);
+  // "custom" is the subscriber's own ElevenLabs voice: their key, their voice, billed to their account (slice 3). Anything else uses SSP's key.
+  const own = project.voice === "custom" ? await ownVoice(job.user_id) : null;
+  const voiceId = own ? own.voiceId : assetsLib.voiceIdFor(project.voice);
   if (!voiceId) throw new Error("This voice is not configured yet.");
-  if (!process.env.ELEVENLABS_API_KEY) throw new Error("Narration is not configured.");
+  const apiKey = own ? own.apiKey : process.env.ELEVENLABS_API_KEY;
+  if (!apiKey) throw new Error("Narration is not configured.");
   const sent = timing.applyPronunciations(tagged, pronunciations); // respellings are spoken, never shown: the captions below are mapped back to the written words
-  const res = await postJson("api.elevenlabs.io", timing.endpointPath(voiceId), { "xi-api-key": process.env.ELEVENLABS_API_KEY }, timing.buildRequest(sent, { modelId: TTS_MODEL }), 180000);
+  const res = await postJson("api.elevenlabs.io", timing.endpointPath(voiceId), { "xi-api-key": apiKey }, timing.buildRequest(sent, { modelId: TTS_MODEL }), 180000);
   const j = res.json;
+  if (own && res.status !== 200) throw new Error(voiceLib.explainFailure(res.status, res.json).message + " Your own voice could not narrate this reel. Fix it in Marketing Profile, or switch to an SSP voice, then run it again.");
   if (res.status !== 200 || !j || !j.audio_base64) throw new Error(`The narration service returned ${res.status}${res.json && res.json.detail && res.json.detail.message ? ": " + res.json.detail.message : ""}`);
   const audio = Buffer.from(j.audio_base64, "base64");
   const al = j.alignment;
@@ -76,7 +88,7 @@ async function prepareNarration(job, project, tagged, pronunciations) {
   await put(key, audio, "audio/mpeg");
   const durationSec = Math.round(Math.max(lastEnd + 0.4, (audio.length * 8) / 128000) * 100) / 100; // default output is 128 kbps mp3
   const rec = { key, duration_sec: durationSec, words: words.map((w) => ({ text: w.text, start: w.start, end: w.end })), voice_id: voiceId, model_id: TTS_MODEL, characters: sent.length, pronunciations_applied: sent !== tagged ? timing.cleanPronunciations(pronunciations).length : 0 };
-  const usage = { ...(job.usage || {}), narration_characters: sent.length };
+  const usage = { ...(job.usage || {}), narration_characters: sent.length, ...(own ? { narration_own_key: true } : {}) };
   job.assets = { ...(job.assets || {}), audio: rec }; job.usage = usage;
   await patchJob(job.id, { assets: job.assets, usage });
   return rec;

@@ -4,11 +4,12 @@
 "use strict";
 const A = require("./agent-appearance-lib");
 
-// Style DNA: staging and wardrobe TONE only. It never overrides the approved face or an approved garment (spec, Executive decisions).
+// Style: concerns the LOWER body only (trousers, belt, shoes), chosen to go with whatever top is already visible and approved. It is never put in the
+// three-quarter prompt, and it never adds or changes a top layer: a style word like "professional" alone made the model add a sports coat (Sam's test, Nov 27).
 const STYLES = {
-  approachable_local_agent: { label: "Approachable Local Agent", text: "an approachable, friendly neighborhood real estate agent" },
-  professional_consultant: { label: "Professional Consultant", text: "a polished professional consultant" },
-  modern_ceo: { label: "Modern CEO", text: "a confident modern executive" },
+  approachable_local_agent: { label: "Approachable Local Agent", text: "chinos or khakis with casual leather shoes" },
+  professional_consultant: { label: "Professional Consultant", text: "tailored dress trousers with dress shoes" },
+  modern_ceo: { label: "Modern CEO", text: "slim dark trousers with clean, minimal shoes" },
 };
 const DEFAULT_STYLE = "approachable_local_agent";
 const styleText = (key) => (STYLES[key] || STYLES[DEFAULT_STYLE]).text;
@@ -34,27 +35,29 @@ function describeAttributes(attrs) {
   if (a.facial_hair && !/^none$/i.test(a.facial_hair)) bits.push(`facial hair: ${a.facial_hair}`);
   else if (a.facial_hair) bits.push("no facial hair");
   if (a.glasses === "yes") bits.push("glasses"); else if (a.glasses === "no") bits.push("no glasses");
-  if (a.shirt) bits.push(`shirt: ${a.shirt}`);
+  const clothing = a.clothing || a.shirt;   // sheets saved before Nov 27 recorded only a shirt
+  if (clothing) bits.push(`clothing: ${clothing}`);
   return bits.join("; ");
 }
 
 const NO_BRANDING = "No badge, name tag, logo, text, extra people or accessories.";
 const TEXT = {
-  three_quarter: ({ style, attrs }) =>
+  three_quarter: ({ attrs }) =>
     "Create a realistic three-quarter-length studio portrait of the person in Image 1, head through upper legs. Face and grooming must match Image 1" + (attrs ? ` (${attrs})` : "") + ". " +
-    "Keep the visible shirt unchanged. Use " + style + " for presentation only; do not add a blazer, jacket, sweater or other clothing layer unless the subscriber selected one. " +
-    "Complete unseen clothing naturally as a proposal, not a verified fact. Relaxed arms, natural body proportions, soft studio light, seamless neutral light-gray backdrop. Plain unbranded clothing. " + NO_BRANDING,
+    "Keep ALL visible clothing unchanged, including any jacket, blazer, sweater or other layer already worn. Do not add any clothing layer that is not visible in Image 1. " +
+    "Complete unseen clothing naturally to go with the visible top, as a proposal, not a verified fact. Relaxed arms, natural body proportions, soft studio light, seamless neutral light-gray backdrop. Plain unbranded clothing. " + NO_BRANDING,
   full_body: ({ style }) =>
-    "Extend the approved three-quarter portrait (Image 1) to a complete head-to-shoes standing studio photograph. Keep the face, hairstyle, facial hair, shirt, torso build and shoulder width consistent with the approved reference; Image 2 is the approved headshot for the face. " +
-    "Complete the lower-body outfit in the selected style (" + style + "); keep any already-approved garment unchanged. Natural stance, arms relaxed, anatomically realistic hands, belt, trousers and shoes. " +
-    "No extra layers, logos, badges or name tags. Uniform soft light and neutral light-gray studio background.",
+    "Extend the approved three-quarter portrait (Image 1) to a complete head-to-shoes standing studio photograph. Keep the face, hairstyle, facial hair, torso build and shoulder width consistent with the approved reference; Image 2 is the approved headshot for the face. " +
+    "Keep everything the person is wearing from the waist up exactly as in Image 1, including any jacket, blazer or sweater; do not add or remove a layer. " +
+    "Complete the lower body to go with that top: " + style + ". Keep any already-approved garment unchanged. Natural stance, arms relaxed, anatomically realistic hands, belt, trousers and shoes. " +
+    "No logos, badges or name tags. Uniform soft light and neutral light-gray studio background.",
 };
 
 /** The full prompt for a stage. The retry note is added as ONE adjustment, with the likeness held fixed (spec: optional focused correction). */
 function buildPrompt(stage, { styleKey, attributes, note } = {}) {
   const f = TEXT[stage];
   if (!f) throw new Error("unknown stage");
-  let p = f({ style: styleText(styleKey), attrs: describeAttributes(attributes) });
+  let p = f({ style: styleText(styleKey), attrs: describeAttributes(attributes) });   // the style only reaches the full-length prompt
   const n = cleanNote(note);
   if (n) p += ` Adjustment requested by the subscriber: "${n}". Apply only this adjustment. Preserve the approved facial likeness, hairstyle, facial hair, body proportions, clothing and studio lighting; do not redesign anything else.`;
   return p;

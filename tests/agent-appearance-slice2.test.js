@@ -92,7 +92,7 @@ test("checkUpload saves a private working copy, records the verdict and keeps wh
   assert.equal(r.ok, true); assert.equal(r.check.ok, true);
   const a = w.assets.find((x) => x.stage === "original");
   assert.ok(a.s3_key.startsWith(`smart-stage-appearance/${U}/${S}/original/`)); assert.equal(a.status, "pending");
-  assert.equal(w.sheet.vision_attributes.attributes.shirt, "navy blazer");
+  assert.equal(w.sheet.vision_attributes.attributes.clothing, "navy blazer");
 });
 
 test("checkUpload refuses someone else's key, a bad type, a tiny photo and a badge photo", async () => {

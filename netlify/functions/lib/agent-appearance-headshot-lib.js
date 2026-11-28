@@ -37,7 +37,7 @@ const VISION_SYSTEM = [
   "  head_fraction: a number from 0 to 1 = the height of the head (top of the hair to the bottom of the chin) divided by the height of the whole image. Measure it; do not guess a category. Typical values: tight head-and-shoulders portrait 0.45 to 0.65; chest-up portrait 0.30 to 0.45; waist-up about 0.22; knees-up about 0.15; full body about 0.12",
   "  framing: one of \"head_shoulders\", \"waist_up\", \"three_quarter_or_full_body\", \"other\" (for the record only)",
   "  has_badge_logo_or_text: true when any badge, lanyard, name tag, brokerage or company logo, or readable writing or sign is visible on clothing, background or props",
-  "  attributes: what is visible only: { \"hair\": short phrase, \"facial_hair\": short phrase or \"none\", \"glasses\": \"yes\" or \"no\", \"shirt\": short phrase }",
+  "  attributes: what is visible only: { \"hair\": short phrase, \"facial_hair\": short phrase or \"none\", \"glasses\": \"yes\" or \"no\", \"clothing\": short phrase naming EVERY visible garment, outer layer first, e.g. \"navy sport coat over a light blue button-up shirt\" or \"gray crew-neck sweater\" }",
   "Describe only what you can see. Do not guess age, ethnicity, health or anything not visible.",
 ].join("\n");
 
@@ -50,14 +50,14 @@ function parseVision(text) {
   try { const m = String(text || "").match(/\{[\s\S]*\}/); o = m ? JSON.parse(m[0]) : null; } catch { o = null; }
   if (!o || typeof o !== "object") return null;
   const a = o.attributes && typeof o.attributes === "object" ? o.attributes : {};
-  const s = (v) => String(v == null ? "" : v).replace(/[\u0000-\u001f]/g, " ").trim().slice(0, 80);
+  const s = (v) => String(v == null ? "" : v).replace(/[\u0000-\u001f]/g, " ").trim().slice(0, 120);
   return {
     people: Math.max(0, Math.floor(Number(o.people) || 0)),
     faceClear: o.face_clear === true,
     headFraction: Number.isFinite(Number(o.head_fraction)) && o.head_fraction !== null && o.head_fraction !== "" && Number(o.head_fraction) > 0 && Number(o.head_fraction) <= 1 ? Number(o.head_fraction) : null,
     framing: ["head_shoulders", "waist_up", "three_quarter_or_full_body"].includes(o.framing) ? o.framing : "other",
     hasBadgeLogoOrText: o.has_badge_logo_or_text === true,
-    attributes: { hair: s(a.hair), facial_hair: s(a.facial_hair), glasses: /^y/i.test(s(a.glasses)) ? "yes" : "no", shirt: s(a.shirt) },
+    attributes: { hair: s(a.hair), facial_hair: s(a.facial_hair), glasses: /^y/i.test(s(a.glasses)) ? "yes" : "no", clothing: s(a.clothing) || s(a.shirt) },   // "shirt" is how sheets saved before Nov 27 recorded it
   };
 }
 

@@ -7,7 +7,7 @@ const S = require("../netlify/functions/lib/agent-appearance-stage-lib");
 const SR = require("../netlify/functions/lib/agent-appearance-stage-run-lib");
 
 const U = "11111111-1111-4111-8111-111111111111", SID = "22222222-2222-4222-8222-222222222222";
-const ATTRS = { hair: "short gray", facial_hair: "none", glasses: "no", shirt: "light blue button-up" };
+const ATTRS = { hair: "short gray", facial_hair: "none", glasses: "no", clothing: "navy sport coat over a light blue button-up" };
 
 function world(over = {}) {
   let n = 0, u = 0;
@@ -33,17 +33,22 @@ function world(over = {}) {
 }
 const make = async (w, stage, note) => { const g = await SR.readyToGenerate({ deps: w.deps, userId: U, stage, note }); assert.ok(g.ok, JSON.stringify(g)); return SR.runStage({ deps: w.deps, userId: U, stage, note: g.note }); };
 
-test("prompts: from the spec, filled with only what the headshot showed; the style never adds clothing; no vendor names", () => {
+test("prompts: filled with only what the headshot showed; every visible garment is kept; the style reaches only the lower body of the full-length prompt", () => {
   const p = S.buildPrompt("three_quarter", { styleKey: "modern_ceo", attributes: ATTRS });
   assert.match(p, /three-quarter-length studio portrait of the person in Image 1/);
-  assert.match(p, /hair: short gray; no facial hair; no glasses; shirt: light blue button-up/);
-  assert.match(p, /do not add a blazer, jacket, sweater/);
-  assert.match(p, /confident modern executive/);
-  assert.match(p, /No badge, name tag, logo, text/);
-  assert.match(S.buildPrompt("full_body", {}), /head-to-shoes/);
+  assert.match(p, /hair: short gray; no facial hair; no glasses; clothing: navy sport coat over a light blue button-up/);
+  assert.match(p, /Keep ALL visible clothing unchanged, including any jacket, blazer, sweater/);
+  assert.match(p, /Do not add any clothing layer that is not visible in Image 1/);
+  assert.doesNotMatch(p, /executive|consultant|neighborhood|slim dark|chinos|dress trousers/i, "the style is not in the three-quarter prompt at all");
+  assert.equal(S.buildPrompt("three_quarter", { styleKey: "modern_ceo" }), S.buildPrompt("three_quarter", { styleKey: "professional_consultant" }));
+  assert.match(S.buildPrompt("full_body", { styleKey: "modern_ceo" }), /slim dark trousers with clean, minimal shoes/);
+  assert.match(S.buildPrompt("full_body", { styleKey: "professional_consultant" }), /tailored dress trousers with dress shoes/);
+  assert.match(S.buildPrompt("full_body", {}), /chinos or khakis/, "the default style");
+  assert.match(S.buildPrompt("full_body", {}), /from the waist up exactly as in Image 1, including any jacket, blazer or sweater; do not add or remove a layer/);
   assert.doesNotMatch(S.buildPrompt("full_body", { styleKey: "nope" }), /undefined/);
   assert.doesNotMatch(p + S.buildPrompt("full_body", {}), /topaz|nano|fal\.ai|gemini/i);
   assert.equal(S.describeAttributes(null), "");
+  assert.match(S.describeAttributes({ hair: "gray", shirt: "blue shirt" }), /clothing: blue shirt/, "sheets saved before Nov 27 only recorded a shirt");
 });
 
 test("the retry note is cleaned, capped, and added as ONE adjustment with the likeness held fixed", () => {
@@ -128,7 +133,7 @@ test("reject puts one attempt away and leaves the others; the style can change u
   assert.equal((await SR.loadStageState({ deps: w.deps, userId: U })).stages.three_quarter.drafts.length, 1);
   assert.equal((await SR.setStyle({ deps: w.deps, userId: U, style: "bogus" })).ok, false);
   assert.ok((await SR.setStyle({ deps: w.deps, userId: U, style: "professional_consultant" })).ok);
-  assert.match((await make(w, "three_quarter")) && w.runnerCalls[2].input.prompt, /polished professional consultant/);
+  assert.ok(await make(w, "three_quarter")); assert.doesNotMatch(w.runnerCalls[2].input.prompt, /consultant|dress trousers/i);   // the style never reaches this prompt
   await SR.approveStage({ deps: w.deps, userId: U, assetId: r2.assetId });
   assert.equal((await SR.setStyle({ deps: w.deps, userId: U, style: "modern_ceo" })).ok, false, "locked once approved");
 });

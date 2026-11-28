@@ -28,12 +28,28 @@ begin
   if new.source_project_id is null and new.series_root_project_id is null then
     return new;
   end if;
-  -- ON DELETE SET NULL clears one reference when the reel it points at is deleted; that update must be allowed to go through.
-  if tg_op = 'UPDATE' and (new.source_project_id is null or new.series_root_project_id is null) then
-    return new;
-  end if;
+  -- A deletion (ON DELETE SET NULL) clears one reference. Only that is allowed with one reference missing: the cleared reference must have been set before,
+  -- and the reference that remains is still checked: it must exist, be another project, and belong to this subscriber.
   if new.source_project_id is null or new.series_root_project_id is null then
-    raise exception 'source_project_id and series_root_project_id must be set together';
+    if tg_op <> 'UPDATE' then
+      raise exception 'source_project_id and series_root_project_id must be set together';
+    end if;
+    if (new.source_project_id is null and old.source_project_id is null)
+       or (new.series_root_project_id is null and old.series_root_project_id is null) then
+      raise exception 'source_project_id and series_root_project_id must be set together';
+    end if;
+    select * into src from public.agent_marketing_projects where id = coalesce(new.source_project_id, new.series_root_project_id);
+    -- A missing row here is the same deletion still in progress (the foreign key guarantees the reference otherwise): the second reference is cleared next.
+    if src.id is null then
+      return new;
+    end if;
+    if src.id = new.id then
+      raise exception 'a project cannot be its own source or series root';
+    end if;
+    if src.user_id <> new.user_id then
+      raise exception 'remaining lineage reference must belong to the same subscriber';
+    end if;
+    return new;
   end if;
   if new.source_project_id = new.id or new.series_root_project_id = new.id then
     raise exception 'a project cannot be its own source or series root';

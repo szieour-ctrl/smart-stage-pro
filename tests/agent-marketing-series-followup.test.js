@@ -192,3 +192,58 @@ test("hide_drafts leaves a follow-up draft alone", async () => {
   assert.strictEqual((await call("POST", { action: "hide_drafts" })).status, 200);
   assert.strictEqual(db.agent_marketing_projects.find((p) => p.id === f.id).hidden_at, null);
 });
+
+// ── The button's own payload (Nov 28, 2026): the page's code builds the request; the endpoint receives exactly that. ──
+const vm = require("vm"), fs = require("fs"), nodePath = require("path");
+const pagePayloadFn = () => {
+  const html = fs.readFileSync(nodePath.join(__dirname, "..", "agent-marketing.html"), "utf8");
+  const a = html.indexOf("  var fuKeys = {};"), b = html.indexOf("  async function createFollowup");
+  assert.ok(a > 0 && b > a, "the page's follow-up request code is present");
+  const ctx = { window: { crypto: require("crypto") }, crypto: require("crypto") };
+  vm.createContext(ctx);
+  vm.runInContext(html.slice(a, b) + "\nthis.followupPayload = followupPayload; this.fuKeys = fuKeys;", ctx);
+  return ctx;
+};
+const finishedEp1 = async () => {
+  reset();
+  const ep1 = await create("meet_your_agent", { angle: "introduce", audience: "General audience", motivation: "Serving my community", clientStyle: "Warm and patient", firsthand: "Clients like that I explain each step." });
+  db.agent_marketing_projects.find((p) => p.id === ep1.id).narrative_approved = { editorialAngle: "A personal guide.", captionText: "x" };
+  finish(ep1.id);
+  return ep1;
+};
+
+test("clicking the button on a completed reel creates one draft; the same request again returns that draft", async () => {
+  const ep1 = await finishedEp1();
+  const page = pagePayloadFn();
+  const body = page.followupPayload(ep1.id);
+  assert.deepStrictEqual(Object.keys(body).sort(), ["action", "creationKey", "sourceId"]);
+  const made = await call("POST", body);
+  assert.strictEqual(made.status, 200, JSON.stringify(made.json));
+  assert.strictEqual(made.json.project.sourceProjectId, ep1.id);
+  assert.strictEqual(made.json.project.seriesRootProjectId, ep1.id);
+  assert.ok(!made.json.existing);
+  // a double click or a retry before the page saw the answer: the page builds the same request
+  const again = await call("POST", page.followupPayload(ep1.id));
+  assert.strictEqual(again.status, 200);
+  assert.strictEqual(again.json.existing, true);
+  assert.strictEqual(again.json.project.id, made.json.project.id);
+  assert.strictEqual(db.agent_marketing_projects.filter((p) => p.source_project_id).length, 1);
+});
+
+test("the button on episode two creates episode three with the original series root", async () => {
+  const ep1 = await finishedEp1();
+  const page = pagePayloadFn();
+  const ep2 = (await call("POST", page.followupPayload(ep1.id))).json.project;
+  delete page.fuKeys[ep1.id];   // the page drops the key once it has the answer
+  finish(ep2.id);
+  const ep3 = (await call("POST", page.followupPayload(ep2.id))).json;
+  assert.strictEqual(ep3.project.sourceProjectId, ep2.id);
+  assert.strictEqual(ep3.project.seriesRootProjectId, ep1.id);
+  assert.notStrictEqual(ep3.project.id, ep2.id);
+});
+
+test("a source that is not finished is refused for the page's request too", async () => {
+  reset();
+  const ep1 = await create("meet_your_agent", { angle: "introduce", audience: "General audience", motivation: "Serving my community", clientStyle: "Warm and patient", firsthand: "x y z" });
+  assert.strictEqual((await call("POST", pagePayloadFn().followupPayload(ep1.id))).status, 409);
+});

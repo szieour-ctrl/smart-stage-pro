@@ -921,11 +921,13 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
   }
   // One follow-up entry point (My projects). The key makes a repeated tap or a retry return the same draft instead of making another.
   var fuKeys = {};
+  function newKey() { return window.crypto && crypto.randomUUID ? crypto.randomUUID() : "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function (c) { var r = Math.random() * 16 | 0; return (c === "x" ? r : (r & 3 | 8)).toString(16); }); }
+  // The exact body the button sends. The field names are the endpoint's (sourceId, creationKey); a repeat before success reuses the same key.
+  function followupPayload(sourceId) { var key = fuKeys[sourceId] || (fuKeys[sourceId] = newKey()); return { action: "create_followup", sourceId: sourceId, creationKey: key }; }
   async function createFollowup(sourceId, btn) {
     btn.disabled = true;
     try {
-      var key = fuKeys[sourceId] || (fuKeys[sourceId] = (window.crypto && crypto.randomUUID ? crypto.randomUUID() : "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function (c) { var r = Math.random() * 16 | 0; return (c === "x" ? r : (r & 3 | 8)).toString(16); })));
-      var r = await api("POST", "", { action: "create_followup", sourceProjectId: sourceId, creationKey: key });
+      var r = await api("POST", "", followupPayload(sourceId));
       if (!r.ok) throw new Error(r.json.error || "Could not start the follow-up");
       delete fuKeys[sourceId]; setProject(r.json.project); go(2);
     } catch (e) { alert(e.message); btn.disabled = false; }

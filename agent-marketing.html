@@ -272,6 +272,7 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
       <input type="file" id="phFile" accept="image/png,image/jpeg,image/webp">
     </div>
     <div id="phBody"></div>
+    <div id="apBody"></div>
     <div class="msg" id="phMsg"></div>
     <div class="actions"><button class="btn ghost" type="button" id="phClose">Close</button></div>
   </section>
@@ -1812,6 +1813,7 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
       else h += '<div class="actions"><button class="btn gold" type="button" data-ph="refill">Continue for ' + s.sheet.refillImages + " Images (" + s.sheet.poolSize + " more iterations)</button></div>";
     }
     $("phBody").innerHTML = h;
+    apRender();
   }
   async function phLoad(quiet) {
     var r = await api("GET", "", null, PH);
@@ -1855,6 +1857,77 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
     }
     ph.busy = false; phRender(); say("phMsg", "This is taking longer than usual. Check back in a minute.", "err");
   }
+  // ── Appearance Sheet stages: three-quarter and full-length images (slice 4a, Nov 27, 2026) ──
+  var ap = { notes: {}, busy: null };
+  var AP_INFO = {
+    three_quarter: { intro: "Made from your approved headshot: head to upper legs, in the style you choose. Your shirt stays as it is." },
+    full_body: { intro: "Made from your approved three-quarter image: head to shoes, with the rest of your outfit completed in your style." }
+  };
+  function apChecklist() { return '<div class="hint" style="margin-top:6px">Before you approve, check: does the face look like you; is the shirt right; are the hands and arms natural; is there no badge, logo or writing. Approve only one you would use. Each try uses one of your iterations.</div>'; }
+  function apRender() {
+    var s = ph.s, el = $("apBody"); if (!s || !el) return;
+    var a = s.appearance;
+    Object.keys(AP_INFO).forEach(function (k) { var n = document.getElementById("apNote_" + k); if (n) ap.notes[k] = n.value; });
+    if (!a || !s.approved) { el.innerHTML = ""; return; }
+    var h = '<div style="margin-top:22px"><div class="eyebrow">Your Agent Appearance Sheet</div><div class="panel-sub">' + esc(s.sheet.poolText) + ". Every try stays on this page until you approve one, so you can compare.</div>";
+    var styleLocked = !!(a.stages.three_quarter && a.stages.three_quarter.approved);
+    h += '<label class="lbl" for="apStyle">Style</label><select id="apStyle"' + (styleLocked || ap.busy ? " disabled" : "") + ">" + a.style.options.map(function (o) { return '<option value="' + esc(o.key) + '"' + (o.key === a.style.key ? " selected" : "") + ">" + esc(o.label) + "</option>"; }).join("") + "</select>";
+    h += '<div class="hint">The style guides how you are presented. It never changes your face or the clothes you have already approved.</div>';
+    ["three_quarter", "full_body"].forEach(function (k) {
+      var st = a.stages[k]; if (!st) return;
+      h += '<div class="note" style="margin-top:14px"><b>' + esc(st.title) + "</b><br>" + esc(AP_INFO[k].intro);
+      if (st.approved) {
+        h += "<div style='margin-top:8px'>" + phThumb(st.approved.url, st.title, st.approved.fullUrl) + '<div class="hint">Approved. This image is kept and will not be changed.</div></div>';
+      } else if (!st.unlocked) {
+        h += '<div class="hint" style="margin-top:6px">Approve the previous step first.</div>';
+      } else {
+        var working = ap.busy === k || (a.working && a.working.stage === k);
+        if (st.drafts.length) {
+          h += apChecklist();
+          h += st.drafts.map(function (d, i) { return "<div style='margin-top:10px'><b>Try " + (i + 1) + "</b>" + (d.note ? ' <span class="hint">Your request: ' + esc(d.note) + "</span>" : "") + "<div style='margin-top:6px'>" + phThumb(d.url, st.title + " try " + (i + 1), d.fullUrl) + '</div><div class="actions" style="margin-top:8px"><button class="btn gold" type="button" data-ap="approve" data-id="' + esc(d.assetId) + '"' + (working ? " disabled" : "") + '>Use this one</button> <button class="btn ghost" type="button" data-ap="reject" data-id="' + esc(d.assetId) + '"' + (working ? " disabled" : "") + ">Not this one</button></div></div>"; }).join("");
+        }
+        if (st.lastFailure && !working) h += '<div class="msg err" style="margin-top:8px">' + esc(st.lastFailure) + "</div>";
+        if (s.sheet.poolRemaining > 0) {
+          if (st.drafts.length || st.attempts) h += '<label class="lbl" for="apNote_' + k + '" style="margin-top:12px">Want something changed? (optional)</label><input type="text" id="apNote_' + k + '" maxlength="' + a.noteMax + '" placeholder="For example: a lighter shirt, a warmer smile" value="' + esc(ap.notes[k] || "") + '"' + (working ? " disabled" : "") + ">";
+          h += '<div class="actions"><button class="btn gold" type="button" data-ap="generate" data-stage="' + k + '"' + (working ? " disabled" : "") + ">" + (working ? '<span class="spinner"></span>Making your image…' : (st.drafts.length || st.attempts ? "Try again" : "Make my " + (k === "three_quarter" ? "three-quarter" : "full-length") + " image")) + "</button></div>";
+        } else h += '<div class="actions"><button class="btn gold" type="button" data-ph="refill">Continue for ' + s.sheet.refillImages + " Images (" + s.sheet.poolSize + " more iterations)</button></div>";
+      }
+      h += "</div>";
+    });
+    el.innerHTML = h + "</div>";
+  }
+  async function apGenerate(stage) {
+    var n = document.getElementById("apNote_" + stage), note = n ? n.value : "";
+    var before = ph.s.appearance.stages[stage].attempts, t0 = Date.now(), seen = false;
+    ap.busy = stage; apRender(); say("phMsg", "Making your image. This usually takes a minute or two. You can leave this page open and keep waiting.");
+    var r = await api("POST", "", { action: "stage_generate", stage: stage, note: note }, PH);
+    if (!r.ok) { ap.busy = null; say("phMsg", r.json.error || "Could not start.", "err"); await phLoad(true); return; }
+    if (r.json.dispatch) { try { await fetch("/.netlify/functions/agent-appearance-background", { method: "POST", headers: { Authorization: "Bearer " + token(), "Content-Type": "application/json" }, body: JSON.stringify({ stage: stage, note: r.json.note }) }); } catch (e) { /* the poll below reports it */ } }
+    ap.notes[stage] = "";
+    while (Date.now() - t0 < 5 * 60 * 1000) {
+      await new Promise(function (ok) { setTimeout(ok, 3000); });
+      var s = await phLoad(true); if (!s || !s.appearance) continue;
+      var a = s.appearance, st = a.stages[stage];
+      if (a.working) seen = true;
+      if (st.attempts > before || (seen && !a.working)) { ap.busy = null; apRender(); return st.attempts > before ? say("phMsg", "Here is your image. Use it, or try again.", "ok") : say("phMsg", st.lastFailure || "That image could not be made. Your iteration was not used. Please try again.", "err"); }
+      if (!seen && Date.now() - t0 > 60000) break;
+    }
+    ap.busy = null; apRender(); say("phMsg", "This is taking longer than usual. Check back in a minute.", "err");
+  }
+  function wireAppearance() {
+    $("apBody").addEventListener("click", async function (ev) {
+      var b = ev.target.closest && ev.target.closest("button[data-ap]"); if (!b || b.disabled) return;
+      var a = b.getAttribute("data-ap");
+      if (a === "generate") return apGenerate(b.getAttribute("data-stage"));
+      b.disabled = true;
+      if (a === "approve") { var r = await phPost({ action: "stage_approve", assetId: b.getAttribute("data-id") }); if (r.ok) say("phMsg", "Approved. This image is now part of your Appearance Sheet.", "ok"); else apRender(); return; }
+      if (a === "reject") { var rr = await phPost({ action: "stage_reject", assetId: b.getAttribute("data-id") }); if (!rr.ok) apRender(); }
+    });
+    $("apBody").addEventListener("change", async function (ev) {
+      if (ev.target && ev.target.id === "apStyle") await phPost({ action: "style", style: ev.target.value });
+    });
+  }
+
   function showPhotos() {
     $("photosPanel").classList.remove("hidden"); $("voicePanel").classList.add("hidden"); $("app").classList.add("hidden"); say("phMsg", "");
     phLoad();
@@ -1864,7 +1937,7 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
     $("myPhotosBtn").classList.remove("hidden");
     $("myPhotosBtn").addEventListener("click", showPhotos);
     $("myProjectsBtn").addEventListener("click", function () { hidePhotos(); hideVoice(); });
-    $("phClose").addEventListener("click", hidePhotos);
+    $("phClose").addEventListener("click", hidePhotos); wireAppearance();
     $("phConsent").addEventListener("change", async function () { if (this.checked) await phPost({ action: "consent", version: ph.s.consent.version }); else phRender(); });
     $("phFile").addEventListener("change", function () { phUpload(this.files && this.files[0]); });
     $("phBody").addEventListener("click", async function (ev) {

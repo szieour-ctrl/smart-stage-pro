@@ -1,0 +1,134 @@
+// Agent Appearance Sheet, slice 4a: the three-quarter and full-length images. Every outside call is a stand-in: this spends nothing.
+const test = require("node:test");
+const assert = require("node:assert");
+const A = require("../netlify/functions/lib/agent-appearance-lib");
+const H = require("../netlify/functions/lib/agent-appearance-headshot-lib");
+const S = require("../netlify/functions/lib/agent-appearance-stage-lib");
+const SR = require("../netlify/functions/lib/agent-appearance-stage-run-lib");
+
+const U = "11111111-1111-4111-8111-111111111111", SID = "22222222-2222-4222-8222-222222222222";
+const ATTRS = { hair: "short gray", facial_hair: "none", glasses: "no", shirt: "light blue button-up" };
+
+function world(over = {}) {
+  let n = 0, u = 0;
+  const w = { sheet: { id: SID, user_id: U, status: "in_progress", pool_remaining: 12, pool_refills: 0, consent_at: "2026-11-27T00:00:00Z", consent_version: H.CONSENT_VERSION, style_dna: null, vision_attributes: { attributes: ATTRS } },
+    assets: [{ id: "h0000000-0000-4000-8000-000000000001", sheet_id: SID, user_id: U, stage: "enhanced_headshot", kind: "single", s3_key: `smart-stage-appearance/${U}/${SID}/enhanced_headshot/h.png`, status: "approved", created_at: 0 }],
+    calls: [], files: {}, runnerCalls: [], failRunner: false, ...over };
+  const db = {
+    getSheet: async () => w.sheet, ensureSheet: async () => w.sheet, patchSheet: async (id, f) => Object.assign(w.sheet, f),
+    listAssets: async () => w.assets.slice(), getAsset: async (id) => w.assets.find((a) => a.id === id) || null,
+    insertAsset: async (row) => { w.assets.push({ created_at: ++n, ...row }); return row.id; }, patchAsset: async (id, f) => Object.assign(w.assets.find((a) => a.id === id), f),
+    lastCallsAny: async () => w.calls.slice().reverse(),
+    insertCall: async (row) => { const id = "c" + (w.calls.length + 1); w.calls.push({ id, ...row, started_at: row.started_at || new Date().toISOString() }); return id; },
+    updateCall: async (id, f) => Object.assign(w.calls.find((c) => c.id === id), f),
+    debit: async () => (w.sheet.pool_remaining > 0 ? --w.sheet.pool_remaining : -1),
+    refund: async () => { w.sheet.pool_remaining = Math.min(12, w.sheet.pool_remaining + 1); },
+  };
+  w.files[w.assets[0].s3_key] = Buffer.from("big");
+  return Object.assign(w, { deps: { db, uuid: () => `aaaaaaaa-aaaa-4aaa-8aaa-${String(++u).padStart(12, "0")}`,
+    storage: { put: async (k, b) => { w.files[k] = b; }, get: async (k) => { if (!w.files[k]) throw new Error("missing " + k); return w.files[k]; } },
+    presign: async (uid, k) => `https://signed.example/${k}`, normalize: async () => ({ buffer: Buffer.from("ref"), width: 2048, height: 2048, contentType: "image/jpeg" }), preview: async () => Buffer.from("small"),
+    runner: { run: async (endpoint, input) => { w.runnerCalls.push({ endpoint, input }); if (w.failRunner) throw new Error("boom"); return { requestId: "r1", data: { images: [{ url: "https://x/y.png" }] } }; } },
+    download: async () => ({ buffer: Buffer.from("png"), contentType: "image/png" }), probe: async () => ({ width: 1536, height: 2048 }) } });
+}
+const make = async (w, stage, note) => { const g = await SR.readyToGenerate({ deps: w.deps, userId: U, stage, note }); assert.ok(g.ok, JSON.stringify(g)); return SR.runStage({ deps: w.deps, userId: U, stage, note: g.note }); };
+
+test("prompts: from the spec, filled with only what the headshot showed; the style never adds clothing; no vendor names", () => {
+  const p = S.buildPrompt("three_quarter", { styleKey: "modern_ceo", attributes: ATTRS });
+  assert.match(p, /three-quarter-length studio portrait of the person in Image 1/);
+  assert.match(p, /hair: short gray; no facial hair; no glasses; shirt: light blue button-up/);
+  assert.match(p, /do not add a blazer, jacket, sweater/);
+  assert.match(p, /confident modern executive/);
+  assert.match(p, /No badge, name tag, logo, text/);
+  assert.match(S.buildPrompt("full_body", {}), /head-to-shoes/);
+  assert.doesNotMatch(S.buildPrompt("full_body", { styleKey: "nope" }), /undefined/);
+  assert.doesNotMatch(p + S.buildPrompt("full_body", {}), /topaz|nano|fal\.ai|gemini/i);
+  assert.equal(S.describeAttributes(null), "");
+});
+
+test("the retry note is cleaned, capped, and added as ONE adjustment with the likeness held fixed", () => {
+  assert.equal(S.cleanNote("   "), null); assert.equal(S.cleanNote(null), null);
+  assert.equal(S.cleanNote("a\n\tlighter   shirt\u0000"), "a lighter shirt");
+  assert.equal(S.cleanNote("x".repeat(500)).length, S.NOTE_MAX);
+  const p = S.buildPrompt("three_quarter", { note: "a lighter shirt" });
+  assert.match(p, /Adjustment requested by the subscriber: "a lighter shirt"\. Apply only this adjustment\. Preserve the approved facial likeness/);
+  assert.doesNotMatch(S.buildPrompt("three_quarter", {}), /Adjustment requested/);
+});
+
+test("three-quarter: one iteration, reference is the approved headshot, 3:4 at 2K, the note is kept on the call", async () => {
+  const w = world();
+  const r = await make(w, "three_quarter", "make the shirt lighter");
+  assert.ok(r.ok); assert.equal(w.sheet.pool_remaining, 11);
+  const call = w.runnerCalls[0];
+  assert.equal(call.endpoint, "fal-ai/nano-banana-pro/edit");
+  assert.equal(call.input.aspect_ratio, "3:4"); assert.equal(call.input.resolution, "2K"); assert.equal(call.input.num_images, 1);
+  assert.equal(call.input.image_urls.length, 1); assert.match(call.input.image_urls[0], /_ref\.jpg$/);   // a 2048 px copy, not the 3200 px original
+  assert.match(call.input.prompt, /make the shirt lighter/);
+  assert.equal(w.calls[0].note, "make the shirt lighter"); assert.equal(w.calls[0].quoted_usd, 0.15);
+  const a = w.assets.find((x) => x.id === r.assetId);
+  assert.equal(a.stage, "three_quarter"); assert.equal(a.status, "pending"); assert.equal(a.parent_id, w.assets[0].id);
+});
+
+test("order is enforced: full-length needs an approved three-quarter; nothing runs twice at once; no iterations → no run", async () => {
+  const w = world();
+  assert.equal((await SR.readyToGenerate({ deps: w.deps, userId: U, stage: "full_body" })).code, "locked");
+  assert.equal((await SR.readyToGenerate({ deps: w.deps, userId: U, stage: "poses" })).code, "stage");
+  w.calls.push({ id: "c0", stage: "three_quarter", status: "started", started_at: new Date().toISOString() });
+  assert.equal((await SR.readyToGenerate({ deps: w.deps, userId: U, stage: "three_quarter" })).code, "busy");
+  w.calls[0].started_at = new Date(Date.now() - 11 * 60 * 1000).toISOString();   // a worker that died: closed out, iteration returned
+  w.sheet.pool_remaining = 5;
+  assert.ok((await SR.readyToGenerate({ deps: w.deps, userId: U, stage: "three_quarter" })).ok); assert.equal(w.sheet.pool_remaining, 6);
+  w.sheet.pool_remaining = 0; w.calls = [];
+  assert.equal((await SR.readyToGenerate({ deps: w.deps, userId: U, stage: "three_quarter" })).code, "pool_empty");
+  w.sheet.pool_remaining = 3; w.sheet.consent_at = null;
+  assert.equal((await SR.readyToGenerate({ deps: w.deps, userId: U, stage: "three_quarter" })).code, "consent");
+});
+
+test("a failed call gives the iteration back and keeps no image", async () => {
+  const w = world({ failRunner: true });
+  const r = await make(w, "three_quarter");
+  assert.equal(r.ok, false); assert.equal(w.sheet.pool_remaining, 12); assert.equal(w.assets.filter((a) => a.stage === "three_quarter").length, 0);
+  const st = await SR.loadStageState({ deps: w.deps, userId: U });
+  assert.match(st.stages.three_quarter.lastFailure, /Your iteration was not used/); assert.equal(st.stages.three_quarter.attempts, 0);
+});
+
+test("every attempt stays visible; approving one puts the others away and locks the stage; the next stage opens", async () => {
+  const w = world();
+  const r1 = await make(w, "three_quarter"); const r2 = await make(w, "three_quarter", "warmer smile");
+  let st = await SR.loadStageState({ deps: w.deps, userId: U });
+  assert.equal(st.stages.three_quarter.drafts.length, 2, "the first try is still there to compare");
+  assert.equal(st.stages.three_quarter.drafts[1].note, "warmer smile");
+  assert.equal(st.stages.full_body.unlocked, false);
+  assert.ok((await SR.approveStage({ deps: w.deps, userId: U, assetId: r1.assetId })).ok);
+  assert.equal(w.assets.find((a) => a.id === r2.assetId).status, "rejected");
+  st = await SR.loadStageState({ deps: w.deps, userId: U });
+  assert.ok(st.stages.three_quarter.approved); assert.equal(st.stages.three_quarter.drafts.length, 0); assert.equal(st.stages.full_body.unlocked, true);
+  assert.equal((await SR.readyToGenerate({ deps: w.deps, userId: U, stage: "three_quarter" })).code, "approved", "an approved image is never redone over");
+  assert.equal((await SR.approveStage({ deps: w.deps, userId: U, assetId: r2.assetId })).ok, false);
+  assert.equal(w.sheet.pool_remaining, 10);
+});
+
+test("full-length: made from the approved three-quarter AND the headshot (2:3), and the three-quarter is untouched", async () => {
+  const w = world();
+  const r1 = await make(w, "three_quarter"); await SR.approveStage({ deps: w.deps, userId: U, assetId: r1.assetId });
+  const before = JSON.stringify(w.assets.find((a) => a.id === r1.assetId));
+  const r2 = await make(w, "full_body");
+  const call = w.runnerCalls[1];
+  assert.equal(call.input.aspect_ratio, "2:3"); assert.equal(call.input.image_urls.length, 2);
+  assert.ok(call.input.image_urls[0].includes("three_quarter") && call.input.image_urls[1].includes("enhanced_headshot"));
+  assert.deepEqual(w.calls[1].input_asset_ids, [r1.assetId, w.assets[0].id]);
+  assert.equal(JSON.stringify(w.assets.find((a) => a.id === r1.assetId)), before);
+  assert.equal(w.assets.find((a) => a.id === r2.assetId).parent_id, r1.assetId);
+});
+
+test("reject puts one attempt away and leaves the others; the style can change until the three-quarter is approved", async () => {
+  const w = world();
+  const r1 = await make(w, "three_quarter"); const r2 = await make(w, "three_quarter");
+  assert.ok((await SR.rejectStage({ deps: w.deps, userId: U, assetId: r1.assetId })).ok);
+  assert.equal((await SR.loadStageState({ deps: w.deps, userId: U })).stages.three_quarter.drafts.length, 1);
+  assert.equal((await SR.setStyle({ deps: w.deps, userId: U, style: "bogus" })).ok, false);
+  assert.ok((await SR.setStyle({ deps: w.deps, userId: U, style: "professional_consultant" })).ok);
+  assert.match((await make(w, "three_quarter")) && w.runnerCalls[2].input.prompt, /polished professional consultant/);
+  await SR.approveStage({ deps: w.deps, userId: U, assetId: r2.assetId });
+  assert.equal((await SR.setStyle({ deps: w.deps, userId: U, style: "modern_ceo" })).ok, false, "locked once approved");
+});

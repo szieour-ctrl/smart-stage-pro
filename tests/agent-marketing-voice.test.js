@@ -74,3 +74,16 @@ test("wiring: the function returns no key, the narration step uses the subscribe
   assert.match(prep, /"xi-api-key": apiKey/);
   for (const f of ["agent-marketing.html", "netlify/functions/lib/agent-marketing-lib.js", "netlify/functions/lib/agent-marketing-assets-lib.js"]) assert.ok(!/VOICE_CUSTOM_TEST|My voice \(test\)/.test(fs.readFileSync(__dirname + "/../" + f, "utf8").replace(/\/\/.*$/gm, "")), f);
 });
+
+test("test switch: without tags the narrator gets the same words with no [audio tags], and the timings still match the captions", () => {
+  const T = require("../netlify/functions/lib/agent-marketing-timing-lib");
+  const tagged = "[conversational] Hey there, [pause] this is it. [emphasis] Really!";
+  assert.strictEqual(T.withoutTags(tagged), "Hey there, this is it. Really!");
+  assert.deepStrictEqual(T.captionWords(T.withoutTags(tagged)), T.captionWords(tagged));
+  const plain = T.withoutTags(tagged), chars = [...plain];
+  const al = { characters: chars, character_start_times_seconds: chars.map((_, i) => i * 0.05), character_end_times_seconds: chars.map((_, i) => i * 0.05 + 0.05) };
+  assert.ok(T.wordsMatchCaption(T.wordsFromAlignment(al), tagged));
+  assert.ok(T.checkAlignment(al, plain, chars.length * 0.05).ok);
+  const prep = fs.readFileSync(__dirname + "/../netlify/functions/agent-marketing-prepare-background.js", "utf8");
+  assert.match(prep, /AGENT_MARKETING_NARRATE_WITHOUT_TAGS/);
+});

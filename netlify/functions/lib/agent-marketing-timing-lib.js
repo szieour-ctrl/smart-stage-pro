@@ -257,4 +257,7 @@ function restorePronunciations(words, list, taggedText) {
   });
 }
 
-module.exports = { mergePronunciations, usablePronunciations, healBoundaries, reconcileWords, cleanPronunciations, applyPronunciations, restorePronunciations, realignScenes, buildRequest, endpointPath, checkAlignment, wordsFromAlignment, captionWords, wordsMatchCaption, groupCaptionLines, sceneWindows };
+/** The text with its [audio tags] removed: what the narrator is sent when AGENT_MARKETING_NARRATE_WITHOUT_TAGS is on (a delivery comparison, Nov 27, 2026). */
+function withoutTags(text) { return String(text || "").replace(TAG_RE, " ").replace(/[ \t]{2,}/g, " ").replace(/ +([,.;:!?])/g, "$1").trim(); }
+
+module.exports = { withoutTags, mergePronunciations, usablePronunciations, healBoundaries, reconcileWords, cleanPronunciations, applyPronunciations, restorePronunciations, realignScenes, buildRequest, endpointPath, checkAlignment, wordsFromAlignment, captionWords, wordsMatchCaption, groupCaptionLines, sceneWindows };

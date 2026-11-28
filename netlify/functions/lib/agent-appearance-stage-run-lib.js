@@ -190,4 +190,18 @@ async function setOutfit({ deps, userId, lowerBody, shoes, height }) {
   return { ok: true };
 }
 
-module.exports = { STALE_CALL_MS, loadStageState, readyToGenerate, runStage, approveStage, rejectStage, rejectPanel, setOutfit, reapStaleAny };
+// "Clear and start over": only once the whole sheet is finished (headshot and every step approved). It puts every image on the sheet away and forgets the outfit and what was read from the old photo,
+// so the subscriber uploads a new photo and begins again. The iterations they have left are NOT reset (a new pool is only ever bought with the 5-Image refill), and consent stays.
+async function startOver({ deps, userId, now = Date.now() }) {
+  const sheet = await deps.db.ensureSheet(userId);
+  const assets = await deps.db.listAssets(sheet.id);
+  const finished = !!approvedOf(assets, "enhanced_headshot") && Object.keys(S.ALL_STAGES).every((st) => !!approvedOf(assets, st));
+  if (!finished) return { ok: false, status: 400, code: "not_finished", error: "You can start over once your headshot and every image on the sheet are approved and saved." };
+  const calls = await reapStaleAny(deps, sheet, now);
+  if (calls.some((c) => c.status === "started")) return { ok: false, status: 409, code: "busy", error: msg.busy };
+  for (const a of assets) if (a.status !== "rejected") await deps.db.patchAsset(a.id, { status: "rejected" });
+  await deps.db.patchSheet(sheet.id, { vision_attributes: null, lower_body: null, shoes: null, height_text: null, approved_wardrobe: null, status: "in_progress" });
+  return { ok: true };
+}
+
+module.exports = { startOver, STALE_CALL_MS, loadStageState, readyToGenerate, runStage, approveStage, rejectStage, rejectPanel, setOutfit, reapStaleAny };

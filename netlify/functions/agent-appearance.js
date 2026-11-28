@@ -11,6 +11,7 @@
 //   POST { action: "stage_generate", stage, note?, lowerBody? | shoes? + height? } → starts one image (a background job); takes one iteration; `note` is the subscriber's optional retry instruction
 //   POST { action: "stage_approve" | "stage_reject", assetId }   (a multi-panel try is approved or put away as a whole)
 //   POST { action: "panel_reject", assetId }  → leaves one panel of a multi-panel image out
+//   POST { action: "start_over", confirmed:true } → once everything is approved: puts every image away so a new photo can start the sheet again (iterations left are kept)
 //   POST { action: "refill", confirmed }  → out of iterations: 5 Images buys 12 more
 const { PutObjectCommand, S3Client } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
@@ -97,6 +98,7 @@ exports.handler = async (event) => {
     if (b.action === "stage_approve") { const r = await SR.approveStage({ deps, userId, assetId: b.assetId }); return r.ok ? reply(200, await fullState()) : fail(r); }
     if (b.action === "panel_reject") { const r = await SR.rejectPanel({ deps, userId, assetId: b.assetId }); return r.ok ? reply(200, await fullState()) : fail(r); }
     if (b.action === "stage_reject") { const r = await SR.rejectStage({ deps, userId, assetId: b.assetId }); return r.ok ? reply(200, await fullState()) : fail(r); }
+    if (b.action === "start_over") { if (b.confirmed !== true) return reply(400, { error: "Please confirm that you want to clear your images and start over." }); const r = await SR.startOver({ deps, userId }); return r.ok ? reply(200, await fullState()) : fail(r); }
     return reply(400, { error: "Unknown action." });
   } catch (e) {
     console.error("agent-appearance error:", e.message);

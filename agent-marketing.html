@@ -1952,6 +1952,8 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
       }
       h += "</div>";
     });
+    var finished = ["three_quarter", "full_body", "angles", "expressions", "poses"].every(function (k) { return a.stages[k] && a.stages[k].approved; });
+    if (finished) h += '<div class="note" style="margin-top:14px"><b>Start over with a new photo</b><br>Your sheet is finished. If you want to begin again with a different photo, this clears every image on the sheet and your outfit details. The iterations you have left stay as they are.<div class="actions" style="margin-top:8px"><button class="btn ghost" type="button" data-ap="startover"' + (a.working || ap.busy ? " disabled" : "") + ">Clear my images and start over</button></div></div>";
     el.innerHTML = h + "</div>";
   }
   async function apGenerate(stage) {
@@ -1982,6 +1984,12 @@ html{scroll-padding-bottom:calc(var(--rs-bar-h,96px) + 20px);}
       if (a === "generate") return apGenerate(b.getAttribute("data-stage"));
       if (a === "panel") { b.disabled = true; var rp = await phPost({ action: "panel_reject", assetId: b.getAttribute("data-id") }); if (!rp.ok) apRender(); return; }
       if (a === "pick") { var lo = $("apLower"); if (lo) { lo.value = b.getAttribute("data-text"); ap.notes.lower = lo.value; } return; }
+      if (a === "startover") {
+        if (!window.confirm("Clear and start over?\n\nThis puts away your approved headshot and every image on your sheet. Reels will keep using your saved headshot until you approve a new one. Your remaining iterations are not reset. This cannot be undone.")) return;
+        b.disabled = true; var so = await phPost({ action: "start_over", confirmed: true });
+        if (so.ok) { ap.notes = {}; say("phMsg", "Cleared. Upload a new photo to begin again.", "ok"); window.scrollTo({ top: $("photosPanel").offsetTop, behavior: "smooth" }); } else apRender();
+        return;
+      }
       b.disabled = true;
       if (a === "approve") { var r = await phPost({ action: "stage_approve", assetId: b.getAttribute("data-id") }); if (r.ok) say("phMsg", "Approved. This image is now part of your Appearance Sheet.", "ok"); else apRender(); return; }
       if (a === "reject") { var rr = await phPost({ action: "stage_reject", assetId: b.getAttribute("data-id") }); if (!rr.ok) apRender(); }

@@ -262,3 +262,27 @@ test("waiting on an image does not redraw the page every few seconds", () => {
   assert.match(html, /async function phLoad\(quiet, noRender\)/);
   assert.equal((html.match(/phLoad\(true, true\)/g) || []).length, 2, "both polling loops (enhance and stage) load without redrawing");
 });
+
+test("start over: refused until the headshot and all five steps are approved; then every image is put away, the outfit and the old photo reading are forgotten, and the iterations left stay", async () => {
+  const w = world();
+  assert.equal((await SR.startOver({ deps: w.deps, userId: U })).code, "not_finished");
+  for (const st of ["three_quarter", "full_body", "angles", "expressions", "poses"]) w.assets.push({ id: "z-" + st, sheet_id: SID, user_id: U, stage: st, kind: st === "angles" || st === "expressions" || st === "poses" ? "composite" : "single", s3_key: "k/" + st, status: "approved", created_at: 9 });
+  w.assets.push({ id: "z-crop", sheet_id: SID, user_id: U, stage: "poses", kind: "crop", parent_id: "z-poses", s3_key: "k/c", status: "approved", created_at: 9 });
+  w.sheet.pool_remaining = 3; w.sheet.shoes = "brown dress shoes"; w.sheet.height_text = "5'9\""; w.sheet.vision_attributes = { attributes: { hair: "gray" } };
+  w.calls.push({ id: "c1", stage: "poses", status: "started", started_at: new Date().toISOString() });
+  assert.equal((await SR.startOver({ deps: w.deps, userId: U })).code, "busy");
+  w.calls[0].status = "ok";
+  assert.ok((await SR.startOver({ deps: w.deps, userId: U })).ok);
+  assert.ok(w.assets.every((a) => a.status === "rejected"));
+  assert.equal(w.sheet.pool_remaining, 3, "iterations are not reset");
+  assert.equal(w.sheet.vision_attributes, null); assert.equal(w.sheet.lower_body, null); assert.equal(w.sheet.shoes, null); assert.equal(w.sheet.height_text, null);
+  assert.ok(w.sheet.consent_at, "consent stays");
+  const st = await SR.loadStageState({ deps: w.deps, userId: U });
+  assert.ok(Object.values(st.stages).every((s) => !s.approved && !s.unlocked));
+});
+
+test("the page offers Clear and start over only on a finished sheet, behind a confirmation", () => {
+  const html = require("fs").readFileSync(__dirname + "/../agent-marketing.html", "utf8");
+  assert.match(html, /if \(finished\) h \+=[\s\S]*?data-ap="startover"/);
+  assert.match(html, /a === "startover"[\s\S]*?window\.confirm[\s\S]*?action: "start_over", confirmed: true/);
+});

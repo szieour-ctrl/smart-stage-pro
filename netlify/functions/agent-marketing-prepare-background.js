@@ -68,7 +68,9 @@ async function prepareNarration(job, project, tagged, pronunciations) {
   if (!voiceId) throw new Error("This voice is not configured yet.");
   const apiKey = own ? own.apiKey : process.env.ELEVENLABS_API_KEY;
   if (!apiKey) throw new Error("Narration is not configured.");
-  const sent = timing.applyPronunciations(tagged, pronunciations); // respellings are spoken, never shown: the captions below are mapped back to the written words
+  const noTags = String(process.env.AGENT_MARKETING_NARRATE_WITHOUT_TAGS || "").trim() === "1";   // test switch: same approved script, spoken without its audio tags
+  const sent0 = timing.applyPronunciations(tagged, pronunciations);
+  const sent = noTags ? timing.withoutTags(sent0) : sent0; // respellings are spoken, never shown: the captions below are mapped back to the written words
   const res = await postJson("api.elevenlabs.io", timing.endpointPath(voiceId), { "xi-api-key": apiKey }, timing.buildRequest(sent, { modelId: TTS_MODEL }), 180000);
   const j = res.json;
   if (own && res.status !== 200) throw new Error(voiceLib.explainFailure(res.status, res.json).message + " Your own voice could not narrate this reel. Fix it in Marketing Profile, or switch to an SSP voice, then run it again.");
@@ -87,7 +89,7 @@ async function prepareNarration(job, project, tagged, pronunciations) {
   const key = `agent-marketing-assets/${job.user_id}/${job.project_id}/${job.id}/narration.mp3`;
   await put(key, audio, "audio/mpeg");
   const durationSec = Math.round(Math.max(lastEnd + 0.4, (audio.length * 8) / 128000) * 100) / 100; // default output is 128 kbps mp3
-  const rec = { key, duration_sec: durationSec, words: words.map((w) => ({ text: w.text, start: w.start, end: w.end })), voice_id: voiceId, model_id: TTS_MODEL, characters: sent.length, pronunciations_applied: sent !== tagged ? timing.cleanPronunciations(pronunciations).length : 0 };
+  const rec = { key, duration_sec: durationSec, words: words.map((w) => ({ text: w.text, start: w.start, end: w.end })), voice_id: voiceId, model_id: TTS_MODEL, audio_tags: !noTags, characters: sent.length, pronunciations_applied: sent !== tagged ? timing.cleanPronunciations(pronunciations).length : 0 };
   const usage = { ...(job.usage || {}), narration_characters: sent.length, ...(own ? { narration_own_key: true } : {}) };
   job.assets = { ...(job.assets || {}), audio: rec }; job.usage = usage;
   await patchJob(job.id, { assets: job.assets, usage });
